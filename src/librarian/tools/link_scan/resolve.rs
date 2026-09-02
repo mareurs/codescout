@@ -32,6 +32,38 @@ pub struct PrefixConflict {
     pub declared_by: Vec<String>,
     /// Every ACTIVE artifact defining at least one `<prefix>-N` token, claimants included.
     pub defined_by: Vec<String>,
+    /// The tokens actually defined by more than one active artifact — the intersection.
+    ///
+    /// **Empty means LATENT, never "fine".** Two allocators sharing a namespace whose token
+    /// spaces happen not to overlap today is exactly the 2026-08-18 founding case, disjoint
+    /// only because one ledger zero-padded its first thirteen entries — "an accident nothing
+    /// recorded or enforced", which stopped holding on 2026-09-01 when a third ledger began
+    /// at `T-1` and ran past the padding boundary. So this field separates *broken now* from
+    /// *not broken yet*; it cannot separate *disjoint by design* from *disjoint by luck*, and
+    /// nothing in this payload can, because both are one declarer with several definers. Read
+    /// a non-empty list as work, an empty one as a claim to re-check when either side
+    /// allocates.
+    /// docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
+    pub colliding_tokens: Vec<TokenCollision>,
+}
+
+/// One token defined by two or more active artifacts, with what the collision costs today.
+///
+/// The two counts are deliberately different units, because reading one as the other is a
+/// measured failure rather than a hypothetical: `link_scan` emits one `Citation` per
+/// `(kind, raw)` per document, so `citing_sources` answers *how much is broken* while
+/// `citing_mentions` answers *how many places need editing*. `tracker-hygiene-log:HY-21`
+/// predicted −3 from three mentions and measured −2, because one citer's two mentions had
+/// always been a single finding. Both ship so no reader has to know that to read either.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TokenCollision {
+    pub token: String,
+    /// The active artifacts defining it — a subset of the conflict's `defined_by`.
+    pub defined_by: Vec<String>,
+    /// Artifacts holding at least one unresolvable citation of this token.
+    pub citing_sources: usize,
+    /// Total mentions across those artifacts, counting repeats within one document.
+    pub citing_mentions: usize,
 }
 
 /// token → definers, plus the per-prefix ownership state the resolver needs.
@@ -113,6 +145,17 @@ impl DefinitionIndex {
     ///   pattern, and `ambiguous` already quantifies its real cost (~400 citations, 49 of
     ///   50 sampled being F/W). A declaration is an author claiming exclusivity; declining
     ///   to declare is declining to claim it.
+    ///
+    ///   **That sentence describes a corpus that no longer exists, and the drift is the
+    ///   reason `colliding_tokens` was added rather than a second exemption.** Measured
+    ///   2026-09-02: six session logs now DO declare `entry_prefix`, because
+    ///   `get_guide("tracker-conventions")` later instructed every ledger author to — so
+    ///   `F` and `W` are reported today, on a rule whose justification was keyed to
+    ///   authors declining to declare. An exemption encodes a judgement made at one
+    ///   moment and has to be maintained against a corpus that moves; the intersection
+    ///   below re-derives the question every run. Left standing rather than deleted
+    ///   because it is the clearest instance of why this check reports evidence instead
+    ///   of verdicts.
     /// - **Active.** `R` and `U` each keep an archive companion that legitimately defines
     ///   their tokens. Counting those would fire twice more, both false.
     ///
@@ -122,10 +165,12 @@ impl DefinitionIndex {
     /// zero-padded (`T-001`…`T-013`) while its later ones are `T-14`…`T-24`, and the
     /// resolver matches token strings — an accident nothing recorded or enforced.
     ///
-    /// **That conflict was fixed the same day, so this now reports 0 on the corpus:**
-    /// `fable-tuning-tasks` took `FT`; `tool-usage-patterns` kept `T` as the wider-cited
-    /// claimant. A 0 here is the healthy state, not dead wiring — the founding case lives
-    /// in the tests below, which is where a regression guard belongs anyway.
+    /// **That accident stopped holding on 2026-09-01**, when a third artifact began
+    /// defining `T-1`…`T-17` and ran past the padding boundary: `T-14`…`T-17` are now
+    /// defined twice and 17 citations of them resolve to nothing. The founding record
+    /// predicted this in the sentence above, which is what a class with no mechanism looks
+    /// like from the inside.
+    /// docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md
     ///
     /// The rename also settled what no count could: `T-1`…`T-12` had been binding ~65
     /// citations that were never about fable tasks — three retired `T-N` ledgers plus
@@ -140,9 +185,19 @@ impl DefinitionIndex {
     /// `ledger_defines_nothing` owns that case, and its entries are uncitable regardless of
     /// who else shares the namespace.
     ///
+    /// `citations` maps a token to `(citing_sources, citing_mentions)` and annotates the
+    /// intersection; it never decides membership. **A conflict with no citations and no
+    /// overlapping token is still reported**, because the finding is a fact about the
+    /// INDEX — two allocators in one namespace — and the founding case was exactly that
+    /// state on the day it was filed. Passing an empty map yields the pre-2026-09-02
+    /// payload with every count zero, which is what the pure-index tests below assert.
+    ///
     /// Ordered by prefix — `BTreeMap`/`BTreeSet` throughout — so a report diffs cleanly
     /// against a prior run, the same reason `doctor` orders by `abs_path`.
-    pub fn prefix_conflicts(&self) -> Vec<PrefixConflict> {
+    pub fn prefix_conflicts(
+        &self,
+        citations: &BTreeMap<String, (usize, usize)>,
+    ) -> Vec<PrefixConflict> {
         self.declared_by
             .iter()
             .filter_map(|(prefix, declarers)| {
@@ -150,10 +205,39 @@ impl DefinitionIndex {
                 if definers.len() < 2 {
                     return None;
                 }
+                // The intersection, derived from `by_token` rather than from the citation
+                // stream: a token defined twice is defined twice whether or not anyone has
+                // cited it yet, and the latent case is the one the founding instance was.
+                let colliding_tokens = self
+                    .by_token
+                    .iter()
+                    .filter(|(token, _)| token.split('-').next() == Some(prefix.as_str()))
+                    .filter_map(|(token, refs)| {
+                        let mut active: Vec<String> = refs
+                            .iter()
+                            .filter(|d| d.active)
+                            .map(|d| d.artifact_id.clone())
+                            .collect();
+                        active.sort();
+                        active.dedup();
+                        if active.len() < 2 {
+                            return None;
+                        }
+                        let (citing_sources, citing_mentions) =
+                            citations.get(token).copied().unwrap_or((0, 0));
+                        Some(TokenCollision {
+                            token: token.clone(),
+                            defined_by: active,
+                            citing_sources,
+                            citing_mentions,
+                        })
+                    })
+                    .collect();
                 Some(PrefixConflict {
                     prefix: prefix.clone(),
                     declared_by: declarers.iter().cloned().collect(),
                     defined_by: definers.iter().cloned().collect(),
+                    colliding_tokens,
                 })
             })
             .collect()
@@ -658,7 +742,7 @@ mod tests {
             ("tool-usage", "active", &squatter),
         ]);
 
-        let got = idx.prefix_conflicts();
+        let got = idx.prefix_conflicts(&BTreeMap::new());
         assert_eq!(got.len(), 1, "{got:?}");
         assert_eq!(got[0].prefix, "T");
         assert_eq!(got[0].declared_by, vec!["fable-tasks".to_string()]);
@@ -666,6 +750,17 @@ mod tests {
             got[0].defined_by,
             vec!["fable-tasks".to_string(), "tool-usage".to_string()],
             "both active definers must be named, so the reader knows who to talk to"
+        );
+        // LOAD-BEARING FIXTURE DETAIL: `T-1` and `T-14` are disjoint, which is what the
+        // real corpus looked like on 2026-08-18 and the whole reason that instance was
+        // survivable. Change either token to match the other and this becomes the 2026-09-02
+        // state instead, silently converting the founding regression guard into a duplicate
+        // of `a_conflict_naming_a_twice_defined_token_reports_it`.
+        assert!(
+            got[0].colliding_tokens.is_empty(),
+            "disjoint token spaces: two allocators, nothing broken YET — an empty \
+             intersection is the latent state, not a clean bill: {:?}",
+            got[0].colliding_tokens
         );
     }
 
@@ -684,7 +779,7 @@ mod tests {
         let idx =
             DefinitionIndex::build([("bugfix-log", "active", &a), ("release-log", "active", &b)]);
         assert!(
-            idx.prefix_conflicts().is_empty(),
+            idx.prefix_conflicts(&BTreeMap::new()).is_empty(),
             "nobody claimed F, so two definers of it is a convention, not a conflict"
         );
     }
@@ -709,7 +804,7 @@ mod tests {
             ("recon-archive", "archived", &archived),
         ]);
         assert!(
-            idx.prefix_conflicts().is_empty(),
+            idx.prefix_conflicts(&BTreeMap::new()).is_empty(),
             "the sole ACTIVE definer owns the namespace; its archive is not a rival"
         );
     }
@@ -723,7 +818,118 @@ mod tests {
             ..ex_with_defs(&["SD-1", "SD-2"])
         };
         let idx = DefinitionIndex::build([("structural-debt", "active", &only)]);
-        assert!(idx.prefix_conflicts().is_empty());
+        assert!(idx.prefix_conflicts(&BTreeMap::new()).is_empty());
+    }
+
+    /// The live case, and the half `prefix_conflicts` could not express before 2026-09-02:
+    /// two active artifacts defining the SAME token, which is what actually breaks citations.
+    ///
+    /// Paired deliberately with `a_declared_prefix_with_a_second_active_definer_is_a_conflict`
+    /// above, whose fixture is disjoint. Same conflict shape, opposite intersection — so a
+    /// mutation collapsing the two states fails one of them whichever way it goes. Neither
+    /// test alone discriminates: the older one passes on an implementation that always
+    /// returns an empty intersection, this one on an implementation that never checks
+    /// `active`.
+    #[test]
+    fn a_conflict_naming_a_twice_defined_token_reports_it() {
+        let owner = DocExtract {
+            declared_prefixes: vec!["T".to_string()],
+            ..ex_with_defs(&["T-14", "T-32"])
+        };
+        let squatter = ex_with_defs(&["T-14", "T-1"]);
+        let idx = DefinitionIndex::build([
+            ("tool-usage", "active", &owner),
+            ("system-retro", "active", &squatter),
+        ]);
+
+        let citations = BTreeMap::from([("T-14".to_string(), (12usize, 19usize))]);
+        let got = idx.prefix_conflicts(&citations);
+
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(
+            got[0]
+                .colliding_tokens
+                .iter()
+                .map(|c| c.token.as_str())
+                .collect::<Vec<_>>(),
+            vec!["T-14"],
+            "only the token defined by BOTH may be named — T-1 and T-32 are each single-\
+             definer and naming them would send a reader to files that are not in conflict"
+        );
+        assert_eq!(
+            got[0].colliding_tokens[0].defined_by,
+            vec!["system-retro".to_string(), "tool-usage".to_string()],
+            "the reader needs the two files to reconcile, not just the token"
+        );
+        assert_eq!(got[0].colliding_tokens[0].citing_sources, 12);
+        assert_eq!(got[0].colliding_tokens[0].citing_mentions, 19);
+    }
+
+    /// The two counts must stay distinguishable, because the whole reason they both exist is
+    /// that one is routinely read as the other.
+    ///
+    /// A test asserting only that *some* count arrives would pass on an implementation that
+    /// wrote the same number into both fields — which is the exact defect
+    /// `tracker-hygiene-log:HY-21` measured from the other side, predicting −3 mentions and
+    /// observing −2 findings. So the fixture makes them differ and asserts each separately.
+    #[test]
+    fn the_two_citation_counts_are_different_units() {
+        let owner = DocExtract {
+            declared_prefixes: vec!["T".to_string()],
+            ..ex_with_defs(&["T-17"])
+        };
+        let squatter = ex_with_defs(&["T-17"]);
+        let idx = DefinitionIndex::build([
+            ("tool-usage", "active", &owner),
+            ("system-retro", "active", &squatter),
+        ]);
+
+        // One citing artifact, three mentions inside it — the shape of a guide that
+        // demonstrates a token and then uses it again in a worked example.
+        let citations = BTreeMap::from([("T-17".to_string(), (1usize, 3usize))]);
+        let got = idx.prefix_conflicts(&citations);
+
+        let c = &got[0].colliding_tokens[0];
+        assert_eq!(c.citing_sources, 1, "one artifact holds every mention");
+        assert_eq!(c.citing_mentions, 3, "three places actually need editing");
+        assert_ne!(
+            c.citing_sources, c.citing_mentions,
+            "if these are ever equal by construction the second field is decoration"
+        );
+    }
+
+    /// `active` is filtered at TOKEN grain too, not only when building `defined_by`.
+    ///
+    /// A separate site from `an_archived_co_definer_is_not_a_conflict`: that one guards the
+    /// conflict's membership, this one guards the intersection, and a kill at either says
+    /// nothing about the other. Without it, an archived companion defining the same token as
+    /// its live ledger — the documented endpoint of the compaction ladder — would be reported
+    /// as a live collision on every ledger that has ever been compacted.
+    #[test]
+    fn an_archived_definer_does_not_make_a_token_collide() {
+        let live = DocExtract {
+            declared_prefixes: vec!["R".to_string()],
+            ..ex_with_defs(&["R-4", "R-98"])
+        };
+        let other_live = ex_with_defs(&["R-98"]);
+        let archive = ex_with_defs(&["R-4"]);
+        let idx = DefinitionIndex::build([
+            ("recon-live", "active", &live),
+            ("recon-rival", "active", &other_live),
+            ("recon-archive", "archived", &archive),
+        ]);
+
+        let got = idx.prefix_conflicts(&BTreeMap::new());
+        assert_eq!(
+            got[0]
+                .colliding_tokens
+                .iter()
+                .map(|c| c.token.as_str())
+                .collect::<Vec<_>>(),
+            vec!["R-98"],
+            "R-4 is defined by the live ledger and its own archive — the compaction ladder, \
+             not a collision. Only R-98 has two ACTIVE definers."
+        );
     }
 
     #[test]

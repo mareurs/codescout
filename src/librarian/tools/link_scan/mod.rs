@@ -398,11 +398,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .iter()
             .map(|(i, ex, _)| (rows[*i].id.as_str(), rows[*i].status.as_str(), ex)),
     );
-    // Computed here rather than during resolution because it is a fact about the INDEX, not
-    // about any one citation — and it must be reported even when every citation currently
-    // resolves, which is exactly the `T` case. Artifact ids, consistent with `src_id` and
-    // `dst_ref` in the arms below; resolve one with `artifact(action="get", id=…)`.
-    let prefix_conflicts = index.prefix_conflicts();
+    // Computed AFTER the resolution loop rather than here, since 2026-09-02: the conflict
+    // itself is still a fact about the INDEX and is reported even when every citation
+    // resolves — exactly the `T` case as filed in 2026-08-18 — but `colliding_tokens` now
+    // annotates each one with what it costs today, and those tallies exist only once the
+    // citations have been walked. Membership is unchanged: a conflict with zero citations is
+    // still emitted. See `resolve::DefinitionIndex::prefix_conflicts`.
+    // Artifact ids throughout, consistent with `src_id` and `dst_ref` in the arms below;
+    // resolve one with `artifact(action="get", id=…)`.
     let mut corpus = resolve::Corpus::default();
     for row in &rows {
         corpus.ids.insert(row.id.clone());
@@ -470,6 +473,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut cross_repo_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut malformed_qualifier_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut cross_repo_file_qualified_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    // token -> (citing_sources, citing_mentions), for `prefix_conflicts`' intersection.
+    // TWO units on purpose, and conflating them is a measured failure rather than a
+    // hypothetical: one `Citation` is emitted per `(kind, raw)` per document, so the first
+    // counts artifacts and the second counts mentions. `tracker-hygiene-log:HY-21` predicted
+    // -3 from three mentions of one token and measured -2, because a single citer's two
+    // mentions had always been one finding.
+    //
+    // Ambiguous citations only. A bare token with two active definers is ALWAYS ambiguous,
+    // and a `<stem>:TOKEN` citation still resolves — so this counts exactly the citations the
+    // collision breaks, never the ones a reader already qualified around.
+    let mut colliding_token_citations: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut citations_total = 0usize;
 
     // Which registered workspace root, if any, contains a given row — used below to
@@ -620,6 +634,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
                     *ambiguous_by_source.entry(src_rel.clone()).or_insert(0) += 1;
+                    // Keyed by the RAW citation text, so a qualified form never lands here:
+                    // `T-14` matches a token, `tool-usage-patterns:T-14` matches nothing and
+                    // is skipped by the lookup in `prefix_conflicts`.
+                    let tally = colliding_token_citations
+                        .entry(c.raw.clone())
+                        .or_insert((0, 0));
+                    tally.0 += 1;
+                    tally.1 += c.occurrences().count();
                     push_windowed(
                         &mut ambiguous,
                         &mut ambiguous_total,
@@ -825,6 +847,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         tx.commit()?;
     }
 
+    let prefix_conflicts = index.prefix_conflicts(&colliding_token_citations);
+    // The count a reader needs but would otherwise have to derive: how many of these are
+    // broken NOW. A bare total stops working as a tripwire once any structural member is
+    // permanent — a declared ledger whose entries live in companion files is one by
+    // construction — and nobody reads 3 -> 4 the way they read 0 -> 1.
+    let prefix_conflicts_live = prefix_conflicts
+        .iter()
+        .filter(|c| !c.colliding_tokens.is_empty())
+        .count();
+
     // Human-reviewable edge lists (windowed), with rel_paths for readability.
     // Paged by the same window as the finding arrays: these were capped too, and a
     // caller who can reach every dangling citation but only the first 50 stale edges has
@@ -900,6 +932,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // docs/issues/archive/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
             "cross_repo_file_qualified": cross_repo_file_qualified_total,
             "prefix_conflicts": prefix_conflicts.len(),
+            // Conflicts with at least one token defined twice — the subset breaking citations
+            // today, as opposed to two allocators that have not collided yet.
+            "prefix_conflicts_live": prefix_conflicts_live,
             // The window a caller actually received, so `truncated` and the array
             // lengths are interpretable without the caller re-deriving them from the
             // arguments they happened to send. Absent from the request, present in the

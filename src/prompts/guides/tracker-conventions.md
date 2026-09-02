@@ -387,7 +387,7 @@ there and commit the result, or re-author with `artifact_augment(id=…, prompt=
 ## Entry-level standard — the shape INSIDE a tracker
 
 The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
-`R-91`, `T-17`, `BUG-40`). They are not style preferences: the first three are
+`R-91`, `HY-11`, `BUG-40`). They are not style preferences: the first three are
 enforced by the citation resolver, and violating them silently breaks the link
 graph. Every figure below was measured on this repo on 2026-08-17.
 
@@ -562,7 +562,7 @@ array all shipped and are archived together.
 ### Citing an entry — bare, or qualified
 
 Cite by **bare token** when the prefix has exactly one ledger: `R-98`, `HY-10`,
-`T-17`, `CAP-5`.
+`CAP-5`.
 
 Cite **qualified by file stem** when several files share a prefix. `F-N` and `W-N`
 are namespaced per work stream, so each session log owns its own counter and
