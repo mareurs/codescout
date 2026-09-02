@@ -146,8 +146,15 @@ positions.
 This is a **corpus repair, not a root-cause fix**, hence `status: mitigated`. Nothing
 prevents the next entry drifting the same way.
 
-- **SHA:** recorded in the repair commit on `experiments`.
-- **patch-id:** recorded alongside it.
+- **SHA:** `5ee95eb4` on **`experiments`** — positional, and it dies when `experiments` is rebased.
+- **patch-id:** `dbba96a9e99bb2fe24aa6f2357fe1de1cf4fab9e` — `git show 5ee95eb4 | git patch-id --stable`.
+  Content hash of the diff; survives rebase and cherry-pick.
+
+*(Recorded in a follow-up commit rather than in the repair commit itself, because a
+commit cannot cite its own SHA. The alternative — leaving "recorded in the repair commit"
+as a forward reference — is `IC-11`'s forward-reference shape, which rots when the work
+succeeds and whose blind party is the implementer whose diff never touches the sentence.
+Declining to ship that inside a bug file about silent drift.)*
 
 **Root-cause candidate, not built:** a test asserting that every `## OB-N — <title>`
 section carries the template's fields in line-anchored form. Same role
