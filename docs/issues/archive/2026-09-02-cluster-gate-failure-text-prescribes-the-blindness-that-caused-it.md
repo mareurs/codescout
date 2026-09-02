@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-02
 closed:
 severity: medium
@@ -236,48 +236,45 @@ green test and a refused commit currently has no way to learn that those are com
 
 ## Fix
 
-Plan, not implemented. Both are edits to the panic message in `tests/issue_clusters.rs`
-(`every_index_count_matches_the_corpus` ~`:1144`, `every_bare_n_in_a_class_field_matches_the_corpus`
-~`:941`).
+**Fixed.** Defect 1 at `1b3ac36b` (patch-id `8ff32896b7df6875f770cc7353334d184e6b1bf2`), defect 2
+at `aae67302` (patch-id `e17c8da86c4960aefe394b0c8ce93aa5897c60c9`).
 
-1. **Name the other explanation before the re-derivation.** Lead with a check that discriminates:
-   `git status --short docs/issues/` — if any bug file is `D` or `??`, a peer is mid-move and the
-   count is transient; do not edit the ledger. Only then offer the re-derivation.
-2. **Disclose the pair.** State that the corpus side and the cell side must move together, name both
-   files, and say which one the caller most likely needs. A reader who cannot edit one should learn
-   that from the failure rather than by asking three sessions.
-3. Consider having the gate *detect* condition 1 itself — it already shells `git`, so a
-   `git status --porcelain docs/issues` check is one more call — and downgrade to a skip-with-reason
-   rather than a red. That converts a false alarm into a statement, and is the version that survives
-   a reader who does not read carefully.
+**Defect 1 closed structurally, and not by the fix planned below.** The plan was to improve the
+message. What happened instead is that the count comparison the message belonged to no longer
+exists: `1b3ac36b` stopped the ledger storing derived counts, so there is no `n` cell to disagree
+with a corpus and nothing to re-derive. The surviving check reads the **index** (`git show :path`),
+never the worktree — so a file tracked but deleted from the worktree is read normally, and the
+peer-mid-move blindness is unreachable rather than merely warned about. That is this file's own
+option 3 ("have the gate *detect* condition 1 itself… convert a false alarm into a statement"),
+reached from a different direction.
 
-**The strongest argument for 3 over 1 was produced by a reader at maximum care.** Measured
-2026-09-02: a second session (`codescout-ca`), *deliberately verifying* another session's count of
-these very untracked files, hand-rolled `grep -h '^  - cluster/'` — a two-space anchor inferred from
-the two files it had already read — and got **2 where the answer is 3**. The third file carries its
-tag at zero indent, so the anchor discarded exactly the file whose subject is anchors that discard.
-No error, no warning, a smaller number.
+**Reproduced before believing any of it**, per CLAUDE.md. Throwaway clone, three tracked bug files
+deleted from `docs/issues/` with untracked copies in `archive/` — this file's exact scenario:
 
-Three things make this decisive rather than merely ironic:
+| state | old gate | new gates |
+|---|---|---|
+| peer mid-move, nothing else | **false red**, 3 classes "drifted" | cargo 17/17, hook exit 0 (index *and* worktree) |
+| mid-move + a planted stored count | — | **REFUSED** |
+| mid-move + a real new member, no ledger edit | — | **REFUSED**, naming the stem |
 
-- The reader was **checking someone else's claim rather than producing their own**, which is the
-  most careful posture available, and had **published the correct remedy two messages earlier**
-  (*"when a count has a named test, read the test, do not re-derive the number beside it"*).
-- `tests/issue_clusters.rs` already contains `both_yaml_tag_styles_are_read`, **passing**, because
-  someone met this exact edge and wired it. The repo knew; the hand-rolled selector did not inherit
-  it.
-- It is the same failure as this session's own `^-[^-]`, which discarded removed lines beginning
-  `-` and undercounted a diff by two — **an anchor built from the instances in front of the author
-  rather than from the grammar.** Both undercount, neither errors, both are systematic.
+The last two rows are why the first is evidence: silent on the transient state *and* loud on real
+defects, simultaneously. A structurally blind gate produces the first row alone.
 
-So a failure message whose remedy is *"go re-derive it"* hands every reader a fresh chance to write
-a narrower selector than the one the test suite already got right — and the readers most likely to
-comply are the careful ones. That is `CLAUDE.md` § *Observer Blindness* position 3 exactly: the fix
-is the check that runs when nobody is worried, not a better instruction to the worried.
+**Defect 2 needed a real fix and got one.** *"The message names one side of a two-file atomic
+edit"* survived the inversion in a new form — a class gaining a member still couples the bug file
+to the ledger. `aae67302` makes the refusal name both sides, state that a contended ledger is now
+a **wait** rather than a re-derivation (the edit is a one-line append carrying no number, so no
+peer's commit can invalidate it), forecloses the false mid-move diagnosis by name, and — the part
+this file specifically asked for — **says the lossy escape out loud**: an untracked bug file is
+invisible to `git ls-files` and the gate will pass, with nothing to remind you the evidence is off
+the corpus. The complaint was that the only self-consistent state was to make new evidence
+invisible and no gate said so.
 
-Fixing the sibling bug's read-consistency does **not** close this: a `--cached` corpus would end the
-false red, but the message would still prescribe a worktree command and still name one file of two.
-
+**One thing this file predicted that did not survive contact.** It notes the class had "zero
+instances reproducible at `HEAD`" and that this one did. Closing it does not change any count —
+under the new design there are no stored counts, and `the_count_scan_reaches_the_archive` means an
+archived file still counts. Archiving is now free, which is a small consequence of `1b3ac36b`
+worth stating where a future reader of this class will look.
 ## Tests added
 
 None yet. Owed: a test that the panic message names `git status` before it names `git grep`, and one

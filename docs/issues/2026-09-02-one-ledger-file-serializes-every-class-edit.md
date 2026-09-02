@@ -368,7 +368,7 @@ the number.
 - `docs/trackers/issue-clusters.md` — IC-17, the class this instantiates.
 - `docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md` (`781633e4`) —
   IC-18's sixth member; the same ledger, one step earlier in the same procedure.
-- `docs/issues/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md` —
+- `docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md` —
   `codescout-69`'s file on the gate's re-derivation hint reproducing its own blind spot.
 - `a24c93a7` — the untangle; its message carries `codescout-5e`'s release condition verbatim
   and is the only durable copy.

@@ -6,7 +6,7 @@ severity: medium
 owner: marius
 related:
   - docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
-  - docs/issues/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
+  - docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
 tags:
   - cluster/shared-resource-carries-no-owner
 kind: bug
