@@ -46,6 +46,30 @@
 # is already decided, and refusing every commit whose index holds foreign paths would
 # fire on ordinary sequential work by one session.
 #
+# AND THE READ CAN BE DEFEATED BY BATCHING, which is why the paragraph above is not
+# enough. A read step placed in the SAME command as the write it gates is not a read
+# step. `git diff --cached --name-status; git commit` in one invocation prints the
+# thing you are supposed to act on, but the output reaches the reader only after the
+# commit has already run — so the print is a record of what happened, not a check on
+# whether it should. Two properties make this expensive rather than merely wrong:
+#
+#   - It is INVISIBLE IN A TRANSCRIPT. The sequence reads as a review followed by a
+#     commit, in that order, and nothing distinguishes it from one.
+#   - It is caused by BATCHING FOR EFFICIENCY, which is otherwise the right instinct
+#     here, and the same instinct every other guidance in this repo encourages.
+#
+# Measured 2026-09-02 at `21258b4b`: a session ran `git add -- <its two paths>` and
+# then a bare `git commit` in the same invocation that printed the full
+# `--name-status`, and captured four files belonging to session
+# `63083c9e-cc56-4dbd-9852-820f34261eeb`. Reported by session
+# `c45dd5ef-5bd3-4e91-a22d-1840e1242ad3`, who had read the sections above, quoted
+# them to two other sessions within the hour, and diagnosed their own capture by
+# re-reading them. Knowing the route did not help; the batching is what did it.
+#
+# The remedy is a separate invocation, and it is cheap: print, READ, then commit as a
+# second call. Generalises past git — any `check && act` in one command has this
+# property whenever a human or a model does the checking.
+#
 # READ-SIDE COST, so nobody diagnoses it as data loss
 # --------------------------------------------------
 # The pre-commit framework stashes unstaged changes while hooks run, and that stash
@@ -99,12 +123,19 @@ done < <(GIT_INDEX_FILE="$idx" git diff-index --cached --name-only HEAD)
     echo "same file since you last looked. Four such captures are recorded in"
     echo "docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md."
     echo
-    echo "Do this instead — it costs two commands and makes the content visible:"
+    echo "Do this instead — FOUR SEPARATE calls. Not one batched command:"
     echo
     echo "    git add ${unreviewed[*]}"
     echo "    git diff --cached --name-only   # <- the index is SHARED: confirm these are all yours"
     echo "    git diff --cached               # <- read the content; that is the whole point"
     echo "    git commit"
+    echo
+    echo "SEPARATE is load-bearing, not style. Batched into one invocation, the output"
+    echo "reaches you only AFTER the commit has run — so the read becomes a record of"
+    echo "what happened instead of a check on whether it should, and the transcript"
+    echo "still reads as a review followed by a commit. A read step placed in the same"
+    echo "command as the write it gates is not a read step. Measured 2026-09-02 at"
+    echo "21258b4b: exactly that batching captured four files from another session."
     echo
     echo "A bare \`git commit\` commits the WHOLE index, and a peer may have staged into it."
     echo "If it holds paths you did not stage, wait or commit with an explicit pathspec"
