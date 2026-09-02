@@ -5023,6 +5023,49 @@ fn scan_terminal_status_without_fix_anchor(
     Ok(out)
 }
 
+/// The body of every `## Fix` / `## Fix provenance` section, concatenated.
+///
+/// **Added 2026-09-02 after the live corpus falsified the premise this check shipped with.**
+/// [`declared_patch_ids`] was first run over the WHOLE body, on the reasoning that a 40-hex
+/// following the literal `patch-id` is produced by one act only — closing a bug — and so needs
+/// no further scoping. The first run against the real corpus returned **5 findings, 4 of them
+/// false**: patch-ids sitting in `## Symptom (Effect)`, `## Evidence` and `## References` ×2,
+/// every one citing a commit the bug was *observed* at or a peer commit offered as evidence.
+///
+/// The cause is that `CLAUDE.md` tells authors to cite **any** commit by SHA *and* patch-id, so
+/// the label is corpus-wide vocabulary rather than a fix marker. That is the same decoy the
+/// sibling documents for bare hashes — *"the hash was the commit the bug was OBSERVED at, so a
+/// reader scanning for provenance finds one and stops looking"* — arriving one level up, at the
+/// label I had assumed was immune to it.
+///
+/// **Nothing in the unit suite could have caught this**, and that is the part worth keeping: the
+/// fixtures encoded the author's own premise, so they agreed with it. Only running the shipped
+/// check against the corpus falsified it — `get_guide("project-activation-bootstrap")` § *verify
+/// at the bytes*, "a claim about how a TOOL behaves needs the call run once and the real output
+/// read".
+///
+/// Headings inside fences are not headings; fence delimiters are copied through so the caller's
+/// own fence tracking still sees balanced pairs within the slice.
+fn fix_section_body(content: &str) -> String {
+    let mut out = String::new();
+    let mut in_fix = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
+    for line in content.lines() {
+        let t = line.trim_start();
+        let is_delim = fence.feed(t);
+        if !is_delim && !fence.in_fence() && t.starts_with("## ") {
+            let h = t.trim_end().to_ascii_lowercase();
+            in_fix = h == "## fix" || h == "## fix provenance";
+            continue;
+        }
+        if in_fix {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Every patch-id a bug file DECLARES, in either shape the corpus actually uses.
 ///
 /// **Deliberately looser than [`structured_fix_pointers`], and the measurement is the reason.**
@@ -5155,7 +5198,7 @@ fn scan_non_terminal_status_with_fix_anchor(
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        let anchors = declared_patch_ids(&content);
+        let anchors = declared_patch_ids(&fix_section_body(&content));
         if anchors.is_empty() {
             continue;
         }
@@ -6863,9 +6906,16 @@ mod tests {
             "anchored",
             "open",
             "",
-            &format!("Fixed at `abc1234`, patch-id `{FIXTURE_PATCH_ID}`."),
+            &format!("## Fix\n\nFixed at `abc1234`, patch-id `{FIXTURE_PATCH_ID}`."),
         );
-        seed_live_bug(&cat, &root, "bare", "open", "", "Still investigating.");
+        seed_live_bug(
+            &cat,
+            &root,
+            "bare",
+            "open",
+            "",
+            "## Fix\n\nStill investigating.",
+        );
         let ctx = ctx_rooted_at(cat, &root);
 
         let v = {
@@ -6890,7 +6940,7 @@ mod tests {
                 status,
                 status,
                 "",
-                &format!("Closed. patch-id `{FIXTURE_PATCH_ID}`."),
+                &format!("## Fix\n\nClosed. patch-id `{FIXTURE_PATCH_ID}`."),
             );
         }
         let ctx = ctx_rooted_at(cat, &root);
@@ -6923,10 +6973,17 @@ mod tests {
             "decoy",
             "open",
             "",
-            "Observed at `655c0b6f6794be223f85fbad8360cd3002cc13d3` on experiments.",
+            "## Fix\n\nObserved at `655c0b6f6794be223f85fbad8360cd3002cc13d3` on experiments.",
         );
         // The label present but the value too short to be a patch-id.
-        seed_live_bug(&cat, &root, "short", "open", "", "patch-id `2ae27c8a`.");
+        seed_live_bug(
+            &cat,
+            &root,
+            "short",
+            "open",
+            "",
+            "## Fix\n\npatch-id `2ae27c8a`.",
+        );
         // The label inside a fenced worked example — a quotation, not a declaration.
         seed_live_bug(
             &cat,
@@ -6934,7 +6991,7 @@ mod tests {
             "fenced",
             "open",
             "",
-            &format!("How to record one:\n\n```\npatch-id `{FIXTURE_PATCH_ID}`\n```\n"),
+            &format!("## Fix\n\nHow to record one:\n\n```\npatch-id `{FIXTURE_PATCH_ID}`\n```\n"),
         );
         let ctx = ctx_rooted_at(cat, &root);
 
@@ -6962,7 +7019,7 @@ mod tests {
             "prose",
             "open",
             "",
-            &format!("**Fixed on `experiments` at `655c0b6f`**, patch-id `{FIXTURE_PATCH_ID}`."),
+            &format!("## Fix\n\n**Fixed on `experiments` at `655c0b6f`**, patch-id `{FIXTURE_PATCH_ID}`."),
         );
         seed_live_bug(
             &cat,
@@ -6989,7 +7046,7 @@ mod tests {
     async fn non_terminal_status_with_fix_anchor_ignores_zombie() {
         let (_tmp, root, _live) = git_fixture_with_commit();
         let cat = Catalog::open_in_memory().unwrap();
-        let body = format!("Fixed once. patch-id `{FIXTURE_PATCH_ID}`. Came back.");
+        let body = format!("## Fix\n\nFixed once. patch-id `{FIXTURE_PATCH_ID}`. Came back.");
         seed_live_bug(&cat, &root, "watched", "zombie", "", &body);
         seed_live_bug(&cat, &root, "working", "investigating", "", &body);
         let ctx = ctx_rooted_at(cat, &root);
@@ -7014,7 +7071,7 @@ mod tests {
     async fn non_terminal_status_with_fix_anchor_is_discharged_by_a_non_empty_unverified() {
         let (_tmp, root, _live) = git_fixture_with_commit();
         let cat = Catalog::open_in_memory().unwrap();
-        let body = format!("Half of it landed. patch-id `{FIXTURE_PATCH_ID}`.");
+        let body = format!("## Fix\n\nHalf of it landed. patch-id `{FIXTURE_PATCH_ID}`.");
         seed_live_bug(
             &cat,
             &root,
@@ -7050,7 +7107,7 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                "---\nkind: bug\nstatus: open\n---\n\n# BUG: stale\n\npatch-id `{FIXTURE_PATCH_ID}`\n"
+                "---\nkind: bug\nstatus: open\n---\n\n# BUG: stale\n\n## Fix\n\npatch-id `{FIXTURE_PATCH_ID}`\n"
             ),
         )
         .unwrap();
@@ -7067,6 +7124,61 @@ mod tests {
             scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
+    }
+
+    /// A patch-id OUTSIDE a `## Fix` section is a citation, not an anchor.
+    ///
+    /// **Every fixture here is a real shape from the live corpus, and this test exists because
+    /// the check shipped without it and was wrong.** Its first run against the real
+    /// `docs/issues/` tree returned 5 findings, 4 of them false — patch-ids in
+    /// `## Symptom (Effect)`, `## Evidence`, and `## References` twice, each citing the commit
+    /// the bug was OBSERVED at or a peer commit offered as evidence.
+    ///
+    /// The premise that failed: *a 40-hex following the literal `patch-id` is produced by one
+    /// act only, closing a bug*. False, because `CLAUDE.md` instructs authors to cite ANY commit
+    /// by SHA and patch-id, so the label is corpus-wide vocabulary. That is the sibling's
+    /// observed-at-hash decoy arriving one level up, at the label assumed immune to it.
+    ///
+    /// **The unit suite could not have caught it**: the fixtures encoded the same premise as the
+    /// implementation, so they agreed. Only the shipped check run over the corpus disagreed.
+    ///
+    /// Mutation this kills: dropping `fix_section_body` and scanning the whole body again.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_ignores_a_patch_id_outside_the_fix_section() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        for (name, section) in [
+            ("observed", "## Symptom (Effect)"),
+            ("evidenced", "## Evidence"),
+            ("referenced", "## References"),
+        ] {
+            seed_live_bug(
+                &cat,
+                &root,
+                name,
+                "open",
+                "",
+                &format!("{section}\n\nMeasured at `83125c1f` (patch-id `{FIXTURE_PATCH_ID}`).\n"),
+            );
+        }
+        // The control: the same label, in the section that DOES declare an anchor. Without it a
+        // `fix_section_body` that returned the empty string always would pass this test.
+        seed_live_bug(
+            &cat,
+            &root,
+            "anchored",
+            "open",
+            "",
+            &format!("## Evidence\n\nSeen at `dead1234`.\n\n## Fix\n\nFixed, patch-id `{FIXTURE_PATCH_ID}`.\n"),
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the Fix-section anchor counts: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("anchored"));
     }
 
     /// The discrimination that keeps the decoy heuristic honest. A 16-hex catalog id and a
