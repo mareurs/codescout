@@ -688,6 +688,100 @@ async fn a_pinned_read_gets_no_worktree_notice_even_though_the_tree_is_unchosen(
     );
 }
 
+/// docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+///
+/// **The DELIVERY half, which no other test in this file reaches.**
+///
+/// `a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen` and its pinned twin
+/// prove the notice is *computed* and *injected*. They cannot prove it is *delivered*, and the
+/// reason is a property of the fixture, not of the assertions: `EchoTool` leaves `output_form()`
+/// at its `Json` default, so those tests take the **pretty-JSON** branch of `call_content` — the
+/// branch that preserves an injected field, and the one that ten production tools do not take.
+///
+/// So the mechanism was fixed, mutation-tested at two sites, and confirmed live in a real
+/// response — and was still dropped by `grep`, `tree`, `symbols`, `symbol_at`, `references`,
+/// `call_graph`, `read_file`, `read_markdown`, `memory` and `library`, every one of which
+/// declares `OutputForm::Text`. Each of those checks was sound about what it measured; none
+/// measured this. CLAUDE.md's "mutate the PRODUCTION path" with the emphasis on *which* path:
+/// the mutations hit the **decision** (does the notice fire?) and nothing reached the
+/// **delivery** (does the caller receive it?).
+///
+/// The two halves below share one context and differ only in `output_form`, so the pairing is
+/// the discriminator: a regression that drops the notice from compact output fails the second
+/// assertion while the first stays green — exactly the shape that shipped.
+#[tokio::test]
+async fn a_compact_rendered_read_still_carries_the_worktree_notice() {
+    /// A bulk-locator tool: declares `OutputForm::Text` AND a `format_compact`, which is the
+    /// combination `grep`/`tree`/`symbols` ship. `EchoTool` has the second and not the first,
+    /// which is precisely why it cannot see this bug.
+    struct CompactEchoTool;
+
+    #[async_trait::async_trait]
+    impl Tool for CompactEchoTool {
+        fn name(&self) -> &str {
+            "compact_echo"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn call(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &ToolContext,
+        ) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::json!({"matches": 3, "files": 2}))
+        }
+        fn format_compact(&self, result: &serde_json::Value) -> Option<String> {
+            Some(format!(
+                "{} matches in {} files",
+                result["matches"], result["files"]
+            ))
+        }
+        fn output_form(&self) -> OutputForm {
+            OutputForm::Text
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    let wt = seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    // Control: the Json-form path. This is what the sibling tests exercise, and it stayed green
+    // throughout the window in which the bug was live — which is the whole point of pairing it.
+    let json_text = echo_once(&ctx).await;
+    assert!(
+        json_text.contains("_workspace_notice"),
+        "fixture check: the JSON branch must carry the notice, or the compact assertion below \
+         proves nothing about compact rendering specifically, got: {json_text}"
+    );
+
+    let compact = CompactEchoTool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = compact[0].as_text().map(|t| t.text.clone()).unwrap();
+
+    assert!(
+        text.contains("3 matches in 2 files"),
+        "the compact summary itself must survive — if this fails the tool's own answer was \
+         lost, which is worse than the bug it replaces, got: {text}"
+    );
+    assert!(
+        text.contains(&wt.display().to_string()),
+        "a compact-rendered read must still name the tree it answered from; this is the \
+         assertion the ten OutputForm::Text tools needed and did not have, got: {text}"
+    );
+    assert!(
+        text.contains("workspace(action='activate'"),
+        "and it must still name a call the caller can run, got: {text}"
+    );
+}
+
 /// The sibling `_workspace_notice` field sits next to a plausible `stdout`
 /// answer and loses attention to it — measured twice in one session in
 /// docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md.

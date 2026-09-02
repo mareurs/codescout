@@ -20,16 +20,24 @@ unverified: 'Reproduced live and diagnosed at the bytes, but NOT confirmed per-t
 
 ## Summary
 
-`worktree_read_notice` computes correctly, `inject_notice` writes `_workspace_notice` into the
-response `Value` — and then, for any tool rendering in `OutputForm::Text` with a working
-`format_compact`, the renderer builds its text from that `Value` and **silently omits the
-field**. No `format_compact` implementation reads the key.
+**Corrected 2026-09-02, and the correction is larger than the number.** This file was filed
+claiming *"18 tools implement `format_compact`"* as the affected population. **That is the wrong
+criterion.** `format_compact` is only consulted when a tool also declares
+`fn output_form() -> OutputForm::Text`, and the trait default is `OutputForm::Json`.
 
-So the notice reaches the caller on JSON-object responses (`artifact`, `librarian`, …) and is
-dropped on the read tools an agent actually uses: `symbols`, `grep`, `tree`, `read_file`,
-`read_markdown`, `references`, `semantic_search`, `call_graph`, `symbol_at`. **18 tools
-implement `format_compact`.**
+The real population is **ten**, all declaring `OutputForm::Text`: `grep`, `tree`, `symbols`,
+`symbol_at`, `references`, `call_graph`, `read_file`, `read_markdown`, `memory`, `library`.
 
+The original figure came from a grep for `format_compact` implementations — the file's own
+`unverified:` field flagged that step as "an absence over a population, the assertion shape this
+repo treats as weakest" and said to enumerate rather than trust it. Enumerating is what found
+the error. The caveat was right; writing it down did not prevent the mistake, it only made the
+mistake findable.
+
+`worktree_read_notice` computes correctly and `inject_notice` writes `_workspace_notice` into the
+response `Value` — then, for those ten, `format_compact` builds its text from that `Value` by
+selecting the fields the *tool* knows about, and a field the framework added after the tool
+returned is one no renderer reads. The notice survived only on the pretty-JSON branch.
 ## Symptom (Effect)
 
 Measured live 2026-09-02, one session, one server process, within seconds, all conditions held
@@ -103,6 +111,33 @@ It is also `OB-15` in its own right — the notice's silence on `symbols` is ind
 from the notice not existing, which is precisely how it survived a fix, two mutation runs, and
 a live production check that used the one response shape where it works.
 
+
+### The identical mechanism was already measured and written down — for the sibling field
+
+`src/server.rs:7684`, in a test comment predating this file:
+
+> Probed via the APPENDED GUIDE BODY, not via `_guide_hint`. Measured, not assumed: `tree` is
+> `OutputForm::Text` with a `format_compact` (`src/tools/tree.rs:58-69`), so its primary block is
+> rendered text and the `_guide_hint` field injected into the `Value` **never reaches the wire**
+> — `extract_hint` returns `None` here even when the opener fired.
+
+So `inject_hint` has the same defect, on the same line of `call_content`, and someone measured it
+while working on the guide ledger. This file was written as a discovery of the mechanism; it was
+a rediscovery of a documented one, on the neighbouring field. `F-104`'s *Promote-when* asked for
+"a second instance of a framework-injected response field that a per-tool renderer drops" — the
+second instance already existed, in the tree, and neither party knew of the other's half. That is
+`OB-15` exactly: the discriminator was in the code, not in the absence, and nobody greped.
+
+**But the two are not equally harmful, and the next sentence of that comment is why:** *"The
+second block is pushed regardless of output form."* A guide's **body** is appended as its own
+content block, so the model still receives the guidance — only the `_guide_hint` metadata field
+is lost. The worktree notice has no second block, so its loss is total. `inject_hint` is
+degraded; `inject_notice` was silent.
+
+**Consequence for the fix:** re-attaching the notice to the rendered text is sufficient here and
+is *not* automatically the right move for `_guide_hint`, whose body already arrives by another
+route and would be duplicated. Not changed in this fix; recorded so the symmetry is not applied
+blind.
 ## Fix
 
 Not implemented. The decision is where the notice goes for a text-rendered tool, and it is a
@@ -126,4 +161,3 @@ already prove and the delivery path stays untested.
 Unclaimed. Filed by the session that shipped `7a3aee93`, which made the notice fire on every
 unpinned read and thereby made this reachable often enough to notice; the drop itself predates
 that and has been there since the notice shipped on 2026-08-15.
-

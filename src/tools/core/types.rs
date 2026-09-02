@@ -1028,7 +1028,25 @@ pub trait Tool: Send + Sync {
             }
             if form == OutputForm::Text {
                 if let Some(text) = self.format_compact(&val) {
-                    Content::text(text)
+                    // The notice must be re-attached HERE, not left to `inject_notice`.
+                    // That function writes `_workspace_notice` into the `Value`, and
+                    // `format_compact` builds its text by selecting the fields the tool
+                    // cares about — a field the framework added after the tool returned is
+                    // one no renderer knows to read. So the notice was injected and then
+                    // discarded, on every tool with a compact form: `symbols`, `grep`,
+                    // `tree`, `read_file`, `references`, `semantic_search`, … 18 of them,
+                    // which is precisely the read surface it exists to caveat. It survived
+                    // only on the pretty-JSON branch below.
+                    // docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+                    //
+                    // PREFIXED, matching `inject_notice`'s own choice for `run_command`
+                    // ("so the warning sits in the channel that is actually read"): the
+                    // notice changes how the content below should be read, so it has to
+                    // arrive before it, not after a result the reader has already believed.
+                    Content::text(match &workspace_notice {
+                        Some(notice) => format!("⚠ {notice}\n\n{text}"),
+                        None => text,
+                    })
                 } else {
                     Content::text(
                         serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
