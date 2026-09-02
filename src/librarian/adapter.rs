@@ -269,14 +269,41 @@ impl crate::tools::Tool for LibrarianAdapter {
             .map_err(bridge_recoverable_error)
     }
 
+    /// Does this call mutate anything the cross-process write guard protects?
+    ///
+    /// **Reads are the closed set; everything else is a write.** The inverse —
+    /// enumerating the writes — is what got this wrong twice. The `artifact` arm
+    /// listed five mutating actions while the dispatcher routed three more
+    /// (`graft`, `append_entry`, `update_entry`), all unguarded; `append_entry`
+    /// exists *because* concurrent sessions race on entry-id allocation. The bug
+    /// report that found those three then missed `audit_log`, whose
+    /// `prune_before_ms` + `confirm=true` runs `DELETE FROM catalog_audit` and
+    /// whose `export=true` appends to a committed shard. Two independent
+    /// enumerations of one small set, both short.
+    ///
+    /// The asymmetry settles the direction. An unlisted **read** is merely
+    /// over-serialised — it takes a lock nobody was contending for. An unlisted
+    /// **write** races, on a checkout that routinely carries five or more
+    /// concurrent sessions. So a new action, and via the final arm a new
+    /// librarian *tool*, is guarded on the day it is added; opting out is a
+    /// deliberate edit to a read set right here.
+    ///
+    /// **The exception is a long read, and it is not a softening of the rule.**
+    /// `doctor` and `audit_log` scan the whole catalog in their common form.
+    /// Guarding them unconditionally would hold the write lock for the length of
+    /// a diagnostic and block every other session's writes behind it — trading
+    /// this bug for an availability one. They get a read-default arm each,
+    /// keyed on their own schema-documented repair opt-in and over-approximated
+    /// (`doctor` on `fix` being present at all, so a dry run is guarded too).
+    ///
+    /// docs/issues/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
     fn is_write(&self, input: &Value) -> bool {
         let action = input.get("action").and_then(Value::as_str);
         match self.inner.name() {
-            // CRUD tool — mutating actions only; find/get/graph/state_at are reads.
-            "artifact" => matches!(
-                action,
-                Some("create" | "update" | "move" | "delete" | "link")
-            ),
+            // CRUD tool. find/get/graph/state_at are the only reads; create,
+            // update, move, delete, link, graft, append_entry and update_entry
+            // all mutate, as does any action added after this line.
+            "artifact" => !matches!(action, Some("find" | "get" | "graph" | "state_at")),
             // Append-only event log: `create` writes, `list` reads.
             "artifact_event" => action == Some("create"),
             // Always attaches/replaces/merges an augmentation row.
@@ -284,13 +311,13 @@ impl crate::tools::Tool for LibrarianAdapter {
             // gather / list_stale are both read-only — the write-back is
             // artifact(update, commit_refresh=true), classified under "artifact".
             "artifact_refresh" => false,
-            // reindex rewrites the catalog; audit_doc_refs emits a tracker unless
-            // emit_tracker=false; legibility_scan reconciles the backlog unless
-            // write=false; link_scan mutates edges ONLY when write=true (read-
-            // default — polarity is the inverse of legibility_scan's, do not
-            // copy that arm); context/tracker_design/workspace_state_at/doctor read.
             "librarian" => match action {
-                Some("reindex") => true,
+                // Unconditional reads.
+                Some("context" | "tracker_design" | "workspace_state_at") => false,
+                // Conditional arms, and the polarities are NOT uniform — do not
+                // copy one onto another. audit_doc_refs and legibility_scan write
+                // by default and opt out on an explicit flag; link_scan, doctor
+                // and audit_log read by default and opt IN.
                 Some("audit_doc_refs") => {
                     input.get("emit_tracker").and_then(Value::as_bool) != Some(false)
                 }
@@ -298,9 +325,24 @@ impl crate::tools::Tool for LibrarianAdapter {
                     input.get("write").and_then(Value::as_bool) != Some(false)
                 }
                 Some("link_scan") => input.get("write").and_then(Value::as_bool) == Some(true),
-                _ => false,
+                // Read-default because both are long full-catalog scans — see the
+                // doc comment. A write mode added to either that does not route
+                // through these keys must update this arm; `fix` and
+                // `export`/`confirm` are the schema's own repair opt-ins.
+                Some("doctor") => input.get("fix").is_some(),
+                Some("audit_log") => {
+                    input.get("export").and_then(Value::as_bool) == Some(true)
+                        || input.get("confirm").and_then(Value::as_bool) == Some(true)
+                }
+                // reindex, merge_worktree, and anything added later.
+                _ => true,
             },
-            _ => false,
+            // Every librarian tool is wrapped by the blanket map over
+            // `lib_all_tools()` above, so this arm catches tools added later. It
+            // returns `true` for the reason the arms above default to write: an
+            // unclassified tool that mutates is the failure mode, and an
+            // unclassified tool that reads costs only serialisation.
+            _ => true,
         }
     }
 

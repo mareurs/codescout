@@ -5718,6 +5718,163 @@ mod tests {
         assert!(!server.is_write_call("symbols", &json!({})));
     }
 
+    /// Every librarian action outside a **declared read set** classifies as a write.
+    ///
+    /// This replaces a membership assertion that could not fail on the defect it
+    /// was standing next to. [`is_write_call_classifies_plain_writes`] asserts
+    /// that listed actions *are* classified — a shape monotone under omission, so
+    /// the three unguarded `artifact` actions (`graft`, `append_entry`,
+    /// `update_entry`) sat beside a green test for months, and `audit_log` was
+    /// missed again by the bug report that found them.
+    ///
+    /// The population is derived from each tool's own `action` enum rather than
+    /// listed here, which fixes the monotonicity in the direction that matters:
+    ///
+    /// - a **new action** added to the schema is asserted to be a write with no
+    ///   edit to this test, and passes only because `is_write` now defaults that
+    ///   way — the two changes agree by construction rather than by upkeep;
+    /// - a **new read opt-out** added to `is_write` and not declared below turns
+    ///   this red, which is the safe direction to be wrong in;
+    /// - a **typo'd or stale** entry in a read set below is reported as dead
+    ///   rather than silently classifying its intended action as a write.
+    ///
+    /// Mutation-checked per MEMBER, not per feature (`CLAUDE.md` § *Testing
+    /// Discipline*): drop any single action from a read set below, or add any
+    /// single action to one, and this fires naming that action.
+    ///
+    /// Feature-gate note: the lean lane (`--no-default-features`) advertises no
+    /// librarian tools, so this test is **inert** there by construction — it
+    /// reaches no tool and asserts nothing. Do not credit it with coverage on
+    /// that lane; the `covered` count below is what makes the difference legible.
+    ///
+    /// docs/issues/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
+    #[tokio::test]
+    async fn is_write_classifies_every_action_outside_a_declared_read_set_as_a_write() {
+        use serde_json::json;
+        let (_dir, server) = make_server().await;
+
+        // Each tool's CLOSED read set — the only actions permitted to classify as
+        // reads WHEN CALLED BARE. `link_scan`, `doctor` and `audit_log` are here
+        // because their flagless forms read; each also has a write form, and both
+        // polarities are asserted below. An entry here is therefore not a claim
+        // that the action never writes — only that its no-argument call does not.
+        let read_sets: &[(&str, &[&str])] = &[
+            ("artifact", &["find", "get", "graph", "state_at"]),
+            (
+                "librarian",
+                &[
+                    "context",
+                    "tracker_design",
+                    "workspace_state_at",
+                    "link_scan",
+                    "doctor",
+                    "audit_log",
+                ],
+            ),
+        ];
+
+        let mut misclassified: Vec<String> = Vec::new();
+        let mut dead_reads: Vec<String> = Vec::new();
+        let mut covered = 0usize;
+
+        for &(tool, reads) in read_sets {
+            let Some(t) = server.tools.iter().find(|t| t.name() == tool) else {
+                continue; // lean lane — tool not advertised
+            };
+            covered += 1;
+            let schema = t.input_schema();
+            let actions: Vec<&str> = schema
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            assert!(!actions.is_empty(), "{tool} advertises no `action` enum");
+
+            dead_reads.extend(
+                reads
+                    .iter()
+                    .filter(|r| !actions.contains(r))
+                    .map(|r| format!("{tool}.{r}")),
+            );
+
+            for a in &actions {
+                let got = server.is_write_call(tool, &json!({ "action": a }));
+                let want = !reads.contains(a);
+                if got != want {
+                    misclassified.push(format!("{tool}.{a}: is_write={got}, expected {want}"));
+                }
+            }
+        }
+
+        assert!(
+            dead_reads.is_empty(),
+            "these read-set entries name no action in their tool's `action` enum: {}.\n\
+             A stale or misspelled entry here is worse than absent: the action it was \
+             meant to exempt now classifies as a write (safe), while the entry itself \
+             exempts nothing and reads as if it does.",
+            dead_reads.join("; ")
+        );
+        assert!(
+            misclassified.is_empty(),
+            "is_write disagrees with the declared read sets: {} (tools reached: {covered}).\n\
+             If the action MUTATES, the fix is in `LibrarianAdapter::is_write` — it should \
+             not be reachable as a read. If it genuinely only reads, add it to the read set \
+             in this test in the same commit that exempts it there, so the exemption is \
+             stated twice and by two different people's reading.",
+            misclassified.join("; ")
+        );
+
+        // Both polarities of every conditional arm — the half a bare-action probe
+        // structurally cannot reach, and the half that stops the read sets above
+        // from reading as "these actions never write".
+        //
+        // The defaults are NOT uniform, and that is the trap: audit_doc_refs and
+        // legibility_scan WRITE unless a flag says otherwise, while link_scan,
+        // doctor and audit_log READ unless a flag says otherwise. Copying one
+        // arm's polarity onto another inverts a guard silently, so each is pinned
+        // in both directions rather than by family.
+        if server.tools.iter().any(|t| t.name() == "librarian") {
+            let w = |v: Value| server.is_write_call("librarian", &v);
+            assert!(w(json!({"action": "audit_doc_refs"})));
+            assert!(!w(
+                json!({"action": "audit_doc_refs", "emit_tracker": false})
+            ));
+            assert!(w(json!({"action": "legibility_scan"})));
+            assert!(!w(json!({"action": "legibility_scan", "write": false})));
+            assert!(!w(json!({"action": "link_scan"})));
+            assert!(w(json!({"action": "link_scan", "write": true})));
+            // doctor guards on `fix` ALONE, dry run included — the guard has to
+            // cover the run that decides whether to write, not only the one that
+            // does. audit_log has two independent write keys and neither implies
+            // the other: `export` appends to the committed shard, `confirm` (with
+            // prune_before_ms) runs DELETE FROM catalog_audit.
+            assert!(!w(json!({"action": "doctor"})));
+            assert!(w(json!({"action": "doctor", "fix": "prune_missing"})));
+            assert!(w(
+                json!({"action": "doctor", "fix": "prune_missing", "confirm": true})
+            ));
+            assert!(!w(json!({"action": "audit_log"})));
+            assert!(w(json!({"action": "audit_log", "export": true})));
+            assert!(w(
+                json!({"action": "audit_log", "prune_before_ms": 1, "confirm": true})
+            ));
+        }
+
+        // Not vacuous on the default lane. Without this, a registration change
+        // that stopped advertising the librarian tools would turn every
+        // assertion above into a no-op and still read green.
+        #[cfg(feature = "librarian")]
+        assert_eq!(
+            covered,
+            read_sets.len(),
+            "expected every read-set tool to be advertised with the `librarian` \
+             feature on; reached {covered} of {}",
+            read_sets.len()
+        );
+    }
+
     #[tokio::test]
     async fn is_write_call_memory_depends_on_action() {
         use serde_json::json;
