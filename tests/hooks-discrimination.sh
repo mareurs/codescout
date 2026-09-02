@@ -498,7 +498,7 @@ rm -rf "$WT" "$T"
 # ---------------------------------------------------------------------------
 # 8. THE ROUTE COLUMN — WHY `-` was recorded, not merely that it was.
 #
-# docs/issues/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md: the
+# docs/issues/archive/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md: the
 # guard asserted ONE cause ("staged before this guard was installed") for a state that
 # four separate branches reach, and the sentence had frozen while the recorder grew two
 # of them under it. Prose cannot be kept correct here by care — the enumeration proposed

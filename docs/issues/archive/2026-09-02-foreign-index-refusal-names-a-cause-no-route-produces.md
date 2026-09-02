@@ -1,5 +1,5 @@
 ---
-id: '43377426520f683b'
+id: 0a5da6794d2c60e7
 kind: bug
 status: fixed
 title: 'BUG: the foreign-index guard''s refusal names a cause no route produces, and omits the route it exists to catch'
@@ -230,6 +230,32 @@ does not touch the shim:** `git rev-parse --git-path hooks` resolves to the **co
 `.git/hooks` from inside a worktree (measured by `codescout-0a` from
 `.worktrees/tool-collapse`, confirmed here; `core.hooksPath` unset). A change that DID
 touch the shim would go live for every session wherever it landed.
+## Fix provenance
+
+Two commits, neither superseding the other: the first records the route, the second
+corrects the fallback that asserted a cause it had not determined.
+
+- **SHA:** `689ceffb`
+- **patch-id:** `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`
+- **SHA:** `d7eb09c2`
+- **patch-id:** `208e88ed8bd5cd208a67b3f1ef9def78dd6bea69`
+
+Both on `experiments`, landed by `git merge --ff-only` from a private worktree branch, so
+no merge commit exists for either.
+
+The accompanying records are `5ff50899` (patch-id
+`c63471342dac548d8171286077a68c0cd830ce0a`), `f72a93f6`
+(`cc641a69d2bff977e9a3dbceff5fe647158aa2a8`) and `96c21054`
+(`269ec498dfece6d1e9f74ec80d6c409b7393889f`). They are listed as prose rather than as
+`- **SHA:**` lines because they close nothing — the structured pointers are the fix
+anchors, and padding them with documentation commits would make the check verify the wrong
+thing.
+
+**Why the pair and not the SHA alone, stated here because this file is the evidence.** Its
+fix SHA was re-keyed **twice** by rebases onto a moving `experiments` within two hours of
+being written — `25f6540c` → `689ceffb`, then `bceb76f8` → `d7eb09c2`. Each patch-id was
+byte-identical across its rebase, because it hashes the diff rather than its position. The
+repair was a lookup both times instead of a search.
 ## Tests added
 
 14 cases in `tests/hooks-discrimination.sh` § 8 (+117 lines), which runs in **CI**

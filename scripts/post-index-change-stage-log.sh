@@ -271,7 +271,7 @@ EOF
 # `-` is reachable by four branches and the reason is discarded at write time, so the
 # paired guard can only ENUMERATE candidates -- and an enumeration in prose froze while
 # this file grew two new routes under it
-# (docs/issues/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md).
+# (docs/issues/archive/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md).
 # A fourth column costs one field and makes the true branch knowable at refuse time,
 # which is the difference between listing what MIGHT have happened and reporting what
 # did. The enumeration cannot be kept correct by care: it was already short by one route
