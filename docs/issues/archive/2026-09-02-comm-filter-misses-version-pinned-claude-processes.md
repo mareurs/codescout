@@ -1,12 +1,14 @@
 ---
-id: '991cf9d966205d72'
+id: d2ad0e747aaed72d
 kind: bug
-status: open
+status: fixed
 title: the self-identification walk filters on comm, so a version-pinned session cannot find itself
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-03
+unverified: NO REGRESSION TEST, and this is the half that has none. The walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, so it cannot be pointed at a fixture without editing the skill, and a source-text assertion ("the block contains no comm test") is a proxy for the behaviour rather than the behaviour. Verified by hand against one live version-pinned process; that verification is not repeatable and the population is transient — 3 such sessions existed on 2026-09-02, 1 on 2026-09-03.
 ---
 
 ## Summary
@@ -77,7 +79,7 @@ the binary regardless of what the process is called.
 The same `comm` selector is what an author reaches for when *measuring* this population, and it
 silently narrows those measurements too. Session `f13f8169-93a1-4392-95d1-8774d296e0c0`
 derived the live-but-socketless residual for
-`docs/issues/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md`
+`docs/issues/archive/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md`
 as **2**, via `pgrep -x claude`. Re-derived structurally by exe path:
 
 | instrument | live claude processes | socketless |
@@ -106,6 +108,18 @@ two tokens that collide, silently binding to the wrong one. This one matches too
 a peer proposed"*), which is the second time a peer has proposed `IC-6` for a too-narrow
 selector.
 
+## A second site, which this file did not name
+
+This file located the `comm` filter at `reaching-peer-sessions/SKILL.md` Step 1 and stopped there.
+The identical test — `[ "$(tr -d '\0' </proc/$p/comm)" = claude ]` — also sat in a
+`reconnaissance-patterns.md` R-N entry, where it served as a **liveness gate** rather than a
+self-identification walk. Same selector, worse failure: a version-pinned session is skipped, the
+loop prints nothing, and a valid sessionId resolves to *"no such session"* rather than to an
+error. The narrowing produced a confident negative.
+
+Found by grepping the tree while fixing the first site, not by reading this file, which named one
+and read as complete — `bug-fix-session-log:W-102` holding about the bug file that helped produce
+it. Corrected in place, with the broken original preserved and marked *do not copy*.
 ## Proposed fix
 
 Identify the server by **exe**, not by name:
@@ -131,6 +145,23 @@ row is off by one and the reader has no way to know.
 
 ## Status
 
-Not fixed. Filed on notice; the repository holding the skill is outside this session's working
-directories, so the fix is a decision for the operator rather than something to take here.
+**Fixed** at `claude-plugins:bb14719`, patch-id `87019883ed5b6a85ae30999f6cc3381522fc73dc`
+— the same commit as the sibling greedy-regex bug, cross-repo so the SHA is prefixed.
 
+The walk no longer asks what a process is *called*. It climbs to the first ancestor **holding a
+socket in `cc-socks`**, which is what "a claude server" means here and is a property the kernel
+records rather than a name the binary happens to carry — the general form recorded in
+`IC-18`'s `**Members:**`.
+
+**Verified 2026-09-03 on the discriminating case**, which is the only one that proves anything:
+this session's own `comm` is `claude`, so its `<-- you` row worked *before* the fix and is
+monotone under the defect. Against live pid `985365` (`comm=2.1.258`, exe
+`~/.local/share/claude/versions/2.1.258`) the two walks diverge as predicted — the old one passes
+over it and runs to PID 1, printing no `<-- you`; the new one terminates there.
+
+**The loud-failure half shipped too**, which was the recommendation this file made independently
+of any particular fix: when the walk finds no socket-bearing ancestor the summary now drops the
+peer figure entirely and says why, rather than printing a session count a reader silently uses as
+a peer count.
+
+See `unverified:` — this half has no regression test and the reason is structural, not neglect.

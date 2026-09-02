@@ -7710,8 +7710,8 @@ basis `3e275c54` resolves to pid 3624594 / `compact-root-claude-md` / `.claude-s
 > ```
 >
 > Both defects are filed —
-> `docs/issues/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md`
-> and `docs/issues/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md` — and both
+> `docs/issues/archive/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md`
+> and `docs/issues/archive/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md` — and both
 > are fixed at their other site, `reaching-peer-sessions/SKILL.md` Step 1. This is the **second**
 > site; the bug files named one. Found by grepping the tree while fixing the first, which is
 > `bug-fix-session-log:W-102`: checking the named site confirms the named site.

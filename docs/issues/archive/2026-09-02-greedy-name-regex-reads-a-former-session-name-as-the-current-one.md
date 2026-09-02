@@ -1,12 +1,14 @@
 ---
-id: '8a1a5576d005f8d5'
+id: 8dbb3ff3cb9a89f7
 kind: bug
-status: open
+status: fixed
 title: the peer-enumeration regex reads a former session name as the current one
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-03
+unverified: 'The regression test covers the name read only. The self-identification half of the same commit is verified by hand, not by test — see the sibling bug file. The test is newly reachable: `tests/run-all.sh` globbed hooks only until 2026-09-03, so a skill-colocated test was discovered by nothing; the glob was widened in the same commit and has not yet run in CI, which invokes two named targets rather than the runner.'
 ---
 
 ## Summary
@@ -134,7 +136,7 @@ the residual with room to spare.
 That number was itself wrong the first two times it was taken, and the reason is a second defect
 in the same script: a peer derived it as **2** via `pgrep -x claude`, and the `comm` filter misses
 every session whose binary is version-pinned. Filed separately as
-`docs/issues/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md`
+`docs/issues/archive/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md`
 (`cluster/selector-narrower-than-its-population`). Noted here because it is the same lesson this
 file is about arriving one layer up: **a value read by pattern-matching a name the schema never
 promised**. There it was `"name":` matched by position in a line; here it is `claude` matched
@@ -170,6 +172,23 @@ gone, so what the instrument displayed for it is unverifiable in the sense above
 is its own worked example. Two candidate causes, one operator error and one instrument defect,
 and the discriminating record no longer exists. Attributing it to the regex would be the
 convenient reading, not the supported one.
+## A second site, which this file did not name
+
+This file located the defect at `reaching-peer-sessions/SKILL.md` Step 1 and stopped there. There
+was a **second** occurrence of the identical greedy expression, in a `reconnaissance-patterns.md`
+R-N entry's sessionId-lookup snippet, found by grepping the tree while fixing the first — not by
+reading this file, which named one site and read as complete.
+
+That is `bug-fix-session-log:W-102` holding about the bug file that helped produce it: *checking
+the named site confirms the named site.* A bug file is a claim about a population of occurrences,
+and naming one is the same shape as a ledger naming one stale citation when three existed.
+
+The second site is corrected in place, with the broken original deliberately preserved and marked
+*do not copy* — the entry records a method that was actually run and a conclusion drawn from it,
+so rewriting it would falsify the record rather than repair it. Worth reading for its own reason:
+its author had validated the script **on their own sessionId as a control**, and the control
+passed because that session was neither renamed nor version-pinned — a control drawn from the
+population both defects exclude.
 ## Proposed fix
 
 Parse the JSON:
@@ -190,5 +209,24 @@ a property of the expression.
 
 ## Status
 
-Not fixed. Filed on notice during unrelated work; the skill remains usable via the `uds:`
-addressing form, which does not depend on the name column.
+**Fixed** at `claude-plugins:bb14719`, patch-id `87019883ed5b6a85ae30999f6cc3381522fc73dc`
+(cross-repo: the fix is in `claude-plugins`, not this repo, so the SHA is prefixed and the
+patch-id is what survives that repo's own history rewrites).
+
+The shipped line is now a structural read — `json.load(...)["name"]` — which cannot be reached by
+the decoy key at all, rather than a regex taught to avoid it.
+
+**Verified 2026-09-03, discriminatingly.** Against the same live registry file that reproduced it:
+the old greedy form still returns `stop-storing-derived-counts` and the shipped form returns
+`split-issue-clusters-file`. The reproduction has not gone stale, so the check still separates a
+fixed world from a broken one rather than merely agreeing with both.
+
+**Regression test:** `codescout-companion/skills/reaching-peer-sessions/reaching-peer-sessions.test.sh`,
+four cases, and it **extracts the command from `SKILL.md` rather than re-typing it** — a copy would
+pass forever against a skill edited back to the greedy form. Two mutations of the production path
+were run and both were killed: changing the line's *shape* reds the extraction guard, and keeping
+the shape while making the *program* return `formerNames[-1]["name"]` reds case 1 with
+`got 'idle|stop-storing-derived-counts'` — the defect's own signature. Case 2 asserts the fixture
+still reproduces the bug, so case 1 cannot quietly become vacuous.
+
+See `unverified:` for what the test does **not** cover and for the reachability caveat.
