@@ -37,6 +37,7 @@ under another profile; the sessionId survives both).
 | 8 | `9e2b93d2`, `dcf3940a` | `ffb95976` |
 | 9 | `e67c3221` | `ffb95976` |
 | 10 | `95b77262` | `ffb95976` |
+| 11 | `98eb5adc`, `488192e8` — **backfill + fix (c) only; the swap is NOT written** | `ffb95976` |
 
 `19e0e253-6b26-4a74-a201-33c92fbd0b30` is session `codescout-20` (profile `~/.claude`).
 `ffb95976-dc89-4cca-87aa-c026544faf2f` is the session that wrote this block.
@@ -54,7 +55,10 @@ ticks *are* a live trace — written by the session that made them, as each land
 closes the outage**: between Tasks 6 and 8 artifact semantic search returned an empty page
 for every re-indexed artifact.
 
-**Tasks 11–12 have not started.** The negative verification that used to stand here for 7–12
+**Task 11 is HALF done and Task 12 has not started.** Task 11's backfill and its
+mandatory fix (c) shipped; `swap_artifact_vec` was deliberately not written, and its
+Step 5 is not runnable as written — read that task's own block before touching either.
+The negative verification that used to stand here for 7–12
 has been consumed by those four tasks and is not re-derivable:
 `src/librarian/catalog/find.rs` now contains `max_per_artifact`, and Task 7's `gc.rs` half
 was **withdrawn as redundant** rather than performed — the trigger plus the FK cascade
@@ -2144,6 +2148,58 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): semantic f
 
 ## Task 11: Backfill and swap
 
+> **PARTIALLY DONE 2026-09-02** by session `ffb95976`. Commits `98eb5adc` (fix (c)) and
+> `488192e8` (the backfill). **The swap is deliberately NOT implemented.**
+>
+> **Fix (c) shipped first, as this task requires.** `IndexReport` gains
+> `vectorless: Option<usize>`, surfaced by `reindex` as `vectorless` +
+> `vectorless_note`. `Option`, not a bare count, because `0` would read identically for
+> "measured, no hole" and "embeddings are off, so the number is noise". It counts **chunk
+> rows, not vectors** — a defect caught while writing the second test: `index_repo` writes
+> through `store.upsert` when an external store is configured and leaves `artifact_vec_v2`
+> empty, so a vector-based count would false-alarm at **100%**. `embed_queue_items` writes
+> chunk rows as a side effect of queueing, so "no chunk rows" is the absorbing state's exact
+> signature on every backend.
+>
+> **The backfill's key test asserts the fix does NOT close the trap.** After the backfill
+> the indexer still refuses to queue the artifact — without that control, a backfill doing
+> what an ordinary reindex would have done looks identical and is not worth a function.
+>
+> **Three departures from the specified interfaces.** `BackfillReport` gains
+> `missing_file`: a file that is *gone* and one that is *blank* have different remedies and
+> `skipped_empty` would say the same word about both. The cursor **clears on completion**
+> rather than persisting as a watermark — parked at the end of the corpus it would skip any
+> artifact that becomes vectorless later with an earlier timestamp, which is exactly what a
+> re-formed hole looks like; mutating it to a watermark gives `left: 0, right: 2`, and *0
+> artifacts visited* reads as "nothing to do". And it takes the **`Mutex`**, not a
+> `&Catalog`, so the lock is released across each embedding await — clippy's
+> `await_holding_lock` caught the first shape and the honest fix was the restructure.
+>
+> **Wired as a CLI (`codescout backfill-chunks`), not an MCP action**, and both halves of
+> that are deliberate: an unwired function is `cluster/declared-not-wired`, and a tool
+> action would hold the catalog through thousands of remote round-trips, degrading every
+> session sharing it.
+>
+> ⚠ **STEP 5 IS DANGEROUS AS WRITTEN — do not run it.** It sets
+> `LIBRARIAN_CATALOG=/tmp/…` to point the binary at a copy. **That variable does not exist
+> anywhere in this codebase** (verified by grep 2026-09-02), so the command opens the
+> **live** catalog and back-fills it — the exact thing the step's own text forbids, on a
+> machine where several sessions share that file. A real dry run needs a catalog argument
+> the CLI does not yet take.
+>
+> **Why the swap was not written, rather than written-and-not-run.** The plan blocks
+> *running* it, which would leave a function nobody may call — `cluster/declared-not-wired`,
+> the class whose canonical instance in this repo is two tools that implemented `Tool`,
+> were registered nowhere, and carried a passing suite for months. Shipping the swap now
+> would instantiate it knowingly. It stays for whoever lands fix (a) or (b).
+>
+> **And the plan and the bug file disagree about whether the backfill is blocked at all.**
+> The bug file's Resume says Task 11 *"backfills chunk rows from artifacts the indexer
+> declines to process, so running it first would backfill into the hole and report
+> success."* That is true of a backfill routed through the indexer and false of this one,
+> which consults `content_unchanged` nowhere — resolved on the mechanism, not on which
+> document is newer.
+
 **BLOCKED ON P1 — AMENDED 2026-09-02: diagnosed, not fixed.** The vector-coverage hole now has a reproduction and a named mechanism (`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`, artifact `a766aad35b0b7610`); see § *Entry condition*. That changes what the block means rather than lifting it:
 
 - **The backfill itself is unblocked.** It needs the exit from the absorbing state, and the exit is the established half; the entry path is the half still unknown.
@@ -2158,7 +2214,8 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): semantic f
 - Produces: `pub async fn backfill_chunk_vectors(cat: &Catalog, svc: &EmbeddingService, batch: usize) -> Result<BackfillReport>` where `BackfillReport { embedded: usize, skipped_empty: usize, artifacts: usize }`
 - Produces: `pub fn swap_artifact_vec(cat: &Catalog) -> Result<()>`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests** — the two SWAP tests. Not written; see the block
+      above for why writing them now would ship an unwired function.
 
 ```rust
 #[test]
@@ -2192,7 +2249,8 @@ fn the_swap_is_re_runnable() {
 Run: `cargo test --lib the_swap_replaces_the_table`
 Expected: FAIL — `cannot find function swap_artifact_vec`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement** — the backfill runner and fix (c). `swap_artifact_vec` is NOT
+      implemented and stays for whoever lands fix (a) or (b).
 
 ```rust
 /// Replace `artifact_vec` with the chunk-keyed `artifact_vec_v2`.
@@ -2238,12 +2296,15 @@ For the backfill runner, walk artifacts in `updated_at` order, call `embed_queue
 >
 > Task 7 was re-verified against the live file today and its coordinates hold. This task's never were — which is the entire difference, and the reason the instruction is "resolve by symbol" rather than "use these numbers".
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass** — 38/38 `librarian::indexer`, 18/18
+      `librarian::tools::reindex`. Mutation: cursor-as-watermark gave `left: 0, right: 2`.
 
 Run: `cargo test --lib librarian::indexer`
 Expected: PASS.
 
-- [ ] **Step 5: Dry run on a COPY, never the live catalog**
+- [ ] ⚠ **Step 5: Dry run on a COPY, never the live catalog** — NOT RUN, and **not runnable
+      as written**: `LIBRARIAN_CATALOG` does not exist in this codebase, so the command
+      redirects nothing and opens the LIVE catalog. Needs a CLI catalog argument first.
 
 ```bash
 cp ~/.local/share/librarian/catalog.db /tmp/claude-1000/catalog-backfill-test.db
@@ -2255,7 +2316,9 @@ sqlite3 /tmp/claude-1000/catalog-backfill-test.db \
 
 Expected: on the order of 90,500 rows corpus-wide (~26,530 for codescout alone). A number near 4,500 means only one chunk per artifact was written — stop and re-check Task 6.
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit** — `98eb5adc` + `488192e8`. The staging line here names
+      only `indexer.rs`; the CLI wiring also touches `src/cli/backfill_chunks.rs`,
+      `src/cli/mod.rs` and `src/main.rs`, and fix (c) touches `tools/reindex.rs`.
 
 ```bash
 cargo fmt
