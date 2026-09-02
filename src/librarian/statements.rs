@@ -104,7 +104,7 @@ fn first_declaration_line<'a>(section_text: &'a str, re: &Regex) -> Option<&'a s
 /// a third of the targets authors had already written, and rendering the
 /// fragment as the whole field. Reading the paragraph moves the corpus from
 /// 47% to 59% resolvable. See
-/// `docs/issues/2026-09-02-parse-rests-on-truncates-at-line-one.md`.
+/// `docs/issues/archive/2026-09-02-parse-rests-on-truncates-at-line-one.md`.
 ///
 /// **Only the declaring line is column-0 anchored.** Continuation lines are
 /// expected to be indented — that is the hanging-indent form this field's own

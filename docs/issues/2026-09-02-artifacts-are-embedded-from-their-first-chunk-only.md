@@ -97,8 +97,11 @@ no artifact.
 
 ### It compounds with a known-empty edge
 
-`**Rests on:**` materialises zero edges (see
-`docs/issues/2026-09-02-parse-rests-on-truncates-at-line-one.md`). So neither
+`**Rests on:**` materialises zero edges. Its parser half is fixed —
+`docs/issues/archive/2026-09-02-parse-rests-on-truncates-at-line-one.md`,
+`experiments` `1b071cd7`, patch-id
+`9d0f25f5581c517c4b5ff663fea05d0858f855f0` — but the **edge** is still unbuilt.
+So neither
 the lexical route nor the semantic route currently reaches an individual
 Statement. Any design that says *"then we semantically retrieve the Statements
 that rest on this"* is resting on a layer that does not exist.
@@ -161,4 +164,3 @@ gating change; `indexer.rs:69` is one line once the schema allows it.
 - `crates/codescout-embed/src/chunker.rs:127-201`
 - `src/librarian/catalog/schema.sql:49-58`
 - Coverage query: `SELECT COUNT(*) FROM artifact a WHERE NOT EXISTS (SELECT 1 FROM artifact_vec_rowids v WHERE v.id = a.id)` against `~/.local/share/librarian/catalog.db`
-
