@@ -2717,6 +2717,48 @@ fn entry_indegree(
     Ok(deg)
 }
 
+/// Tokens this text defines more than once, with every defining line.
+///
+/// Re-derives definitions from raw headings rather than reading
+/// `DocExtract.definitions`: `link_scan`'s extractor de-duplicates at parse time
+/// (`link_scan/extract.rs:399` and `:440` both guard one `seen_defs` set), so a
+/// same-file duplicate is DISCARDED before it reaches any consumer. Reading that
+/// vector here would produce a check whose positive case is unrepresentable.
+/// `bug-fix-session-log:F-99`.
+///
+/// The definition grammar is `extract.rs::def_re`'s, repeated rather than shared
+/// because that function is private and making it `pub(crate)` would widen a
+/// parser's surface for one caller. If the two ever disagree, the pinned test
+/// `duplicate_definitions_needs_the_dash_separator` is what fails.
+//
+// Not yet called outside its own tests: Task 2 wires it into the `doctor`
+// tool as the `entry_defined_twice` check. `allow(dead_code)` is scoped to
+// this one function and comes off in that task's diff.
+#[allow(dead_code)]
+fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
+    use std::collections::BTreeMap;
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+").unwrap());
+
+    let mut seen: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    for h in crate::librarian::preview::headings::parse(text) {
+        let Some(m) = re.captures(&h.text) else {
+            continue;
+        };
+        let token = m.get(1).unwrap().as_str().to_string();
+        let Some(prefix) = token.split('-').next() else {
+            continue;
+        };
+        if !prefixes.iter().any(|p| p == prefix) {
+            continue;
+        }
+        seen.entry(token).or_default().push(h.line as u32);
+    }
+    seen.into_iter()
+        .filter(|(_, lines)| lines.len() > 1)
+        .collect()
+}
+
 /// Cross-file citations below which a Statement is not worth anyone's attention.
 ///
 /// Shared, on purpose, by every check in this family (Tasks 5-7): two checks producing
@@ -13297,5 +13339,38 @@ root = "work/elsewhere/ghost"
             Some(&json!(1)),
             "root B must be its OWN key, not merged into root A's: {scoped:#?}"
         );
+    }
+
+    #[test]
+    fn duplicate_definitions_finds_a_token_defined_twice() {
+        let body = "# L\n\n## R-147 — first\n\ntext\n\n## R-147 — second\n";
+        let got = duplicate_definitions(body, &["R".to_string()]);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "R-147");
+        assert_eq!(got[0].1.len(), 2, "both lines reported: {got:?}");
+    }
+
+    /// The negative direction. Without it the function could return every token
+    /// it sees and still pass the test above — an existence assertion is monotone
+    /// under widening.
+    #[test]
+    fn duplicate_definitions_is_silent_on_a_clean_ledger() {
+        let body = "# L\n\n## R-147 — first\n\n## R-148 — second\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// A prefix the ledger does not declare is not this ledger's namespace.
+    #[test]
+    fn duplicate_definitions_ignores_an_undeclared_prefix() {
+        let body = "# L\n\n## T-1 — a\n\n## T-1 — b\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// `## A-9 Addendum` has no dash separator, so it defines nothing —
+    /// two of them are two sections ABOUT A-9, not a duplicate definition.
+    #[test]
+    fn duplicate_definitions_needs_the_dash_separator() {
+        let body = "# L\n\n## R-9 Addendum\n\n## R-9 Addendum\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
     }
 }
