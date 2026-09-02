@@ -147,9 +147,37 @@ impl UsageRecorder {
     }
 }
 
+/// Classify a tool call's outcome for `usage.db`.
+///
+/// **The `Err` arm has to downcast, because this runs BEFORE the router that
+/// would otherwise tell it.** `route_tool_error` (`src/server.rs`) is what turns
+/// a [`RecoverableError`] into an `isError: false` response, and it runs after
+/// [`UsageRecorder::record_content`] has already written the row. Classifying
+/// every `Err` as `"error"` therefore made `recoverable_error` unreachable in
+/// production: the column is documented and queried as a three-value taxonomy
+/// and held two, so a guard firing correctly and a hard failure were the same
+/// value, and two queries filtering on the third returned nothing without
+/// saying so.
+///
+/// The `Ok` arm below can still emit `"recoverable_error"`, but only for a tool
+/// returning `Ok(content)` whose JSON body carries a top-level `error` key. No
+/// live tool does that — codescout's recoverable errors travel as `Err`, per
+/// `get_guide("error-handling")` — which is why that arm's existence read as
+/// coverage while the value never appeared in 57k rows.
+///
+/// [`RecoverableError`]: crate::tools::RecoverableError
+///
+/// docs/issues/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
 fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool, Option<String>) {
     match result {
-        Err(e) => ("error", false, Some(e.to_string())),
+        Err(e) => {
+            let outcome = if e.downcast_ref::<crate::tools::RecoverableError>().is_some() {
+                "recoverable_error"
+            } else {
+                "error"
+            };
+            (outcome, false, Some(e.to_string()))
+        }
         Ok(blocks) => {
             // Parse the text of the first content block as JSON and inspect it
             // for the same "error" / "overflow" sentinel keys that classify_result uses.
@@ -646,6 +674,79 @@ mod content_tests {
         assert!(inp.is_some(), "input_json should be populated");
         assert!(out.is_some(), "output_json should be populated for errors");
         assert!(out.unwrap().contains("file not found"));
+    }
+
+    /// A `RecoverableError` stores `outcome="recoverable_error"`; a hard error does not.
+    ///
+    /// **Both directions, in one database, because either alone is monotone.**
+    /// Asserting only the recoverable row passes against a classifier that
+    /// returns `"recoverable_error"` for everything — which is the same
+    /// two-value column this bug was about, relabelled. Asserting only the
+    /// hard row is what the code did before the fix.
+    ///
+    /// **It asserts the STORED ROW, not `classify_content_result`'s return.**
+    /// That is the whole point of siting it here: the classifier could be
+    /// unit-tested green while the value never reached `usage.db`, because
+    /// the disposition is decided by `route_tool_error` in `src/server.rs`
+    /// *after* the recorder has already written. A unit test of the
+    /// classifier cannot see that ordering; this traverses it.
+    ///
+    /// Measured before the fix: 0 `recoverable_error` rows in 57k calls, in a
+    /// column documented and queried as a three-value taxonomy, with two live
+    /// queries filtering on the dead value and returning empty without saying
+    /// so.
+    ///
+    /// docs/issues/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
+    #[tokio::test]
+    async fn record_content_distinguishes_a_recoverable_error_from_a_hard_one() {
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+        );
+        let input = json!({});
+
+        // The shape every codescout guard uses: a RecoverableError travelling
+        // as `Err`, routed to isError:false further up. Before the fix this
+        // landed as "error", indistinguishable from the row below it.
+        let _ = recorder
+            .record_content("edit_file", &input, None, || async {
+                Err(crate::tools::RecoverableError::new("0 matches for old_string").into())
+            })
+            .await;
+        let _ = recorder
+            .record_content("read_file", &input, None, || async {
+                Err(anyhow::anyhow!("file not found"))
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT tool_name, outcome FROM tool_calls ORDER BY tool_name")
+            .unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(
+            rows,
+            vec![
+                ("edit_file".to_string(), "recoverable_error".to_string()),
+                ("read_file".to_string(), "error".to_string()),
+            ],
+            "the outcome column must separate a guard firing correctly from a hard \
+                 failure; got {rows:?}"
+        );
     }
 
     #[tokio::test]
