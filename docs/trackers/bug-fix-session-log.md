@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 96
-entry_high_water_W: 93
+entry_high_water_F: 98
+entry_high_water_W: 94
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,8 @@ entry_high_water_W: 93
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-98 | 2026-09-02 | high | epistemic | fixed-verified | `8343d6ca` retracted a falsified remedy from a bug file, correctly scoped "bug file only, no counts moved" — and the same claim stood in `docs/trackers/issue-clusters.md:1139`, IC-17's `**Members:**`, labelled **verified**, written by the same session at `cd6bb36c`. **The correct scoping is what preserved the falsehood**: nothing relates a bug file to a ledger field quoting it — no edge, no diff hunk, no check. Worse than the unsafe instruction beside it: `:872` is advice that misfires, `:1139` was false and labelled verified. Found by `codescout-05` reading past the line I had *accurately* told it not to amend — an accurate but incomplete correction carries enough authority to stop the next person looking. Fixed `fea2e1ce`. |
+| F-97 | 2026-09-02 | med | measurement | fixed-verified | Ran `cargo check --workspace --all-targets` (which does not lint at all), got exit 0, and published "all green" under the project gate's name — while `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` was red, exit 101, 10 errors. Had seen the seven `dead_code` warnings and described them as "expected"; `-D warnings` promotes each to an error. Quoted the gate's four commands in my own first message of the session and ran none of them for four hours. **A green from an instrument chosen for its speed is a fact about that instrument.** Caught by `codescout-26`, which held the failing code. |
 | F-96 | 2026-09-02 | med | epistemic | fixed-verified | I published `core.hooksPath points at scripts/` as the reason a hook edit is instantly live here. Wrong twice. **The variable is unset** at every scope — this repo's *healthy* state, asserted by `tests/hook_config.rs`, and a *set* value once disabled every hook here for a day, so a reader acting on my sentence reproduces an archived bug. A peer caught that. **But the conclusion survived their correction and was independently false:** pre-commit clears unstaged changes before hooks (`staged_files_only.py:108`), so a `language: system` entry runs the **index** copy of its own script — measured, 3 cases. The exposure moment is `git add`, not the editor save. Both halves of the refutation were already filed in this repo, held one each by two sessions who agreed with each other instead of composing them. **A correction is a fresh claim — check the part of the original it leaves standing.** Second law: an `## Environment` block is the least-audited claim in a bug file, and the one downstream files copy |
 | F-95 | 2026-09-01 | high | concurrent-sessions | mitigated | Mutation testing in the shared checkout put `if false && …` into a peer's **staged index**. Their review of the staged diff used a filtered grep that happened not to print the `if` line, so a disabled gate passed human review with a green suite behind it; the only thing that stopped the commit was the `unreviewed-content` pre-commit hook — which is about unstaged content, not about this defect, and would not have fired on a whole-tree `git add`. A mutation writes the SAME BYTES an intentional edit writes, so no observer can separate them: `file-provenance` correctly returned `SHARED` and named both sessions, and that is the most any instrument could say. Restored byte-exact, re-staged, peer notified, 7/7 green — but nothing prevents recurrence. Mutations belong in a worktree, not a shared tree |
 | F-94 | 2026-09-01 | med | test-rigor | fixed-verified | The new dispersion test pins the gate's **existence**, not its **threshold**. Four mutation runs: disabling the gate kills only that test (so it earns its place), but moving `DISPERSION` 0.8 → 0.9 is **7/7 green**. Its two fixtures sit at the extremes — 0.33 and 1.00 — so every cut in (0.33, 1.00] satisfies it, leaving the shipped 0.8 unguarded across **(0.667, 1.0]**. The sole guard between 0.667 and 0.8 is `…_reports_only_the_active_projects_citers`, a *project-scoping* regression whose 3-cites/2-files ratio is incidental to its purpose and unannotated — so a tidy-up making that fixture read more like a real ledger would keep it passing and delete the last guard. `IC-14` turned on a test |
@@ -152,6 +154,7 @@ entry_high_water_W: 93
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-94 | 2026-09-02 | high | **Get a claim checked by a peer whose SAMPLE differs** — different scope, different sample *time*, or different instrument; not a more careful reviewer, a differently-positioned one. Five errors in one ~5h session across seven co-located sessions, **none caught by its author**, two already committed: a stale compiler sample (`E0603` vs a peer's `E0425` on the same tree ~1min apart, no overlap), `F-97`, a committed-and-falsified count remedy, `F-98`, and a shared-blind-spot corroboration made **twice** — the second time 90 minutes after publishing the rule against it. Every correction came from the party who would have benefited from the error standing. The promotable form is **not** "get peer review" — that is a policy, and it failed against an author who had just written it down — but **state the scope and unit a claim was measured over**, so a reader can tell whether a second instrument is independent. |
 | W-93 | 2026-09-01 | high | A green fixture suite met real data and the correction was to the QUESTION, not the code — run the instrument against the corpus before believing its design, not merely before shipping it | `file-provenance.py` passed 34/34 fixtures, then answered its own motivating file with **fifteen** sessions, every one a genuine lifetime author. Not a bug: "who has ever written this?" is answerable and useless, while "this is dirty NOW and reds my build, is it mine?" is bounded by the path's last commit. No fixture could pose it — each had one write in an empty timeline, which is what a fixture author naturally writes. Three assertions in the same suite also passed VACUOUSLY, each differently: a marker matched its own fixture path name (`src/undated.rs`), a case was answered by an earlier section's write to the same path (`docs/new.md`), and a negative passed because its fixture source was out-of-tree and discarded before any logic ran | validated |
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
 | W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
@@ -9638,6 +9641,100 @@ Blindness* states that for instruments; this is the same failure between **agent
 **Status:** fixed-verified — both editable surfaces corrected in place (the archive file
 and the peer's file, the latter flagged to its author); `054c8a3e`'s message is immutable
 and is left standing, cited here as the third instance.
+
+## F-97 — Reported `cargo check` green under the project gate's name while the clippy step was red
+
+**Observed:** 2026-09-02 ~09:47, verifying tree state after a peer landed `e701ec59` on a shared checkout with seven live sessions.
+
+**When:** Reporting tree state to the operator and to peers, immediately before others would budget work against it.
+
+**Expected (what I published):** "All green" — a status table listing `cargo check --workspace --all-targets` (exit 0), `cargo test --test issue_clusters` (18/18), `scripts/pre-commit-ledger-counts.py` (exit 0), and git status.
+
+**Got (reality):** The project gate's clippy line — `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` — was **red, exit 101, 10 error lines**. Seven `dead_code` warnings in `src/engines/` that I had seen, read, and explicitly described as *"only dead-code warnings, expected for a module not yet wired"* were each promoted to an error by `-D warnings`. `cargo check` does not lint at all, so it cannot express the question clippy answers.
+
+**Probable cause:** Instrument substituted for speed, then reported under the gate's name. `cargo check` was chosen because it was fast and because a compile error was the hypothesis being tested; the result was then generalised to "the gate is green". CLAUDE.md § *Development Commands* warns about exactly one step up from this — *"the long clippy form is the gate, not garnish: bare `cargo clippy -- -D warnings` lints only the root package's non-test targets with default features, so it passes trees CI fails."* I ran something weaker than the weak form.
+
+**The tell was available and unused:** I quoted the gate's four commands verbatim in my own first message of the session and then ran none of them for four hours. A green from an instrument chosen for its speed is a fact about that instrument.
+
+**Workaround / correction:** Ran the real gate line, found the failures **confined** to `src/engines/` (zero errors elsewhere — the null result is what established single ownership), and republished the state with clippy listed as RED and attributed. Caught by `codescout-26`, not by me.
+
+**Severity:** med — published a wrong tree-state to an operator and to six peer sessions, any of whom could have run the four-command gate, hit a red they did not cause, and spent time attributing it. No code was wrong; the *report* was. Cost one correction round-trip plus a full clippy run to re-derive.
+
+**Status:** fixed-verified — corrected in the same session, gate line re-run, scope of failures established by null result.
+
+**Valid:** dated 2026-09-02
+
+True of this session's reporting, not of the code. Re-check if the gate's four commands change.
+
+**Rests on:** CLAUDE.md § *Development Commands* — the four commands are four because each answers a question the others cannot, and `check` answers none of clippy's.
+
+**Fix idea / Pointer:** Before writing "green" anywhere a reader will act on, name which command produced it. A status table listing three commands and omitting the fourth reads as complete; the omission is invisible to the reader and to the author.
+
+## F-98 — A correctly-scoped retraction left the same claim standing in a second artifact, labelled verified
+
+**Observed:** 2026-09-02, after committing `8343d6ca` to retract a falsified remedy from `docs/issues/2026-09-02-one-ledger-file-serializes-every-class-edit.md`.
+
+**When:** Believing the retraction complete and reporting it as such.
+
+**Expected:** `8343d6ca` withdrew the index-free union count (`tracked ∪ git ls-files --others --exclude-standard`) after `codescout-20` falsified it at `tests/issue_clusters.rs:511-527` — `actual_counts` iterates `tracked_all_bug_files()`, so the field carries the **tracked** count and a union reds `every_bare_n_in_a_class_field_matches_the_corpus`. The commit was scoped **"bug file only, no counts moved"**, which was correct and deliberate.
+
+**Got:** The same claim was still standing in a *second* artifact — `docs/trackers/issue-clusters.md:1139`, IC-17's `**Members:**` field, written by the same session at `cd6bb36c`, reading *"...returns the correct corpus without touching the index, **verified 2026-09-02**..."*. A reader arriving at IC-17 gets the falsified remedy asserted as verified, with no marker, and the retraction lives in a file they have no reason to open.
+
+**Probable cause:** The correct scoping is what preserved the falsehood. Every rule in this repo says to scope a commit to what it changes and not to touch a shared unsplittable ledger without cause — and following all of them left the claim in the artifact that indexes the class the claim belongs to. Nothing relates a bug file to a ledger field quoting it: no edge, no diff hunk, no check names the section a later edit retired.
+
+**This is worse than the unsafe instruction it sat next to.** `issue-clusters.md:872`'s *"`git add` first, then count"* is **advice that misfires** on a shared index. `:1139`'s tail was **false and labelled verified**, in the Index-bearing artifact.
+
+**How it was found — and the near-miss is the point.** `codescout-05` found it. I had told it, accurately, that `:1139` was a *mention* of the instruction rather than a use, and that it should **not** amend it. That was true and it was **incomplete in a way that would have closed the search**: it read the whole field instead of stopping at the line I had characterised, and found the survivor three sentences later. An accurate, incomplete correction carries enough authority to stop the next person looking.
+
+**Workaround / fix:** `fea2e1ce` — the sentence now opens *"not by the union — that prescription was FALSIFIED at `8343d6ca`, and this sentence asserted it as verified until..."*, cites the mechanism rather than a verdict, records why the union measured clean, and marks the surviving read-side finding as surviving. Prose only, no count moved.
+
+**Severity:** high — a false claim labelled verified, in the artifact that indexes `cluster/doc-contradicted-by-code`, which is the class it instantiates. Would have propagated to any session reading IC-17 for the corrected count rule.
+
+**Status:** fixed-verified — `fea2e1ce`, patch-id `d9a6dea264169f3e31d27adb3323b734be98afd5`; grep for the claim returns 0; gate 18/18.
+
+**Valid:** invariant
+
+The mechanism does not decay: two artifacts can carry one claim, and retracting it in either leaves the other standing, because nothing in markdown relates them.
+
+**Rests on:** `observer-blindness:OB-12` — a section a later one falsifies produces no diff hunk, no broken link, and no check naming what it retired. This is OB-12 across two *files* rather than within one.
+
+**Fix idea / Pointer:** Before scoping a retraction, grep the claim's distinctive phrase across `docs/` — not the file you are editing. If the claim was ever quoted into a tracker, ledger, or guide, the retraction owes a second commit, and the correctly-scoped first one will not schedule it.
+
+## W-94 — Peers with a differing SAMPLE caught five errors no author caught, including two already committed
+
+**Observed:** 2026-09-02, across a ~5h session with seven live sessions in one checkout (six peers plus me, by socket enumeration — `ListAgents` reports a per-profile subset).
+
+**Pattern:** When a claim will be acted on, get it checked by a peer whose **sample differs** — different scope, different sample *time*, or different instrument. Not a more careful reviewer; a differently-positioned one. Then state the scope and unit of what you checked, so the peer can tell whether their sample is independent of yours.
+
+**Counterfactual — five concrete instances, none caught by its author:**
+
+1. **Stale compiler sample.** I ran `cargo check`, got `E0603` at `src/engines/coordinator.rs:9`, and told the owning session *"the fix is one line — the compiler hands it over."* `codescout-20` had sampled the same tree ~1 min earlier and got `E0425`, two types not found — **no overlap**. A subagent was writing the file between our samples. Without the cross-check, `codescout-26` applies a one-line `use` fix, is still red, and goes hunting a phantom second defect. (Both diagnoses were already stale on arrival; 26 had fixed it independently.)
+
+2. **Substituted instrument.** `F-97` — I reported `cargo check` green as "all green" while the gate's clippy line was red with 10 errors. Caught by `codescout-26`, which held the failing code and knew the gate line applied to it.
+
+3. **Falsified remedy, already committed.** I verified an index-free union count and shipped it in `4266be0f`. `codescout-20` falsified it at `tests/issue_clusters.rs:511-527`. Without it, that bug file would carry advice that **reds the ledger gate for anyone who follows it**.
+
+4. **A retraction that missed a second artifact.** `F-98` — found by `codescout-05` reading past the line I had (accurately) told it not to amend.
+
+5. **Shared blind spot reported as corroboration, twice.** I offered "catalog query and filesystem grep agree at 43" as confirmation — both read the worktree, so they agree *because* they share a property. Then did it again 90 minutes later, offering `grep -r` = union as corroboration — both answer the on-disk question. I had described this failure, published it, and named CLAUDE.md's independence rule, between the two instances.
+
+**Confirming data points:** the five above, plus three misattributions of a single staging event (`20` → `05` → actually `26`'s subagent), each by a session mid-sentence about not routing by adjacency.
+
+**Impact:** high — item 3 alone would have shipped actively harmful advice into a load-bearing ledger; item 1 would have cost a peer a debugging detour on a build blocking seven sessions.
+
+**The strongest evidence is who supplied the corrections.** Every one came from the party who would have *benefited* from the error standing: `codescout-05` refusing an over-attribution in its own favour, then retracting its own proposed remedy; `codescout-20` diffing and withdrawing a claim inside its own commit message; `codescout-26` recording its subagent's mistake as its own and naming the rule it broke.
+
+**Promote-when:** already at threshold by instance count, but the promotion is **not** "get peer review" — that is a policy, and item 5 shows a policy does not survive contact with an author who has just written it down. The mechanizable form is the one to promote: **make a claim state the scope and unit it was measured over**, so a reader can tell whether a second instrument is independent. Two of the five above are pure unit/scope omissions.
+
+**Status:** validated — five independent instances in one session, each with a named cost and a named catcher.
+
+**Valid:** dated 2026-09-02
+
+Instance count is a fact about this session. The mechanism claim — that differing *sample* rather than greater *care* is what caught these — rests on all five having been missed by careful authors.
+
+**Rests on:** CLAUDE.md § *Observer Blindness* position 2 (the reviewer who does not share the author's context) and its independence rule (two instruments agreeing is evidence only if their scopes differ).
+
+**Fix idea / Pointer:** The cheap version, available in advance: before citing a confirming result, ask what property the two instruments share. If they share the one that would produce the error, their agreement is one blind spot counted twice.
 
 ## Template for new entries
 
