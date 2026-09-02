@@ -102,6 +102,75 @@ pub fn parse(doc: &str) -> Result<(Option<Frontmatter>, &str)> {
     Ok((Some(fm), &rest[body_start..]))
 }
 
+/// Number of lines that sit ABOVE `body` in `doc` — the frontmatter block's
+/// height, and the amount every line number derived from `body` alone is short
+/// by.
+///
+/// **Pass the pair a single [`parse`] call returned.** `parse`'s body is a
+/// suffix subslice of the document it parsed, which is the whole derivation:
+/// the prefix is everything before it. Handing in a body from one parse and a
+/// document from another is the mistake this exists to make hard to commit — so
+/// a pair that is NOT a suffix match returns `0` rather than a number computed
+/// from unrelated text. That direction is deliberate: `0` reproduces the
+/// pre-fix behaviour (ranges short by the frontmatter), whereas a wrong
+/// non-zero offset points at a line that exists and is wrong, which reads as
+/// correct.
+pub fn body_line_offset(doc: &str, body: &str) -> usize {
+    if !doc.ends_with(body) {
+        return 0;
+    }
+    // `ends_with` guarantees the split is on a char boundary.
+    doc[..doc.len() - body.len()].lines().count()
+}
+
+#[cfg(test)]
+mod body_line_offset_tests {
+    use super::*;
+
+    #[test]
+    fn a_document_without_frontmatter_has_no_offset() {
+        let doc = "# Title\n\nbody\n";
+        let (_, body) = parse(doc).unwrap();
+        assert_eq!(body_line_offset(doc, body), 0);
+    }
+
+    #[test]
+    fn the_offset_is_the_frontmatter_blocks_own_line_count() {
+        // LOAD-BEARING: this block is exactly 4 lines (`---`, two keys, `---`),
+        // so 4 is the only correct answer. Add or remove a key here and the
+        // expected value below must move with it — that coupling is the point.
+        // A hard-coded 4 against a block of some other height is what gives
+        // this test the ability to fail at all.
+        let doc = "---\nkind: tracker\nstatus: active\n---\n# Title\n\nbody\n";
+        let (fm, body) = parse(doc).unwrap();
+        assert!(
+            fm.is_some(),
+            "the fixture's frontmatter must actually parse"
+        );
+        assert_eq!(body, "# Title\n\nbody\n");
+        assert_eq!(body_line_offset(doc, body), 4);
+    }
+
+    #[test]
+    fn a_body_that_is_not_this_documents_body_yields_zero_not_a_wrong_number() {
+        // The safe-direction guarantee: a mismatched pair degrades to "no
+        // offset", never to an offset computed from a length coincidence.
+        // `"ope\n"` is 4 bytes, so a naive `doc.len() - body.len()` would have
+        // produced a confident, wrong prefix here instead of refusing.
+        let doc = "---\nkind: tracker\n---\n# Title\n";
+        assert_eq!(body_line_offset(doc, "ope\n"), 0);
+    }
+
+    #[test]
+    fn crlf_frontmatter_counts_the_same_lines() {
+        // `---\r\n` + one key + `---\r\n` = 3 lines. Pins that `str::lines()`
+        // strips the `\r` rather than counting a phantom line.
+        let doc = "---\r\nkind: tracker\r\n---\r\n# Title\r\n";
+        let (_, body) = parse(doc).unwrap();
+        assert_eq!(body_line_offset(doc, body), 3);
+    }
+}
+
 pub fn write(fm: &Frontmatter, body: &str) -> String {
     // Serialize the first-class fields with serde_yml, but emit the `extra` map
     // ourselves. serde_yml conservatively quotes any string YAML 1.1 could

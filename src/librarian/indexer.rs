@@ -69,7 +69,23 @@ pub fn first_h1(body: &str) -> Option<String> {
     None
 }
 
-/// Build the embed-queue entries for `body`: ONE PER CHUNK, keyed by chunk id.
+/// Build the embed-queue entries for `doc`: ONE PER CHUNK, keyed by chunk id.
+///
+/// **`doc` is the WHOLE file, frontmatter and all** — not a pre-stripped body.
+/// The split happens here rather than at the call sites because the body and
+/// its line offset have to come from ONE parse: a caller that passed a body
+/// from one parse and an offset from another (or forgot the offset) would
+/// store ranges silently short by the frontmatter's height, which is the
+/// defect this signature exists to prevent recurring. See
+/// `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+///
+/// A document whose frontmatter does not parse is chunked whole, at offset 0.
+/// That aligns the two former callers, which disagreed: `index_repo_sync` fell
+/// back to an EMPTY body (so a malformed-frontmatter file was chunked into
+/// nothing and silently never became searchable), while
+/// [`backfill_chunk_vectors`] fell back to the full content. Whole-content is
+/// the better of the two — a file with a bad `---` block is still a file
+/// someone wants to find.
 ///
 /// Writes the artifact's `artifact_chunk` rows as a side effect, because the
 /// chunk ids the queue is keyed on are assigned there — the queue and the rows
@@ -82,13 +98,14 @@ pub fn first_h1(body: &str) -> Option<String> {
 /// bulk reindex.
 ///
 /// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
-/// path and the forced-re-embed path through the unchanged-row early return.
-/// Keeping it in one place is what stops those two from drifting apart.
+/// path and the forced-re-embed path through the unchanged-row early return —
+/// and by [`backfill_chunk_vectors`]. Keeping it in one place is what stops
+/// those three from drifting apart.
 pub(crate) fn embed_queue_items(
     cat: &Catalog,
     id: &str,
     title: Option<String>,
-    body: &str,
+    doc: &str,
 ) -> Result<Vec<EmbedQueueItem>> {
     // 2048 chars = 512 tokens. Do NOT swap this for chunk_size_for_model:
     // that returns a CEILING (2048 tokens for CodeRankEmbed), and this project
@@ -96,7 +113,14 @@ pub(crate) fn embed_queue_items(
     // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
     const CHUNK_CHARS: usize = 512 * 4;
 
-    let built = crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS);
+    // One parse, two derived values. `body_line_offset` re-derives the height
+    // from the pair rather than being told it, and returns 0 for a pair that is
+    // not a suffix match — so the worst this can do is fall back to the old
+    // behaviour, never invent a plausible wrong line.
+    let (_, body) = frontmatter::parse(doc).unwrap_or((None, doc));
+    let line_offset = frontmatter::body_line_offset(doc, body);
+
+    let built = crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS, line_offset);
     let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
     Ok(stored
         .into_iter()
@@ -291,7 +315,7 @@ pub fn index_repo_sync(
             // path instead would rewrite every row and misreport them as
             // `updated`.
             if want_embeddings && force_embed {
-                embed_queue.extend(embed_queue_items(cat, &id, title, body)?);
+                embed_queue.extend(embed_queue_items(cat, &id, title, &content)?);
             }
             seen_ids.push(id);
             report.unchanged += 1;
@@ -324,7 +348,7 @@ pub fn index_repo_sync(
         // project). Re-classification alone, without either signal, does not
         // require recomputing the embedding.
         if want_embeddings && (!content_unchanged || force_embed) {
-            embed_queue.extend(embed_queue_items(cat, &id, title, body)?);
+            embed_queue.extend(embed_queue_items(cat, &id, title, &content)?);
         }
 
         seen_ids.push(id.clone());
@@ -896,14 +920,12 @@ pub async fn backfill_chunk_vectors(
                     continue;
                 }
             };
-            let body = match frontmatter::parse(&content) {
-                Ok((_, b)) => b.to_string(),
-                Err(_) => content.clone(),
-            };
-
+            // The whole file, frontmatter included — embed_queue_items owns
+            // the split now, so this path and index_repo_sync's cannot land
+            // chunks in two different coordinate spaces.
             let items = {
                 let cat = catalog.lock();
-                embed_queue_items(&cat, &id, title, &body)?
+                embed_queue_items(&cat, &id, title, &content)?
             };
             if items.is_empty() {
                 report.skipped_empty += 1;
@@ -2077,6 +2099,80 @@ kind = "memory"
     }
 
     #[test]
+    fn a_stored_chunks_range_points_at_that_text_in_the_file() {
+        // The Task-12 regression guard. Chunk ranges leave the process through
+        // `artifact(find, semantic=)`'s `matched` block as FILE lines and a
+        // caller opens the file at them. Until 2026-09-02 they were
+        // body-relative, so every hit on a frontmatter-carrying document was
+        // short by the block's height and landed inside the PREVIOUS entry
+        // (measured: 7793 against a true 7808 on bug-fix-session-log.md).
+        //
+        // LOAD-BEARING — the fixture's frontmatter must stay NON-EMPTY. At zero
+        // frontmatter lines the offset is 0, body- and file-relative coincide,
+        // and the defect is UNREPRESENTABLE: the test would pass against the
+        // broken implementation. That is exactly how every other
+        // embed_queue_items test here missed it — all of them pass a bare body.
+        let doc =
+            "---\nkind: tracker\nstatus: active\n---\n# Log\n\npre\n\n## W-2 — second\n\nbeta\n";
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        embed_queue_items(&cat, "a", None, doc).unwrap();
+
+        let file_lines: Vec<&str> = doc.lines().collect();
+        let mut stmt = cat
+            .conn
+            .prepare(
+                "SELECT start_line, end_line, entry_token, content FROM artifact_chunk \
+                 WHERE artifact_id = 'a' ORDER BY chunk_ix",
+            )
+            .unwrap();
+        let rows: Vec<(i64, i64, Option<String>, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            rows.len() >= 2,
+            "fixture must yield a preamble plus an entry chunk, got {}",
+            rows.len()
+        );
+
+        // The round trip, asserted PER CHUNK rather than over the set: slice the
+        // FILE at the stored range and the chunk's own text must come back. This
+        // is monotone in neither direction — it fails under a dropped offset, a
+        // doubled one, and an off-by-one either way, none of which a
+        // `start_line >= 1`-shaped assertion can see.
+        for (start, end, _, content) in &rows {
+            assert_eq!(
+                file_lines[*start as usize - 1..*end as usize].join("\n"),
+                *content,
+                "chunk stored as file lines {start}-{end} is not the text at those lines"
+            );
+        }
+
+        // And the token survived the shift. It is looked up body-relative
+        // BEFORE the offset is applied; folding the offset in earlier slides
+        // every token one entry along — measured, the preamble chunk inherited
+        // `W-2` at range (5, 8) while the real one lost it.
+        let w2 = rows
+            .iter()
+            .find(|(_, _, t, _)| t.as_deref() == Some("W-2"))
+            .expect("the W-2 entry chunk must still carry its token");
+        assert_eq!(
+            (w2.0, w2.1),
+            (9, 11),
+            "`## W-2 — second` is line 9 of the fixture and `beta` is line 11"
+        );
+    }
+
+    #[test]
     fn a_whitespace_only_section_is_dropped_without_dropping_the_batch() {
         // The embedder's guard bails the WHOLE batch on one empty input
         // (archive/2026-05-17-reindex-embedding-dim-mismatch.md). With N chunks the
@@ -2101,7 +2197,7 @@ kind = "memory"
         )
         .unwrap();
         let body = "\n# T\n\n## W-1 — real\n\ncontent\n\n## W-2 — also real\n\nmore\n";
-        let built = crate::librarian::catalog::chunk::build_chunks("a", body, 512 * 4);
+        let built = crate::librarian::catalog::chunk::build_chunks("a", body, 512 * 4, 0);
         let empties = built.iter().filter(|r| r.content.trim().is_empty()).count();
         // LOAD-BEARING: this is what stops the fixture silently going vacuous
         // again if the chunker's heading/section rules change — without it, a
@@ -2239,6 +2335,7 @@ kind = "memory"
             "a",
             "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
             2048,
+            0,
         );
         let stored = crate::librarian::catalog::chunk::replace_chunks(&cat, "a", &built).unwrap();
         assert!(

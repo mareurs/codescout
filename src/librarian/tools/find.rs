@@ -1794,7 +1794,7 @@ mod tests {
     /// ARTIFACT id — leaves every candidate unresolvable, and the failure shows
     /// up as an empty page rather than an error, so it reads like a ranking bug.
     fn seed_vec(cat: &Catalog, id: &str, axis: usize) {
-        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048);
+        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048, 0);
         let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
         let mut v = vec![0.0f32; 768];
         v[axis] = 1.0;
@@ -1868,7 +1868,7 @@ mod tests {
         near_ix: Option<usize>,
     ) -> Vec<crate::librarian::catalog::chunk::ChunkRow> {
         let body = "# T\n\nintro\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n";
-        let built = crate::librarian::catalog::chunk::build_chunks(id, body, 2048);
+        let built = crate::librarian::catalog::chunk::build_chunks(id, body, 2048, 0);
         let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
         assert!(
             rows.len() >= 3,
@@ -2012,7 +2012,7 @@ mod tests {
     #[tokio::test]
     async fn a_cut_snippet_says_it_was_cut_and_an_uncut_one_does_not() {
         fn seed_one_chunk(cat: &Catalog, id: &str, body: &str) {
-            let built = crate::librarian::catalog::chunk::build_chunks(id, body, 8192);
+            let built = crate::librarian::catalog::chunk::build_chunks(id, body, 8192, 0);
             let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
             assert_eq!(
                 rows.len(),

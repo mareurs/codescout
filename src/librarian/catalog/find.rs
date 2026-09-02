@@ -942,7 +942,7 @@ mod tests {
     /// fails SILENTLY rather than loudly, because an unresolvable candidate id
     /// is skipped as stale, so the page simply comes back empty.
     fn one_chunk(cat: &Catalog, id: &str) -> String {
-        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048);
+        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048, 0);
         let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
         rows[0].chunk_id.clone()
     }
@@ -971,6 +971,7 @@ mod tests {
             "a",
             "# T\n\nintro\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
             2048,
+            0,
         );
         let rows = crate::librarian::catalog::chunk::replace_chunks(&cat, "a", &built).unwrap();
         assert!(
@@ -1008,13 +1009,18 @@ mod tests {
         let big = crate::librarian::catalog::chunk::replace_chunks(
             &cat,
             "big",
-            &crate::librarian::catalog::chunk::build_chunks("big", &big_body, 2048),
+            &crate::librarian::catalog::chunk::build_chunks("big", &big_body, 2048, 0),
         )
         .unwrap();
         let small = crate::librarian::catalog::chunk::replace_chunks(
             &cat,
             "small",
-            &crate::librarian::catalog::chunk::build_chunks("small", "## W-9 — t\n\nbody\n", 2048),
+            &crate::librarian::catalog::chunk::build_chunks(
+                "small",
+                "## W-9 — t\n\nbody\n",
+                2048,
+                0,
+            ),
         )
         .unwrap();
         let store =

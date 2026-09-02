@@ -1162,7 +1162,7 @@ mod tests {
         let ledger_chunks = chunk::replace_chunks(
             &cat,
             "r/ledger.md",
-            &chunk::build_chunks("r/ledger.md", &ledger, 2048),
+            &chunk::build_chunks("r/ledger.md", &ledger, 2048, 0),
         )
         .unwrap();
         assert!(
@@ -1177,7 +1177,7 @@ mod tests {
         for c in &chunk::replace_chunks(
             &cat,
             "r/note.md",
-            &chunk::build_chunks("r/note.md", NOTE, 2048),
+            &chunk::build_chunks("r/note.md", NOTE, 2048, 0),
         )
         .unwrap()
         {

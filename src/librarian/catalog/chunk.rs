@@ -12,7 +12,11 @@ pub struct ChunkRow {
     pub chunk_id: String,
     pub artifact_id: String,
     pub chunk_ix: usize,
+    /// 1-indexed line **in the file**, frontmatter included. See
+    /// [`build_chunks`]'s `line_offset`: this is the coordinate space the
+    /// number is published in, so it is the one it is stored in.
     pub start_line: usize,
+    /// 1-indexed, inclusive, **in the file**. See [`ChunkRow::start_line`].
     pub end_line: usize,
     pub entry_token: Option<String>,
     pub content: String,
@@ -23,7 +27,34 @@ pub struct ChunkRow {
 /// entries start their own chunk. `chunk_size` is the CHARACTER budget and
 /// stays 2,048 (512 tokens) — see the plan's Global Constraints before
 /// touching it.
-pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<ChunkRow> {
+///
+/// `line_offset` is how many lines sit ABOVE `body` in the file it came from —
+/// the frontmatter block, for a librarian artifact. It is added to every
+/// returned range, so [`ChunkRow`]'s `start_line` / `end_line` mean
+/// **the line in the FILE, in every ChunkRow that exists** — freshly built or
+/// read back out of `artifact_chunk`. One meaning is the whole point: these
+/// numbers leave the process through `artifact(find, semantic=)`'s `matched`
+/// block, where a caller opens the file at them. Publishing body-relative
+/// numbers as file lines put every hit on a tracker short by the frontmatter's
+/// height, landing inside the PREVIOUS entry — measured 2026-09-02 at 7793 vs
+/// a true 7808, see
+/// `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+/// A caller with nothing above its body passes `0`; there is deliberately no
+/// 3-argument form that means `0` implicitly, because an implicit `0` is
+/// exactly how that defect was shipped.
+///
+/// The offset is applied AFTER the entry-token lookup and must stay there:
+/// `entry_tokens_by_line` is computed over `body`, so its keys are
+/// body-relative. Folding `line_offset` into `raw.start_line` before the lookup
+/// leaves every range correct and slides every token onto the WRONG chunk —
+/// measured under mutation 2026-09-03: the preamble inherited `W-2` while the
+/// real `W-2` chunk read `None`.
+pub fn build_chunks(
+    artifact_id: &str,
+    body: &str,
+    chunk_size: usize,
+    line_offset: usize,
+) -> Vec<ChunkRow> {
     let tokens = entry_tokens_by_line(body);
     codescout_embed::chunker::split_markdown_with_depth(body, chunk_size, 0, 6)
         .into_iter()
@@ -36,10 +67,15 @@ pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<Chu
                 chunk_id: String::new(),
                 artifact_id: artifact_id.to_string(),
                 chunk_ix: ix,
+                // Keyed on the UNSHIFTED line — see the note above.
                 entry_token: tokens.get(raw.start_line).cloned().flatten(),
-                start_line: raw.start_line,
-                end_line: raw.end_line,
+                start_line: raw.start_line + line_offset,
+                end_line: raw.end_line + line_offset,
                 content: raw.content,
+                // Over `content` only, so re-chunking a file at a corrected
+                // offset preserves every hash — which is why the migration off
+                // body-relative ranges costs no re-embedding: replace_chunks
+                // keeps the id and the vector and re-syncs the position.
                 content_hash: format!("{:x}", hasher.finalize()),
             }
         })
@@ -291,7 +327,7 @@ mod tests {
     #[test]
     fn build_chunks_carries_line_ranges_and_entry_tokens() {
         let body = "# Log\n\npreamble\n\n## W-81 — a title\n\nbody text\n";
-        let rows = build_chunks("a", body, 2048);
+        let rows = build_chunks("a", body, 2048, 0);
         assert!(rows.len() >= 2, "preamble and entry are separate chunks");
         assert_eq!(rows[0].entry_token, None, "the preamble is inside no entry");
         // Pinned to real output (verified by a one-off probe run before writing
@@ -314,11 +350,50 @@ mod tests {
     }
 
     #[test]
+    fn a_line_offset_shifts_every_range_and_moves_no_entry_token() {
+        // Guards the ARITHMETIC site. The threading site — whether production
+        // ever passes a non-zero offset — is guarded separately in
+        // indexer.rs's `a_stored_chunks_range_points_at_that_text_in_the_file`;
+        // one kill here says nothing about the other, per the once-per-site law.
+        let body = "# Log\n\npre\n\n## W-2 — second\n\nbeta\n";
+        let at_zero = build_chunks("a", body, 2048, 0);
+        let at_four = build_chunks("a", body, 2048, 4);
+
+        assert_eq!(at_zero[0].start_line, 1, "offset 0 is still body-relative");
+        assert!(
+            at_four
+                .iter()
+                .any(|r| r.entry_token.as_deref() == Some("W-2")),
+            "LOAD-BEARING: the fixture must contain an entry token, or the \
+             token half of this test is vacuous"
+        );
+        assert_eq!(at_zero.len(), at_four.len());
+
+        for (z, f) in at_zero.iter().zip(at_four.iter()) {
+            assert_eq!(f.start_line, z.start_line + 4);
+            assert_eq!(f.end_line, z.end_line + 4);
+            // The token is keyed on the UNSHIFTED line and must NOT travel with
+            // the range. Folding the offset in before `tokens.get(..)` leaves
+            // every range correct and slides every token one entry along:
+            // measured, the preamble inherited `W-2` and the real `W-2` chunk
+            // read `None`. No range assertion can see that.
+            assert_eq!(f.entry_token, z.entry_token);
+            // The hash is over `content` alone, so shifting the coordinate
+            // space preserves it. That is not a detail — it is why correcting
+            // the offset on an already-indexed corpus costs no re-embedding:
+            // replace_chunks matches on (chunk_ix, content_hash), keeps the id
+            // and the vector, and re-syncs the position fields only.
+            assert_eq!(f.content, z.content);
+            assert_eq!(f.content_hash, z.content_hash);
+        }
+    }
+
+    #[test]
     fn replace_chunks_preserves_ids_for_unchanged_chunks() {
         // This is what stops a re-index re-embedding an untouched 766 KB tracker.
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
-        let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048);
+        let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048, 0);
         let stored1 = replace_chunks(&cat, "a", &first).unwrap();
         let stored2 = replace_chunks(&cat, "a", &first).unwrap();
         assert_eq!(
@@ -334,9 +409,9 @@ mod tests {
         // replace that deletes EVERYTHING also passes.
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
-        let long = build_chunks("a", "# T\n\n## A-1 — x\n\na\n\n## A-2 — y\n\nb\n", 2048);
+        let long = build_chunks("a", "# T\n\n## A-1 — x\n\na\n\n## A-2 — y\n\nb\n", 2048, 0);
         replace_chunks(&cat, "a", &long).unwrap();
-        let short = build_chunks("a", "# T\n\n## A-1 — x\n\na\n", 2048);
+        let short = build_chunks("a", "# T\n\n## A-1 — x\n\na\n", 2048, 0);
         replace_chunks(&cat, "a", &short).unwrap();
         let stored = chunks_for(&cat, "a").unwrap();
         assert_eq!(
@@ -380,13 +455,13 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
         let body = "# T\n\nx\n\n## W-1 — t\n\ny\n";
-        let first = build_chunks("a", body, 2048);
+        let first = build_chunks("a", body, 2048, 0);
         let stored1 = replace_chunks(&cat, "a", &first).unwrap();
         let chunk_id = stored1[0].chunk_id.clone();
         seed_vec_row(&cat, &chunk_id);
 
         // Re-index with IDENTICAL content — the case replace_chunks exists for.
-        let second = build_chunks("a", body, 2048);
+        let second = build_chunks("a", body, 2048, 0);
         let stored2 = replace_chunks(&cat, "a", &second).unwrap();
         assert_eq!(stored2[0].chunk_id, chunk_id, "id preservation still holds");
         assert_eq!(
@@ -405,7 +480,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
         let body = "# T\n\nx\n\n## W-1 — t\n\ny\n";
-        let first = build_chunks("a", body, 2048);
+        let first = build_chunks("a", body, 2048, 0);
         let stored1 = replace_chunks(&cat, "a", &first).unwrap();
         let w1 = stored1
             .iter()
@@ -418,7 +493,7 @@ mod tests {
         // Insert a line into the preamble only — the W-1 entry's own content is
         // byte-identical, but its position in the body has shifted down by one.
         let shifted_body = "# T\n\nx\nANOTHER LINE\n\n## W-1 — t\n\ny\n";
-        let second = build_chunks("a", shifted_body, 2048);
+        let second = build_chunks("a", shifted_body, 2048, 0);
         replace_chunks(&cat, "a", &second).unwrap();
 
         // Re-fetch from the DB — the return value of replace_chunks is built
@@ -450,13 +525,13 @@ mod tests {
         // satisfied by a replace_chunks that never deletes anything at all.
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
-        let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048);
+        let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048, 0);
         let stored1 = replace_chunks(&cat, "a", &first).unwrap();
         let chunk_id = stored1[0].chunk_id.clone();
         seed_vec_row(&cat, &chunk_id);
 
         // Re-index with DIFFERENT content at the same chunk_ix (the preamble).
-        let second = build_chunks("a", "# T\n\nCHANGED\n\n## W-1 — t\n\ny\n", 2048);
+        let second = build_chunks("a", "# T\n\nCHANGED\n\n## W-1 — t\n\ny\n", 2048, 0);
         replace_chunks(&cat, "a", &second).unwrap();
 
         assert_eq!(
