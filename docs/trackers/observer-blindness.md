@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 13
+entry_high_water_OB: 14
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-14 | 2026-09-02 | **the sampling frame — what the corpus contains, what one row means, how rows were selected — is the premise every number rests on and the one no downstream check reads.** A frame error moves numerator and denominator together, so every consistency check passes | **the analyst**, whose entire access to the population runs *through* the frame; auditing it needs a view of the population that does not come through it | wrong instrument, and uniquely so for the **review** half: 13 rounds plus a sustained adversarial review that reversed 4 conclusions, and none of five parties questioned the frame — `OB-4`'s shared-substrate law applied to reviewers rather than instruments | **designed** — show the data owner the corpus census and the sampling frame *before* the findings; census is 3 queries plus a per-producer byte share. Not promoted: 2 instances, 1 work stream |
 | OB-13 | 2026-09-02 | **deleting a token makes every negative assertion naming it vacuously true — permanently, silently, while staying green.** The instance was *written as a forward-looking guard and made vacuous by the very event it anticipated* (`prompts/mod.rs:2603`, "After Task 14 lands…") | **the author performing the deletion.** The diff enumerates removals; the assertions that MENTION the token are not in it — they survive untouched, compile, pass, and read as guards. Nothing in the act of deleting points backwards | wrong instrument — the reverse direction is **closed**: token→assertions is a grep, assertions→"which go vacuous" is unanswerable, since the discriminator is who OWNS the token and that is not in the text. Measured: a selector over 93 assertions returned **28**, overwhelmingly fixtures | `designed, not built` — H-N: trigger on a token leaving the tree, `grep -rn '!.*contains.*<token>'`. **Plus a repair-side check**, because the blindness recurs in the fix: the prescribed replacement needle was itself vacuous, by a different mechanism, and passed |
 | OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed case has no mechanism and none is proposed |
 | OB-11 | 2026-09-01 | a session-keyed ledger answers for a party the protocol never named — a subagent's FIRST fetch reports as a repeat, and its auto-inject is suppressed as already-delivered | the codescout MCP server: `agent_id` rides harness `SubagentStart`/`Stop` events and no MCP tool call ever carries it | wrong instrument — the guide text told the parent to make it *worse* | **partial** — wording fixed at 3 sites, note pinned negatively, companion hook overrides the brief; the **keying** is unfixable from inside this repo |
@@ -502,7 +503,7 @@ in the wrong direction.
 as *"remember to rebuild after the lean lane"* — an instruction addressed to precisely
 the party defined as receiving no signal.
 
-**Mechanism status: shipped** — `73066479`. The documented gate now runs the lean lane
+**Mechanism status:** shipped — `73066479`. The documented gate now runs the lean lane
 **third** and the default lane **last**, so following the instructions correctly leaves
 nothing armed. The safe state is a *consequence* of compliance rather than an extra step.
 
@@ -1243,7 +1244,7 @@ re-examined* — only the boundary).
 
 **Vigilance:** wrong instrument, and demonstrably so. The holder in the recorded instance was, at that moment, writing a commit message about shared-checkout hazards and had spent the evening filing observer-blindness findings. Knowing the class prevented nothing, because the class does not present to the holder at all.
 
-**Mechanism status: none yet.** Two candidate shapes, in the order this ledger prefers them:
+**Mechanism status:** none yet. Two candidate shapes, in the order this ledger prefers them:
 
 1. **An owner field on the resource** — the refusal names the file; it should name the holder. The machinery exists: `scripts/pre-commit-foreign-index.sh` already resolves a staged path to a `Session-Id` and prints `SendMessage(to: "uds:/run/user/<uid>/cc-socks/<pid>.sock")`. This converts an unbounded wait into a message and is `IC-17`'s remedy exactly.
 2. **Make compliance end in a safe state** — the `OB-2` shape, here spelled *edit-and-land, never edit-and-hold*. Weaker, because it is a practice rather than a mechanism, and it is addressed to the party defined as receiving no signal.
@@ -1303,7 +1304,7 @@ into `get_guide("tracker-conventions")` § *A `## Resume` states its own currenc
 sibling emits **no signal anywhere** — not in the diff, not in a link check, not in the
 falsified section itself, which continues to read as settled prose.
 
-**Blind party: the author adding the new section, specifically.** They are facing forward —
+**Blind party:** the author adding the new section, specifically. They are facing forward —
 composing the alternative, the correction, the newer measurement. The sections their new one
 refutes were written earlier, are internally coherent, and read as finished. Nothing in the act
 of appending points backwards. In the recorded corpus the falsifying section was **written by
@@ -1323,14 +1324,14 @@ broken link, no error — a true-sounding instruction whose premise a sibling qu
 its own review rejected Strategy A; `capability-proposals.md` CAP-7 § *Resume* says *"Next:
 check 1"* above a status block listing check 1's commit and patch-id.
 
-**Vigilance: wrong instrument, twice over.** "Re-read the whole document when you add a
+**Vigilance:** wrong instrument, twice over. "Re-read the whole document when you add a
 section" is unenforceable and nobody does it at 1,500 lines. And the party it addresses is
 the one who just finished writing the *new* section — the moment of least attention to the old
 ones. Measured: three of the falsified claims survived a full session of a reader who was
 *actively ruling on that very document*, and were caught only when each became the next
 concrete task.
 
-**Mechanism status: partial.** The **currency marker** shipped 2026-09-02 —
+**Mechanism status:** partial. The **currency marker** shipped 2026-09-02 —
 `get_guide("tracker-conventions")` § *A `## Resume` states its own currency*: a section either
 dates its heading or opens with a banner naming what superseded it and where the current state
 lives. Measured over the corpus that motivated it: **0 of 5 sections carrying a marker were
@@ -1380,7 +1381,7 @@ after `X` ceases to exist is the monotone-under-removal law (`CLAUDE.md` § *Tes
 with a specific trigger: **a dead mechanism produces exactly the silence the assertion asserts.**
 The suite does not shrink, no test reddens, and the guard survives in the file guarding nothing.
 
-**Blind party: the author performing the deletion, specifically.** They are looking at what is
+**Blind party:** the author performing the deletion, specifically. They are looking at what is
 going away — the diff enumerates removals, and every removal is accounted for. The negative
 assertions that *mention* the token are not in the diff: they survive it untouched, compile, pass,
 and read as guards. Nothing in the act of deleting points at them. The instance is exact about
@@ -1436,6 +1437,116 @@ below, which is the cheaper half and covers a failure the trigger cannot.
 (`prompts/mod.rs:2603` retrospective, `augmentation.rs:3027` prospective — different subsystems,
 same day) and one of the repair half, all from the same work stream. One work stream is not two
 subsystems in the sense the promotion bar means, whatever the file paths say.
+
+## OB-14 — the sampling frame is unauditable from inside it, and review inherits it
+
+**Valid:** invariant
+
+**Rests on:** `provenance-probe-session-log:F-13` and `provenance-probe-session-log:F-14` (the two
+instances); `provenance-probe-session-log:W-9` and `provenance-probe-session-log:W-10` (the practice
+that caught them); `reconnaissance-patterns:R-53` and `reconnaissance-patterns:R-54` (the scouts).
+
+**Class:** the **sampling frame** — what the corpus physically contains, what one row *means*, and
+how rows were selected — is the premise every downstream number rests on, and the one premise no
+downstream check reads. A frame error therefore yields a body of individually correct, internally
+consistent, collectively meaningless figures.
+
+**Blind party:** the analyst — and for a reason stronger than inattention: their entire access to
+the population runs *through* the frame. Auditing it would need a view of the population that does
+not come through the frame, which is by construction the one view they do not have. Every check
+available to them is computed **from** the corpus and is therefore **inside** it.
+
+**Who can see it:** whoever knows the **provenance of the inputs** — how the data came to exist,
+which of it was real work, how much of it there is. That is a *different qualification* from
+`OB-1`'s *"a reader who does not share the author's context"*, and the difference is this entry: a
+peer reviewer with full data access is **worse** placed than a non-analyst who knows the world the
+corpus came from, because the reviewer inherits the frame and the outsider never had it.
+
+**Plausible-answer property:** definitional rather than incidental. A frame error moves numerator
+and denominator **together**, so every ratio, reconciliation and consistency check passes — those
+checks are computed under the frame's own definitions. Measured: thirteen rounds produced no figure
+that looked wrong to any of five parties, over a corpus that was ~60% base64 by the study's own
+accounting and whose 64 "sessions" were 34.
+
+**Vigilance:** wrong instrument — and this entry carries the ledger's strongest evidence for the
+**review** half specifically. The programme ran thirteen rounds *and* a sustained adversarial review
+by an independent session which reversed four conclusions (a gate's lift against a null model, a
+source-label catch-all, a retrieval-granularity claim, two self-contradicting verdict lines). Not one
+of those parties questioned the frame, and they could not: adversarial review is an instrument aimed
+at the **reasoning**, while reviewer and analyst read one corpus through one frame. This is `OB-4`'s
+*"instruments sharing a substrate are one instrument"* applied to **reviewers** — which predicts that
+adding reviewers is a null operation against this class at any level of rigour, and that the four
+reversals it did produce are evidence the review was working, not evidence it could have reached here.
+
+**Mechanism status:** `designed` — shape (2) from § *The vigilance finding*, an unconditional policy
+tied to a trigger that occurs anyway.
+
+- **The policy: show the data owner the corpus census and the sampling frame BEFORE showing anyone
+  the findings.** The trigger is *about to report a measurement*, which happens in every measurement
+  task, so nothing has to be noticed. Both instances below were closed by the owner in **one sentence
+  each**, against artifacts readable in under a minute — *"the browser MCP is not part of the normal
+  flow"* and *"we should have more than 64 sessions, much more."*
+- **The census, and it is three queries plus one classification.** (1) `count(*)` against
+  `uniqExact(<thing_id>)` — rows per thing; if the ratio is not ~1, rows are not observations.
+  (2) `sum(len)` against `sum(max(len) per thing)` — the double-count factor; a large ratio means
+  rows nest, so every sum is inflated and every "independent" observation is a prefix of another.
+  (3) `uniqExact(<thing_id>)` **on the sample** — the effective n; report that, never the row count.
+  (4) Per **producing tool**: calls, bytes, share of bytes. A single producer above ~20% of bytes is
+  a validity question before it is a distribution feature — ask what those bytes *are*, which
+  character-class statistics answer (base64 run fraction, whitespace fraction) while reading no
+  content, so the check stays privacy-safe.
+- **What it is not.** It is not "sample more" — that is the reflex answer and it is a null operation
+  here, because a larger sample drawn through the same frame reproduces the error at higher
+  confidence. In the second instance the sample was 0.1% of the population *and* the fix was not
+  simply to take more: 444 sessions drawn in the wrong **unit** would have been equally wrong.
+
+**Instances — two, one work stream, and the population is stated rather than padded.**
+
+| | frame parameter that was wrong | how it presented |
+|---|---|---|
+| `provenance-probe-session-log:F-13` | **content** — a byte was assumed to be a text byte. `flatten()` is `json.dumps`, so image blocks were stringified and their base64 counted as text: 71/71 payloads >90% base64, median 100% of the payload inside one contiguous base64 run, 37/71 truncated at a 400 KB cap | base64 holds zero codebase-specific tokens *by construction*, so it inflated every share denominator **and** depressed every utilisation figure at once — pushing in both directions, which is why no single number looked absurd |
+| `provenance-probe-session-log:F-14` | **unit and selection** — a row was assumed to be a session. One row is a *request*, and each request re-sends the whole conversation: 143 requests per session, a **165×** double-count on summed lengths. 64 sampled rows were 34 distinct sessions; a top band of 13 rows was 6. Strata were equal-n over populations of 567 and 17,003 | an absence claim over 34 sessions was published as a population claim (*"the trigger population is empty"*); the true figure was 2 calls. Bands stratified by size were **conversation-depth** strata wearing size labels |
+
+**Boundary — stated because a class with none absorbs its neighbours.**
+
+- **Not `OB-1`.** OB-1 is a *published claim* omitting a parameter the reader needs, and its remedy
+  is to publish the parameter. Here the parameters **were** published — derivations, units, counting
+  rules — and were correct under a frame that was not. Publishing harder is a no-op; the defect is
+  upstream of publication.
+- **Not `OB-3`.** That is one *instrument* whose result set is a subset by an undocumented rule, and
+  its remedy is a second instrument on a different substrate. Here the frame is not an instrument
+  that under-reports; it is the definition of the population all instruments range over, so a second
+  instrument inherits it.
+- **Not `OB-9`.** That asks why a wrong value is not caught **downstream**, and its answer is the
+  reader's resolution limit. This asks why the value was wrong **upstream**, with the reader's
+  plausibility filter working correctly on a number that was correctly computed.
+- **Not `issue-clusters:IC-18`.** A selector narrower than its population *never saw* the excluded
+  members. Here the selector saw everything it was pointed at; what was wrong was what a row **meant**
+  and what the bytes **were**. IC-18's remedy — widen the selector or name its scope — repairs
+  neither instance.
+
+**A published confirmation, per `CLAUDE.md` § *Testing Discipline*'s recording law.**
+`reconnaissance-patterns:R-54`'s second half — *never let "zero observed" become "empty" without
+stating n* — was written as a new rule and is a **re-derivation**: `CLAUDE.md` § *Testing Discipline*'s
+*"a count of a defect population must arrive with its unit or not at all"* and `OB-1`'s *"report a
+search count together with the key you searched for"* already cover it. Its first half —
+**pseudo-replication**, rows nested as prefixes of one another — has no antecedent found in this
+corpus. Recorded because a re-derivation that lands on an existing rule leaves no artifact unless
+somebody writes it down, and absorbing it as a new finding would have made this ledger look more
+productive than it was.
+
+**Status:** open — **two instances, one work stream, one analyst.** Deliberately **not promoted**,
+on `OB-13`'s own reasoning: one work stream is not two subsystems whatever the file paths say, and
+both instances here share an analyst as well as a corpus, which is a narrower base still. What the
+pair does establish is the *review* claim, because that ran across five parties rather than one. A
+third instance from a different work stream, or one instance where an internal check or a
+frame-sharing reviewer **did** catch a frame error, is what decides this — the second would falsify
+it outright.
+
+**Falsified by** a frame error caught by a party who reached the corpus only through the frame —
+an internal consistency check, or a reviewer with the analyst's data access and no independent
+knowledge of the inputs' provenance. That would make this ordinary carelessness with a careful
+remedy available, which is exactly what this ledger's admission test excludes.
 
 ## Template for new entries
 
