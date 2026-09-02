@@ -420,6 +420,53 @@ So the guard's stated capability covers `W-99` and it would have caught it. What
 That is worth stating as a rule rather than an anecdote, because `--name-only` looks like the same check economised: **the file list is not a review.** Staging is what makes content *reviewable*; only reading the content reviews it, and on a shared checkout the file list is the one projection guaranteed to omit the thing you are looking for — a captured file appears in it under a name you recognise, because it is a file you were also editing.
 
 **A corollary for the two-call window.** `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md` was drafted from this instance claiming the window *caused* the capture. It did not: `git add` on a shared file takes a peer's edits whether or not the peer is mid-protocol, so a complete single-call edit would have gone identically. The window **widens exposure and is not the cause**, the remedies do not overlap, and that file has been corrected to say so before it was first committed.
+## Instance 8 — 2026-09-02, the third route: the one the guard does not inspect at all
+
+**Keyed to sessionIds throughout, and for once that is not boilerplate — see § *the name collision* below.**
+
+**Capturing commit:** `21258b4b`, session `c45dd5ef`, 17:29 — *"docs(issues): the capture's mechanism, settled by asking — and two halves that read differently"*.
+**Captured from:** session `63083c9e`.
+**Route:** `git add -- <two own doc paths>`, then a **bare `git commit`** with no pathspec. In the interval, `63083c9e` staged four files into the shared index; all six were committed.
+
+**Volume, with its unit:** `git show 21258b4b --stat` reports 6 files, 227 insertions and 42 deletions = **269 changed lines**, of which **201 across 4 of 6 files** belong to `63083c9e` — `docs/PROBES.md` (2), `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md` (88), `src/engines/emitters.rs` (17), `src/server.rs` (94). Confirmed independently against `.git/session-stage-log`, where those four paths carry `63083c9e` rows with `route=named`. *(`c45dd5ef` reported this as "201 of 227"; 227 is the insertion count alone. The pair is 201/269 changed lines, or 201/227 insertions — both defensible, neither interchangeable, which is § *a count must arrive with its unit* in miniature.)*
+
+### Why this is a THIRD route and not Instance 7 again
+
+`scripts/pre-commit-unreviewed-content.sh:21-22`:
+
+> Only pathspec commits are examined — an ordinary `git add` + `git commit` commits the index, **which is by definition what you staged** and could review.
+
+So a bare index commit is the **uninspected** route. `--no-verify` is irrelevant here — the hook would not have looked. This is exclusion 3 (`"any capture in an ordinary index commit, where the content was staged and is presumed reviewed"`) realized, and `:39-47` describes it verbatim including a measured 2026-08-31 precedent. `c45dd5ef` had **read that passage and quoted it to two sessions within the hour**, then did it.
+
+**And the exclusion rests on a premise its own text states, which this repo falsifies daily.** *"which is by definition what you staged"* is true of a private index and false of a shared one: another session can stage into it, so the index is precisely **not** by definition yours. That makes exclusion 3 weaker than an acknowledged gap — it is a gap whose stated justification does not hold under the conditions the file was written for.
+
+Three routes now, and they need different remedies: pathspec-commit into a shared **file** (`f13f8169`, both halves of Instance 7), and bare-index-commit into a shared **index** (this one).
+
+### A step ordered into uselessness — sharper than either skipped step
+
+`f13f8169` ran `--name-only` and read it, learning "which files" and never "whose lines". `c45dd5ef` did something worse and more instructive: their command printed `git diff --cached --name-status` — **showing all six paths, correctly** — and committed **in the same shell invocation**, so the output reached them only *after* the commit had run.
+
+That is not a skipped check. The check existed, executed, and produced correct output that arrived too late to act on. **A verification step whose output is read after the irreversible act is indistinguishable from no verification**, and it reads in the transcript as diligence — which is why it is worse than an omission: an omission is visible to its author. The rule is ordering, not presence: **a check and the act it gates cannot share a shell invocation.**
+
+### The name collision — two live sessions, one name, one incident, opposite roles
+
+Verified at the registry bytes, `~/.claude-sdd/sessions/<pid>.json`:
+
+| pid | name | sessionId | role here |
+|---|---|---|---|
+| 1754443 | `codescout-dd` | `c45dd5ef` | captured Instance 8 |
+| 4052913 | `codescout-dd` | `63083c9e` | captured **from**, Instance 8 |
+
+**Both live, both on `.claude-sdd`, both named `codescout-dd`.** So `to: "codescout-dd"` is ambiguous between the capturer and the captured *in this very incident*, and any tracker row attributing tonight's work to that name is unresolvable after the fact. § *Observer Blindness* warns that a name is re-minted by compaction or a restart and therefore decays; this is the **simultaneous** form, which is worse, because decay at least fails in one direction at a time. The messages in this exchange resolved only because they were addressed by socket path.
+
+### The stage log answered this one in one call
+
+`c45dd5ef` reached for `.git/session-stage-log` for their own incident minutes after reading the Instance 7 derivation, and it returned a single owner for all four paths, `route=named`, plus a discrimination between their own earlier `src/server.rs` blob and `63083c9e`'s on the same path. Two keys, one call.
+
+Their note on why nobody reaches for it is the actionable half, and is now fixed: **the index has a recorded owner and no read surface said so** — not the hook's remedy text, not `CLAUDE.md` § *Reaching a Peer Session*, not `docs/PROBES.md`. It is now a row in `docs/PROBES.md` § *Standalone scripts*, carrying the shape a reader needs: it records **staging**, never committing, so **absence of a row is the signal** — and absence looks identical to not having looked.
+
+**`route=named` earns its own sentence.** It marks a deliberate `git add <path>`, which told `c45dd5ef` that `63083c9e` was mid-commit rather than incidentally dirty — and that is what made a *"do not re-commit, you will find nothing"* warning the right message to send instead of a bare apology. A field whose value nobody would have predicted mattering.
+
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
