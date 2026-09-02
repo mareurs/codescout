@@ -846,6 +846,16 @@ that *created* a ledger with two index tables and six entries, where a ledger-co
 seemed exactly applicable. Each time I deferred it, latterly on the grounds that a peer held
 `scripts/pre-commit-ledger-counts.py`.
 
+**Update 2026-09-02 — the name changed at `1b3ac36b`; the scope mismatch is REDUCED, not eliminated.** The
+quoted string above is left verbatim: it is what this session actually saw, and rewriting it would turn a
+true observation into a claim about a banner that did not exist yet. The hook is now named *"refuse a stored
+count, or a class gaining a member it does not name"*. That narrows the finding — *"a class"* is cluster
+vocabulary rather than general-ledger vocabulary, so the `Skipped` misreading this entry describes is less
+available. It does not close it: the name still does not say **which** ledger, so a reader watching it skip
+on a commit touching some other tracker reaches the same wrong inference by a shorter route. **Entry stays
+open.** Reported by the peer who did the rename, who declined to claim it closed this finding — the accurate
+reading was theirs, and it would have been both convenient and unfalsifiable from their side to claim more.
+
 **Got — correct behaviour, and one line explains it.** `.pre-commit-config.yaml:141`:
 
     files: ^(docs/trackers/issue-clusters\.md|docs/issues/.*\.md)$

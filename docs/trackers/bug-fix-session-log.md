@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 101
-entry_high_water_W: 97
+entry_high_water_F: 102
+entry_high_water_W: 98
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,8 +50,10 @@ entry_high_water_W: 97
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-102 | 2026-09-02 | high | test-discipline | open | **Five assertions in one feature satisfied by text that survives deleting the thing they name — and the fifth was committed by the fix for the fourth.** `len()==2` where a constant, `h.level` and 0-indexing all pass; a `contains` on the token where replacing the rendered line list with an empty string stays green; a `contains` on *push* satisfied by the hint's explanatory sentence rather than by its remedy; a `contains` on `'7'` satisfied by the token `R-147` itself; and `len()==2` again, its message reading *leaving exactly the two `##` definitions*, equally satisfied by `[6,7]` — precisely what the mutation it guards against produces. Instance 5 sits in the diff written to fix instance 4, in the merge blocker's own evidence test, written by an implementer whose dispatch said *treat this as a class — fix any other assertion satisfiable by text that survives deleting the thing it names*; their report says **no fifth instance to report**. `OB-1` under controlled conditions: the author was not merely aware of the class, they were **holding an instruction to sweep for it, in the file they were sweeping**. Every catch came from a reviewer asking *what else satisfies this string?* — a different question, not a more careful reading of the same one, which is why care is the wrong instrument. Instance 5 shipped at `5eea9301`, parked with a ruling |
 | F-101 | 2026-09-02 | med | measurement | open | **When you catch yourself explaining why a measurement is impractical, check whether the obstacle IS the result.** A `/mcp` reconnect drops you into the cleared-slot state a filed bug named as unowned; two calls closed it. Unpinned `symbols` returned home's answer, then a write was refused for the slot *still* being cleared — so **the read path has a silent home default that never sets the slot**, which is why worktree reads are silently wrong rather than blocked. Two confident wrong answers were drafted first: (1) "cleared slot auto-activates home", off the `project-activation-bootstrap` injection, which `get_guide("workspace-state")` says is re-sent on **every** reconnect regardless of project — the most legible signal was about the reconnect and nothing else; (2) "the probes interfere, the state is one-shot" — **wrong for the same reason the real answer is right**, and I had already written the table arguing it. Neither reached a peer or a commit only because the next tool call landed before the writeup did |
 | F-100 | 2026-09-02 | high | measurement | open | **A window is a fact about the query, never about the thing — re-run once with it REMOVED, not widened.** Four instances in one evening across four sessions, each returning a clean, self-consistent, *wrong* answer. `cut -c1-150` hid **+1,508 chars** of hand-authored prose and nearly published a wrong correction *of* a peer; a `git grep` window stopped two files short of its own falsifier; a `grep` over stdout hid an argparse exit-2 written to **stderr** and cost **three** debugging rounds on code that worked — written by someone who had already messaged two peers about instance 1. The remedy is one command (drop the `cut`, drop `--include`, `2>&1`), not "be careful with filters", which is the remedy that failed four times, twice inside a correction of itself |
+| F-99 | 2026-09-02 | high | measurement | fixed-verified | A spec's mechanism was **inferred from where the grep window stopped**. `context_lines=8` over `resolve.rs` showed the resolver's short-circuit and never reached the extractor two files upstream, so the spec claimed a same-file duplicate *"pushes two `DefinerRef`s"* when `extract.rs:399`/`:440` guard on a shared `seen_defs` and dedupe it to **one** at parse time. **The conclusion survived and its mechanism did not** — the dangerous shape, because an implementer re-reading a true claim backed by a false mechanism builds the check on `DocExtract.definitions` and gets a positive case that is *unrepresentable*: not wrong output, **no output ever**, with the red test pointing at the fixture rather than the design. Caught by a pre-dispatch scout one step before `writing-plans`; corrected in place at `fd6317a4` with the correction annotated rather than silently applied. The index row this entry needed was itself missing for ~6h — a section with no row is unreachable from the index, which is how an entry stops compounding |
 | F-98 | 2026-09-02 | high | epistemic | fixed-verified | `8343d6ca` retracted a falsified remedy from a bug file, correctly scoped "bug file only, no counts moved" — and the same claim stood in `docs/trackers/issue-clusters.md:1139`, IC-17's `**Members:**`, labelled **verified**, written by the same session at `cd6bb36c`. **The correct scoping is what preserved the falsehood**: nothing relates a bug file to a ledger field quoting it — no edge, no diff hunk, no check. Worse than the unsafe instruction beside it: `:872` is advice that misfires, `:1139` was false and labelled verified. Found by `codescout-05` reading past the line I had *accurately* told it not to amend — an accurate but incomplete correction carries enough authority to stop the next person looking. Fixed `fea2e1ce`. |
 | F-97 | 2026-09-02 | med | measurement | fixed-verified | Ran `cargo check --workspace --all-targets` (which does not lint at all), got exit 0, and published "all green" under the project gate's name — while `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` was red, exit 101, 10 errors. Had seen the seven `dead_code` warnings and described them as "expected"; `-D warnings` promotes each to an error. Quoted the gate's four commands in my own first message of the session and ran none of them for four hours. **A green from an instrument chosen for its speed is a fact about that instrument.** Caught by `codescout-26`, which held the failing code. |
 | F-96 | 2026-09-02 | med | epistemic | fixed-verified | I published `core.hooksPath points at scripts/` as the reason a hook edit is instantly live here. Wrong twice. **The variable is unset** at every scope — this repo's *healthy* state, asserted by `tests/hook_config.rs`, and a *set* value once disabled every hook here for a day, so a reader acting on my sentence reproduces an archived bug. A peer caught that. **But the conclusion survived their correction and was independently false:** pre-commit clears unstaged changes before hooks (`staged_files_only.py:108`), so a `language: system` entry runs the **index** copy of its own script — measured, 3 cases. The exposure moment is `git add`, not the editor save. Both halves of the refutation were already filed in this repo, held one each by two sessions who agreed with each other instead of composing them. **A correction is a fresh claim — check the part of the original it leaves standing.** Second law: an `## Environment` block is the least-audited claim in a bug file, and the one downstream files copy |
@@ -156,6 +158,7 @@ entry_high_water_W: 97
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-98 | 2026-09-02 | high | **A question about METHOD is a request to re-measure, not to re-explain — and when you re-derive, change the INSTRUMENT, not the care.** A challenge to a conclusion invites defence, and defending is often right; a challenge to the method cannot be answered by re-asserting the conclusion at all, because a sound conclusion drawn by an unsound method is indistinguishable from an unsound one at the point of publication. A more careful application of the same instrument reproduces the same blind spot — this is `W-94`'s *check it against a sample that differs* applied reflexively, when no peer is available | Two applications in one session, **one of which changed the answer**. (1) *Both owed citations closed, verified* rested on an unpinned `grep` returning zero; re-run **pinned** it returned zero again — sound, but the pinned run is the only reason that could be said, so the honest write-up was *the claim stands; the method that produced it did not deserve to be trusted*. (2) Measuring fix-SHA decay, `git cat-file -e` over 123 archived citations returned **0 dead** — which reads as *SHAs never die here*, and would have made a merge-vs-rebase decision look stakeless. `cat-file -e` tests object EXISTENCE; an orphan survives in the object store until `git gc` prunes it. Re-measured by **reachability** against `experiments` and `master`: **1 orphan**. Nothing in the first output marked it as answering a different question, it was self-consistent, and it pointed the same direction as the truth — which is exactly what would have made it durable | validated |
 | W-97 | 2026-09-02 | med | **When a change removes a surface, sweep its references and sort each into POINTER (go consult this) or RECORD (this once happened). Repair the pointers; leave the records** — deleting a record to satisfy a sweep falsifies the evidence the surface ever existed. Paired with a mechanical twin that needs no judgement: `grep -ohE 'scripts/[a-z_-]+\.(py\|sh)' <touched files> \| sort -u`, then stat each | Measured on the `n`-column removal: **14** surviving references, **13 records, 1 pointer** — a linter flagging all 14 would be right once and destructive thirteen times. The live pointer was a section banner in `tests/issue_clusters.rs` (`6070ae75`); a second, found independently by `codescout-0d` (`005dd9e6`), was **itself the remedy for a stale claim** — a fix outliving its own surface with nothing pointing backwards from the removal commit. The path check caught a dangling pointer **inside the commit fixing dangling pointers** (`probe-cluster-express.py`, no such file) under a minute after writing it, by a maximally-primed author: priming did not help, the mechanism did. Denominator published — `0d` ran the same check over its own 6 files + `docs/conventions/*.md`, **10 paths, 9 resolve, 1 known fixture, no defect** — because a check mentioned only when it fires has none | validated |
 | W-96 | 2026-09-02 | med | **`-z` and NUL-splitting travel together or neither travels.** Adding `-z` to a consumer that splits on *lines* turns a correct instrument into a wrong one, so *"harden it with `-z`"* is the specific regression to refuse when reviewing any path enumerator | A zero-byte file named `head.\naab0c4ef'"s` — newline plus both quote characters — appeared in the repo root minutes after two line-oriented hook parsers changed underneath this session (`689ceffb`). Both obvious moves were wrong. **The parser is fine:** `core.quotePath` defaults true, so `git diff --cached --raw` C-quotes the path onto ONE tab-delimited line and both hooks parse 2 rows for 2 staged files, field intact. **`-z` is the defect:** `git ls-files --others \| wc -l` → 2 (correct), `-z \| wc -l` → **1**, and `-z` + Python `.splitlines()` → the *right count* with *garbage rows*. No newline is needed to reach it — `core.quotePath` quotes any non-ASCII byte, so an em-dash in a bug-file slug counts correctly then cannot be opened (`git show :"…\342\200\224….md"` → rc=128). **Exposure today is 0** — nothing in `scripts/`, `tests/*.sh`, `.pre-commit-config.yaml` or `src/` pairs `-z` with a line splitter, and 0 tracked paths are C-quoted — so this is recorded as latent rather than live, with `_prime_index`'s `cat-file --batch` path left explicitly untested for want of a population. Subject expired mid-investigation: the file was gone ~6 min later and a `(none)` grep result was nearly read as a grep bug rather than a changed world; the finding survived only because it had already been reproduced in a throwaway repo the peers could not reach | validated |
 | W-95 | 2026-09-02 | high | **Before filing a bug against a tool this repo builds, compare the running binary's mtime to the commit time of the fix that would explain the finding** — `stat -c '%y' target/debug/codescout` against `git log -1 --format='%cd' <sha>`. Two commands, no build. `doctor` reported 5 files as `non_terminal_status_with_fix_anchor`; four were artifacts of a binary **141 seconds older than `36cb17ed`**, the commit that fixed exactly that misreading. The report was complete, self-consistent and reproducible on that binary — and wrong. Confirmed by rebuild: the same check now reports **0**, and the zero discriminates, because the fifth file's anchor genuinely is under `## Fix` and would still fire had its `unverified:` discharge (`dde26886`) not also worked. A mechanism, not a policy: the trigger is a category you already know you are in. |
@@ -10152,6 +10155,120 @@ unrelated reason. The friction is that the refutation arrived by accident of ord
 an instrument excluding evidence, this one is an instrument's *most legible output* being about
 something else entirely. And `W-95`: the running binary here predates HEAD by **29 seconds**,
 checked first, and was irrelevant only because the intervening commit touched zero code files.
+
+## F-102 — five assertions satisfied by text that survives deleting what they name — the fifth in the fix for the fourth
+
+**Valid:** dated 2026-09-02
+
+**Severity:** high — five instances inside one five-task feature, the fifth committed *by the fix for the fourth*, by an implementer explicitly asked to sweep for it.
+
+**Status:** open — the class is named in CLAUDE.md § *Testing Discipline* and every instance was caught by review, never by the author. No mechanism exists.
+
+**Observed.** One defect shape recurred five times in a single feature branch
+(`entry-id-collision`, merged `5eea9301`): **an assertion satisfied by text that survives deleting
+the thing it names.**
+
+| # | site | the assertion | what survives it |
+|---|---|---|---|
+| 1 | `doctor.rs`, Task 1 | `got[0].1.len() == 2` | a constant, `h.level` (`[2,2]`), 0-indexing (`[2,6]`) |
+| 2 | `doctor.rs`, Task 2 | `detail.contains("R-147")` | replacing `lines_str` with `""` |
+| 3 | `append_entry.rs`, Task 4 | `msg.contains("push")` | deleting the remedy sentence — *"until yours is **push**ed"* in the explanatory sentence satisfies it |
+| 4 | `doctor.rs`, Task 2 fix | `detail.contains('7')` | the token `R-147` contains a `7`; only the `"11"` half discriminated |
+| 5 | `doctor.rs`, final fix wave | `got[0].1.len() == 2`, message *"leaving exactly the two `##` definitions"* | `[6, 7]` — what a `push(section.end_line)` mutation produces |
+
+**Why this is the entry and not five commit lines.** Each was fixed on notice, and the fix did not
+reach the class. Instance 5 is in the diff written to fix instance 4, in the test that is the merge
+blocker's primary evidence, by an implementer whose dispatch said *"treat this as a class — while you
+are in these tests, if you spot another assertion satisfiable by text that survives deleting the thing
+it names, fix it and say so."* Their report says **"no fifth instance to report."**
+
+**This is `OB-1` measured under controlled conditions.** CLAUDE.md § *Observer Blindness* records four
+instances of one class in one evening, *"every one committed by an author actively writing about that
+class."* Here the author was not merely aware of the class — they were **holding an instruction to
+sweep for it**, in the file they were sweeping. Knowing the class prevented nothing. What caught four
+of five was a reviewer holding a different question, and the fifth was caught by a reviewer told to
+*judge by mutation, not by presence*.
+
+**The tell, and why "assert more precisely" is the wrong remedy.** Every one of the five is an
+assertion whose *stated intent* is correct and whose *satisfiable set* is wider than that intent. The
+author cannot see the gap, because they are checking the assertion against what they meant — and it
+matches. Only someone asking *"what else satisfies this string?"* sees it. That is a different
+question, not a more careful reading of the same one, which is why care is the wrong instrument.
+
+**Candidate mechanism, unbuilt.** A reviewer prompt line — *"for each assertion, name one edit to the
+production code that leaves it green"* — converts the check from reading to construction. Cheap, but
+it is a policy on a prompt, and this class's own history says policies aimed at authors fail. The
+stronger shape would be a lint over test bodies for `contains(<literal>)` where the literal is a
+substring of another literal in the same assertion block. Not costed; recorded so the next session
+does not re-derive the diagnosis before reaching the design question.
+
+**Rests on:** CLAUDE.md § *Testing Discipline* (*a test cannot detect a change its assertion is
+MONOTONE under*) — this is that law's sub-case where the monotone direction is **textual** rather than
+structural, and `OB-1` § *the third position* for why the mechanism must not be another instruction to
+the party who cannot see it.
+
+**Counterfactual.** Instances 1-4 shipped green and were caught only because each task drew an
+independent reviewer. Instance 5 shipped: it is in `experiments` at `5eea9301`, parked with a ruling
+rather than fixed, because the process allows one fix wave after a final review and it arrived in that
+wave's re-review. So the class's realised cost on this branch is one imprecise assertion in main.
+
+## W-98 — a question about METHOD is a request to re-measure, not to re-explain — and change the instrument, not the care
+
+**Valid:** dated 2026-09-02
+
+**Severity:** high (as a win: the pattern changed a published number once and confirmed a second)
+
+**Status:** validated — two applications in one session, one of which changed the answer.
+
+**Observed.** Twice in one session a published claim was challenged **on its method rather than on
+its conclusion**, and both times the response was to re-derive the claim with a different instrument
+instead of arguing the conclusion. The outcomes differed, which is the point:
+
+**Case 1 — the conclusion survived, the method had not earned trust.** Published: *"both owed
+citations are closed, verified"*, off an unpinned `grep` returning `0 matches`. A peer then reported
+that unpinned reads can resolve against a different checkout and return a plausible wrong answer
+rather than an error. Re-running the same query **pinned** to the main checkout returned `0` again —
+sound. But the pinned run is the only reason that could be said, and at publication time it could
+not have been. The correct write-up was *"the claim stands; the method that produced it did not
+deserve to be trusted"*, not *"I was right"*.
+
+**Case 2 — the conclusion did not survive, and the error was invisible in the output.** Measuring
+whether cited fix-SHAs decay, the first pass used `git cat-file -e` over 123 archived citations and
+returned **0 dead**. That reads as *"SHAs never die here"* and would have made a merge-vs-rebase
+argument look stakeless. `cat-file -e` tests object **existence**; an orphaned commit survives in the
+object store until `git gc` prunes it. Re-measured by **reachability** (`merge-base --is-ancestor`
+against `experiments` and `master`): **1 orphan**. Nothing in the first output marked it as answering
+a different question.
+
+**Why the trigger is "method questioned", not "claim doubted".** A challenge to the conclusion invites
+defence, and defending is often correct — the conclusion may be right. A challenge to the *method*
+cannot be answered by re-asserting the conclusion at all, because the two are independent: a sound
+conclusion from an unsound method is what Case 1 was, and it is indistinguishable from Case 2 at the
+point of publication. **Treat "how did you measure that?" as a request to re-measure, never as a
+request to re-explain.**
+
+**The generalisable form.** When re-deriving, change the *instrument*, not the care. Case 2's second
+pass was not a more careful `cat-file`; it asked a different question (reachable vs exists). Case 1's
+second pass was not a more careful grep; it pinned the workspace. A more careful application of the
+same instrument reproduces the same blind spot — which is `W-94`'s rule (*get a claim checked by a peer
+whose SAMPLE differs*) applied reflexively, to yourself, when no peer is available.
+
+**Counterfactual.** Without the re-derivation in Case 2, `0 of 123` ships as a measured fact into a
+merge-strategy decision and into this ledger, where the next session inherits it. It is wrong, it is
+self-consistent, and it points the same direction as the truth — which is what makes it durable: a
+reader has no reason to re-check a number that agrees with their expectation. Case 1's counterfactual
+is smaller and real: an unpinned zero would have stood as "verified" with no record that its scope was
+never established.
+
+**Promote-when:** a third case arises where re-derivation *changes* the answer (Case 2 is the first).
+At two-with-one-change this is a validated habit; at three-with-two-changes it is a rule worth a
+CLAUDE.md line, and the line to write is the trigger — *a question about method is a request to
+re-measure* — not the virtue.
+
+**Rests on:** `W-94` (*state the scope and unit a claim was measured over*) and `F-100` (*a window is
+a fact about the query, never about the thing*). This is their reflexive case: the party best placed
+to notice is the author, and the author is exactly the party who cannot — so the trigger has to be an
+external question, which is the only part of this that is reliably available.
 
 ## Template for new entries
 
