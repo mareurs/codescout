@@ -552,7 +552,7 @@ Set `entry_collection` to the params key holding your array of entry objects (e.
 
 - Each archetype has a `body_skeleton`. Use it.
 - **A `PREFIX-N` namespace means every entry needs its own `## <ID> — <title>` section** — the only shape `link_scan` reads as a definition. A params row, a `## T-4` missing the dash-and-title, and the `render_template` table (which renders into `librarian(context)`, never the file) all define nothing, so entries written that way can never be cited. `doctor` reports the gap; `get_guide("tracker-conventions")` has the measurements.
-- Body sections are written by humans (or AI in `artifact_refresh` synthesis), edited rarely.
+- Body sections are written by humans (or AI in `doc(action="gather")` synthesis), edited rarely.
 - Always include a **History** section for dated session blocks (`### YYYY-MM-DD — <event>`). This is the universal cross-project pattern.
 
 ## Step 7 — Check for collisions

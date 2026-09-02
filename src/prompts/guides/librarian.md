@@ -138,7 +138,7 @@ hand-written, and a table row defines no citable token: `link_scan` binds `PREFI
 never be cited. Give each entry a heading; keep the table too if it reads well.
 `get_guide("tracker-conventions")` § *One entry format, never two* has the measurements.
 ## Augmentation Lifecycle
-<!-- serves: doc.augment, artifact_refresh.gather, artifact_refresh.list_stale -->
+<!-- serves: doc.augment, doc.gather, doc.list_stale -->
 
 Augmentation attaches a persistent prompt to any artifact.
 
@@ -193,13 +193,13 @@ The wholesale replace is still available for a genuine bulk rewrite. It now repo
 that performed it.
 
 **Refresh cycle** (run by the agent, not automatic):
-1. `artifact_refresh(action="gather", id="...")` — collects context; does NOT write
+1. `doc(action="gather", id="...")` — collects context; does NOT write
 2. Synthesize the new body from the gathered context
 3. `artifact(action="update", id="...", patch={body: "..."}, commit_refresh=true)` — write + record timestamp
 
 **Stale check:**
 ```
-artifact_refresh(action="list_stale", threshold_hours=24)
+doc(action="list_stale", threshold_hours=24)
 ```
 
 ---

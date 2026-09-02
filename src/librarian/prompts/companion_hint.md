@@ -36,9 +36,9 @@ ephemeral session state (don't persist).
 | Manual re-scan                                | `librarian` with `action=reindex` |
 | Attach/replace prompt+params on artifact      | `doc` with `action=augment`      |
 | Merge-patch params on existing augmentation   | `doc` with `action=augment`, `merge=true`, or `artifact(update, patch={params:{...}})` |
-| Gather context for refresh (read-only)        | `artifact_refresh` with `action=gather` |
+| Gather context for refresh (read-only)        | `doc` with `action=gather` |
 | List/find augmented artifacts                 | `artifact` with `action=find`, `augmented: true` |
-| Discover stale augmented artifacts            | `artifact_refresh` with `action=list_stale` |
+| Discover stale augmented artifacts            | `doc` with `action=list_stale` |
 
 Example: `artifact {action: "find", kind: "tracker"}` — live trackers in the
 **active project** (default scope). Pass `scope: "all"` to widen.

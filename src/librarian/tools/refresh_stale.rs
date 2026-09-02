@@ -88,8 +88,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let next_step = if items.is_empty() {
         "No stale augmented artifacts in scope.".to_string()
     } else {
-        "Call artifact_refresh(id) on each item, synthesize updates, \
-         then artifact_update(id, commit_refresh=true)."
+        "Call doc(action=\"gather\", id=...) on each item, synthesize updates, \
+             then doc(action=\"update\", id=..., commit_refresh=true)."
             .to_string()
     };
 

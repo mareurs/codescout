@@ -49,8 +49,8 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 
 | Subcommand | Mirrors MCP action |
 |---|---|
-| `gather <id>` | `artifact_refresh(action="gather")` |
-| `list-stale` | `artifact_refresh(action="list_stale")` |
+| `gather <id>` | `doc(action="gather")` |
+| `list-stale` | `doc(action="list_stale")` |
 
 ### `codescout artifact-augment <id>` — attach or patch augmentation
 

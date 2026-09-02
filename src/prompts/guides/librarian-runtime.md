@@ -53,7 +53,7 @@ catalog from disk — never the other way around.
 
 ## Augmentation runtime details
 
-**Gather sources** (used by `artifact_refresh(action="gather")`
+**Gather sources** (used by `doc(action="gather")`
 params): `git_log`, `artifacts`, `observations`, `file`, `grep`.
 Unknown sources are skipped with a warning.
 

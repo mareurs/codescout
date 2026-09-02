@@ -1,13 +1,15 @@
-# `artifact_refresh(action="list_stale")`
+# `doc(action="list_stale")`
 
 Discovery action: surfaces augmented artifacts whose last refresh is older than a
 threshold. Returns them oldest-first (never-refreshed first) so the agent knows
-what to call `artifact_refresh(action="gather")` on next.
+what to call `doc(action="gather")` on next.
 
-> **This was the standalone `artifact_refresh_stale` tool.** It folded into
-> `artifact_refresh` as the `list_stale` action during the librarian tool collapse —
-> see [librarian-tools-collapse](librarian-tools-collapse.md). The page kept the old
-> name in its title and its prose until 2026-09-01; the schema below is the action's.
+> **This was the standalone `artifact_refresh_stale` tool, then the standalone
+> `artifact_refresh` tool's `list_stale` action.** Task 6 of the tool-surface
+> collapse folded `artifact_refresh` itself into `doc` — see
+> [librarian-tools-collapse](librarian-tools-collapse.md). The page kept the old
+> name in its title and its prose across both renames; the schema below is the
+> action's.
 
 ## Schema
 
@@ -44,7 +46,7 @@ All fields are optional.
       "age_hours": null
     }
   ],
-  "next_step": "Call artifact_refresh(id) on each item..."
+  "next_step": "Call doc(action=\"gather\", id=...) on each item..."
 }
 ```
 
@@ -54,12 +56,12 @@ then oldest `last_refreshed_at` ascending.
 ## Typical workflow
 
 ```
-artifact_refresh(action="list_stale", scope="repo")
+doc(action="list_stale", scope="repo")
 → pick item from list
-artifact_refresh(action="gather", id=...)
+doc(action="gather", id=...)
 → synthesize new content
-artifact(action="update", id=..., patch={ body: "..." })
-artifact(action="update", id=..., commit_refresh=true)
+doc(action="update", id=..., patch={ body: "..." })
+doc(action="update", id=..., commit_refresh=true)
 ```
 
 ## Known limitations

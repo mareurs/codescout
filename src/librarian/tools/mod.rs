@@ -382,7 +382,6 @@ pub mod schema_validate;
 pub mod tracker_design;
 
 pub mod artifact;
-pub mod artifact_refresh;
 pub mod librarian;
 
 // Not a registered `Tool` — an internal write-gate helper (overlay
@@ -400,11 +399,7 @@ pub(crate) mod temp_write_guard;
 pub use temp_write_guard::TempGuardEnv;
 
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
-    vec![
-        Arc::new(artifact::Artifact),
-        Arc::new(artifact_refresh::ArtifactRefreshTool),
-        Arc::new(librarian::Librarian),
-    ]
+    vec![Arc::new(artifact::Artifact), Arc::new(librarian::Librarian)]
 }
 
 #[cfg(test)]
@@ -586,7 +581,7 @@ mod required_param_routing_tests {
                 "{name}: the refusal must name what wanted the field; got: {msg}"
             );
             assert!(
-                msg.contains("doc(") || msg.contains("artifact_refresh("),
+                msg.contains("doc("),
                 "{name}: the refusal must name the TOOL and action, since `missing field \
                  \\`x\\`` names neither; got: {msg}"
             );

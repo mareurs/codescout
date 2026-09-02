@@ -2486,7 +2486,7 @@ mod tests {
     }
 
     /// Name-prefix classifier for the librarian tool family (`doc`,
-    /// `artifact_refresh`, `librarian`, `tracker_design`,
+    /// `librarian`, `tracker_design`,
     /// `workspace_state_at`, ...), used only to size the "core"
     /// (non-librarian) tool surface in `server_registers_all_tools` and
     /// `server_tool_count_is_l3_target`. NOT used for the description-cap
@@ -2535,14 +2535,19 @@ mod tests {
     /// Returning `None` is what makes an unclassified tool a failure rather than a pass.
     fn action_contract(tool: &str) -> Option<ActionContract> {
         Some(match tool {
-            "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_refresh"
-            | "librarian" => ActionContract::Inventory,
-            // `doc` (14 actions) and `edit_markdown` (5) describe by theme on
-            // purpose: an inventory would not fit the surface budget, and the client
-            // already receives the `action` enum itself in the schema. The thematic arm
-            // is an escape hatch, so the test asserts against it in the opposite
-            // direction rather than treating it as an exemption.
-            "doc" | "edit_markdown" => ActionContract::Thematic,
+            "workspace" | "library" | "edit_code" | "index" | "memory" | "doc" | "librarian" => {
+                ActionContract::Inventory
+            }
+            // `edit_markdown` (5 actions) describes by theme on purpose: an
+            // inventory would not fit the surface budget, and the client already
+            // receives the `action` enum itself in the schema. The thematic arm is
+            // an escape hatch, so the test asserts against it in the opposite
+            // direction rather than treating it as an exemption. `doc` used to sit
+            // here too (Task 6 folded `artifact_refresh` in as `gather` /
+            // `list_stale` and rewrote the description to name all 17 actions,
+            // which moved it to Inventory — an enumerating description under a
+            // Thematic contract fails the gate by design).
+            "edit_markdown" => ActionContract::Thematic,
             _ => return None,
         })
     }
@@ -2550,7 +2555,7 @@ mod tests {
     /// Does `haystack` name `token` as a standalone word?
     ///
     /// Plain substring matching is wrong here and the counter-example is LIVE, not
-    /// hypothetical: `artifact_refresh`'s enum is `["gather", "list_stale"]`, so a
+    /// hypothetical: `doc`'s action enum includes `list_stale`, so a
     /// substring test for a `list` action would be satisfied by `list_stale`, and the
     /// gate would certify an inventory that never named it. The reference probe in the
     /// bug report used Python's `in` and inherits exactly this hole.
@@ -6473,7 +6478,18 @@ mod tests {
         // polarities are asserted below. An entry here is therefore not a claim
         // that the action never writes — only that its no-argument call does not.
         let read_sets: &[(&str, &[&str])] = &[
-            ("doc", &["find", "get", "graph", "state_at", "event_list"]),
+            (
+                "doc",
+                &[
+                    "find",
+                    "get",
+                    "graph",
+                    "state_at",
+                    "event_list",
+                    "gather",
+                    "list_stale",
+                ],
+            ),
             (
                 "librarian",
                 &[
@@ -7354,9 +7370,10 @@ mod guide_hint_tests {
         // doc(action="augment") always writes (no read action) — folded from the
         // deleted `artifact_augment` tool in Task 5.
         assert!(server.is_write_call("doc", &json!({"action": "augment", "id": "x"})));
-        // artifact_refresh gather/list_stale are read-only.
-        assert!(!server.is_write_call("artifact_refresh", &json!({"action": "gather"})));
-        assert!(!server.is_write_call("artifact_refresh", &json!({"action": "list_stale"})));
+        // doc's gather/list_stale (folded in from the deleted artifact_refresh
+        // tool) are read-only.
+        assert!(!server.is_write_call("doc", &json!({"action": "gather", "id": "x"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "list_stale"})));
         // librarian: reindex + (default) audit_doc_refs write; the rest read.
         assert!(server.is_write_call("librarian", &json!({"action": "reindex"})));
         assert!(server.is_write_call("librarian", &json!({"action": "audit_doc_refs"})));

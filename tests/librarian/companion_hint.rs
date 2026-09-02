@@ -6,7 +6,7 @@
 
 const COMPANION_HINT: &str = include_str!("../../src/librarian/prompts/companion_hint.md");
 
-const REAL_TOOLS: &[&str] = &["doc", "artifact_refresh", "librarian"];
+const REAL_TOOLS: &[&str] = &["doc", "librarian"];
 
 fn extract_tool_tokens(s: &str) -> Vec<&str> {
     s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')

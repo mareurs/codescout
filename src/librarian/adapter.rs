@@ -304,22 +304,24 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// Task 4 folded the `artifact_event` tool into `doc` (`event_create` /
     /// `event_list`); `event_list` joins the doc read-set below, `event_create`
     /// falls through the `doc` arm's default (write), same as every other
-    /// mutating `doc` action.
+    /// mutating `doc` action. Task 6 folded the standalone `artifact_refresh`
+    /// tool into `doc` as `gather` / `list_stale` — both read-only (`gather`
+    /// collects context without writing; `list_stale` only lists), so both join
+    /// the doc read-set below and the old `"artifact_refresh" => false` arm is
+    /// gone with the tool it guarded.
     fn is_write(&self, input: &Value) -> bool {
         let action = input.get("action").and_then(Value::as_str);
         match self.inner.name() {
-            // CRUD tool. find/get/graph/state_at/event_list are the only reads;
-            // create, update, move, delete, link, graft, append_entry,
-            // update_entry and event_create all mutate, as does any action
-            // added after this line.
+            // CRUD tool. find/get/graph/state_at/event_list/gather/list_stale are
+            // the only reads; create, update, move, delete, link, graft,
+            // append_entry, update_entry, event_create and augment all mutate, as
+            // does any action added after this line.
             "doc" => !matches!(
                 action,
-                Some("find" | "get" | "graph" | "state_at" | "event_list")
+                Some(
+                    "find" | "get" | "graph" | "state_at" | "event_list" | "gather" | "list_stale"
+                )
             ),
-            // Always attaches/replaces/merges an augmentation row — folded into
-            // `doc(action="augment")`, which the "doc" arm above already classifies
-            // as a write (augment is not in its read-action allowlist).
-            "artifact_refresh" => false,
             "librarian" => match action {
                 // Unconditional reads.
                 Some("context" | "tracker_design" | "workspace_state_at") => false,

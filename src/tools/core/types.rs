@@ -784,7 +784,7 @@ pub trait Tool: Send + Sync {
     ///
     /// Default: every tool is pinnable EXCEPT session/global/registry tools —
     /// those resolve no per-request project and must not advertise a pin they
-    /// ignore. The librarian family (`doc`, `artifact_refresh`, `librarian`) IS
+    /// ignore. The librarian family (`doc`, `librarian`) IS
     /// pinnable: its adapter resolves `ctx.workspace_override` before deriving
     /// each call's `current_project` (see `LibrarianAdapter::call`), so a
     /// `workspace=` pin scopes catalog reads and writes to the named workspace.

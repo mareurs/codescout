@@ -74,19 +74,7 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Document CRUD and query. \
-         Defaults: scope=project (active project only), archived/superseded hidden when \
-         filter does not constrain status. Shortcut params kind/status expand to eq-filters \
-         and combine with filter via AND. \
-         Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
-         body via a persistent prompt; call librarian(tracker_design) before creating one. \
-         append_entry atomically assigns the next id for any monotonic-ID ledger and, WITH entry_collection, appends the row; WITHOUT it the ledger is prose (`## PREFIX-N` body sections) and the call reserves the id, writing nothing — \
-         use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...). \
-         update_entry patches ONE existing entry in place; use it to change a row (e.g. flip a status) \
-         instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection. \
-         augment attaches or replaces a persistent refresh prompt + params on any artifact: merge=false \
-         (default) overwrites the augmentation's fields — fields you omit silently reset — merge=true \
-         patches only what you pass."
+        "Document catalog: find/get/create/update/move/delete markdown documents (specs, plans, ADRs, trackers, bug files) with YAML frontmatter, plus their events, augmentations and entries. Defaults: scope=project; archived/superseded hidden unless the filter constrains status; kind/status shortcuts AND with filter. Trackers are kind=tracker documents that may carry an augmentation (persistent prompt + params) — call librarian(tracker_design) before creating one. Entries: append_entry assigns the next PREFIX-N id atomically — with entry_collection it appends a params row; without it the ledger is prose and, given anchor_heading+title+body, the server writes the `## PREFIX-N — title` section itself. update_entry patches ONE row in place — use it rather than patch={params:…}, whose RFC 7396 array semantics replace the whole collection. Events: event_create appends an immutable record (kind inside the `event` object); event_list reads them newest-first. augment attaches or replaces the augmentation — merge=false (default) overwrites it wholesale, so fields you omit silently reset, merge=true patches only what you pass; gather collects refresh context without writing (write back with update, commit_refresh=true); list_stale lists augmentations older than threshold_hours. graph walks links; link adds a manual rel; graft folds one row's history into another; state_at shows a document as of a commit or timestamp."
     }
     fn description_cap(&self) -> usize {
         1_800
@@ -99,7 +87,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list", "augment"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list", "augment", "gather", "list_stale"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -134,7 +122,7 @@ impl Tool for Artifact {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],
                     "default": "project",
-                    "description": "find: scope for listing. Defaults to active project."
+                    "description": "find/list_stale: project (default), repo, umbrella, or all."
                 },
                 "augmented": {
                     "type": "boolean",
@@ -149,7 +137,7 @@ impl Tool for Artifact {
                     "type": "integer",
                     "default": 50,
                     "maximum": 500,
-                    "description": "find: max rows (default 50, max 500). event_list: max events (default 50)."
+                    "description": "find: max rows (default 50, max 500). event_list: max events (default 50). list_stale: max documents (default 10, max 50)."
                 },
                 "offset": {
                     "type": "integer",
@@ -159,7 +147,12 @@ impl Tool for Artifact {
                 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list: document id (16-hex). find and create take none."
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list/gather: document id (16-hex). find and create take none."
+                },
+                "threshold_hours": {
+                    "type": "integer",
+                    "default": 24,
+                    "description": "list_stale: hours since last refresh to count as stale (default 24)."
                 },
                 "include_links": { "type": "boolean", "default": false, "description": "get: include link edges" },
                 "links_direction": {
@@ -354,35 +347,37 @@ impl Tool for Artifact {
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
-            RecoverableError::new(
-                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment",
-            )
-        })?;
+                RecoverableError::new(
+                    "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale",
+                )
+            })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
         // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
         if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
             tracing::warn!("audit verb stamp failed: {e}");
         }
         match action {
-            "find"     => super::find::call(ctx, args).await,
-            "get"      => super::get::call(ctx, args).await,
-            "create"   => super::create::call(ctx, args).await,
-            "update"   => super::update::call(ctx, args).await,
-            "move"     => super::mv::call(ctx, args).await,
-            "delete"   => super::delete::call(ctx, args).await,
-            "graft"    => super::graft::call(ctx, args).await,
-            "link"     => super::link::call(ctx, args).await,
-            "graph"    => super::graph::call(ctx, args).await,
-            "state_at" => super::state_at::call(ctx, args).await,
-            "append_entry" => super::append_entry::call(ctx, args).await,
-            "update_entry" => super::update_entry::call(ctx, args).await,
-            "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
-            "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
-            "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
-            other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment"
-            ))),
-        }
+                "find"     => super::find::call(ctx, args).await,
+                "get"      => super::get::call(ctx, args).await,
+                "create"   => super::create::call(ctx, args).await,
+                "update"   => super::update::call(ctx, args).await,
+                "move"     => super::mv::call(ctx, args).await,
+                "delete"   => super::delete::call(ctx, args).await,
+                "graft"    => super::graft::call(ctx, args).await,
+                "link"     => super::link::call(ctx, args).await,
+                "graph"    => super::graph::call(ctx, args).await,
+                "state_at" => super::state_at::call(ctx, args).await,
+                "append_entry" => super::append_entry::call(ctx, args).await,
+                "update_entry" => super::update_entry::call(ctx, args).await,
+                "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
+                "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
+                "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
+                "gather"       => super::refresh::call(ctx, args).await,
+                "list_stale"   => super::refresh_stale::call(ctx, args).await,
+                other => Err(RecoverableError::new(format!(
+                    "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale"
+                ))),
+            }
     }
 }
 
@@ -406,6 +401,18 @@ mod tests {
             err.downcast_ref::<RecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn list_stale_action_routes_correctly() {
+        let v = Artifact
+            .call(
+                &mk_ctx(),
+                serde_json::json!({"action": "list_stale", "scope": "all"}),
+            )
+            .await
+            .unwrap();
+        assert!(v.is_array() || v["items"].is_array());
     }
 
     #[tokio::test]
@@ -494,8 +501,9 @@ mod tests {
     /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
     /// than one asserted to fail, why `deny_unknown_fields` is unavailable (measured: adding
     /// it once broke every `doc(update)` call), and what the `accepts_any_json` escape
-    /// admits — now lives on `crate::tools::param_probe`, shared with `librarian`,
-    /// `artifact_event` and `artifact_refresh`.
+    /// admits — now lives on `crate::tools::param_probe`, shared with `librarian` and
+    /// `artifact_event`. Task 6 folded the standalone `artifact_refresh` tool's probe
+    /// coverage (`gather`, `list_stale`) into this one.
     ///
     /// Required params are type-valid dummies chosen to **fail resolution**: a nonexistent
     /// id, an escaping `rel_path`. That failure is the point — it is reached *after*
@@ -506,9 +514,10 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // 56 labelled keys across the 14 actions as of 2026-09-02. The floor leaves
-        // room for the schema to shrink without a false alarm while still catching a
-        // break in the `<action>:` label convention.
+        // 56 labelled keys across the 17 actions as of 2026-09-02 (Task 6 folded in
+        // `gather`/`list_stale`). The floor leaves room for the schema to shrink
+        // without a false alarm while still catching a break in the `<action>:` label
+        // convention.
         assert_all_honored(
             "doc",
             &Artifact.input_schema(),
@@ -521,7 +530,7 @@ mod tests {
 
     const PROBE_NO_SUCH_ID: &str = "0000000000000000";
 
-    const PROBE_ACTIONS: [&str; 15] = [
+    const PROBE_ACTIONS: [&str; 17] = [
         "find",
         "get",
         "create",
@@ -537,6 +546,8 @@ mod tests {
         "event_create",
         "event_list",
         "augment",
+        "gather",
+        "list_stale",
     ];
 
     /// The minimum type-valid args each action needs to get *past* deserialisation.
@@ -603,6 +614,9 @@ mod tests {
             "augment" => {
                 m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
                 m.insert("augment".into(), json!({"prompt": "probe"}));
+            }
+            "gather" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
             }
             "create" => {
                 m.insert("kind".into(), json!("bug"));
