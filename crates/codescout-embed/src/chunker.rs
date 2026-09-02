@@ -117,8 +117,8 @@ pub fn split_markdown_with_depth(
         if section_text.len() <= chunk_size {
             chunks.push(RawChunk {
                 content: section_text,
-                start_line: start + 1,
-                end_line: end,
+                start_line: start + 1, // 1-indexed
+                end_line: end,         // end is exclusive in lines[], so this is the last line
                 metadata: None,
             });
         } else {
@@ -442,13 +442,50 @@ mod tests {
 
     #[test]
     fn split_markdown_with_depth_3_equals_the_default() {
+        // NOTE: split_markdown(x) literally *is* split_markdown_with_depth(x, 3)
+        // after the delegation below, so the a-vs-b comparison here is
+        // tautological (satisfied by construction, no fixture can break it).
+        // It still earns its keep by pinning the delegation constant to
+        // exactly 3 — but the absolute `a.len() == 3` assertion is the one
+        // that actually guards "depth 3 behaves as it did before this
+        // change", since there is no pre-change predicate left in the tree
+        // to compare against relatively.
         let src = "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz\n\n#### D\n\nw\n";
         let a = split_markdown(src, 10_000, 0);
         let b = split_markdown_with_depth(src, 10_000, 0, 3);
+        assert_eq!(
+            a.len(),
+            3,
+            "delegation must split into exactly 3 sections at depth 3"
+        );
         assert_eq!(a.len(), b.len());
         for (x, y) in a.iter().zip(b.iter()) {
             assert_eq!(x.content, y.content);
             assert_eq!((x.start_line, x.end_line), (y.start_line, y.end_line));
         }
+    }
+
+    #[test]
+    fn split_markdown_default_depth_splits_h1_h2_h3_and_not_h4() {
+        // LOAD-BEARING, exact counts not >=: `>=` is monotone under the
+        // `l <= depth` -> `l < depth` mutation, which silently re-chunks every
+        // indexed markdown file containing an h3.
+        let src = "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz\n\n#### D\n\nw\n";
+        let chunks = split_markdown(src, 10_000, 0);
+        assert_eq!(chunks.len(), 3, "h1/h2/h3 split; h4 does not");
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|c| (c.start_line, c.end_line))
+                .collect::<Vec<_>>(),
+            vec![(1, 4), (5, 8), (9, 15)],
+        );
+    }
+
+    #[test]
+    fn hashes_without_a_following_space_are_not_headings() {
+        // Kills the mutation that deletes heading_level's `starts_with(' ')` filter.
+        let src = "# A\n\n#hashtag\n\n###\n\n#[derive(Debug)]\n";
+        assert_eq!(split_markdown(src, 10_000, 0).len(), 1);
     }
 }
