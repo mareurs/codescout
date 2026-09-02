@@ -179,6 +179,58 @@ Cross-cutting fix wave, both components:
 All nine passed per-task review, a whole-branch review, and a final fix-wave re-review with
 a **Merge** verdict. What each component does and does not cover is in `extra.unverified` on
 this artifact's frontmatter, not restated here.
+
+## The unblock is per-PUSH, not per-fix — measured 2026-09-02
+
+A property of the shipped guard, not a defect, and worth stating next to it because the shape
+is counter-intuitive and cost two sessions a round-trip to establish.
+
+**The guard refuses on unpushed COMMITS touching the ledger.** So committing an entry re-arms
+it against the next one. Filing an entry is not a step toward being unblocked; it is what
+blocks you again.
+
+Observed end-to-end within ten minutes:
+
+| step | state |
+|---|---|
+| 7 ledgers with unpushed commits | all `REFUSED` |
+| `62d7fa4b..056d79f2` pushed, clean fast-forward | 0 ahead, **0 blocked** |
+| `OB-15` committed into `observer-blindness.md` (`2af25ca8`) | 1 ahead, **that ledger `REFUSED` again** |
+
+The refusal after step 3 is correct on its own terms: an unpushed `OB-15` genuinely *is*
+invisible to another host allocating from origin's mark, so the next entry in that namespace
+would collide. Nothing here argues for weakening it.
+
+(That sentence names the next id obliquely on purpose. Writing it out would mint a citation of
+an entry nobody has defined, which `link_scan` reports as dangling and no backtick escapes —
+the only escape is a fenced block. Same constraint as
+`docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`, met here rather
+than tripped.)
+
+**What is worth recording is where the friction lands.** The guard is in tension with
+*commit-early* discipline specifically, and not with batching:
+
+- file N entries, commit once, push — **fine**
+- file one, commit, file another — **refused**
+
+So the cost falls on the person doing the more careful thing, and the steady state on a
+rarely-pushed branch is *blocked* rather than *allowed*. Measured the same evening: `experiments`
+reached **133 commits** ahead of `origin/experiments` with **7 of 37** declared ledgers refusing
+allocation, and clearing them was a single push — an event at push time, with nothing at fix time
+able to reach it.
+
+**Practical consequence for anyone hitting this:** the remedy is never to re-check the entry or
+the ledger. It is to push, or to batch the entries and push once. If you cannot push, the
+guard's own hint is right — park the entry worktree-local and fold it in afterwards; this
+session did exactly that for `OB-15` and re-ran the identical `append_entry` call after the push
+succeeded.
+
+Found by `codescout-0a` (sessionId `2cb44cd3`), which measured the re-arm from outside while
+this session was reporting `0 ahead / 0 blocked` — a figure true when measured and stale by the
+time it was read, because the reporting session had committed in between. That is the same
+windowed-instrument caveat CLAUDE.md states under § *Observer Blindness*: a windowed
+instrument's zero is scoped to its window, and re-running it later silently moves the window.
+Confirmed here at the bytes rather than accepted on report.
 ## Tests added
 
 None — no fix written. A regression test should assert that allocation is refused (or

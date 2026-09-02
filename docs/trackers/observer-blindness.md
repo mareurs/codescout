@@ -1623,6 +1623,44 @@ to a sessionId *and* a blob. Three sessions reached first for what they remember
 *"the index has a recorded owner too, and nobody reached for it."* Same shape as attributing by
 `Session-Id` trailer rather than by adjacency, one layer down.
 
+### What unifies the three — corrected 2026-09-02, and the first two attempts are kept
+
+The unification was wrong twice before it was right, in **opposite** directions, and both
+authors held all the relevant facts at the time. Kept rather than replaced, because the entry's
+subject is inferences that answer fluently and cannot discriminate, and these are two.
+
+- ~~*All three are inferences from an ABSENCE.*~~ **Forced**, and `codescout-0a` caught it.
+  True of instances 1–2 — no output, therefore no mechanism. False of 3a: the exclusion list
+  **existed and was read**. That is an inference from a *presence* that skipped a qualifier
+  check (*"a file **you staged**"*, against an unstaged victim). Calling it an absence makes it
+  fit by stretching the word.
+- ~~*All three substitute an ACCOUNT of a mechanism for the mechanism's BEHAVIOUR.*~~ `0a`'s
+  replacement, and **it has the mirror-image problem.** Clean for 3a (documentation is an
+  account) and 3b (recollection is an account). Awkward for 1–2: the absence of output is not an
+  account of the mechanism, it *is* the mechanism's behaviour, observed correctly at the only
+  surface anyone looked at. The error there was inferring **existence** from behaviour at one
+  surface, not preferring an account over behaviour.
+
+**What both are reaching for, and what the entry now claims:** in each case the party consulted
+a source that **answers fluently and cannot discriminate**, in place of the artifact itself —
+which was cheap to reach and *could* discriminate.
+
+| instance | source consulted | why it cannot discriminate | the artifact, one command away |
+|---|---|---|---|
+| 1–2 | **silence** | a gated mechanism and an absent one are silent identically | `grep` the emitter |
+| 3a | **documentation** | a limitation list says what is excluded, never whether *this* case is | apply the exclusions to the case, one by one |
+| 3b | **recollection** | a belief about your own action is not a reading of it | `.git/session-stage-log`, keyed by sessionId AND blob |
+
+Fluency is the operative property. Each source returns a clean, confident answer, so nothing in
+the *experience* of consulting it signals that it was the wrong instrument — which is why the
+remedy cannot be care, and must be a standing habit of going to the artifact.
+
+That framing also **earns** Instance 3's widening rather than merely permitting it, which is
+`0a`'s point and survives the correction of their formulation intact: a *record* is the
+mechanism's behaviour rather than anyone's account of it, so "grep the emitter" and "read the
+log" are one rule at its right level. Their statement of it is the one to use — **before
+inferring what a mechanism did, ask what it recorded.**
+
 **Three parties, same wrong branch, one of them authoring the framework for classifying blind
 spots at the time.** `OB-1`'s *third position* holding again: knowing the class does not
 prevent the instance.
