@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 14
+entry_high_water_OB: 15
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-15 | 2026-09-02 | **a mechanism that is GATED OFF and one that was never BUILT produce identical observations** — no output, every call, forever. The diagnostician's evidence cannot discriminate, and the two have opposite remedies. Runs in both directions: *no output ⇒ no mechanism*, and *a published limitation ⇒ this instance is covered by it* | **anyone diagnosing a missing output from the output.** Not carelessness — they hold the *complete* observation, which is what disqualifies a care-based remedy. The discriminator is in the code, never in the absence | wrong instrument, and **asymmetrically pulled**: *build it* is actionable and ends in a plan, *ungate it* asks you to believe in something you have no evidence for — so the tie breaks toward building predictably rather than randomly, which is what earns a standing check | none yet — candidate is one line in reconnaissance Phase 1: *an output you have never seen is not evidence that nothing emits it; grep the emitter.* 3 instances, 2 substrates, 3 sessions; instance 3 argues it should reach **records** too, not only emitters (`.git/session-stage-log` answered in one command a question three sessions were answering from memory) |
 | OB-14 | 2026-09-02 | **the sampling frame — what the corpus contains, what one row means, how rows were selected — is the premise every number rests on and the one no downstream check reads.** A frame error moves numerator and denominator together, so every consistency check passes | **the analyst**, whose entire access to the population runs *through* the frame; auditing it needs a view of the population that does not come through it | wrong instrument, and uniquely so for the **review** half: 13 rounds plus a sustained adversarial review that reversed 4 conclusions, and none of five parties questioned the frame — `OB-4`'s shared-substrate law applied to reviewers rather than instruments | **designed** — show the data owner the corpus census and the sampling frame *before* the findings; census is 3 queries plus a per-producer byte share. Not promoted: 2 instances, 1 work stream |
 | OB-13 | 2026-09-02 | **deleting a token makes every negative assertion naming it vacuously true — permanently, silently, while staying green.** The instance was *written as a forward-looking guard and made vacuous by the very event it anticipated* (`prompts/mod.rs:2603`, "After Task 14 lands…") | **the author performing the deletion.** The diff enumerates removals; the assertions that MENTION the token are not in it — they survive untouched, compile, pass, and read as guards. Nothing in the act of deleting points backwards | wrong instrument — the reverse direction is **closed**: token→assertions is a grep, assertions→"which go vacuous" is unanswerable, since the discriminator is who OWNS the token and that is not in the text. Measured: a selector over 93 assertions returned **28**, overwhelmingly fixtures | `designed, not built` — H-N: trigger on a token leaving the tree, `grep -rn '!.*contains.*<token>'`. **Plus a repair-side check**, because the blindness recurs in the fix: the prescribed replacement needle was itself vacuous, by a different mechanism, and passed |
 | OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed case has no mechanism and none is proposed |
@@ -1547,6 +1548,100 @@ it outright.
 an internal consistency check, or a reviewer with the analyst's data access and no independent
 knowledge of the inputs' provenance. That would make this ordinary carelessness with a careful
 remedy available, which is exactly what this ledger's admission test excludes.
+
+## OB-15 — a silenced mechanism and an absent one produce identical observations, and the tie breaks toward building
+
+**Valid:** invariant
+
+**The claim.** A mechanism that exists but is *gated off* and a mechanism that was *never
+built* produce **identical observations**: no output, on every call, forever. Nothing in the
+absence distinguishes them. So a party diagnosing a missing output holds no evidence bearing on
+which one they are in — and the two have opposite remedies, *build it* versus *ungate it*.
+
+**Why "look harder" is the wrong instrument.** The reasoning that reaches the wrong answer is
+not careless, it is *valid*: "I have never seen this output, therefore nothing emits it" is a
+sound inference from the observation, and the observation is complete. The defect is that the
+observation cannot discriminate, and no care applied to it will. This is CLAUDE.md §
+*Testing Discipline*'s monotone law with the **observer moved** — that law says an absence
+assertion cannot detect a dead mechanism, because a dead mechanism produces exactly the silence
+it asserts. Here the assertion is a diagnostician's rather than a test's, and the silence is
+production's rather than a fixture's, but the structure and the blind spot are inherited whole.
+
+**The asymmetric pull, which is what makes it predictable rather than merely possible.** The two
+branches are not equally attractive. *Build it* is actionable and terminates in a plan; *ungate
+it* asks you to believe in something you have no evidence for. So the tie does not break
+randomly — it breaks toward building, and the resulting design work looks productive for as
+long as it takes to discover the duplicate. That asymmetry is why this earns a standing check:
+it says the error will recur, not merely that it can. (`codescout-0a`, whose observation this
+was, put the distinction better than the entry can: *"only the second earns a standing check,
+because only the second says it will happen again."*)
+
+1. **Who structurally cannot see it.** Anyone diagnosing a missing output *from the output*.
+   Not "was careless" — they hold the complete observation, which is the disqualifying
+   condition for a care-based remedy.
+2. **Who can.** Anyone who reads the emitter's source, or greps for the message. A different
+   *instrument*, not a more careful reader: the discriminator is in the code and never in the
+   observation.
+3. **The check that runs when nobody is worried.** **Before designing a mechanism to produce an
+   output, grep for something that already produces it.** One command, at a trigger that
+   happens anyway, and its cost when the mechanism is genuinely absent is one empty grep —
+   cheap enough to run unconditionally, which is the property that matters, since a check gated
+   on suspicion is unreachable here.
+
+**Instances 1 and 2, one hour apart on one defect.** The bug file
+`docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`
+asserted *"No equivalent exists on the read path"*, carried unchallenged through three
+sessions' contributions. `worktree_read_notice` had shipped 2026-08-15, wired into
+`Tool::call_content`, covering every read tool, and was silent because `notice_once` had spent
+its one shot early in the conversation.
+
+- `codescout-0a` designed a remedy for a mechanism it believed absent, and named the error
+  itself: *"the evidence for absence was that no notice had ever appeared."*
+- This session read that sentence in the bug file it was **assigned to fix** and did not check
+  it either. What broke the tie was not scepticism: a routine `semantic_search` for the write
+  guard returned the read notice as a neighbour. **The correction arrived as a side effect of
+  unrelated work** — the strongest argument for a standing check, since the only thing that
+  worked was luck.
+
+**Instance 3 — a different substrate, found while this entry was blocked from being written.**
+Three sessions spent an evening empirically re-deriving which peer-commit captures
+`pre-commit-unreviewed-content.sh` does and does not catch. The answer was written at the
+enforcement site the whole time, under a heading reading `WHAT IT DOES NOT CATCH` (`:34-37`),
+and none of the three had read it until one went looking. Two then over-corrected the other
+way — reading the exclusion list as covering an incident it did not, because case 1's qualifier
+(*"a file **you staged**"*) fails silently against an unstaged victim. Both instances of that
+flattening were withdrawn only after someone tested the case exclusion-by-exclusion. So the
+class runs in **both** directions: *no output ⇒ no mechanism*, and *a published limitation ⇒
+this instance is covered by it*. Both are inferences from an absence — of output in the first,
+of a distinguishing qualifier in the second.
+
+**A generalisation Instance 3 supplies and the first two do not:** the missing datum may be a
+**record** rather than a mechanism. That evening's central question — was a captured file
+staged or unstaged — was answered by `.git/session-stage-log`, which keys every staging event
+to a sessionId *and* a blob. Three sessions reached first for what they remembered doing;
+`ffb95976` settled it against two independent keys in one command and wrote the lesson down:
+*"the index has a recorded owner too, and nobody reached for it."* Same shape as attributing by
+`Session-Id` trailer rather than by adjacency, one layer down.
+
+**Three parties, same wrong branch, one of them authoring the framework for classifying blind
+spots at the time.** `OB-1`'s *third position* holding again: knowing the class does not
+prevent the instance.
+
+**Rests on:** CLAUDE.md § *Testing Discipline* (the monotone law this generalises), `OB-1`
+(knowing a class does not prevent an instance), `OB-7` (*a declaration is well-formed and
+nothing in production reaches it* — its complement: there the mechanism is unreachable and
+declared, here it is reachable and silent; both present as nothing happening, and the remedies
+differ again).
+
+**Mechanism status:** none yet. The candidate is the grep-before-you-design check above; it is
+a policy until something triggers it, and a trigger the model must notice is a policy rather
+than a mechanism (`skill-frictions:SKF-22`). Best available home is the reconnaissance skill's
+Phase 1, which already fires at exactly this moment — before acting on a shape not read this
+session — and would need one line: **an output you have never seen is not evidence that nothing
+emits it; grep the emitter.** Instance 3 argues the line should reach records too, not only
+emitters.
+
+**Status:** open
 
 ## Template for new entries
 
