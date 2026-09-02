@@ -338,6 +338,32 @@ fn make_walk_fixture(root: &Path) {
     wt("checkout/inner-wt"); // a worktree belonging to that other checkout
 }
 
+/// Discovered worktrees as `/`-separated paths relative to `root`.
+///
+/// **Shared so the two callers cannot diverge, which they did.** Both tests below compare
+/// against forward-slash literals; one normalised separators and the other did not, four
+/// lines apart. On Unix both pass — `\` never appears in a tempdir path — so the omission
+/// was invisible locally and on every ubuntu and macos lane, and reddened
+/// `windows-latest` with `[".worktrees\\wt-a", "checkout\\inner-wt", …]` against
+/// `"checkout/inner-wt"`.
+///
+/// That is `IC-9`: an assertion whose haystack embeds environment-controlled text — here
+/// the platform's separator — satisfied by coincidence. The remedy is not to remember the
+/// `.replace`, it is to leave one place where it can be written.
+/// See `docs/issues/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md` for the
+/// sibling instance found the same night, in another module, by another hand.
+fn rel_slash(root: &Path, found: &[PathBuf]) -> Vec<String> {
+    found
+        .iter()
+        .map(|p| {
+            p.strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect()
+}
+
 /// The walk must find a worktree wherever it sits, and must skip exactly what it claims to.
 ///
 /// **This is the test the live checks cannot be.** Both of those scan the real repo root, so
@@ -356,15 +382,7 @@ fn the_walk_finds_worktrees_anywhere_and_skips_what_it_must() {
     let root = tmp.path();
     make_walk_fixture(root);
 
-    let found: Vec<String> = discover_linked_worktrees(root)
-        .iter()
-        .map(|p| {
-            p.strip_prefix(root)
-                .unwrap_or(p)
-                .to_string_lossy()
-                .replace('\\', "/")
-        })
-        .collect();
+    let found: Vec<String> = rel_slash(root, &discover_linked_worktrees(root));
 
     assert_eq!(
         found,
@@ -399,10 +417,7 @@ fn a_nested_independent_checkout_is_walked_through_not_reported() {
     make_walk_fixture(root);
 
     let found = discover_linked_worktrees(root);
-    let rel: Vec<String> = found
-        .iter()
-        .map(|p| p.strip_prefix(root).unwrap_or(p).to_string_lossy().into())
-        .collect();
+    let rel = rel_slash(root, &found);
 
     assert!(
         !rel.iter().any(|p| p == "checkout"),
