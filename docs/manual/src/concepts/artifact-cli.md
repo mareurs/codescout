@@ -29,14 +29,14 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 
 | Subcommand | Mirrors MCP action | Purpose |
 |---|---|---|
-| `find` | `artifact(action="find")` | Filter + semantic search |
-| `get <id>` | `artifact(action="get")` | Body / headings / line slice / links |
-| `create` | `artifact(action="create")` | New artifact (`--kind`, `--title`, `--rel-path`, `--augment`) |
-| `update <id>` | `artifact(action="update")` | Patch fields; `--commit-refresh` after a gather |
-| `move <id>` | `artifact(action="move")` | Rename / relocate; updates path edges |
-| `link` | `artifact(action="link")` | Create typed edge between two artifacts |
-| `graph <id>` | `artifact(action="graph")` | BFS neighbourhood as ASCII tree |
-| `state-at <id>` | `artifact(action="state_at")` | Time-travel snapshot at commit or timestamp |
+| `find` | `doc(action="find")` | Filter + semantic search |
+| `get <id>` | `doc(action="get")` | Body / headings / line slice / links |
+| `create` | `doc(action="create")` | New artifact (`--kind`, `--title`, `--rel-path`, `--augment`) |
+| `update <id>` | `doc(action="update")` | Patch fields; `--commit-refresh` after a gather |
+| `move <id>` | `doc(action="move")` | Rename / relocate; updates path edges |
+| `link` | `doc(action="link")` | Create typed edge between two artifacts |
+| `graph <id>` | `doc(action="graph")` | BFS neighbourhood as ASCII tree |
+| `state-at <id>` | `doc(action="state_at")` | Time-travel snapshot at commit or timestamp |
 
 ### `codescout artifact-event ...` — append-only event log
 
@@ -54,7 +54,7 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 
 ### `codescout artifact-augment <id>` — attach or patch augmentation
 
-Mirrors `artifact_augment` MCP tool. Accepts `--prompt`, `--params`
+Mirrors the `doc(action="augment")` MCP tool. Accepts `--prompt`, `--params`
 (JSON), and `--merge` for params-only RFC 7396 merge-patch.
 
 ## Output modes

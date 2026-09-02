@@ -29,7 +29,7 @@ the agent can read without parsing raw JSON.
 
 ### Schema
 
-Pass `render_template` to `artifact_augment` — with `merge=true` to patch it onto an
+Pass `render_template` to `doc(action="augment")` — with `merge=true` to patch it onto an
 existing augmentation, or the default `merge=false` to seed one:
 
 ```json
@@ -47,7 +47,7 @@ existing augmentation, or the default `merge=false` to seed one:
 ## `params_schema`
 
 A JSON Schema (draft-07+) validating `params` on every write:
-`artifact_augment`, both on the initial seed (`merge=false`) and on every
+`doc(action="augment")`, both on the initial seed (`merge=false`) and on every
 `merge=true` patch.
 Violations return a recoverable error — params are **not** written.
 

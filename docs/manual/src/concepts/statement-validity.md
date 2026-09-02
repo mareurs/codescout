@@ -137,7 +137,7 @@ quietly drops findings.
 
 ## Server-side stamping
 
-`artifact(action="append_entry")` stamps `**Valid:** dated <today>` into the
+`doc(action="append_entry")` stamps `**Valid:** dated <today>` into the
 section it writes, unless the caller passes a class explicitly. The stamp happens
 in the same file write and transaction as the entry-id high-water mark, because a
 caller writing the section afterwards would do a second read-modify-write outside

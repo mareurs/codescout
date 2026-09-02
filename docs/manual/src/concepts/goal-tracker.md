@@ -36,7 +36,7 @@ The active goal is auto-surfaced — you do not have to remember to read it.
 **Find the active goal directly:**
 
 ```text
-artifact(action="find",
+doc(action="find",
          kind="tracker",
          filter={"tags":{"in":["goal"]}, "status":{"eq":"active"}})
 ```
@@ -58,14 +58,14 @@ fresh session sees the goal without having to query for it.
 librarian(action="tracker_design", intent="goal: <one-line objective>")
 
 # 2. Create the artifact with augmentation in one call
-artifact(action="create",
+doc(action="create",
          kind="tracker",
          tags=["goal"],
          title="<human title>",
          augment={ prompt: "...", params: {...} })
 
 # 3. Link child sub-trackers (one or more existing archetypes)
-artifact(action="link",
+doc(action="link",
          src_id="<goal-id>",
          dst_id="<child-id>",
          rel="child")

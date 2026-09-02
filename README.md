@@ -81,23 +81,23 @@ librarian, "find every active spec touching the embedder" is a single tool call.
   (spec / plan / adr / runbook / memory / tracker / doc / ...) and indexed
   into a SQLite catalog at `~/.local/share/librarian/catalog.db`.
 - A typed link graph (`supersedes`, `implements`, `references`, ...) connects
-  artifacts; walk it transitively with `artifact(action="graph")`.
+  artifacts; walk it transitively with `doc(action="graph")`.
 - A 4-tier scope ladder (`project` → `repo` → `umbrella` → `all`) lets the
   agent widen beyond the current sub-project on demand.
 - Optional semantic search via `LIBRARIAN_EMBED_*` turns
-  `artifact(action="find", semantic="…")` into vector search.
+  `doc(action="find", semantic="…")` into vector search.
 
 **How to use it.**
 
 ```text
 # Find every active spec touching the retrieval stack
-artifact(action="find", kind="spec", status="active", semantic="retrieval pipeline")
+doc(action="find", kind="spec", status="active", semantic="retrieval pipeline")
 
 # Read one, with its outgoing link graph
-artifact(action="get", id="abc123", include_links=true)
+doc(action="get", id="abc123", include_links=true)
 
 # Connect a plan to the spec it implements
-artifact(action="link", src_id="<plan>", dst_id="<spec>", rel="implements")
+doc(action="link", src_id="<plan>", dst_id="<spec>", rel="implements")
 
 # Pack a topic neighbourhood into a single markdown bundle for context
 librarian(action="context", topic="hybrid sparse + dense retrieval", max_tokens=4000)

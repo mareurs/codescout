@@ -23,8 +23,8 @@ and defers the consequences.
 
 | Surface | Behaviour once past the grace window |
 |---|---|
-| `artifact(action="find")` | Row is hidden (listing and semantic search) |
-| `artifact(action="get")` | Still returns it — an explicit id is an explicit request |
+| `doc(action="find")` | Row is hidden (listing and semantic search) |
+| `doc(action="get")` | Still returns it — an explicit id is an explicit request |
 | `librarian(action="doctor")` | Still reports it, and counts it |
 
 Hiding is deliberately confined to the surfaces an agent browses. A stale row

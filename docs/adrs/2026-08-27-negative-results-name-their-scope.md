@@ -92,7 +92,7 @@ Three clauses, all load-bearing:
 |---|---|---|
 | **Pre-flight predicate** → `RecoverableError` | the input is unsatisfiable *by construction*, before any work | `unsatisfiable_absolute_glob` |
 | **Post-hoc audit counter** → warning field beside the result | the work ran and examined nothing | `WalkAudit.accepted` + `completeness_warning` |
-| **Scope carried on an existing error** | something already fails; the error is the carrier | `read_file` / `read_markdown` `(searched <abs path>)` |
+| **Scope carried on an existing error** | something already fails; the error is the carrier | `read_file` `(searched <abs path>)` |
 
 The third is the cheapest and most overlooked. `76e287f8` needed no new field and no new
 control flow: `resolved` was already in scope at the failure site and simply absent from

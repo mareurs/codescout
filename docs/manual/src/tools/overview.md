@@ -30,13 +30,11 @@ language support.
 
 | Tool | Description |
 |------|-------------|
-| `read_file` | Read lines from a file, with optional range and pagination |
-| `read_markdown` | Read a Markdown file with heading-based navigation |
+| `read_file` | Read a file. On `.md` it is heading-addressed: the heading map by default, `heading`/`headings` for sections, `start_line`/`end_line` or `offset`/`limit` for a slice, `force=true` for raw lines |
 | `tree` | List files and directories, optionally recursive; also finds files by glob pattern, respecting `.gitignore` |
 | `grep` | Search file contents with a regex pattern |
 | `create_file` | Create or overwrite a file with given content |
-| `edit_file` | Find-and-replace editing within a file |
-| `edit_markdown` | Edit a Markdown document by heading |
+| `edit_file` | Find-and-replace editing within a file. On `.md` it also takes the heading grammar (`heading` + `action`, heading-addressed `edits[]`, `frontmatter`) — one grammar per batch |
 
 ---
 

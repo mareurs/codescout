@@ -32,7 +32,7 @@ worktree never sees another's in-progress rows.
 ## Fork-on-first-write
 
 The first mutating call against a main-root artifact — `append_entry`,
-`update`, `artifact_event`, `artifact_augment`, or `link` — forks it, creating:
+`update`, `event_create`, `augment`, or `link` — forks it, creating:
 
 - a shadow row at the worktree path;
 - a `worktree_fork` event carrying the fork-time base params and frontmatter;

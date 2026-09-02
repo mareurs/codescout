@@ -42,7 +42,7 @@ reason this page exists:
 
 - `reindex` **preserves** augmentation keyed by id rather than regenerating it — so
   it reports success and repairs nothing.
-- `artifact(get)` returns `augmentation: null` with no comment.
+- `doc(get)` returns `augmentation: null` with no comment.
 - A missing `cites` edge is indistinguishable from an artifact that cites nothing.
 - Memory points missing from the store make `recall` return *fewer* results, never
   an error.
@@ -69,7 +69,7 @@ host that made no catalog changes at all — freshness is bounded by each host's
 **A fifth mode has the OPPOSITE shape, and it is not on the table above.** The four
 above are state that fails to arrive. This one is state that arrives *without* its
 catalog counterpart: **an artifact moved on the other host.** Because
-`id = sha256(abs_path)`, `artifact(action="move")` re-keys the row *there* and drops the
+`id = sha256(abs_path)`, `doc(action="move")` re-keys the row *there* and drops the
 old one — but git carries only a file rename, so your catalog keeps a row keyed on a path
 that no longer exists. Archiving a bug file is the routine case, and it happens constantly.
 
@@ -118,7 +118,7 @@ repair runs against a tree you did not expect.
 librarian(action="reindex")
 ```
 
-Adds rows for files the catalog has never seen. **Do this before any `artifact(find)`
+Adds rows for files the catalog has never seen. **Do this before any `doc(find)`
 query** — a `find` against a stale catalog returns a confidently wrong empty set. The
 response's `unindexed_hint` on a prior call is the tell you skipped it.
 
@@ -266,7 +266,7 @@ Extract the real queries, then execute each:
 ```
 grep -n 'entry_filter' <tracker path>              # self-documented
 grep -rn '<artifact-id>' docs/ --include='*.md'    # then READ the hits
-artifact(action="get", id="<id>", entry_filter=<the documented filter>)
+doc(action="get", id="<id>", entry_filter=<the documented filter>)
 ```
 
 A failing one returns, verbatim:
@@ -295,7 +295,7 @@ which is exactly why nobody thinks to look:
 grep -rn '<artifact-id>' docs/issues/archive/ docs/superpowers/ docs/trackers/ --include='*.md'
 ```
 
-then read every hit showing an `artifact_augment` / `append_entry` / `update_entry` /
+then read every hit showing a `doc(action="augment")` / `append_entry` / `update_entry` /
 `entry_filter` call, or a response echo like `changed_fields: [...]`.
 
 **A field name recovered from a quoted call beats one derived from body prose.**
@@ -345,7 +345,7 @@ in two tiers:
   **The owning action does not self-heal**, so it will not do this for you: run
   against an existing-but-unaugmented tracker, `legibility_scan` returns
   `ok: true` *with* `tracker_error: "no augmentation for artifact … — call
-  artifact_augment first"`. The create-and-augment path only fires when the tracker
+  doc(action=\"augment\") first"`. The create-and-augment path only fires when the tracker
   does not exist.
 
   **Verify byte-identity rather than asserting it** — read both source files and the
@@ -420,7 +420,7 @@ Do not trust the steps; check the outcomes.
 index(action="verify")                 # git_sync.status, memories.missing_count → 0
 librarian(action="link_scan")          # edges_missing[0], edges_stale[0]
 librarian(action="doctor")             # augmentation_declared_but_absent → 0
-artifact(action="get", id="<a Tier-A tracker>", entry_filter={"status":{"eq":"open"}})
+doc(action="get", id="<a Tier-A tracker>", entry_filter={"status":{"eq":"open"}})
 ```
 
 The last one is the real test: it is the call CLAUDE.md documents for browsing
@@ -474,7 +474,7 @@ and the **catalog**. Both bit during the 2026-08-28 pass.
   `bug-fix-session-log:F-60`, *"a peer's routine commit absorbed this session's
   uncommitted `append_entry` writes."*
 - **Worktrees make an unqualified write ambiguous, and the server refuses it.**
-  With linked worktrees present and no explicit activation, `edit_markdown` returns
+  With linked worktrees present and no explicit activation, `edit_file` returns
   `Write blocked: git worktrees detected but workspace(action='activate') has not
   been called`, naming them. Answer it with an explicit
   `workspace(action="activate", path="<main repo>")` rather than working around it —

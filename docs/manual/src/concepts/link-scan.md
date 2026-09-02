@@ -15,8 +15,8 @@ maintains scanner-owned `rel="cites"` edges to match.
 
 ## Why derive rather than declare
 
-The link graph pays off in three places: `artifact(action="get",
-include_links=true)`, `artifact(action="graph")`, and
+The link graph pays off in three places: `doc(action="get",
+include_links=true)`, `doc(action="graph")`, and
 `librarian(action="context", anchor_id=…)`, which packs an artifact's
 neighbourhood into a context bundle. All three are only as good as the edges.
 

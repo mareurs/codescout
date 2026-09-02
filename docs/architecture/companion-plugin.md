@@ -46,10 +46,10 @@ for ev,es in (d.get('hooks') or d).items():
 
 **PreToolUse (guards — hard `permissionDecision: deny`):**
 - `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)` → `worktree-write-guard.mjs` — blocks codescout write tools when in a git worktree until `workspace(activate)` has run (clears the `.cs-worktree-pending` marker).
-- `Edit|Write|mcp__codescout__(edit_code|edit_file|create_file)` → `constitution-guard.mjs` — buddy-constitution write guard. Note the matcher is **not** the same set as `worktree-write-guard`'s: it adds native `Edit`/`Write` and omits `edit_markdown`.
+- `Edit|Write|mcp__codescout__(edit_code|edit_file|create_file)` → `constitution-guard.mjs` — buddy-constitution write guard. Note the matcher is **not** the same set as `worktree-write-guard`'s: it adds native `Edit`/`Write` and omits `edit_file`.
 - `Grep|Glob|Read|Bash|Edit|Write` → `pre-tool-guard.mjs` — **hard-denies native Read/Grep/Glob/Edit/Write on source files and all native Bash**, redirecting to codescout MCP tools.
 - `Bash` → `git-worktree-guard.mjs` — denies worktree-ambiguous destructive git verbs from Bash; requires `git -C <path>` (single-worktree repos carved out).
-- `mcp__.*__read_file` → `il4-deny-hook.mjs` — IL4: hard-denies `read_file` on `.md` paths, redirecting to `read_markdown`.
+- `mcp__.*__read_file` → `il4-deny-hook.mjs` — IL4: hard-denies `read_file` on `.md` paths, redirecting to the now-retired `read_markdown`. **Obsolete and actively harmful as of the 2026-09-02 fold** — `read_file` IS the heading-addressed markdown reader now, so this hook denies the correct call and names a tool the server no longer registers. It still fires (observed this session). Removal is Task 12 of the tool-surface collapse; see `docs/issues/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`.
 
 **PreToolUse (advisory — `exit 0` + injected hint):**
 - `Agent` → `pre-task-hint.mjs` — on the first subagent dispatch of a session, points at the `reconnaissance` skill. **The matcher is `Agent`, not `Task`** — this doc claimed `Task` for months, which is the tool name that no longer exists.
@@ -73,7 +73,7 @@ The `PreToolUse` hook will **block** any attempt to use native `Read`, `Grep`, o
 - `symbols(name=..., include_body=true)` — read a function body
 - `grep(pattern)` — regex search
 - `semantic_search(query)` — concept-level search
-- `read_file(path)` — for non-source files (toml, json); `read_markdown(path)` for `.md`
+- `read_file(path)` — for non-source files (toml, json); `read_file(path)` for `.md`
 - `run_command(command)` — shell, cwd sandboxed to the active project
 
 ## Cross-repo work (companion: hardened 2026-05-21)

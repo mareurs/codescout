@@ -4,6 +4,29 @@ All notable changes to codescout are documented here.
 
 ## [Unreleased]
 
+### Changed — tool surface collapse (26 → 21 tools)
+
+- **`artifact` is now `doc`.** `artifact_event`, `artifact_augment` and `artifact_refresh`
+  are `doc` actions: `event_create` / `event_list` (the event fields gathered under one
+  `event` object), `augment` (reusing the `augment` object `create` already took, plus a
+  top-level `merge`), and `gather` / `list_stale`. `state_at` takes `id` like every other
+  action.
+- **`read_markdown` and `edit_markdown` are gone.** `read_file` returns the heading map for
+  a `.md` path and takes `heading`/`headings`; `edit_file` takes the heading grammar
+  (`heading` + `action`, heading-addressed `edits[]`) and `frontmatter`. A batch may not mix
+  the heading grammar with `old_string`/`new_string` items — the call is refused rather than
+  half-applied, because their atomicity and shrink-guard semantics differ.
+- **Iron Laws 4 and 5 survive, with new subjects.** They are no longer "use this other tool";
+  they are "use the heading-addressed parameters". `read_file(path.md, force=true)` still
+  returns raw lines and bypasses the heading map, so the rule still has content.
+- **Two behaviour changes worth naming, not just relocations.** `offset`/`limit` now work on
+  markdown reads (they were silently dropped by `read_markdown`), and a plain
+  `old_string`/`new_string` edit on a `.md` path now succeeds where `edit_file` used to
+  refuse it. Librarian-managed artifacts are still refused on every branch.
+- **No aliases.** The six retired names return the MCP unknown-tool error; there is no
+  compatibility shim. CLI: `codescout doc …`.
+- `Tool::description_cap()` replaces the librarian-family name-prefix exemption.
+
 ### Added
 
 - **Statement validity — a `**Valid:**` decay class on tracker entries, and four `doctor`
@@ -24,7 +47,7 @@ All notable changes to codescout are documented here.
   load-bearing precisely because another repo depends on it keeps its true exposure, and a
   developer is still not handed another project's work. Scoped-out rows are counted in
   `catalog_health.entry_validity_scoped_by_project` and named in the report hint rather than
-  silently dropped. `artifact(action="append_entry")` stamps `**Valid:** dated <today>` into
+  silently dropped. `doc(action="append_entry")` stamps `**Valid:** dated <today>` into
   the section it writes unless the caller passes a class, in the same transaction as the
   entry-id high-water mark. Docs: `docs/manual/src/concepts/statement-validity.md`.
 
@@ -86,7 +109,7 @@ All notable changes to codescout are documented here.
   every child row (events, observations, links, augmentation) via a deferred-FK
   id-rewrite, and `fix="reseat_worktree"` re-points worktree-scoped rows. All
   three are dry-run by default and require `confirm=true` to write.
-- **`artifact(action="append_entry")` — atomic entry allocation for monotonic-ID
+- **`doc(action="append_entry")` — atomic entry allocation for monotonic-ID
   trackers.** Assigns the next `<id_prefix>-<n>` from the live maximum across
   both the augmentation's `entry_collection` rows *and* the ids the markdown
   body already claims, so a body that ran ahead of params cannot reissue an id
@@ -96,7 +119,7 @@ All notable changes to codescout are documented here.
   deduped, immutable `slug`, and entries can cite other entries: pass `cites`
   to `append_entry` with 16-hex artifact ids, `<slug>:<local>` entry ids, or
   unique rel_paths, and the edges are created atomically — an unresolvable or
-  ambiguous ref aborts the whole call rather than guessing. `artifact(action=
+  ambiguous ref aborts the whole call rather than guessing. `doc(action=
   "get", include_links=true)` surfaces them. Not supported from a worktree
   checkout.
 - **`librarian(action="link_scan")` — derive citation edges from prose.** Parses
@@ -106,7 +129,7 @@ All notable changes to codescout are documented here.
   applies. Idempotent, and the repair path after moves or reindex — the catalog's
   abs_path pre-clean cascade-drops a moved artifact's links, and a re-scan heals
   them. First live run on this repo: 755 artifacts, 430 edges from zero.
-- **`artifact(action="graft")` — merge one artifact into another.** Re-points the
+- **`doc(action="graft")` — merge one artifact into another.** Re-points the
   source's events, observations and links onto the destination, merges
   augmentation params with collision renumbering, flags near-duplicate entries
   for review, and deletes the source last.
@@ -222,7 +245,7 @@ All notable changes to codescout are documented here.
   roots. Repos with no worktrees are unaffected, and that case is pinned by its own test.
   See `docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md`.
 
-- **`artifact(action="get")` on an unknown id now returns an error instead of `null`.**
+- **`doc(action="get")` on an unknown id now returns an error instead of `null`.**
   The `None` arm returned `Ok(Value::Null)` — a *success* carrying a null payload, which
   no caller could tell from an artifact that exists with an empty body. Since an artifact
   id is `sha256(abs_path)`, archiving one re-keys it, so "this id stopped resolving" is a
@@ -376,7 +399,7 @@ All notable changes to codescout are documented here.
 
   The predicate, its 200-byte floor and the report type move into
   `crate::util::shrink_guard`, shared by all three surfaces that overwrite documents
-  wholesale — `artifact(update, patch={body})`, `edit_markdown` and `memory(write)`. Each
+  wholesale — `doc(update, patch={body})`, `edit_markdown` and `memory(write)`. Each
   previously carried its own copy, which is why fixing one would have left the other two;
   `edit_markdown` had no shrink-guard test at all and now has two. `force=true` still
   bypasses both arms. The read side that fed the bad write already warned three times over
@@ -386,8 +409,8 @@ All notable changes to codescout are documented here.
   not out of the cap. See
   `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
 
-- **`artifact(action="find")` answered `count: 0` identically for "nothing is there" and
-  "the catalog has never looked."** An artifact created outside `artifact(action="create")`
+- **`doc(action="find")` answered `count: 0` identically for "nothing is there" and
+  "the catalog has never looked."** An artifact created outside `doc(action="create")`
   — by `create_file`, a plain write, or a peer's git commit — is absent until a reindex,
   and the response said nothing, so a lagging catalog and an empty filesystem were
   byte-identical answers. `find` now walks the scope's own root with the same two filters
@@ -396,7 +419,7 @@ All notable changes to codescout are documented here.
   same quantity. See
   `docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md`.
 
-- **`artifact(action="find")` silently dropped a top-level `rel_path` and answered with
+- **`doc(action="find")` silently dropped a top-level `rel_path` and answered with
   page 1 of the whole catalog.** `rel_path` is a create-time parameter; on `find` it was
   accepted and ignored, so a narrowing query returned every artifact in scope and looked
   like a successful broad search. It is now lifted into
@@ -442,13 +465,13 @@ All notable changes to codescout are documented here.
   to the result just given. The notice is now prefixed into stdout itself. See
   `docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
 
-- **`edit_markdown(action="edit")` deleted the matched text when `new_string` was
+- **`edit_file(action="edit")` deleted the matched text when `new_string` was
   omitted.** The key was read as `unwrap_or("")`, so a `content`/`new_string` mix-up —
   the sibling edit tools disagree on the name — turned a scoped replacement into a silent
   deletion and returned `{"status":"ok"}`. Three independent read sites now require the
   key to be **present**; `new_string: ""` still deletes, so deliberate deletion stays
   reachable and is distinguishable from a typo. The third site was
-  `artifact(update, patch={body_edits})`, which edits trackers and bug files — the
+  `doc(update, patch={body_edits})`, which edits trackers and bug files — the
   artifacts least likely to have their content asserted by any test. See
   `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
 
@@ -579,7 +602,7 @@ All notable changes to codescout are documented here.
   one that it does. Because the writer emits the typed fields first and then appends
   `extra` verbatim, `extra={"kind": "bug"}` produced **two `kind:` lines in one YAML
   mapping** — which does not parse, so the artifact lost its kind, status, title, owners
-  and tags together and dropped out of `artifact(find, kind=…)` entirely. The file still
+  and tags together and dropped out of `doc(find, kind=…)` entirely. The file still
   read correctly to a human and no gate noticed; one bug file sat outside the ledger for a
   working day. `create` and `update` now refuse an `extra` key that names a modelled field
   and name the parameter that owns it, and the writer additionally drops such a key rather
@@ -607,7 +630,7 @@ All notable changes to codescout are documented here.
 
 - **`librarian` path matching could never succeed on Windows.** `containing_root` compared
   a catalog `abs_path` (stored forward-slashed and `//?/`-prefixed) against a root spelled
-  with backslashes, so `artifact(action="move")` and `artifact(action="delete")` answered
+  with backslashes, so `doc(action="move")` and `doc(action="delete")` answered
   `no managed root contains …` for every row on that platform. Both sides now go through a
   normalized comparable form, and the match is segment-aware — a sibling directory sharing
   a name prefix still does not match. See
@@ -703,7 +726,7 @@ All notable changes to codescout are documented here.
   warning on every `cargo test`. Escaped as inline code.
 
 - **Seven new manual pages** for subsystems that had none: worktree overlay,
-  catalog GC &amp; repair, entry citations, `link_scan`, `artifact(action="graft")`,
+  catalog GC &amp; repair, entry citations, `link_scan`, `doc(action="graft")`,
   constitution trackers, and `edit_markdown` miss diagnostics. Also corrected
   `concepts/librarian-embedded.md`, which still advertised "15 librarian tools"
   including a standalone `workspace_state_at` — there are five, and
@@ -730,12 +753,12 @@ All notable changes to codescout are documented here.
 
 ### Added
 
-- **Surgical body editing for `artifact(update)` — `patch={body_edits: [...]}`.**
+- **Surgical body editing for `doc(update)` — `patch={body_edits: [...]}`.**
   Mirrors `edit_markdown`'s batch shape: each entry is `{heading, action,
   content? | old_string+new_string?, at?, replace_all?, include_subsections?}`,
   applied atomically. Mutually exclusive with `patch={body}`. Removes the
   temptation to write a partial body in the first place — the anti-pattern
-  that cost a real ~600-line tracker on 2026-05-25 (`artifact(get,
+  that cost a real ~600-line tracker on 2026-05-25 (`doc(get,
   heading=…)` returns *a section*, but `patch={body: <section>}` *replaces
   the entire body*). See
   [docs/architecture/augmented-artifacts.md § Body editing surfaces](docs/architecture/augmented-artifacts.md)

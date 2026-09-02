@@ -244,7 +244,7 @@ nine, and the provenance is the whole contribution.
 clause 2 — and the first where the misleading instrument was the one this project's own
 documentation prescribes.** A session resuming from compaction read
 `open-issue-work-queue`'s structured rows with
-`artifact(action="get", entry_filter={"status":{"eq":"open"}})`, which is verbatim the
+`doc(action="get", entry_filter={"status":{"eq":"open"}})`, which is verbatim the
 recipe `CLAUDE.md` gives for that tracker. It returned a well-formed, complete, entirely
 plausible list on which four rows were wrong — including a fix that had been shipped,
 tested, archived, patch-id'd and live-verified, reported as `open` and "not yet scouted".

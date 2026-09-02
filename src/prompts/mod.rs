@@ -1987,6 +1987,135 @@ mod tests {
             );
         }
     }
+    /// Retired tool names must not survive as CALL FORMS in the reader-facing docs.
+    ///
+    /// **This gate exists because the sweep that created it was unfalsifiable.** Task 10 of the
+    /// 2026-09-02 tool-surface collapse rewrote 160 mentions across 35 files by hand, and
+    /// nothing could have told anyone whether it finished: `tests/doc_tool_refs.rs` is blind
+    /// here two independent ways — its `a_documented_call_names_a_live_tool` skips every token
+    /// without an underscore (`artifact` has none, so `artifact(` was never checked), and
+    /// `present_tense_surfaces()` walks neither `docs/architecture/`, `docs/conventions/` nor
+    /// `docs/adrs/`, which between them held 60 of the 160. That is `IC-11` exactly: a
+    /// hand-enumerated sweep reports the surfaces it changed, never the ones it missed.
+    ///
+    /// **Call forms only, and that restriction is the whole design.** A denylist over bare
+    /// names is unusable on this corpus, because a doc legitimately NAMES a retired tool in
+    /// four different ways that all have to keep working:
+    ///
+    /// - historical migration records — `docs/manual/src/concepts/librarian-tools-collapse.md`
+    ///   documents a *previous* collapse, in `artifact_event {action: "create"}` brace form;
+    /// - dated measurements — "Probed 2026-08-28: … returns *not found*";
+    /// - Rust paths that still resolve — `src/tools/markdown/read_markdown.rs` still exists;
+    ///   only its `impl Tool` went;
+    /// - raw usage data — `src/prompts/shape_census.txt` counts calls made before the rename.
+    ///
+    /// A call form (`name(`) is none of those. It is a claim that this is how you invoke the
+    /// tool today, which is exactly the claim the collapse falsified.
+    ///
+    /// `CHANGELOG.md` is excluded: its released sections are a historical record by
+    /// construction, and its Unreleased section documents the rename by naming both sides.
+    #[test]
+    fn reader_docs_contain_no_retired_call_forms() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        // Every retired name, as the caller would write it. `artifact(` carries the paren for
+        // the same reason DEPRECATED_TOOL_NAMES does: "artifact" is still the correct noun.
+        const RETIRED_CALLS: &[&str] = &[
+            "artifact(",
+            "artifact_event(",
+            "artifact_augment(",
+            "artifact_refresh(",
+            "read_markdown(",
+            "edit_markdown(",
+        ];
+        const ROOTS: &[&str] = &[
+            "docs/manual/src",
+            "docs/architecture",
+            "docs/conventions",
+            "docs/adrs",
+            "src/prompts/guides",
+        ];
+        const FILES: &[&str] = &[
+            "CLAUDE.md",
+            "README.md",
+            "CONTRIBUTING.md",
+            "docs/TAXONOMY.md",
+            "docs/PROGRESSIVE_DISCOVERABILITY.md",
+            "docs/PROBES.md",
+            "docs/RELEASE.md",
+            "src/prompts/source.md",
+            "src/prompts/README.md",
+        ];
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "md") {
+                    out.push(p);
+                }
+            }
+        }
+
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        for r in ROOTS {
+            let before = paths.len();
+            walk(&root.join(r), &mut paths);
+            // PER-ROOT non-vacuity, and it is deliberately not a total.
+            //
+            // A single `paths.len() > N` floor decays: measured 2026-09-03, renaming ONE of the
+            // five roots away left 39 files against a floor of 40, so it caught that loss by a
+            // single file — and would stop catching it the moment the corpus grew. This asserts
+            // the property that actually matters and does not drift: every root contributes.
+            assert!(
+                paths.len() > before,
+                "ROOTS entry '{r}' matched no .md files — the scan is not reading what it claims. \
+             A renamed or moved directory silently empties this gate, and both assertions \
+             below are `is_empty()`, which is monotone under removal: an empty corpus \
+             produces exactly the silence they assert."
+            );
+        }
+        for f in FILES {
+            let p = root.join(f);
+            if p.exists() {
+                paths.push(p);
+            }
+        }
+
+        let mut bad: Vec<String> = Vec::new();
+        for p in &paths {
+            let Ok(text) = std::fs::read_to_string(p) else {
+                continue;
+            };
+            let rel = p.strip_prefix(root).unwrap_or(p).display().to_string();
+            for (n, line) in text.lines().enumerate() {
+                for &call in RETIRED_CALLS {
+                    if line.contains(call) {
+                        bad.push(format!("  {rel}:{}  `{call}`  {}", n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            bad.is_empty(),
+            "{} retired call form(s) in reader-facing docs:\n{}\n\n\
+         These say \"this is how you invoke the tool\", and the tool does not exist. \
+         `artifact(` → `doc(`; `artifact_event(action=\"list\")` → \
+         `doc(action=\"event_list\")`; `artifact_augment(id, params=…)` → \
+         `doc(action=\"augment\", id, augment={{params: …}})`; \
+         `artifact_refresh(action=\"gather\")` → `doc(action=\"gather\")`; \
+         `read_markdown(` → `read_file(`; `edit_markdown(` → `edit_file(`.\n\n\
+         To MENTION a retired form (a translation note, a migration record), write it \
+         without the paren — `read_markdown`, not `read_markdown(`. That is the escape \
+         hatch, and it is deliberate: this gate is about invocation claims, not vocabulary.",
+            bad.len(),
+            bad.join("\n")
+        );
+    }
 
     /// The gate's four commands must stay in their documented order, because the
     /// order is load-bearing: the lean lane leaves a librarian-less binary in the

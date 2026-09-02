@@ -72,7 +72,7 @@ cross it inline.
 Phase 1 is read-only delegation, and the exposed set is an explicit allowlist:
 
 `symbols` · `symbol_at` · `references` · `call_graph` · `tree` · `grep` ·
-`semantic_search` · `read_file` · `read_markdown` · `get_guide`
+`semantic_search` · `read_file` · `get_guide`
 
 Every other tool — all writes, `run_command`, `workspace`, and every librarian
 mutation — is rejected by construction. That is deliberately independent of the

@@ -188,7 +188,7 @@ near-identical. Configuring one gives you no signal that the others exist.
 |---|---|---|---|
 | `CODESCOUT_EMBEDDER_URL`, `CODESCOUT_SPARSE_EMBEDDER_URL`, `CODESCOUT_RERANKER_URL`, `CODESCOUT_EMBEDDER_MODEL` | `src/retrieval/config.rs` | the retrieval stack: `semantic_search` over code, semantic memory cross-embedding, anchor creation | sparse/reranker fall back to the published host ports; the dense URL falls back to nothing and the backend is resolved from the model |
 | `CODESCOUT_EMBED_URL`, `CODESCOUT_EMBED_MODEL` | `src/config/project.rs` | the same retrieval stack, at **lower precedence** — a project-config layer beneath the `CODESCOUT_EMBEDDER_*` names | ignored |
-| `LIBRARIAN_EMBED_MODEL`, `LIBRARIAN_EMBED_URL`, `LIBRARIAN_EMBED_API_KEY` | `src/librarian/mod.rs` | the librarian artifact index only — `artifact(semantic=…)`, `librarian(context)` | absent `LIBRARIAN_EMBED_MODEL` disables the librarian embedding service entirely |
+| `LIBRARIAN_EMBED_MODEL`, `LIBRARIAN_EMBED_URL`, `LIBRARIAN_EMBED_API_KEY` | `src/librarian/mod.rs` | the librarian artifact index only — `doc(semantic=…)`, `librarian(context)` | absent `LIBRARIAN_EMBED_MODEL` disables the librarian embedding service entirely |
 
 Two consequences worth knowing before you debug an embedding failure:
 

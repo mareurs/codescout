@@ -3,17 +3,17 @@
 Converts a **prose tracker** (entries as `## X-N` sections + `**Key:** value`
 lines — the `reflective` archetype shape) into a **filterable tracker**
 (entries as a structured array in augmentation `params` — the `failure_table`
-shape), so `artifact(get, id, entry_filter={…})` can query its rows.
+shape), so `doc(get, id, entry_filter={…})` can query its rows.
 
 This is an agent-readable procedure, not a tool. There is no `retrofit`
 command — you follow these steps by hand using the existing
-`artifact`/`artifact_augment` tools.
+`doc`/`doc(action="augment")` tools.
 
 ## When to retrofit
 
 - The tracker has repeating numbered entries (`F-N`, `U-N`, `W-N`, roadmap items).
 - You want to query them by metadata (status, category, severity, …) via
-  `artifact(get, entry_filter=…)`.
+  `doc(get, entry_filter=…)`.
 - It is currently prose-only — no `entry_collection` declared on its augmentation.
 
 If a tracker is already structured (entries live in a params array, e.g. the
@@ -22,7 +22,7 @@ the `entry_collection` pointer.
 
 ## Procedure
 
-1. **Read the tracker.** `artifact(action="get", id="<id>", full=true)`.
+1. **Read the tracker.** `doc(action="get", id="<id>", full=true)`.
    Identify the repeating `## X-N — …` sections and the `**Key:** value` lines
    under each.
 2. **Derive the schema.** Each `**Key:**` becomes a field. Pin types: enums for
@@ -37,14 +37,17 @@ the `entry_collection` pointer.
    sees no change. (See the `failure_table` archetype's `render_template_example`.)
 5. **Declare the pointer.**
    ```
-   artifact_augment(
+   doc(
+       action="augment",
        id="<id>",
        merge=false,
-       prompt="<existing prompt>",
-       params={ "<collection>": [ …objects… ] },
-       params_schema={ … },
-       render_template="…",
-       entry_collection="<collection>",
+       augment={
+         prompt: "<existing prompt>",
+         params: { "<collection>": [ …objects… ] },
+         params_schema: { … },
+         render_template: "…",
+         entry_collection: "<collection>",
+       },
    )
    ```
    `merge=false` overwrites ALL caller-controlled fields, so pass `prompt` /
@@ -55,17 +58,17 @@ the `entry_collection` pointer.
    `params_path="/abs/path.json"` instead of `params` (read server-side;
    mutually exclusive). An 11-row table with prose-heavy cells already grazes
    the cap (measured 8.8 KB on the prompt-hamsa audit-log retrofit, 2026-07-05).
-6. **Verify.** `artifact(action="get", id="<id>", full=true)` — the rendered body
+6. **Verify.** `doc(action="get", id="<id>", full=true)` — the rendered body
    must match the original section-for-section. Then test a filter:
    ```
-   artifact(action="get", id="<id>", entry_filter={"status": {"eq": "open"}})
+   doc(action="get", id="<id>", entry_filter={"status": {"eq": "open"}})
    ```
    The returned `entries` are the matching rows; `entry_total` is the count of
    object entries considered.
 
 ## Filter syntax
 
-`entry_filter` uses the same AST as `artifact(find)`'s `filter`:
+`entry_filter` uses the same AST as `doc(find)`'s `filter`:
 
 - Leaf: `{field: {op: value}}` — ops `eq`, `ne`, `in`, `nin`, `gt`, `lt`,
   `gte`, `lte`, `contains`, `prefix`.
@@ -81,7 +84,7 @@ exclude the row. Keep `not` over fields your entries always carry.)
 ## Notes
 
 - **Never delete prose in the same step you add params.** Mutate the body via
-  `artifact(action="update", patch={body_edits: […]})`, never a wholesale
+  `doc(action="update", patch={body_edits: […]})`, never a wholesale
   `body` overwrite — the 50% body-shrink guard exists to catch exactly this.
 - **Keep `id` on every entry object** so filtered rows map back to their
   `## X-N` section.

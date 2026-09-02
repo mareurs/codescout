@@ -131,7 +131,7 @@ Step 4 used to be the archive step, gated on `master`. It is not any more: a bug
 archived once its fix is **verified on `experiments`** (`_TEMPLATE.md` / `get_guide(
 "tracker-conventions")`), because `experiments` is never deleted and holding files back
 only grew a pile of `fixed`-but-unarchived bugs that no query surfaced anyway —
-`artifact(action="find", kind="bug", status="open")` filters on `status`, not on path.
+`doc(action="find", kind="bug", status="open")` filters on `status`, not on path.
 
 What step 4 owes instead is the **SHA swap**, and it is the one piece the earlier gate was
 silently providing: while archiving waited for `master`, every archived file necessarily
@@ -254,7 +254,7 @@ and any of them is the fix. `git log master --oneline --grep="<subject prefix>"`
 weaker fallback — measured 2026-08-19, subject-keyword probes returned between 2 and 153
 candidates, which is a search rather than a lookup.
 
-This applies to **every SHA-citing surface** — tracker entries (F-N / W-N / U-N / H-N / R-N), `artifact_event` `anchor_commit` / `also_mutates`, `docs/issues/<bug>.md` Fix sections, ADRs. The concise rule + the cross-repo `<repo>:<sha>` prefix convention live in memory `gotchas` (Cherry-Pick SHA Discipline, Cross-Repo Commit References).
+This applies to **every SHA-citing surface** — tracker entries (F-N / W-N / U-N / H-N / R-N), `doc(action="event_create")` `anchor_commit` / `also_mutates`, `docs/issues/<bug>.md` Fix sections, ADRs. The concise rule + the cross-repo `<repo>:<sha>` prefix convention live in memory `gotchas` (Cherry-Pick SHA Discipline, Cross-Repo Commit References).
 
 ## Large-Cohort Promotion (Fast-Forward)
 

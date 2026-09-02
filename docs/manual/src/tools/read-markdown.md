@@ -1,9 +1,19 @@
-# `read_markdown`
+# Markdown reads (`read_file`)
 
 > **Page history:** this page started as a release note for the `read_markdown`
 > improvements landing — adaptive output tiers, `@file_*` buffer ref support,
 > and heading navigation. It now serves as the tool's reference. The
 > "What changed" framing below preserves the historical context.
+>
+> **`read_markdown` no longer exists.** Task 7 of the 2026-09-02 tool-surface
+> collapse folded it into `read_file`, which now returns the heading map for a
+> `.md` path, takes `heading`/`headings` for sections, `start_line`/`end_line`
+> (or native-`Read` `offset`/`limit`) for a slice, and `force=true` for raw
+> lines. **Every capability described below survives unchanged** — only the
+> tool name in front of it moved, so read `read_markdown` here as
+> `read_file`. The file keeps its `read-markdown.md` name deliberately:
+> renaming it would break the `SUMMARY.md` entry and any external link, for no
+> gain a title cannot deliver.
 ## What changed
 
 Three related improvements landed together:

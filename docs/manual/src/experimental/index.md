@@ -32,9 +32,9 @@ contents. The headline additions:
 | Catalog GC, `rehome`, `prune_missing` (schema v10) | [Catalog GC & Repair](../concepts/catalog-gc.md) |
 | `append_entry` + `entry_cite` (schema v9) | [Entry Citations](../concepts/entry-citations.md) |
 | `librarian(action="link_scan")` | [link_scan](../concepts/link-scan.md) |
-| `artifact(action="graft")` | [artifact (action="graft")](../concepts/artifact-graft.md) |
+| `doc(action="graft")` | [artifact (action="graft")](../concepts/artifact-graft.md) |
 | Constitution trackers + `codescout constitution-check` | [Constitution Trackers](../concepts/constitution-trackers.md) |
-| `edit_markdown` miss diagnostics | [Miss Diagnostics](../tools/edit-markdown-miss-diagnostics.md) |
+| `edit_file` miss diagnostics | [Miss Diagnostics](../tools/edit-markdown-miss-diagnostics.md) |
 | `**Valid:**` decay classes + four `doctor` checks | [Statement Validity](../concepts/statement-validity.md) |
 
 Writing the page into the main manual directly — rather than staging it here and
@@ -49,5 +49,5 @@ place readers already look.
   `librarian(action="legibility_scan")`, Windows/EDR support.
 - **2026-05-18 to 2026-05-24**: ripgrep-style text output, the goal-tracker
   archetype, `codescout artifact*` CLI subcommands,
-  `librarian(action="audit_doc_refs")`, the `edit_markdown` frontmatter/`at`
+  `librarian(action="audit_doc_refs")`, the `edit_file` frontmatter/`at`
   additions.

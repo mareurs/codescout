@@ -14,7 +14,7 @@ Returns a self-contained markdown guide covering:
 - **Filter syntax** — leaf format `{"field": {"op": value}}` with composition (`and`/`or`/`not`)
 - **Tracker workflow** — design → create → augment → refresh lifecycle
 - **Augmentation lifecycle** — `gather` / `commit_refresh` / `append_mode` / `history_cap`
-- **Archiving / Moving** — `artifact(action="update", patch={status:"archived"})` and `artifact(action="move")`
+- **Archiving / Moving** — `doc(action="update", patch={status:"archived"})` and `doc(action="move")`
 - **Common mistakes** — filter format inversion, forgetting `repo` on create, direct file edits
 
 ## Why pull it?

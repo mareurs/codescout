@@ -1,11 +1,11 @@
-# `artifact(action="move")` — Atomic File Rename
+# `doc(action="move")` — Atomic File Rename
 
-Atomically renames a librarian-managed artifact file and updates the catalog's `rel_path` in a single operation. Replaces the previous `git mv` + `artifact(update, patch={rel_path:...})` + `librarian(action="reindex")` three-step sequence.
+Atomically renames a librarian-managed artifact file and updates the catalog's `rel_path` in a single operation. Replaces the previous `git mv` + `doc(update, patch={rel_path:...})` + `librarian(action="reindex")` three-step sequence.
 
 ## Usage
 
 ```json
-artifact(action="move", id="<16-hex>", new_rel_path="docs/archive/my-tracker.md")
+doc(action="move", id="<16-hex>", new_rel_path="docs/archive/my-tracker.md")
 ```
 
 ### Parameters
@@ -43,4 +43,4 @@ Git sees the rename automatically in `git status` — no extra `git add` needed.
 
 ## When to use
 
-Use `artifact(action="move")` whenever you need to reorganize a tracker or archive it to a different directory. Do **not** use `git mv` or `fs::rename` directly — those leave the catalog stale until the next reindex.
+Use `doc(action="move")` whenever you need to reorganize a tracker or archive it to a different directory. Do **not** use `git mv` or `fs::rename` directly — those leave the catalog stale until the next reindex.

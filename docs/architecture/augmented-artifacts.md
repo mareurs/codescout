@@ -8,8 +8,8 @@ state I cannot summarize in prose" surface.
 This page is the mental model. The implementation lives in
 `src/librarian/catalog/augmentation.rs` (catalog DB row, merge_params
 validation) and `src/cli/mod.rs::artifact_augment` (CLI entry); the tool
-surfaces are `artifact_augment`, `artifact_refresh`, and
-`artifact(action="update", commit_refresh=true)`.
+surfaces are `doc(action="augment")`, `doc(action="gather")` / `doc(action="list_stale")`, and
+`doc(action="update", commit_refresh=true)`.
 
 ## Why this exists
 
@@ -36,7 +36,7 @@ carries four things, and a reader — human or LLM — gets all of them at once:
 
 1. **Data** — structured rows in `params`. Naming the array via
    `entry_collection` makes them filterable with
-   `artifact(action="get", entry_filter=…)`.
+   `doc(action="get", entry_filter=…)`.
 2. **Rendering** — an optional `render_template` projects `params` into the
    `librarian(action="context")` bundle — **not** into the `.md` file on disk. See
    § *How render_template works* for what this does and does not keep in sync.
@@ -46,7 +46,7 @@ carries four things, and a reader — human or LLM — gets all of them at once:
    maintain this tracker, what its params mean, which gather sources refresh
    it.* The artifact teaches the reader how to use the artifact.
 4. **History** — every body write emits a `field_patch` event;
-   `artifact_event(action="list")` plus `artifact(action="state_at")` /
+   `doc(action="event_list")` plus `doc(action="state_at")` /
    `librarian(action="workspace_state_at")` answer "what did this tracker say
    at commit X / hold last week."
 
@@ -57,7 +57,7 @@ proofs carry all four faces: `tool-usage-patterns` (id `f2ecdd76a6189efb`) and
 
 **Why state this explicitly.** Usage telemetry across two independent codebases
 shows the capability is *undiscovered at the point of use*: agents hand-maintain
-structured tracker tables with `edit_markdown` (380 calls across 39 files in
+structured tracker tables with `edit_file` (380 calls across 39 files in
 codescout; 659 across 59 files in MRV-poc) while `entry_collection` is set on
 6 artifacts in one repo and **zero** in the other, and the time-travel surfaces
 sit near 0.1% of calls. The gap is discoverability, not missing mechanism — the
@@ -70,9 +70,9 @@ An augmented artifact has **three controllable channels**:
 
 | Channel | Where it lives | Lifecycle | Edited by |
 |---|---|---|---|
-| **Body** | The `.md` file on disk | Written by whoever edits it — **never auto-rendered from params** | Auto-render OR human via `edit_markdown` |
-| **Params** | Catalog DB row (`augmentations.params`) | Mutated via `artifact_augment(merge=true, ...)` or by the producing tool | Programmatic only — never hand-edit a managed file's params via filesystem |
-| **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `artifact_refresh(gather)` | `artifact_augment(merge=false, prompt=..., params=...)` to replace |
+| **Body** | The `.md` file on disk | Written by whoever edits it — **never auto-rendered from params** | Auto-render OR human via `edit_file` |
+| **Params** | Catalog DB row (`augmentations.params`) | Mutated via `doc(action="augment", merge=true, augment={params: ...})` or by the producing tool | Programmatic only — never hand-edit a managed file's params via filesystem |
+| **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `doc(action="gather")` | `doc(action="augment", merge=false, augment={prompt: ..., params=...)` to replace |
 
 Plus four optional fields stored alongside the prompt:
 
@@ -86,7 +86,7 @@ Plus four optional fields stored alongside the prompt:
 
 ## Why some markdown is "managed" (refuses direct read/edit)
 
-When an artifact has an augmentation, `read_markdown` and `edit_markdown`
+When an artifact has an augmentation, `read_file` and `edit_file`
 refuse to touch the file directly. The rationale: the body is **not the
 source of truth** — params are. A direct edit would either be silently
 overwritten by the next refresh, or would create a body that doesn't
@@ -99,9 +99,9 @@ The error redirects to the artifact tools:
 do not read or edit it directly
 
 Use artifact tools instead:
-• Read:   artifact(action="get", id="<id>")
-• Find:   artifact(action="find", semantic="<topic>")
-• Edit:   artifact(action="update", id="<id>", patch={...})
+• Read:   doc(action="get", id="<id>")
+• Find:   doc(action="find", semantic="<topic>")
+• Edit:   doc(action="update", id="<id>", patch={...})
 ```
 
 The gate is intentional friction — it forces you through a path that
@@ -111,13 +111,13 @@ respects the params/body distinction.
 
 ## Body editing surfaces — `body_edits` vs. `body`
 
-`artifact(update)` exposes two body-mutation modes plus an escape hatch.
+`doc(update)` exposes two body-mutation modes plus an escape hatch.
 Picking the wrong one cost a real ~600-line tracker body in 2026-05-25
 (see `docs/issues/`).
 
 | Patch shape | Effect | Guard |
 |---|---|---|
-| `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_markdown`'s batch shape. Atomic (all-or-nothing). | `action="replace"` is refused when it would consume nested headings — **unless** `include_subsections: true`, which is the guard's off switch, not a guard. |
+| `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_file`'s batch shape. Atomic (all-or-nothing). | `action="replace"` is refused when it would consume nested headings — **unless** `include_subsections: true`, which is the guard's off switch, not a guard. |
 | `patch={body: "..."}` | Total overwrite — the new string becomes the entire body. | **50% shrink guard.** If the new body loses more than 50% of the old body's **bytes or lines**, the write is refused with `RecoverableError("body-shrink guard: ...")`, naming which dimension went over. |
 | `force=true` (top-level on the call) | Bypass the shrink guard. | Use only when shrinkage is intentional (full rewrite, archiving). |
 
@@ -148,15 +148,15 @@ text than it removed records `prev_bytes < new_bytes` and reads as a benign
 append. `replaced_subsections` (added 2026-08-06) is the field that names the
 destroyed headings.
 
-Query via `artifact_event(action="list", artifact_id=X)` — a single body
+Query via `doc(action="event_list", id=X)` — a single body
 write that shouldn't have happened is now reconstructable from the event
 timeline without scraping `usage.db`.
 
 **The anti-pattern to remember.** The 2026-05-25 incident:
 
 ```text
-1. artifact(get, id=X, heading="Currently Shipped")  → returns one section
-2. artifact(update, id=X, patch={body: <just that section>})  → WIPES body
+1. doc(get, id=X, heading="Currently Shipped")  → returns one section
+2. doc(update, id=X, patch={body: <just that section>})  → WIPES body
 ```
 
 **The second anti-pattern.** `body_edits` is surgical, but not *automatically*
@@ -165,7 +165,7 @@ means reconstructing that whole section from memory — and every child you forg
 to re-emit is deleted:
 
 ```text
-artifact(update, id=X, patch={body_edits: [{
+doc(update, id=X, patch={body_edits: [{
     heading: "## Wins", action: "replace", include_subsections: true,
     content: "## Wins\n\n### W-3 — new\n..."     # W-1 and W-2 are GONE
 }]})
@@ -179,7 +179,7 @@ never re-emits content it isn't changing. Filed and fixed in `45669701`, which a
 the bug file is archived at
 `docs/issues/archive/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
 
-The `artifact(get, heading=)` shape *returns* a section, but
+The `doc(get, heading=)` shape *returns* a section, but
 `patch={body}` *replaces* the entire body with whatever string is passed.
 The LLM's mental model "I have the body in hand, I'll write it back" is
 wrong — it has *a section* in hand. The shrink guard catches the >50%
@@ -201,20 +201,20 @@ arm was added the next day in response. See
 
 **Rule: never build a write payload from a `get` response.** Rebuild it from
 the file or from `git show <sha>:<path>`.
-## The artifact_augment lifecycle
+## The `doc(action="augment")` lifecycle
 
-`artifact_augment` controls the prompt + params + ancillary fields:
+`doc(action="augment")` controls the prompt + params + ancillary fields:
 
 | Call shape | What happens |
 |---|---|
-| `artifact_augment(id, prompt=..., params=...)` (merge=false, default) | **Full replace.** Overwrites ALL six caller-controlled fields: prompt, params, render_template, params_schema, append_mode, history_cap. Fields you omit silently reset to None / false. |
-| `artifact_augment(id, merge=true, params={...})` | **Params-only patch.** RFC 7396 merge-patch into existing params. Prompt and other fields unchanged. |
-| `artifact_augment(id, merge=true, params={key: null})` | **Delete a params key.** RFC 7396 semantics: null deletes. |
-| `artifact_refresh(action="gather", id)` | **Read-only gather** — collects context for an LLM to synthesize. Does NOT write. The caller must follow up with `artifact(update, commit_refresh=true)`. |
-| `artifact(update, id, commit_refresh=true)` | Records that a refresh cycle completed. Updates `last_refreshed_at` and optionally bumps body. |
+| `doc(action="augment", id, augment={prompt: ..., params: ...})` (merge=false, default) | **Full replace.** Overwrites ALL six caller-controlled fields: prompt, params, render_template, params_schema, append_mode, history_cap. Fields you omit silently reset to None / false. |
+| `doc(action="augment", id, merge=true, augment={params: {...}})` | **Params-only patch.** RFC 7396 merge-patch into existing params. Prompt and other fields unchanged. |
+| `doc(action="augment", id, merge=true, augment={params: {key: null}})` | **Delete a params key.** RFC 7396 semantics: null deletes. |
+| `doc(action="gather", id)` | **Read-only gather** — collects context for an LLM to synthesize. Does NOT write. The caller must follow up with `doc(update, commit_refresh=true)`. |
+| `doc(update, id, commit_refresh=true)` | Records that a refresh cycle completed. Updates `last_refreshed_at` and optionally bumps body. |
 
 The `merge=false` overwrite semantics are a foot-gun: if you mean to update
-only the prompt but call `artifact_augment(id, prompt="new")` without
+only the prompt but call `doc(action="augment", id, augment={prompt: "new"})` without
 passing the existing params, params silently reset to `{}`. **Use
 `merge=true` when patching one field.** Use `merge=false` only when
 deliberately replacing the entire augmentation.
@@ -250,8 +250,8 @@ the augmentation's *stored* template:
 So **the stored `render_template` never reaches the file on disk.** The refresh
 path does not consume it: every `render_template` occurrence in
 `tools/refresh.rs` and `tools/update.rs` is a test fixture set to `None`. The
-body is whatever the prompt + LLM produce during `artifact_refresh(gather) →
-artifact(update, commit_refresh=true)`, with or without a template.
+body is whatever the prompt + LLM produce during `doc(action="gather") →
+doc(update, commit_refresh=true)`, with or without a template.
 
 The one tracker whose body *does* track params proves the rule rather than
 breaking it: `legibility_scan` had to write its own body-projector, and the
@@ -282,7 +282,7 @@ lifecycle state; the body heading is the entry's identity. See
 Inspect:
 
 ```text
-artifact(action="get", id="fc97be512112fea4", full=true)
+doc(action="get", id="fc97be512112fea4", full=true)
 read_file("@tool_*", json_path="$.augmentation.params")
 ```
 
@@ -301,7 +301,7 @@ the artifact is `f2ecdd76a6189efb`, as CLAUDE.md and the file's own frontmatter
 both state. And the split is *not* "structured-at-top, prose-at-bottom": the
 file on disk contains frontmatter, prose, and 22 `### T-N` headings, with **zero
 table rows and no rendered block**. The structured rows live only in the catalog;
-reach them with `artifact(action="get", id="f2ecdd76a6189efb", entry_filter={…})`.
+reach them with `doc(action="get", id="f2ecdd76a6189efb", entry_filter={…})`.
 
 That shape is the good one, incidentally — one heading per entry is what keeps
 its `T-N` citations resolvable. Measured project-wide the same day, this tracker
@@ -317,12 +317,12 @@ instead of headings contributed roughly thirty.
   `librarian(action="context")`, never into the file, and the refresh path does
   not consume it at all. A refresh cycle cannot fix this because there is nothing
   to fix. If the body must show the data, write it there yourself via
-  `artifact(update, patch={body_edits: […]})` — or accept that the catalog is the
+  `doc(update, patch={body_edits: […]})` — or accept that the catalog is the
   only home for it and query with `entry_filter`. (This bullet previously told
   readers to "force a refresh", sending them into a cycle that cannot change the
   file.)
-- **`read_markdown` rejects the file** — managed artifact gate is firing.
-  Route through `artifact(get, full=true)` then `read_file` with
+- **`read_file` rejects the file** — managed artifact gate is firing.
+  Route through `doc(get, full=true)` then `read_file` with
   `json_path` to extract the field you need.
 - **Params field is 5+ MB** — your `read_file` will route the result to a
   `@file_*` buffer. Use `json_path` to extract specific fields rather than
@@ -332,7 +332,7 @@ instead of headings contributed roughly thirty.
   `(id, kind, status, tags, title, abs_path, owners, topic)` but NOT
   params content. If you want to query by params (e.g. "find all
   goal-trackers with status_log entries past 2026-04"), you need to
-  augment the librarian or post-filter after `artifact(find)`.
+  augment the librarian or post-filter after `doc(find)`.
 
 ## When to augment vs. when not to
 
@@ -352,7 +352,7 @@ Do NOT augment when:
 
 ## Pointers
 
-- Tool surfaces: `artifact_augment`, `artifact_refresh`, `artifact(update, commit_refresh=true)`
+- Tool surfaces: `doc(action="augment")`, `doc(action="gather")` / `doc(action="list_stale")`, `doc(update, commit_refresh=true)`
 - Implementation: `src/librarian/catalog/augmentation.rs` (row + merge + schema validation)
 - Schema: `params_schema` is enforced on every merge via `merge_params`
   (see `src/librarian/catalog/augmentation.rs::merge_params`)

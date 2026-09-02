@@ -64,14 +64,14 @@ someone said so out loud, and it is a **denominator**, not a catch: a confirming
 entered the wrong-number population and bears on the base rate rather than on the hit rate.
 Absorbing it as a near-catch would make the population look self-correcting.
 
-## One mutation per guarded SITE — the `artifact_augment` run
+## One mutation per guarded SITE — the `doc(action="augment")` run
 
 **Law:** mutate once per guarded SITE, not once per feature.
 
 A mutation run answers a question about one *line*. Where a law is implemented at N call sites, one
 kill proves exactly one site is guarded and says nothing about the other N−1.
 
-Measured: `artifact_augment` had two shape-writing paths, and mutating each separately killed
+Measured: the augment path (then the standalone `artifact_augment` tool) had two shape-writing paths, and mutating each separately killed
 **different** tests, neither failing under the other's mutation — so a single mutation would have
 supported "covered" with the second site unguarded.
 

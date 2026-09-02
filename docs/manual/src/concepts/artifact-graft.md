@@ -1,4 +1,4 @@
-# `artifact(action="graft")` — Fold One Artifact Into Another
+# `doc(action="graft")` — Fold One Artifact Into Another
 
 > ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
 > crates.io; the API may change without notice. The full cohort is listed under
@@ -6,7 +6,7 @@
 > [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
 
 ```text
-artifact(action="graft", from_id="<source>", into_id="<destination>")
+doc(action="graft", from_id="<source>", into_id="<destination>")
 ```
 
 Merges the source artifact into the destination and deletes the source.

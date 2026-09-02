@@ -2365,6 +2365,13 @@ mod tests {
                 "allocate_entry_id: `/p/docs/trackers/x.md` does not declare an entry_prefix",
                 Some("ledger_not_declared"),
             ),
+            // FIXTURE NOTE — the pre-2026-09-02 tool name and message are DELIBERATE, and a
+            // rename sweep must not "fix" them. `usage.db` is a historical store: rows
+            // recorded before the tool-surface collapse carry `tool_name = "artifact_augment"`
+            // and the old message text, and this classifier still has to map them. The
+            // discriminating substring (`no augmentation for artifact`) is common to both the
+            // old and current messages, so updating this line would keep the test GREEN while
+            // silently dropping the only coverage of the historical form.
             (
                 "artifact_augment",
                 "no augmentation for artifact '5696563f06b2c222' — call artifact_augment first",

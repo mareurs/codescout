@@ -1,4 +1,4 @@
-# `edit_markdown` Miss Diagnostics
+# `edit_file` Miss Diagnostics
 
 > ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
 > crates.io; the API may change without notice. The full cohort is listed under
@@ -47,7 +47,7 @@ big enough to make it slow.
 
 ## It survives into artifacts
 
-The same diagnostic reaches `artifact(action="update", patch={body_edits: […]})`,
+The same diagnostic reaches `doc(action="update", patch={body_edits: […]})`,
 so editing a managed tracker gets the same explanation as editing a plain
 markdown file — the tiers do not stop at the tool boundary.
 

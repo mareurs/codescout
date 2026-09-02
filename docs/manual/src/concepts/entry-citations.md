@@ -18,7 +18,7 @@ one of those, and whichever you read can be behind the other — a body that ran
 ahead of params reissues an id that a heading already claims.
 
 ```text
-artifact(action="append_entry",
+doc(action="append_entry",
          id="<tracker-id>",
          id_prefix="F",
          entry_collection="frictions",
@@ -55,7 +55,7 @@ fails.
 Then **omit `entry_collection`** to reserve an id without writing anything:
 
 ```text
-artifact(action="append_entry", id="<ledger-id>", id_prefix="R")
+doc(action="append_entry", id="<ledger-id>", id_prefix="R")
 → { "id": "R-42", "reserved": true,
     "body_max": 41, "reserved_max": 41, "frontmatter_max": 41,
     "next_step": "… Add the section as `## R-42 — <title>` …" }
@@ -78,7 +78,7 @@ entry_high_water_HY: 11
 ```
 
 Do not hand-edit it downward, and do not drop it when compacting. It is the only one of
-the three inputs that survives a fresh clone, an `artifact(action="move")`, and compaction
+the three inputs that survives a fresh clone, an `doc(action="move")`, and compaction
 — the live body's maximum *falls* when entries move to an archive companion, and the
 machine-local reservation does not travel at all. Without the committed mark a
 compacted-then-archived ledger reissues `HY-1`, and because the resolver binds a token to
@@ -103,7 +103,7 @@ merge.
 Pass `cites` alongside the entry:
 
 ```text
-artifact(action="append_entry",
+doc(action="append_entry",
          id="<tracker-id>",
          id_prefix="W",
          entry_collection="wins",
@@ -128,7 +128,7 @@ Not supported from a worktree checkout.
 ## Reading them back
 
 ```text
-artifact(action="get", id="<tracker-id>", include_links=true)
+doc(action="get", id="<tracker-id>", include_links=true)
 ```
 
 surfaces `entry_cite` edges alongside artifact-level links.
@@ -139,7 +139,7 @@ surfaces `entry_cite` edges alongside artifact-level links.
 entry. [`link_scan`](link-scan.md) is the *derive* path: it reads prose that
 already cites tokens and materializes the same class of edge after the fact.
 Both are appropriate; neither should be hand-created via
-`artifact(action="link")`.
+`doc(action="link")`.
 
 ## Where this lives
 
