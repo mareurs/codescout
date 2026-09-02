@@ -90,6 +90,50 @@ belief. That rule treats the **registry** as the ground truth the self-report dr
 This bug is in the reader of that ground truth, so the prescribed remedy does not cover it:
 consulting the registry through this instrument reproduces the same error by a different route.
 
+## The corrupted input's evidence is destroyed on process exit
+
+Raised 2026-09-02 by session `f13f8169-93a1-4392-95d1-8774d296e0c0` (cited by sessionId, not
+name, for the reason this file is about), and measured here rather than taken on report.
+
+The defect corrupts a value whose **ground truth dies with the process**. The two identifiers a
+routing decision can be made from have *opposite* persistence:
+
+| identifier | where it lives | survives process exit? |
+|---|---|---|
+| registry `name` | `$CLAUDE_CONFIG_DIR/sessions/<pid>.json` | **no** — file removed on exit |
+| `sessionId` | a path component of `/tmp/claude-*/<project>/<session-id>/scratchpad`, and quoted in message text | **yes** |
+
+Measured on this machine 2026-09-02: **90 scratchpad directories for this project alone, 81 of
+them belonging to no live session** — so the sessionId's trace outlives its process by a wide
+margin. Against that, pid `4052913`'s registry row is absent from every one of the three
+profiles, and its socket is gone.
+
+So a routing decision made from a **name** cannot be audited afterwards *even in principle*: the
+only record of what the instrument displayed is deleted by the event that ends the session. A
+decision made from a **sessionId** can be.
+
+This is additive to the absorption described under *Symptom*, and distinct from it. Absorption is
+about the **symptom** being consumed by correct advice for another cause; this is about the
+**evidence** being unrecoverable. A defect can be loud and still unauditable, or silent and fully
+auditable; this one is both silent and unauditable, and the second property is what makes the
+rate unmeasurable retrospectively — the 1-in-21 figure above is a *current* census and can never
+be computed over sessions that have already exited.
+
+### The confirming observation, and what it does not establish
+
+That session independently hit the absorption path from the other side: addressed a peer by the
+name its own run of Step 1 displayed, received `No agent named 'X' is reachable`, followed the
+skill's advice to switch to the `uds:` form, and succeeded — with nothing at any point
+suggesting a name had been wrong. That is this file's *Symptom* section observed in the field by
+a second party.
+
+**It does not establish that the regex caused that particular misroute, and it is recorded here
+as not establishing it.** The session states it held the target's sessionId and routed by name
+anyway, contrary to `CLAUDE.md` § *Observer Blindness*; and the target's registry row is now
+gone, so what the instrument displayed for it is unverifiable in the sense above — this section
+is its own worked example. Two candidate causes, one operator error and one instrument defect,
+and the discriminating record no longer exists. Attributing it to the regex would be the
+convenient reading, not the supported one.
 ## Proposed fix
 
 Parse the JSON:
@@ -112,4 +156,3 @@ a property of the expression.
 
 Not fixed. Filed on notice during unrelated work; the skill remains usable via the `uds:`
 addressing form, which does not depend on the name column.
-
