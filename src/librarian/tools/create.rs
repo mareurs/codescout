@@ -56,6 +56,15 @@ pub struct AugmentSpec {
     #[serde(default)]
     pub append_mode: bool,
     pub history_cap: Option<i64>,
+    /// F4 (2026-09-02 fix round): `doc`'s shared `augment` schema object advertises
+    /// `params_path` (it is honored by `doc(action="augment")`), so a caller following
+    /// that schema against `create` got a raw serde "unknown field" error before this
+    /// field existed — a schema promising acceptance while the deserializer refused it.
+    /// Accepted here (so the error is ours to shape) and explicitly rejected in `call`
+    /// with a `RecoverableError` naming why: `create`'s augmentation is written from
+    /// `params` inline, in the same call as the file write, and there is no natural
+    /// point to read a caller-supplied path from disk in that sequence.
+    pub params_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -289,6 +298,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.")
     })?;
+
+    // F4: `params_path` is advertised on the shared `augment` schema object (honored
+    // by `doc(action="augment")`) but not meaningful here — `create` writes the
+    // augmentation from `augment.params` inline, in the same call as the artifact
+    // file write, and there is no natural point in that sequence to read a
+    // caller-supplied path from disk. Reject fast, before any filesystem or catalog
+    // work, with a clean message naming the reason rather than letting serde's
+    // `deny_unknown_fields` produce a raw "unknown field" error for a field the
+    // schema said was fine.
+    if let Some(aug) = &a.augment {
+        if aug.params_path.is_some() {
+            return Err(RecoverableError::with_hint(
+                "doc(action=\"create\") augment.params_path is not supported",
+                "params_path is only honored by doc(action=\"augment\") — for create, pass \
+                 augment.params inline instead of a file path.",
+            ));
+        }
+    }
 
     // Resolve base directory: explicit repo arg looks up in workspace.roots
     // (legacy compatibility), otherwise derive from current_project.abs_path.
@@ -793,6 +820,41 @@ mod tests {
         assert!(
             msg.contains("render_tempalte") || msg.contains("unknown field"),
             "the error must name the offending key, got: {msg}"
+        );
+    }
+
+    /// F4 (2026-09-02 fix round): the shared `augment` schema object in `artifact.rs`
+    /// advertises `params_path` (honored by `doc(action="augment")`), but this struct's
+    /// `deny_unknown_fields` used to refuse it — so `doc(action="create",
+    /// augment={prompt:"x", params_path:"/abs/p.json"})` failed with a raw serde
+    /// "unknown field" error, contradicting the schema that told the caller the field
+    /// was fine. `params_path` must now be ACCEPTED at deserialization and REFUSED with
+    /// a clean, recoverable message naming why `create` can't take it — not silently
+    /// dropped, and not a bare serde parse failure.
+    #[tokio::test]
+    async fn create_augment_rejects_params_path_with_a_recoverable_hint() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "trackers/params-path.md", "kind": "tracker",
+                "title": "Params path", "body": "b",
+                "augment": { "prompt": "p", "params_path": "/abs/p.json" }
+            }),
+        )
+        .await
+        .expect_err("augment.params_path must be refused, not silently accepted or dropped");
+
+        let re = match err.downcast_ref::<RecoverableError>() {
+            Some(re) => re,
+            None => panic!(
+                "must be a RecoverableError naming the reason, not a raw parse failure: {err}"
+            ),
+        };
+        assert!(
+            re.to_string().contains("params_path"),
+            "the refusal must name the offending field: {re}"
         );
     }
 

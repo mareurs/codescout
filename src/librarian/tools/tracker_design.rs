@@ -1,6 +1,6 @@
 //! `tracker_design` — teaching tool. Returns a system_prompt + a library of
 //! archetypes + the existing-tracker landscape so the agent can compose a
-//! well-shaped tracker spec and call `artifact_create` with confidence.
+//! well-shaped tracker spec and call `doc(action="create")` with confidence.
 //!
 //! Archetype-driven (not intent-driven) for v1: server stays stateless, no
 //! synthesis cost, transparent to the agent. Intent-driven tailoring is
@@ -575,7 +575,7 @@ duplicate that is worded differently, which is the collision that actually happe
 
 ## Final step
 
-One call. `artifact_create` — `kind=tracker`, `status=active`, `rel_path`
+One call. `doc(action="create")` — `kind=tracker`, `status=active`, `rel_path`
 (`docs/trackers/<slug>.md`), `title`, `topic`, `body` (Step 6), and `augment={...}`.
 
 `augment` takes the **whole** augmentation, so there is no follow-up call to forget:
@@ -583,7 +583,7 @@ One call. `artifact_create` — `kind=tracker`, `status=active`, `rel_path`
 `entry_collection` (Step 5b), `append_mode`, `history_cap`. An unknown key is **rejected, not
 ignored** — a typo fails loudly instead of vanishing.
 
-To change an augmentation afterwards use `doc(action="augment", id=..., merge=true, ...)`.
+To change an augmentation afterwards use `doc(action="augment", id=..., merge=true, augment={...})`.
 **`merge=true` matters:** `merge=false` overwrites all seven fields, resetting everything you omit.
 "#;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -658,7 +658,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "existing_trackers": existing,
         "existing_trackers_total": total_trackers,
         "intent": a.intent,
-        "next_step": "Pick an archetype, then call librarian(tracker_design, archetype=\"<name>\") for its examples. Compose the spec and call artifact_create with kind=tracker, status=active, body, and augment={prompt, params, render_template, params_schema, entry_collection} — augment takes the full augmentation in one call, and rejects unknown keys.",
+        "next_step": "Pick an archetype, then call librarian(tracker_design, archetype=\"<name>\") for its examples. Compose the spec and call doc(action=\"create\") with kind=tracker, status=active, body, and augment={prompt, params, render_template, params_schema, entry_collection} — augment takes the full augmentation in one call, and rejects unknown keys.",
     });
 
     if total_trackers > EXISTING_TRACKERS_CAP {
@@ -698,7 +698,10 @@ mod tests {
         assert_eq!(v["design_version"], "1");
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
         assert_eq!(v["archetypes"].as_array().unwrap().len(), 8);
-        assert!(v["next_step"].as_str().unwrap().contains("artifact_create"));
+        assert!(v["next_step"]
+            .as_str()
+            .unwrap()
+            .contains("doc(action=\"create\")"));
     }
 
     /// BL-5. This action exists to *teach the caller before they act* — CLAUDE.md

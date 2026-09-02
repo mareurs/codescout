@@ -204,11 +204,11 @@ impl Tool for Artifact {
                 },
                 "augment": {
                     "type": "object",
-                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. action=\"augment\": attach or replace a persistent prompt + params on any artifact (merge=false, default) or patch only the fields you provide (merge=true — see the top-level `merge` property). Fields below are the augmentation's own — see that tool for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
+                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. action=\"augment\": attach or replace a persistent prompt + params on any artifact (merge=false, default) or patch only the fields you provide (merge=true — see the top-level `merge` property). Fields below are augment's own — see that action's own field descriptions for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "Required when merge=false. Persistent instruction: what to maintain and how to format it."
+                            "description": "Required when merge=false (create/replace). Not required when merge=true — a merge call may patch only params/render_template/etc. and leave the existing prompt untouched. Persistent instruction: what to maintain and how to format it."
                         },
                         "params": {
                             "type": "object",
@@ -218,13 +218,29 @@ impl Tool for Artifact {
                             "type": "string",
                             "description": "Filesystem path to a JSON file holding the params payload, read server-side (absolute path recommended). Mutually exclusive with params. Use when params are too large to pass inline (≳9 KB) — see get_guide(\"librarian\") § Augmentation Lifecycle."
                         },
-                        "render_template": { "type": "string" },
-                        "params_schema": { "type": "object" },
-                        "entry_collection": { "type": "string" },
-                        "append_mode": { "type": "boolean" },
-                        "history_cap": { "type": "integer" }
+                        "render_template": {
+                            "type": "string",
+                            "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body."
+                        },
+                        "params_schema": {
+                            "type": "object",
+                            "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
+                        },
+                        "entry_collection": {
+                            "type": "string",
+                            "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables doc(get, entry_filter=...)."
+                        },
+                        "append_mode": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block."
+                        },
+                        "history_cap": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append."
+                        }
                     },
-                    "required": ["prompt"],
                     "additionalProperties": false
                 },
                 "merge": {
@@ -620,6 +636,108 @@ mod tests {
         use crate::tools::param_probe::assert_required_are_advertised;
 
         assert_required_are_advertised("doc", &Artifact.input_schema(), &probe_spec());
+    }
+
+    /// F3 (2026-09-02 fix round): folding the standalone `artifact_augment` tool's
+    /// schema into `doc`'s shared `augment` object (Task 5, `5da2537d`) dropped the
+    /// descriptions on five of its properties — `render_template`, `params_schema`,
+    /// `entry_collection`, `append_mode` and `history_cap` — leaving bare `{"type": ...}`
+    /// entries. `every_property_has_a_description` (server.rs) is documented as blind to
+    /// this: it walks only the schema ROOT's `properties`, never a nested object's own
+    /// `properties`, so `doc.augment.properties.*` was never checked by it and still
+    /// isn't — this test is the dedicated check for that one nested object.
+    #[tokio::test]
+    async fn augment_object_properties_all_have_descriptions() {
+        let schema = Artifact.input_schema();
+        let props = &schema["properties"]["augment"]["properties"];
+        for field in [
+            "prompt",
+            "params",
+            "params_path",
+            "render_template",
+            "params_schema",
+            "entry_collection",
+            "append_mode",
+            "history_cap",
+        ] {
+            let desc = props[field]["description"].as_str().unwrap_or_default();
+            assert!(
+                !desc.is_empty(),
+                "doc.augment.properties.{field} has no description — it is invisible to \
+                 every_property_has_a_description (root-only) and must be checked here instead"
+            );
+        }
+    }
+
+    /// F5 (2026-09-02 fix round): the `augment` object's schema declared
+    /// `"required": ["prompt"]`, but `merge=true` calls legitimately omit `prompt` — a
+    /// merge call may patch only `params`/`render_template`/etc. and leave an existing
+    /// prompt untouched (`augment::create_or_replace_augmentation` only requires it on
+    /// the `merge=false` path). CLAUDE.md's own worked example
+    /// (`doc(action="augment", id=…, merge=true, augment={params:{...}})`) violates this
+    /// over-declared schema. JSON Schema's `required` cannot express "required unless a
+    /// sibling top-level field is true", so the fix is to drop it from `required`
+    /// entirely and rely on the runtime enforcement in `augment::call`, which already
+    /// names the condition in its error.
+    #[tokio::test]
+    async fn augment_object_does_not_over_declare_prompt_as_required() {
+        let schema = Artifact.input_schema();
+        let required = &schema["properties"]["augment"]["required"];
+        assert!(
+            required.is_null() || !required.as_array().unwrap().iter().any(|v| v == "prompt"),
+            "doc.augment schema requires 'prompt' unconditionally, but merge=true calls \
+             legitimately omit it — the schema over-declares what the runtime actually enforces"
+        );
+    }
+
+    /// F5, runtime half: the schema no longer claims `prompt` is unconditionally
+    /// required (asserted above); this confirms the runtime behavior that claim was
+    /// deferring to is actually what runs — a prompt-less `merge=true` succeeds, and a
+    /// prompt-less `merge=false` is refused with a message naming the condition.
+    #[tokio::test]
+    async fn augment_prompt_requirement_is_enforced_at_runtime_not_schema() {
+        let ctx = mk_ctx();
+        let id = "cccccccccccccccc";
+        seed_row(&ctx, id);
+
+        // Establish an augmentation first — merge=true patches an EXISTING one,
+        // and the fields under test (prompt-less merge behavior) only make sense
+        // once there is a prompt already on the row to leave untouched.
+        Artifact
+            .call(
+                &ctx,
+                json!({"action": "augment", "id": id, "augment": {"prompt": "keep me"}}),
+            )
+            .await
+            .expect("initial create/replace with prompt must succeed");
+
+        // merge=false, no prompt: refused, naming the condition.
+        let err = Artifact
+            .call(
+                &ctx,
+                json!({"action": "augment", "id": id, "augment": {"params": {"a": 1}}}),
+            )
+            .await
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("prompt") && msg.contains("merge"),
+            "expected the refusal to name the merge=true escape hatch: {msg}"
+        );
+
+        // merge=true, no prompt: succeeds (patches params only).
+        Artifact
+            .call(
+                &ctx,
+                json!({
+                    "action": "augment",
+                    "id": id,
+                    "merge": true,
+                    "augment": {"params": {"a": 1}}
+                }),
+            )
+            .await
+            .expect("merge=true without prompt must succeed — it patches params only");
     }
 
     /// The doc half of

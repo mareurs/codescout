@@ -4636,7 +4636,7 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
                  healthy regardless. The shape survives only in the catalog of a machine \
                  that has not lost it — run librarian(action=\"doctor\", \
                  fix=\"export_augmentations\") THERE and commit the result. Failing that, \
-                 re-author with doc(action=\"augment\", id=…, augment={{prompt=…, …}})."
+                 re-author with doc(action=\"augment\", id=…, augment={{prompt: …, …}})."
             )
         };
 

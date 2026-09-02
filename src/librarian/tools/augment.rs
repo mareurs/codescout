@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Args {
     id: String,
     #[serde(default)]
@@ -765,6 +766,30 @@ mod tests {
         let row = augmentation::get(&cat, "a100").unwrap().unwrap();
         assert!(!row.append_mode);
         assert_eq!(row.history_cap, None);
+    }
+
+    /// F1 (2026-09-02 fix round on 5da2537d): `doc.augment`'s schema promises
+    /// "Unknown keys are REJECTED, not ignored" but `Args` had no
+    /// `#[serde(deny_unknown_fields)]`, so a misspelled shape field (e.g.
+    /// `render_tempalte`) silently deserialized as absent instead of refusing —
+    /// writing a half-configured shape while reporting success. Mirrors
+    /// `create::tests::create_augment_rejects_an_unknown_field`, whose
+    /// `AugmentSpec` already carries the attribute.
+    #[tokio::test]
+    async fn rejects_an_unknown_field_instead_of_silently_dropping_it() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "a101");
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": "a101", "prompt": "p", "render_tempalte": "typo"}),
+        )
+        .await
+        .expect_err("a misspelled shape field must be rejected, not silently dropped");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("render_tempalte") || msg.contains("unknown field"),
+            "error must name the unrecognised field so the typo is findable: {msg}"
+        );
     }
 
     // =================================================================

@@ -249,7 +249,7 @@ mod tests {
         crate::librarian::tools::augment::call(
             &ctx,
             serde_json::json!({
-            "id": id,
+                "id": id,
                 "prompt": "track",
                 "append_mode": true,
             }),
