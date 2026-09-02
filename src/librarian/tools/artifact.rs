@@ -414,6 +414,24 @@ mod tests {
             .unwrap();
         assert!(v.is_array() || v["items"].is_array());
     }
+    /// `gather` dispatches to `super::refresh::call`. A nonexistent id still proves routing:
+    /// `refresh::call` fails past deserialization with "no augmentation for artifact" — a
+    /// message distinct from the `"unknown action"` fallback this test exists to rule out.
+    #[tokio::test]
+    async fn gather_action_routes_correctly() {
+        let err = Artifact
+            .call(
+                &mk_ctx(),
+                serde_json::json!({"action": "gather", "id": PROBE_NO_SUCH_ID}),
+            )
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no augmentation for artifact"),
+            "expected routing to reach refresh::call's augmentation lookup, got: {msg}"
+        );
+    }
 
     #[tokio::test]
     async fn dispatch_stamps_the_audit_verb() {
@@ -514,7 +532,7 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // 56 labelled keys across the 17 actions as of 2026-09-02 (Task 6 folded in
+        // 58 labelled keys across the 17 actions as of 2026-09-02 (Task 6 folded in
         // `gather`/`list_stale`). The floor leaves room for the schema to shrink
         // without a false alarm while still catching a break in the `<action>:` label
         // convention.
