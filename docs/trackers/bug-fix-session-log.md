@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 105
+entry_high_water_F: 106
 entry_high_water_W: 101
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 101
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-106 | 2026-09-02 | high | plan-drift | fixed-verified | **A plan named the wrong file in BOTH the places that name it, so the natural check — does the plan contradict itself? — passed cleanly.** Task 10's Files list said `artifact.rs` for the response builder and its Step 6 staged `artifact.rs src/server.rs`; the builder is in `tools/find.rs`, which that `git add` names nowhere. Only the schema description was where the plan said. **The second mention reads as corroboration of the first** — internal consistency is not evidence of external correctness, and two expressions of one fact fail together because they share an author and one mistake. The shipped failure would have been the expensive shape, not a loud one: a tool schema advertising `matched` (line range, entry token, snippet) beside a build emitting none of it, with `tools/find.rs` simply unmodified and untested, so **the gate stays green**. Caught by one `grep` for `semantic_find` before the first edit, run only because Task 8 had touched a file the plan did not name. Owed by any plan step naming both a file and a `git add`: re-derive the staging line from where the symbol lives. Sibling of `F-105` — same plan, same root, different mechanism, neither catchable from inside the document |
 | F-105 | 2026-09-02 | high | test-rigor | fixed-verified | **A plan specified a complete test that could not fail, and the reason was a fallback the plan never mentions.** Task 9's test asserted only that `context`'s candidate ids hold no duplicate. Two defects were loud (it read `candidate_ids`, a field the tool does not emit; it called two non-existent helpers). The third is the one a careful transcription still ships: the fixture supplied **no embedder and no store**, which routes `context`'s topic branch into a `title\|topic contains` fallback that is **artifact-grain** — so the distinctness assertion is satisfied by the fallback while exercising none of the code under test, and is monotone under narrowing besides, so an empty page satisfies it too. Fix the two loud defects and it is green on a tree with `max_per_artifact` deleted. **The remedy is a fixture property, not an assertion:** the topic string matches no artifact's title or topic, so the fallback returns **zero** rows and a skipped semantic path reds a positive assertion instead of passing in silence. Adds a question the monotone-direction law does not reach — *what runs INSTEAD when this path is unavailable, and does that also pass?* A fallback is not a mutation of the feature, it is a second implementation of the same signature |
 | F-104 | 2026-09-02 | med | delivery-path | promoted-to-bug-tracker | **The notice I fixed, verified and shipped is injected into the response and then discarded by 18 compact renderers.** `inject_notice` writes `_workspace_notice` into the `Value`; `call_content` hands that `Value` to `self.format_compact(&val)`, and no `format_compact` reads the key — so it survives only on the pretty-JSON branch. It reaches `artifact`; it does not reach `symbols`, `grep`, `tree`, `read_file`, `references`, `semantic_search`. **Both regression tests drive `EchoTool`, which takes the pretty-JSON branch**, so they exercise the one path production read tools do not; the two mutations I ran killed on the **decision** path (`notice_once`, `workspace_override`) and nothing reaches the **delivery** path. Found by a `/mcp` reconnect that recreated the original conditions, with a **refused write as the control** — the guard gates on the same flag, so its refusal proved every precondition held while two reads stayed silent. Three plausible causes were checked and died at the bytes first (stale binary, worktrees gone, peer activation). The live production check I had reported as satisfying `codescout-0a`'s standing ask is what hid it: every response I read the string in was `artifact`, the one shape where it works |
 | F-103 | 2026-09-02 | med | docs-drift | fixed-verified | **The guide section a tool's caller actually receives is routable by `serves:`, so "the docs" is not one surface.** `489715ef` added `stage_together`/`stage_hint` to `artifact(action="move")` and documented the staging step in `tracker-conventions` § *Bug files* — but the section marked `<!-- serves: artifact.move, artifact.delete -->` in `src/prompts/guides/librarian.md` still printed the pre-fix response example, and `stage_together` appeared nowhere in that file. So the surface designed to teach a move caller taught the old shape. Surfaced **not by review**: the live probe run for `W-100` auto-injected the stale section into the same tool result as a response carrying the two fields it omits — drift and refutation arrived together. *Loudness is a property of a PATH* one layer up: the fix went on a path the caller does not traverse. Owed by anyone changing a response shape — grep `serves: <tool>.<action>` across `src/prompts/guides/`, a check nothing currently runs. Fixed in the same session |
@@ -5432,7 +5433,7 @@ shared checkout with a peer session actively editing three files.
    and nothing else would have shown it. Harmless in content, but it surfaces as an
    unexplained diff in someone else's editor.
 2. **`git add docs/issues`** — staged a whole directory, and swept
-   `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` into commit
+   `docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md` into commit
    `38f15fa1`. That is **~168 lines of the peer's active investigation** (an Update
    section, and a root cause naming the `default_workspace_root` clobber from
    `3be6b587a9c92a7a`), now committed under a message about memory migration that does
@@ -5499,7 +5500,7 @@ uncommitted docs — the coordination half of the same problem).
 
 True of the specific numbers measured this session; the general lesson (prefer mtime/content over commit-history/process-count for live-authorship questions) should outlive them.
 
-**Rests on:** `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` — the bug that prompted the cross-session coordination this friction surfaced in.
+**Rests on:** `docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md` — the bug that prompted the cross-session coordination this friction surfaced in.
 
 ## W-62 — Source-level verification of buddy's `from=` field overturned a peer's self-doubt — and forward-projected the same failure mode
 
@@ -9704,7 +9705,7 @@ profile, so a session reporting its own name quotes a belief rather than reading
 
 ## F-98 — A correctly-scoped retraction left the same claim standing in a second artifact, labelled verified
 
-**Observed:** 2026-09-02, after committing `8343d6ca` to retract a falsified remedy from `docs/issues/2026-09-02-one-ledger-file-serializes-every-class-edit.md`.
+**Observed:** 2026-09-02, after committing `8343d6ca` to retract a falsified remedy from `docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md`.
 
 **When:** Believing the retraction complete and reporting it as such.
 
@@ -10500,6 +10501,47 @@ aborted hook run stashes too. Written up in
 **Rests on:** pre-commit retaining stash patches under `~/.cache/pre-commit/`. If it ever
 starts cleaning them up, the oracle disappears and the class returns to being diagnosable only
 from inside the window.
+
+## F-106 — A plan named the wrong file twice, so cross-checking it against itself confirmed the error
+
+**Category:** plan-drift
+**Severity:** high
+**Status:** fixed-verified
+**Commit:** `95b77262` (Task 10 of `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md`)
+
+**Observed.** Task 10's **Files** list named `src/librarian/tools/artifact.rs` for both the
+response builder and the schema description, and its Step 6 staging line read
+`git add src/librarian/tools/artifact.rs src/server.rs`. Only the *description* is in
+`artifact.rs`. The response builder is in **`tools/find.rs`**, which that `git add` names
+nowhere.
+
+**What makes it worse than a typo: the two statements AGREE.** A Files list and a staging
+line are two expressions of one fact, and the natural check — *does the plan contradict
+itself?* — passes cleanly when both are wrong the same way. Internal consistency is not
+evidence of external correctness, and here it is actively misleading: the second mention
+reads as corroboration of the first.
+
+**The failure it would have produced is the expensive shape.** Not a compile error and not
+an empty result: a tool schema advertising `matched` with a line range, an entry token and a
+snippet, shipped alongside a build that emits none of it. Every caller reads the promise; no
+response carries the field; nothing errors. The gate would have been green, because
+`tools/find.rs` would simply have been left unmodified and untested.
+
+**What caught it.** Not review of the plan — a `grep` for `semantic_find` before writing
+anything, run because Task 8 had touched `tools/find.rs` and the plan said `artifact.rs`.
+One call, and the disagreement was immediate.
+
+**Owed by any plan step that names both a file and a `git add`.** Re-derive the staging line
+from where the symbol actually lives, never from the Files list above it — they share an
+author and a single mistake, so they fail together. The cheap form: `grep` the function the
+step modifies, once, before the first edit. Sibling of `F-105`, which is the same plan being
+wrong about what a test could detect; different mechanism, same root, and neither was
+catchable from inside the document.
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** nothing that decays — this is a claim about two lines of a specific plan and
+the general shape they instantiate.
 
 ## Template for new entries
 

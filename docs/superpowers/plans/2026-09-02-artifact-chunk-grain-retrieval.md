@@ -36,6 +36,7 @@ under another profile; the sessionId survives both).
 | 7 | `04444ba2` | `ffb95976` |
 | 8 | `9e2b93d2`, `dcf3940a` | `ffb95976` |
 | 9 | `e67c3221` | `ffb95976` |
+| 10 | `95b77262` | `ffb95976` |
 
 `19e0e253-6b26-4a74-a201-33c92fbd0b30` is session `codescout-20` (profile `~/.claude`).
 `ffb95976-dc89-4cca-87aa-c026544faf2f` is the session that wrote this block.
@@ -48,17 +49,23 @@ nothing in the tree, so those ticks rest on the commit sequence rather than on a
 observation. Read a tick as *"this task shipped"*, never as *"every step was witnessed"*.
 Task 6 Step 5 is the one exception — it was run and the red observed; see its annotation.
 
-**Tasks 7, 8 and 9 shipped on 2026-09-02**, and unlike the rows above them those three ticks
-*are* a live trace — written by the session that made them, as each landed. **Task 8 closes
-the outage**: between Tasks 6 and 8 artifact semantic search returned an empty page for every
-re-indexed artifact.
+**Tasks 7, 8, 9 and 10 shipped on 2026-09-02**, and unlike the rows above them those four
+ticks *are* a live trace — written by the session that made them, as each landed. **Task 8
+closes the outage**: between Tasks 6 and 8 artifact semantic search returned an empty page
+for every re-indexed artifact.
 
-**Tasks 10–12 have not started.** The negative verification that used to stand here for 7–12
-has been consumed by those three tasks and is not re-derivable: `src/librarian/catalog/find.rs`
-now contains `max_per_artifact`, and Task 7's `gc.rs` half was **withdrawn as redundant**
-rather than performed — the trigger plus the FK cascade already collect chunk vectors, and the
-plan aimed the change at `apply_rehome`, which is not a delete site. Read Task 7's own block
-before treating its absence from `gc.rs` as evidence of anything.
+**Tasks 11–12 have not started.** The negative verification that used to stand here for 7–12
+has been consumed by those four tasks and is not re-derivable:
+`src/librarian/catalog/find.rs` now contains `max_per_artifact`, and Task 7's `gc.rs` half
+was **withdrawn as redundant** rather than performed — the trigger plus the FK cascade
+already collect chunk vectors, and the plan aimed the change at `apply_rehome`, which is not
+a delete site. Read Task 7's own block before treating its absence from `gc.rs` as evidence
+of anything.
+
+**Read each shipped task's own block before reusing its Files list or its `git add` line.**
+Three of the four were wrong about where the code lives or what a test could detect, and
+Task 10's was wrong in **both** places consistently — which is why cross-checking a plan
+against itself does not catch this and reading the code does.
 
 Two carried rulings for whoever picks them up:
 
@@ -1999,6 +2006,46 @@ git -C /home/marius/work/claude/codescout commit -m "fix(librarian): context() p
 
 ## Task 10: `artifact(find, semantic=)` result shape
 
+> **DONE 2026-09-02** by session `ffb95976`. Commit `95b77262`.
+>
+> **The Files list was half wrong, and Step 6 would have committed a lie.** It named
+> `artifact.rs` for both the response builder and the param description, and staged
+> `artifact.rs src/server.rs`. Only the *description* is in `artifact.rs`; the response
+> builder is in **`tools/find.rs`**, which that `git add` line does not name. Followed
+> literally, Task 10 ships a schema advertising `matched` and a build that never emits it —
+> and the two halves of the plan **agree with each other**, so no amount of re-reading the
+> plan catches it. Only reading the code does.
+>
+> **Two departures from the specified code, both in the same direction.**
+>
+> **1. The snippet had no truncation marker.** `chars().take(480)` is
+> `cluster/capped-result-presented-as-complete` by name — a 480-char snippet is
+> indistinguishable from a chunk that happens to end there. It now appends
+> `… [snippet truncated — read the span with artifact(get)]`, and the test asserts **both**
+> directions, because a marker is only informative if its absence is too.
+>
+> **2. `chunk_by_id` is keyed by ARTIFACT id**, like the `distance_by_id` it sits beside —
+> correct only while this caller passes `max_per_artifact = 1`. Raise the cap and a second
+> chunk silently overwrites the first; `rows` collapses the same way, being one
+> `ArtifactRow` per hit. Annotated at the site, naming who owns the restructure, because the
+> failure mode is a wrong `matched` span on a plausible-looking item rather than an error.
+>
+> **Four tests, four kills, none overlapping.** Hardcoding `matched.start_line` to 1 — an
+> artifact-grain answer wearing a chunk-grain shape — gave `left: Number(1), right:
+> Number(9)`. Dropping the marker killed the snippet test. `cap_suppressed > 100` killed the
+> suppression test. Firing the hint **unconditionally** killed its *control*, which emitted
+> `0 further chunk(s) belonging to artifacts already on this page were dropped` — precisely
+> the noise that control exists to prevent.
+>
+> **A wording fix the mutants surfaced.** `semantic_exhausted_hint` said *"this is every
+> matching ROW that exists, not a truncated page"* — unambiguous while hits were
+> artifact-grain, unit-ambiguous the moment they were not, and now read beside
+> `cap_suppressed`, where chunks *were* truncated away. Changed to **ARTIFACT**.
+>
+> **Budget: 56_497 → 56_735**, exact measured total with a log entry, per the constant's own
+> rule. 30 bytes were repaid by tightening the draft first, logged as *prose-golf rather
+> than a correctness fix* so a later sweep does not credit it as one of the good ones.
+
 **Files:**
 - Modify: `src/librarian/tools/artifact.rs` (the `find` response builder and the `semantic` param description)
 - Test: `src/librarian/tools/artifact.rs` test module
@@ -2007,7 +2054,10 @@ git -C /home/marius/work/claude/codescout commit -m "fix(librarian): context() p
 - Consumes: `SemanticHit.chunk`, `SemanticPage.cap_suppressed` (Task 8)
 - Produces: each `items[]` entry gains `matched: {start_line, end_line, entry_token, snippet}` when the hit is chunk-grain; response gains `hints.cap_suppressed` when non-zero.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — four tests, not one: `matched` fields, the
+      suppression hint, its silent control, and the truncation marker in both directions.
+      `run_artifact` / `fixture_with_two_entry_artifact` do not exist; a `seed_entry_chunks`
+      helper does the job in `tools/find.rs`'s own module.
 
 ```rust
 #[tokio::test]
@@ -2021,12 +2071,14 @@ async fn semantic_find_results_carry_the_matched_span_and_entry() {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails** — done as a mutation run against the production
+      path; see the block above for the four kills and their exact messages.
 
 Run: `cargo test --lib semantic_find_results_carry_the_matched_span`
 Expected: FAIL — `matched` is null.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement** — in `tools/find.rs`, NOT `artifact.rs`; plus the truncation
+      marker the specified snippet lacked.
 
 In the `find` response builder, when `hit.chunk` is `Some`:
 
@@ -2065,17 +2117,20 @@ Update the `semantic` param description in the tool schema:
                     "description": "find: natural-language query for semantic search (requires embedder). Hits are CHUNK-grain: each item carries `matched` with the line range, the enclosing entry token (e.g. `W-81`) and a bounded snippet."
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes** — 39/39 `librarian::tools::find` green.
 
 Run: `cargo test --lib librarian::tools::artifact`
 Expected: PASS.
 
-- [ ] **Step 5: Check the prompt-surface gates**
+- [x] **Step 5: Check the prompt-surface gates** — both green after the raise;
+      `prompt_surfaces_reference_only_real_tools` unaffected.
 
 Run: `cargo test --lib prompt_surfaces_reference_only_real_tools ; cargo test --lib tool_surface_char_budget`
 The description grew — if the budget test fails, **raising `TOOL_SURFACE_CHAR_BUDGET` is allowed** (it is a ratchet, not a ceiling). Add a dated log entry stating what bought the bytes.
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit** — `95b77262`, and **the staging line here is wrong**: it
+      omits `src/librarian/tools/find.rs`, where the implementation lives. Committed by
+      pathspec over all three paths, a peer holding ~20 staged paths in the shared index.
 
 ```bash
 cargo fmt
