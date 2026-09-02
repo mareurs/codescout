@@ -4,7 +4,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::{insert_below_header, overflow_head};
-use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
+use super::{
+    normalize_line_nav_aliases, optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext,
+};
 use crate::util::text::extract_lines;
 
 pub struct ReadFile;
@@ -448,40 +450,6 @@ fn over_budget_line_hint(path: &str) -> String {
              For JSON content, read_file(\"{path}\", json_path=\"$.<field>\") addresses fields \
              rather than lines."
         )
-    }
-}
-
-/// Normalize native-`Read`-style `offset`/`limit` into `start_line`/`end_line`.
-///
-/// Claude Code's built-in `Read` takes `(offset, limit)` as a 1-indexed start line
-/// plus a line count, and models reach for that signature out of habit. Mapping it
-/// here — before the buffer fork in [`ReadFile::call`] — lets both the buffer and
-/// real-file paths serve those calls through the normal line-range logic instead of
-/// silently returning the file head (the offset/limit-silently-ignored bug).
-///
-/// `start_line`/`end_line` are authoritative: if either is present the aliases are
-/// left untouched. `offset` maps to `start_line` (1-indexed); `limit` maps to a line
-/// count so `end_line = offset + limit - 1`. With only `limit`, `offset` defaults to
-/// line 1, preserving the prior "first N lines" behavior.
-fn normalize_line_nav_aliases(input: &mut Value) {
-    if optional_u64_param(input, "start_line").is_some()
-        || optional_u64_param(input, "end_line").is_some()
-    {
-        return;
-    }
-    let offset = optional_u64_param(input, "offset");
-    let limit = optional_u64_param(input, "limit");
-    if offset.is_none() && limit.is_none() {
-        return;
-    }
-    let Some(obj) = input.as_object_mut() else {
-        return;
-    };
-    let start = offset.unwrap_or(1);
-    obj.insert("start_line".to_string(), json!(start));
-    if let Some(lim) = limit {
-        let end = start.saturating_add(lim).saturating_sub(1);
-        obj.insert("end_line".to_string(), json!(end));
     }
 }
 

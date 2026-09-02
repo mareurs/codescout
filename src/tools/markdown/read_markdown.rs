@@ -3,7 +3,9 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
+use super::super::{
+    normalize_line_nav_aliases, optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext,
+};
 use crate::util::text::extract_lines;
 
 pub struct ReadMarkdown;
@@ -509,6 +511,15 @@ impl Tool for ReadMarkdown {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        // Normalize native-`Read`-style offset/limit into start_line/end_line BEFORE any
+        // param is read, exactly as `ReadFile::call` does. Iron Law 4 redirects every `.md`
+        // read here, so an agent arriving with native-`Read` habits lands on this tool; until
+        // 2026-09-02 the aliases were dropped in silence and the whole heading map came back
+        // with no error and no `corrections` note.
+        // docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
+        let mut input = input;
+        normalize_line_nav_aliases(&mut input);
+
         let path = crate::tools::require_str_param_or_hint(
             &input,
             "path",

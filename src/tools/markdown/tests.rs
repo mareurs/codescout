@@ -2070,6 +2070,87 @@ async fn line_range_past_eof_returns_recoverable_error() {
 }
 
 #[tokio::test]
+async fn read_markdown_honours_offset_and_limit_like_read_file() {
+    // docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
+    //
+    // `read_file` normalises native-`Read`-style offset/limit into start_line/end_line
+    // before doing anything else; `read_markdown` -- the tool Iron Law 4 REDIRECTS every
+    // `.md` read to -- did not, so an agent arriving with native-Read habits landed on
+    // exactly the tool that dropped them. Silently: the whole heading map came back with
+    // no error and no `corrections` note, which is a plausible answer to a question
+    // nobody asked.
+    let body = "# Title\n\nalpha\nbravo\ncharlie\ndelta\necho\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("aliases.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let out = super::ReadMarkdown
+        .call(
+            serde_json::json!({
+                "path": path.to_str().unwrap(),
+                "offset": 4,
+                "limit": 2,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("offset/limit must be honoured, not dropped");
+
+    let text = serde_json::to_string(&out).unwrap();
+    // offset=4, limit=2 -> lines 4..=5, which is "bravo\ncharlie".
+    assert!(
+        text.contains("bravo") && text.contains("charlie"),
+        "expected the offset/limit slice, got: {text}"
+    );
+    // THE DISCRIMINATING HALF. Containment alone is monotone under WIDENING -- returning
+    // the whole file contains the slice and would pass. These two lines are outside it on
+    // either side, so a dropped alias (which yields the heading map for the whole file)
+    // fails here rather than passing quietly.
+    assert!(
+        !text.contains("alpha") && !text.contains("delta"),
+        "the slice must EXCLUDE lines outside 4..=5; a dropped alias returns everything: {text}"
+    );
+}
+
+#[tokio::test]
+async fn read_markdown_explicit_start_line_wins_over_the_aliases() {
+    // Same precedence rule `read_file` enforces: start_line/end_line are authoritative and
+    // the aliases are left untouched when either is present. Without this, the two tools
+    // would honour the same parameters with different priorities, which is worse than one
+    // of them ignoring the aliases outright -- a caller cannot see which rule applied.
+    let body = "# Title\n\nalpha\nbravo\ncharlie\ndelta\necho\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("precedence.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let out = super::ReadMarkdown
+        .call(
+            serde_json::json!({
+                "path": path.to_str().unwrap(),
+                "start_line": 6,
+                "end_line": 6,
+                "offset": 3,
+                "limit": 1,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("explicit start_line/end_line must win");
+
+    let text = serde_json::to_string(&out).unwrap();
+    assert!(
+        text.contains("delta"),
+        "expected line 6 (start_line), got: {text}"
+    );
+    assert!(
+        !text.contains("alpha"),
+        "offset=3 must NOT override an explicit start_line: {text}"
+    );
+}
+
+#[tokio::test]
 async fn bogus_heading_error_carries_headings_array() {
     let body = "# A\n\n## B\n\n## C\n";
     let dir = tempfile::tempdir().unwrap();
