@@ -722,7 +722,7 @@ mod tests {
     ///
     /// Born red 2026-09-01 on the `Read` and `BodyWrite` rows: before the change the
     /// `stamped` arm refused every access, so a plain `kind: doc` file created by
-    /// `doc(action="create")` was locked to the `artifact` API for life —
+    /// `artifact(action="create")` was locked to the `artifact` API for life —
     /// `docs/TEAM-ONBOARDING.md`, a teammate-facing prose guide, was the instance that
     /// surfaced it.
     ///

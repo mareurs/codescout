@@ -1139,7 +1139,7 @@ mod json_path_hint_tests {
         assert_eq!(default_json_path_hint(&v), "$.rows[*]");
     }
 
-    /// The shape that matters most in practice. An `doc(get)` envelope keeps
+    /// The shape that matters most in practice. A `doc(get)` envelope keeps
     /// its useful payload three levels down while carrying a short `tags` array at
     /// the top; a top-level-only scan names `tags` — real, but not what the caller
     /// wants projected. Measured live 2026-08-16: the hint said `$.tags[*]` (4

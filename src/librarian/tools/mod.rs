@@ -597,7 +597,7 @@ mod required_param_routing_tests {
             );
             let hint = r.hint().unwrap_or_default();
             assert!(
-                hint.contains("e.g.") || hint.contains("artifact("),
+                hint.contains("e.g.") || hint.contains("doc("),
                 "{name}: the refusal must carry a concrete corrected call, not a \
                  restatement of the field name; got hint: {hint}"
             );

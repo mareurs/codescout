@@ -248,7 +248,7 @@ fn every_open_bug_file_declares_one_known_defect_class() {
         found.is_empty(),
         "open bug files with a bad defect-class declaration:\n  {}\n\n\
          Every bug carries exactly one `cluster/<slug>` tag from the closed set in {LEDGER}. \
-         Write it THROUGH THE CATALOG — `artifact(action=\"update\", id=…, patch={{tags:[…]}})` \
+         Write it THROUGH THE CATALOG — `doc(action=\"update\", id=…, patch={{tags:[…]}})` \
          or `codescout artifact update <id> --tags …` — because a direct frontmatter edit does \
          not reach the catalog (BL-48), leaving the tag on disk and invisible to every `find`. \
          If no existing class fits, add one to the ledger rather than forcing a fit: a wrong \

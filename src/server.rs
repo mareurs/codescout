@@ -2536,7 +2536,7 @@ mod tests {
         Some(match tool {
             "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_event"
             | "artifact_refresh" | "librarian" => ActionContract::Inventory,
-            // `artifact` (12 actions) and `edit_markdown` (5) describe by theme on
+            // `doc` (12 actions) and `edit_markdown` (5) describe by theme on
             // purpose: an inventory would not fit the surface budget, and the client
             // already receives the `action` enum itself in the schema. The thematic arm
             // is an escape hatch, so the test asserts against it in the opposite

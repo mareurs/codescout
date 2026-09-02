@@ -619,7 +619,7 @@ mod tests {
                 Some("pwned.txt"),
             ),
             (
-                "artifact",
+                "doc",
                 serde_json::json!({"action": "create", "kind": "tracker", "title": "x"}),
                 None,
             ),

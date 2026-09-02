@@ -76,7 +76,7 @@ use crate::prompts::SESSION_OPENING_GUIDE;
 /// remember.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetrievalKey {
-    /// The shape of the call being made — `artifact.update`, `edit_file`.
+    /// The shape of the call being made — `doc.update`, `edit_file`.
     CallShape,
     /// Where the session is, not what it asked. The opener fires on the first
     /// eligible call regardless of shape.

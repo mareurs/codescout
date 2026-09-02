@@ -703,7 +703,7 @@ n body
                 for shape in &sec.serves {
                     for (other_topic, other) in &seen {
                         // Same-topic overlap is legal and present: `librarian.md`
-                        // declares `artifact.update` from both § *Choosing a
+                        // declares `doc.update` from both § *Choosing a
                         // mode* and § *The shrink guard*, and `match_sections`
                         // delivers both. Only CROSS-topic overlap is ambiguous.
                         if *other_topic == *topic {
