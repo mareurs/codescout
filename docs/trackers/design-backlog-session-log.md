@@ -177,6 +177,19 @@ unrecorded by default.
   (timeout policy), whose "total" lean rested on per-stage being impossible — both are now
   implementable, and total stays the default only because no caller for per-stage has been named.
 
+- [x] **T9 — CAP-12's first decision executed; entry REJECTED.** Done 2026-09-02. Read all eight
+  unmeasured `Resume` sections. **0 of 5 carrying a currency marker were misleading; 3 of 3
+  without one were stale.** The discriminator is not age — an age-keyed `doctor` check would have
+  flagged the five healthy files and caught nothing the marker does not already cover. The
+  convention already exists, invented independently five times and never written down: a `Resume`
+  states its own currency either by dating its heading or by carrying a supersession banner that
+  redirects. It does **not** prevent staleness — it makes staleness *legible*, which is a thing a
+  check cannot do. Recommended follow-on: one sentence in `get_guide("tracker-conventions")`,
+  **not written unilaterally** since the guide is read by every session here. Also discovered the
+  tenth "candidate" is the bug-file template itself — the generator of the 497, not a case — and
+  one live defect left for its owner: `gate-contract-consolidation.md`'s Resume routes to pid
+  803654, which is dead.
+
 - [ ] **T6 — #9 (`exec_one_stage`): NOT a prerequisite. Re-scope or drop.** Scouted 2026-09-02
   before editing; the premise did not survive R3 — see `design-backlog-session-log:F-8`. Under
   Strategy C a pipeline is **one** `bash -c` child, so there are no per-stage execs to factor out;

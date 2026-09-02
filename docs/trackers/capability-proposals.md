@@ -53,10 +53,10 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-10 | 2026-08-20 | open — 1 of 4 decisions settled | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 | CAP-11 | 2026-08-26 | proposed | small–medium | Reconcile memory files against memory points — a doctor check, because only doctor can see both projects |
-| CAP-12 | 2026-09-02 | proposed | small — **measure first** | Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom |
+| CAP-12 | 2026-09-02 | **rejected** 2026-09-02 | small — measured, not built | Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom |
 
-**Open: 10 of 12** — all but CAP-5 and CAP-7. Derived 2026-09-02 by reading each entry's own
-`**Status:**` line, not by counting rows above; the two counts agree, which is the check.
+**Open: 9 of 12** — all but CAP-5, CAP-7 and CAP-12. Derived 2026-09-02 by reading each entry's
+own `**Status:**` line, not by counting rows above; the two counts agree, which is the check.
 ## CAP-1 — Session artifact-touch ledger
 
 **Status:** proposed · **Opened:** 2026-08-15 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
@@ -1578,7 +1578,52 @@ against total fires before writing any code. The base arm is a query.
 
 ## CAP-12 — Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom
 
-**Status:** proposed · **Opened:** 2026-09-02
+> **REJECTED 2026-09-02 — the first decision was carried out and it says do not build.** The
+> eight unmeasured Resume sections were read. The discriminator is not age, and a `doctor`
+> check keyed on age would fire on the wrong files. Reason kept below in full; the entry stays
+> as the record of a proposal that measurement closed.
+>
+> **What was measured.** Nine real candidates — the tenth,
+> `superpowers/plans/2026-05-09-bug-tracker-template.md`, turns out to be the **bug-file
+> template itself**, the source of the 497 instances, so it is the generator rather than a case.
+>
+> | file | Resume carries a currency marker? | stale? |
+> |---|---|---|
+> | `open-issue-work-queue.md` | yes — `### Resume — state at compaction, 2026-08-16` | no |
+> | `local-onnx-embedding-session-log.md` | yes — `> **CLOSED 2026-08-13** … everything below is the historical record` | no |
+> | `resume-embedding-transport-stages-1-3.md` | yes — `> **HISTORICAL — T6 shipped 2026-08-30** … read *Resume — what is left*` | no |
+> | `bistriceanu/agent-behavior-analysis.md` | yes — *"Both promotion candidates SHIPPED 2026-08-16 — no longer pending"* | no |
+> | `release-promotion-session-log.md` | yes — `## Resume — round 9, written 2026-08-07. Supersedes rounds 2-8` | dated, so legible even if facts moved |
+> | `run-command-pipeline.md` | **no** | **yes** — routed to a rejected strategy (`design-backlog-session-log:F-3`) |
+> | `capability-proposals.md` (CAP-7) | **no** | **yes** — *"Next: check 1"* while its own status block shows check 1 shipped |
+> | `gate-contract-consolidation.md` | **no** | **yes** — step 1 routes to `codescout-ae` at `uds:…/803654.sock`; **pid 803654 is dead** |
+> | `archive/output-form-text-compaction.md` | n/a — archived; historical by location | n/a |
+>
+> **0 of 5 with a marker were misleading. 3 of 3 without one were stale.** For n=8 that is as
+> clean a split as this corpus is going to give, and it points somewhere other than the proposal.
+>
+> **The convention already exists and already works — it was invented independently, five times.**
+> Nobody wrote it down, and every file that has it is fine. The device is richer than the
+> `**Valid:** dated` field this entry guessed at: a Resume states its own currency **either** by
+> dating its heading **or** by carrying a supersession banner that redirects to what is current.
+> Note what the marker does and does not do — `release-promotion-session-log.md`'s facts may well
+> have moved since 2026-08-07, and that is fine, because it *says* 2026-08-07. **The device does
+> not prevent staleness; it makes staleness legible.** A `doctor` check cannot do that, and
+> keyed on age it would have flagged the five healthy files and missed nothing the marker does
+> not already cover.
+>
+> **Recommended instead — one sentence in `get_guide("tracker-conventions")`:** *a `## Resume`
+> either dates its heading or opens with a banner naming what superseded it and where the
+> current state lives.* Not filed as a new CAP: it is documentation of existing practice, not a
+> capability. **Not written unilaterally** — the guide is read by every session in this checkout.
+>
+> **One live defect found while measuring, left for its owner:**
+> `gate-contract-consolidation.md`'s Resume step 1 routes to a socket whose pid is dead.
+> `codescout-ae` may still exist under another pid — a dead pid is not a dead session
+> (`CLAUDE.md` § *Reaching a Peer Session*) — so this is reported, not repaired, and not
+> attributed.
+
+**Status:** rejected 2026-09-02 — first decision executed; measurement says the discriminator is a currency marker, not age · **Opened:** 2026-09-02
 
 **Valid:** conditional — until the other 8 candidate Resume sections are read and the rate is known
 
