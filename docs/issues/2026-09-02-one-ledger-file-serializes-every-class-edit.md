@@ -175,22 +175,51 @@ shared-checkout rule 6 (*do not repair shared state, report it*) one step earlie
 it names.
 
 **The read side is separable from the write side, and only the write side needs this file's
-remedy.** The pre-commit hook reads the index correctly and deliberately: it asks *what does this
-commit ship*, which is a question about the index by definition. The `**Members:**` prose asks a
-different question — *how many members does this class have* — a fact about the corpus and about
-nobody's staging. `codescout-05` proposed deriving it index-free, and it works (verified
-2026-09-02):
+remedy.** But the separation is not achieved by counting differently — that was this file's first
+attempt and the gate falsifies it.
+
+*(Corrected 2026-09-02 by `codescout-20`, at the source. This section previously prescribed
+deriving the count index-free as `tracked ∪ git ls-files --others --exclude-standard`. That is
+arithmetically sound and it is the **wrong number for the field**.)*
+
+`tests/issue_clusters.rs:511-527` — `actual_counts` iterates `tracked_all_bug_files()`, which at
+`:320` shells out to `git ls-files docs/issues`. The module header at `:1173` states the intent
+outright:
 
 ```
-tracked (git grep -clE, anchored)          19
-untracked, not ignored (git ls-files -o)    1
-UNION                                      20      <- correct, no `git add` issued
-plain filesystem grep -r                   20
+**The count gate sees TRACKED files only, so a local green defers rather than clears.**
 ```
 
-Pointing the prose instruction at that union instead of at `git add` removes readers from the
-queue entirely and leaves the hook's index semantics untouched. It does **not** fix the write-side
-serialization this file is about — but on 2026-09-02 the readers were two of the three collisions.
+So `**Members:**` does not ask *how many members does this class have*. It asks *how many are
+tracked*, and the gate is the **definition** of that question rather than a proxy for it. A reader
+who derives the union honestly and writes what they derived puts a number one higher than the field
+admits for every peer-held untracked member, and reds
+`every_bare_n_in_a_class_field_matches_the_corpus` — under the message *"the count moved and this
+judgement needs re-deriving"*, a cause the union route did not produce.
+
+**Why the union looked correct when this file's author measured it** is the part worth keeping. The
+measurement was taken while holding the untracked member *personally* and committing it in the same
+operation — and in that posture union ≡ post-commit tracked, necessarily. The union is the right
+instrument in exactly one case: the untracked member is **yours** and you are committing it now.
+That is precisely **not** the reader case the remedy was written for. `codescout-05` had nothing to
+commit, so for it the two numbers diverge by every peer-held untracked member. On 2026-09-02 that
+was one — and it was one only because most sessions had just committed.
+
+The plain-filesystem agreement (`grep -r` = union = 21 at `4266be0f`) is not evidence against this.
+It proves the union counts on-disk files correctly. Both instruments answer the **on-disk**
+question; neither answers the **tracked** one.
+
+**The correct remedy does not swap the instrument — it states that there are two numbers.** The
+field carries the tracked count; derive it with the anchored `git grep -clE` form and **no `git
+add`**. If `git ls-files --others --exclude-standard` shows untracked members of the class, they are
+a peer's, deliberately not yours to count, and the gate will admit them when their owner commits.
+
+That keeps readers out of the index — which was the goal and is right — and it removes the last
+reason anyone has to stage a file they did not write, without asking the count to mean something the
+gate does not check.
+
+Removing readers from the queue does **not** fix the write-side serialization this file is about —
+but on 2026-09-02 the readers were two of the three collisions, so it is worth doing on its own.
 
 So serialization does not merely **delay** writers. It makes them **adopt each other's work in
 order to make the counts legal** — which converts a queueing problem into an authorship and
