@@ -2717,42 +2717,39 @@ fn entry_indegree(
     Ok(deg)
 }
 
-/// Tokens this text defines more than once, with every defining line.
+/// Tokens this text defines more than once, with every defining line, sorted
+/// by token.
 ///
-/// Re-derives definitions from raw headings rather than reading
-/// `DocExtract.definitions`: `link_scan`'s extractor de-duplicates at parse time
-/// (`link_scan/extract.rs:399` and `:440` both guard one `seen_defs` set), so a
-/// same-file duplicate is DISCARDED before it reaches any consumer. Reading that
-/// vector here would produce a check whose positive case is unrepresentable.
-/// `bug-fix-session-log:F-99`.
-///
-/// The definition grammar is `extract.rs::def_re`'s, repeated rather than shared
-/// because that function is private and making it `pub(crate)` would widen a
-/// parser's surface for one caller. If the two ever disagree, the pinned test
-/// `duplicate_definitions_needs_the_dash_separator` is what fails.
+/// Built on `entry_sections`, not `headings::parse` plus a local regex.
+/// `entry_sections` (`link_scan/extract.rs:67-121`) already shares `def_re` and
+/// the frontmatter-exclusion filter with `extract()`, and — unlike the
+/// `DocExtract.definitions` this function must NOT read — does not dedupe:
+/// `extract.rs:399` and `:440` both guard one `seen_defs` set on that path,
+/// discarding a same-file duplicate before it reaches any consumer, which would
+/// make this check's positive case unrepresentable. `entry_sections` emits one
+/// `EntrySection` per matching heading with no such guard, so it is safe to
+/// build a duplicate-detector on top of it. `bug-fix-session-log:F-99`.
 //
 // Not yet called outside its own tests: Task 2 wires it into the `doctor`
 // tool as the `entry_defined_twice` check. `allow(dead_code)` is scoped to
 // this one function and comes off in that task's diff.
 #[allow(dead_code)]
 fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
+    use crate::librarian::tools::link_scan::extract::entry_sections;
     use std::collections::BTreeMap;
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r"^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+").unwrap());
 
     let mut seen: BTreeMap<String, Vec<u32>> = BTreeMap::new();
-    for h in crate::librarian::preview::headings::parse(text) {
-        let Some(m) = re.captures(&h.text) else {
-            continue;
-        };
-        let token = m.get(1).unwrap().as_str().to_string();
-        let Some(prefix) = token.split('-').next() else {
-            continue;
-        };
+    for section in entry_sections(text) {
+        // `section.id` is only ever produced by `def_re`'s `[A-Z]{1,3}-\d+` capture,
+        // so it always contains a dash — `.next()` on a non-empty split is never
+        // `None`, and there is no dashless case for an `else` arm to guard.
+        let prefix = section.id.split('-').next().unwrap();
         if !prefixes.iter().any(|p| p == prefix) {
             continue;
         }
-        seen.entry(token).or_default().push(h.line as u32);
+        seen.entry(section.id.clone())
+            .or_default()
+            .push(section.heading_line);
     }
     seen.into_iter()
         .filter(|(_, lines)| lines.len() > 1)
@@ -13347,7 +13344,11 @@ root = "work/elsewhere/ghost"
         let got = duplicate_definitions(body, &["R".to_string()]);
         assert_eq!(got.len(), 1, "{got:?}");
         assert_eq!(got[0].0, "R-147");
-        assert_eq!(got[0].1.len(), 2, "both lines reported: {got:?}");
+        assert_eq!(
+            got[0].1,
+            vec![3, 7],
+            "1-indexed defining lines, not a constant/level/0-indexed stand-in: {got:?}"
+        );
     }
 
     /// The negative direction. Without it the function could return every token
@@ -13372,5 +13373,49 @@ root = "work/elsewhere/ghost"
     fn duplicate_definitions_needs_the_dash_separator() {
         let body = "# L\n\n## R-9 Addendum\n\n## R-9 Addendum\n";
         assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// `entry_sections` excludes headings inside YAML frontmatter — a heading-shaped
+    /// line there is a comment, not a definition (`entry_sections_do_not_define_a_heading_shaped_line_inside_frontmatter`
+    /// pins the same fact one layer down). Building on `entry_sections` rather than
+    /// raw `headings::parse` is what makes this hold; a version built on
+    /// `headings::parse` plus a local regex would report a false duplicate here.
+    #[test]
+    fn duplicate_definitions_ignores_a_heading_shaped_line_inside_frontmatter() {
+        let body = "\
+---
+kind: tracker
+## R-1 — hidden inside frontmatter, must not define
+entry_prefix: R
+---
+## R-1 — real
+body
+";
+        assert!(
+            duplicate_definitions(body, &["R".to_string()]).is_empty(),
+            "the frontmatter comment must not count as a second definition"
+        );
+    }
+
+    /// Two distinct duplicated tokens, sorted by token in the result — the brief's
+    /// explicit ordering contract. Without a second token, `.take(1)` after the
+    /// filter (or any other single-result shortcut) would still pass every other
+    /// test in this module.
+    #[test]
+    fn duplicate_definitions_reports_multiple_tokens_sorted_by_token() {
+        let body = "\
+# L
+
+## T-1 — a
+
+## T-1 — b
+
+## R-1 — c
+
+## R-1 — d
+";
+        let got = duplicate_definitions(body, &["R".to_string(), "T".to_string()]);
+        let ids: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["R-1", "T-1"], "sorted by token: {got:?}");
     }
 }
