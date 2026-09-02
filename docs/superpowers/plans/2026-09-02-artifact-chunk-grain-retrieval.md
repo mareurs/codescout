@@ -1184,7 +1184,7 @@ them. Resolve each site by SYMBOL, not by line — `symbols(name=…, include_bo
 - Modify: `src/librarian/artifact_store.rs` — `SqliteVecArtifactStore::upsert`
   (~`:211`) and `::delete` (~`:219`); **and a guard on `QdrantArtifactStore::upsert`
   (~`:161`)**, per Step 3b
-- Modify: `src/librarian/catalog/gc.rs:406-440` (`migrate_vec_id`), `:482`
+- **`src/librarian/catalog/gc.rs` — NO CHANGE. Scouted 2026-09-02 before implementing; the plan's instruction here was wrong in two independent ways.** See the correction block in § *Step 3*.
 - Read-only, but confirm no change is needed: `src/librarian/tools/reindex.rs`
   (~`:359-376`). It reaches the vector store through the **trait**, so fixing
   `SqliteVecArtifactStore` fixes it. Verify this rather than assuming it —
@@ -1232,7 +1232,15 @@ fn write_embeddings_v2_still_refuses_a_dim_mismatch() {
 }
 ```
 
-- [ ] **Step 1b: The cross-seam test — the one that would have caught this**
+- [ ] **Step 1b: The cross-seam test — RETARGETED 2026-09-02**
+
+> **CORRECTION, found by scouting before implementing: the test below cannot go green in Task 7, and this step asserted that it would.** It requires a chunk id to *hydrate through `semantic_find`*. Hydration means mapping a chunk id to its artifact, and `src/librarian/catalog/find.rs` contains **zero** references to `artifact_chunk` — `find_by_ids_filtered` looks candidate ids up in the `artifact` table directly. **Task 8 owns that work by name** (`semantic_find`, `SemanticHit`, and `knn` reading `artifact_vec_v2`), so no edit available inside Task 7 turns this red green.
+>
+> Worse, the test never touches the writers Step 3a re-points — it upserts straight into `InMemoryArtifactStore` — so **Step 3a is not even on its path.** Left in place it would block Step 6's gate, which requires a green `cargo test --workspace`.
+>
+> **So the test below MOVES to Task 8 Step 1**, where hydration lands and it can go green. Task 7 keeps a cross-seam test of its own, specified after it — one that goes red on *this* task's defect.
+>
+> *Authored in `8b48b8f1` earlier the same day by the session that then found this. That amendment was right that Task 7 would otherwise ship dead code, and wrong about which step proves it — which is the argument for scouting a plan you wrote yourself.*
 
 **Why this step exists.** Every existing `semantic_find` test (`find.rs:421`,
 `:444`, `:795`) hand-feeds the vector store an **artifact** id:
@@ -1297,11 +1305,49 @@ async fn an_id_from_the_production_embed_queue_hydrates_through_semantic_find() 
 }
 ```
 
-**This test is expected to FAIL until Step 3a re-points the writers** — it is the
-red that Step 3a turns green, and it must be *observed* red, not assumed. If it
-passes before Step 3a, stop: either the fixture yields one chunk, or
-`InMemoryArtifactStore` is not the store the reader consults, and in both cases
-the test is proving nothing.
+**↑ That test belongs to Task 8 Step 1. Below is Task 7's own cross-seam test.**
+
+The seam Task 7 owns is **production writer → storage table**, not writer → reader. Add to `src/librarian/artifact_store.rs`'s test module:
+
+```rust
+#[tokio::test]
+async fn the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1() {
+    // LOAD-BEARING: this goes through SqliteVecArtifactStore::upsert — the
+    // PRODUCTION writer, Step 3a site 3 — and NOT through write_embeddings_v2
+    // directly. A test that calls the new function proves the function works
+    // and says nothing about whether anything calls it, which is exactly how
+    // this task would have shipped write_embeddings_v2 as dead code.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let queue = crate::librarian::indexer::embed_queue_items(
+        &cat, "a", Some("T".into()),
+        "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n").unwrap();
+    // Without >1 chunk the grain bug is UNREPRESENTABLE by this fixture: a
+    // single-chunk artifact's chunk id and artifact id fail the same way.
+    assert!(queue.len() > 1, "fixture must yield >1 chunk, got {}", queue.len());
+
+    let cat = std::sync::Arc::new(parking_lot::Mutex::new(cat));
+    let store = SqliteVecArtifactStore::new(cat.clone());
+    for (id, _, _) in &queue {
+        store.upsert("proj", id, &vec![0.5f32; 768]).await.unwrap();
+    }
+
+    let cat = cat.lock();
+    for (id, _, _) in &queue {
+        let n: i64 = cat.conn.query_row(
+            "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "chunk {id} must reach artifact_vec_v2");
+    }
+    // BOTH halves are required. The first is monotone under a writer that
+    // writes v2 AND v1 — which is exactly what a half-finished re-point looks
+    // like, and is a state this task passes through.
+    let v1: i64 = cat.conn
+        .query_row("SELECT COUNT(*) FROM artifact_vec", [], |r| r.get(0)).unwrap();
+    assert_eq!(v1, 0, "no chunk id may reach the artifact-keyed v1 table");
+}
+```
+
+**Expected RED before Step 3a:** the v1 count is non-zero, because `SqliteVecArtifactStore::upsert` still delegates to `write_embeddings`. That red names *this task's* defect, and Step 3a is what turns it green — which is the property the relocated test did not have.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -1377,7 +1423,15 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 }
 ```
 
-In `gc.rs`, call `delete_chunk_vectors(cat, id)?` immediately before every `DELETE FROM artifact WHERE id = …`, at the site already commented *"artifact_vec: no FK, DELETE-trigger only — handled explicitly"* (`gc.rs:482`).
+> **CORRECTION 2026-09-02, found by scouting before implementing — the `gc.rs` instruction was wrong twice, independently.** It read: *"In `gc.rs`, call `delete_chunk_vectors(cat, id)?` immediately before every `DELETE FROM artifact WHERE id = …`, at the site already commented … (`gc.rs:482`)."*
+>
+> **(1) The delete is already handled, so the call would be redundant.** `delete_chunk_vectors`'s own doc-comment justifies itself with *"vec0 has no FK, so nothing else would ever collect them."* That was true when this plan was written, and **Task 4 falsified it.** Verified at the bytes: `artifact_chunk.artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE` (`catalog/mod.rs:262`) → `CREATE TRIGGER artifact_vec_v2_cascade_delete AFTER DELETE ON artifact_chunk BEGIN DELETE FROM artifact_vec_v2 WHERE id = OLD.chunk_id; END` (`:294-298`) → `PRAGMA foreign_keys = ON` on all three `Catalog` constructors (`:481`, `:497`, `:524`). The trigger's own comment records that cascade-fires-trigger was *verified, not assumed*, under `recursive_triggers` both OFF and ON, and `deleting_an_artifact_cascades_its_vec_v2_row_via_the_chunk_trigger` (`:771`) pins it.
+>
+> **(2) `gc.rs:482` is not a delete site at all.** It sits inside `apply_rehome`, which **changes** an artifact id rather than deleting it — `migrate_vec_id` exists only because vec0 rejects `UPDATE … SET id`. Grepping `DELETE FROM artifact WHERE id` across `gc.rs` matches **that comment and no statement**. And rehome needs no v2 work *by design*: `artifact_vec_v2` is keyed by `chunk_id`, which does not change when the artifact id does — given as the reason for that key at `catalog/mod.rs:257-258`.
+>
+> **So `delete_chunk_vectors` survives for exactly ONE caller:** `SqliteVecArtifactStore::delete`, which removes an artifact's vectors **without deleting the artifact row**, so no `artifact_chunk` delete occurs and the trigger is unavailable. Keep the function and its Step 1 test; drop the `gc.rs` edit entirely. **Rewrite its doc-comment** — the hazard is not *"nothing would collect them"* but *"this path deletes vectors without deleting chunks, so the trigger cannot fire here."* A doc-comment stating a falsified rationale is worse than none: it is the thing the next reader checks against.
+>
+> **A live bug was found beside this and is filed, NOT fixed here.** `apply_rehome` updates `artifact.id` and never touches `artifact_chunk.artifact_id` (zero `artifact_chunk` references in `gc.rs`); the FK carries no `ON UPDATE` clause, so it is `NO ACTION`, and `PRAGMA defer_foreign_keys = ON` (`gc.rs:453`) defers that check to COMMIT rather than skipping it. Out of scope for Task 7.
 
 - [ ] **Step 3a: Re-point the production writers — the step the original plan omitted**
 
