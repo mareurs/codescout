@@ -646,7 +646,7 @@ self-consistency — and write the rows that come back clean too, because the di
 what forces contact with each interface rather than a global impression of soundness.
 
 **Counterfactual:** the scan found six gaps; four were interface references that do not
-exist (`codescout:catalog-audit-trail-session-log:F-4`). Without it:
+exist (`catalog-audit-trail-session-log:F-4`). Without it:
 
 - Task 1's implementer imports `crate::util::test_env::EnvGuard` → compile error → finds the
   real `EnvGuard` in `src/agent/mod.rs:2124` → **it fits** → copies it. That is the branch
@@ -693,7 +693,7 @@ is not yet known, so the "prevented" claim is about the dispatches, not about th
 
 **Valid:** dated 2026-09-01
 
-**Rests on:** `codescout:catalog-audit-trail-session-log:F-4`, same session — this win is
+**Rests on:** `catalog-audit-trail-session-log:F-4`, same session — this win is
 F-4's counterfactual and is not independent evidence of it.
 
 ## Template for new entries
