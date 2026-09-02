@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-02
-closed:
+closed: 2026-09-02
 severity: medium
 owner: marius
 related:
@@ -10,6 +10,7 @@ related:
 tags:
   - cluster/selector-narrower-than-its-population
 kind: bug
+unverified: "the 36cb17ed section-scoping fix was verified against the live corpus by a transcription of its two functions, not by the rebuilt MCP binary — re-run librarian(action=\"doctor\") after a rebuild to confirm the real check also reports 1 rather than 5"
 ---
 
 # BUG: a finished bug record has no queryable way to say so, and the terminal-status selector returns a correct zero
@@ -208,6 +209,25 @@ matching the sibling and the guide.
 machine as well as to a human:** flipping them to `fixed` at `8fb5f638` took
 `terminal_status_without_fix_anchor` from 1 to 4, because their provenance was prose. Adding
 proper `## Fix provenance` blocks took it back to 2. Both were true findings.
+
+## Fix provenance
+
+- **SHA:** `751d34a6` (`experiments`) — the check, its helper and seven tests.
+- **patch-id:** `3c33c1cc212623101226371cfb1070cc7998d5b9` — content hash; survives rebase and cherry-pick.
+- **SHA:** `36cb17ed` (`experiments`) — the section-scoping correction and its eighth test.
+- **patch-id:** `2d76d739754f43dcbbe128f4434f130ab1d460a5` — content hash; survives rebase and cherry-pick.
+
+**Two commits, neither superseding the other**, which is the shape `structured_fix_pointers`
+was made plural to hold: `751d34a6` is the mechanism and `36cb17ed` is the premise correction
+the live corpus forced. A record citing only the first would point at a version that produced
+four false findings out of five; citing only the second would point at a diff that does not
+contain the check. Both, in order.
+
+This block is also the record closing its own loop. The check reads a patch-id **in a Fix
+section** as an anchor, so writing this section is what makes this file visible to the
+mechanism it describes — and flipping `status` to `fixed` in the same commit is what makes it
+correctly silent again. Before that flip it fired on itself, which is the only end-to-end
+confirmation available: the defect, the detector and the remedy exercised on one artifact.
 ## Tests added
 
 Seven, in `src/librarian/tools/doctor.rs`, one discrimination each, following the sibling's
