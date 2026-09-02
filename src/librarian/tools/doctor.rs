@@ -189,6 +189,7 @@ declare_checks! {
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
     LedgerDefinesNothing => "ledger_defines_nothing",
     MissingFile => "missing_file",
+    NonTerminalStatusWithFixAnchor => "non_terminal_status_with_fix_anchor",
     ParamsBehindBody => "params_behind_body",
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
@@ -402,6 +403,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // a record that declares none. Scoped to LIVE terminal bug files — 297 of 355 archived
     // files predate the rule, and the guide calls those stale instructions rather than debt.
     all_violations.extend(scan_terminal_status_without_fix_anchor(ctx, &cat.conn)?);
+    // The mirror of the check above, and the direction that had no instrument: a record whose
+    // BODY declares a patch-id while its status still says `open`. Detectable only by reading
+    // bodies, which is why the two cheap frontmatter-keyed checks exist and this one did not.
+    all_violations.extend(scan_non_terminal_status_with_fix_anchor(ctx, &cat.conn)?);
     // Both checks above answer "is a fix pointer declared?". This one answers why that
     // answer can be confidently wrong: an unterminated fence mutes every line-anchored
     // scan below it, so a "nothing declared" finding may be about the parse and not the
@@ -5018,6 +5023,177 @@ fn scan_terminal_status_without_fix_anchor(
     Ok(out)
 }
 
+/// Every patch-id a bug file DECLARES, in either shape the corpus actually uses.
+///
+/// **Deliberately looser than [`structured_fix_pointers`], and the measurement is the reason.**
+/// That helper reads `- **SHA:**` / `- **patch-id:**` list items and nothing else — the shape
+/// `get_guide("tracker-conventions")` prescribes at archive time. Measured 2026-09-02: **0 of
+/// the live `docs/issues/*.md` corpus used it.** Every live record writes provenance as prose,
+/// which is also what the guide's own worked example shows (*"Fixed at `38e0980b`, merged to
+/// `experiments` at `e6484b16`"*), and the structured form appears only under `archive/`. A
+/// check keyed on the structured shape alone would therefore be precise and reachable by no
+/// in-tree author — decoration however loudly written, per `CLAUDE.md` § *Testing Discipline*
+/// (*"loudness is a property of a PATH, not of a failure"*).
+///
+/// **Keyed on the patch-id, never on a bare SHA.** A commit-like hash sitting in prose is the
+/// decoy [`scan_terminal_status_without_fix_anchor`] exists to name: measured 2026-08-19, 8 of
+/// its 9 findings carried one, usually the commit the bug was OBSERVED at in an `Environment`
+/// line. A 40-hex labelled `patch-id` is produced by exactly one act — `git show <sha> | git
+/// patch-id --stable` — which nobody performs except to close a bug. That asymmetry is the
+/// whole discriminator.
+///
+/// Fenced lines are skipped for [`structured_fix_pointers`]'s reason: a worked example teaching
+/// the shape is a quotation, not a declaration. `git patch-id --stable` appearing inside a
+/// backticked *command* does not match, because the value captured must be 40 hex digits.
+fn declared_patch_ids(content: &str) -> Vec<String> {
+    fn is_patch_id(s: &str) -> bool {
+        s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+    let mut out = Vec::new();
+    let mut fence = crate::util::markdown_fence::FenceState::new();
+    for line in content.lines() {
+        let t = line.trim_start();
+        if fence.feed(t) {
+            continue;
+        }
+        if fence.in_fence() {
+            continue;
+        }
+        // `to_ascii_lowercase` is byte-for-byte length-preserving, so offsets found in `lower`
+        // index `t` safely, and every offset used below lands just past ASCII.
+        let lower = t.to_ascii_lowercase();
+        let mut from = 0usize;
+        while let Some(rel) = lower[from..].find("patch-id") {
+            let after = from + rel + "patch-id".len();
+            if let Some(open) = t[after..].find('`') {
+                let vstart = after + open + 1;
+                if let Some(close) = t[vstart..].find('`') {
+                    let val = &t[vstart..vstart + close];
+                    if is_patch_id(val) {
+                        out.push(val.to_string());
+                    }
+                }
+            }
+            from = after;
+        }
+    }
+    out
+}
+
+/// `non_terminal_status_with_fix_anchor`: a live bug file whose BODY declares a patch-id while
+/// its frontmatter still says `open` or `investigating`.
+///
+/// **The mirror of [`scan_terminal_status_without_fix_anchor`], and the direction that had no
+/// instrument.** The class is *the queryable field and the prose disagree, and only the prose
+/// is true*. One direction — a `fixed` record that overstates — is detectable from **fields
+/// alone** (`status` plus the presence of `unverified:`), and got two checks. This direction
+/// needs a fix anchor that lives only in the **body**, so no frontmatter predicate can express
+/// it, and got none. That is a boundary of the cheap instrument rather than an omission, which
+/// is precisely why the check is worth its cost.
+///
+/// **Why it matters that nobody notices.** The author who writes the fix record knows the bug
+/// is fixed; re-reading their own file, the stale `open` reads as a formality already
+/// discharged — knowing it is done is exactly what removes the prompt to check. The party
+/// misled is a later triage session, which never talks to them. `OB-1` § *the third position*.
+///
+/// Measured 2026-09-02: two records carried a fix SHA, a patch-id, a named regression test and
+/// a green gate while reading `status: open`. A peer's *terminal-but-unarchived* scan returned
+/// a correct **0** over them — its predicate never examines a record whose status understates —
+/// and that zero reached the peer's operator before a reader opened the bodies.
+/// docs/issues/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md
+///
+/// **`zombie` is excluded, for [`scan_terminal_status_without_fix_anchor`]'s `wontfix` reason
+/// read from the other end.** `zombie` means *no longer observed, root cause unconfirmed* — a
+/// record that was fixed once, recurred, and is being watched. Its fix anchor is genuine and
+/// its non-terminal status is correct, so firing would demand a status change that is wrong.
+///
+/// **A record can declare that it knows, via a non-empty `unverified:`.** A partial fix whose
+/// landed half has a patch-id is legitimately still open; the field defined as *what the status
+/// does not establish* is exactly where that belongs, so the check reuses it rather than
+/// inventing a second escape. Empty counts as absent, matching the sibling and the guide:
+/// presence is what a query reads.
+///
+/// Reports only; there is no `fix=`. The right status may be `mitigated` rather than `fixed`,
+/// and a partial fix cancels terminality outright — flipping it here would be the confident
+/// wrong answer this module refuses to give.
+fn scan_non_terminal_status_with_fix_anchor(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path, status FROM artifact \
+         WHERE kind = 'bug' AND status IN ('open', 'investigating') \
+         ORDER BY abs_path",
+    )?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path, status) in &rows {
+        let path = Path::new(abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        // Same path-COMPONENT test as the sibling: a repo living under a directory named
+        // `archive` must not silence its whole issue tree.
+        if path
+            .components()
+            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
+        {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let anchors = declared_patch_ids(&content);
+        if anchors.is_empty() {
+            continue;
+        }
+        if let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) {
+            if let Some(raw) = fm.extra.get("unverified") {
+                let declared = match raw {
+                    Value::Null => String::new(),
+                    Value::String(s) => s.trim().to_string(),
+                    other => other.to_string(),
+                };
+                if !declared.is_empty() {
+                    continue;
+                }
+            }
+        }
+
+        let shown: Vec<String> = anchors.iter().take(2).map(|p| format!("`{p}`")).collect();
+        out.push(Violation::new(
+            "non_terminal_status_with_fix_anchor",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "status is `{status}` but the body declares {} patch-id(s) — {} — which is \
+                 produced only by `git show <sha> | git patch-id --stable`, i.e. by closing \
+                 this bug. The queryable field and the prose disagree and only the prose is \
+                 true, so every triage query hands this out as unstarted work. Flip to `fixed` \
+                 or `mitigated` with `closed:`, or — if the fix is partial and the record is \
+                 legitimately open — say so in `unverified:`, which discharges this check. \
+                 This is a worklist, not a verdict: the check cannot tell a complete fix from \
+                 a landed half.",
+                anchors.len(),
+                shown.join(", ")
+            ),
+        ));
+    }
+    Ok(out)
+}
+
 /// `unterminated_fence`: a catalogued markdown file that reaches EOF with a fence still
 /// open, so every line below the opener is read as code by any line-anchored scan.
 ///
@@ -6665,6 +6841,232 @@ mod tests {
         };
         assert_eq!(v.len(), 1, "wontfix owes no anchor: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("done"));
+    }
+
+    // ---- non_terminal_status_with_fix_anchor ------------------------------------------
+
+    /// The patch-id used across these fixtures. Real shape: 40 hex digits, as
+    /// `git patch-id --stable` emits. Shortening it breaks the check by design — the length
+    /// test is the discriminator that keeps a short hash from counting.
+    const FIXTURE_PATCH_ID: &str = "2ae27c8a135edae59191b0b840b90956bb97ca6d";
+
+    /// An `open` record whose body declares one fires; an `open` record without one does not.
+    /// The second seed is the control: a check that fired on every open record would pass this
+    /// test without it.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_fires_only_where_an_anchor_is_declared() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "anchored",
+            "open",
+            "",
+            &format!("Fixed at `abc1234`, patch-id `{FIXTURE_PATCH_ID}`."),
+        );
+        seed_live_bug(&cat, &root, "bare", "open", "", "Still investigating.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the anchored open record fires: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("anchored"));
+    }
+
+    /// The whole point of the check: a record that declares an anchor AND says so in its status
+    /// is correctly labelled and must stay silent. Without this, the check would be a report of
+    /// "every closed bug", which is the opposite of the defect.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_is_silent_on_a_correctly_labelled_record() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        for status in ["fixed", "mitigated", "wontfix"] {
+            seed_live_bug(
+                &cat,
+                &root,
+                status,
+                status,
+                "",
+                &format!("Closed. patch-id `{FIXTURE_PATCH_ID}`."),
+            );
+        }
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "terminal records are not this check's subject: {v:#?}"
+        );
+    }
+
+    /// A BARE commit hash is not an anchor. This is the discrimination that separates the check
+    /// from a hex sweep: measured 2026-08-19, 8 of 9 `terminal_status_without_fix_anchor`
+    /// findings carried a commit-like hash that was the commit the bug was OBSERVED at. Only the
+    /// `patch-id` LABEL, and a full 40-hex value after it, mean someone closed something.
+    ///
+    /// Mutation this kills: dropping the label search and matching any backticked 40-hex, or
+    /// dropping the length test so a short SHA counts.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_needs_a_labelled_patch_id_not_a_bare_hash() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        // A full 40-hex commit SHA, unlabelled — the decoy shape.
+        seed_live_bug(
+            &cat,
+            &root,
+            "decoy",
+            "open",
+            "",
+            "Observed at `655c0b6f6794be223f85fbad8360cd3002cc13d3` on experiments.",
+        );
+        // The label present but the value too short to be a patch-id.
+        seed_live_bug(&cat, &root, "short", "open", "", "patch-id `2ae27c8a`.");
+        // The label inside a fenced worked example — a quotation, not a declaration.
+        seed_live_bug(
+            &cat,
+            &root,
+            "fenced",
+            "open",
+            "",
+            &format!("How to record one:\n\n```\npatch-id `{FIXTURE_PATCH_ID}`\n```\n"),
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert!(v.is_empty(), "none of these declares an anchor: {v:#?}");
+    }
+
+    /// Both shapes the corpus actually uses must read the same. Measured 2026-09-02: 0 of the
+    /// live `docs/issues/*.md` corpus used the structured `- **patch-id:**` form and every live
+    /// record wrote prose, so a check that read only the structured shape would have been
+    /// unreachable by any in-tree author.
+    ///
+    /// Mutation this kills: narrowing `declared_patch_ids` to the `- **patch-id:**` list form,
+    /// which leaves the prose seed silent and this assertion at 1 instead of 2.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_reads_prose_and_structured_alike() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "prose",
+            "open",
+            "",
+            &format!("**Fixed on `experiments` at `655c0b6f`**, patch-id `{FIXTURE_PATCH_ID}`."),
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "structured",
+            "open",
+            "",
+            &format!("## Fix provenance\n\n- **SHA:** `655c0b6f`\n- **patch-id:** `{FIXTURE_PATCH_ID}`\n"),
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 2, "both shapes are declarations: {v:#?}");
+    }
+
+    /// `zombie` means *no longer observed, root cause unconfirmed* — fixed once, recurred, now
+    /// watched. Its anchor is genuine and its non-terminal status is correct, so firing would
+    /// demand a status change that is wrong. Mirror of
+    /// `terminal_status_without_fix_anchor_ignores_wontfix`, read from the other end.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_ignores_zombie() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        let body = format!("Fixed once. patch-id `{FIXTURE_PATCH_ID}`. Came back.");
+        seed_live_bug(&cat, &root, "watched", "zombie", "", &body);
+        seed_live_bug(&cat, &root, "working", "investigating", "", &body);
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "zombie owes no flip; investigating does: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("working"));
+    }
+
+    /// A partial fix whose landed half has a patch-id is legitimately still open. `unverified:`
+    /// is defined as *what the status does not establish*, so it is the right escape and the
+    /// check reuses it rather than inventing a second field. An EMPTY value counts as absent,
+    /// matching the sibling and the guide: presence is what a query reads.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_is_discharged_by_a_non_empty_unverified() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        let body = format!("Half of it landed. patch-id `{FIXTURE_PATCH_ID}`.");
+        seed_live_bug(
+            &cat,
+            &root,
+            "declared",
+            "open",
+            "unverified: 'phase 2 has not landed'\n",
+            &body,
+        );
+        seed_live_bug(&cat, &root, "hollow", "open", "unverified:\n", &body);
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("hollow"));
+    }
+
+    /// Archived records are out of scope, same precedent as the sibling.
+    ///
+    /// **Seeded by hand rather than with [`seed_archived_bug`], and that is load-bearing.** That
+    /// helper hardcodes `status: fixed`, which this check's SQL never selects — so using it here
+    /// would make the test pass without ever reaching the path-component skip it exists to
+    /// verify. An inert fixture that reads as coverage is worse than no test.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_leaves_archived_records_alone() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        let dir = root.join("docs").join("issues").join("archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stale.md");
+        std::fs::write(
+            &path,
+            format!(
+                "---\nkind: bug\nstatus: open\n---\n\n# BUG: stale\n\npatch-id `{FIXTURE_PATCH_ID}`\n"
+            ),
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new("stale")
+            .with_abs_path(&path)
+            .with_kind("bug")
+            .with_status("open")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
     }
 
     /// The discrimination that keeps the decoy heuristic honest. A 16-hex catalog id and a

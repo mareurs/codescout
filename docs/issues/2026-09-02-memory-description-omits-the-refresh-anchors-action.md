@@ -237,6 +237,16 @@ every run, and fails any tool with an `action` enum and no declared contract.
 Surface cost: +37 chars across both fixes, funded by trimming `index`'s `build` clause, which
 restated its own `scope` parameter. `TOOL_SURFACE_CHAR_BUDGET` was **not** raised — 56,479 →
 56,516 against a 56,519 ratchet.
+
+## Fix provenance
+
+- **SHA:** `655c0b6f` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `2ae27c8a135edae59191b0b840b90956bb97ca6d` — content hash of the diff; survives rebase and cherry-pick.
+
+Structured, not only prose — see the sibling bug's § *Fix provenance* for why the two are
+not interchangeable. Measured 2026-09-02: **0 of the live `docs/issues/*.md` corpus** used
+this shape, and all four `terminal_status_without_fix_anchor` findings were live files
+whose provenance was prose. The shape exists only under `archive/`.
 ## Tests added
 
 `server::tests::tool_descriptions_name_every_action_they_claim_to_enumerate`, sited beside
