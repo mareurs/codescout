@@ -497,7 +497,9 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 
 **Slug:** `cluster/unclassified`
 
-**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) —
+**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02); +1: `doc-tool-refs-counts-call-param-pairs-as-documents` (2026-09-02). Both derivations below — **on continuation lines, which `scripts/pre-commit-ledger-counts.py` does not read.** Its `members_fields` keys on the single line beginning `**Members:**`, so a member named only in the prose beneath satisfies nothing; put the stem up here and the reasoning down there.
+
+`a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` —
 looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
 (`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
 none fit without forcing the claim, so filed under the escape hatch instead — which was created
@@ -522,6 +524,18 @@ does `out[cur] = line` — the field is the SINGLE line starting `**Members:**`,
 paragraph. A derivation appended below it satisfies neither of the gate's two conditions, so
 the refusal reads as "you did not write a derivation" while the derivation sits four lines
 below it. Put the slug on the line; keep the reasoning under it.)*
+
+`doc-tool-refs-counts-call-param-pairs-as-documents` — read all 22 `**Claim:**`
+lines before reaching for the hatch. `IC-20` is the near miss and **excludes it by name**: its
+falsification clause reads *"a member whose true total was recoverable — that is an ordinary
+reporting bug"*, and this count is recoverable by deduplicating on `(file, line, tool)`. `IC-14`
+was the second candidate and fails on coverage: the guard misses no call, it **over**-reports one,
+where that class requires an uncovered remainder. `IC-21` is magnitude-versus-count; this is
+unit-versus-label. **The reason to record the near miss rather than just the verdict:** `IC-14`'s
+own member 3 (`both-doc-citation-guards-skip-half-the-corpus-without-saying-so`) is a *different*
+defect in this *same file*, so a retag into `IC-14` would have read as corroborated by adjacency —
+which is the proximity-is-not-evidence failure `IC-10` names, arriving here as a taxonomy pressure
+rather than an authorship one.
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the

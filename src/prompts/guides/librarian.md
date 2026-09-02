@@ -332,7 +332,7 @@ Event kinds: `note`, `reviewed`, `status_change`, `field_patch`, `superseded_by`
 replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates, so a
 `replace` that destroyed a child while growing the file reads as a benign append —
 **`replaced_subsections` is the only field that reveals it.** Query the history with
-`artifact_event(action="list", artifact_id=X)`.
+`doc(action="event_list", id=X)`.
 
 ---
 

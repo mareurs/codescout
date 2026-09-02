@@ -179,9 +179,18 @@ the returned `content` is the 3-line slice, not the whole heading map — added 
 content-scoped assertion (not containment-only) precisely because the containment-only form
 is monotone under widening, per the note already on this file at time of filing.
 
-- `read_markdown_honours_offset_and_limit_like_read_file` — `offset=4, limit=2` must return
-  lines 4..=5.
-- `read_markdown_explicit_start_line_wins_over_the_aliases` — precedence matches `read_file`.
+- `read_file_on_markdown_offset_slice_excludes_its_neighbours` — `offset=4, limit=2` must
+  return lines 4..=5, and must NOT return lines 3 or 6. Renamed from
+  `read_markdown_honours_offset_and_limit_like_read_file` when Task 7 folded `read_markdown`
+  into `read_file`: the old name compared `read_file` to itself, and collided by substring
+  with the `read_file.rs` test above. **Both survive deliberately** — that one asserts a
+  line COUNT, which is monotone under TRANSLATING the window (an off-by-one normalisation
+  still returns 3 lines and passes it); this one pins the window's POSITION and says nothing
+  about its size. Neither subsumes the other, and deduplicating them drops off-by-one
+  coverage silently.
+- `read_file_on_markdown_explicit_start_line_wins_over_aliases` — precedence matches the raw
+  line-range route; after the fold both routes share one `normalize_line_nav_aliases` call at
+  `ReadFile::call`, so this now guards two routes through one site rather than two tools.
 
 **Only ONE of the two was RED, and the pair inside the first is what caught it.** The
 containment assertion (`contains("bravo")`) **passed against the unfixed code**, because a

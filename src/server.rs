@@ -3357,7 +3357,28 @@ mod tests {
     /// via `cargo test --lib tool_surface_report_lengths -- --nocapture`, actual
     /// total 57_406 across 22 tools. Set to the exact measured total, not padded,
     /// per the rule above.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_406;
+    ///
+    /// CORRECTED to 57_644 on 2026-09-02. **These bytes bought nothing — the entry
+    /// above recorded a figure that did not match the tree it shipped with.**
+    /// `git diff 3d5ac6cb..HEAD` over `src/librarian/tools/`, `src/tools/` and this
+    /// file is EMPTY, and the surface is a pure function of that source, so the tree
+    /// measured 57_644 the whole time; two consecutive report runs agree.
+    ///
+    /// Why a wrong number survived a green gate, which is the part worth keeping:
+    /// **this budget is gated by ONE of the two test lanes.** The lean lane
+    /// (`--no-default-features`) advertises 20 tools totalling 29_812 — `doc`
+    /// (17_726) and `librarian` (10_106) are librarian-gated and absent — so it
+    /// passes with 27_594 chars of headroom and cannot fire at any plausible value.
+    /// Only the default lane measures the real surface, and between `3d5ac6cb` and
+    /// this correction the default lane never ran to completion here: it aborted on
+    /// a `ReadMarkdown` compile error left by a rebase, then on `doc_tool_refs`,
+    /// then on a restart. Each time the lean lane went green and read as coverage.
+    ///
+    /// So do not read a green `tool_surface_under_budget` in a lean run as evidence
+    /// about this constant. It is `CLAUDE.md` § *Testing Discipline*'s loudness law
+    /// at lane granularity: an alarm nothing reaches is exactly as informative as no
+    /// alarm, and here the unreached lane is the one that would have spoken.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_644;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

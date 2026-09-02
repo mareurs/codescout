@@ -237,10 +237,16 @@ pub fn optional_u64_param(input: &serde_json::Value, name: &str) -> Option<u64> 
 /// count so `end_line = offset + limit - 1`. With only `limit`, `offset` defaults to
 /// line 1, preserving the prior "first N lines" behavior.
 ///
-/// Lives here rather than in `read_file` because it has TWO callers that must agree.
-/// It was private to `read_file` until 2026-09-02, and `read_markdown` -- the tool Iron
-/// Law 4 redirects every `.md` read to -- therefore dropped the aliases in silence, so
-/// native-`Read` habits landed on exactly the tool that could not serve them.
+/// Lives here rather than in `read_file` because it is parameter normalisation, not a read
+/// concern. It was private to `read_file` until 2026-09-02, when `read_markdown` -- the tool
+/// Iron Law 4 then redirected every `.md` read to -- was found dropping the aliases in
+/// silence, so native-`Read` habits landed on exactly the tool that could not serve them.
+///
+/// That second caller is now gone: Task 7 folded `read_markdown` into `read_file`, so
+/// `ReadFile::call` is the ONLY caller and normalises once, ahead of the markdown dispatch.
+/// That ordering is what puts `start_line`/`end_line` in front of `markdown::read` -- a
+/// function that reads neither alias and requires BOTH bounds, so an un-normalised
+/// `offset`/`limit` reaches it as neither and falls through to the default heading map.
 /// docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
 pub fn normalize_line_nav_aliases(input: &mut serde_json::Value) {
     if optional_u64_param(input, "start_line").is_some()

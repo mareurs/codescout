@@ -2055,22 +2055,36 @@ async fn line_range_past_eof_returns_recoverable_error() {
 }
 
 #[tokio::test]
-async fn read_markdown_honours_offset_and_limit_like_read_file() {
+async fn read_file_on_markdown_offset_slice_excludes_its_neighbours() {
     // docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
     //
     // `read_file` normalises native-`Read`-style offset/limit into start_line/end_line
-    // before doing anything else; `read_markdown` -- the tool Iron Law 4 REDIRECTS every
-    // `.md` read to -- did not, so an agent arriving with native-Read habits landed on
-    // exactly the tool that dropped them. Silently: the whole heading map came back with
-    // no error and no `corrections` note, which is a plausible answer to a question
+    // before doing anything else; `read_markdown` -- the tool Iron Law 4 then redirected
+    // every `.md` read to -- did not, so an agent arriving with native-Read habits landed
+    // on exactly the tool that dropped them. Silently: the whole heading map came back
+    // with no error and no `corrections` note, which is a plausible answer to a question
     // nobody asked.
+    //
+    // Task 7 folded `read_markdown` into `read_file`, so the surface this guards is now
+    // `ReadFile::call` -- which normalises BEFORE dispatching to `markdown::read`. That
+    // ordering is load-bearing: `markdown::read` reads only start_line/end_line and
+    // requires BOTH, so an un-normalised offset/limit reaches it as neither and falls
+    // through to the default heading map. Keep this call on the public tool -- pointing it
+    // at `markdown::read` directly skips the very normalisation the bug was about.
+    //
+    // NOT redundant with `read_file_on_markdown_honours_offset_and_limit` (read_file.rs),
+    // which asserts `content.lines().count() == 3`. A cardinality assertion is monotone
+    // under TRANSLATION of the window: an off-by-one normalisation (`start_line = offset
+    // + 1`) still yields 3 lines and passes it. The exclusion pair below pins the window's
+    // POSITION and catches exactly that. Each is blind where the other sees; deleting
+    // either as a duplicate removes real coverage in one direction.
     let body = "# Title\n\nalpha\nbravo\ncharlie\ndelta\necho\n";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("aliases.md");
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let out = super::ReadMarkdown
+    let out = crate::tools::read_file::ReadFile
         .call(
             serde_json::json!({
                 "path": path.to_str().unwrap(),
@@ -2099,18 +2113,22 @@ async fn read_markdown_honours_offset_and_limit_like_read_file() {
 }
 
 #[tokio::test]
-async fn read_markdown_explicit_start_line_wins_over_the_aliases() {
-    // Same precedence rule `read_file` enforces: start_line/end_line are authoritative and
-    // the aliases are left untouched when either is present. Without this, the two tools
-    // would honour the same parameters with different priorities, which is worse than one
-    // of them ignoring the aliases outright -- a caller cannot see which rule applied.
+async fn read_file_on_markdown_explicit_start_line_wins_over_aliases() {
+    // Same precedence rule `read_file` enforces on every route: start_line/end_line are
+    // authoritative and the aliases are left untouched when either is present. Before the
+    // Task 7 fold this guarded two TOOLS agreeing; it now guards the two ROUTES inside one
+    // -- the markdown dispatch and the raw line-range path share a single
+    // `normalize_line_nav_aliases` call at `ReadFile::call`, so a precedence change there
+    // must not come out differing by file type. Without it, the same parameters would be
+    // honoured with different priorities, which is worse than dropping the aliases
+    // outright -- a caller cannot see which rule applied.
     let body = "# Title\n\nalpha\nbravo\ncharlie\ndelta\necho\n";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("precedence.md");
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let out = super::ReadMarkdown
+    let out = crate::tools::read_file::ReadFile
         .call(
             serde_json::json!({
                 "path": path.to_str().unwrap(),
