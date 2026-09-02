@@ -42,8 +42,10 @@ was retired 2026-05-18. `open-issue-work-queue.md` § *Sequencing notes* listed 
 same defect `docs/TAXONOMY.md` records for a bare SHA and a bare ordinal. A query is re-evaluated
 on read and cannot go stale.
 
-So: a `**Members:**` line carries the query, plus `n=<count>` and the date it was run. Trust the
-query; re-run it before trusting the count.
+So: a `**Members:**` line carries the query, plus a per-member derivation saying why that
+instance belongs to this class. It does **not** carry a bare count — counts are derived
+(`scripts/probe-cluster-census.py`) and `no_class_field_states_a_bare_n` refuses a stored one.
+Trust the query; run the probe before trusting any figure.
 
 **And the query's POPULATION is not the whole corpus — say which one you mean before comparing
 two classes' counts.** A tag is required of `docs/issues/*.md`, and 34 of 34 carry one; it is
