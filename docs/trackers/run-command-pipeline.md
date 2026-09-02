@@ -101,6 +101,31 @@ The hook fix (shipped 2026-05-18) is the **read-side** half — pipes that start
 
 ### Concern 2 — extract `exec_one_stage` before adding any 10th mode
 
+> **Superseded in part by R3 — read this concern's *urgency* as retired, 2026-09-02.** It says
+> *"before `pipeline=` goes anywhere, extract the foreground-exec block… Both current foreground
+> path and pipeline= delegate to it."* Under **Strategy C** (R3) a pipeline is **one** `bash -c`
+> child — one spawn, one process group, one timeout, one `PIPESTATUS` — so there are no per-stage
+> execs, the name `exec_one_stage` describes Strategy A, and the two paths do not *delegate* to
+> the block: they **are** it, unchanged. `pipeline=` branches **before** it (build the tee-tapped
+> shell string, arrange `PIPESTATUS` emission) and **after** it (classify per R4, shape the
+> envelope per #5); the 326 lines between are untouched. It therefore adds no 10th dispatch mode,
+> which was this concern's whole reason for blocking.
+>
+> **#9 is consequently NOT a prerequisite.** The refactor stays defensible on readability grounds
+> — 326 lines, nine modes, past this repo's own threshold — but that is a weaker argument and
+> belongs in its own commit. If taken, the seam under C is
+> `spawn_and_await(command, work_dir, timeout, ctx) -> Completed(Output) | TimedOut`, excluding
+> `handle_successful_output` and the timeout-hint text — both response formatting that `pipeline=`
+> needs differently.
+>
+> **Why this was not caught earlier, stated because it is the reusable part:** Strategy C was
+> introduced *by this same review*, in Concern 1. **A review that adds a new alternative does not
+> automatically re-audit its own earlier concerns against it**, and each concern reads as
+> self-contained, so nothing downstream forces the re-audit. Third instance in this tracker of an
+> unexamined Strategy-A claim surviving into the C world — `design-backlog-session-log:F-4` (a
+> cost with no caller), `design-backlog-session-log:F-7` (a cost reachable at another layer), and
+> now a prerequisite the chosen strategy dissolves. See `design-backlog-session-log:F-8`.
+
 Nine dispatch modes in one function is past the "argues about where new features belong" heuristic. Before pipeline= goes anywhere, extract the foreground-exec block (spawn + killpg + timeout + SIGPIPE reset +
 buffer-store) as `exec_one_stage`.
 

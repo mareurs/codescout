@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 7
+entry_high_water_F: 8
 entry_high_water_W: 1
 ---
 
@@ -85,6 +85,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-5 | 2026-09-01 | high | measurement | fixed-verified | two systems agreed and both were the wrong sample — a correct ruling was one message from retraction |
 | F-6 | 2026-09-02 | low | measurement | wontfix-false-alarm | the ledger-count hook's "skip" was correct — the name is broader than its `files:` scope (**denominator, not a catch**) |
 | F-7 | 2026-09-02 | high | architectural | fixed-verified | "impossible by construction" was a claim about Rust, not about the capability — C's last cost was reachable in the shell |
+| F-8 | 2026-09-02 | med | architectural | open | #9 was carried as a prerequisite, and Strategy C dissolves it — third unexamined Strategy-A claim |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -176,8 +177,19 @@ unrecorded by default.
   (timeout policy), whose "total" lean rested on per-stage being impossible — both are now
   implementable, and total stays the default only because no caller for per-stage has been named.
 
-- [ ] **T6 — #9 (`exec_one_stage` extraction) is a prerequisite under every strategy.** Verified
-  absent (`symbols(name="exec_one_stage")` → 0 matches). Real code, gated on T5.
+- [ ] **T6 — #9 (`exec_one_stage`): NOT a prerequisite. Re-scope or drop.** Scouted 2026-09-02
+  before editing; the premise did not survive R3 — see `design-backlog-session-log:F-8`. Under
+  Strategy C a pipeline is **one** `bash -c` child, so there are no per-stage execs to factor out;
+  `exec_one_stage` names Strategy A. Concern 2's *"both paths delegate to it"* is false under C —
+  they **are** it, unchanged — and its *"before `pipeline=` goes anywhere"* urgency was about
+  stopping a 10th dispatch mode, which C does not add: `pipeline=` branches **before** the exec
+  block (build the tee-tapped string, arrange `PIPESTATUS` emission) and **after** it (classify
+  per R4, shape the envelope per #5). The 326 lines between are untouched either way. Still
+  defensible as a *readability* refactor — 326 lines, nine modes — but that is a weaker argument
+  and belongs in its own commit, not smuggled in as pipeline groundwork. If re-scoped, the seam is
+  `spawn_and_await(command, work_dir, timeout, ctx) -> Completed(Output) | TimedOut`, deliberately
+  **excluding** `handle_successful_output` and the timeout-hint text, both of which are response
+  formatting that `pipeline=` needs differently.
 
 **Watch, not a task — `W-1`'s Promote-when.** Its criterion is a *third* instance of
 report-don't-attribute changing another session's action. Two exist. Manufacturing a third is
@@ -881,6 +893,65 @@ short user question that proposed no alternative and only asked for grounding
 **Rests on:** measured 2026-09-02 via `bash -c 'echo hi | timeout 1 sleep 30 | cat'`,
 GNU coreutils `timeout` 9.11; `docs/trackers/run-command-pipeline.md` § *Architectural review*
 Concern 1 (*now harder*) and § *Rulings*; `src/platform/windows.rs:182-193`.
+
+## F-8 — #9 was carried as a prerequisite, and Strategy C dissolves it — third unexamined Strategy-A claim
+
+**Valid:** dated 2026-09-02
+
+**Category:** architectural · **Severity:** med · **Status:** open
+
+**Observed.** T6 was the last task: extract `exec_one_stage` from `run_command_inner`, carried
+all session as *"a prerequisite under every strategy."* Reading the function before editing it
+shows the premise is Strategy-A-shaped and **R3 removed it**.
+
+**Got.** `run_command_inner` (`src/tools/run_command/inner.rs:279-605`) ends in one
+foreground-exec block: `inject_tee` builds `effective_command`; a `#[cfg(unix)]` /
+`#[cfg(windows)]` pair spawns it and returns `(child_output_fut, pgid)`; a heartbeat task
+starts; one `tokio::time::timeout` awaits it and dispatches to `handle_successful_output`, an
+execution error, or the timeout arm with its `killpg`.
+
+**Under Strategy C there is exactly ONE exec.** A pipeline is a single
+`bash -c 'a | tee t0 | b | tee t1 | c'` child — one spawn, one process group, one timeout, one
+`PIPESTATUS`. There are no per-stage execs to factor a per-stage function out of. So:
+
+- **The name is wrong.** `exec_one_stage` describes Strategy A, where each stage was its own
+  spawn. Under C the block execs a *pipeline*, not a stage.
+- **The stated justification is thin.** Concern 2's argument is *"both current foreground path
+  and pipeline= delegate to it."* Under C they do not delegate to it — they **are** it,
+  unchanged. `pipeline=` is a **command-construction** step *before* the block (build the
+  tee-tapped shell string; arrange for `PIPESTATUS` to be emitted) and a **response-formatting**
+  step *after* it (classify per R4, shape the envelope per #5). The 326 lines in between are
+  untouched either way.
+- **It is therefore not a prerequisite.** Concern 2's *"before `pipeline=` goes anywhere,
+  extract…"* was written to stop a **10th dispatch mode** landing in an already-9-mode function.
+  Under C, `pipeline=` adds no dispatch mode to that block: it branches before and after it, not
+  inside it.
+
+**Root cause — same shape as `design-backlog-session-log:F-4` and `design-backlog-session-log:F-7`, third instance, and this one
+is a *prerequisite* rather than a *cost*.** All three are claims made about Strategy A's
+mechanics that were carried forward unexamined after C was chosen: F-4 a cost with no caller,
+F-7 a cost reachable at another layer, and now a prerequisite that the chosen strategy dissolves.
+The review is not careless — it was written **before** C existed as an option, and C was added
+*by that same review* in Concern 1. **A review that introduces a new alternative does not
+automatically re-audit its own earlier concerns against it**, and nothing downstream forces the
+re-audit either, because each concern reads as self-contained.
+
+**What survives.** The refactor is still *defensible* — 326 lines and nine dispatch modes in one
+function is past this repo's own stated threshold — but that is a **readability** argument, and a
+much weaker one than "a prerequisite that unblocks the feature." It should be done, or not, on
+its own merits and in its own commit, not smuggled in as pipeline groundwork. And it touches the
+load-bearing parts: process-group creation, the `PgidKillGuard`, SIGPIPE reset in `pre_exec`, the
+Windows Job Object, and two `#[cfg]` arms that cannot both be compiled locally.
+
+**Recommendation.** Do **not** treat #9 as blocking. Either drop it from the pipeline plan, or
+re-scope it as *"extract the foreground exec so `pipeline=` can reuse it without a tenth
+branch"* — which under C means extracting a `spawn_and_await(command, work_dir, timeout, ctx) ->
+Completed(Output) | TimedOut`, deliberately **excluding** `handle_successful_output` and the
+timeout-hint text, since both are response formatting and `pipeline=` needs different ones.
+
+**Rests on:** `src/tools/run_command/inner.rs:279-605` read in full 2026-09-02;
+`docs/trackers/run-command-pipeline.md` § *Architectural review* Concern 2 and § *Rulings* R3,
+R4, R7.
 
 ## Template for new entries
 
