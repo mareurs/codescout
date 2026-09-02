@@ -211,6 +211,17 @@ enum Commands {
     #[cfg(feature = "librarian")]
     Doctor(codescout::cli::doctor::DoctorArgs),
 
+    /// Give every artifact with no chunk rows a chunked, embedded
+    /// representation, WITHOUT going through the indexer's walk.
+    ///
+    /// The artifacts this reaches are the ones an ordinary reindex declines to
+    /// process: their content is stamped as seen while unembedded, so
+    /// `content_unchanged` is true and the embed is skipped forever. Resumable;
+    /// safe to interrupt. Run it from a shell, never from the MCP server — it
+    /// holds the catalog lock for the whole run.
+    #[cfg(feature = "librarian")]
+    BackfillChunks(codescout::cli::backfill_chunks::BackfillChunksArgs),
+
     /// Read-only query: which active constitution rules apply to a given
     /// path. Used by codescout-companion's PreToolUse hook — not meant for
     /// interactive use. Always exits 0; prints `[]` on any internal error.
@@ -455,6 +466,10 @@ async fn main() -> Result<()> {
         #[cfg(feature = "librarian")]
         Commands::Doctor(args) => {
             codescout::cli::doctor::run(args).await?;
+        }
+        #[cfg(feature = "librarian")]
+        Commands::BackfillChunks(args) => {
+            codescout::cli::backfill_chunks::run(args).await?;
         }
         #[cfg(feature = "librarian")]
         Commands::ConstitutionCheck(args) => {

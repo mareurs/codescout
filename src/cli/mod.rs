@@ -17,6 +17,8 @@ pub mod artifact_refresh;
 #[cfg(feature = "librarian")]
 pub mod audit_doc_refs;
 #[cfg(feature = "librarian")]
+pub mod backfill_chunks;
+#[cfg(feature = "librarian")]
 pub mod constitution_check;
 
 #[cfg(feature = "librarian")]

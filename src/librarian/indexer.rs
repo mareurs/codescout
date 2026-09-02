@@ -785,6 +785,179 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
     Ok(ids.len())
 }
 
+/// What a [`backfill_chunk_vectors`] run did. Four counts rather than three,
+/// because a file that is *gone* and a file that is *empty* are different
+/// outcomes with different remedies, and folding them into one number would make
+/// the report say "skipped" about two unrelated things.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct BackfillReport {
+    /// Chunk vectors written.
+    pub embedded: usize,
+    /// Artifacts whose body yielded no embeddable chunk (blank, or
+    /// frontmatter-only). These are correctly vectorless and will stay so.
+    pub skipped_empty: usize,
+    /// Artifacts whose file is no longer on disk. A catalog-vs-filesystem drift
+    /// this run declines to repair — `librarian(action="reindex")` owns removal.
+    pub missing_file: usize,
+    /// Artifacts visited.
+    pub artifacts: usize,
+}
+
+/// `catalog_meta` key holding the resume cursor, as `"<updated_at>|<id>"`.
+const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
+
+/// Give every artifact that has **no chunk rows** a chunked, embedded
+/// representation, without going through [`index_repo_sync`] at all.
+///
+/// **Why it bypasses the indexer rather than calling it.** The artifacts this
+/// exists for are exactly the ones the indexer *declines to process*: their
+/// content is stamped as seen, so `content_unchanged` is true and the embed is
+/// skipped — an absorbing state
+/// (`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
+/// A backfill routed through the normal walk would inherit that gate and report
+/// success having done nothing. This one consults `content_unchanged` NOWHERE.
+///
+/// **What it does not fix.** The stamp/gate ordering is untouched, so this
+/// empties the hole without closing it: a later run can dig a new one. That is
+/// what `IndexReport::vectorless` is for, and it is why Task 11's *swap* stays
+/// blocked while this half does not — filling a hole is safe; renaming the table
+/// out from under a still-broken writer is not.
+///
+/// **Resumable**, because a full corpus is ~90k chunks of remote round-trips and
+/// an interrupted run must not start over. The cursor is `(updated_at, id)` —
+/// `updated_at` alone is not unique, and a cursor that is not a total order
+/// silently skips every artifact sharing a timestamp with the last one written.
+/// It advances only after a batch is durably written.
+///
+/// Takes the `Mutex` rather than a `&Catalog` so the lock can be RELEASED across
+/// each embedding await. Holding it for the whole run would work in the one-shot
+/// CLI and would be wrong anywhere else, and a signature that only works in one
+/// caller is a trap for the second one.
+///
+/// `batch` is the flush size; 100 matches [`index_repo`]'s own flush.
+pub async fn backfill_chunk_vectors(
+    catalog: &parking_lot::Mutex<Catalog>,
+    svc: &crate::librarian::embedding::EmbeddingService,
+    batch: usize,
+) -> Result<BackfillReport> {
+    use crate::librarian::catalog::gc::{get_meta, set_meta};
+
+    let flush = batch.max(1);
+    let mut report = BackfillReport::default();
+
+    let (mut cur_updated, mut cur_id) = {
+        let cat = catalog.lock();
+        match get_meta(&cat.conn, BACKFILL_CURSOR)? {
+            Some(s) => match s.split_once('|') {
+                Some((u, i)) => (u.parse::<i64>().unwrap_or(i64::MIN), i.to_string()),
+                None => (i64::MIN, String::new()),
+            },
+            None => (i64::MIN, String::new()),
+        }
+    };
+
+    let mut pending: Vec<(String, Vec<f32>)> = Vec::with_capacity(flush);
+
+    loop {
+        // One page of vectorless artifacts past the cursor. Re-queried each round
+        // rather than collected up front: the page is small, and holding a
+        // 700-row snapshot across awaits would go stale against concurrent
+        // writers on a shared catalog.
+        let page: Vec<(String, String, Option<String>, i64)> = {
+            let cat = catalog.lock();
+            let mut stmt = cat.conn.prepare(
+                "SELECT a.id, a.abs_path, a.title, a.updated_at FROM artifact a \
+                 WHERE NOT EXISTS ( \
+                   SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
+                 ) \
+                 AND (a.updated_at > ?1 OR (a.updated_at = ?1 AND a.id > ?2)) \
+                 ORDER BY a.updated_at, a.id LIMIT ?3",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![cur_updated, cur_id, flush as i64], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        if page.is_empty() {
+            break;
+        }
+
+        for (id, abs_path, title, updated_at) in page {
+            report.artifacts += 1;
+            cur_updated = updated_at;
+            cur_id = id.clone();
+
+            let content = match std::fs::read_to_string(&abs_path) {
+                Ok(c) => c,
+                Err(_) => {
+                    report.missing_file += 1;
+                    continue;
+                }
+            };
+            let body = match frontmatter::parse(&content) {
+                Ok((_, b)) => b.to_string(),
+                Err(_) => content.clone(),
+            };
+
+            let items = {
+                let cat = catalog.lock();
+                embed_queue_items(&cat, &id, title, &body)?
+            };
+            if items.is_empty() {
+                report.skipped_empty += 1;
+                continue;
+            }
+
+            let futures_iter = items.into_iter().map(|(chunk_id, t, text)| async move {
+                let vec = svc.embed_artifact(t.as_deref(), &text).await?;
+                anyhow::Ok((chunk_id, vec))
+            });
+            let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
+            while let Some(res) = s.next().await {
+                pending.push(res?);
+            }
+        }
+
+        // Write, THEN advance the cursor: the other order loses a batch on a
+        // crash between the two and calls the range done.
+        if pending.len() >= flush {
+            let cat = catalog.lock();
+            write_embeddings_v2(&cat, &pending)?;
+            report.embedded += pending.len();
+            pending.clear();
+        }
+        {
+            let cat = catalog.lock();
+            set_meta(
+                &cat.conn,
+                BACKFILL_CURSOR,
+                &format!("{cur_updated}|{cur_id}"),
+            )?;
+        }
+    }
+
+    if !pending.is_empty() {
+        let cat = catalog.lock();
+        write_embeddings_v2(&cat, &pending)?;
+        report.embedded += pending.len();
+    }
+    // A completed run CLEARS the cursor, and this is not tidiness. Left at the
+    // end of the corpus, the next run's `updated_at > cursor` predicate would
+    // skip any artifact that becomes vectorless later with an earlier timestamp —
+    // which is precisely what a re-formed hole looks like, since the trap is
+    // entered by content the walk considers old. The cursor's job is to make one
+    // run terminate over rows it cannot fix (empty bodies and missing files keep
+    // no chunk rows, so `NOT EXISTS` re-selects them forever); it is not a
+    // watermark over the corpus's lifetime.
+    {
+        let cat = catalog.lock();
+        set_meta(&cat.conn, BACKFILL_CURSOR, "")?;
+    }
+    Ok(report)
+}
+
 /// Opt-in gate for [`rebuild_artifact_vec_at_dim`]. Default OFF — a dimension
 /// mismatch is a loud, safe stop by default (see F-6b/F-9 history in
 /// `docs/archive/old-trackers/bug-tracker.md` and
@@ -973,6 +1146,165 @@ kind = "memory"
             without_slug, 0,
             "every row the walk touched must have a slug minted, not left for a manual backfill"
         );
+    }
+
+    /// A working embedder for the backfill tests. Constant vector — the
+    /// backfill's contract is *which rows it reaches*, never ranking. 768 dims
+    /// because `artifact_vec_v2` is declared `FLOAT[768]` and sqlite-vec rejects
+    /// anything else at INSERT, which is a loud failure and not a silent one.
+    fn backfill_svc() -> crate::librarian::embedding::EmbeddingService {
+        struct OkEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for OkEmbedder {
+            fn dimensions(&self) -> usize {
+                768
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts
+                    .iter()
+                    .map(|_| {
+                        let mut v = vec![0.0f32; 768];
+                        v[0] = 1.0;
+                        v
+                    })
+                    .collect())
+            }
+        }
+        crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(OkEmbedder))
+    }
+
+    fn md_rules() -> Vec<CompiledRule> {
+        load_rules("[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n").unwrap()
+    }
+
+    /// **The backfill's whole reason to exist: it escapes a state the indexer
+    /// cannot.**
+    ///
+    /// The absorbing state is REPRODUCED, not simulated — index with embeddings
+    /// off (stamps `file_sha256`, writes nothing), then on (the row is now
+    /// `content_unchanged`, so the early return skips the embed). The test then
+    /// runs `index_repo_sync` once more and asserts it STILL refuses, in the same
+    /// test: without that control, a backfill doing exactly what an ordinary
+    /// reindex would have done looks identical and is not worth a function.
+    #[tokio::test]
+    async fn the_backfill_embeds_what_the_indexer_permanently_refuses_to() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("ledger.md"),
+            "# L\n\nintro\n\n## W-1 — a\n\nalpha\n\n## W-2 — b\n\nbeta\n",
+        )
+        .unwrap();
+
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        let (trapped, q) =
+            index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
+        assert_eq!(trapped.vectorless, Some(1), "fixture must be in the trap");
+        assert!(q.is_empty(), "and the indexer must be refusing it");
+
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+            .await
+            .unwrap();
+        assert_eq!(report.artifacts, 1);
+        assert_eq!(report.skipped_empty, 0);
+        assert_eq!(report.missing_file, 0);
+        assert!(
+            report.embedded >= 3,
+            "the ledger has a preamble plus two entries; the backfill must write a \
+             vector PER CHUNK, not one per artifact — got {}",
+            report.embedded
+        );
+
+        let vecs: i64 = m
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            vecs as usize, report.embedded,
+            "the report must not overstate what landed"
+        );
+
+        // The control: the indexer is STILL refusing. The backfill emptied the
+        // hole; it did not close it — which is exactly why the swap stays blocked.
+        let (after, q2) =
+            index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
+        assert_eq!(after.vectorless, Some(0), "the hole is empty");
+        assert!(
+            q2.is_empty(),
+            "and the indexer still declines to queue it — the ORDERING defect is \
+             untouched, so a new artifact can still fall in"
+        );
+    }
+
+    /// An empty body and a missing file are different outcomes with different
+    /// remedies, and a single `skipped` count would say the same word about both.
+    /// Neither is an error, and neither may be counted as `embedded`.
+    #[tokio::test]
+    async fn a_blank_artifact_and_a_vanished_one_are_counted_apart() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("blank.md"), "---\ntitle: B\n---\n").unwrap();
+        std::fs::write(tmp.path().join("gone.md"), "# G\n\nbody\n").unwrap();
+
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
+
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+            .await
+            .unwrap();
+        assert_eq!(report.artifacts, 2);
+        assert_eq!(report.embedded, 0, "neither had anything to embed");
+        assert_eq!(report.skipped_empty, 1, "the blank one");
+        assert_eq!(report.missing_file, 1, "the deleted one");
+    }
+
+    /// **A completed run must clear its cursor.** Parked at the end of the
+    /// corpus, the next run's `updated_at > cursor` predicate skips any artifact
+    /// that becomes vectorless later with an EARLIER timestamp — which is exactly
+    /// what a re-formed hole looks like, since the trap is entered by content the
+    /// walk considers old.
+    ///
+    /// This is the assertion a cursor-as-watermark implementation fails, and it
+    /// fails SILENTLY: the second run returns `artifacts: 0, embedded: 0`, which
+    /// reads as "nothing to do" rather than as a skip.
+    #[tokio::test]
+    async fn a_second_run_still_finds_an_artifact_that_fell_in_afterwards() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        std::fs::write(tmp.path().join("b.md"), "# B\n\nbeta\n").unwrap();
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+
+        let first = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+            .await
+            .unwrap();
+        assert_eq!(first.artifacts, 2);
+        assert!(first.embedded >= 2);
+
+        // Both fall back in, keeping their ORIGINAL `updated_at` — behind
+        // wherever a watermark cursor would have been parked.
+        {
+            let cat = m.lock();
+            cat.conn.execute("DELETE FROM artifact_chunk", []).unwrap();
+            cat.conn.execute("DELETE FROM artifact_vec_v2", []).unwrap();
+        }
+
+        let second = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+            .await
+            .unwrap();
+        assert_eq!(
+            second.artifacts, 2,
+            "a run that parks its cursor at the end of the corpus reports 0 here, and \
+             0 reads as 'nothing to do' rather than as a skip"
+        );
+        assert!(second.embedded >= 2, "and it must actually re-embed them");
     }
 
     /// **The absorbing state, reproduced end to end and then COUNTED.**
