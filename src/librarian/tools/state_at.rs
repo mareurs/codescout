@@ -146,6 +146,7 @@ pub(crate) fn replay_state_at(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
+    #[serde(alias = "id")]
     pub artifact_id: String,
     #[serde(default)]
     pub commit: Option<String>,
@@ -155,8 +156,8 @@ pub struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(
-            format!("doc(action=\"state_at\") requires 'artifact_id': {e}"),
-            "e.g. doc(action=\"state_at\", artifact_id=\"<16-hex>\", commit=\"<sha>\"). Supply exactly one of commit or timestamp (ms epoch) as the cutoff. Get an id from doc(action=\"find\", ...).",
+            format!("doc(action=\"state_at\") requires 'id': {e}"),
+            "e.g. doc(action=\"state_at\", id=\"<16-hex>\", commit=\"<sha>\"). Supply exactly one of commit or timestamp (ms epoch) as the cutoff. Get an id from doc(action=\"find\", ...).",
         )
     })?;
 

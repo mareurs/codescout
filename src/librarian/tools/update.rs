@@ -390,6 +390,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
 
+    if let Some(p) = args.get("patch") {
+        if !p.is_null() && !p.is_object() {
+            return Err(super::RecoverableError::with_hint(
+                "doc(action=\"update\") patch must be a JSON object mapping field names to new values",
+                "e.g. patch={\"status\": \"fixed\"}. A patch that is an array or scalar is not a valid RFC 7396 merge document.",
+            ));
+        }
+    }
+
     let mut a: Args = serde_json::from_value(args)?;
 
     // Every top-level param the artifact schema advertises for `update` is lifted

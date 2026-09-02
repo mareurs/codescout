@@ -28,7 +28,7 @@ impl Tool for Workspace {
                 "action": {
                     "type": "string",
                     "enum": ["activate", "status", "list_projects"],
-                    "description": "Operation to perform."
+                    "description": "Operation to perform. Required unless post_compact=true, which implies status."
                 },
                 "path": {
                     "type": "string",
@@ -42,8 +42,7 @@ impl Tool for Workspace {
                     "type": "boolean",
                     "description": "Flush all LSP clients after context compaction. Implies action='status' when action is omitted."
                 }
-            },
-            "required": ["action"]
+            }
         })
     }
 

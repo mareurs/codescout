@@ -494,7 +494,10 @@ impl Tool for ReadMarkdown {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] }
+            ],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },

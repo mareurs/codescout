@@ -139,7 +139,7 @@ impl Tool for Symbols {
                     "description": "Filter by kind (interface = Rust traits). Ignored when name_path is given.",
                     "enum": ["function", "class", "struct", "interface", "type", "enum", "module", "constant"]
                 },
-                "include_body": { "type": "boolean", "default": false },
+                "include_body": { "type": "boolean", "default": false, "description": "Include full source body for each matched symbol." },
                 "depth": { "type": "integer", "description": "Children depth (overview default 1; search default 0)." },
                 "include_docs": { "type": "boolean", "default": false, "description": "Attach each symbol's own docstring (overview and search modes)." },
                 "force_mode": {

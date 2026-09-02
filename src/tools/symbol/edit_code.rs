@@ -112,8 +112,8 @@ impl Tool for EditCode {
                     "type": "string",
                     "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\". Alias: `name_path` (symbols()' name for the same address) is accepted."
                 },
-                "path":     { "type": "string" },
-                "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"] },
+                "path":     { "type": "string", "description": "File path (relative to project root) containing the symbol." },
+                "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"], "description": "Edit to perform: rename (LSP-aware), remove, replace (overwrite body), or insert (adjacent code)." },
                 "new_name": {
                     "type": "string",
                     "description": format!(

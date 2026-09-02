@@ -26,7 +26,11 @@ impl Tool for CreateFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path", "content"],
+            "required": ["content"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] }
+            ],
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
                 "file_path": { "type": "string", "description": "Alias for path" },

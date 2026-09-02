@@ -31,7 +31,11 @@ impl Tool for ReadFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] },
+                { "required": ["output_id"] }
+            ],
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },

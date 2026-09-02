@@ -377,7 +377,10 @@ impl Tool for EditFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] }
+            ],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
                 "file_path": { "type": "string", "description": "Alias for path" },

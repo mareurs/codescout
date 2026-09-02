@@ -76,12 +76,26 @@ impl Tool for Artifact {
                     "type": "boolean",
                     "description": "find: filter to augmented (true) or non-augmented (false) artifacts"
                 },
-                "include_archived": { "type": "boolean", "default": false },
-                "limit": { "type": "integer", "default": 50, "maximum": 500 },
-                "offset": { "type": "integer", "default": 0, "maximum": 100000 },
+                "include_archived": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "find: include archived and superseded rows, which the default scope hides."
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "maximum": 500,
+                    "description": "find: max rows (default 50, max 500)."
+                },
+                "offset": {
+                    "type": "integer",
+                    "default": 0,
+                    "maximum": 100000,
+                    "description": "find: rows to skip for paging (default 0)."
+                },
                 "id": {
                     "type": "string",
-                    "description": "get/update/graph/append_entry: artifact id"
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry: document id (16-hex). find and create take none."
                 },
                 "include_links": { "type": "boolean", "default": false, "description": "get: include link edges" },
                 "links_direction": {
@@ -90,7 +104,11 @@ impl Tool for Artifact {
                     "description": "get: filter links by direction (default: both)"
                 },
                 "links_rel": { "type": "string", "description": "get: filter links to this rel type" },
-                "include_observations": { "type": "boolean", "default": false },
+                "include_observations": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "get: include observation rows recorded against the document (default false)."
+                },
                 "full": { "type": "boolean", "default": false, "description": "get: include full body" },
                 "heading": { "type": "string", "description": "get: fetch one section by heading" },
                 "occurrence": { "type": "integer", "minimum": 1, "description": "get: 1-indexed selector when `heading` matches several sections. Omitted, an ambiguous heading returns body_meta.heading_ambiguous naming each match's line." },
@@ -137,7 +155,7 @@ impl Tool for Artifact {
                 },
                 "patch": {
                     "type": "object",
-                    "description": "REQUIRED for action='update' — an update with no `patch` fails with the bare serde message `missing field 'patch'`, which names the field but not the action that wanted it. Fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits — edit_markdown's batch shape exactly, including its action semantics and occurrence rule; applied atomically, RECOMMENDED for tracker maintenance; (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
+                    "description": "update: the fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Top-level status/title/owners/tags/topic/time_scope/extra are lifted into patch automatically and reported under `corrections`; an update that changes nothing is refused. Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits — edit_markdown's batch shape exactly, including its action semantics and occurrence rule; applied atomically, RECOMMENDED for tracker maintenance; (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — arrays are REPLACED whole, so use update_entry to change one row. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
                 },
                 "force": {
                     "type": "boolean",
@@ -169,7 +187,6 @@ impl Tool for Artifact {
                     "default": false,
                     "description": "graph: also walk event and source nodes via event_edges"
                 },
-                "artifact_id": { "type": "string", "description": "state_at: artifact id" },
                 "commit": { "type": "string", "description": "state_at: git commit hash as time-travel cutoff" },
                 "timestamp": {
                     "type": "integer",
@@ -203,7 +220,7 @@ impl Tool for Artifact {
                 },
                 "anchor_heading": {
                     "type": "string",
-                    "description": "append_entry, prose ledgers: pass with `title` + `body` — all three or none, a partial set is refused naming what is missing — and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
+                    "description": "append_entry: prose ledgers — pass with `title` + `body` (all three or none; a partial set is refused naming what is missing) and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
                 }
             }
         })
@@ -439,7 +456,7 @@ mod tests {
                 m.insert("rel".into(), json!("cites"));
             }
             "state_at" => {
-                m.insert("artifact_id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
             }
             "create" => {
                 m.insert("kind".into(), json!("bug"));

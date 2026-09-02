@@ -707,7 +707,8 @@ impl Tool for Memory {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"]
+                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"],
+                    "description": "Operation to perform: read/write/list/delete for topic-based memory; remember/recall/forget for semantic (bucket-classified) memory; refresh_anchors to re-derive anchor topics."
                 },
                 "topic": {
                     "type": "string",

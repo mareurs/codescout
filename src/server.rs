@@ -2708,6 +2708,182 @@ mod tests {
         }
     }
 
+    // ---------- Registry-wide schema honesty gates (Task 3) ----------
+
+    /// Every advertised property carries a description. A param with type and default
+    /// only is one the model cannot choose to use. Measured 2026-09-02: 12 such params
+    /// across 7 tools; this test listed them and each was described in the same change.
+    #[tokio::test]
+    async fn every_property_has_a_description() {
+        let (_dir, server) = make_server().await;
+        let mut blank = Vec::new();
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+                continue;
+            };
+            for (name, def) in props {
+                let has = def
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .is_some_and(|d| !d.trim().is_empty());
+                if !has {
+                    blank.push(format!("{}.{}", t.name(), name));
+                }
+            }
+        }
+        assert!(
+            blank.is_empty(),
+            "params with no description:\n  {}",
+            blank.join("\n  ")
+        );
+    }
+
+    /// `doc` says which action a param serves through a `<action>[/<action>]:` prefix, or
+    /// `all:`. The honesty direction is already tested (labelled ⇒ honoured, in
+    /// `artifact.rs`); this is completeness: every param carries a well-formed label and
+    /// every action has at least one param labelled for it. Measured 2026-09-02 before the
+    /// rewrite: `delete` had zero and four params had no label at all.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_doc_param_is_labelled_and_every_action_has_a_param() {
+        let (_dir, server) = make_server().await;
+        let doc = server.find_tool("doc").expect("doc is registered");
+        let schema = doc.input_schema();
+        let props = schema["properties"].as_object().unwrap();
+        let actions: Vec<String> = props["action"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        let mut unlabelled = Vec::new();
+        let mut covered: std::collections::HashSet<String> = Default::default();
+        for (name, def) in props {
+            if name == "action" {
+                continue;
+            }
+            let desc = def["description"].as_str().unwrap_or("");
+            let label = desc.split(':').next().unwrap_or("");
+            let tokens: Vec<&str> = label.split('/').map(str::trim).collect();
+            let well_formed = !label.is_empty()
+                && !label.contains(' ')
+                && tokens
+                    .iter()
+                    .all(|t| *t == "all" || actions.iter().any(|a| a == t));
+            if !well_formed {
+                unlabelled.push(format!("{name}: {label:?}"));
+                continue;
+            }
+            for t in tokens {
+                if t == "all" {
+                    covered.extend(actions.iter().cloned());
+                } else {
+                    covered.insert(t.to_string());
+                }
+            }
+        }
+        let uncovered: Vec<&String> = actions.iter().filter(|a| !covered.contains(*a)).collect();
+        assert!(
+            unlabelled.is_empty() && uncovered.is_empty(),
+            "unlabelled params: {unlabelled:?}\nactions with no labelled param: {uncovered:?}"
+        );
+    }
+
+    /// A schema's `required` array is a claim about what a call MUST supply. An alias
+    /// property lets a caller satisfy the underlying need without ever naming the
+    /// required key — so naming that key alone in `required` is false the moment an
+    /// alias exists; the true requirement is an alternation, which a flat `required`
+    /// array cannot express and `anyOf` can.
+    ///
+    /// The alias relation is derived from the schema's own prose, not a hand-list: a
+    /// property whose description opens `Alias for <name>` declares itself an alias of
+    /// `<name>`. That is real data — `get_path_param`/`require_path_param`
+    /// (`src/fs/mod.rs`) genuinely accept `path` or any of `PATH_PARAM_ALIASES`
+    /// (`file_path`, `relative_path`, `file`) at runtime, and `file_path`'s schema text
+    /// already says so. So this needs no per-tool input and catches a new alias
+    /// property the moment it is added with a `required` entry it falsifies.
+    ///
+    /// Measured 2026-09-02: `read_markdown(file_path="docs/issues/_TEMPLATE.md")` with
+    /// no `path` returned the whole document — `file_path` genuinely discharges the
+    /// requirement `required: ["path"]` claims to hold alone. Five tools were affected
+    /// (read_file, create_file, edit_file, edit_markdown, read_markdown); `grep`
+    /// declares the same `file_path` alias but does not require `path`, so it is
+    /// unaffected and correctly not flagged.
+    ///
+    /// The remedy is the schema, not the code: `file_path` is a deliberate, documented
+    /// alias, so the fix is to stop the `required` array from claiming `path` alone —
+    /// never to make the code refuse aliases.
+    #[tokio::test]
+    async fn required_names_no_key_that_has_a_declared_alias() {
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+                continue;
+            };
+            let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
+                continue;
+            };
+            // property name -> the name it declares itself an alias of.
+            let aliases: Vec<(&str, &str)> = props
+                .iter()
+                .filter_map(|(name, def)| {
+                    let d = def.get("description")?.as_str()?;
+                    let rest = d.strip_prefix("Alias for ")?;
+                    let target = rest.split(|c: char| c.is_whitespace()).next()?;
+                    Some((name.as_str(), target))
+                })
+                .collect();
+            for req in required.iter().filter_map(|v| v.as_str()) {
+                for (alias_name, target) in &aliases {
+                    if *target == req {
+                        offenders.push(format!(
+                            "{}: required=[{req:?}] but {alias_name:?} is declared an alias of it",
+                            t.name()
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these schemas name a required key that another property declares itself an \
+             alias of — the true requirement is an alternation; express it with `anyOf` \
+             (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// `workspace` declared `action` required while its code accepted `post_compact`
+    /// alone (31 of 120 such calls in 30 days, per the `config/mod.rs` `None if
+    /// post_compact => "status"` arm). `required` is a claim about `call()`; pin the
+    /// schema half here and the behaviour half in `config/mod.rs`.
+    #[tokio::test]
+    async fn workspace_does_not_require_action() {
+        let (_dir, server) = make_server().await;
+        let ws = server
+            .find_tool("workspace")
+            .expect("workspace is registered");
+        let schema = ws.input_schema();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert!(
+            !required.contains(&"action"),
+            "workspace accepts post_compact=true with no action; `action` must not be in required: {required:?}"
+        );
+        let d = schema["properties"]["action"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            d.contains("post_compact"),
+            "action's description must say when it may be omitted: {d}"
+        );
+    }
+
     // ---------- Tool surface budget (spec 2026-08-18-tool-surface-budget-design) ----------
 
     /// Reproduce the tool surface exactly as `list_tools` advertises it.
@@ -2870,7 +3046,10 @@ mod tests {
     /// on the very next added byte, which is the only thing keeping this honest.
     /// The sweep that pays it back should LOWER this line, and any pass that
     /// cannot is a pass that did not happen.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_735;
+    ///
+    /// Provisional: raised by Task 3's schema descriptions; Task 10 ratchets it to
+    /// the post-collapse measurement.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_497;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

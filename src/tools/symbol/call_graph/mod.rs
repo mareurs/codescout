@@ -369,9 +369,9 @@ impl Tool for CallGraph {
             "properties": {
                 "symbol":       { "type": "string", "description": "Symbol identifier. Plain method: 'MyStruct/method'. Trait impl method: 'impl Trait for Struct/method'." },
                 "path":         { "type": "string", "description": "File containing the symbol (required for seed resolution)" },
-                "direction":    { "enum": ["callers", "callees", "both"], "default": "callers" },
+                "direction":    { "type": "string", "enum": ["callers", "callees", "both"], "default": "callers", "description": "Which edges to walk: functions that call the symbol, functions it calls, or both." },
                 "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },
-                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring" }
+                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "'full' includes each node's source body; 'exploring' returns names and locations only." }
             },
             "required": ["symbol", "path"]
         })

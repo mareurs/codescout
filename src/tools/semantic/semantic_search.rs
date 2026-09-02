@@ -567,7 +567,7 @@ impl Tool for SemanticSearch {
             "required": ["query"],
             "properties": {
                 "query": { "type": "string", "description": "Natural language or code snippet to search for" },
-                "limit": { "type": "integer", "default": 10 },
+                "limit": { "type": "integer", "default": 10, "description": "Max results to return (default 10)." },
                 "detail_level": { "type": "string", "description": "'full' for complete chunks (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'" },
