@@ -283,6 +283,62 @@ at different levels.* That is the remedy pattern, and its absence — not the pr
 aggregate — is what identifies an instance. An aggregate assertion is not a defect; an aggregate
 assertion **standing alone** where a per-member claim is being made is.
 
+**That inversion needed one more word, supplied by a second instance below: the absence of a second
+level that REACHES THE PRODUCTION PATH.** A second level can be present, named for exactly the job,
+and dead.
+
+### A second subsystem — and a DIFFERENT way to be vacuous
+
+**Scope first, per the rule immediately above.** Every symbol in this subsection lives on branch
+`tool-collapse` **only** — `required_names_no_key_that_has_a_declared_alias`,
+`alias_offender_detection_catches_a_synthetic_offender`, `parse_declared_aliases`,
+`EXPECTED_ALIAS_COUNTS_BY_TOOL` and `every_property_has_a_description` each return **0 occurrences
+on `experiments`**, verified. Line numbers are that branch's at `98e7c788`. Only
+`tool_surface_under_budget` exists in both trees.
+
+**The floor mechanism was ruled out cleanly, and that turned out to prove nothing.** The gate has no
+491-byte analogue: `input_schema()` is a bare trait declaration with no default body (true on
+`experiments` too — `src/tools/core/types.rs:714`), there is no server-side schema augmentation,
+`parse_declared_aliases` `filter_map`s with `?` and synthesises nothing, and
+`EXPECTED_ALIAS_COUNTS_BY_TOOL` is a genuine equality rather than a `> 0`. The two-part
+demonstration is real, and step 2's `left: 0  right: 3` is itself the proof that the failing value
+is *reachable* — the exact property the p50 case lacked.
+
+**Then mutating the production predicate left the suite green with the detector dead.**
+`if *target == req` → `if *target == req && false`, which makes the entire offender scan
+unreachable: **24 passed, 0 failed.** Two independent causes, neither of which the floor analysis
+would have found:
+
+1. **The guard asserts about a copy of the thing it guards.** The synthetic fixture *re-types* the
+   matching loop rather than calling the production one; only `parse_declared_aliases` is shared. So
+   its own failure message — *"the offender-matching logic itself is broken"* — is **false of the
+   production loop**, and the doc comment claiming the shared-function design prevents exactly this
+   drift is true of half the logic and the wrong half.
+2. **`offenders.is_empty()` over a population empty by design**, because the task that installed the
+   guard fixed every offender. Today's correct answer and a dead detector's are byte-identical —
+   the monotone-under-removal law, arriving underneath the scope law.
+
+**Two subsystems, two DIFFERENT falsification mechanisms, which is worth more than two of the same.**
+The p50 case: *the member cannot reach the failing value.* This one: *the guard asserts about a
+re-implementation of what it guards, over a population the fix emptied.* A reader who has closed one
+has not closed the other.
+
+Hence the sharpened acceptance bar: **mutate the PRODUCTION path, not the test's inputs.** A second
+level asserting about its own copy is indistinguishable from coverage at every point except a
+mutation of the shipping predicate.
+
+### A third instance of the p50 shape, in a third subsystem
+
+`tool_surface_under_budget` is satisfied **better** by gutting a description — the same
+wrong-direction blindness as `total <= CEILING`. On `tool-collapse` its only counterweight is
+`every_property_has_a_description`, asserting `!d.trim().is_empty()`: the falsified shape again, a
+non-emptiness claim that cannot distinguish an accurate description from a one-character one. At
+budget headroom 0 the mechanical pressure is downward on characters, so the incentive points at the
+blind spot. **Nothing is wrong today** — five were verified — and it is recorded as structural, not
+as a defect. What makes it more than hypothetical is that the same task produced *three successive
+wrong versions of one description*.
+
+
 ## Related
 
 - The laws themselves: [`CLAUDE.md`](../../CLAUDE.md) § *Testing Discipline*.

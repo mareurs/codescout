@@ -95,8 +95,10 @@ premise that every addition falsifies.
   per-member assertion is only as good as the member's ability to reach the failing value, which a
   deliberate fallback floor can make unreachable; `bytes > 0` per shape was still green because a
   shape whose section is gone receives a 491-byte fallback rather than nothing. So **demand an
-  observed RED, never an assertion's existence** — that is the only acceptance bar separating
-  reachable from unreachable without knowing the system's floors in advance. And where a system
+  observed RED, never an assertion's existence** — and **mutate the PRODUCTION path, not the
+  test's inputs**: a second level asserting about its own re-implementation is indistinguishable
+  from coverage until you break the thing that ships. (One such guard survived its own detector
+  being disabled — 24 green — while its fixture re-typed the matching loop it claimed to share.) And where a system
   already names its own failure state, **assert on the name, not on a proxy for it**: the
   discriminator is usually already in the output, unused, while both parties reach for a number.
   (Two remedies falsified before the third worked, measured 2026-09-02 →
