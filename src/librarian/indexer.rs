@@ -1007,6 +1007,13 @@ kind = "memory"
         assert_eq!(fresh.title.as_deref(), Some("Updated"));
     }
 
+    // FINDING C ANNOTATION (post-Task-6): this fixture's body has no blank line
+    // after the frontmatter, so it happens to yield exactly one chunk — the
+    // `count == 1` assertion below passes for that reason, not because
+    // embed_queue_items/write_embeddings only ever produce one vector per
+    // artifact. It does NOT cover a multi-chunk body; on one, this test would
+    // fail for the wrong reason (a real N-to-1 regression looks identical to
+    // this passing for the right reason). Task 7/8 own re-pointing this area.
     #[tokio::test]
     async fn embeds_artifact_into_vec_table() {
         use crate::librarian::embedding::EmbeddingService;
@@ -1489,6 +1496,16 @@ kind = "memory"
         // The embedder's guard bails the WHOLE batch on one empty input
         // (archive/2026-05-17-reindex-embedding-dim-mismatch.md). With N chunks the
         // filter has to be per-chunk, or one blank section aborts a full reindex.
+        //
+        // FINDING A FIX: `"##    "` is a valid H2 with empty text per
+        // `heading_level` (crates/codescout-embed/src/chunker.rs:138-145, "1-6
+        // hashes followed by a space") — its own section trims to "##", which is
+        // NOT empty, so a fixture built only from that shape never produces an
+        // empty chunk and never reaches the per-chunk filter. The genuinely empty
+        // chunk here is the body's own leading blank line before the first
+        // heading (the dominant real shape: frontmatter.rs starts the body right
+        // after the closing `---\n`, so any file with a blank line after
+        // frontmatter yields an empty first section).
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(
             &cat,
@@ -1498,12 +1515,27 @@ kind = "memory"
                 .build(),
         )
         .unwrap();
-        let body = "# T\n\n## W-1 — real\n\ncontent\n\n##    \n\n\n\n## W-2 — also real\n\nmore\n";
+        let body = "\n# T\n\n## W-1 — real\n\ncontent\n\n## W-2 — also real\n\nmore\n";
+        let built = crate::librarian::catalog::chunk::build_chunks("a", body, 512 * 4);
+        let empties = built.iter().filter(|r| r.content.trim().is_empty()).count();
+        // LOAD-BEARING: this is what stops the fixture silently going vacuous
+        // again if the chunker's heading/section rules change — without it, a
+        // future rule change could make every chunk non-empty (as `"##    "` did
+        // here) and this test would keep passing while proving nothing.
+        assert_eq!(
+            empties, 1,
+            "fixture must contain exactly one empty chunk or this test proves nothing"
+        );
         let items = embed_queue_items(&cat, "a", None, body).unwrap();
         assert!(!items.is_empty(), "the real chunks survive");
         assert!(
             items.iter().all(|(_, _, t)| !t.trim().is_empty()),
             "no empty text may reach the embedder"
+        );
+        assert_eq!(
+            items.len(),
+            built.len() - empties,
+            "the empty chunk is dropped and the real ones are NOT"
         );
     }
 
@@ -1538,6 +1570,28 @@ kind = "memory"
             .unwrap();
         assert!(before > 0);
 
+        // FINDING B FIX: insert a real artifact_vec_v2 row keyed by one of the
+        // seeded chunk ids, so the "and vector" half of this test's name is
+        // actually exercised rather than just mentioned in a comment.
+        // `artifact_vec_v2` is keyed by chunk_id, not artifact_id — see
+        // src/librarian/catalog/mod.rs:285.
+        let (seeded_chunk_id, _, _) = &seeded[0];
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![seeded_chunk_id, vec![0u8; 768 * 4]],
+            )
+            .unwrap();
+        let vec_before: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id = ?1",
+                [seeded_chunk_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(vec_before, 1, "sanity: the vector row was seeded");
+
         // Now reindex with an empty body.
         let items = embed_queue_items(&cat, "a", None, "").unwrap();
         assert!(
@@ -1556,6 +1610,19 @@ kind = "memory"
         assert_eq!(
             after, 0,
             "every chunk row for the emptied artifact must be gone"
+        );
+
+        let vec_after: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id = ?1",
+                [seeded_chunk_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            vec_after, 0,
+            "artifact_vec_v2_cascade_delete must remove the vector for the deleted chunk"
         );
     }
 
@@ -1685,6 +1752,22 @@ kind = "memory"
         );
     }
 
+    // FINDING C ANNOTATION (post-Task-6, corrected): this fixture hand-inserts
+    // rows into `artifact_vec` keyed by ARTIFACT id. Task 6 re-keyed the embed
+    // queue to CHUNK ids, but the write path is unchanged: `write_embeddings`
+    // (indexer.rs:603) still inserts into this same artifact-keyed
+    // `artifact_vec` table (v1) — the move to `artifact_vec_v2` (chunk-keyed)
+    // is Task 7's open work, not something already shipped. So post-Task-6, a
+    // real production write puts a CHUNK id into a table this fixture only
+    // ever populates with ARTIFACT ids — those rows are orphans no cascade
+    // collects, since `artifact_vec` is a `vec0` virtual table with no
+    // foreign key (schema.sql:49) and `artifact_vec_cascade_delete` matches
+    // on `WHERE id = OLD.id` (schema.sql:54), i.e. an artifact id, which a
+    // chunk id will never equal. This fixture is therefore inert with
+    // respect to the current write path: it still asserts the trigger works
+    // (true), but that isn't the shape production writes anymore. Left in
+    // place (not deleted/rewritten) for Task 7, which owns re-pointing this
+    // area to `artifact_vec_v2`.
     #[test]
     fn removed_file_also_removes_embedding_row() {
         let tmp = tempfile::TempDir::new().unwrap();
