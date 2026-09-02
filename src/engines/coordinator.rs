@@ -195,6 +195,17 @@ mod tests {
         })
     }
 
+    fn reports_ledger_state(_c: &PostCtx<'_>, l: &mut GuideLedger) -> Emitted {
+        Emitted::Claimed(Emission {
+            hint: None,
+            blocks: vec![Content::text(if l.contains("stale") {
+                "STILL-THERE"
+            } else {
+                "REARMED"
+            })],
+        })
+    }
+
     fn ctx<'a>(v: &'a serde_json::Value) -> PostCtx<'a> {
         PostCtx {
             selector: Some("t.a"),
@@ -251,8 +262,14 @@ mod tests {
     }
 
     /// The primary block carries exactly one `_guide_hint` field, so a second
-    /// hint has nowhere to go. First claimant wins; later hints are dropped
-    /// rather than overwriting.
+    /// hint has nowhere to go. The rule is FIRST NON-`None` HINT WINS, not
+    /// strictly "first claimant": a claim whose `Emission::hint` is `None`
+    /// (an operator-rules claim carrying no guide hint, for instance) does
+    /// NOT suppress a later engine's hint — `run_post_in` only skips the
+    /// assignment once `out.hint` already holds `Some`. Both of this test's
+    /// emitters carry a hint, so it cannot distinguish "first claimant wins"
+    /// from "first non-`None` hint wins"; see `run_post_in` for the actual
+    /// rule and its rationale.
     #[test]
     fn only_the_first_hint_survives() {
         let v = json!({});
@@ -275,5 +292,26 @@ mod tests {
         let engines = [unwired, decl("real", Corpus::CompiledGuides, claims_second)];
         let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
         assert_eq!(texts(&out), vec!["SECOND".to_string()]);
+    }
+
+    /// The idle re-arm tick is coordinator-level and FIRST, not merely
+    /// present somewhere in `run_post_in` — the session opener's trigger
+    /// reads the ledger this tick may re-arm (see `run_post_in`'s doc
+    /// comment), so running it after even one engine reorders it against
+    /// that engine's own read. A topic backdated past the TTL must already
+    /// be gone by the time the first engine's emitter observes the ledger.
+    #[test]
+    fn the_idle_tick_runs_before_any_engine_observes_the_ledger() {
+        let v = json!({});
+        let mut ledger = GuideLedger::anonymous(Some(std::time::Duration::from_secs(60)));
+        ledger.insert("stale".to_string());
+        ledger.backdate_for_test("stale", chrono::Duration::seconds(120));
+        let engines = [decl(
+            "reporter",
+            Corpus::CompiledGuides,
+            reports_ledger_state,
+        )];
+        let out = run_post_in(&engines, &ctx(&v), &mut ledger);
+        assert_eq!(texts(&out), vec!["REARMED".to_string()]);
     }
 }
