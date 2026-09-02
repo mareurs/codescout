@@ -141,8 +141,8 @@ tests" is read as *makes unit tests possible*.
 
 ## GG-4 — `librarian` § Body Editing Surfaces sits 54 B under the p50 ceiling
 
-**Status:** open — a ratchet with almost no slack
-**Valid:** dated 2026-08-27
+**Status:** closed 2026-09-03 — second child decomposed; it yielded 24 B, and that is the result
+**Valid:** dated 2026-09-03
 
 Task 10's p50 ceiling test measures the current draw at **11,946 B against a
 12,000 B ceiling** — a 54 B (0.5%) margin. Any prose added to a `librarian`
@@ -185,6 +185,66 @@ smaller declaring sections, not consolidating them.
 
 **Next:** split, don't merge. Treat the 54 B margin as the reason this is due
 now rather than later.
+
+> **CLOSED 2026-09-03 — the second child was decomposed and yielded 24 B, not another 445.**
+> Every figure in the entry above is pre-decomposition and kept for its derivation; all of it is
+> superseded. Re-derived today by summing `<!-- serves: -->` declarations per shape:
+>
+> | claim in this entry | today |
+> |---|---|
+> | `artifact.update` is 3,265 B | **2,164 B** (1,355 anti-patterns + 809 shrink-guard) |
+> | … "the largest single shape" | **false** — `librarian.doctor` is 3,891 B |
+> | margin 54 B | **359 B** at the 2026-09-02 re-derivation; ceiling test green |
+>
+> **The cut that existed.** *Choosing a mode — anti-patterns* still closed with *"the response
+> and the `field_patch` payload both carry `replaced_subsections`"* — by then a verbatim
+> duplicate of § *artifact_event — Event Log*, which the sibling's decomposition had already given
+> the fuller version of, including the whole-file-aggregate reasoning. Removed the event-side
+> half, kept the one fact an update caller needs (*the response names the casualties — read it*)
+> and a pointer. 1,379 → 1,355 B.
+>
+> **Why it is 24 B and not 445, which is the finding rather than a disappointment.** This entry
+> assumed the two children were symmetric — both oversized, both decomposable. They were not. The
+> sibling held a paragraph *addressed to another tool*; this one holds worked examples addressed
+> to exactly the caller it serves, and they are irreducible by this method. **Do not re-open this
+> looking for another 445 B.**
+>
+> **One thing checked and deliberately not cut.** The `body_edits` code block reads as a
+> duplicate of § *Body Editing Surfaces*' four-row surface table — it is not, because **the
+> parent is undeclared and never auto-injects**. An `artifact.update` caller receives the two
+> `###` children and no parent table (confirmed against a live injection this session), so the
+> child's block is the caller's only copy of the shape. Cutting it would have removed the fact
+> and left the sentence that assumes it.
+>
+> **Successor concern — measured here, OWED ITS OWN `GG-N` id.** `append_entry` refused
+> allocation (*"this ledger has commits that are not on its upstream branch"*): the two unpushed
+> commits touching this ledger are from this work stream, but the branch is 69 ahead of
+> `origin/experiments` and pushing it would push five other sessions' work, which is not this
+> task's to do. Recorded in full so the follow-up is a `git push` plus one `append_entry`, never a
+> re-derivation.
+>
+> **The concentration this entry was chasing has moved, and it now sits where neither guard sees
+> it at session grain.** § *librarian(action=…) — Reference* declares **eight** shapes
+> (`reindex, link_scan, doctor, audit_doc_refs, context, tracker_design, legibility_scan,
+> audit_log`) and is **2,401 B against `MAX_DECLARED_SECTION_BYTES = 2500`** — a **99 B** margin,
+> tighter than the 54 B that opened this entry. Every one of the eight draws the whole section;
+> `librarian.doctor` draws **3,891 B** (Reference + § *doctor repairs*), the largest per-shape draw
+> in the corpus and **1.8× the largest p50 shape**.
+>
+> **It is green twice, and that is the finding.** `declared_sections_are_within_the_size_cap` is
+> per-**section** and passes at 2,401 ≤ 2,500. `a_p50_session_stays_under_…_byte_ceiling` is
+> per-**session** over the p50 six — all `artifact.*` — so no `librarian.*` shape is exercised and
+> it is silent by construction. A section can serve eight shapes at 3,891 B apiece and pass both.
+> The ceiling's own comment enumerates what its widening is and is not — operator rules, session
+> opener, `craft-skills`, the PRE phase — and does not say *shapes outside the p50 six are
+> unbudgeted at session grain*, which is the exclusion that hides this.
+>
+> **Not a defect claim.** Nothing shows a `doctor` caller is over-served; `doctor` is a broad
+> action and 3,891 B may be right. What is shown is that **no instrument would say either way.**
+> Remedy candidates, unadjudicated: extend the ceiling fixture with a `librarian.*` shape (prices
+> it, but needs a re-derived ceiling — a spec amendment); decompose § *Reference* at `###` under
+> the same *split-don't-merge* rule; or decide 3,891 B is correct and record it so the next reader
+> stops here.
 
 ## GG-5 — Phase 3 derivation: three surfaces still feed the index instead of projecting from it
 

@@ -252,11 +252,11 @@ artifact(update, id=X, patch={body_edits: [{
 }]})
 ```
 
-The shrink guard cannot catch this — it compares whole-file totals, and a write
-that adds more than it removed passes by construction. Since 2026-08-06 the
-response and the `field_patch` payload both carry `replaced_subsections` naming
-what was destroyed; **read it.** To add a sibling, target the last existing child
-with `insert_after` instead of replacing the parent.
+The shrink guard cannot catch this: it compares whole-file totals, so a write that
+adds more than it removed passes. The response names the casualties in
+`replaced_subsections` — **read it.** (After the fact, § *artifact_event — Event
+Log*.) To add a sibling, target the last existing child with `insert_after` instead
+of replacing the parent.
 
 ### The shrink guard, `force`, and `patch`'s accepted keys
 <!-- serves: artifact.update -->
