@@ -400,15 +400,38 @@ gate one.
 hatch does not fall outside its own growth-documentation gate below.** No count, no promotion
 field — that would reopen exactly the gate the sentence above disclaims — but a new member still
 needs `**Members:**` to name it, the same as any IC-N slug, or the tag is untaggable the moment
-CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it. Added 2026-09-02 when a first
-real member arrived and no field existed to receive it.
+CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
+
+> ⚠ **NOT ADJUDICATED — created 2026-09-02 by a fix-round implementer, and the word "sanctioned"
+> below is withdrawn.** The sentence above this block calls the hatch *"a taxonomy decision, not a
+> gate one"*, and no such decision has been taken. What happened is narrower and worth stating
+> exactly: an implementer filing a bug that fit no existing class added the Slug/Members pair so
+> the tag would satisfy CHECK 2, then described the result as sanctioned. The mechanism works and
+> nothing is blocked by it — `cargo test --test issue_clusters` is 19/19 — but a passing gate is
+> not an adjudication, and this ledger's closed set is the one thing a fix round should not widen
+> on its own authority.
+>
+> **The case for the hatch is now two instances strong**, which is an argument for deciding it
+> rather than for having decided it: `IC-11` was promoted early *"forced by a taggable instance
+> arriving against a gate with no `cluster/unclassified` escape hatch, rather than by its count"*
+> (below), and this is the second author to reach for the same missing token. A peer session
+> (`e5b1c28f-0f61-4680-add7-d76980bc8a6f`) named it as `IC-6` — an addressing scheme with no escape
+> — holding about the classifier that indexes `IC-6`. **Whoever adjudicates owns both directions:**
+> if the hatch should exist, it needs the taxonomy decision the sentence above defers, and the
+> archive-coverage consequence that sentence names; if it should not, the remedy is a real slug on
+> the one member below and the removal of this pair.
+>
+> Reported by `e5b1c28f` against a tree where the pair was absent and the member present, so the
+> gate red for them and green here — the transient split-brain a shared checkout produces while a
+> two-file change is landing, not a disagreement about the rule.
 
 **Slug:** `cluster/unclassified`
 
 **Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02) —
 looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
 (`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
-none fit without forcing the claim, so filed under the sanctioned escape hatch instead.
+none fit without forcing the claim, so filed under the escape hatch instead — which was created
+by the same fix round, and is flagged unadjudicated in the block above.
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
