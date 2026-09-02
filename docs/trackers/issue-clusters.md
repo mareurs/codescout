@@ -447,12 +447,11 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 
 **Slug:** `cluster/unclassified`
 
-**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02) —
+**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) —
 looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
 (`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
 none fit without forcing the claim, so filed under the escape hatch instead — which was created
 by the same fix round, and is flagged unadjudicated in the block above.
-
 +1: `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) — a value
 computed in one coordinate space (lines within the frontmatter-stripped **body**) published
 under a name that states another (`start_line`, read by every consumer as a **file** line).
@@ -466,7 +465,12 @@ adding a constant the response simply omits, so neither the claim nor the remedy
 escape hatch rather than forced into `IC-20`. **If a second instance appears, the candidate
 class is "a quantity is published in a coordinate space its name does not state"** — and the
 blind party would be the producer, for whom the two spaces are the same number in every test
-that seeds the body and compares against the body.
+that seeds the body and compares against the body. *(Took three refused commits to land, and
+the reason is worth one line: `members_fields` in `scripts/pre-commit-ledger-counts.py:367`
+does `out[cur] = line` — the field is the SINGLE line starting `**Members:**`, not the
+paragraph. A derivation appended below it satisfies neither of the gate's two conditions, so
+the refusal reads as "you did not write a derivation" while the derivation sits four lines
+below it. Put the slug on the line; keep the reasoning under it.)*
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
