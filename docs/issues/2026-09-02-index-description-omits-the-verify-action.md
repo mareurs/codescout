@@ -53,7 +53,11 @@ SELECT count(*) FROM tool_calls WHERE tool_name='index' AND input_json LIKE '%ve
 > `v not in t["description"]` — a **substring** match, which silently discharges an action
 > whose name is a substring of any other word. Two live false negatives:
 > `edit_markdown`'s `edit` is satisfied by *"batch mode via **edit**s array"*, and `artifact`'s
-> `update` by *"**update**_entry"*. Found by `codescout-0a` while building the real gate. The
+> `update` by *"**update**_entry"*. Found by `codescout-69`, in output this file had already
+> published — the class came from `codescout-05`'s gate comment in `655c0b6f` (which names
+> `list_stale` satisfying a substring test for `list`) and reached them via `codescout-0a` as a
+> relay. Catching it required re-running a table already concluded, which is the half nobody
+> does. The
 > snippet below is the word-boundary form. **Both real findings are unaffected** — `index`
 > and `memory` are byte-identical under either test — but a reproduction that under-reports is
 > the defect this section exists to correct, so it is corrected rather than footnoted.
@@ -100,7 +104,9 @@ it. The exclusions must be **declared per tool**, not sniffed — and the themat
 re-declare rather than silently staying exempt.
 
 `memory` is a **second real instance**, filed separately as
-`docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`. It is why the
+`docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`
+(archived `a55396ec`; the move re-keyed its artifact id `0e3d4bde7147b852` → `fa5cdbf597476b52`).
+It is why the
 plan this file originally carried stated a false premise — *"`index` fails today, the other three
 pass"* — counting a four-tool population.
 
@@ -200,6 +206,19 @@ sibling's correction could not have caught this one.
 That is why the gate **derives** the population instead of asserting it: any tool with an
 `action` enum and no declared contract fails, so the list cannot silently fall behind the
 surface again.
+
+## Fix provenance
+
+- **SHA:** `655c0b6f` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `2ae27c8a135edae59191b0b840b90956bb97ca6d` — content hash of the diff; survives rebase and cherry-pick.
+
+Recorded in this **structured** shape, not only in prose, because the two are not
+interchangeable to the machine: `structured_fix_pointers` in
+`src/librarian/tools/doctor.rs` reads `- **SHA:**` / `- **patch-id:**` list items and
+nothing else, so the prose form this file carried in § *Fix* — accurate, and what
+`get_guide("tracker-conventions")`'s own worked example teaches — read as **no anchor
+declared** and raised a `terminal_status_without_fix_anchor` finding the moment the status
+was flipped to `fixed`.
 ## Tests added
 
 `server::tests::tool_descriptions_name_every_action_they_claim_to_enumerate`, in
