@@ -604,7 +604,7 @@ were left in `IC-3` as genuinely arguable rather than moved on a coin-flip.
 
 **Slug:** `cluster/<slug>`
 **Claim:** <the mechanism, in mechanism-language>
-**Members:** `filter={"tags": {"contains": "cluster/<slug>"}}` — n=<count>, <YYYY-MM-DD>
+**Members:** `filter={"tags": {"contains": "cluster/<slug>"}}` — <why this instance belongs to this class. Never a bare count: derive one with `scripts/probe-cluster-census.py`, which `no_class_field_states_a_bare_n` cannot enforce on this template because a placeholder has no integer to match>
 **Blind party:** <who structurally cannot see it, and why> | `none — ordinary design defect`
 **Promotes to:** `not yet` | <target ledger + id>
 **Mechanism status:** none yet | designed | shipped (<what>)
