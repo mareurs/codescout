@@ -2188,19 +2188,12 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{
+        make_server, make_server_no_project, make_server_with_project_toml, test_env,
+    };
     use super::*;
     use crate::agent::Agent;
     use tempfile::tempdir;
-
-    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
-    /// ever reads, writes, or garbage-collects the real per-user state directory.
-    fn test_env(dir: &std::path::Path) -> ServerEnv {
-        ServerEnv {
-            guide_hints_dir: Some(dir.join("guide_hints")),
-            servers_dir: Some(dir.join("servers")),
-            ..Default::default()
-        }
-    }
 
     /// `100_000_000_000_000` secs is inside the measured live panic band:
     /// `Duration::from_std`'s own guard only rejects values adjacent to
@@ -2228,58 +2221,6 @@ mod tests {
             0,
             "a fresh stamp must not expire under a 100-year TTL"
         );
-    }
-
-    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
-        make_server_with_project_toml(None).await
-    }
-
-    /// `make_server`, plus an optional `.codescout/project.toml`.
-    ///
-    /// The file must be written BEFORE `Agent::new`, which is the only window in
-    /// which it is read: `ProjectConfig::load_or_default` runs during agent
-    /// construction, so a config written afterwards is invisible to the session.
-    /// That ordering is the whole reason this helper exists rather than callers
-    /// writing the file themselves after `make_server()`.
-    async fn make_server_with_project_toml(
-        project_toml: Option<&str>,
-    ) -> (tempfile::TempDir, CodeScoutServer) {
-        let dir = tempdir().unwrap();
-        let codescout_dir = dir.path().join(".codescout");
-        std::fs::create_dir_all(&codescout_dir).unwrap();
-        let ws_path = codescout_dir.join("librarian-workspace.toml");
-        std::fs::write(&ws_path, "").unwrap();
-        if let Some(project_toml) = project_toml {
-            std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
-        }
-
-        // `ServerEnv::librarian` only exists with the `librarian` feature on;
-        // without the gate this helper fails to compile under
-        // `--no-default-features` / `--features local-embed`.
-        #[cfg(feature = "librarian")]
-        let env = ServerEnv {
-            librarian: crate::librarian::LibrarianEnv {
-                workspace: Some(ws_path),
-                db: Some(codescout_dir.join("librarian.db")),
-                ..Default::default()
-            },
-            ..test_env(dir.path())
-        };
-        #[cfg(not(feature = "librarian"))]
-        let env = test_env(dir.path());
-
-        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-        let lsp = LspManager::new_arc();
-        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
-        (dir, server)
-    }
-
-    async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
-        let dir = tempfile::tempdir().unwrap();
-        let agent = Agent::new(None).await.unwrap();
-        let env = test_env(dir.path());
-        let server = CodeScoutServer::new_with_env(agent, env).await;
-        (dir, server)
     }
 
     #[tokio::test]
@@ -7844,9 +7785,171 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Test-only helpers shared by more than one test module.
+    //!
+    //! `call_tool_checked` lives here rather than in each consumer because
+    //! codescout routes `RecoverableError` to a SUCCESS result carrying
+    //! `{"ok": false}` — so `is_error` alone silently passes a failed call
+    //! (pinned by `recoverable_error_routes_to_success_not_is_error`). A
+    //! second copy is a second place to get that wrong, and a probe that
+    //! scored a rejected call as "capped, no marker" would report a
+    //! plausible finding instead of an error.
+    use super::*;
+    use crate::agent::Agent;
+    use serde_json::Value;
+    use tempfile::tempdir;
+
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    pub(crate) fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            servers_dir: Some(dir.join("servers")),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+        make_server_with_project_toml(None).await
+    }
+
+    /// `make_server`, plus an optional `.codescout/project.toml`.
+    ///
+    /// The file must be written BEFORE `Agent::new`, which is the only window in
+    /// which it is read: `ProjectConfig::load_or_default` runs during agent
+    /// construction, so a config written afterwards is invisible to the session.
+    /// That ordering is the whole reason this helper exists rather than callers
+    /// writing the file themselves after `make_server()`.
+    pub(crate) async fn make_server_with_project_toml(
+        project_toml: Option<&str>,
+    ) -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        let ws_path = codescout_dir.join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+        if let Some(project_toml) = project_toml {
+            std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
+        }
+
+        // `ServerEnv::librarian` only exists with the `librarian` feature on;
+        // without the gate this helper fails to compile under
+        // `--no-default-features` / `--features local-embed`.
+        #[cfg(feature = "librarian")]
+        let env = ServerEnv {
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(codescout_dir.join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        #[cfg(not(feature = "librarian"))]
+        let env = test_env(dir.path());
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        (dir, server)
+    }
+
+    pub(crate) async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        let env = test_env(dir.path());
+        let server = CodeScoutServer::new_with_env(agent, env).await;
+        (dir, server)
+    }
+
+    pub(crate) fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: server.agent.clone(),
+            lsp: server.lsp.clone(),
+            output_buffer: server.output_buffer.clone(),
+            progress: None,
+            peer: None,
+            section_coverage: server.section_coverage.clone(),
+            guide_hints_emitted: server.guide_hints_emitted.clone(),
+            workspace_override: None,
+        }
+    }
+
+    /// Consume the session-opening guide slot.
+    ///
+    /// The opener fires on the first guide-eligible call of ANY session
+    /// (`prompts::SESSION_OPENING_GUIDE`, dispatched from `Tool::call_content`).
+    /// Tests that measure a *domain* guide's own trigger must warm the ledger
+    /// first, or they measure the opener instead — which is exactly what made
+    /// seven of these tests fail when the opener was widened on 2026-08-16.
+    pub(crate) fn warm_ledger(ctx: &crate::tools::ToolContext) {
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+    }
+
+    /// Same dispatch as `call_tool`, but asserts the call actually succeeded
+    /// before returning its content. Guide injection only fires on
+    /// `call_content`'s success path, so a silently-failed call produces 0 B
+    /// of guide — indistinguishable from legitimate cross-call dedup unless
+    /// the call is checked for BOTH failure shapes: `is_error: true` (fatal
+    /// `anyhow` errors, e.g. `update`'s unknown-id path at
+    /// `librarian/tools/update.rs:369`) AND a `RecoverableError`, which
+    /// `route_tool_error` (this file) deliberately routes to `is_error: false`
+    /// with an `{"ok": false, "error": ...}` body (e.g. `get`'s unknown-id
+    /// path at `librarian/tools/get.rs:125-134`) — pinned by
+    /// `recoverable_error_routes_to_success_not_is_error`. Checking `is_error`
+    /// alone would silently pass a `RecoverableError`, undercounting the
+    /// session's real guide draw with no test failure to show for it.
+    /// `label` identifies the failing shape in the panic message.
+    pub(crate) async fn call_tool_checked(
+        server: &CodeScoutServer,
+        name: &str,
+        input: Value,
+        label: &str,
+    ) -> Vec<rmcp::model::Content> {
+        let ctx = shared_ctx(server);
+        warm_ledger(&ctx);
+        let result = server
+            .call_tool_by_name(name, input)
+            .await
+            .expect("dispatch ok");
+        assert!(
+            result.is_error.is_none_or(|e| !e),
+            "{label} call must succeed for its guide bytes to count — got: {:?}",
+            result.content
+        );
+        if let Some(primary) = result.content.first().and_then(|c| c.as_text()) {
+            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
+                assert_ne!(
+                    body.get("ok"),
+                    Some(&Value::Bool(false)),
+                    "{label} call returned a RecoverableError (isError:false, but \
+                     ok:false) — its guide bytes cannot count: {body}"
+                );
+            }
+        }
+        result.content
+    }
+
+    /// Every content block after the primary (index 0) — the auto-injected
+    /// guide blocks `call_content` appends, whether that is the single
+    /// whole-topic block (non-declaring topic) or N section-slice blocks
+    /// (declaring topic).
+    pub(crate) fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
+        content
+            .iter()
+            .skip(1)
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect()
+    }
+}
+
 #[cfg(feature = "librarian")]
 #[cfg(test)]
 mod guide_hint_tests {
+    use super::test_support::{call_tool_checked, guide_blocks, shared_ctx, warm_ledger};
     use super::*;
     use serde_json::{json, Value};
 
@@ -7968,19 +8071,6 @@ mod guide_hint_tests {
             .clone()
     }
 
-    fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
-        crate::tools::ToolContext {
-            agent: server.agent.clone(),
-            lsp: server.lsp.clone(),
-            output_buffer: server.output_buffer.clone(),
-            progress: None,
-            peer: None,
-            section_coverage: server.section_coverage.clone(),
-            guide_hints_emitted: server.guide_hints_emitted.clone(),
-            workspace_override: None,
-        }
-    }
-
     fn extract_hint(content: &[rmcp::model::Content]) -> Option<String> {
         let text = content.first()?.as_text()?.text.clone();
         let v: Value = serde_json::from_str(&text).ok()?;
@@ -8004,19 +8094,6 @@ mod guide_hint_tests {
             Some(t) => t.text.chars().take(600).collect(),
             None => format!("<{} content item(s), none textual>", content.len()),
         }
-    }
-
-    /// Consume the session-opening guide slot.
-    ///
-    /// The opener fires on the first guide-eligible call of ANY session
-    /// (`prompts::SESSION_OPENING_GUIDE`, dispatched from `Tool::call_content`).
-    /// Tests that measure a *domain* guide's own trigger must warm the ledger
-    /// first, or they measure the opener instead — which is exactly what made
-    /// seven of these tests fail when the opener was widened on 2026-08-16.
-    fn warm_ledger(ctx: &crate::tools::ToolContext) {
-        ctx.guide_hints_emitted
-            .lock()
-            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
     }
 
     /// Concatenate every content block of a result, for asserting on the
@@ -8074,61 +8151,7 @@ mod guide_hint_tests {
             .content
     }
 
-    /// Same dispatch as `call_tool`, but asserts the call actually succeeded
-    /// before returning its content. Guide injection only fires on
-    /// `call_content`'s success path, so a silently-failed call produces 0 B
-    /// of guide — indistinguishable from legitimate cross-call dedup unless
-    /// the call is checked for BOTH failure shapes: `is_error: true` (fatal
-    /// `anyhow` errors, e.g. `update`'s unknown-id path at
-    /// `librarian/tools/update.rs:369`) AND a `RecoverableError`, which
-    /// `route_tool_error` (this file) deliberately routes to `is_error: false`
-    /// with an `{"ok": false, "error": ...}` body (e.g. `get`'s unknown-id
-    /// path at `librarian/tools/get.rs:125-134`) — pinned by
-    /// `recoverable_error_routes_to_success_not_is_error`. Checking `is_error`
-    /// alone would silently pass a `RecoverableError`, undercounting the
-    /// session's real guide draw with no test failure to show for it.
-    /// `label` identifies the failing shape in the panic message.
-    async fn call_tool_checked(
-        server: &CodeScoutServer,
-        name: &str,
-        input: Value,
-        label: &str,
-    ) -> Vec<rmcp::model::Content> {
-        let ctx = shared_ctx(server);
-        warm_ledger(&ctx);
-        let result = server
-            .call_tool_by_name(name, input)
-            .await
-            .expect("dispatch ok");
-        assert!(
-            result.is_error.is_none_or(|e| !e),
-            "{label} call must succeed for its guide bytes to count — got: {:?}",
-            result.content
-        );
-        if let Some(primary) = result.content.first().and_then(|c| c.as_text()) {
-            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
-                assert_ne!(
-                    body.get("ok"),
-                    Some(&Value::Bool(false)),
-                    "{label} call returned a RecoverableError (isError:false, but \
-                     ok:false) — its guide bytes cannot count: {body}"
-                );
-            }
-        }
-        result.content
-    }
 
-    /// Every content block after the primary (index 0) — the auto-injected
-    /// guide blocks `call_content` appends, whether that is the single
-    /// whole-topic block (non-declaring topic) or N section-slice blocks
-    /// (declaring topic).
-    fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
-        content
-            .iter()
-            .skip(1)
-            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-            .collect()
-    }
 
     /// Substitute every known rendering of a fixture root out of one emitted block.
     ///
