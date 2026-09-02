@@ -258,7 +258,7 @@ response and the `field_patch` payload both carry `replaced_subsections` naming
 what was destroyed; **read it.** To add a sibling, target the last existing child
 with `insert_after` instead of replacing the parent.
 
-### The shrink guard, `force`, and event forensics
+### The shrink guard, `force`, and `patch`'s accepted keys
 <!-- serves: artifact.update -->
 
 **Body-shrink guard.** A body write losing >50% of the file's **bytes or
@@ -266,13 +266,6 @@ lines** is refused with `RecoverableError("body-shrink guard: ...")`, naming
 which. The hint names `body_edits[]` and the `force=true` escape. Exempt:
 files under 200 B, and `append_mode + history_cap` artifacts, whose history
 trimming is meant to shrink.
-
-**Body mutations emit `field_patch` events.** Every body write records a
-`field_patch` event with `payload={field: "body", prev_bytes, new_bytes,
-edits_count, mode, forced, replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates: a replace that destroyed a
-child while growing the file reads as a benign append, so
-`replaced_subsections` is the only field that reveals it. Query forensic history with
-`artifact_event(action="list", artifact_id=X)`.
 
 **`patch` accepts only declared keys.** An unknown key returns
 `RecoverableError` listing the valid fields.
@@ -333,6 +326,13 @@ artifact_event(action="list",   artifact_id="...", kinds=["note", "verdict"])
 
 Event kinds: `note`, `reviewed`, `status_change`, `field_patch`, `superseded_by`,
 `external_signal`, `intent`, `verdict`.
+
+**`field_patch` is where body forensics live.** Every body write records one, with
+`payload={field: "body", prev_bytes, new_bytes, edits_count, mode, forced,
+replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates, so a
+`replace` that destroyed a child while growing the file reads as a benign append —
+**`replaced_subsections` is the only field that reveals it.** Query the history with
+`artifact_event(action="list", artifact_id=X)`.
 
 ---
 

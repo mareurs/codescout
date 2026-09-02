@@ -1558,6 +1558,23 @@ the code the spec describes; none changes what Phase 1 delivers.
   recommends decomposing further at `###`, not merging, so the remedy here is
   splitting each child into smaller declaring sections, not consolidating them.
 
+  > **DONE for one of the two, 2026-09-02.** `The shrink guard, force, and event
+  > forensics` carried three paragraphs, one of which — the `field_patch` payload and
+  > `artifact_event(action="list")` — is addressed to `artifact_event`, not to
+  > `artifact.update`, and duplicated the one fact an update caller needs
+  > (`replaced_subsections` reveals a destroyed child), which the sibling
+  > anti-patterns section already states with *"read it."* Moved into
+  > § *artifact_event — Event Log*, which already lists `field_patch` among its kinds;
+  > the heading is now *The shrink guard, `force`, and `patch`'s accepted keys*.
+  >
+  > **The measurement is the interesting part: `librarian.md` shrank 3 B and the served
+  > draw fell 445 B** — 12,330 → 11,885 against a 12,244 ceiling, margin 359 B.
+  > Decomposition is not byte-trimming; it is serving bytes to the action that needs
+  > them. The figures above (11,946 / 12,000 / 3,265 B) are the pre-decomposition state
+  > and are kept for their derivation.
+  >
+  > *Choosing a mode — anti-patterns* is untouched and remains the open half.
+
 
 ### Carried deferred minors (from the SDD review loop, 2026-08-27)
 

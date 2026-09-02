@@ -157,6 +157,30 @@ and are delivered as two separate wrapped blocks.
 over `MAX_DECLARED_SECTION_BYTES = 2500`. The remedy is splitting each child into
 smaller declaring sections, not consolidating them.
 
+> **HALF DONE, 2026-09-02 — and the ceiling did fire in the interim, exactly as this
+> entry predicted.** *"Any prose added to a `librarian` section that
+> `serves: artifact.update` breaks the gate"* came true from a different direction: a
+> peer's +555 B to a section serving `artifact.create` reddened it, against a ceiling
+> re-derived down to 12,244 the same day. Record:
+> `docs/issues/2026-09-02-a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout.md`.
+>
+> **Resolved by decomposing the second child.** *The shrink guard, force, and event
+> forensics* held a `field_patch` / `artifact_event(action="list")` paragraph addressed
+> to `artifact_event` rather than to `artifact.update` — and duplicating the single
+> fact an update caller needs from it, `replaced_subsections`, which the sibling
+> anti-patterns section already states outright. Moved to § *artifact_event — Event
+> Log*, whose kind list already names `field_patch`. Heading is now *The shrink guard,
+> `force`, and `patch`'s accepted keys*.
+>
+> **`librarian.md` shrank 3 B; the served draw fell 445 B** — 12,330 → 11,885, margin
+> 359 B against 12,244. Worth stating plainly because it is the whole point of grain:
+> decomposition moves bytes to the action that needs them rather than deleting them, so
+> whole-topic size is nearly useless as a progress signal here.
+>
+> **Still open:** *Choosing a mode — anti-patterns* (1,366 B), untouched. The 54 B
+> margin in this entry's title is superseded; every figure above is the
+> pre-decomposition state, kept for its derivation.
+
 **Next:** split, don't merge. Treat the 54 B margin as the reason this is due
 now rather than later.
 
