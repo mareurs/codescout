@@ -29,11 +29,19 @@
 
 ## Entry condition — NOT a task in this plan
 
-**P1 — the vector-coverage hole.** 1,406 of 4,525 catalogued artifacts have a vector (31.1%); within codescout, the repo *with* a configured embedder, 717 of 1,357 have none (52.8%). The cause is **not established**. The pattern fits `docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md` (reindex does not re-embed unchanged content without `force`, so runs where the embedder was unavailable leave permanent holes), but that is a hypothesis, not a reproduction.
+**P1 — the vector-coverage hole. DIAGNOSED 2026-09-02.** The original text of this section is superseded and quoted below, because its derivation is what changed:
 
-This is deliberately not a task here: a no-placeholder TDD task cannot be written for an investigation whose answer is unknown. It has its own bug file and must be diagnosed **before Task 11 ships**, because a backfill that reproduces the hole delivers chunk-grain retrieval that is dark over half this repo.
+> *"1,406 of 4,525 catalogued artifacts have a vector (31.1%); within codescout, the repo with a configured embedder, 717 of 1,357 have none (52.8%). The cause is **not established**. The pattern fits `docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md` … but that is a hypothesis, not a reproduction."*
 
-Tasks 1–10 and 12 do not depend on it.
+The reproduction was run. `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` (artifact `a766aad35b0b7610`, severity high) establishes the mechanism: `index_repo_sync` commits an artifact's `file_sha256` at `src/librarian/indexer.rs:302` **unconditionally**, then at `:309` decides whether to embed by reading that same stamp. A run reaching `:302` without reaching `:309`'s true branch records the content as seen while leaving it unembedded, and every later run then computes `content_unchanged == true` and skips it. The state is **absorbing**: `index_repo` calls `index_repo_sync(…, false, false)`, hardcoding both `force_rewalk` and `force_embed`, so no automatic caller can supply the lever that escapes.
+
+**729 of codescout's 1373 catalog artifacts (53%) have no searchable representation of any kind** — no legacy per-artifact vector, no chunk rows — and no ordinary reindex can give them one. The derivation, including the `sha256sum -c` pass proving those 729 are byte-identical to what was indexed, is in the bug file. Read it there; do not restate the number from here.
+
+**Two mechanisms, not one — and the archived file is the other half, not a duplicate.** `2026-07-25-reindex-reembed-noop-without-force.md` is a **policy** finding: reindex will not re-embed unchanged content without `force`. The new file is a **bookkeeping** finding: `:302` manufactures the "unchanged" condition on content that was never embedded. The archive describes the escape hatch; this describes the hole it has to be used on. Neither supersedes the other, and citing only one of them describes half the system.
+
+**What is still NOT established, and it bears directly on Task 11.** The bug's `unverified:` field records that the *entry* path is unknown — measurement proves the 729 are trapped and cannot leave, not which run stamped each one. A run with no embedder, a per-artifact embed error, and an artifact predating embeddings are not distinguishable after the fact, because the catalog keeps no per-artifact embed-attempt record. Task 11 does not need the entry path: a backfill needs the *exit*. But this is exactly why fix (c) in that file — an `IndexReport` count of `want_embeddings && !has_vector` — is the part that must ship under § *Observer Blindness*, and not merely the tidy one. Without it the next occurrence is as unreconstructable as this one.
+
+**So the prerequisite changed shape: it is now a fix plus a backfill, not an investigation.** Tasks 1–10 and 12 still do not depend on it. Task 11 does, and its blocker text is amended to say which half is lifted.
 
 ---
 
@@ -1773,10 +1781,14 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): semantic f
 
 ## Task 11: Backfill and swap
 
-**BLOCKED ON P1.** Do not run the swap on a real catalog until the vector-coverage hole is diagnosed — a backfill that inherits it ships retrieval that is dark over half this repo.
+**BLOCKED ON P1 — AMENDED 2026-09-02: diagnosed, not fixed.** The vector-coverage hole now has a reproduction and a named mechanism (`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`, artifact `a766aad35b0b7610`); see § *Entry condition*. That changes what the block means rather than lifting it:
+
+- **The backfill itself is unblocked.** It needs the exit from the absorbing state, and the exit is the established half; the entry path is the half still unknown.
+- **The swap is not.** Do not run it on a real catalog until fix (a) or (b) from the bug file has landed. `:302` still stamps content as seen before `:309` decides to embed it, so a backfill against an unfixed indexer fills the hole once and the next `librarian(reindex)` starts digging it again — with the freshly written chunk rows now making the affected artifacts *look* covered.
+- **Fix (c) is mandatory here, not optional hygiene.** An `IndexReport` count of `want_embeddings && !has_vector` is the only thing that would make a re-formed hole observable; without it the next occurrence is as unreconstructable as this one.
 
 **Files:**
-- Modify: `src/librarian/indexer.rs` (add the backfill runner near `write_embeddings` at `:479`)
+- Modify: `src/librarian/indexer.rs` (add the backfill runner next to `write_embeddings` — **resolve by symbol, not by line**; see the coordinate note in Step 3)
 - Test: `src/librarian/indexer.rs` test module
 
 **Interfaces:**
@@ -1823,7 +1835,7 @@ Expected: FAIL — `cannot find function swap_artifact_vec`
 /// Replace `artifact_vec` with the chunk-keyed `artifact_vec_v2`.
 ///
 /// Re-runnable: a catalog already swapped has no `artifact_vec_v2` and returns
-/// early. Reuses the DROP+CREATE shape at `indexer.rs:640`, and re-creates the
+/// early. Reuses the DROP+CREATE shape in `rebuild_artifact_vec_at_dim`, and re-creates the
 /// cascade trigger — `migrate_v6.rs:202` records that DROP TABLE takes the
 /// trigger with it, which is silent and leaves orphan vectors behind.
 pub fn swap_artifact_vec(cat: &Catalog) -> Result<()> {
@@ -1848,7 +1860,20 @@ pub fn swap_artifact_vec(cat: &Catalog) -> Result<()> {
 }
 ```
 
-For the backfill runner, walk artifacts in `updated_at` order, call `embed_queue_items`, embed in batches of `batch` (default 100, matching `indexer.rs:652`), and `write_embeddings_v2`. **Do not** route through the unchanged-content early return at `indexer.rs:284` — that is the mechanism P1 most likely instantiates. Record progress in `catalog_meta` (added in v10) under key `chunk_backfill_cursor` so an interrupted run resumes.
+For the backfill runner, walk artifacts in `updated_at` order, call `embed_queue_items`, embed in batches of `batch` (default 100, matching the `batch.len() >= 100` flush inside `index_repo`), and `write_embeddings_v2`. Record progress in `catalog_meta` (v10, `catalog/mod.rs:238`) under key `chunk_backfill_cursor`, via the `get_meta` / `set_meta` pair `gc.rs` already provides, so an interrupted run resumes.
+
+**Do not consult `content_unchanged` at all.** The unchanged-content early return — the `if !force_rewalk && content_unchanged && meta_unchanged` block in `index_repo_sync`, whose embed branch is gated on `force_embed` — is where an already-trapped artifact is *sealed* on every later run. But note this is only the second half of P1's mechanism: the trap is *entered* at the `:302`/`:309` pair (§ *Entry condition*), so a backfill that skirts the early return escapes the seal and leaves the entry wide open. That is the whole reason the swap stays blocked on the fix while the backfill does not.
+
+> **Coordinate note — verified 2026-09-02 at `8b48b8f1`.** All four `indexer.rs` line numbers this task originally carried are stale; the one `migrate_v6.rs` citation is exact (`:202` is verbatim `-- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.`). That split is the signal: `indexer.rs` is the file this plan keeps moving. **No bulk shift is available** — the four corrections are +23, +22, +50 and −22 — so resolve every site by symbol:
+>
+> | cited | actually | at |
+> |---|---|---|
+> | `:479` "`write_embeddings`" | `write_embeddings` | `:502` |
+> | `:640` "DROP+CREATE shape" | inside `rebuild_artifact_vec_at_dim` | `:662-663` |
+> | `:652` "batch of 100" | `batch.len() >= 100`, inside `index_repo` | `:702` |
+> | `:284` "unchanged-content early return" | `let now = …`, the line *after* the block; the block is `:262-282`, embed gate `:276` | — |
+>
+> Task 7 was re-verified against the live file today and its coordinates hold. This task's never were — which is the entire difference, and the reason the instruction is "resolve by symbol" rather than "use these numbers".
 
 - [ ] **Step 4: Run to verify they pass**
 
