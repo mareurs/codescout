@@ -40,19 +40,43 @@ Tasks 1–10 and 12 do not depend on it.
 
 ## Deferred — named so nobody reads its absence as coverage
 
-**Qdrant parity is NOT in this plan.** Every task above changes the sqlite-vec
-backend. `src/librarian/artifact_store.rs:216` is the Qdrant write path and is
-left untouched, so on a Qdrant-backed catalog `artifact(find, semantic=)` keeps
-its present artifact-grain, first-chunk-only behaviour.
+**AMENDED 2026-09-02 — the original text of this section was wrong twice, and
+both errors pointed the same way: they made a silent breakage read as a
+deliberate deferral.** It said *"`src/librarian/artifact_store.rs:216` is the
+Qdrant write path and is left untouched, so on a Qdrant-backed catalog
+`artifact(find, semantic=)` keeps its present artifact-grain, first-chunk-only
+behaviour."* Verified against the code:
 
-This matches the spec's open question 4, which records the decision as
-undecided rather than made. It is written here because a plan that silently
-covers one of two backends looks complete: the tests pass, the gate is green,
-and the second backend fails only in production on a machine nobody is testing
-on.
+- **`:216` is not Qdrant.** It is the last line of `SqliteVecArtifactStore::upsert`
+  (`impl` at `:210`, `upsert` at `:211`). `QdrantArtifactStore`'s `upsert` is at
+  `:161` (`impl` at `:160`). The guard named the wrong backend, and so implied the
+  sqlite write path was handled — when the sqlite write path is the exact one the
+  plan leaves broken (see Task 7's amendment).
+- **Qdrant does not keep its present behaviour.** `ArtifactVectorStore::upsert`
+  carries exactly **one** id, and after Task 6 that id is a *chunk* id for every
+  backend. `QdrantArtifactStore::upsert` (`:161`) passes it to
+  `artifact_upsert` (`src/retrieval/artifact.rs:77`), which derives the point id
+  from it *and* writes it into the payload as `artifact_id` (`:85`, `:89`). So
+  Qdrant is already storing chunk-keyed points whose payload claims they are
+  artifact ids. Nothing about its behaviour is unchanged.
+
+**What is actually deferred: Qdrant CHUNK-GRAIN PARITY** — carrying both ids
+(chunk id for line ranges, artifact id for hydration) through the trait, which
+needs a signature widening that reaches Task 8's read shape too. This matches
+the spec's open question 4, which records the decision as undecided rather than
+made.
+
+**What is NOT deferrable, and is now a required step in Task 7: the Qdrant path
+must not silently receive chunk ids.** A deferral means "this backend keeps
+working as before"; today it means "this backend returns nothing, slowly, and
+says so nowhere". Task 7 Step 3b specifies the guard. Until that guard exists,
+the deferral is not a decision — it is an undetected outage on the *default*
+backend of the server build (`ArtifactBackend::resolve`, `:42`).
 
 **Before shipping, establish which backend this deployment actually uses** —
-and if it is Qdrant, this plan does not apply to it yet.
+and if it is Qdrant, this plan does not apply to it yet, and Task 7's guard is
+what tells the operator that rather than leaving them to discover it from an
+empty result.
 ## File Structure
 
 | File | Responsibility |
@@ -1012,15 +1036,51 @@ git -C /home/marius/work/claude/codescout commit -m "fix(librarian): embed every
 
 ## Task 7: Write vectors to `artifact_vec_v2`, and fan out the delete cascade
 
+**AMENDED 2026-09-02 — this task originally produced `write_embeddings_v2` and
+never called it.** Verified: the only production call of `write_embeddings_v2`
+anywhere in this plan was Task 11's one-shot backfill, and Task 11 is blocked on
+prerequisite P1. Meanwhile Task 6 already re-keyed the embed queue to chunk ids,
+and every live consumer still writes them into the **artifact-keyed** `artifact_vec`.
+That is not an interim window between Tasks 6 and 8 — as written it was the
+plan's permanent end state. Re-pointing the consumers is now part of this task.
+
+**Line numbers below are as-of 2026-09-02 and Task 6 has already moved some of
+them. Resolve each site by SYMBOL, not by line — `symbols(name=…, include_body=true)`
+— and treat a mismatch as a signal the substrate moved, not a rounding error.**
+
 **Files:**
-- Modify: `src/librarian/indexer.rs:479-560` (`write_embeddings`, `write_embeddings_with`)
+- Modify: `src/librarian/indexer.rs` — `write_embeddings`, `write_embeddings_with`
+  (~`:502-608`); **and the embed-flush consumer, which is `index_repo`
+  (`:676-727`) — NOT `index_repo_sync`.** An earlier draft of this amendment said
+  `index_repo_sync`; that is wrong and was corrected by reading the symbol table.
+  `index_repo_sync` spans `:115-388` and contains no `write_embeddings` call at
+  all. `index_repo` holds **two** of them, `:708` and `:721`, and they are the
+  same shape — the `else` arm of `if let Some(s) = store { s.upsert(…) }`, once
+  for the every-100 batch flush and once for the trailing partial batch. Change
+  both or the bug survives in whichever you miss, silently, for any repo whose
+  artifact count is not a multiple of 100.
+- Also modify: `src/librarian/indexer.rs` — `embed_queue_items` (`:70-102`) must
+  become `pub(crate)`, so Step 1b's test can reach it from `catalog::find`'s test
+  module. This is a visibility change, not a behaviour one, and it is the only
+  production edit Step 1b needs.
+- Modify: `src/librarian/artifact_store.rs` — `SqliteVecArtifactStore::upsert`
+  (~`:211`) and `::delete` (~`:219`); **and a guard on `QdrantArtifactStore::upsert`
+  (~`:161`)**, per Step 3b
 - Modify: `src/librarian/catalog/gc.rs:406-440` (`migrate_vec_id`), `:482`
-- Test: both files' test modules
+- Read-only, but confirm no change is needed: `src/librarian/tools/reindex.rs`
+  (~`:359-376`). It reaches the vector store through the **trait**, so fixing
+  `SqliteVecArtifactStore` fixes it. Verify this rather than assuming it —
+  if it grew a direct `write_embeddings` call, it is a fourth site.
+- Test: all three files' test modules, plus the cross-seam test in Step 1b
 
 **Interfaces:**
 - Consumes: `EmbedQueueItem` keyed by chunk id (Task 6)
 - Produces: `pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()>` — writes to `artifact_vec_v2`, same dim guard as `write_embeddings_with`
 - Produces: `pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize>`
+- **Re-points:** every production writer of artifact embeddings onto
+  `artifact_vec_v2`. After this task, `grep` for `write_embeddings(` and
+  `artifact_vec` must return only v1-migration and v1-test call sites — a
+  production write to `artifact_vec` is a defect, not a leftover.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1054,10 +1114,87 @@ fn write_embeddings_v2_still_refuses_a_dim_mismatch() {
 }
 ```
 
+- [ ] **Step 1b: The cross-seam test — the one that would have caught this**
+
+**Why this step exists.** Every existing `semantic_find` test (`find.rs:421`,
+`:444`, `:795`) hand-feeds the vector store an **artifact** id:
+`store.upsert("proj", "a", …)`. So all three stayed green through Task 6, which
+re-keyed the embed queue to **chunk** ids and broke hydration end-to-end. The
+defect lives in the seam between the production *writer* and the production
+*reader*, and no test in the tree crosses it. That is this project's own law —
+*mutate the PRODUCTION path, not the test's inputs* — and the tests above are the
+second level asserting about their own re-implementation.
+
+**The load-bearing property: no id in this test is written by hand.** Every id
+comes out of `embed_queue_items`. Replace `queue[0].0` with a literal and the
+test silently rejoins the population that missed the bug. Annotate that on the
+fixture line, per § *Testing Discipline*.
+
+Add to `src/librarian/catalog/find.rs`'s test module:
+
+```rust
+#[tokio::test]
+async fn an_id_from_the_production_embed_queue_hydrates_through_semantic_find() {
+    // LOAD-BEARING: the ids fed to the store MUST come from embed_queue_items,
+    // never from a literal. Every other semantic_find test here hand-feeds an
+    // artifact id, which is exactly why all of them stayed green when Task 6
+    // re-keyed the queue to chunk ids and hydration broke outright.
+    use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+    use crate::librarian::artifact_store::ArtifactVectorStore;
+
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+
+    let queue = crate::librarian::indexer::embed_queue_items(
+        &cat,
+        "a",
+        Some("T".into()),
+        "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+    )
+    .unwrap();
+    // Without >1 chunk the grain bug is UNREPRESENTABLE by this fixture: a
+    // single-chunk artifact's chunk id and artifact id fail in the same way,
+    // so the test would pass under both the broken and the fixed writer.
+    assert!(queue.len() > 1, "fixture must yield >1 chunk, got {}", queue.len());
+
+    let store = InMemoryArtifactStore::default();
+    for (id, _, _) in &queue {
+        store.upsert("proj", id, &[1.0, 0.0]).await.unwrap();
+    }
+
+    let cat = parking_lot::Mutex::new(cat);
+    let page = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.hits.iter().map(|h| h.row.id.as_str()).collect::<Vec<_>>(),
+        vec!["a"],
+        "a chunk id from the production queue must hydrate to its ARTIFACT, exactly once"
+    );
+    // The widening loop is the second half of the symptom: on the broken path
+    // `enough` is false and `store_exhausted` is false, so semantic_find climbs
+    // toward K_CAP=2000 and re-queries several times before returning empty.
+    // An empty page is the visible failure; the burn is the expensive one.
+    assert_eq!(page.widenings, 0, "hydration must not need to widen");
+}
+```
+
+**This test is expected to FAIL until Step 3a re-points the writers** — it is the
+red that Step 3a turns green, and it must be *observed* red, not assumed. If it
+passes before Step 3a, stop: either the fixture yields one chunk, or
+`InMemoryArtifactStore` is not the store the reader consults, and in both cases
+the test is proving nothing.
+
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib deleting_an_artifact_removes_all_its_chunk_vectors`
 Expected: FAIL — `cannot find function write_embeddings_v2`
+
+Run: `cargo test --lib an_id_from_the_production_embed_queue_hydrates`
+Expected: FAIL — the page is empty, because the chunk ids were written to
+`artifact_vec` (v1) and `find_by_ids_filtered` hydrates against the `artifact`
+table. **Record the observed failure text.** "Empty page" and "function not
+found" are different reds; only the first one is evidence about this defect.
 
 - [ ] **Step 3: Implement**
 
@@ -1123,6 +1260,108 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 ```
 
 In `gc.rs`, call `delete_chunk_vectors(cat, id)?` immediately before every `DELETE FROM artifact WHERE id = …`, at the site already commented *"artifact_vec: no FK, DELETE-trigger only — handled explicitly"* (`gc.rs:482`).
+
+- [ ] **Step 3a: Re-point the production writers — the step the original plan omitted**
+
+Without this, `write_embeddings_v2` is dead code and the branch ships the
+defect. There are **three** production sites that write a chunk id into the
+artifact-keyed v1 table, reached by two different routes:
+
+| # | Site | Route | Change |
+|---|---|---|---|
+| 1 | `indexer.rs:708` — `index_repo`, every-100 batch flush | direct, when `store` is `None` | `write_embeddings` → `write_embeddings_v2` |
+| 2 | `indexer.rs:721` — `index_repo`, trailing partial batch | direct, when `store` is `None` | same |
+| 3 | `artifact_store.rs:216` — `SqliteVecArtifactStore::upsert` | through the trait, when `store` is `Some(sqlite-vec)` | same |
+
+`reindex.rs:359-376` is **read-only for this task and the plan's note about it is
+correct** — verified: it reaches the store only through `store.upsert(…)` at
+`:368` and has no `write_embeddings` fallback at all, so fixing site 3 fixes it.
+Confirm this by reading the symbol rather than trusting this line; if it has
+grown a direct call, it is a fourth site.
+
+`SqliteVecArtifactStore::delete` (`:219`) must delete from `artifact_vec_v2`
+too. It is not on the write path, so nothing reds when it is missed — the cost
+is an accumulating orphan set, which is the same failure mode this task's
+doc-comment on `delete_chunk_vectors` describes.
+
+**Exit criterion, checkable in one command:** `grep` for `write_embeddings(` and
+for `artifact_vec\b` across `src/` must return only v1-migration paths
+(`write_embeddings_with`, `rebuild_artifact_vec_at_dim`, `gc.rs`'s
+`migrate_vec_id`) and test modules. A production write to `artifact_vec` after
+this step is a defect, not a leftover.
+
+- [ ] **Step 3b: Guard `QdrantArtifactStore::upsert` — refuse a grain it cannot honour**
+
+Chunk-grain Qdrant is **deferred** (see § *Deferred*), and deferral is only
+honest if the deferred path *refuses* the input it cannot handle. Today it
+accepts it: `ArtifactVectorStore::upsert` carries exactly one id, so a chunk id
+reaches `QdrantArtifactStore::upsert` (`:161`) and is written as **both** the
+point id and the payload's claimed `artifact_id`
+(`src/retrieval/artifact.rs:85` and `:89`). Nothing downstream can distinguish
+that from a real artifact id. There is no error, no log line, and no observer —
+which is § *Observer Blindness*'s test for a defect that care will not catch.
+
+The two id spaces are **shape-distinguishable**, so the guard is exact rather
+than a heuristic. Both halves verified at their mint sites:
+
+- **artifact id** — `src/librarian/ids.rs:17-23`, `artifact_id_from_abs` =
+  `sha256(abs_path)` hex `[..16]`: exactly 16 lowercase hex chars.
+  Independently encoded as `\b[0-9a-f]{16}\b` by the citation extractor
+  (`link_scan/extract.rs:258-262`), whose doc-comment states the same invariant.
+  Two instruments of *different kinds* — a mint and a parser — so this is
+  corroboration rather than one blind spot counted twice.
+- **chunk id** — `src/librarian/catalog/chunk.rs:136` and `:141`,
+  `uuid::Uuid::new_v4().to_string()`: 36 chars, four dashes. It cannot satisfy
+  the artifact-id predicate.
+
+Add at the top of `QdrantArtifactStore::upsert`, before `self.ensure(…)`:
+
+```rust
+// Chunk-grain Qdrant is deferred (see the plan's § Deferred). Deferral only
+// holds if this path REFUSES the grain it cannot represent: a chunk id here
+// becomes the point id AND the payload's claimed `artifact_id`
+// (retrieval/artifact.rs:85,89), indistinguishable downstream from a real one.
+// Artifact ids are sha256(abs_path)[..16] — 16 lowercase hex (librarian/ids.rs:17).
+// Chunk ids are UUID v4 (catalog/chunk.rs:136). Refuse the shape.
+if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+    anyhow::bail!(
+        "QdrantArtifactStore is artifact-grain and was handed a non-artifact id {id:?}. \
+         Chunk-grain retrieval is implemented on the sqlite-vec backend only; \
+         set the artifact backend to sqlite-vec, or implement chunk-grain Qdrant."
+    );
+}
+```
+
+**Name the observer, or this guard is decoration** (§ *Testing Discipline*: an
+alarm nothing reaches is exactly as informative as no alarm). The reaching caller
+is `index_repo`'s `s.upsert(project_id, id, vec)` at `:705` and `:718` whenever
+`ArtifactBackend::resolve` returns Qdrant — **which is the default on the server
+build** (`artifact_store.rs:42`), so this fires for anyone running the shipped
+binary against a re-indexed corpus. The error surfaces through
+`index_repo`'s `?` into the reindex report. Write the test with that caller in
+mind, not with a direct call to `upsert`.
+
+Test it against the real id shapes, both directions:
+
+```rust
+#[tokio::test]
+async fn qdrant_store_refuses_a_chunk_id_and_accepts_an_artifact_id() {
+    // Both fixtures are REAL shapes from their mint sites, not hand-typed
+    // look-alikes: change either constructor and this test must be re-derived.
+    let chunk_like = uuid::Uuid::new_v4().to_string();
+    let artifact_like = crate::librarian::ids::artifact_id_from_abs(
+        std::path::Path::new("/test/a.md"),
+    );
+    assert_eq!(artifact_like.len(), 16, "artifact id shape moved — re-derive the guard");
+    // …assert upsert(chunk_like) is Err and names the grain; upsert(artifact_like)
+    // reaches `ensure` (a connection error is a PASS here — it means the guard
+    // let it through; only a grain-refusal error is a FAIL).
+}
+```
+
+That last parenthesis is the load-bearing half: without it the accept-direction
+assertion is satisfied by *any* error, including the guard wrongly firing, and
+the test is monotone in the direction it exists to check.
 
 - [ ] **Step 4: Run to verify they pass**
 
