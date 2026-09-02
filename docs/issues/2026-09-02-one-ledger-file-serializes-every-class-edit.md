@@ -1,13 +1,14 @@
 ---
-status: open
+kind: bug
+status: mitigated
+tags:
+- cluster/shared-resource-carries-no-owner
+closed: null
 opened: 2026-09-02
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - cluster/shared-resource-carries-no-owner
-kind: bug
+severity: medium
+unverified: The serialization is REDUCED, not eliminated. What `1b3ac36b` removes is the stored count and therefore the concurrency-invalidation this file reproduces — a peer's commit can no longer stale your number between deriving it and committing it, because there is no number. What REMAINS is that a filer documenting a new member still edits `docs/trackers/issue-clusters.md`, so two sessions filing bugs for different classes still contend on one file. That residue is the per-class split this file proposed and which was deliberately not taken; it is a separate design item, not debt this fix owes.
 ---
 
 # BUG: one ledger file serializes every class edit, so textually disjoint edits block each other
@@ -276,20 +277,61 @@ carries everything currently staged.
 
 ## Fix
 
-Not yet fixed. Two candidate remedies, both design calls:
+**Mitigated** at `1b3ac36b`, patch-id `8ff32896b7df6875f770cc7353334d184e6b1bf2`. Neither
+candidate remedy below was taken; both split the ledger, and the reproduction shows the coupling
+is the **stored count**, not the file size.
 
-- **Per-class files** — `docs/trackers/clusters/IC-N-<slug>.md`, one record each, with
-  `issue-clusters.md` reduced to an index. Makes the commit unit equal the edit unit.
-  Cost: 22 files, and every existing citation of the monolith needs re-pointing.
-- **A rendered index over per-class sources** — same split, with the Index table generated
-  rather than hand-maintained. Removes the count-bump edit entirely, which is what couples
-  the bug file to the ledger in the first place.
+**What shipped: the ledger stores no derived count.** The Index `n` column is gone, and all 31
+live bare `n=` in `**Members:**` / `**Promotes to:**` were *wrapped in backticks*, not deleted —
+so every superseded figure keeps its derivation and no sentence was rewritten. Live counts come
+from `scripts/probe-cluster-census.py`. The row keeps what no query derives: verdict, subsystem
+spread, mechanism status. It used to mix a derived counter with a human adjudication, which is
+exactly why bumping the counter forced a write to the adjudication's file.
 
-The second is strictly better if the rendering is wired to a check, since it deletes the
-coupling rather than making it cheaper. Note `get_guide("tracker-conventions")` withdrew
-`render_template` as a body-writing mechanism in 2026-08-18 — **no `render_template` writes a
-body** — so this needs a real generator, not an augmentation.
+**The gate inverted rather than went away, and that correction came from a peer.** The first
+design claimed filing a bug would edit the ledger *zero* times. `codescout-17` falsified it by
+word-diffing its own filing commit `1b92a7de`: three lines changed, **+1,508 characters** of
+hand-authored, non-derivable prose past column 150 — 119 to the Index row (spread adjudication),
+845 to `**Members:**`, 544 to `**Promotes to:**`. The counter and the verdict sit on the *same
+lines*. What survives is narrower and is the real defect: the count made the edit **mandatory**,
+and it is the stored NUMBER that stales under concurrency, never the prose — two sessions adding
+members to different classes invalidate each other's counts and never each other's sentences.
 
+So `tests/issue_clusters.rs` and `scripts/pre-commit-ledger-counts.py` now refuse (a) any commit
+**storing** a count, and (b) a commit where a class **gains a member** without `**Members:**`
+naming it, in the ledger's own `+1: `<dateless-slug>`` shape. That preserves the forcing function
+the count was: authors wrote those derivations *while satisfying the refusal*, and nothing would
+have reported the thinning — a `**Members:**` with 22 members and no derivations reads identically
+to one with full derivations, to every query.
+
+`codescout-17` also falsified the **first** form of the replacement, before it shipped: *"did the
+line change"* is satisfied by a trailing space, which is `cluster/assertion-satisfiable-by-accident`
+and a real regression against a count that had to equal a derived value.
+
+## Residual — the serialization is REDUCED, not eliminated
+
+Recorded in `unverified:` and stated here so no reader takes `mitigated` for `fixed`. A filer
+documenting a new member **still edits `docs/trackers/issue-clusters.md`**, so two sessions filing
+bugs for different classes still contend on one file. What is gone is the concurrency-invalidation
+this file reproduces: no number can stale between deriving it and committing it, because there is
+no number.
+
+The residue is the per-class split proposed below and deliberately not taken — 47 files cite the
+monolith by path, and `id = sha256(abs_path)` would mint 22 historyless catalog rows. It is a
+separate design item, not debt this fix owes.
+
+## Superseded — the two candidates this file proposed
+
+Kept because the reasoning that rejected them is the finding.
+
+- **Per-class files** — `docs/trackers/clusters/IC-N-<slug>.md`, monolith reduced to an index.
+  Narrows contention; does not remove it, because a filer still bumps a number in whatever file
+  holds it.
+- **A rendered index over per-class sources** — judged "strictly better" here. It is not: the
+  operative part was always *generating* the count rather than *splitting* the file, and once the
+  count is derived the generator has nothing left to generate.
+
+Both were reasoning from *file size* as the coupling. The measurement says otherwise.
 ## Tests added
 
 None. This is a defect in an artifact's shape, not in code, and the existing gate
