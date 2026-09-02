@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 50
+entry_high_water_F: 51
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -78,6 +78,7 @@ surfaces, not the definition.
 | F-48 | F-47's remedy names the unit "task", but the thing that needs a base is the DISPATCH — so a fix round re-uses the implementation commit and widens 14× | open |
 | F-49 | One fact had four representations, and three review rounds each fixed the one named — a grep over the known phrasings cannot find the form nobody has described yet | open |
 | F-50 | I attributed three files from index membership while citing the Session-Id trailer as the right channel in the same message — and the true author was a third session | open |
+| F-51 | The stage log is keyed by blob; I queried it by path and got a confident wrong owner from a `retained` pre-image row | open |
 
 ## Wins Index
 
@@ -4285,6 +4286,45 @@ Plus a fourth form the same rounds turned up piecemeal: `EngineDecl::emit_post`'
 **Remedy.** For any authorship claim about a shared checkout: `git log -1 --format='%b' -- <path>` and read the `Session-Id:` trailer, or ask the session to quote its own scratchpad path — the harness makes the id a path component, so it is *given* rather than inferred. Never `git status`, never `git diff --stat`, never index membership. And when the claim is going into a message **to** the party it is about, the cost of being wrong is that they act on it: state the instrument you used in the same sentence as the claim, so they can refuse it.
 
 **Rests on:** `reconnaissance-patterns:R-19`; `observer-blindness:OB-1`.
+
+## F-51 — The stage log is keyed by blob; I queried it by path and got a confident wrong owner from a `retained` pre-image row
+
+**Valid:** invariant
+
+**Severity:** high — the instrument exists specifically to prevent authorship-by-adjacency, and it returned a **confident wrong owner** to two sessions in opposite directions inside ten minutes. A wrong owner routes a warning, or a repair, at the wrong session.
+
+**Status:** open
+
+**Observed:** `.git/session-stage-log` is the positive-identification instrument `prompt-surface-measurement-session-log:F-50` prescribes and `docs/PROBES.md` documents. **Its rows are keyed by BLOB. Both of us keyed by something else, and both got a confident wrong answer.**
+
+| party | key used | answer | truth |
+|---|---|---|---|
+| peer `c45dd5ef` | index membership | "your 4 renames … still staged and yours" | none were mine |
+| me | **path**, `grep -F <path> \| tail -1` | `mv.rs` → `c45dd5ef` | `mv.rs` → `c95ba99b` |
+
+`src/librarian/tools/mv.rs` carries **two** rows. The staged blob is `40bb97eb`, whose row reads `c95ba99b named`; the other row, `db1ea2e6`, is the **committed pre-image** and is flagged `retained` — and it bears `c45dd5ef`. A path grep returns both, and `tail -1` picked the pre-image. So I told a session that a file was theirs on the strength of a row recording that it *used to be*.
+
+The four archive-move renames looked rowless for the same reason: their rows are keyed by the **post-move** blob, which a pre-move path never matches.
+
+**The correct query, and it resolves cleanly** — take the staged blob from `git ls-files -s`, match it in the log:
+
+```
+for p in $(git diff --cached --name-only); do
+  b=$(git ls-files -s -- "$p" | awk '{print substr($2,1,8)}')
+  grep -F "	$b	" "$(git rev-parse --git-dir)/session-stage-log" | tail -1 | cut -f1
+done | sort | uniq -c
+→ 23 c95ba99b
+```
+
+**23 of 23, one owner, zero ambiguity.** The instrument is not weak; it was queried on the wrong axis.
+
+**The class.** This is `IC-6`'s **no-disambiguator** half — *"a key that does not disambiguate"* — holding about the instrument built to prevent authorship-by-adjacency. A path is not a key into this log: one path accumulates a row per blob it has held, and nothing in a path-keyed result marks which row is current. **The log ships the disambiguator** — the blob, plus a `retained` flag naming the pre-image — and neither of us read it. The peer identified the symmetry, and it is what makes this a class rather than two slips: **we failed in opposite directions using the same instrument**, they by not consulting it and me by consulting it wrongly.
+
+**What held anyway, and why it is the better property.** The peer's commit was path-scoped with `--no-verify`, and it protected all 23 paths **without depending on the attribution being right**. Both attributions were wrong and the protection held. A remedy whose correctness is independent of the diagnosis beats one that needs the diagnosis — which is the same shape as `CLAUDE.md`'s *"make the correct path end in a safe state"*.
+
+**Remedy.** Query by blob, never by path, and treat a `retained` row as history rather than state. `docs/PROBES.md`'s row for this log should say so at the read surface — an instrument documented without its key is documented for an author who already knows it.
+
+**Rests on:** `prompt-surface-measurement-session-log:F-50`; `issue-clusters:IC-6`.
 
 ## Template for new entries
 
