@@ -1,17 +1,17 @@
 ---
 id: a25f881ebbae5be2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a transiently-empty index permanently destroys stage-log ownership, so your own paths read as foreign'
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/archive/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md
 severity: medium
-unverified: no fix and no regression test — root cause and minimal trigger are reproduced, but nothing is changed and tests/hooks-discrimination.sh has no case asserting ownership survives an index-emptying operation, which is why the behaviour shipped.
+unverified: fix and regression tests are green in the working tree but NOT yet committed, so no fix SHA or patch-id is recorded and the file is not archived. Both are owed at commit time.
 ---
 
 # BUG: a transiently-empty index permanently destroys stage-log ownership, so your own paths read as foreign
@@ -118,44 +118,84 @@ whatever pruning keeps the file bounded, and keep the claiming rule exactly as i
 
 ## Fix
 
-Not implemented, and not attempted today. Direction: **stop truncating.** Preserve rows whose
-`(blob, path)` is absent from the current staged set instead of dropping them, so a
-transiently empty index cannot erase ownership; keep the existing rule that the current writer
-may only claim pairs argv NAMED.
+Implemented 2026-09-02. The write loop still emits one row per currently-staged pair; a
+second pass now **carries forward** prior rows whose `(blob, path)` is absent from that set,
+capped by `STAGE_LOG_MAX_RETAINED` (default 1000, env-overridable so the suite can reach the
+bound). Retained rows are copied verbatim — owner *and* route — and marked with a fifth
+tab-separated field, `retained`.
 
-Two things a fix must not break, both currently load-bearing:
+The claiming rule is untouched: retention **preserves** an owner and never assigns one, so a
+retained `-` stays `-`.
 
-- The claiming rule (`fa9b3aff`) — a cold log must still claim only what argv named.
-- Boundedness. The log currently self-limits by tracking only staged pairs. Retention needs a
-  prune, and the prune must not be "drop what is not staged", which is the bug.
+Two things the implementation had to get right that the plan did not anticipate, both found by
+an observed RED rather than by reading:
 
-**Do not fix it by making the guard trust `-` more.** Over-refusing is the correct direction;
-the defect is upstream, in what the recorder forgets.
+- **`NR == FNR` is the wrong discriminator here**, and wrong *only* in the case this fix
+  exists for. `$tmp` is empty exactly when the index is transiently empty, and an empty first
+  file makes `NR == FNR` true for the second file's first record — which would file the prior
+  log as the staged set and retain nothing, silently, in the stash case alone. Keyed on
+  `FILENAME` instead.
+- **The log runs newest-first, not oldest-first.** Each pass writes the staged block and
+  appends retention after it, so the head of the retained block is the recently-unstaged.
+  Keeping the tail satisfies the cap while evicting exactly the row a stash/pop is about to
+  ask for; a six-cycle trace showed the newest row dropped. The cap keeps the head.
 
+**A regression the fix introduced, and the invariant that constrained the repair.** Retention
+makes the carry-over lookup visible to pairs that *left* the index, and carry-over runs before
+the claiming branch — so a retained row suppressed a fresh explicit claim by another session.
+Caught by § 6's `a deletion patch (+++ /dev/null) is claimed`, which went from green to red.
+The blanket repair — let a `names_path` claim beat carry-over — **breaks § 2's headline
+invariant**, because one `git add -- unchanged.txt changed.txt` names a pair it does not alter
+and the namer would steal it from the stager. So the override is scoped to *retained* rows,
+which is what the fifth field is for: a retained row is a claim about the past, and a staging
+op that explicitly names the path is what is putting the pair back.
+
+`scripts/pre-commit-foreign-index.sh`'s MECHANISM comment documented the row as three fields
+(`<owner>\t<blob>\t<path>`) and had already gone stale when the route column landed; updated
+to the current five and to say the guard ignores the marker.
 ## Tests added
 
-None yet. `tests/hooks-discrimination.sh` § 8 covers the route values but has no case for
-ownership surviving an index-emptying operation — which is the assertion this bug wants, and
-its absence is why the behaviour shipped. A regression test is a stash/pop cycle asserting the
-owner is unchanged.
+`tests/hooks-discrimination.sh` § 9, five cases. Confirmed RED against the unmodified script
+first (6 failures, 73 pre-existing passes), then green at 79/79.
 
+- ownership survives **while the index is empty** — the root cause, not merely the round trip
+- ownership survives a full stash/pop cycle, for both staged paths
+- the **route** survives with the owner; a row restored as `not-staging` would still read as
+  unattributable to the guard, so restoring the owner alone is no repair
+- retention does not invent an owner for a pair the claiming rule left unowned
+- the cap is honoured **and** evicts the oldest, keeping the newest
+
+**The stasher is a different session from the stager, and that is the fixture's load-bearing
+detail.** With one session doing both, a "fix" that simply let the restoring writer claim every
+staged pair would satisfy the owner assertion while destroying the claiming rule — the
+assertion is monotone under that mutation. Splitting the sessions makes it RED.
+
+The cap assertion carries a lower bound as well as an upper one. `rows <= 4` alone passed
+vacuously at **0 rows** against the unfixed script — an assertion that cannot fail, which is
+`cluster/assertion-that-cannot-fail` in the test written to close a different class.
 ## Workarounds
 
 `git commit -- <explicit paths>` — the pathspec form ignores the shared index and is what the
-refusal already prints. Re-`git add` the paths after any stash/reset to re-establish
-ownership before committing.
+refusal already prints.
 
+**Re-`git add`ing the paths does NOT re-establish ownership, and this file said it did.**
+Falsified 2026-09-02 by direct experiment: `git add` of already-staged, byte-identical content
+is not an index write, so `post-index-change` never fires and the row stays `-` /
+`not-staging`. Only a *content change* triggers the hook and reclaims the pair — verified by
+appending a byte to a staged file, after which the row came back as the author's. That is why
+the peer's retry was refused: there was no route back short of modifying their own work.
+
+The wrong workaround is worth recording rather than deleting. It is plausible, it is what any
+reader would try first, and it fails **silently** — the log is simply unchanged, with no error
+to read.
 ## Resume
 
-Write the regression case first, in `tests/hooks-discrimination.sh` § 8: stage two paths as
-`SESS-A`, `git stash`, `git stash pop`, assert `owner_of` is still `SESS-A`. Confirm it REDs
-against the current script before changing anything — per `CLAUDE.md` § *Testing Discipline*,
-an observed red against the production path, not the fixture's inputs.
+Fixed; no resume owed. The regression cases and the retention pass are in place and the suite
+is green at 79/79.
 
-Then change the write loop in `scripts/post-index-change-stage-log.sh` to carry forward
-unmatched prior rows. Re-run the full suite (69/69 at time of filing) and re-run mutations M6
-and M7, which guard the prose replacement and the diagnostic-only invariant.
-
+What is deliberately **not** addressed here, and stays with `IC-17`: retention gives the git
+index a durable ownership record, but the working tree's *unstaged* state still has none, and
+that gap has no adjacent git primitive to extend. See the class's `Mechanism status`.
 ## References
 
 - `scripts/post-index-change-stage-log.sh` — the truncate-and-rebuild loop.
@@ -166,4 +206,3 @@ and M7, which guard the prose replacement and the diagnostic-only invariant.
   owned; this is the hole in that claim.
 - Observation and the pre-commit route: sessionId `953b5e77`. Reproduction, minimal trigger
   and root cause: this session.
-

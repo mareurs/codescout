@@ -86,6 +86,10 @@ git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 log="$git_dir/session-stage-log"
 tmp="$log.$$"
 me="${CLAUDE_CODE_SESSION_ID:--}"
+# Retention bound. Tracking only staged pairs is what used to keep this file small, so
+# keeping unstaged rows removes that limit and this cap is what replaces it. Overridable
+# so the suite can reach the bound -- a cap no test can reach is a cap no test asserts.
+max_retained="${STAGE_LOG_MAX_RETAINED:-1000}"
 # Did a STAGING operation cause this index write? Only then may we claim a new pair.
 # Tokens are NUL-separated; skip argv[0] up to `git`, then skip global flags (`-c`) and
 # their `key=value` arguments, and take the first real subcommand. An unreadable or
@@ -323,9 +327,20 @@ while IFS=$'\t' read -r blob path; do
     if [ -s "$log" ]; then
         # $4 is empty on a row written before route recording; awk still emits the tab,
         # so `read` yields an empty route rather than folding the two fields together.
+        # $5 is the retention marker (below) and is empty on a continuously-staged row.
         prior="$(awk -F'\t' -v b="$blob" -v p="$path" \
-            '$2 == b && $3 == p { print $1 "\t" $4; exit }' "$log")"
-        IFS=$'\t' read -r owner route <<< "$prior"
+            '$2 == b && $3 == p { print $1 "\t" $4 "\t" $5; exit }' "$log")"
+        IFS=$'\t' read -r owner route held <<< "$prior"
+        # A RETAINED row describes a pair that LEFT the index and has come back, so it is
+        # a claim about the past. If this staging op explicitly NAMED the path, that op is
+        # what is putting the pair back and the claim below should win. Restricted to
+        # retained rows on purpose: letting a named claim beat a CONTINUOUSLY-STAGED row
+        # would break "the stager wins, not the observer" for the reachable case where one
+        # `git add -- unchanged.txt changed.txt` names a pair it does not alter.
+        if [ "$held" = "retained" ] && [ "$claimant" != "-" ] && names_path "$path"; then
+            owner=""
+            route=""
+        fi
     fi
     if [ -n "$owner" ]; then
         # Carried over from an existing row: preserve the route that row recorded, and
@@ -358,6 +373,38 @@ while IFS=$'\t' read -r blob path; do
     printf '%s\t%s\t%s\t%s\n' "$owner" "$blob" "$path" "$route" >> "$tmp"
 done < <(git diff --cached --raw 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
+# Carry forward rows whose pair is no longer staged. Ownership is a durable fact about who
+# put a blob into the index; the staged set is not, and emitting only staged pairs
+# conflated the two -- so any operation that transiently emptied the index (`git stash`, a
+# reset, a failed pre-commit's stash cycle) wrote an empty log and the rows were gone for
+# good. The carry-over lookup above cannot repair that: it reads the file this pass has
+# already replaced. `git stash` alone is the minimal trigger; no hook failure is needed.
+# docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
+#
+# Rows are copied VERBATIM, owner and route together. Retention PRESERVES an owner and
+# never assigns one, so the claiming rule above stays the only writer of a new owner and a
+# retained `-` stays `-`. Restoring the owner without the route would be no repair: the
+# guard reads the route, and a row back as `not-staging` still reads as unattributable.
+#
+# FILENAME, not the usual `NR == FNR`, discriminates the two inputs. `$tmp` is EMPTY in
+# exactly the case this fix exists for, and an empty first file makes `NR == FNR` true for
+# the second file's first record -- which would file the prior log as the staged set and
+# retain nothing, silently, in the stash case alone.
+if [ -s "$log" ]; then
+    retained="$(awk -F'\t' -v keep="$max_retained" -v staged_file="$tmp" '
+        FILENAME == staged_file { staged[$2 FS $3] = 1; next }
+        !(($2 FS $3) in staged) { buf[++n] = $1 FS $2 FS $3 FS $4 }
+        END {
+            # Newest-wins. Each pass writes the staged block FIRST and appends retention
+            # after it, so the file runs newest to oldest and the HEAD of `buf` is the
+            # recently-unstaged -- which is what a stash/pop is about to ask for. Keeping
+            # the tail instead satisfies the bound while evicting exactly those rows;
+            # measured, not reasoned -- a six-cycle trace showed the newest row dropped.
+            for (i = 1; i <= n && i <= keep; i++) print buf[i] FS "retained"
+        }
+    ' "$tmp" "$log")"
+    [ -n "$retained" ] && printf '%s\n' "$retained" >> "$tmp"
+fi
 # Atomic replace: peers run this hook concurrently against the same file.
 mv -f "$tmp" "$log" 2>/dev/null || rm -f "$tmp"
 exit 0

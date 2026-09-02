@@ -50,9 +50,13 @@
 #
 # MECHANISM
 # ---------
-# scripts/post-index-change-stage-log.sh records `<owner>\t<blob>\t<path>` for every
-# staged blob as it appears. This reads that log, keyed on the same (blob, path) pair,
-# and refuses when any currently-staged pair is owned by a different session id.
+# scripts/post-index-change-stage-log.sh records
+# `<owner>\t<blob>\t<path>\t<route>[\t retained]` for every staged blob as it appears,
+# and keeps rows for pairs that have LEFT the index so a transiently empty index cannot
+# erase ownership. This reads that log, keyed on the same (blob, path) pair, and refuses
+# when any currently-staged pair is owned by a different session id. The trailing
+# `retained` marker is the recorder's own bookkeeping about whether a claim may override
+# the row; nothing here reads it, and this guard treats a retained row like any other.
 #
 # WHAT THIS DOES NOT CATCH
 # ------------------------

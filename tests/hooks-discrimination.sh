@@ -646,6 +646,79 @@ eq "a blanket add still records unnamed, not pre-staged" "$(route_of sub/b.txt)"
 has "guard still names the blanket form for it" "$(guard other-session)" "blanket add"
 rm -rf "$T"
 
+# ---------------------------------------------------------------------------
+# 9. OWNERSHIP SURVIVES A TRANSIENTLY EMPTY INDEX
+#
+# docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
+#
+# The log was a projection of the CURRENT staged set: the write loop truncated and
+# re-emitted one row per staged pair, so any operation that transiently empties the index
+# (`git stash`, a reset, a failed pre-commit's stash cycle) wrote an empty log and the
+# rows were gone for good. Carry-over could not help -- it reads the file the truncate
+# already discarded. The author's own paths then read as `theirs:` under owner `-`.
+#
+# THE STASHER IS A DIFFERENT SESSION FROM THE STAGER, and that is the load-bearing detail
+# of this fixture. With A doing both, a "fix" that simply let the restoring writer claim
+# every staged pair would satisfy the owner assertion while destroying the claiming rule
+# (§ 2b). Splitting the sessions makes that mutation RED here: it would report B.
+S_R=retain-sess-A
+S_R_PEER=retain-sess-B
+
+new_repo
+echo base > base.txt && git add base.txt && git commit -qm base
+echo a > a.txt
+echo b > b.txt
+CLAUDE_CODE_SESSION_ID="$S_R" git add -- a.txt b.txt
+eq "baseline: the stager owns both paths" "$(owner_of a.txt)" "$S_R"
+
+# The empty-index moment itself, not merely the round trip. This is the root cause: if the
+# rows do not survive WHILE the index is empty, there is nothing for the restore to find.
+CLAUDE_CODE_SESSION_ID="$S_R_PEER" git stash -q --include-untracked
+eq "ownership survives while the index is empty" "$(owner_of a.txt)" "$S_R"
+
+CLAUDE_CODE_SESSION_ID="$S_R_PEER" git stash pop -q
+eq "ownership survives a stash/pop cycle" "$(owner_of a.txt)" "$S_R"
+eq "and for the second path too" "$(owner_of b.txt)" "$S_R"
+# The route must survive with the owner. A retained row that came back as `not-staging`
+# would still read as unattributable to the guard even with the owner restored.
+eq "the route survives with the owner" "$(route_of a.txt)" "named"
+has "the stager's own bare commit is not refused" "$(guard "$S_R")" "EXIT=0"
+rm -rf "$T"
+
+# Retention must not resurrect a claim the claiming rule refused. A pair that was never
+# owned stays unowned across the cycle -- otherwise retention becomes a second, quieter
+# route to the cross-claim § 2b exists to prevent.
+new_repo
+echo base > base.txt && git add base.txt && git commit -qm base
+mkdir -p sub
+echo c > sub/c.txt
+CLAUDE_CODE_SESSION_ID="$S_R" git add sub/
+eq "baseline: a blanket add is unowned" "$(owner_of sub/c.txt)" "-"
+CLAUDE_CODE_SESSION_ID="$S_R_PEER" git stash -q --include-untracked
+CLAUDE_CODE_SESSION_ID="$S_R_PEER" git stash pop -q
+eq "retention does not invent an owner for an unowned pair" "$(owner_of sub/c.txt)" "-"
+rm -rf "$T"
+
+# Retention is bounded. The log self-limited by tracking only staged pairs; keeping
+# unstaged rows removes that limit, so the prune is what replaces it -- and the prune must
+# not be "drop what is not staged", which is the bug. Cap is env-overridable SO THAT this
+# case can reach it; a test that cannot reach the bound cannot assert one.
+new_repo
+echo base > base.txt && git add base.txt && git commit -qm base
+for i in 1 2 3 4 5 6; do
+    echo "$i" > "r$i.txt"
+    STAGE_LOG_MAX_RETAINED=3 CLAUDE_CODE_SESSION_ID="$S_R" git add -- "r$i.txt"
+    STAGE_LOG_MAX_RETAINED=3 CLAUDE_CODE_SESSION_ID="$S_R" git rm -q --cached "r$i.txt"
+done
+retained_rows="$(wc -l < .git/session-stage-log)"
+[ "$retained_rows" -le 4 ] && [ "$retained_rows" -ge 1 ] \
+    && ok "retention honours the cap ($retained_rows rows)" \
+    || no "retention honours the cap" "expected 1..4 rows, got $retained_rows"
+# Newest-wins, not oldest-wins. A cap that kept the OLDEST retained rows would satisfy the
+# bound above while evicting exactly the row a stash/pop is about to ask for.
+eq "the cap evicts the oldest, keeping the newest" "$(owner_of r6.txt)" "$S_R"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]
