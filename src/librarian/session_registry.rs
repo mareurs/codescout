@@ -87,6 +87,18 @@ pub trait ProcProbe {
     fn socket_exists(&self, path: &str) -> bool;
 }
 
+/// The `/proc/<pid>/stat` field-22 parse, pulled out of `RealProcProbe::starttime` so
+/// it can be tested directly against fixture lines without touching the filesystem.
+/// See `RealProcProbe::starttime` for the field-counting rationale.
+fn starttime_from_stat_line(line: &str) -> Option<String> {
+    // Field 2 (comm) may contain spaces and parentheses, so split after the LAST
+    // ')' rather than tokenising the whole line — the standard /proc/stat parse.
+    let tail = &line[line.rfind(')')? + 1..];
+    // After comm, fields are: state(3) ppid(4) ... starttime(22).
+    // tail starts at field 3, so starttime is index 19 of the remainder.
+    tail.split_whitespace().nth(19).map(str::to_string)
+}
+
 /// The real probe. Linux-only by construction; on other platforms `starttime` returns
 /// `None`, which surfaces as `ProcessGone` rather than a wrong `Live`.
 pub struct RealProcProbe;
@@ -94,12 +106,7 @@ pub struct RealProcProbe;
 impl ProcProbe for RealProcProbe {
     fn starttime(&self, pid: i64) -> Option<String> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        // Field 2 (comm) may contain spaces and parentheses, so split after the LAST
-        // ')' rather than tokenising the whole line — the standard /proc/stat parse.
-        let tail = &stat[stat.rfind(')')? + 1..];
-        // After comm, fields are: state(3) ppid(4) ... starttime(22).
-        // tail starts at field 3, so starttime is index 19 of the remainder.
-        tail.split_whitespace().nth(19).map(str::to_string)
+        starttime_from_stat_line(&stat)
     }
 
     fn socket_exists(&self, path: &str) -> bool {
@@ -167,12 +174,44 @@ impl SessionRegistry {
     }
 
     pub fn resolve(&self, session_id: &str, probe: &dyn ProcProbe) -> ClaimLiveness {
-        let Some(row) = self.rows.iter().find(|r| r.session_id == session_id) else {
+        let matches: Vec<&SessionRow> = self
+            .rows
+            .iter()
+            .filter(|r| r.session_id == session_id)
+            .collect();
+        if matches.is_empty() {
             return ClaimLiveness::UnresolvableHere {
                 profiles_searched: self.profiles_searched.clone(),
             };
-        };
+        }
 
+        // Duplicate sessionIds across profiles are a documented reality on this
+        // machine: a resumed/restarted session leaves a stale row under the old
+        // profile and a live row under the new one, both keyed by the same
+        // sessionId (CLAUDE.md § Observer Blindness: "`codescout-00` became
+        // `codescout-cc` on a different profile and PID with its sessionId
+        // unchanged"). The dangerous direction is a stale row shadowing a live
+        // one, so: if ANY matching row resolves Live, report it. Otherwise
+        // report the first matching row's Dead outcome — among several dead
+        // rows the choice changes nothing a reader does (the remedy is "demote
+        // to investigating" either way), so an arbitrary-but-documented pick
+        // beats an invented recency heuristic.
+        let mut first_dead = None;
+        for row in &matches {
+            let outcome = Self::resolve_one(row, probe);
+            if matches!(outcome, ClaimLiveness::Live { .. }) {
+                return outcome;
+            }
+            if first_dead.is_none() {
+                first_dead = Some(outcome);
+            }
+        }
+        first_dead.expect("matches is non-empty, so at least one Dead outcome was recorded")
+    }
+    /// Liveness for exactly one row — the socket/process/procStart conjunction.
+    /// Never returns `UnresolvableHere`; that outcome belongs to `resolve`, which
+    /// knows whether any row matched at all.
+    fn resolve_one(row: &SessionRow, probe: &dyn ProcProbe) -> ClaimLiveness {
         let dead = |reason| ClaimLiveness::Dead {
             pid: row.pid,
             name: row.name.clone(),
@@ -351,6 +390,31 @@ mod tests {
             ClaimLiveness::Live { .. }
         ));
     }
+    /// Duplicate sessionIds across profiles are a documented reality on this machine: a
+    /// resumed/restarted session leaves a stale row under the old profile and a live row
+    /// under the new one, both keyed by the same sessionId (CLAUDE.md § Observer
+    /// Blindness: "`codescout-00` became `codescout-cc` on a different profile and PID
+    /// with its sessionId unchanged"). The stale row sorts first in load order here —
+    /// it must not shadow the live one.
+    #[test]
+    fn a_duplicate_session_id_prefers_a_live_row_over_an_earlier_stale_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Stale row loads FIRST: no socket, no process — Dead if resolved alone.
+        let stale = seed_profile(tmp.path(), ".claude", &row("sid-dup", 111, "1"));
+        // Live row loads SECOND, same sessionId, a different (correct, running) pid.
+        let live = seed_profile(tmp.path(), ".claude-kat", &row("sid-dup", 222, "2"));
+        let reg = SessionRegistry::load(&[stale, live]);
+        let probe = FakeProbe {
+            starttimes: HashMap::from([(222, "2".to_string())]),
+            sockets: vec!["/sock/222.sock".to_string()],
+        };
+        match reg.resolve("sid-dup", &probe) {
+            ClaimLiveness::Live { pid, .. } => assert_eq!(pid, 222),
+            other => panic!(
+                "expected Live (the live row must not be shadowed by the earlier stale one), got {other:?}"
+            ),
+        }
+    }
 
     /// A malformed row must not poison the whole registry.
     #[test]
@@ -399,5 +463,38 @@ mod tests {
         assert!(dirs
             .iter()
             .all(|d| !d.to_string_lossy().contains("not-claude")));
+    }
+    /// The plan-mandated `/proc/<pid>/stat` field-22 parse, exercised directly against a
+    /// realistic single-line fixture — no probe, no filesystem.
+    #[test]
+    fn starttime_from_stat_line_parses_a_normal_line() {
+        let line =
+            "2414613 (codescout) S 1 2414613 2414613 0 -1 4194304 100 0 5 0 20 3 0 0 20 0 4 0 \
+                79345929 500000000 1000 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 17 0 0 0 \
+                0 0 0 0 0 0 0 0 0 0 0";
+        assert_eq!(starttime_from_stat_line(line), Some("79345929".to_string()));
+    }
+
+    /// A `comm` containing both a space and a `)` — the exact hazard the parse's own
+    /// comment names. The fixture is chosen so a naive `line.split_whitespace().nth(21)`
+    /// (tokenising the whole line as if `comm` held no whitespace) lands on the WRONG
+    /// field ("17", one of the filler values) instead of the real starttime
+    /// ("999000111"). Asserting that first proves this fixture discriminates the
+    /// correct `rfind(')')`-based parse from the naive one — a fixture that agrees
+    /// under both implementations would not be coverage.
+    #[test]
+    fn starttime_from_stat_line_handles_a_comm_with_a_space_and_a_paren() {
+        let line =
+            "1234 (weird ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 999000111 111 222";
+        assert_eq!(
+            line.split_whitespace().nth(21),
+            Some("17"),
+            "fixture does not discriminate: the naive whole-line split must disagree with the \
+         correct parse for this test to prove anything"
+        );
+        assert_eq!(
+            starttime_from_stat_line(line),
+            Some("999000111".to_string())
+        );
     }
 }
