@@ -215,9 +215,15 @@ mod tests {
         };
         assert!(!e.is_empty(), "the overflow path must deliver the topic");
         let (hint_topic, shape) = e.hint.expect("the overflow path must hint its own topic");
+        // Inert in one direction, deliberately: this fixture's `content_topic` IS
+        // "progressive-disclosure", so the assertion cannot separate `topic` from
+        // `content_topic` — a mutation swapping one for the other passes. What it
+        // does catch is a dropped or hardcoded-wrong hint, which was the named gap.
+        // The separating case is the `topic_declaring` fallthrough, which this
+        // module does not yet cover.
         assert_eq!(
             hint_topic, "progressive-disclosure",
-            "the hint must name the topic actually delivered, not the tool's content topic"
+            "the hint must name the delivered topic, and must not be dropped"
         );
         assert!(
             matches!(shape, GuideDeliveryShape::Whole),
@@ -249,9 +255,23 @@ mod tests {
             .as_text()
             .map(|t| t.text.clone())
             .expect("the rule block must be text content");
+        // The wrapper is pinned against a literal, not re-derived from the same
+        // `format!` — a re-derivation is monotone under any change to that string.
+        // Same idiom, same reason, as `guide_block`'s wrapper at `src/server.rs`.
+        // The imperative is left free: it is OP-3's shipped text, and coupling an
+        // engine test to a rule's wording would red on a legitimate rule edit.
+        let (wrapper, imperative) = text
+            .split_once('\n')
+            .expect("the block is a wrapper comment, a newline, then the imperative");
+        assert_eq!(
+            wrapper,
+            "<!-- operator-rule OP-3 — delivered once this session for this call \
+             shape; see docs/trackers/operator-rules.md -->",
+            "the wrapper comment must survive byte-for-byte for Plan 3"
+        );
         assert!(
-            text.starts_with("<!-- operator-rule OP-3"),
-            "the wrapper comment must survive byte-for-byte for Plan 3; got {text:?}"
+            !imperative.is_empty(),
+            "the imperative must follow the wrapper; got {text:?}"
         );
         assert!(first.hint.is_none(), "the rule corpus owns no _guide_hint");
 

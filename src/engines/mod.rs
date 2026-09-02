@@ -354,6 +354,17 @@ mod tests {
             ENGINES.iter().take(3).all(|e| e.emit_post.is_some()),
             "the first three engines must be wired, or Plan 3 has nothing to call"
         );
+        // The other half of the same property: `take(3)` is only the right bound
+        // while the 4th row stays unwired. `is_ledger_participant()` reads `mode`
+        // alone, so wiring `craft-skills` would red nothing without this.
+        assert!(
+            ENGINES[3].emit_post.is_none(),
+            "wiring craft-skills makes take(3) above the wrong bound"
+        );
+        // Ceiling, not an omission: this pins that each row HAS an emitter, never
+        // which one. Comparing `fn` pointers is lint-flagged in Rust, so swapping
+        // two rows' emitters is caught by the emitters' own behavioural tests
+        // rather than here.
     }
 
     /// `craft-skills` ships and is counted by no ledger and no budget. The

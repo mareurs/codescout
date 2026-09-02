@@ -22,10 +22,15 @@ pub(crate) struct PostCtx<'a> {
     /// `Tool::relevant_guide_topic(value)`.
     pub content_topic: Option<&'a str>,
     /// Whether the progressive-disclosure gate fires:
-    /// `exceeds_inline_limit(&json) || output_id.is_some()`, exactly as
+    /// `exceeds_inline_limit(&json) || output_id is a STRING`, exactly as
     /// computed at `call_content`'s `"progressive-disclosure"` topic check
     /// (`src/tools/core/types.rs:1075-1082`). Precomputed because deciding
     /// it requires the serialised JSON, which the coordinator does not hold.
+    ///
+    /// Read `is a string` literally: the gate is `.and_then(|v| v.as_str())`,
+    /// so a present-but-non-string `output_id` does **not** fire it. No
+    /// producer emits a non-string today, which is what makes transcribing
+    /// this as `get("output_id").is_some()` a divergence nothing would catch.
     ///
     /// **Not** the same condition as the separate buffering decision
     /// (`exceeds_inline_limit(&json) && !self.force_inline()`,
