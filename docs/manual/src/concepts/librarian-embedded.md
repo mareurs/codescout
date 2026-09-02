@@ -5,8 +5,8 @@ the codescout binary as an opt-in subsystem behind the `librarian` cargo
 feature, which is on by default in dev builds and off in `--no-default-features`
 production builds.
 
-When active, the five librarian tools — `artifact`, `artifact_augment`,
-`artifact_event`, `artifact_refresh`, and `librarian` — are advertised alongside
+When active, the four librarian tools — `artifact`, `artifact_augment`,
+`artifact_event`, and `librarian` — are advertised alongside
 codescout's core toolset, and the librarian server instructions block is
 appended to codescout's MCP `instructions` field. (`workspace_state_at` was
 folded into `librarian(action="workspace_state_at")`; see
@@ -48,7 +48,7 @@ To opt out globally, set `LIBRARIAN_ENABLED=0` in the codescout MCP server
 launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
 ## What you lose with `librarian` off
 
-- The five librarian tools disappear from `tools/list`.
+- The four librarian tools disappear from `tools/list`.
 - The librarian instructions block is omitted from the MCP `instructions`
   field, so the LLM gets no hint that artifact tooling exists.
 - The on-disk catalog (SQLite at `$XDG_DATA_HOME/librarian/catalog.db`) and
