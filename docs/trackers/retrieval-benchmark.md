@@ -209,6 +209,95 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-03 — after the coordinate fix: 2/12, and the denominator is the finding
+
+**hits@5 2/12, MRR 0.1667, `search_live=true`.** The first non-zero score this
+instrument has produced. Up from 0/12 / MRR 0.0 on both prior runs.
+
+| run | hits@5 | MRR | what changed |
+|---|---|---|---|
+| baseline (Task 1) | 0/12 | 0.0 | — |
+| after Tasks 2–11 | 0/12 | 0.0 | chunk-grain shipped; ranks correct artifact #1, publishes the wrong span |
+| **after `36afd405`** | **2/12** | **0.1667** | chunk ranges are file lines; 47 artifacts' stored ranges migrated |
+
+**Config.** Host `ripper`, `experiments` @ `36afd405` (patch-id
+`6ba7ae81ba07d8fde8870fc6162c6330093159b8`), `target/release/codescout`
+(`server-stack` → Qdrant, `artifacts` collection, 5386 points — artifact-grain
+by contract; the Task 7 guard now refuses chunk ids outright),
+embeddings `CodeRankEmbed` @ 127.0.0.1:48081. Suite
+`scripts/tc-suites/artifact-entries.json`, harness
+`scripts/run-artifact-bench.py`.
+
+**Read the denominator before the numerator — 2/12 is 2 of 2 reachable.**
+The suite's twelve targets were checked against `artifact_chunk` after the run:
+
+| target | chunk rows | rank |
+|---|---|---|
+| `docs/trackers/bug-fix-session-log.md` (AE-1) | 559 | **1** |
+| `docs/trackers/prompt-surface-measurement-session-log.md` (AE-10) | 175 | **1** |
+| the other ten (AE-2…9, 11, 12) | **0** | none |
+
+The two targets carrying chunk rows are exactly the two that scored, both at
+rank 1. The other ten hold **zero** chunk rows, so they are absent from the
+semantic index entirely and no ranking change could reach them. Retrieval is
+2-for-2 on the population it can see; the residual is **index coverage**, not
+ranking — 55 of 1430 codescout artifacts (3.8%) have chunk rows at all. A
+reader taking `2/12` at face value would go tune the ranker.
+
+**Two instrument facts, both still true.** The harness must be run with
+`--bin target/release/codescout`: the default `target/debug` is a lean build
+whose `ArtifactBackend::resolve` returns `SqliteVec`, reads an empty
+`artifact_vec_v2`, and returns `count: 0, hints: {}` at exit 0 — a clean zero
+that looks like a retrieval verdict. And `docs/trackers/retrieval-benchmark.md`
+is in `.codescout/project.toml`'s `ignored_paths`, so this tracker cannot
+contaminate its own suite.
+
+**What blocks the remaining ten — and it is NOT a backfill problem.** This
+deployment resolves to the **Qdrant** backend, and chunk-grain retrieval is
+implemented on **sqlite-vec only**. A `librarian(action="reindex")` run
+2026-09-03 returned `embedded: 0, embed_error_count: 59`, every one of them:
+
+> `QdrantArtifactStore is artifact-grain and was handed a non-artifact id
+> "1fda5a94-…". Chunk-grain retrieval is implemented on the sqlite-vec backend
+> only; set the artifact backend to sqlite-vec, or implement chunk-grain
+> Qdrant.`
+
+That is **Task 7's guard working as specified**, not a defect. The plan's
+§ *Deferred* already names this and says in terms: *"before shipping, establish
+which backend this deployment actually uses — and if it is Qdrant, this plan
+does not apply to it yet."* It is Qdrant. So the chunk-grain feature is inert
+here by design, the 55 artifacts holding `artifact_chunk` rows hold them
+because `embed_queue_items` writes chunk ROWS as a side effect of queueing
+even when the vector upsert is then refused, and the benchmark's live hits are
+artifact-grain Qdrant hits hydrated against those rows. Which is exactly why
+only the two suite targets carrying chunk rows can produce a `matched` block
+at all.
+
+**A false lead, recorded so it is not re-walked.** `codescout backfill-chunks`
+was briefly suspected of writing to a store the backend never reads, and a bug
+file was drafted. It is wrong: `SqliteVecArtifactStore::upsert`
+(`src/librarian/artifact_store.rs:242`) calls the same `write_embeddings_v2`
+the backfill calls directly, so on the one backend where chunk-grain works the
+two paths have an identical target. The draft was withdrawn unpushed. The
+lesson is the ordinary one: the claim came from reading three call sites, and
+running the tool once refuted it.
+
+**So the real fork is a deployment decision, not a fix**: either point this
+project at sqlite-vec (`[librarian] vector_backend = "sqlite-vec"` in
+`.codescout/project.toml`, or `CODESCOUT_ARTIFACT_BACKEND`), or implement
+Qdrant chunk-grain parity — the plan's open question 4, recorded as undecided.
+**Do not read a later run's delta as a ranking change** until that is settled;
+it will be coverage arriving.
+
+**Migration note, for anyone comparing against an older run.** The 47
+artifacts whose stored ranges were shifted from body- to file-relative kept
+their `chunk_id`s and vectors: `content_hash` is over `content` alone, so the
+coordinate change preserves every hash. Nothing was re-embedded, so this run's
+delta is attributable to the coordinate fix and to nothing else. Three
+artifacts were refused by the migration's round-trip check because their chunk
+rows are stale against the current file (17/41, 2/20 and 3/10 chunks
+reproducing) — a separate defect that only a re-chunk cures.
+
 ### 2026-09-02 — artifact-path after chunk-grain (Tasks 2–11): **still 0/12, for a different reason**
 
 `hits@5 **0/12**, MRR **0.0**, `search_live: true`` — numerically identical to the baseline
