@@ -451,6 +451,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "frontmatter_id_is_not_a_catalog_id",
         "ledger_defines_nothing",
         "entry_without_definition",
+        "entry_defined_twice",
         "terminal_status_with_caveat",
     ];
     let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
@@ -686,7 +687,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         hint_parts.push(format!(
             "{total_scoped} row-grain finding(s) (frontmatter_id_mismatch / \
              frontmatter_id_is_not_a_catalog_id / ledger_defines_nothing / \
-             entry_without_definition / terminal_status_with_caveat) across {n_projects} other \
+             entry_without_definition / entry_defined_twice / terminal_status_with_caveat) across \
+             {n_projects} other \
              project root(s) were scoped OUT of this report — see \
              catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
              scoped: fix=reseat_worktree takes no root and reseats every unregistered row in the \
@@ -13483,24 +13485,66 @@ body
         let ids: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["R-1", "T-1"], "sorted by token: {got:?}");
     }
-    /// A ledger with two `## R-147 — …` headings. The FIXTURE'S LOAD-BEARING DETAIL
-    /// is the repeated token with different titles: the collision a cross-host merge
-    /// produces is two entries that were each written independently, not a copy.
+
+    /// A ledger with two `## R-147 — …` headings, seeded once inside the active
+    /// project root and once outside it (a sibling project). The FIXTURE'S
+    /// LOAD-BEARING DETAIL is the repeated token with different titles: the
+    /// collision a cross-host merge produces is two entries that were each
+    /// written independently, not a copy.
+    ///
+    /// Two-sided by construction, per Ruling 17: an absence assertion alone
+    /// ("the foreign ledger is not reported") is monotone under an undispatched
+    /// check, which would also produce silence. Asserting `found.len() == 1`
+    /// AND that the survivor is the in-project row is what fails if scoping is
+    /// absent (2 violations), fails if the check stops dispatching (0), and
+    /// fails if it reports the wrong one.
     #[tokio::test]
-    async fn entry_defined_twice_fires_on_a_duplicated_token() {
+    async fn entry_defined_twice_fires_on_a_duplicated_token_scoped_to_the_active_project() {
         let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
         let cat = Catalog::open_in_memory().unwrap();
+        let dup_body =
+            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — first\n\ntext\n\n## R-147 — second\n";
         seed_ledger(
             &cat,
-            "ledger",
-            &tmp.path().join("ledger.md"),
-            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — desktop\n\nbody\n\n## R-147 — laptop\n\nbody\n",
+            "bbbbbbbbbbbbbbbb",
+            &active_root.join("docs/ledger.md"),
+            dup_body,
         );
-        let ctx = ctx_rooted_at(cat, tmp.path());
+        seed_ledger(
+            &cat,
+            "cccccccccccccccc",
+            &sibling_root.join("docs/ledger.md"),
+            dup_body,
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
         let out = call(&ctx, json!({})).await.unwrap();
         let found = violations_named(&out, "entry_defined_twice");
-        assert_eq!(found.len(), 1, "{out:#?}");
-        assert!(found[0]["detail"].as_str().unwrap().contains("R-147"));
+        assert_eq!(
+            found.len(),
+            1,
+            "the sibling-root duplicate must be scoped out and the in-project one kept: {out:#?}"
+        );
+        assert_eq!(
+            found[0]["artifact_id"].as_str().unwrap(),
+            "bbbbbbbbbbbbbbbb",
+            "the survivor must be the ACTIVE project's row: {found:#?}"
+        );
+        assert!(
+            found[0]["path"]
+                .as_str()
+                .unwrap()
+                .contains("active-project"),
+            "path must name the in-project file, not the sibling's: {found:#?}"
+        );
+        let detail = found[0]["detail"].as_str().unwrap();
+        assert!(detail.contains("R-147"), "{detail}");
+        assert!(
+            detail.contains('7') && detail.contains("11"),
+            "the 1-indexed defining lines must reach the message, not just the \
+             computation Task 1 already pins with vec![3, 7]: {detail}"
+        );
     }
 
     /// The negative direction, and the one that makes the test above discriminating.
