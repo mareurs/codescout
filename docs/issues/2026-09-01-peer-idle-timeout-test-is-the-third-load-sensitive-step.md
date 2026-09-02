@@ -384,6 +384,50 @@ disappear, which remains the step § *Seventh observation* named and nobody has 
 confirmation that changes no verdict is the point — per § *Sixth observation*, an unrecorded
 confirmation makes the population look self-correcting.
 
+### Ninth observation, 2026-09-02 — a THIRD test, in a subsystem no previous member touches
+
+Two consecutive full `cargo test --workspace` runs on the same tree, gating an unrelated
+`link_scan` change. Each failed with **one** test, and they were **different tests**:
+
+```
+run 1   librarian::indexer::an_artifact_stamped_without_a_vector_is_counted_rather_than_silent
+        5020 passed, 1 failed
+run 2   peer::server::run_exits_after_idle_timeout_with_no_connections
+        5021 passed, 1 failed
+```
+
+Run 1's test **passes in isolation** immediately after, matching the signature every prior
+observation reports.
+
+**What this adds, and it is one thing only: the population spans subsystems.** Every member
+named in this file until now is a `peer::server` or migration test —
+`run_exits_after_idle_timeout_with_no_connections` and
+`run_migrations_is_safe_under_concurrent_connections` — both concurrency-shaped and both in
+the same area. `an_artifact_stamped_without_a_vector_is_counted_rather_than_silent` is in
+`librarian::indexer` and is about vector-stamping bookkeeping. The *fifth* observation
+already claimed the signature is not confined to one test; this is the first member that
+makes it not confined to one **subsystem**, which narrows what a fix can look like: anything
+scoped to the peer server's timing would leave this one firing.
+
+**What this does NOT add, said explicitly because it is the reading the data invites.** Load
+average was **129.30** at the time (nine sessions sharing this checkout, several running
+cargo). That is the highest figure recorded on this bug — and it is *not* evidence, because
+this file's own `unverified:` already refutes total load as the discriminator: *"This
+session's four runs refute total load (the HEAVIEST run passed, a lighter one failed)."* A
+ninth data point agreeing with a hypothesis that was already falsified is not a ninth
+confirmation of anything. Recorded so the number is on the record and cannot be re-derived
+later as fresh support.
+
+**One lead, offered as a lead.** The same session's `librarian(action="reindex")` reported
+`embed_error_count: 29`, every one
+`QdrantArtifactStore is artifact-grain and was handed a non-artifact id` — a chunk-grain
+backend mismatch. Run 1's test is in the vector-stamping path. Whether the two are related
+is **unchecked**: the test uses its own fixture and the reindex touched the live catalog, so
+the obvious mechanism (shared embedder state) is not established and may not exist. Named
+because nobody else is positioned to notice the coincidence, not because it is a diagnosis.
+
+**No per-instance fix requested**, per this file's standing position.
+
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
