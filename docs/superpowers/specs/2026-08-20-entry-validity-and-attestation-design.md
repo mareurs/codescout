@@ -425,6 +425,65 @@ therefore stores `asserted_at` separately, and refutation **closes an interval**
 than overwriting prose. See *Bitemporal storage* in Layer 1.
 ---
 
+## Layer 3c — the trigger fired
+
+Added 2026-09-02. The Sequencing table's 3c row read `not building` on a
+measurement of **1 resolvable declaration**, with an explicit revisit condition of
+**~20**. Re-measured today: **62**.
+
+### Why the old number was right, and why it decayed
+
+Layer 1 — the `**Rests on:**` **field itself** — shipped **2026-08-20**. The
+re-measurement that produced `1` was taken **2026-08-21**, one day later. Authors
+had had a day. Twelve days of authoring since produced 208 declarations, 45.3% of
+the 459 entries that declare a `**Valid:**` class.
+
+So the ruling was correct when made and is stale now by exactly the mechanism this
+document exists to detect. Worth stating plainly because it generalises: **a revisit
+trigger with no owner is a policy, not a mechanism.** Nothing watched this one; it
+was found by a measurement sweep aimed at something else. If 3c ships, its own
+follow-on thresholds should be `doctor` checks rather than prose.
+
+### The measurement
+
+Resolver-grain — a declaration counts only if some token in it would yield
+`Outcome::Edge` from `resolve::resolve`, not merely if it *looks* like a path or a
+token. That distinction is load-bearing: a shape-based count over the same corpus
+returns ~98–123, and 22 of those are `src/` paths that name no artifact at all.
+
+| outcome | n |
+|---|---|
+| entry-token, unique definer | 35 |
+| rel_path naming a catalogued artifact | 22 |
+| 16-hex artifact id | 5 |
+| **resolvable total** | **62** |
+| entry-token **ambiguous** — reported, never guessed | 25 |
+| path names no catalogued artifact | 22 |
+| entry-token dangling | 1 |
+
+**62 is a lower bound**, twice over: the probe parsed 163 declarations against the
+validated corpus count of 208 (its fence handling is a naive toggle, not
+[`FenceState`]), and it does not resolve **qualified** tokens
+(`bug-fix-session-log:F-33`). The second omission is the larger one — most of the 25
+ambiguous entry-tokens are `F-N`/`W-N`, which are per-work-stream namespaces that the
+qualified form resolves by construction, and `get_guide("tracker-conventions")`
+already instructs authors to write them that way.
+
+### What did NOT change
+
+The design in § *The high-level route* and § *Resolution and materialization* stands
+unamended — `entry_cite` row, `rel='rests-on'`, `origin='scan'`, only `Outcome::Edge`
+becomes a row, prune-and-rematerialize per scan. The prerequisite in § *Prerequisite:
+slugs at scale* is **already discharged** (3a shipped, 4107/4107 minted), so 3c's
+blast radius is now confined to a new `rel` value in a table whose primary key already
+includes `rel`.
+
+One open question the original design did not have to answer at n=1: **the 25
+ambiguous tokens.** `resolve::resolve` reports and never guesses, which is correct, but
+at this volume the report is the useful output — it names the entries whose author
+wrote a bare `F-33` where the qualified form was required. That is a `doctor`-shaped
+finding, not an edge.
+
 ## Non-goals
 
 - **Any check that answers "is this entry promoted?"** Measured 2026-08-20: a
@@ -1277,7 +1336,7 @@ verification.
 | 2 | **Four** doctor checks (not three), gated on shared exposure | 1 | **SHIPPED 2026-08-20** — one exposure term, not `max()` — see below |
 | 3a | Slug bulk-mint (`doctor fix=mint_slugs`) | 0 | **SHIPPED 2026-08-20** — 4107/4107 minted |
 | 3b | `origin='scan'` entry-grain materializer | 3a | **SHIPPED 2026-08-21** — 322 edges; see below |
-| 3c | `rel='rests-on'` edges | 3b + declarations | **not building** — re-measured 2026-08-21: 1 resolvable declaration corpus-wide, and its edge already exists as `cites`. Revisit if resolvable declarations reach ~20 |
+| 3c | `rel='rests-on'` edges | 3b + declarations | **TRIGGER FIRED 2026-09-02 — re-open.** Was `not building`: re-measured 2026-08-21 at 1 resolvable declaration, revisit at ~20. Now **62**, resolver-grain and a **lower bound** — 35 entry-tokens with a unique definer, 22 rel_paths naming a catalogued artifact, 5 artifact ids. See § *Layer 3c — the trigger fired* |
 | 4 | Entry-grain `context` anchor | 3 | **SHIPPED 2026-08-21** — two-pass packing; see below |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | **RETIRED 2026-08-21** — the leak is ~4 entry-grain reads per 30h in every era, and Layer 4's `context(anchor_id=<slug>:<local>)` names the entry in the call input, so the growth path arrives pre-attributed. Reopen only on the event trigger in §6 |
 | 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4 | **the TAP shipped 2026-08-21** — read-only, no new tables, proof-carrying enforced at read. Storage (`entry_attestation`, `condition_event`, coalescing, bitemporal `asserted_at`) still designed-only |
