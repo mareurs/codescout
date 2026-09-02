@@ -141,6 +141,7 @@ pub(crate) async fn run_command_interactive(
 
     // Interaction loop.
     let mut round = 0u32;
+    // cap-class: NOT_A_CAP — runaway-loop guard on the interactive session; it kills the process and appends an explicit max-rounds note
     const MAX_ROUNDS: u32 = 50; // guard against runaway loops
     loop {
         if round >= MAX_ROUNDS {

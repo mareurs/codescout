@@ -32,8 +32,10 @@ use crate::librarian::catalog::{find as cat_find, links};
 use crate::util::fs::RepoPath;
 
 /// Cap on artifacts scanned per run (same spirit as audit_doc_refs's file cap).
+// cap-class: RESULT_CAP link_scan.artifacts — probed
 const MAX_ARTIFACTS_DEFAULT: usize = 10_000;
 /// Caps on findings carried inline in the response.
+// cap-class: RESULT_CAP link_scan.findings — probed
 const FINDINGS_CAP: usize = 50;
 
 #[derive(Deserialize)]

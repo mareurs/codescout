@@ -7,7 +7,9 @@ use crate::librarian::catalog::audit::{host, shard};
 use anyhow::Result;
 use serde_json::{json, Value};
 
+// cap-class: RESULT_CAP audit_log.default_limit — probed
 const DEFAULT_LIMIT: usize = 50;
+// cap-class: RESULT_CAP audit_log.max_limit — probed
 const MAX_LIMIT: usize = 500;
 
 /// Filter keys `prune_before_ms` does not honor — Task review Finding A

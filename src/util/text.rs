@@ -823,6 +823,7 @@ col 0
     /// enough, and prove nothing about the cost model.
     #[test]
     fn json_budget_chunk_still_fits_the_budget_after_serialization() {
+        // cap-class: NOT_A_CAP — a unit test's own budget argument; it bounds no shipped path
         const BUDGET: usize = 200;
         let text: String = std::iter::repeat_n("ab", 100)
             .collect::<Vec<_>>()

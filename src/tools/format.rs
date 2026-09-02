@@ -133,10 +133,13 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// Wide objects exist (`artifact(get)` alone carries ~15); listing every key would
     /// crowd out the arrays and scalars below, which carry more per byte.
+    // cap-class: RESULT_CAP format.shape_keys — probed
     const MAX_KEYS: usize = 24;
     /// Long enough for a title or a status, short enough that a stray blob cannot
     /// monopolise the line.
+    // cap-class: RESULT_CAP format.shape_scalar_len — probed
     const MAX_SCALAR_LEN: usize = 60;
+    // cap-class: RESULT_CAP format.shape_scalars — probed
     const MAX_SCALARS: usize = 8;
 
     match val {

@@ -328,6 +328,7 @@ pub async fn semantic_find(
     // ledger can contribute a hundred chunks and still yield `max_per_artifact`
     // hits, so `k` has to reach further than it did in the artifact-keyed era.
     let mut k = (target * 5 * max_per_artifact.max(1)).max(200);
+    // cap-class: RESULT_CAP catalog.semantic_k — probed
     const K_CAP: usize = 8000;
     let mut widenings = 0usize;
 

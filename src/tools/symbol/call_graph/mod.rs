@@ -159,6 +159,7 @@ impl CachedResolver {
         /// Hard cap on files walked before giving up. Set so a typical
         /// project (1k–10k files) completes well under the MCP 60 s ceiling
         /// while a monorepo stops short instead of stalling the call.
+        // cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
         const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
 
         let walker = ignore::WalkBuilder::new(&self.root)

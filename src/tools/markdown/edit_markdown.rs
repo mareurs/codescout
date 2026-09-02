@@ -1071,12 +1071,17 @@ pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
     false
 }
 
+// cap-class: NOT_A_CAP — similarity floor for a closest-match error hint; below it the error names no_similar_match, and the edit result is unchanged
 const SIM_THRESHOLD: f64 = 0.5;
+// cap-class: NOT_A_CAP — skips the closest-match search on huge sections; the refusal is stated as section_too_many_lines and no edit output is truncated
 const SECTION_LINE_CAP: usize = 400;
+// cap-class: NOT_A_CAP — skips the closest-match search on huge sections; the refusal is stated as section_too_many_bytes and no edit output is truncated
 const SECTION_BYTE_CAP: usize = 65_536;
+// cap-class: NOT_A_CAP — skips the closest-match search for a huge anchor; the refusal is stated as old_string_too_large and no edit output is truncated
 const OLD_STRING_CAP: usize = 8192;
 
 fn truncate_snippet(s: &str) -> String {
+    // cap-class: NOT_A_CAP — truncates a snippet inside an error hint, with a trailing ellipsis; hint text, not the tool's result
     const MAX: usize = 200;
     if s.chars().count() <= MAX {
         s.to_string()

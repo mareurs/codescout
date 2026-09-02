@@ -305,6 +305,7 @@ pub enum Outcome {
 }
 
 /// Cap on candidate ids carried in an Ambiguous finding.
+// cap-class: RESULT_CAP link_scan.ambiguous_candidates — probed
 const AMBIGUOUS_CANDIDATE_CAP: usize = 5;
 
 /// Resolve one citation from the artifact `src_id` whose repo-relative file

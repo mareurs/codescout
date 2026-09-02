@@ -266,6 +266,7 @@ pub fn write_index_state_with_dirty(
     // capped. Defined locally rather than imported -- this module has no other
     // dependency on `sync.rs`, and the value only needs to agree in spirit, not
     // by shared constant.
+    // cap-class: RESULT_CAP index_state.skipped_sample — probed
     const SKIPPED_SAMPLE_CAP: usize = 20;
     let state = IndexState {
         last_indexed_commit: head_commit_full(root).unwrap_or_default(),

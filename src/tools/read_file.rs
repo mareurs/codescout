@@ -634,6 +634,7 @@ fn read_with_line_range(
     // (archived 2026-08-18. That bug closed on THIS exemption and the extent-ordered hint —
     // its third step, stating the overlap condition in the always-loaded IL1 text, was
     // measured as prompt-hamsa A-25 and refuted. Do not "finish" the bug by re-adding it.)
+    // cap-class: NOT_A_CAP — routing predicate deciding whether a read counts as a head read; it selects a code path and removes no content
     const HEAD_END_MAX: u64 = 60;
     let is_head_read = start == 1 && end <= HEAD_END_MAX;
 

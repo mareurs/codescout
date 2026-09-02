@@ -27,6 +27,7 @@ use crate::tools::RecoverableError;
 /// conditions (e.g. kotlin-lsp "Multiple editing sessions"). Older lines are
 /// evicted once the cap is reached to prevent unbounded growth for long-lived
 /// or unusually noisy server processes.
+// cap-class: NOT_A_CAP — ring-buffer capacity for server stderr used to detect fatal init conditions; diagnostic state, never part of a tool result
 const MAX_STDERR_LINES: usize = 200;
 
 use super::call_hierarchy::supports_call_hierarchy;
@@ -695,8 +696,10 @@ impl LspClient {
         //       `cold_start_max_retries`).
         // Warm:  3 retries × 300 ms linear backoff ≈ 1.2 s max wait.
         const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+        // cap-class: NOT_A_CAP — retry ceiling; exhaustion surfaces as an error, never as a shortened result
         const MAX_RETRIES_COLD: usize = cold_start_max_retries();
         const RETRY_DELAY_COLD_MS: u64 = 3_000;
+        // cap-class: NOT_A_CAP — retry ceiling; exhaustion surfaces as an error, never as a shortened result
         const MAX_RETRIES_WARM: usize = 3;
         const RETRY_DELAY_WARM_MS: u64 = 300;
 
@@ -913,6 +916,7 @@ impl LspClient {
         // Retry on -32800 (RequestCancelled) during initialization.
         // JVM-based servers (kotlin-lsp) may cancel the init request while
         // still bootstrapping their platform subsystems.
+        // cap-class: NOT_A_CAP — initialize retry ceiling; exhaustion surfaces as the last error, never as a shortened result
         const MAX_INIT_RETRIES: usize = 5;
         const INIT_RETRY_DELAY_MS: u64 = 3000;
 
@@ -1112,6 +1116,7 @@ impl LspClient {
             }
         }
 
+        // cap-class: RESULT_CAP lsp.did_open_size — probed
         const MAX_DID_OPEN_SIZE: u64 = 10 * 1024 * 1024; // 10 MiB
         if let Ok(metadata) = std::fs::metadata(path) {
             if metadata.len() > MAX_DID_OPEN_SIZE {

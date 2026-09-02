@@ -530,6 +530,7 @@ pub async fn fetch_validated_symbol(
     name_path: &str,
     at_line: Option<u32>,
 ) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>, Option<RangeRepair>)> {
+    // cap-class: NOT_A_CAP — retry ceiling; exhaustion returns the last error rather than a shortened symbol list
     const MAX_RETRIES: u32 = 3;
     let mut last_err: Option<anyhow::Error> = None;
 

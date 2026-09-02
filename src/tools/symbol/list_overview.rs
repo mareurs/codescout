@@ -22,12 +22,15 @@ use crate::symbol::query::{filter_variable_symbols, symbol_to_json};
 
 /// Directory/glob scans can produce huge output (each file has many symbols).
 /// Cap exploring-mode file count lower than the global OutputGuard default (200).
+// cap-class: RESULT_CAP symbols.overview_files — probed
 pub(super) const LIST_SYMBOLS_MAX_FILES: usize = 50;
 /// Hard cap on top-level symbols (fallback when flat count is within budget).
+// cap-class: RESULT_CAP symbols.overview_single_file — probed
 pub(super) const LIST_SYMBOLS_SINGLE_FILE_CAP: usize = 100;
 /// Cap on *total* symbol entries including depth-1 children.
 /// A single `impl` block with 10 methods counts as 11 flat entries, so the
 /// flat budget prevents depth-1 output from ballooning even on rich files.
+// cap-class: RESULT_CAP symbols.overview_single_file_flat — probed
 pub(super) const LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP: usize = 150;
 
 /// File count below which directory mode returns full symbols (recursive walk).
@@ -35,6 +38,7 @@ pub(super) const LIST_SYMBOLS_RECURSE_SMALL: usize = 30;
 /// File count below which directory mode returns AST class names per subdir.
 pub(super) const LIST_SYMBOLS_RECURSE_MEDIUM: usize = 80;
 /// Max immediate subdirectories shown in directory_map mode.
+// cap-class: RESULT_CAP symbols.overview_subdirs — probed
 pub(super) const LIST_SYMBOLS_MAX_SUBDIRS: usize = 15;
 
 /// Count top-level symbols plus their direct children (depth-1 children).

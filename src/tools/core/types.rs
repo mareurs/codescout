@@ -16,15 +16,18 @@ use crate::tools::core::guide_emit::inject_hint;
 /// Maximum estimated tokens for inline tool output.
 /// Content exceeding this is buffered and summarized.
 /// Token estimate: ~4 bytes per token.
+// cap-class: RESULT_CAP tool_output.inline_tokens — probed
 pub(crate) const MAX_INLINE_TOKENS: usize = 2_500;
 
 /// Byte equivalent of MAX_INLINE_TOKENS — used for byte-budget arithmetic
 /// in truncation code (run_command buffer-only paths).
+// cap-class: RESULT_CAP run_command.inline_bytes — probed
 pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = MAX_INLINE_TOKENS * 4;
 
 /// Byte budget for auto-chunked inline content. Set to 90% of
 /// TOOL_OUTPUT_BUFFER_THRESHOLD to leave headroom for the JSON envelope
 /// overhead (~500-1000 bytes for content/complete/next/shown_lines keys).
+// cap-class: RESULT_CAP tool_output.inline_byte_budget — probed
 pub(crate) const INLINE_BYTE_BUDGET: usize = TOOL_OUTPUT_BUFFER_THRESHOLD * 9 / 10;
 
 /// Soft line-count nudge for markdown default reads.
@@ -32,12 +35,14 @@ pub(crate) const INLINE_BYTE_BUDGET: usize = TOOL_OUTPUT_BUFFER_THRESHOLD * 9 / 
 /// Files whose line count exceeds this threshold — but whose byte size still
 /// fits `INLINE_BYTE_BUDGET` — get full content plus a focused-read hint.
 /// Files larger than `INLINE_BYTE_BUDGET` are buffered regardless of line count.
+// cap-class: NOT_A_CAP — soft nudge: above it the caller still receives full content plus a focused-read hint, so nothing is withheld
 pub(crate) const LINE_SOFT_CAP: usize = 150;
 
 /// Heading-count gate for escalation to MAP shape. A markdown file with more
 /// than this many headings is structurally a directory — content is skim-only
 /// and the caller wants to pivot. Escalates Tier 2 → Tier 3 regardless of
 /// byte/line budgets. Closes Hamsa eval B1 (many-headings.md, 251 sections).
+// cap-class: RESULT_CAP markdown.headings_hard_cap — probed
 pub(crate) const HEADINGS_HARD_CAP: usize = 40;
 
 /// Check whether content should be buffered based on estimated token count.
@@ -47,8 +52,10 @@ pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
 
 /// Soft cap for compact summaries shown alongside `@tool_*` refs.
 /// Truncation prefers whole-line boundaries. See [`truncate_compact`].
+// cap-class: RESULT_CAP tool_output.compact_summary_bytes — probed
 pub(crate) const COMPACT_SUMMARY_MAX_BYTES: usize = 2_000;
 /// Hard cap — no summary will exceed this size regardless of line boundaries.
+// cap-class: RESULT_CAP tool_output.compact_summary_hard_bytes — probed
 pub(crate) const COMPACT_SUMMARY_HARD_MAX_BYTES: usize = 3_000;
 
 /// Shared context passed to every tool invocation.
@@ -647,6 +654,7 @@ pub(crate) fn default_json_path_hint(val: &Value) -> String {
 /// row rather than the set. Depth-bounded so a deeply nested payload costs a fixed
 /// walk rather than a full traversal.
 fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(String, usize)>) {
+    // cap-class: RESULT_CAP tool_output.largest_array_depth — probed
     const MAX_DEPTH: usize = 4;
     let Some(map) = v.as_object() else {
         return;

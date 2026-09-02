@@ -1680,6 +1680,7 @@ fn check_outside_managed_roots(id: &str, abs_path: &str, roots: &[PathBuf]) -> O
 
     // Cap the root list: a large workspace registry would otherwise dominate
     // the report, and the first few are the ones a reader actually checks.
+    // cap-class: RESULT_CAP doctor.listed_roots — probed
     const MAX_LISTED: usize = 5;
     let listed: Vec<String> = roots
         .iter()
@@ -2877,6 +2878,7 @@ fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation
 /// work independently is how a backlog becomes the steady state — as of June 2025 more
 /// than 604,000 English Wikipedia pages carried at least one `{{citation needed}}`.
 /// Also a guess; re-tune from the first month's output.
+// cap-class: RESULT_CAP doctor.exposure_threshold — probed
 const EXPOSURE_THRESHOLD: usize = 5;
 
 /// A declared `conditional` whose named event may already have fired.
@@ -4437,6 +4439,7 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
         }
 
         // Char-wise, not byte-wise: these are prose and routinely contain non-ASCII.
+        // cap-class: RESULT_CAP doctor.caveat_chars — probed
         const CAVEAT_MAX: usize = 240;
         let shown = if caveat.chars().count() > CAVEAT_MAX {
             format!("{}…", caveat.chars().take(CAVEAT_MAX).collect::<String>())

@@ -986,6 +986,7 @@ mod tests {
         const MAIN: &str = "m";
         const DELTA: &str = "m@wt";
         const DIRTY: &str = "src/dirty.rs";
+        // cap-class: NOT_A_CAP — a test's own query argument inside a tokio test; it bounds no shipped path
         const LIMIT: usize = 12;
 
         let _ = wrap.client.delete_collection(coll).await;

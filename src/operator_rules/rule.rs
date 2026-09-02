@@ -30,6 +30,7 @@ pub use crate::prompts::guide_index::Shape as Selector;
 /// into whatever section followed, silently eating every entry in between (see
 /// `a_leading_dash_separator_used_as_a_section_break_does_not_eat_the_first_entry`
 /// below).
+// cap-class: NOT_A_CAP — bounds a frontmatter-detection scan; on breach the document is returned whole and unchanged
 const FRONTMATTER_LINE_CAP: usize = 50;
 
 fn strip_frontmatter(doc: &str) -> &str {

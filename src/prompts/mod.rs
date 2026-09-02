@@ -26,6 +26,7 @@ pub const SERVER_INSTRUCTIONS: &str =
 /// (2200) sat above the real cliff, so the gate was wrong twice over while staying green.
 ///
 /// See `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.
+// cap-class: RESULT_CAP prompts.client_instructions_chars — probed
 pub(crate) const CLIENT_INSTRUCTIONS_CHAR_LIMIT: usize = 2048;
 
 /// Characters held back from the measured cliff. The limit was observed on one client
@@ -400,6 +401,7 @@ fn fit_dynamic_block(static_part: &str, segments: &[StatusSegment]) -> String {
 /// trimmed" only tells it to distrust the whole block. Capped, because a note that grows
 /// with the losses it reports can consume the budget it is reporting on.
 fn trim_note(dropped: &[&'static str]) -> String {
+    // cap-class: RESULT_CAP prompts.trim_note_names — probed
     const MAX_NAMED_DROPS: usize = 3;
     if dropped.is_empty() {
         return String::new();
@@ -2167,6 +2169,7 @@ mod redesign_invariants {
     ///
     /// If you need to add content, author a `get_guide(topic)` entry and reference it
     /// from the slice — do not raise this number.
+    // cap-class: NOT_A_CAP — test-only ratchet asserting the static slice size; it bounds no runtime path
     const STATIC_SLICE_CHAR_BUDGET: usize = 1900;
 
     #[test]

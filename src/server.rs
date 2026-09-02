@@ -105,6 +105,7 @@ pub struct ServerEnv {
 /// at the parse site (rather than in `expire_idle`, which this task does not
 /// own) means a malicious or fat-fingered env var degrades to "TTL effectively
 /// never fires" instead of unwinding every guide-eligible call.
+// cap-class: NOT_A_CAP — clamp on a parsed env-var duration guarding a chrono overflow panic; it bounds a TTL, not any returned content
 const MAX_GUIDE_TTL_SECS: u64 = 60 * 60 * 24 * 365 * 100;
 
 /// Parse `CODESCOUT_GUIDE_TTL_SECS`, clamped to [`MAX_GUIDE_TTL_SECS`]. `None`
@@ -2774,6 +2775,7 @@ mod tests {
     /// on the very next added byte, which is the only thing keeping this honest.
     /// The sweep that pays it back should LOWER this line, and any pass that
     /// cannot is a pass that did not happen.
+    // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
     const TOOL_SURFACE_CHAR_BUDGET: usize = 56_735;
 
     #[tokio::test]
@@ -3312,6 +3314,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_tool_description_under_cap() {
+        // cap-class: NOT_A_CAP — test-only assertion ceiling on tool-description length; it bounds no runtime path
         const CAP: usize = 1800;
         let (_dir, server) = make_server().await;
         let over: Vec<(String, usize)> = server

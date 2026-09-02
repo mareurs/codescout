@@ -13,8 +13,11 @@ struct Args {
     scope: Option<Scope>,
 }
 
+// cap-class: RESULT_CAP refresh_stale.max_limit — probed
 const MAX_LIMIT: usize = 50;
+// cap-class: NOT_A_CAP — default staleness predicate in hours; it defines which artifacts qualify rather than shortening the qualifying set, and the caller overrides it
 const DEFAULT_THRESHOLD_HOURS: u32 = 24;
+// cap-class: RESULT_CAP refresh_stale.default_limit — probed
 const DEFAULT_LIMIT: usize = 10;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;

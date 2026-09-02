@@ -735,7 +735,9 @@ fn dominant_text_preview(result: &Value) -> Option<String> {
 fn matched_items_summary(result: &Value) -> Option<String> {
     /// Eight rows is roughly 800 bytes — informative without crowding out the shape
     /// description below it, and well inside `COMPACT_SUMMARY_MAX_BYTES`.
+    // cap-class: RESULT_CAP librarian.summary_items — probed
     const MAX_ITEMS: usize = 8;
+    // cap-class: RESULT_CAP librarian.summary_title — probed
     const MAX_TITLE: usize = 72;
 
     let items = result.get("items")?.as_array()?;
@@ -781,6 +783,7 @@ fn matched_items_summary(result: &Value) -> Option<String> {
 /// intended effect, not a bug in this function: the caller already picked a section, and a
 /// redundant list of every section would answer a question they did not ask.
 fn section_headings_summary(result: &Value) -> Option<String> {
+    // cap-class: RESULT_CAP librarian.summary_headings — probed
     const MAX_HEADINGS: usize = 14;
 
     let headings = result.get("preview")?.get("headings")?.as_array()?;

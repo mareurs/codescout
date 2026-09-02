@@ -16,6 +16,21 @@
 //! Scans `src/` and never `tests/`: this file contains `cap-class:` strings
 //! as FIXTURES, and a scanner that read them would count a teaching example
 //! as a declaration.
+//!
+//! ## Census — 2026-09-02
+//!
+//! **105 cap-shaped `const` declarations** in tracked `src/` (unit: `const`
+//! declarations matching [`is_cap_shaped`], one count per declaration, not
+//! per use site — a constant read at six call sites still counts once):
+//! **66** `RESULT_CAP` across 66 distinct ids, **39** `NOT_A_CAP`. Derived by
+//! running [`every_cap_constant_is_classified`]'s own parser over
+//! `git ls-files src`, not by a shell grep — a second selector answers a
+//! slightly different question, which is the `IC-18` mistake this gate
+//! exists to catch.
+//!
+//! The census is a floor on the cap population, not a census of caps:
+//! [`is_cap_shaped`] cannot see a bound named `PAGE_SIZE`, and instrument B
+//! ([`truncation_sites`]) is what covers the operations it misses.
 
 // Consumed by Task 5's probe_row_ids; allow until then.
 #[allow(unused_imports)]
@@ -668,9 +683,6 @@ fn unclassified_decls_names_every_offender_and_is_not_a_bare_count() {
 
 /// THE GATE. Every cap-shaped constant in tracked `src/` is classified.
 #[test]
-#[ignore = "un-ignored by Task 3, which classifies the backlog this names. \
-                Kept as a test rather than deleted so `cargo test -- --ignored` \
-                prints the live worklist."]
 fn every_cap_constant_is_classified() {
     let mut offenders = vec![];
     for file in tracked_src_files() {

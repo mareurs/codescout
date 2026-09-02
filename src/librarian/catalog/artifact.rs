@@ -328,6 +328,7 @@ pub fn upsert_and_mint_slug(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
 /// long `-2…-47` chains the obvious objection predicts. And **the marginal cost of 50
 /// over 60 is 39 rows**, while 40 nearly triples the suffixed count for ten more
 /// characters, which is why the knee is here.
+// cap-class: NOT_A_CAP — bounds a generated slug string; it names an artifact and shortens no returned collection or body
 const SLUG_BASE_MAX: usize = 50;
 
 /// Trim `base` to at most `cap` bytes, preferring to cut at a `-` boundary so the slug
