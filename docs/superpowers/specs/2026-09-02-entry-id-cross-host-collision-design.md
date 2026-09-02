@@ -102,9 +102,25 @@ duplication is `link_scan`'s `ambiguous` bucket and `doctor`'s `prefix_conflicts
 both of which already exist. This check owns only the case neither can see: **two
 active definitions inside one file**, which is what a cross-host merge produces.
 
-**This state is invisible today, and the reason is specific.** In
-`src/librarian/tools/link_scan/resolve.rs:319-329`, `CitationKind::EntryToken`
-short-circuits:
+**This state is invisible today, and the reason is earlier in the pipeline than it
+first appears.** `link_scan`'s extractor de-duplicates definitions at parse time —
+`src/librarian/tools/link_scan/extract.rs:399` and `:440`, both guarding the same
+`seen_defs` set:
+
+```rust
+if seen_defs.insert(token.clone()) {
+    out.definitions.push(Definition { token, line });
+}
+```
+
+`BTreeSet::insert` returns `false` when the token is already present, so **the second
+`## R-147 — …` heading in a file is discarded before anything downstream can see it.**
+`DocExtract.definitions` therefore cannot *represent* a same-file duplicate, and
+`DefinitionIndex` — which is built by iterating that vector — records exactly one
+`DefinerRef` for the token, not two.
+
+That compounds with a second short-circuit rather than being redundant with it. Even
+were the extractor to emit both, `resolve.rs:319-329` returns early:
 
 ```rust
 let definers = index.definers(&citation.raw);
@@ -114,12 +130,26 @@ if definers.iter().any(|d| d.artifact_id == src_id) {
 match definers.len() { 0 => ... }
 ```
 
-A same-file duplicate pushes two `DefinerRef`s carrying the **same** `artifact_id`,
-so an entry citing a duplicated sibling in its own ledger returns `SelfCite` and
-never reaches the ambiguity branch — and citing a sibling is the commonest citation
-shape inside a ledger. The collision is therefore invisible precisely where it is
-most likely to be cited from. `doctor`'s existing checks include
-`entry_without_definition` and `ledger_defines_nothing`; there is no *defined twice*.
+An entry citing a duplicated sibling in its own ledger — the commonest citation shape
+inside a ledger — returns `SelfCite` without ever counting definers. So the state is
+unreachable at two independent layers, and `doctor`'s existing checks
+(`entry_without_definition`, `ledger_defines_nothing`) cover neither.
+
+**CONSEQUENCE FOR THE IMPLEMENTATION, and it is the one thing an implementer must not
+get wrong: Component A cannot be built on `DocExtract`.** Reading `ex.definitions` and
+looking for repeats yields a check that can never fire on any input. The check must
+re-derive definitions from the raw text, using the same two primitives
+`extract.rs:433-444` uses and omitting the dedup:
+`crate::librarian::preview::headings::parse(text)` for the headings, and `extract`'s
+`def_re()` shape for the `## <ID> — <title>` match. `headings::parse` itself does not
+deduplicate; the collapse is entirely in `seen_defs`.
+
+*(This paragraph is a correction. The spec as first committed at `ee561448` asserted
+that a same-file duplicate "pushes two `DefinerRef`s carrying the same `artifact_id`",
+which is false — caught by a reconnaissance scout before any implementation was
+dispatched. Recorded as a friction entry rather than silently amended, because the
+conclusion survived while its stated mechanism did not, and that is the shape that
+reads as verified when re-read.)*
 
 `doctor` is the right home rather than `link_scan`: this is a property of one
 artifact's body, not of the citation graph, and it must be reportable on a corpus

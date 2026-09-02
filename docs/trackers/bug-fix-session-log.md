@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 98
+entry_high_water_F: 99
 entry_high_water_W: 96
 ---
 
@@ -9820,6 +9820,62 @@ it had already been reproduced somewhere the peers could not reach.
 
 This is `IC-6`'s no-escape half — a namespace whose tokens the enumerator cannot represent — with
 the twist that the documented hardening *inverts* the failure instead of removing it.
+
+## F-99 — a spec's mechanism was inferred from where the grep window stopped, one file short of the dedup that made it false
+
+**Severity:** high — the spec was committed (`ee561448`) and was one step from `writing-plans`, which would have handed the false mechanism to an implementer verbatim.
+
+**Status:** fixed-verified — spec corrected in place; correction annotated rather than silently applied.
+
+**Valid:** dated 2026-09-02
+
+**Observed.** A design spec for a new `doctor` check asserted that a same-file duplicate
+entry definition is invisible because `link_scan`'s resolver short-circuits: *"a same-file
+duplicate pushes two `DefinerRef`s carrying the same `artifact_id`, so an entry citing a
+duplicated sibling returns `SelfCite`"*. A pre-dispatch scout of
+`src/librarian/tools/link_scan/extract.rs` found it pushes **one**, not two.
+
+**The actual mechanism, one layer earlier.** `extract.rs:399` and `:440` both guard on a
+shared `seen_defs` set:
+
+```rust
+if seen_defs.insert(token.clone()) {
+    out.definitions.push(Definition { token, line });
+}
+```
+
+`BTreeSet::insert` returns `false` for a token already present, so the **second**
+`## R-147 — <title>` heading in a file is discarded at parse time. `DocExtract.definitions`
+cannot *represent* the state, and `DefinitionIndex` — built by iterating that vector —
+records one `DefinerRef`.
+
+**Why this is `high` and not `med`.** The conclusion the spec drew (*this state is invisible*)
+was **correct**, and correct for a stronger reason than the one written. That is the
+dangerous shape: an implementer re-reading the spec finds a true claim supported by a false
+mechanism, and the natural implementation — read `ex.definitions`, look for repeats — yields
+a check **that can never fire on any input**. Not a check that fires wrongly; one whose
+positive case is unrepresentable, so its own test would be red for a reason pointing at the
+test rather than at the design. The spec now names the correct data source explicitly:
+`librarian::preview::headings::parse(text)` plus `extract`'s `def_re()` shape, which is
+`extract.rs:433-444` minus the dedup.
+
+**How it got in.** The claim was assembled from a `grep` with `context_lines=8` over
+`resolve.rs`. The context window showed the resolver's short-circuit and did not reach the
+extractor two files upstream, so the mechanism was *inferred from where the search happened
+to stop*. A grep window is a fact about a query, never about a pipeline — and the resulting
+sentence read as verified because it quoted real code at real line numbers.
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* (a test cannot detect what its recording
+filters out — here the extractor is the filter, and the check would have been the test) and
+the reconnaissance skill's Phase-3 rule, *name the proposition a confirming result proves*.
+The quoted `resolve.rs` snippet was real and proved a real thing; it did not prove the thing
+the sentence beside it claimed.
+
+**Counterfactual.** Without the scout the spec goes to `writing-plans` unchanged. The
+implementer builds Component A on `DocExtract.definitions`, the seeded two-heading fixture
+produces one definition, and the task fails at test time with a symptom (`expected 1 finding,
+got 0`) that points at the fixture. Recovery cost is a task cycle plus a redesign of the
+check's data source — the part the spec now states outright.
 
 ## Template for new entries
 
