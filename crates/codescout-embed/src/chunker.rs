@@ -75,23 +75,36 @@ pub fn split(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawCh
     chunks
 }
 
-/// Split markdown content by heading boundaries, then apply character limits.
+/// Split markdown by heading boundaries, then apply character limits.
 ///
-/// Each `#`, `##`, or `###` heading starts a new section. Sections that fit
-/// within `chunk_size` become a single chunk; oversized sections are sub-split
-/// by the regular [`split`] function with line offsets adjusted.
+/// Heading levels 1..=3 start a new section. For a caller that needs deeper
+/// headings to split — the librarian's entry ledgers define entries at `####` —
+/// use [`split_markdown_with_depth`]. The default is 3 and MUST stay 3: the
+/// code index's `chunk_id` encodes `start_line`, so widening it here silently
+/// invalidates every existing code chunk.
 pub fn split_markdown(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawChunk> {
+    split_markdown_with_depth(source, chunk_size, chunk_overlap, 3)
+}
+
+/// [`split_markdown`], with the heading depth that starts a new section made
+/// explicit. `max_heading_depth` is clamped to 1..=6.
+pub fn split_markdown_with_depth(
+    source: &str,
+    chunk_size: usize,
+    chunk_overlap: usize,
+    max_heading_depth: usize,
+) -> Vec<RawChunk> {
     if source.is_empty() {
         return vec![];
     }
+    let depth = max_heading_depth.clamp(1, 6);
 
     let lines: Vec<&str> = source.lines().collect();
-    let mut sections: Vec<(usize, usize)> = vec![]; // (start_idx, end_idx) 0-indexed
+    let mut sections: Vec<(usize, usize)> = vec![];
     let mut section_start = 0;
 
     for (i, line) in lines.iter().enumerate() {
-        if i > 0 && (line.starts_with("## ") || line.starts_with("### ") || line.starts_with("# "))
-        {
+        if i > 0 && heading_level(line).is_some_and(|l| l <= depth) {
             sections.push((section_start, i));
             section_start = i;
         }
@@ -104,21 +117,31 @@ pub fn split_markdown(source: &str, chunk_size: usize, chunk_overlap: usize) -> 
         if section_text.len() <= chunk_size {
             chunks.push(RawChunk {
                 content: section_text,
-                start_line: start + 1, // 1-indexed
-                end_line: end,         // end is exclusive in lines[], so this is the last line
+                start_line: start + 1,
+                end_line: end,
                 metadata: None,
             });
         } else {
-            // Section too large — sub-split with regular splitter
             let sub_chunks = split(&section_text, chunk_size, chunk_overlap);
             for mut sc in sub_chunks {
-                sc.start_line += start; // adjust to file-level line numbers
+                sc.start_line += start;
                 sc.end_line += start;
                 chunks.push(sc);
             }
         }
     }
     chunks
+}
+
+/// ATX heading level of `line` (1..=6), or `None` when it is not a heading.
+/// Requires the space after the hashes, so `#hashtag` is not a heading.
+fn heading_level(line: &str) -> Option<usize> {
+    let stripped = line.trim_start_matches('#');
+    let hashes = line.len() - stripped.len();
+    (1..=6)
+        .contains(&hashes)
+        .then_some(hashes)
+        .filter(|_| stripped.starts_with(' '))
 }
 
 /// Split a markdown document into chunks bounded by an approximate token budget.
@@ -391,5 +414,41 @@ mod tests {
         let text = "# Title\n\nShort content that fits easily.\n";
         let chunks = chunk_markdown(text, 1000);
         assert_eq!(chunks.len(), 1);
+    }
+
+    // --- split_markdown_with_depth tests ---
+
+    #[test]
+    fn split_markdown_default_depth_ignores_h4() {
+        // LOAD-BEARING: `#### D` must NOT start a chunk at the default depth.
+        // The code index's chunk_ids encode start_line, so changing this default
+        // silently invalidates 33,032 existing chunks.
+        let src = "# A\n\ntext\n\n#### D\n\nmore\n";
+        let chunks = split_markdown(src, 10_000, 0);
+        assert_eq!(chunks.len(), 1, "h4 must not split at default depth");
+    }
+
+    #[test]
+    fn split_markdown_with_depth_6_splits_on_h4() {
+        let src = "# A\n\ntext\n\n#### D\n\nmore\n";
+        let chunks = split_markdown_with_depth(src, 10_000, 0, 6);
+        assert_eq!(chunks.len(), 2, "h4 must split at depth 6");
+        assert!(chunks[1].content.starts_with("#### D"));
+        assert_eq!(
+            chunks[1].start_line, 5,
+            "line numbers stay 1-indexed and file-relative"
+        );
+    }
+
+    #[test]
+    fn split_markdown_with_depth_3_equals_the_default() {
+        let src = "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz\n\n#### D\n\nw\n";
+        let a = split_markdown(src, 10_000, 0);
+        let b = split_markdown_with_depth(src, 10_000, 0, 3);
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.content, y.content);
+            assert_eq!((x.start_line, x.end_line), (y.start_line, y.end_line));
+        }
     }
 }
