@@ -13498,6 +13498,24 @@ root = "work/elsewhere/ghost"
     /// not swallow this — the shape a real cross-host merge actually produces,
     /// since both clones allocate from the ledger's existing heading level
     /// (`outcome.heading_level`, `append_entry.rs`).
+    ///
+    /// LOAD-BEARING, AND WEAKER THAN IT LOOKS — annotated so nobody credits it with
+    /// coverage it does not provide. The fixture is three headings: `##` at line 3, a
+    /// nested `###` at line 5, `##` at line 7. The assertion names the surviving lines
+    /// instead of counting them, which is strictly stronger and free.
+    ///
+    /// It is NOT, however, closing a hole, and the mutation run that established this
+    /// corrected the reason it was written (2026-09-02). The count form it replaced,
+    /// `got[0].1.len() == 2`, was adequate here: the level check is what protects line
+    /// 7, and keeping or dropping line 5 moves the length to 3 or 2 — so on this
+    /// fixture every mutation that changes WHICH lines survive also changes HOW MANY.
+    /// Five were tried (`>` to `>=` on the level check, sort by level, sort by level
+    /// descending, widening `end_line`, pushing spans unconditionally) and none
+    /// produced two WRONG survivors. The one that did — reversing the sort — is
+    /// already killed by `duplicate_definitions_finds_a_token_defined_twice`.
+    ///
+    /// Do not weaken this back to a count; do not cite it as evidence that a count
+    /// form is unsafe here. That claim was checked and did not hold.
     #[test]
     fn duplicate_definitions_still_fires_on_a_same_level_duplicate_beside_a_nested_one() {
         let body = "# L\n\n## A-28 — x\n\n### A-28 — sub\n\n## A-28 — y\n";
@@ -13505,9 +13523,10 @@ root = "work/elsewhere/ghost"
         assert_eq!(got.len(), 1, "{got:?}");
         assert_eq!(got[0].0, "A-28");
         assert_eq!(
-            got[0].1.len(),
-            2,
-            "the nested ### must be dropped, leaving exactly the two ## definitions: {got:?}"
+            got[0].1,
+            vec![3, 7],
+            "1-indexed surviving lines — the nested ### at 5 dropped, the two ## at 3 \
+             and 7 kept: {got:?}"
         );
     }
 
