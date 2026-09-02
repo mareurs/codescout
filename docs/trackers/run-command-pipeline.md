@@ -516,6 +516,52 @@ all stages inside it. Third instance of that assumption in one surfaces list, an
 on Git Bash was the open caveat in `F-7`. With total ruled, nothing on the default path depends
 on it; it becomes a precondition only for an opt-in that does not exist yet.
 
+
+### R7 (2026-09-02, marius) — #6 and the source-gate bug: one rule for both
+
+**Ruled: a gate's predicate is per-command. Evaluate it per-command, refuse the whole call, and
+name the offender.** This settles #6 and prescribes the fix for
+`docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md` in one move, because
+they are the same defect seen from two directions — that bug is the *shipped* instance and #6 is
+the *unbuilt* one.
+
+**For #6 concretely:** every stage runs `is_dangerous_command`, `check_source_file_access` **and**
+`detect_il3_violation`. Any offending stage refuses the whole pipeline **before any stage runs**
+(matching R2's pre-execution refusal, and for the same reason — a refusal at stage 2 has already
+had side effects). The refusal names the stage index and the clause. Per-stage `@ack_*` stays
+deferred, as the surface leans.
+
+**Substrate check (2026-09-02) — the fix is far cheaper than the bug file assumed, and its own
+"one splitter, not two" requirement is already met.** That file records *"the gate source has
+not been read yet, and this file's claim is therefore about observed behaviour only."* Read now:
+
+| gate | call site | decomposes? |
+|---|---|---|
+| `detect_il3_violation` | `src/tools/run_command/mod.rs:211` | **yes** — `strip_heredoc_bodies` then `pipeline_segments` |
+| `is_dangerous_command` | `src/tools/run_command/inner.rs:298` | no — whole string |
+| `check_source_file_access` | `src/tools/run_command/inner.rs:315` | no — whole string |
+
+`pipeline_segments` (`src/util/path_security.rs:1111-1123`) already splits on `&&`, `||`, `;`
+and newline, quote-safe, with `split_outside_quotes` tracking quote state across line breaks —
+and it carries its own archived bug for the newline case
+(`docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md`). `strip_heredoc_bodies`
+sits at `:911`. **All three gates live in the same module as both helpers**, so "one splitter,
+not two" needs no new parser and no plumbing — only two more call sites for a private function
+already beside them. CLAUDE.md § *Parsers Over a Namespace* counts four independent shell gates
+in this process each separately mis-parsing a heredoc; reusing this one is how that count stops
+at four.
+
+**And R6 makes the pipeline case free.** `stages: [str]` arrives **already decomposed** — the
+caller did the splitting, so no parser runs at all for a pipeline call. Per-stage gating is a
+`for` loop over a list that exists. That is a second, unplanned argument for R6's XOR schema:
+it does not merely keep the gates *sighted*, it removes the parse they would otherwise need.
+
+**Deliberately out of scope, adopting the bug file's own reasoning:** do not run the permitted
+clauses anyway. Partial execution of a refused command is a worse contract than refusing all of
+it — the caller cannot tell which side effects happened. Refuse everything; say what to remove.
+
+**Confidence:** high. The rule is one sentence, its two instances are verified at `path:line`,
+and the helper it depends on is already in production under a third gate.
 ### R6 (2026-09-02, marius) — #1 schema: `stages` XOR `command`, formally
 
 **Ruled: top-level `stages: [str]` **XOR** `command: str`, mutually exclusive.** Recorded as a

@@ -144,15 +144,29 @@ unrecorded by default.
   R4 also adds three test cases, because § *Tests needed* was monotone under the very defect the
   ruling fixes.
 
-- [ ] **T7 — #3 (timeout policy), re-opened by R3.** Its "total" lean rested on per-stage being
-  impossible, which `design-backlog-session-log:F-7` falsified. Both implementable. No caller for
-  per-stage has been named — the same test that retired per-stage cancellation — so total remains
-  the correct default until one is. Decide explicitly rather than inheriting the old lean.
+- [x] **T7 — #3 ruled total (R5).** Done 2026-09-02. Ruled on merit rather than impossibility:
+  no caller for per-stage has been named, the same test that retired per-stage cancellation.
+  Recorded explicitly as a **reversible** no — per-stage stays reachable as `timeout <n> <stage>`
+  with no schema migration — because declining a cheap available capability is a different act
+  from declining an impossible one. Also retired #3's own `remaining = total - elapsed` wording,
+  the third and last instance of the sequential assumption in that surfaces list.
 
-- [ ] **T4 — #6 and the source-gate bug should be ruled once, together.** #6 is the per-stage
-  dangerous-command gate; `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
-  is the same question already filed against a shipped surface — and fired **twice on this
-  session's own commands**. One ruling covers both.
+- [x] **T4 — #6 and the source-gate bug ruled together as R7.** Done 2026-09-02. One rule: *a
+  gate's predicate is per-command; evaluate it per-command, refuse the whole call, and name the
+  offender.* The substrate check discharged the bug file's own open caveat (*"the gate source has
+  not been read yet"*) and made the fix far cheaper than it assumed: `pipeline_segments`
+  (`src/util/path_security.rs:1111-1123`) already splits on `&&`/`||`/`;`/newline quote-safely,
+  `strip_heredoc_bodies` is at `:911`, `detect_il3_violation` already uses both — and **all three
+  gates live in that same module**, so "one splitter, not two" needs two call sites, not a parser.
+  Also **narrowed the bug's own root cause**: IL-3 *does* decompose and *does* name its segment,
+  so the live defect is two gates that do not decompose, one of which also does not name. Bug file
+  updated with the reading and the running firing count (**six** across two sessions, two of them
+  on this session's own commands).
+
+- [x] **T8 — #1 formally ruled (R6).** `stages` XOR `command`. Recorded as a ruling because it had
+  been *leaning* since Concern 3 and never decided — and `design-backlog-session-log:F-3` is this
+  same tracker's record of what an unresolved lean does to a later reader. Re-founded on
+  `src/tools/run_command/mod.rs:211`, since Concern 3's companion-hook argument is dead.
 
 - [x] **T5 — #7 ruled: Strategy C.** Done 2026-09-02, recorded as `run-command-pipeline.md`
   § *Rulings* **R3**. A confirmation rather than a trade-off: both of C's stated costs had been

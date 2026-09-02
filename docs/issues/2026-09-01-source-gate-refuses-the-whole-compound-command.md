@@ -70,6 +70,38 @@ grep, and the whole command had to be re-issued without it.
 
 ## Root cause
 
+> **Source read 2026-09-02 — this section's own caveat is discharged, and the fix is cheaper
+> than it assumed.** The text below says *"the gate source has not been read yet, and this
+> file's claim is therefore about observed behaviour only."* It has now been read, and the
+> behavioural inference was right about the *what* and wrong about the *cost*.
+>
+> | gate | call site | decomposes? |
+> |---|---|---|
+> | `detect_il3_violation` | `src/tools/run_command/mod.rs:211` | **yes** — `strip_heredoc_bodies`, then `pipeline_segments` |
+> | `is_dangerous_command` | `src/tools/run_command/inner.rs:298` | no — whole string |
+> | `check_source_file_access` | `src/tools/run_command/inner.rs:315` | no — whole string |
+>
+> **§ *Fix*'s "one splitter, not two" requirement is already satisfied — the splitter exists.**
+> `pipeline_segments` (`src/util/path_security.rs:1111-1123`) splits on `&&`, `||`, `;` and
+> newline, quote-safe via `split_outside_quotes`, which tracks quote state across line breaks;
+> `strip_heredoc_bodies` is at `:911`. **All three gates live in the same module as both
+> helpers**, so the repair is two more call sites for a private function already beside them —
+> no new parser, no plumbing, and nothing to keep in sync.
+>
+> This also refines § *Root cause*'s "both gates evaluate a per-command property over a
+> per-string scope": IL-3 **does** decompose and **does** name its offending segment. What it
+> shares with the source gate is only the all-or-nothing *refusal*, which § *Fix* argues is
+> correct and should stay. So the live defect is narrower than the section states — two gates
+> that do not decompose, one of which also does not name.
+>
+> Prescribed fix and its rationale: `docs/trackers/run-command-pipeline.md` § *Rulings* **R7**,
+> which rules this bug and unbuilt design surface #6 together as one rule — *a gate's predicate
+> is per-command; evaluate it per-command, refuse the whole call, and name the offender.*
+>
+> Two further firings on 2026-09-02, both on this session's own commands, both compound
+> `;`-lists where one clause named a source file and the rest were unrelated. Running total
+> across the two sessions: **six**.
+
 `inferred from the gate's own emitted condition text — the gate source has not been read
 yet, and this file's claim is therefore about observed behaviour only.`
 
