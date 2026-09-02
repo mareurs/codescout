@@ -621,10 +621,27 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
             // cannot be staged within one test process.
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
+                // `.read(true)` is NOT redundant, and is load-bearing on Windows only.
+                //
+                // The next line locks this handle, and `fs4`'s Windows path is
+                // `LockFileEx`, which REQUIRES the handle to carry `GENERIC_READ` or
+                // `GENERIC_WRITE`. std maps an append-only open to
+                // `FILE_GENERIC_WRITE & !FILE_WRITE_DATA` (`library/std/src/sys/fs/
+                // windows.rs`, `get_access_mode`, the `(false, _, true, None)` arm) —
+                // which is neither, so `LockFileEx` returns `ERROR_ACCESS_DENIED` and
+                // every export fails with a bare `Access is denied. (os error 5)`.
+                // Adding read selects the `(true, _, true, None)` arm, which ORs
+                // `GENERIC_READ` back in. Append semantics are unchanged.
+                //
+                // Invisible on Unix, where `flock(2)` ignores the descriptor's access
+                // mode entirely: this cost 21 tests on every `windows-latest` lane while
+                // Linux and macOS stayed green. Do not "simplify" it away.
+                // docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md
+                .read(true)
                 .append(true)
                 .open(&path)
                 .with_context(|| format!("opening {}", path.display()))?;
-            FileExt::lock_exclusive(&f)?;
+            FileExt::lock_exclusive(&f).with_context(|| format!("locking {}", path.display()))?;
             // A single `write_all` over one already-newline-terminated buffer,
             // not `writeln!`, which lowers to two separate `write_all` calls
             // (body, then "\n") — a kill between them leaves a torn line with

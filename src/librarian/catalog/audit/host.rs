@@ -25,14 +25,19 @@ use rusqlite::Connection;
 
 /// The committed audit-shard directory, as SEPARATE path components.
 ///
-/// Two entries and not one string, because `".codescout/audit"` was one string until
-/// 2026-09-02 and that cost every Windows lane. `Path::join` treats its argument as a
-/// single opaque component, so on Windows the joined result was
-/// `C:\…\.tmpXXXX\.codescout/audit` — backslashes throughout, one forward slash — and
-/// `create_dir_all`, which walks ancestors by splitting on the platform separator, never
-/// created `.codescout` and returned `ERROR_PATH_NOT_FOUND`. 21 tests red on every
-/// `windows-latest` lane, 2 on `windows-gnu`, Linux and macOS entirely green.
-/// See `docs/issues/2026-09-02-audit-dir-literal-breaks-every-windows-lane.md`.
+/// Two entries and not one string on hygiene grounds: `Path::join` treats its argument as
+/// a single opaque component, so `join(".codescout/audit")` produced
+/// `C:\…\.tmpXXXX\.codescout/audit` on Windows — backslashes throughout, one forward
+/// slash. Building from components avoids the mixed form and lets
+/// [`audit_dir_display`] derive the POSIX rendering instead of repeating the literal.
+///
+/// **This was NOT the cause of the 2026-09-02 Windows failures, and this comment used to
+/// say it was.** That diagnosis was drawn from a 2-of-21 sample and the split shipped at
+/// `9a156bd4` changed nothing — the next run failed identically. The real cause was
+/// `LockFileEx` refusing an append-only handle in `shard.rs`; the mixed path is tolerated
+/// by Windows here, and the failure happens after `create_dir_all` and after the file
+/// opens. Kept because it is correct, not because it fixed anything.
+/// See `docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
 ///
 /// **Do not collapse these back into one literal**, and note the Linux-side reason the
 /// obvious guard does not work: on Unix `join(".codescout/audit")` DOES split into two
@@ -340,24 +345,24 @@ mod tests {
 
     /// No part of the audit directory may contain a path separator.
     ///
-    /// **This is the assertion that runs where the bug could not be seen.** The defect it
-    /// guards — `AUDIT_DIR = ".codescout/audit"` joined onto a root, then handed to
-    /// `create_dir_all` — was invisible on Linux and macOS and red on all four Windows
-    /// lanes (21 tests on `windows-latest`, 2 on `windows-gnu`), because `Path::join`
-    /// treats its argument as ONE component and `create_dir_all` walks ancestors by
-    /// splitting on the platform separator. On Windows that left `.codescout` uncreated
-    /// and returned `ERROR_PATH_NOT_FOUND`.
+    /// **A hygiene guard, not a regression test — and the distinction is the point.** It
+    /// was written believing the joined literal caused the 2026-09-02 Windows failures. It
+    /// did not: the split shipped at `9a156bd4` and the next run failed identically, 21
+    /// tests, same names, same lines. The real cause was `LockFileEx` refusing an
+    /// append-only handle in `shard.rs`. So this test guards a property worth having and
+    /// **guards no known defect**; do not credit it with coverage of the Windows lanes.
+    /// See `docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
     ///
     /// **Why it asserts on the PARTS and not on the built path.** The obvious test —
     /// "`audit_dir(root)` has two components below `root`" — passes on Unix whether the
     /// parts are split or not, because `/` IS the Unix separator and `join` normalises it
-    /// away. That test would be green on every developer machine and on three of CI's
-    /// lanes while the defect sat there, which is precisely the shape that produced the
-    /// bug. Asserting on the input is what makes it checkable everywhere.
+    /// away. Asserting on the input is what makes the property checkable at all on the
+    /// platform everyone develops on. That reasoning survives the retraction above; only
+    /// the claim about what it prevents does not.
     ///
     /// Mutation caught: collapsing `AUDIT_DIR_PARTS` back to a single
-    /// `[".codescout/audit"]`, on any platform.
-    /// See `docs/issues/2026-09-02-audit-dir-literal-breaks-every-windows-lane.md`.
+    /// `[".codescout/audit"]`, on any platform — verified 2026-09-02, this test reds and
+    /// [`the_display_form_and_the_joined_path_agree`] stays green.
     #[test]
     fn audit_dir_parts_carry_no_separator() {
         for part in AUDIT_DIR_PARTS {
