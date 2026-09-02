@@ -286,7 +286,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
         }
     }
     // Shared heading-resolution error (file_summary::resolve_section_range) —
-    // raised by read_markdown and edit_markdown; NOT by artifact(get), which
+    // raised by read_markdown and edit_markdown; NOT by doc(get), which
     // swallows the same miss into body_meta.heading_missing and stays success.
     // Quote-style agnostic: read_markdown's runtime message quotes the heading
     // via `{:?}` (Rust Debug — double quotes), while edit_markdown's propagated

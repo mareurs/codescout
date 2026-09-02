@@ -50,7 +50,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let Some(registration) = reg::get(&cat, &root)? else {
         return Err(RecoverableError::with_hint(
             format!("no worktree registration for `{root}`"),
-            "Unregistered legacy rows: use librarian(action=\"doctor\") + fix=\"reseat_worktree\", or artifact(action=\"graft\") instead.",
+            "Unregistered legacy rows: use librarian(action=\"doctor\") + fix=\"reseat_worktree\", or doc(action=\"graft\") instead.",
         ));
     };
     if registration.status != "active" {

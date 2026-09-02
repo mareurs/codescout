@@ -405,7 +405,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // citations have been walked. Membership is unchanged: a conflict with zero citations is
     // still emitted. See `resolve::DefinitionIndex::prefix_conflicts`.
     // Artifact ids throughout, consistent with `src_id` and `dst_ref` in the arms below;
-    // resolve one with `artifact(action="get", id=…)`.
+    // resolve one with `doc(action="get", id=…)`.
     let mut corpus = resolve::Corpus::default();
     for row in &rows {
         corpus.ids.insert(row.id.clone());
@@ -567,7 +567,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         {
             self_names.push(name);
         }
-        // Git-root basename — the same convention `artifact(action="create")`'s `repo`
+        // Git-root basename — the same convention `doc(action="create")`'s `repo`
         // field documents ("workspace root name (git repo basename)"), and the one a
         // citation author is actually spelling. Gated on the row living under that git
         // root so a scope="umbrella"/"all" scan cannot stamp this repo's name onto

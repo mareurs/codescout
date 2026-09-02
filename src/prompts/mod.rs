@@ -506,7 +506,7 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
          `artifact` (a call observed missing the required `action` field — no `Shape` \
          can match only the no-action form without matching every `artifact.*` call \
          too) and `librarian.find` (an invalid `librarian` action; the caller most \
-         likely meant `artifact(action=\"find\")`) — both are exactly the class of \
+         likely meant `doc(action=\"find\")`) — both are exactly the class of \
          mistake this table exists to catch.",
     ),
     (
@@ -2383,7 +2383,7 @@ mod redesign_invariants {
         }
     }
 
-    /// BL-26 regression: `artifact(action="move")` mints a NEW id — catalog
+    /// BL-26 regression: `doc(action="move")` mints a NEW id — catalog
     /// identity is `sha256(abs_path)`, so a move cannot preserve it. What makes
     /// `move` the right call over delete+recreate is that it *grafts* the
     /// augmentation, events, links and observations onto the new id.

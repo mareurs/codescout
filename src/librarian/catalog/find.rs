@@ -145,7 +145,7 @@ fn shift_param_indices(sql: &str, offset: usize) -> String {
 }
 
 /// Direct-id lookup, NO filter and NO visibility predicate applied. This is the
-/// forensic bypass: `artifact(action="get")`-style and `doctor`-style access to
+/// forensic bypass: `doc(action="get")`-style and `doctor`-style access to
 /// a row (including ones hidden by the grace-period visibility predicate) must
 /// go through here, never through `find`/`find_by_ids_filtered`.
 pub fn find_by_ids(cat: &Catalog, ids: &[String]) -> Result<Vec<ArtifactRow>> {

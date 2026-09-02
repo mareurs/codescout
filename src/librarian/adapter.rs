@@ -186,7 +186,7 @@ pub fn adapters_for(ctx: Arc<LibToolContext>) -> Vec<Arc<dyn crate::tools::Tool>
 ///
 /// `default_json_path_hint` picks the largest array within a bounded depth. That is the
 /// right rule for the results that usually overflow — lists of records — and the wrong one
-/// for a scoped read: `artifact(action="get", heading=…)` answers with a `body` **string**,
+/// for a scoped read: `doc(action="get", heading=…)` answers with a `body` **string**,
 /// and a string is never a candidate for an array-selecting heuristic. So the hint named
 /// `$.preview.headings[*]` — the heading map, which the caller already had and had not
 /// asked for — while the section they requested sat at `$.body`. Following it costs a
@@ -306,13 +306,13 @@ impl crate::tools::Tool for LibrarianAdapter {
             // CRUD tool. find/get/graph/state_at are the only reads; create,
             // update, move, delete, link, graft, append_entry and update_entry
             // all mutate, as does any action added after this line.
-            "artifact" => !matches!(action, Some("find" | "get" | "graph" | "state_at")),
+            "doc" => !matches!(action, Some("find" | "get" | "graph" | "state_at")),
             // Append-only event log: `create` writes, `list` reads.
             "artifact_event" => action == Some("create"),
             // Always attaches/replaces/merges an augmentation row.
             "artifact_augment" => true,
             // gather / list_stale are both read-only — the write-back is
-            // artifact(update, commit_refresh=true), classified under "artifact".
+            // doc(update, commit_refresh=true), classified under "doc".
             "artifact_refresh" => false,
             "librarian" => match action {
                 // Unconditional reads.
@@ -383,7 +383,7 @@ impl crate::tools::Tool for LibrarianAdapter {
         Some("librarian")
     }
 
-    /// Point a buffered `artifact(get)` at its **body**, not at the largest array in the
+    /// Point a buffered `doc(get)` at its **body**, not at the largest array in the
     /// envelope. Decision extracted to [`scoped_body_hint`] so a test can reach it without
     /// building an adapter — the same shape `format_compact` uses for
     /// `librarian_compact_summary`.
@@ -485,7 +485,7 @@ fn names_tracker_path(result: &Value) -> bool {
 ///
 /// 1. **Incompleteness.** First any **cut finding array** (`counts.truncated`), named as
 ///    `name[shown of total]` — see [`finding_truncation_summary`] for why the warning
-///    cannot live in the emitting tool's own `hint`. Then the `artifact(get)` body cap
+///    cannot live in the emitting tool's own `hint`. Then the `doc(get)` body cap
 ///    (`$.overflow.shown_lines`), then any other action's own `$.overflow.hint`. A body large enough to trip the cap also
 ///    exceeds the inline budget, so without promotion the warning is buffered away and an
 ///    agent extracts `$.body`, sees ~500 lines and never learns it was truncated — that
@@ -508,7 +508,7 @@ fn names_tracker_path(result: &Value) -> bool {
 /// Returns `None` when there is nothing to add, leaving the generic describer in place
 /// rather than replacing it with something worse.
 fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String> {
-    let is_artifact = inner_name == "artifact";
+    let is_artifact = inner_name == "doc";
     let mut lines: Vec<String> = Vec::new();
 
     // Leads, per the ordering rule above: a cut finding array is the strongest
@@ -561,7 +561,7 @@ fn body_truncation_warning(result: &Value) -> Option<String> {
     Some(format!(
         "artifact body TRUNCATED — only {shown} of {total} lines are in $.body \
          (soft cap). $.body is NOT the complete body. Read the rest with a narrower \
-         selector — artifact(get, id=…, heading=\"<section>\") or start_line=N, \
+         selector — doc(get, id=…, heading=\"<section>\") or start_line=N, \
          end_line=M — or see $.overflow for total_lines and top-level headings."
     ))
 }
@@ -573,7 +573,7 @@ fn body_truncation_warning(result: &Value) -> Option<String> {
 /// as a complete one — measured 2026-08-16, a `context` call returned 10 of 50 candidates
 /// with discovery capped while its envelope said only `"15357 bytes … 4 keys"`.
 ///
-/// Declines on the `artifact(get)` body cap, which [`body_truncation_warning`] states
+/// Declines on the `doc(get)` body cap, which [`body_truncation_warning`] states
 /// more loudly and more specifically just above.
 fn overflow_hint(result: &Value) -> Option<String> {
     let overflow = result.get("overflow")?.as_object()?;
@@ -772,14 +772,14 @@ fn matched_items_summary(result: &Value) -> Option<String> {
 ///
 /// `title` and `status` already survive as short scalars in the generic description;
 /// headings do not, and they are what tells the caller which narrower
-/// `artifact(get, heading="…")` call to make instead of pulling the whole body out of
+/// `doc(get, heading="…")` call to make instead of pulling the whole body out of
 /// the buffer. Rendered with their level markers so a heading can be passed straight
 /// back as that argument.
 ///
 /// This is one side of a cross-file contract with `stub_preview` (`src/librarian/tools/get.rs`):
 /// this function reads `preview.headings` as an array via `.as_array()?` and early-returns
 /// `None` the instant that fails. `stub_preview` replaces that array with a string note
-/// (`HEADINGS_OMITTED_NOTE`) whenever `artifact(get)`'s caller already selected a body — so a
+/// (`HEADINGS_OMITTED_NOTE`) whenever `doc(get)`'s caller already selected a body — so a
 /// body-selected `get` produces no "sections: …" line here, silently, for free. That is the
 /// intended effect, not a bug in this function: the caller already picked a section, and a
 /// redundant list of every section would answer a question they did not ask.
@@ -937,7 +937,7 @@ mod tests {
             "body": "…capped body…",
             "overflow": { "shown_lines": 500, "total_lines": 1841, "hint": "…" },
         });
-        let summary = librarian_compact_summary("artifact", &result)
+        let summary = librarian_compact_summary("doc", &result)
             .expect("an overflow object must yield a truncation summary");
         assert!(summary.contains("500"), "names shown lines: {summary}");
         assert!(summary.contains("1841"), "names total lines: {summary}");
@@ -951,7 +951,7 @@ mod tests {
     fn compact_summary_none_without_overflow() {
         // Body fit within the cap → no overflow field → generic fallback preserved.
         let result = json!({ "id": "x", "body": "short body" });
-        assert!(librarian_compact_summary("artifact", &result).is_none());
+        assert!(librarian_compact_summary("doc", &result).is_none());
     }
 
     #[test]
@@ -982,7 +982,7 @@ mod tests {
             "hints": {},
         });
 
-        let summary = librarian_compact_summary("artifact", &result)
+        let summary = librarian_compact_summary("doc", &result)
             .expect("a result carrying matched items must summarise them");
 
         assert!(
@@ -1023,7 +1023,7 @@ mod tests {
             "body": "…",
         });
 
-        let summary = librarian_compact_summary("artifact", &result)
+        let summary = librarian_compact_summary("doc", &result)
             .expect("a result carrying section headings must summarise them");
 
         assert!(
@@ -1063,12 +1063,12 @@ mod tests {
             "body_meta": { "heading": "## Index", "line_count": 2, "bytes": 40 },
             "preview": {
                 "shape": "default",
-                "headings": "omitted (body selector present) — call artifact(get, id=…) with no body selector for the map",
+                "headings": "omitted (body selector present) — call doc(get, id=…) with no body selector for the map",
                 "total_headings": 12
             }
         });
 
-        let summary = librarian_compact_summary("artifact", &result).expect("a summary");
+        let summary = librarian_compact_summary("doc", &result).expect("a summary");
 
         assert!(
             !summary.contains("sections:"),
@@ -1089,7 +1089,7 @@ mod tests {
             ]}
         });
 
-        let summary = librarian_compact_summary("artifact", &result).expect("a summary");
+        let summary = librarian_compact_summary("doc", &result).expect("a summary");
 
         assert!(
             summary.contains("sections:"),
@@ -1116,7 +1116,7 @@ mod tests {
             "body": "…capped…",
         });
 
-        let summary = librarian_compact_summary("artifact", &result)
+        let summary = librarian_compact_summary("doc", &result)
             .expect("overflow plus headings must yield both");
 
         let truncation = summary
@@ -1135,7 +1135,7 @@ mod tests {
     /// BL-19 fix 3, first half — and a correctness bug found by measuring rather than
     /// reasoning. `librarian(context)` carries its OWN incompleteness signal in
     /// `$.overflow.hint`, and the summary dropped it because the whole function was
-    /// gated on `inner_name == "artifact"`.
+    /// gated on `inner_name == "doc"`.
     ///
     /// Measured live 2026-08-16: a `context` call returned 10 of 50 candidates with
     /// discovery capped, and the envelope said only `"15357 bytes … 4 keys"`. A partial
@@ -1165,7 +1165,7 @@ mod tests {
             "overflow": { "shown_lines": 500, "total_lines": 1841, "hint": "…" },
         });
         let summary =
-            librarian_compact_summary("artifact", &body_capped).expect("body cap still summarises");
+            librarian_compact_summary("doc", &body_capped).expect("body cap still summarises");
         assert_eq!(
             summary.matches("500").count(),
             1,
@@ -1647,7 +1647,7 @@ mod tests {
         let a = adapter_for_test();
         assert_eq!(
             a.selector_key(&json!({"action": "append_entry", "id": "x"})),
-            Some("artifact.append_entry".to_string())
+            Some("doc.append_entry".to_string())
         );
         // No action ⇒ the bare tool name. Tool-only shapes (e.g. artifact_augment,
         // which takes no `action` param at all) must still be matchable by a
@@ -1775,7 +1775,7 @@ mod tests {
     /// leave a catalog row that also says `fixed`.
     ///
     /// Without the syncer the row keeps `open` indefinitely, and
-    /// `artifact(find, kind="bug", status=…)` — the triage query CLAUDE.md and the
+    /// `doc(find, kind="bug", status=…)` — the triage query CLAUDE.md and the
     /// activation bootstrap both prescribe — reports a value the file contradicts.
     /// `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
     #[test]

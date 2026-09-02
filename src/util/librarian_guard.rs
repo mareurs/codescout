@@ -1,7 +1,7 @@
 /// Guard that rejects direct reads/edits on librarian-managed artifact files.
 ///
 /// Librarian artifacts have YAML frontmatter with an `id: <16-hex>` field. Agents
-/// should use `artifact(action="get"/"update")` instead of reading/editing the
+/// should use `doc(action="get"/"update")` instead of reading/editing the
 /// backing file directly — the raw file lacks catalog metadata (link graph,
 /// augmentation state, event history).
 use crate::tools::RecoverableError;
@@ -152,7 +152,7 @@ fn guard_with_oracle(
     // heading-addressed tool Iron Law 4 sends them to. And the population is selected
     // by creation route rather than by any property of the file:
     // `docs/issues/_TEMPLATE.md` carries no `id:`, so every bug file created the
-    // documented way is unstamped, while `artifact(action="create")` stamps everything
+    // documented way is unstamped, while `doc(action="create")` stamps everything
     // it writes. Measured 2026-09-01: 57 of 120 tracked files under `docs/trackers/`
     // and 206 across `docs/issues/`.
     //
@@ -190,10 +190,10 @@ fn guard_with_oracle(
     // is what trains callers to route around it.
     let hint = if ledger && !augmented && !stamped {
         "This file is a ledger — it owns a PREFIX-N id namespace.\n\
-         • Add an entry:  artifact(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
+         • Add an entry:  doc(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
          \x20 then write the section yourself with the id it returns.\n\
          • Edit anything else (prose, a heading, a typo):\n\
-         \x20 artifact(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
+         \x20 doc(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
          action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
             .to_string()
     } else if stamped_only {
@@ -202,15 +202,15 @@ fn guard_with_oracle(
         // instead of the generic three-line menu — and say what is now allowed, or the
         // caller has no way to learn that the body was never the problem.
         "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
-         • artifact(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
+         • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
          Reads and BODY edits are allowed directly — read_markdown, and edit_markdown \
          without its `frontmatter` param, both work on this file."
             .to_string()
     } else {
         "Use artifact tools instead:\n\
-         • Read:   artifact(action=\"get\", id=\"<id>\")\n\
-         • Find:   artifact(action=\"find\", semantic=\"<topic>\")\n\
-         • Edit:   artifact(action=\"update\", id=\"<id>\", patch={...})\n\
+         • Read:   doc(action=\"get\", id=\"<id>\")\n\
+         • Find:   doc(action=\"find\", semantic=\"<topic>\")\n\
+         • Edit:   doc(action=\"update\", id=\"<id>\", patch={...})\n\
          Full guide: resources/read doc://librarian-guide"
             .to_string()
     };
@@ -415,7 +415,7 @@ mod tests {
         .unwrap_err();
         let re = err.downcast_ref::<RecoverableError>().unwrap();
         assert!(re.message.contains("librarian-managed artifact"));
-        assert!(re.hint().unwrap().contains("artifact(action="));
+        assert!(re.hint().unwrap().contains("doc(action="));
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
         .expect_err("a quoted id is still a librarian id — the guard must refuse");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
         assert!(re.message.contains("librarian-managed artifact"));
-        assert!(re.hint().unwrap().contains("artifact(action="));
+        assert!(re.hint().unwrap().contains("doc(action="));
     }
 
     /// A tracker can be **augmented** — `params` in the catalog, the file only a
@@ -558,7 +558,7 @@ mod tests {
     /// frontmatter block by adding one leaves this test passing and testing nothing.
     /// Verified on disk 2026-09-01: `docs/trackers/skill-frictions.md` still has no
     /// `id:`, so the premise holds. What this test therefore does NOT cover is the
-    /// file that carries one because `artifact(action="create")` put it there — see
+    /// file that carries one because `doc(action="create")` put it there — see
     /// `a_stamped_refusal_names_the_stamp_as_its_reason` below and
     /// `docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
     #[test]
@@ -650,7 +650,7 @@ mod tests {
     /// Born red 2026-09-01: the `stamped` arm's `why` was the empty string, so the
     /// message read `'<path>' is a librarian-managed artifact — do not read or edit it
     /// directly` with no reason at all. That is the arm most likely to fire unintended,
-    /// because `artifact(action="create")` stamps every file it writes whatever its
+    /// because `doc(action="create")` stamps every file it writes whatever its
     /// `kind` — measured that day: 57 of 120 tracked files under `docs/trackers/` and
     /// 206 across `docs/issues/` carry a stamp, a population selected by creation
     /// route rather than by any property of the file. A refusal is a negative result
@@ -675,7 +675,7 @@ mod tests {
             }
         }
 
-        // Exactly what `artifact(action="create", kind="doc", ...)` writes: a quoted
+        // Exactly what `doc(action="create", kind="doc", ...)` writes: a quoted
         // id, no entry_prefix, no augmentation.
         let text = "---\nid: '23421bbc5b226368'\nkind: doc\nstatus: draft\ntitle: A teammate guide\n---\n\n## Layer 2\n\nprose\n";
         assert!(
@@ -722,7 +722,7 @@ mod tests {
     ///
     /// Born red 2026-09-01 on the `Read` and `BodyWrite` rows: before the change the
     /// `stamped` arm refused every access, so a plain `kind: doc` file created by
-    /// `artifact(action="create")` was locked to the `artifact` API for life —
+    /// `doc(action="create")` was locked to the `artifact` API for life —
     /// `docs/TEAM-ONBOARDING.md`, a teammate-facing prose guide, was the instance that
     /// surfaced it.
     ///
@@ -751,7 +751,7 @@ mod tests {
             }
         }
 
-        // Byte-for-byte what `artifact(action="create", kind="doc", ...)` writes.
+        // Byte-for-byte what `doc(action="create", kind="doc", ...)` writes.
         let text = "---\nid: '23421bbc5b226368'\nkind: doc\nstatus: draft\ntitle: A teammate guide\n---\n\n## Layer 2\n\nprose\n";
         assert!(
             is_librarian_artifact(text) && declared_entry_prefixes(text).is_empty(),
@@ -830,7 +830,7 @@ mod tests {
             .to_string();
 
         assert!(
-            hint.contains("artifact(action=\"update\""),
+            hint.contains("doc(action=\"update\""),
             "the hint must name the route that DOES reach the catalog: {hint}"
         );
         assert!(
@@ -1102,7 +1102,7 @@ mod tests {
     ///
     /// What each arm keeps is no longer the same, corrected 2026-09-01: the augmented
     /// arm keeps the generic hint, and the stamped arm now gets its own, naming the
-    /// `artifact(update)` route for frontmatter **and** saying that reads and body edits
+    /// `doc(update)` route for frontmatter **and** saying that reads and body edits
     /// are allowed. This test is about neither of those texts — it pins only that
     /// `append_entry` does not leak out of the ledger arm, which is the property that
     /// survives both.

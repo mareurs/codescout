@@ -67,7 +67,7 @@ const BODY_PARAM_HINT: &str = "Pass the code as body=\"...\" — for 'replace' t
 
 /// Read the replacement code, accepting `content` as an alias for `body`.
 ///
-/// `edit_markdown` and `artifact(update)` call this argument `content`, `edit_code`
+/// `edit_markdown` and `doc(update)` call this argument `content`, `edit_code`
 /// calls it `body`, and callers carry a whole call shape over from one to the other.
 /// The alias costs nothing and removes a round-trip from the find-then-edit path the
 /// Iron Laws prescribe. Canonical `body` wins if both are present, matching

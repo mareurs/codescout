@@ -627,7 +627,7 @@ impl Availability {
 /// Picks the **largest array anywhere within a bounded depth**, not merely a
 /// top-level one. Envelopes routinely carry a short array at the top and the
 /// payload worth projecting further down — measured live 2026-08-16, an
-/// `artifact(get)` result advertised `$.tags[*]` (4 strings) for a buffer whose
+/// `doc(get)` result advertised `$.tags[*]` (4 strings) for a buffer whose
 /// point was `$.augmentation.params.tasks[*]` (18 records).
 /// docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
 pub(crate) fn default_json_path_hint(val: &Value) -> String {
@@ -1139,7 +1139,7 @@ mod json_path_hint_tests {
         assert_eq!(default_json_path_hint(&v), "$.rows[*]");
     }
 
-    /// The shape that matters most in practice. An `artifact(get)` envelope keeps
+    /// The shape that matters most in practice. An `doc(get)` envelope keeps
     /// its useful payload three levels down while carrying a short `tags` array at
     /// the top; a top-level-only scan names `tags` — real, but not what the caller
     /// wants projected. Measured live 2026-08-16: the hint said `$.tags[*]` (4

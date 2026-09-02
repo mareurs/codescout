@@ -73,7 +73,7 @@ pub struct AugmentationSidecar {
 /// prevent, and it was visible only in the export's dry run, never in the code.
 ///
 /// Keyed on path rather than on the 16-hex artifact id because the id is `sha256(abs_path)`
-/// and is re-minted by every `artifact(action="move")` — archiving is the most common thing
+/// and is re-minted by every `doc(action="move")` — archiving is the most common thing
 /// that happens to these files. A move re-derives this name too, but the declaration lives
 /// in frontmatter and travels with the file, so the pair cannot drift apart.
 pub fn path_for(repo_root: &Path, artifact_abs_path: &Path) -> PathBuf {

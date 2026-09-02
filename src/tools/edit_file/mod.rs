@@ -439,7 +439,7 @@ impl Tool for EditFile {
             if !allowed {
                 return Err(super::RecoverableError::with_hint(
                     "Use edit_markdown for markdown files",
-                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace) — but NOT on a librarian-managed artifact (docs/trackers, bug files with an `id:` in frontmatter), which every edit_file path refuses: use artifact(action=\"update\", id=..., patch={body_edits: [...]}) for those.",
+                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace) — but NOT on a librarian-managed artifact (docs/trackers, bug files with an `id:` in frontmatter), which every edit_file path refuses: use doc(action=\"update\", id=..., patch={body_edits: [...]}) for those.",
                 ).into());
             }
         }

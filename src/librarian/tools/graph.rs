@@ -19,7 +19,7 @@ struct Args {
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"graph\") requires 'id': {e}"), "e.g. artifact(action=\"graph\", id=\"<16-hex>\", depth=2). Get an id from artifact(action=\"find\", ...).")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"graph\") requires 'id': {e}"), "e.g. doc(action=\"graph\", id=\"<16-hex>\", depth=2). Get an id from doc(action=\"find\", ...).")
     })?;
     if a.depth < 1 || a.depth > 3 {
         return Err(RecoverableError::new("depth must be between 1 and 3"));

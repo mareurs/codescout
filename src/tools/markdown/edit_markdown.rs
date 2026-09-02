@@ -1338,7 +1338,7 @@ impl Tool for EditMarkdown {
 
         let file_content = std::fs::read_to_string(&resolved)?;
 
-        // Reject librarian-managed artifacts — use artifact(action="update") instead.
+        // Reject librarian-managed artifacts — use doc(action="update") instead.
         // Passing the resolved path also catches augmented artifacts with no
         // frontmatter id, where a direct write desynchronises file from params.
         //
@@ -1459,7 +1459,7 @@ impl Tool for EditMarkdown {
         // Refuse a write that cuts the file by >50% in EITHER bytes or lines,
         // unless the caller passed `force: true`. The predicate, the 200-byte
         // floor and the reason there are two dimensions all live in
-        // crate::util::shrink_guard, shared with artifact(update) and
+        // crate::util::shrink_guard, shared with doc(update) and
         // memory(write) — three private copies is how the line-truncation gap
         // survived being fixed once.
         let force = input["force"].as_bool().unwrap_or(false);

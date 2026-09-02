@@ -309,7 +309,7 @@ impl Tool for ArtifactAugment {
                 },
                 "entry_collection": {
                     "type": "string",
-                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...)."
+                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables doc(get, entry_filter=...)."
                 }
             }
         })
@@ -319,7 +319,7 @@ impl Tool for ArtifactAugment {
         let mut a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(
             format!("artifact_augment requires 'id': {e}"),
-            "e.g. artifact_augment(id=\"<16-hex>\", prompt=\"...\"). Get an id from artifact(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
+            "e.g. artifact_augment(id=\"<16-hex>\", prompt=\"...\"). Get an id from doc(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
         )
     })?;
 

@@ -417,7 +417,7 @@ mod containing_root_tests {
 
     /// Regression: on Windows the catalog and `current_project` spell the same
     /// location differently, and `Path::starts_with` cannot bridge them. This
-    /// left `artifact(move)` reporting `no managed root contains <path>` for a
+    /// left `doc(move)` reporting `no managed root contains <path>` for a
     /// file `create` had just written and `find` returned happily.
     ///
     /// `doctor` stayed green throughout — it enforces the forward-slash form
@@ -589,7 +589,9 @@ mod required_param_routing_tests {
                 "{name}: the refusal must name what wanted the field; got: {msg}"
             );
             assert!(
-                msg.contains("artifact"),
+                msg.contains("doc(")
+                    || msg.contains("artifact_event(")
+                    || msg.contains("artifact_refresh("),
                 "{name}: the refusal must name the TOOL and action, since `missing field \
                  \\`x\\`` names neither; got: {msg}"
             );

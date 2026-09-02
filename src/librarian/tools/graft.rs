@@ -1,4 +1,4 @@
-//! `artifact(action="graft")` — fold one catalog row's history into another.
+//! `doc(action="graft")` — fold one catalog row's history into another.
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};

@@ -155,8 +155,8 @@ pub struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(
-            format!("artifact(action=\"state_at\") requires 'artifact_id': {e}"),
-            "e.g. artifact(action=\"state_at\", artifact_id=\"<16-hex>\", commit=\"<sha>\"). Supply exactly one of commit or timestamp (ms epoch) as the cutoff. Get an id from artifact(action=\"find\", ...).",
+            format!("doc(action=\"state_at\") requires 'artifact_id': {e}"),
+            "e.g. doc(action=\"state_at\", artifact_id=\"<16-hex>\", commit=\"<sha>\"). Supply exactly one of commit or timestamp (ms epoch) as the cutoff. Get an id from doc(action=\"find\", ...).",
         )
     })?;
 

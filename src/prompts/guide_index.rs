@@ -961,10 +961,10 @@ Body Mu.
             "librarian has no declared sections"
         );
 
-        let got = idx.match_sections("librarian", Some("artifact.find"), &serde_json::json!({}));
+        let got = idx.match_sections("librarian", Some("doc.find"), &serde_json::json!({}));
         assert!(
             !got.is_empty(),
-            "expected `artifact.find` to match at least one librarian section"
+            "expected `doc.find` to match at least one librarian section"
         );
         assert!(
             got.iter().any(|s| s.heading == "Filter Syntax"),
@@ -1003,12 +1003,12 @@ Body Mu.
         let idx = GuideIndex::try_build().unwrap();
         let entry = idx.topic("librarian").expect("librarian in index");
         for shape in [
-            "artifact.update",
-            "artifact.get",
-            "artifact.find",
-            "artifact.append_entry",
-            "artifact.create",
-            "artifact.move",
+            "doc.update",
+            "doc.get",
+            "doc.find",
+            "doc.append_entry",
+            "doc.create",
+            "doc.move",
         ] {
             let sel = Some(shape);
             let hits = idx.match_sections("librarian", sel, &serde_json::json!({}));

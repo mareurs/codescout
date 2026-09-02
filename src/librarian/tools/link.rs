@@ -13,7 +13,7 @@ struct Args {
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"link\") requires 'src_id', 'dst_id' and 'rel': {e}"), "e.g. artifact(action=\"link\", src_id=\"<16-hex>\", dst_id=\"<16-hex>\", rel=\"supersedes\"). Both ids are 16-hex artifact ids from find/get. Most citations need no manual link - link_scan derives rel=\"cites\" from prose.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"link\") requires 'src_id', 'dst_id' and 'rel': {e}"), "e.g. doc(action=\"link\", src_id=\"<16-hex>\", dst_id=\"<16-hex>\", rel=\"supersedes\"). Both ids are 16-hex artifact ids from find/get. Most citations need no manual link - link_scan derives rel=\"cites\" from prose.")
     })?;
     let now = chrono::Utc::now().timestamp_millis();
     let mut cat = ctx.catalog.lock();

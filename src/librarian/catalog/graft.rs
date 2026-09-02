@@ -29,7 +29,7 @@ pub struct GraftReport {
     pub entries_renumbered: usize,
     /// `entry_reservation` rows folded onto the destination, taking the MAX of the
     /// two marks per prefix. Without this the graft's cascade-delete dropped them,
-    /// so `artifact(move)` reset a ledger's id counter.
+    /// so `doc(move)` reset a ledger's id counter.
     pub entry_reservations_folded: usize,
     pub remap: BTreeMap<String, String>,
     pub suspicious: Vec<Value>,
@@ -173,7 +173,7 @@ pub(crate) fn repoint_history(
     //    outright whenever the destination already tracks the same prefix.
     //
     //    Before this existed, `graft_rows`' cascade-delete of the source silently
-    //    dropped these rows, which is what let `artifact(move)` — i.e. archiving —
+    //    dropped these rows, which is what let `doc(move)` — i.e. archiving —
     //    reset a ledger's counter
     //    (docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md).
     let entry_reservations_folded = tx.execute(

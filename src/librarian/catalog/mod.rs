@@ -172,7 +172,7 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         )?;
     }
     // v8: refreshed_at_commit column on artifact_augmentation (server-computed provenance;
-    // written by commit_refresh, surfaced by artifact(get) as provenance.refreshed_at_commit).
+    // written by commit_refresh, surfaced by doc(get) as provenance.refreshed_at_commit).
     if !column_exists(conn, "artifact_augmentation", "refreshed_at_commit")? {
         conn.execute(
             "ALTER TABLE artifact_augmentation ADD COLUMN refreshed_at_commit TEXT",

@@ -55,7 +55,7 @@ fn find_heading_section<'q>(
 /// (`declared-not-wired`): the capability existed and nothing reached it.
 ///
 /// Staying `isError: false` is deliberate and unchanged; see the comment at
-/// `src/usage/db.rs` on why `artifact(get)` reports a heading miss in `body_meta`
+/// `src/usage/db.rs` on why `doc(get)` reports a heading miss in `body_meta`
 /// instead of raising. Only the *label* was wrong, and then only the *hint*.
 fn heading_miss_meta(name: &str, err: &crate::tools::RecoverableError) -> serde_json::Value {
     // One expression, so the two arms cannot drift on this field the way they already did
@@ -105,7 +105,7 @@ fn apply_soft_cap(body: &str) -> (String, Option<(usize, usize, Vec<String>)>) {
 
 /// What a stubbed preview puts where the heading array was.
 const HEADINGS_OMITTED_NOTE: &str =
-    "omitted (body selector present) — call artifact(get, id=…) with no body selector for the map";
+    "omitted (body selector present) — call doc(get, id=…) with no body selector for the map";
 
 /// Strip the heavy fields from a preview when the caller already named what they wanted.
 ///
@@ -129,7 +129,7 @@ const HEADINGS_OMITTED_NOTE: &str =
 /// (`src/librarian/adapter.rs`, doc comment above its definition): that function's whole job is
 /// to read `preview.headings` as an array and render it into the compact summary, and it
 /// early-returns `None` the moment `.as_array()` fails — which is exactly what replacing the
-/// array with `HEADINGS_OMITTED_NOTE` (a string) here causes. A body-selected `artifact(get)`
+/// array with `HEADINGS_OMITTED_NOTE` (a string) here causes. A body-selected `doc(get)`
 /// therefore gets no "sections: …" line in `format_compact`, silently, for free — this is the
 /// intended effect (the caller already picked a section; a redundant list adds nothing), not a
 /// bug in the adapter. `total_headings`, below, is what still lets a caller learn the map
@@ -218,7 +218,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"get\") requires 'id': {e}"), "e.g. artifact(action=\"get\", id=\"<16-hex>\"). Get an id from artifact(action=\"find\", ...). Add full=true for the whole body, or heading=\"## Section\" for one section.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"get\") requires 'id': {e}"), "e.g. doc(action=\"get\", id=\"<16-hex>\"). Get an id from doc(action=\"find\", ...). Add full=true for the whole body, or heading=\"## Section\" for one section.")
     })?;
     let body_selectors = [
         a.full.unwrap_or(false),
@@ -259,8 +259,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None => {
                 return Err(RecoverableError::new(format!(
                     "unknown artifact id '{}'. If this id came from an earlier call, an \
-                     artifact(action=\"move\") since then will have re-keyed it (id = \
-                     sha256(abs_path)); find it by path with artifact(action=\"find\", \
+                     doc(action=\"move\") since then will have re-keyed it (id = \
+                     sha256(abs_path)); find it by path with doc(action=\"find\", \
                      filter={{\"rel_path\": {{\"contains\": …}}}}, include_archived=true). If \
                      it was never seen before, run librarian(action=\"reindex\").",
                     a.id

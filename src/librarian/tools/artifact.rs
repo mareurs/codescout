@@ -9,11 +9,11 @@ pub struct Artifact;
 #[async_trait]
 impl Tool for Artifact {
     fn name(&self) -> &'static str {
-        "artifact"
+        "doc"
     }
 
     fn description(&self) -> &'static str {
-        "Artifact CRUD and query. \
+        "Document CRUD and query. \
          Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \
@@ -217,11 +217,7 @@ impl Tool for Artifact {
         })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
         // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
-        if let Err(e) = ctx
-            .catalog
-            .lock()
-            .set_audit_verb(&format!("artifact.{action}"))
-        {
+        if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
             tracing::warn!("audit verb stamp failed: {e}");
         }
         match action {
@@ -279,7 +275,7 @@ mod tests {
             .conn
             .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(verb.as_deref(), Some("artifact.find"));
+        assert_eq!(verb.as_deref(), Some("doc.find"));
     }
 
     #[tokio::test]
@@ -297,7 +293,7 @@ mod tests {
     #[tokio::test]
     async fn update_action_passes_through_dispatcher_without_unknown_field_error() {
         // Regression: deny_unknown_fields on update::Args used to reject the
-        // outer dispatcher's `action` field, breaking every artifact(update)
+        // outer dispatcher's `action` field, breaking every doc(update)
         // call through the Tool surface. Unit tests of update::call directly
         // missed this because they passed args without `action`. Going through
         // Artifact.call exercises the dispatcher pass-through.
@@ -351,7 +347,7 @@ mod tests {
 
     /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
     /// than one asserted to fail, why `deny_unknown_fields` is unavailable (measured: adding
-    /// it once broke every `artifact(update)` call), and what the `accepts_any_json` escape
+    /// it once broke every `doc(update)` call), and what the `accepts_any_json` escape
     /// admits — now lives on `crate::tools::param_probe`, shared with `librarian`,
     /// `artifact_event` and `artifact_refresh`.
     ///
@@ -368,7 +364,7 @@ mod tests {
         // the schema to shrink without a false alarm while still catching a break in the
         // `<action>:` label convention.
         assert_all_honored(
-            "artifact",
+            "doc",
             &Artifact.input_schema(),
             &probe_spec(),
             30,
@@ -476,7 +472,7 @@ mod tests {
     async fn every_required_param_is_advertised() {
         use crate::tools::param_probe::assert_required_are_advertised;
 
-        assert_required_are_advertised("artifact", &Artifact.input_schema(), &probe_spec());
+        assert_required_are_advertised("doc", &Artifact.input_schema(), &probe_spec());
     }
 
     /// The doc half of

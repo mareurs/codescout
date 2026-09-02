@@ -8,7 +8,7 @@ get_guide("tracker-conventions").
 ---
 
 ## Artifact Model
-<!-- serves: artifact.get, artifact.create -->
+<!-- serves: doc.get, doc.create -->
 <!-- requires: docs/trackers/ — Backing Store, Not a Docs Folder -->
 
 Every artifact is a markdown file with YAML frontmatter stored under the project root.
@@ -64,7 +64,7 @@ artifact(action="get", id="<id>", heading="## Foo") ← read one section
 ---
 
 ## Filter Syntax
-<!-- serves: artifact.find -->
+<!-- serves: doc.find -->
 
 Filters are AST nodes. Two shapes:
 
@@ -118,7 +118,7 @@ day-to-day tracker workflow (creating, querying, archiving), see
 get_guide("tracker-conventions"). This guide covers only the artifact-level
 mechanics that apply to all kinds.
 ### Reach for augmentation — don't hand-maintain the table
-<!-- serves: artifact.append_entry -->
+<!-- serves: doc.append_entry -->
 
 A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 **augmented artifact**: attach a `params` array + `render_template` (+ optional
@@ -168,7 +168,7 @@ buffer caps inline reads, so it can't round-trip. Two server-side paths read it 
 its key — a bare-array patch under `merge` is a silent no-op.
 
 ### Changing ONE entry — don't hand-build the array
-<!-- serves: artifact.update_entry -->
+<!-- serves: doc.update_entry -->
 
 **A params patch replaces an entry collection; it does not merge into it.** Sending
 `{tasks: [one row]}` to flip one row's status deletes every other row, and the catalog is
@@ -220,7 +220,7 @@ index. **Editing the body has three surfaces, with different blast radius:**
 | `edit_file` | Refused on managed files, **on every write path** | Batch `edits[]`, `insert` prepend/append, and single `old_string`/`new_string` all guard. The `.md` gate's `replace_all=true` escape is not a way around it. | Never on augmented artifacts. |
 
 ### Choosing a mode — anti-patterns
-<!-- serves: artifact.update -->
+<!-- serves: doc.update -->
 
 **Avoid this anti-pattern** (caused a real ~600-line tracker body loss):
 
@@ -259,7 +259,7 @@ Log*.) To add a sibling, target the last existing child with `insert_after` inst
 of replacing the parent.
 
 ### The shrink guard, `force`, and `patch`'s accepted keys
-<!-- serves: artifact.update -->
+<!-- serves: doc.update -->
 
 **Body-shrink guard.** A body write losing >50% of the file's **bytes or
 lines** is refused with `RecoverableError("body-shrink guard: ...")`, naming
@@ -337,7 +337,7 @@ replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates, so a
 ---
 
 ## artifact(action="graph") — Relationship Map
-<!-- serves: artifact.graph, artifact.link -->
+<!-- serves: doc.graph, doc.link -->
 
 ```
 artifact(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
@@ -379,7 +379,7 @@ main checkout's catalog instead of a wholesale fork:
   than reseating them.
 
 ## Archiving / Moving Trackers
-<!-- serves: artifact.move, artifact.delete -->
+<!-- serves: doc.move, doc.delete -->
 
 Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
 get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",

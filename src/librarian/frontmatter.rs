@@ -31,7 +31,7 @@ pub struct Frontmatter {
     /// Custom / unrecognized frontmatter keys, captured verbatim so they
     /// survive a parse→edit→write round-trip (otherwise an update would
     /// silently drop them). Not catalog-indexed — not filterable via
-    /// artifact(find); readable on disk and surfaced by artifact(get) as
+    /// doc(find); readable on disk and surfaced by doc(get) as
     /// `extra`.
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -194,7 +194,7 @@ pub fn write(fm: &Frontmatter, body: &str) -> String {
         // wrote above, and a duplicate key makes the entire block unparseable — which
         // costs every field, not just this one. Dropping it is the safe direction: the
         // typed field above already carries that key with the catalog-indexed value.
-        // Callers are refused at the input boundary (`artifact(create|update)`); this is
+        // Callers are refused at the input boundary (`doc(create|update)`); this is
         // the backstop for internal ones, and it is why `write` can stay infallible.
         if RESERVED_KEYS.contains(&k.as_str()) {
             continue;
@@ -269,7 +269,7 @@ pub fn rewrite_frontmatter_normalizing(
 ///
 /// Measured twice through real callers. `move`: 3.5 changed lines per file on a
 /// librarian-written corpus, **30** on a hand-authored one (BL-34). Then
-/// `artifact(update, patch={status})` on a hostile fixture: one field requested,
+/// `doc(update, patch={status})` on a hostile fixture: one field requested,
 /// **seven** lines changed, six unrequested (BL-36). Value-preserving and
 /// form-preserving are different properties; a targeted write owes both.
 ///

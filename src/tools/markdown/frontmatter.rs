@@ -131,7 +131,7 @@ pub fn apply_ops(
                 .to_string(),
             "This module is flat-only and cannot safely rewrite a multi-line YAML value it \
              did not fully recognise. For a librarian-managed artifact use \
-             artifact(action=\"update\", patch={...}); otherwise rewrite the frontmatter block \
+             doc(action=\"update\", patch={...}); otherwise rewrite the frontmatter block \
              in one edit."
                 .to_string(),
         )

@@ -343,7 +343,7 @@ async fn edit_action_rejects_both_new_string_and_content() {
     );
 }
 
-/// `edit_markdown` shares the shrink predicate with `artifact(update)` and
+/// `edit_markdown` shares the shrink predicate with `doc(update)` and
 /// `memory(write)` (`crate::util::shrink_guard`), and until 2026-08-29 all three
 /// tested only bytes. This surface had no shrink-guard coverage at all, so the
 /// line arm is pinned here rather than assumed to come along with the shared

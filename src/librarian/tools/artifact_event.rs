@@ -15,7 +15,7 @@ impl Tool for ArtifactEvent {
     fn description(&self) -> &'static str {
         "Artifact event log. action: create | list. \
          Events are immutable append-only records anchored to git commits — \
-         distinct from field patches (use artifact(update) for those)."
+         distinct from field patches (use doc(update) for those)."
     }
 
     fn input_schema(&self) -> Value {

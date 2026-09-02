@@ -38,7 +38,7 @@
 //!    now the LEGACY fallback for catalog drift the overlay never saw.
 //! 8. `abs_path_outside_managed_roots` — every `artifact.abs_path` must
 //!    resolve under some managed root, i.e. the precondition
-//!    `artifact(move)` / `artifact(delete)` enforce via `containing_root`.
+//!    `doc(move)` / `doc(delete)` enforce via `containing_root`.
 //!    Added after WIN-30, where that resolution silently failed for every
 //!    row on Windows and no existing check could see it: the catalog stores
 //!    `//?/C:/...` while `current_project` holds `\\?\C:\...`, and
@@ -643,7 +643,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              or limit={sample_limit}, offset={next_offset} for the next page. \
              catalog_health.outside_roots_by_project counts every row, elided AND scoped-out ones included. \
              A row here is under NO managed root, NO umbrella sibling, and NO repo the catalog has commits for — \
-             so nothing on this machine claims it and artifact(move)/artifact(delete) have nothing to resolve it against."
+             so nothing on this machine claims it and doc(move)/doc(delete) have nothing to resolve it against."
         ));
     }
     if !outside_scoped_by_project.is_empty() {
@@ -1614,7 +1614,7 @@ fn scan_artifact_paths(
 ///
 /// What is left over is the finding worth a reader's attention: 10 rows under no
 /// umbrella member and no repo the catalog has ever seen. Those are the ones
-/// `artifact(move)` / `artifact(delete)` will refuse with nothing to point at.
+/// `doc(move)` / `doc(delete)` will refuse with nothing to point at.
 ///
 /// Deliberately does NOT consult the filesystem. A row is scoped out for belonging
 /// somewhere known, not for existing — `check_missing_file` already owns
@@ -1660,7 +1660,7 @@ fn known_workspace_roots(ctx: &ToolContext, conn: &rusqlite::Connection) -> Vec<
 /// Every `artifact.abs_path` must resolve under some managed root.
 ///
 /// This is exactly the precondition [`super::containing_root`] enforces for
-/// `artifact(move)` and `artifact(delete)`, restated as an invariant so it is
+/// `doc(move)` and `doc(delete)`, restated as an invariant so it is
 /// observable *before* someone tries to move a file. It exists because it was
 /// missing: `containing_root` could not match any catalog path on Windows
 /// (WIN-30) — the catalog stores `//?/C:/...` while `current_project` holds
@@ -1698,8 +1698,8 @@ fn check_outside_managed_roots(id: &str, abs_path: &str, roots: &[PathBuf]) -> O
         Some(id.to_string()),
         abs_path,
         format!(
-            "resolves under none of the {} managed root(s), so artifact(move) and \
-             artifact(delete) will refuse this row. Expected if it belongs to another \
+            "resolves under none of the {} managed root(s), so doc(move) and \
+             doc(delete) will refuse this row. Expected if it belongs to another \
              workspace; a defect if it should be under one of: {}{}",
             roots.len(),
             listed.join(", "),
@@ -2142,7 +2142,7 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// away from, which resolves to nothing. Measured 2026-08-16: **all 78** unique
 /// `^id:` values in `docs/issues/archive/` were stale, and none could be repaired
 /// through any write tool (each carries a 16-hex id, so `edit_markdown` and
-/// `edit_file` refuse it, and `artifact(update)`'s `extra` cannot write `id`).
+/// `edit_file` refuse it, and `doc(update)`'s `extra` cannot write `id`).
 /// That is why the repair lives here.
 ///
 /// **Two findings, not one, because the causes differ and so do the remedies.**
@@ -3988,7 +3988,7 @@ fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Vi
                      BY an archive move, so a citation written before one schedules no repair: \
                      no event fires and no procedure owns the fix. Either repoint the citation \
                      to `docs/issues/{name}`, or complete the archive via \
-                     `artifact(action=\"move\")` and re-point every citation in the same commit."
+                     `doc(action=\"move\")` and re-point every citation in the same commit."
                 ),
             ));
         }
@@ -4312,7 +4312,7 @@ fn scan_params_status_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
                  entries disagree, so `entry_filter` and the committed markdown answer \
                  the same question differently — and only the body is in git. Read the \
                  body and decide which side is right, then repair the other: \
-                 `artifact(action=\"update_entry\", …)` for the `params` side, a \
+                 `doc(action=\"update_entry\", …)` for the `params` side, a \
                  `body_edits` patch for the body. This check is a HEURISTIC and both \
                  directions of error are possible: it is silent on ~8.6% of real \
                  disagreements (measured), and a status region whose prose merely \
@@ -4525,7 +4525,7 @@ pub(crate) fn parse_declaration(v: &Value) -> Declaration {
 /// `render_template` and `entry_collection` live only in the catalog, which is
 /// machine-local and git-ignored. So the absence is invisible by construction: `reindex`
 /// preserves augmentation keyed by id rather than regenerating it, and therefore reports
-/// healthy after a loss and repairs nothing; `artifact(get)` returns `augmentation: null`
+/// healthy after a loss and repairs nothing; `doc(get)` returns `augmentation: null`
 /// without comment; and the documented `append_entry` / `update_entry` / `entry_filter`
 /// calls fail only at use, one caller at a time.
 ///
@@ -5689,7 +5689,7 @@ mod tests {
 
     /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
     ///
-    /// `ec9e63d0` stopped `artifact(move)` creating this drift. The population it
+    /// `ec9e63d0` stopped `doc(move)` creating this drift. The population it
     /// left behind was total: all 78 unique `^id:` values in `docs/issues/archive/`
     /// resolved to nothing.
     ///
@@ -7636,7 +7636,7 @@ mod tests {
         // foreign workspace, and the reader needs to tell that from real drift
         // without re-deriving the root list.
         assert!(v.detail.contains("codescout"), "got: {}", v.detail);
-        assert!(v.detail.contains("artifact(move)"), "got: {}", v.detail);
+        assert!(v.detail.contains("doc(move)"), "got: {}", v.detail);
     }
 
     /// A sibling sharing a name prefix is outside the root. Same boundary

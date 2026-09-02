@@ -1223,7 +1223,7 @@ mod tests {
     /// `rel_path` is an advertised top-level param of the shared `artifact` schema and
     /// its description is written partly in `find` terms, but `Args` had no such field
     /// and cannot carry `deny_unknown_fields` — the dispatcher passes `action` through,
-    /// and adding it once broke every `artifact(update)` call. So serde dropped the key
+    /// and adding it once broke every `doc(update)` call. So serde dropped the key
     /// and the call ran at defaults: no filter, `limit: 50`. The reply was an
     /// unfiltered first page whose `count` reads as a match total.
     #[tokio::test]
@@ -1571,7 +1571,7 @@ mod tests {
 
     /// docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md
     ///
-    /// A file dropped onto disk without going through `artifact(action="create")`
+    /// A file dropped onto disk without going through `doc(action="create")`
     /// (a `create_file`, `Write`, or peer `git commit`) is invisible to `find` and
     /// nothing in the response says so — the load-bearing half. Real disk I/O:
     /// `git_root` must be a real tempdir since `count_disk_md` walks it for real.

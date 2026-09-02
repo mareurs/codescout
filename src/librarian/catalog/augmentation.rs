@@ -27,7 +27,7 @@ pub struct AugmentationRow {
     /// entry rows (e.g. "failures", "children"). None = not entry-filterable.
     pub entry_collection: Option<String>,
     /// Server-computed provenance: repo HEAD at the last commit_refresh. None until a
-    /// refresh runs with a resolvable HEAD. Surfaced by artifact(get) as
+    /// refresh runs with a resolvable HEAD. Surfaced by doc(get) as
     /// provenance.refreshed_at_commit; NOT overwritten by re-augment.
     pub refreshed_at_commit: Option<String>,
 }
@@ -487,14 +487,14 @@ fn snapshot_stale_note(
         format!(
             "This tracker renders a snapshot in its body, and its `{entry_id}` row still shows \
              the PREVIOUS field values — params changed, the file did not. Update the row via \
-             artifact(action=\"update\", patch={{body_edits: [...]}}), or the committed table \
+             doc(action=\"update\", patch={{body_edits: [...]}}), or the committed table \
              disagrees with the catalog."
         )
     } else {
         format!(
             "This tracker renders a snapshot in its body, but `{entry_id}` is not in it at all — \
              the row exists only in the catalog, which is machine-local and git-ignored. Add it \
-             via artifact(action=\"update\", patch={{body_edits: [...]}})."
+             via doc(action=\"update\", patch={{body_edits: [...]}})."
         )
     })
 }
@@ -540,7 +540,7 @@ fn undefined_in_body_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> O
             "`{entry_id}` has no `## {entry_id} — <title>` heading in the body, so any citation \
              of it would resolve to nothing — an index row does not define a token. This ledger \
              defines its other entries, so this one is most likely an omission: add the heading \
-             via artifact(action=\"update\", patch={{body_edits: [...]}}). If instead this ledger \
+             via doc(action=\"update\", patch={{body_edits: [...]}}). If instead this ledger \
              defines an entry only once something cites it, that is a valid convention and \
              nothing is owed here yet."
         )),
@@ -913,7 +913,7 @@ pub(crate) fn declared_prefixes_from_frontmatter(
 /// the body alone, and argued the machine-local table was safe to lose because it was
 /// "re-derivable from the committed body". That premise held only while the live body
 /// contained every id ever issued — and compaction, which moves entries out to an
-/// archive companion, lowers `body_max` by design, while `artifact(move)`'s graft
+/// archive companion, lowers `body_max` by design, while `doc(move)`'s graft
 /// cascade-deletes the reservation. With both understating, the `.max(1)` floor
 /// reissued `HY-1`, and because the resolver binds a token to its sole ACTIVE definer,
 /// every historical citation silently re-pointed with no dangling or ambiguous count
@@ -975,7 +975,7 @@ pub fn allocate_entry_id(
             format!("allocate_entry_id: `{abs_path}` does not declare an entry_prefix"),
             format!(
                 "A ledger declares its id namespace in FRONTMATTER, so the declaration is \
-                 committed and survives a fresh clone: artifact(action=\"update\", id=\"{artifact_id}\", \
+                 committed and survives a fresh clone: doc(action=\"update\", id=\"{artifact_id}\", \
                  patch={{extra: {{\"{ENTRY_PREFIX_KEY}\": \"{id_prefix}\"}}}}). Pass a list for a \
                  ledger owning two namespaces. No augmentation and no entry_collection are needed."
             ),
@@ -1000,7 +1000,7 @@ pub fn allocate_entry_id(
 
     // The COMMITTED high-water mark, and the only input that survives the three
     // operations `body_max` and `reserved_max` cannot: a fresh clone, an
-    // `artifact(move)` (whose graft cascade-deletes the reservation), and
+    // `doc(move)` (whose graft cascade-deletes the reservation), and
     // compaction (which lowers `body_max` BY DESIGN when entries move to an
     // archive companion). Accepts a number or a string, because a hand-written
     // or previously-quoted value should still be honoured rather than silently
@@ -1126,7 +1126,7 @@ pub fn allocate_entry_id(
                 // The document is in memory right here, so the recovery can be
                 // CONCRETE instead of a referral. Naming the last top-level headings
                 // specifically, because a ledger's append anchor is conventionally its
-                // final stanza and `artifact(action="get")`'s heading window fills from
+                // final stanza and `doc(action="get")`'s heading window fills from
                 // the top — which is exactly why the surface this hint used to name
                 // could not answer on a long ledger.
                 // docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
@@ -2822,7 +2822,7 @@ mod tests {
     /// * compaction moves entries OUT of the live body into an archive companion (the
     ///   ladder `get_guide("tracker-conventions")` mandates), so `body_max` is not
     ///   monotonic;
-    /// * `graft_rows` cascade-deleted the reservation, so `artifact(move)` reset the
+    /// * `graft_rows` cascade-deleted the reservation, so `doc(move)` reset the
     ///   counter — and archiving IS a move. A fresh clone or a second machine has the
     ///   same effect.
     ///
@@ -3247,7 +3247,7 @@ mod tests {
 
     /// docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
     ///
-    /// The old hint sent the caller to `artifact(action="get")` to discover the
+    /// The old hint sent the caller to `doc(action="get")` to discover the
     /// anchor. On the artifact class this feature exists for, that surface cannot
     /// answer: its heading window fills from the TOP, and a ledger's append anchor
     /// is its LAST heading (`append_entry` inserts *before* it), so on a long ledger
@@ -3285,7 +3285,7 @@ mod tests {
              so the retry can be composed from the error alone: {text}"
         );
         assert!(
-            !text.contains("artifact(action=\"get\""),
+            !text.contains("doc(action=\"get\""),
             "the hint must NOT prescribe the surface that cannot answer — that \
              referral is the defect this closes: {text}"
         );

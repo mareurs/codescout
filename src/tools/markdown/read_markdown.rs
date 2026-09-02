@@ -530,7 +530,7 @@ impl Tool for ReadMarkdown {
         // Resolve path → (resolved PathBuf, text String): @file_ buffer ref or disk read.
         let (resolved, text) = resolve_markdown_source(path, ctx).await?;
 
-        // Reject librarian-managed artifacts — use artifact(action="get") instead.
+        // Reject librarian-managed artifacts — use doc(action="get") instead.
         // The resolved path lets the guard also catch AUGMENTED artifacts whose
         // frontmatter carries no id: for those the file is only a snapshot of
         // params held in the catalog, so a direct read returns stale state with

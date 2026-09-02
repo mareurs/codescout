@@ -35,7 +35,7 @@
 //! `floor` catches the convention breaking wholesale; it cannot catch one key losing its label.
 //!
 //! **`deny_unknown_fields` is not available as an alternative** — measured, not assumed. It
-//! was tried and broke every `artifact(update)` call, because the dispatcher passes `action`
+//! was tried and broke every `doc(update)` call, because the dispatcher passes `action`
 //! down and the shared schema holds sibling actions' keys, so every `Args` sees keys that are
 //! not its own. See the note on `find::Args`.
 //!
@@ -165,7 +165,7 @@ pub(crate) async fn assert_all_honored<F, Fut>(
 /// `sweep` walks `schema["properties"]` and asks whether each advertised key is
 /// honored — schema→action. It cannot see a key the schema never advertises, so an
 /// action whose *required* params are absent from the schema passes it silently. That
-/// is how `artifact(action="graft")` shipped advertised-but-unusable: `graft::Args`
+/// is how `doc(action="graft")` shipped advertised-but-unusable: `graft::Args`
 /// requires `from_id` and `into_id`, neither appeared among the 53 advertised
 /// properties, and the single real attempt in `usage.db` failed with
 /// `missing_required_param`.

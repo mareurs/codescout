@@ -4,7 +4,7 @@
 //! `get_guide("tracker-conventions")` and `edit_markdown`'s own `long_docs` row 3d both
 //! recommend for flipping a bug's status — writes the file and never touches the catalog.
 //! The row keeps its pre-edit `status` indefinitely, so
-//! `artifact(find, kind="bug", status=…)`, the triage query CLAUDE.md and the activation
+//! `doc(find, kind="bug", status=…)`, the triage query CLAUDE.md and the activation
 //! bootstrap both prescribe, reports a value the file contradicts.
 //!
 //! The divergence is silent by construction, and the population is the one the guard lets

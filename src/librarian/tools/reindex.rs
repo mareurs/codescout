@@ -409,7 +409,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     // Persist the durable half of the degraded signal. `embed_note` above is an
     // envelope field — gone the moment this call returns — so a later
-    // `artifact(action="find")` has no way to know the last refresh was partial.
+    // `doc(action="find")` has no way to know the last refresh was partial.
     // Written unconditionally whenever embeddings were attempted this run
     // (including a clean 0/[] run, which is what clears a stale marker left by
     // an earlier failure) — never when `want_embeddings` is false, since a run
@@ -512,7 +512,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "embed_note": if !embed_errors.is_empty() {
             format!(
                 "DEGRADED: {total_embedded} embedded, {} failed. The catalog is \
-                 refreshed and `artifact(action=\"find\")` is accurate, but the failed \
+                 refreshed and `doc(action=\"find\")` is accurate, but the failed \
                  artifacts have no vector, so semantic search will not surface them. \
                  Re-run reindex once the embedder is healthy.",
                 embed_errors.len()
@@ -706,7 +706,7 @@ mod tests {
 
     /// Step 2 of docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
     /// the envelope's `embed_error_count` does not outlive the call — a later
-    /// `artifact(action="find")` has no way to know the last refresh was partial.
+    /// `doc(action="find")` has no way to know the last refresh was partial.
     /// This pins the durable half: a failed embed run must persist a marker in
     /// `catalog_meta`, the same key-value table `gc.rs` already uses for
     /// `gc_grace_days`.

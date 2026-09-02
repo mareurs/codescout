@@ -89,7 +89,7 @@ struct Args {
     /// Defaulted so an absent `patch` reaches the lifts below instead of dying at
     /// deserialization. Serde's bare `missing field \`patch\`` names the field but not
     /// the action, and — worse — it fires BEFORE `lift_top_level_param!`, which exists
-    /// specifically to repair `artifact(update, id, status=...)`. The repair for a
+    /// specifically to repair `doc(update, id, status=...)`. The repair for a
     /// mistake was unreachable by the call shape that makes it. An empty patch is
     /// refused after the lifts run, not before.
     #[serde(default)]
@@ -229,7 +229,7 @@ fn try_preserving_frontmatter_patch(doc: &str, patch: &UpdatePatch) -> Option<St
 
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
 /// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
-/// `artifact(update, patch={body_edits: [...]})` to provide surgical body
+/// `doc(update, patch={body_edits: [...]})` to provide surgical body
 /// mutation on librarian-managed files — `edit_markdown` itself refuses to
 /// touch them (see `librarian_guard::guard_not_librarian_managed`).
 ///
@@ -355,7 +355,7 @@ macro_rules! lift_top_level_param {
                 Some(existing) if *existing != top => {
                     return Err(super::RecoverableError::with_hint(
                         format!(
-                            "artifact(action=\"update\"): conflicting `{}` values — the top-level param and `patch.{}` disagree",
+                            "doc(action=\"update\"): conflicting `{}` values — the top-level param and `patch.{}` disagree",
                             $name, $name
                         ),
                         format!(
@@ -385,8 +385,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() || args.get("rel_path").is_some()
     {
         return Err(super::RecoverableError::with_hint(
-            "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
-            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, extra, body, body_edits, params).",
+            "doc(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
+            "Use doc(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, extra, body, body_edits, params).",
         ));
     }
 
@@ -416,13 +416,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // neither the file nor the event log (measured 2026-08-27), and — now that `patch`
     // defaults — an update with no `patch` at all. Same defect in different clothes.
     //
-    // AFTER the lifts on purpose: `artifact(update, id, status="fixed")` arrives with an
+    // AFTER the lifts on purpose: `doc(update, id, status="fixed")` arrives with an
     // empty patch and has a populated one by this line, so the guard must not see it.
     // `commit_refresh` is the one legitimate empty patch — recording that a refresh cycle
     // ran is a real effect even when the body did not move.
     if a.patch.is_empty() && !a.commit_refresh {
         return Err(super::RecoverableError::with_hint(
-            "artifact(action=\"update\") was given nothing to change",
+            "doc(action=\"update\") was given nothing to change",
             "Pass patch={...} naming at least one of status, title, owners, tags, topic, time_scope, extra, body, body_edits, params — e.g. patch={\"status\": \"fixed\"}. A top-level status/title/owners/tags/topic/time_scope/extra is lifted into `patch` for you and reported under `corrections`. To record a refresh cycle without changing the body, pass commit_refresh=true.",
         ));
     }
@@ -680,7 +680,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let committed = if a.commit_refresh {
         // Server-computed provenance: record the repo HEAD at refresh time so
-        // artifact(get) can report commits_behind_head from an unforgeable source.
+        // doc(get) can report commits_behind_head from an unforgeable source.
         let head = ctx
             .current_project
             .as_ref()
@@ -715,7 +715,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 out["warning"] = json!(format!(
                     "params patch replaced the entry collection wholesale: {before} entries -> \
                      {after} ({} removed). RFC 7396 replaces arrays, it does not merge them. To \
-                     change one row use artifact(action=\"update_entry\", entry_id=…, fields=…); \
+                     change one row use doc(action=\"update_entry\", entry_id=…, fields=…); \
                      to add one use append_entry.",
                     before - after
                 ));
@@ -870,7 +870,7 @@ mod tests {
         v["id"].as_str().unwrap().to_string()
     }
 
-    /// `artifact(update, id, status=...)` is the exact call `lift_top_level_param!` was
+    /// `doc(update, id, status=...)` is the exact call `lift_top_level_param!` was
     /// written to repair — twice, after the same defect shipped twice. Until `patch`
     /// gained `#[serde(default)]` the repair was unreachable by the call shape that needs
     /// it: serde rejected the request for a missing `patch` before any lift could run.
@@ -1888,7 +1888,7 @@ text
     /// `apply_body_edits` is a THIRD independent read site for `new_string` —
     /// separate from `edit_markdown`'s single-edit and `plan_batch` paths, not a
     /// wrapper around either. It carried the same `unwrap_or("")` default, so
-    /// `artifact(update, patch={body_edits: [...]})` could delete a tracker or bug
+    /// `doc(update, patch={body_edits: [...]})` could delete a tracker or bug
     /// section and report success. Trackers are the artifacts least likely to have
     /// their content asserted by any test, which makes this the worst of the three
     /// places to lose text silently.

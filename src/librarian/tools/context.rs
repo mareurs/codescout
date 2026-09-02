@@ -70,10 +70,10 @@ const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
 const ATTESTATION_EXPOSURE_THRESHOLD: usize = 5;
 
 const ANCHOR_MARKER: &str = "\n\n… [anchor truncated — reserved half the budget for its \
-                             neighbours; use `artifact(get, id=…, heading=…)` for the full \
+                             neighbours; use `doc(get, id=…, heading=…)` for the full \
                              entry]";
 const EXCERPT_MARKER: &str = "\n\n… [excerpted — the neighbourhood exceeds the budget; use \
-                              `artifact(get, id=…, heading=…)` for the full entry]";
+                              `doc(get, id=…, heading=…)` for the full entry]";
 
 fn scope_summary(
     scope: Scope,
@@ -923,7 +923,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let mut first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
         if total_lines > 30 {
             first_30.push_str(&format!(
-                "\n… [30 of {total_lines} lines — artifact(get, id=…) for the full body]"
+                "\n… [30 of {total_lines} lines — doc(get, id=…) for the full body]"
             ));
         }
         let title = row.title.as_deref().unwrap_or("(untitled)");
@@ -972,7 +972,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     section.truncate(cut);
                     section.push_str(
                         "\n\n… [anchor truncated — reserved half the budget for its \
-                         link neighbors; use `artifact(get, id=…)` for the full body]\n\n",
+                         link neighbors; use `doc(get, id=…)` for the full body]\n\n",
                     );
                 }
             }
@@ -2580,7 +2580,7 @@ mod tests {
     #[tokio::test]
     async fn scope_all_stays_literal_and_reaches_outside_the_umbrella() {
         // Pins the behaviour `librarian(action="context")` deliberately has and
-        // `artifact(action="find")` deliberately does not: an explicit `scope="all"`
+        // `doc(action="find")` deliberately does not: an explicit `scope="all"`
         // is NOT aliased to `umbrella`, so orientation can reach a project the
         // umbrella does not contain. Confirmed by a live A/B against the running
         // server, then ruled intentional by the owner — see

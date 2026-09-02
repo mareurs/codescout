@@ -94,7 +94,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // The file's own `id:` now asserts an identity this move just invalidated.
     // Repair it here, in the same call, because nothing downstream can: every
     // write path into a managed artifact refuses one (`edit_markdown` and
-    // `edit_file` both guard on the frontmatter id; `artifact(update)`'s `extra`
+    // `edit_file` both guard on the frontmatter id; `doc(update)`'s `extra`
     // writes custom keys but never `id`), so a later repair pass has no route to
     // the file. BL-23.
     let content = repair_frontmatter_id(&new_full, &new_id)?;
@@ -415,7 +415,7 @@ mod tests {
     /// which resolves to nothing. This has to be repaired **here**, in the same call
     /// as the graft, because by the time anyone notices, no write path can reach the
     /// file: `edit_markdown` and `edit_file` both refuse a librarian-managed artifact,
-    /// and `artifact(update)`'s `extra` writes custom keys but never `id`.
+    /// and `doc(update)`'s `extra` writes custom keys but never `id`.
     ///
     /// The `file_sha256` assertion is the load-bearing one. It fails if the rewrite
     /// happens after the hash is taken — the catalog would then record a digest of a

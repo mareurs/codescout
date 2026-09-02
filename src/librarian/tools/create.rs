@@ -208,7 +208,7 @@ pub(crate) fn reject_reserved_extra_keys(
 ///    block, so no query can read them.
 /// 2. A key present in both blocks with **different** values resolves silently to the
 ///    catalog's. A probe passing `status: scratch` in the body block was reported as
-///    `status: open` by `artifact(action="get")`, the caller's value simply gone.
+///    `status: open` by `doc(action="get")`, the caller's value simply gone.
 /// 3. The inert block is served as the artifact's `preview.summary`, so the first thing
 ///    an agent reads about the artifact is a mangled YAML fragment.
 ///
@@ -242,7 +242,7 @@ pub(crate) fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
         "body begins with its own `---` frontmatter block, which would be written BELOW \
          the catalog's and silently ignored"
             .to_string(),
-        "artifact(action=\"create\") writes the frontmatter itself from the typed \
+        "doc(action=\"create\") writes the frontmatter itself from the typed \
          parameters. Drop the block from `body` and route its keys: kind / status / \
          title / owners / tags / topic / time_scope as their own parameters, everything \
          else (opened, closed, severity, owner, related, …) via `extra={...}`. If you \
@@ -287,7 +287,7 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. artifact(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.")
     })?;
 
     // Resolve base directory: explicit repo arg looks up in workspace.roots
@@ -968,7 +968,7 @@ mod tests {
     /// The fixture's load-bearing detail is `"status": "scratch"` INSIDE the body block
     /// while the call passes no `status=` parameter. That is what makes this the
     /// silent-conflict case rather than merely a cosmetic one: pre-fix, the catalog
-    /// defaulted `status` to `open` for `kind: bug` and `artifact(action="get")`
+    /// defaulted `status` to `open` for `kind: bug` and `doc(action="get")`
     /// reported `open`, with the caller's `scratch` present on disk and readable by
     /// nothing. Change it to agree with the default and the test still passes while
     /// no longer demonstrating the harm.

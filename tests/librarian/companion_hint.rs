@@ -7,7 +7,7 @@
 const COMPANION_HINT: &str = include_str!("../../src/librarian/prompts/companion_hint.md");
 
 const REAL_TOOLS: &[&str] = &[
-    "artifact",
+    "doc",
     "artifact_event",
     "artifact_augment",
     "artifact_refresh",

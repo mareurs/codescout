@@ -2482,7 +2482,7 @@ mod tests {
             .map(|t| t.name())
             .collect();
         raised.sort();
-        assert_eq!(raised, vec!["artifact", "librarian"]);
+        assert_eq!(raised, vec!["doc", "librarian"]);
     }
 
     /// Name-prefix classifier for the librarian tool family (`artifact`,
@@ -2501,7 +2501,7 @@ mod tests {
             || name.starts_with("tracker_")
             || name == "workspace_state_at"
             || name == "tracker_design"
-            || name == "artifact"
+            || name == "doc"
             || name == "librarian"
     }
 
@@ -2541,7 +2541,7 @@ mod tests {
             // already receives the `action` enum itself in the schema. The thematic arm
             // is an escape hatch, so the test asserts against it in the opposite
             // direction rather than treating it as an exemption.
-            "artifact" | "edit_markdown" => ActionContract::Thematic,
+            "doc" | "edit_markdown" => ActionContract::Thematic,
             _ => return None,
         })
     }
@@ -2953,7 +2953,7 @@ mod tests {
     async fn artifact_advertises_the_append_entry_section_writer() {
         let (_dir, server) = make_server().await;
         let artifact = server
-            .find_tool("artifact")
+            .find_tool("doc")
             .expect("artifact tool is registered");
         let schema = artifact.input_schema();
         let props = schema
@@ -3414,6 +3414,17 @@ mod tests {
         assert!(server.find_tool("READ_FILE").is_none()); // case-sensitive
     }
 
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn the_document_tool_is_named_doc() {
+        let (_dir, server) = make_server().await;
+        assert!(server.find_tool("doc").is_some(), "doc must be registered");
+        assert!(
+            server.find_tool("artifact").is_none(),
+            "artifact was renamed to doc on 2026-09-02; nothing may register the old name"
+        );
+    }
+
     #[tokio::test]
     async fn tool_names_are_unique() {
         let (_dir, server) = make_server().await;
@@ -3486,7 +3497,7 @@ mod tests {
         // asserting them unconditionally fails the `--no-default-features` and
         // `--features local-embed` configs.
         #[cfg(feature = "librarian")]
-        for n in ["artifact", "librarian"] {
+        for n in ["doc", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
         for n in ["workspace", "get_guide"] {
@@ -4822,7 +4833,7 @@ mod tests {
     async fn artifact_find_honors_workspace_pin() {
         // BUG (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md): the
         // librarian adapter derived current_project from the session-default
-        // active_project() and ignored ctx.workspace_override, so artifact(find)
+        // active_project() and ignored ctx.workspace_override, so doc(find)
         // pinned to a foreign workspace silently returned the SESSION project's
         // rows (fails silent-wrong). A pinned find must scope to the pinned
         // workspace, not the default.
@@ -4834,7 +4845,7 @@ mod tests {
         // Seed ONE tracker in the session-default workspace B via an UNPINNED
         // create — unaffected by the bug, so the fixture is stable regardless of
         // the fix.
-        let create = CallToolRequestParams::new("artifact").with_arguments(
+        let create = CallToolRequestParams::new("doc").with_arguments(
             serde_json::from_value(serde_json::json!({
                 "action": "create",
                 "kind": "tracker",
@@ -4861,7 +4872,7 @@ mod tests {
 
         // Find pinned to A (which has NO rows). It must scope to A and return
         // zero rows — NOT fall back to B and hand back B's tracker.
-        let find_a = CallToolRequestParams::new("artifact").with_arguments(
+        let find_a = CallToolRequestParams::new("doc").with_arguments(
             serde_json::from_value(serde_json::json!({
                 "action": "find",
                 "kind": "tracker",
@@ -4892,7 +4903,7 @@ mod tests {
         );
 
         // Sanity: the UNPINNED find still sees B's tracker (default preserved).
-        let find_default = CallToolRequestParams::new("artifact").with_arguments(
+        let find_default = CallToolRequestParams::new("doc").with_arguments(
             serde_json::from_value(serde_json::json!({
                 "action": "find",
                 "kind": "tracker",
@@ -4928,13 +4939,13 @@ mod tests {
     async fn artifact_create_honors_workspace_pin() {
         // Whole-family pin (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md):
         // resolving the pin in the adapter's call() covers writes too — a pinned
-        // artifact(create) must land in the PINNED workspace, not the default.
+        // doc(create) must land in the PINNED workspace, not the default.
         let dir_a = tempdir().unwrap();
         let (dir_b, server) = make_server().await; // default (session) workspace B
         std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
         let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
 
-        let create = CallToolRequestParams::new("artifact").with_arguments(
+        let create = CallToolRequestParams::new("doc").with_arguments(
             serde_json::from_value(serde_json::json!({
                 "action": "create",
                 "kind": "tracker",
@@ -6609,7 +6620,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
         let result = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
@@ -6642,7 +6653,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
 
         let result = tool
             .call_content(
@@ -6739,7 +6750,7 @@ mod guide_hint_tests {
     async fn session_opener_defers_but_does_not_consume_the_tools_topic() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
         let first = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
@@ -6849,15 +6860,15 @@ mod guide_hint_tests {
     async fn is_write_call_classifies_librarian_surface() {
         let (_dir, server) = make_server().await;
         // artifact: mutating actions write; queries read.
-        assert!(server.is_write_call("artifact", &json!({"action": "create"})));
-        assert!(server.is_write_call("artifact", &json!({"action": "update"})));
-        assert!(server.is_write_call("artifact", &json!({"action": "move"})));
-        assert!(server.is_write_call("artifact", &json!({"action": "delete"})));
-        assert!(server.is_write_call("artifact", &json!({"action": "link"})));
-        assert!(!server.is_write_call("artifact", &json!({"action": "find"})));
-        assert!(!server.is_write_call("artifact", &json!({"action": "get"})));
-        assert!(!server.is_write_call("artifact", &json!({"action": "graph"})));
-        assert!(!server.is_write_call("artifact", &json!({"action": "state_at"})));
+        assert!(server.is_write_call("doc", &json!({"action": "create"})));
+        assert!(server.is_write_call("doc", &json!({"action": "update"})));
+        assert!(server.is_write_call("doc", &json!({"action": "move"})));
+        assert!(server.is_write_call("doc", &json!({"action": "delete"})));
+        assert!(server.is_write_call("doc", &json!({"action": "link"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "find"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "get"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "graph"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "state_at"})));
         // artifact_event: create writes, list reads.
         assert!(server.is_write_call("artifact_event", &json!({"action": "create"})));
         assert!(!server.is_write_call("artifact_event", &json!({"action": "list"})));
@@ -6896,7 +6907,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
         let _ = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
@@ -6928,7 +6939,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
         let result = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
@@ -6954,8 +6965,8 @@ mod guide_hint_tests {
             "second block missing the section-scoped auto-inject closing marker"
         );
         assert!(
-            second.text.contains("artifact.find"),
-            "second block should contain the Filter Syntax section (mentions 'artifact.find')"
+            second.text.contains("doc.find"),
+            "second block should contain the Filter Syntax section (mentions 'doc.find')"
         );
         let whole = crate::prompts::topic_body("librarian").unwrap();
         assert!(
@@ -6973,7 +6984,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let tool = tool_by_name(&server, "artifact");
+        let tool = tool_by_name(&server, "doc");
         let _ = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
@@ -7006,7 +7017,7 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let artifact = tool_by_name(&server, "artifact");
+        let artifact = tool_by_name(&server, "doc");
         let event = tool_by_name(&server, "artifact_event");
         let _ = artifact
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
@@ -8077,7 +8088,7 @@ mod guide_hint_tests {
     async fn post_compact_rearms_guide_hints() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
-        let artifact = tool_by_name(&server, "artifact");
+        let artifact = tool_by_name(&server, "doc");
         let workspace = tool_by_name(&server, "workspace");
 
         // Emit once — topic is now in the ledger.
@@ -8184,7 +8195,7 @@ mod guide_hint_tests {
     async fn create_tracker(server: &CodeScoutServer, rel_path: &str) -> String {
         let out = call_tool(
             server,
-            "artifact",
+            "doc",
             json!({
                 "action": "create",
                 "rel_path": rel_path,
@@ -8214,7 +8225,7 @@ mod guide_hint_tests {
         let id = create_tracker(&server, "docs/specs/fixture-a.md").await;
         let out = call_tool(
             &server,
-            "artifact",
+            "doc",
             json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
         )
         .await;
@@ -8252,14 +8263,14 @@ mod guide_hint_tests {
         let first = guide_blocks(
             &call_tool(
                 &server,
-                "artifact",
+                "doc",
                 json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
             )
             .await,
         )
         .join("");
         let second =
-            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+            guide_blocks(&call_tool(&server, "doc", json!({"action": "find"})).await).join("");
         assert!(
             !second.is_empty(),
             "per-section ledger must allow a second slice"
@@ -8270,9 +8281,9 @@ mod guide_hint_tests {
     #[tokio::test]
     async fn the_same_shape_twice_delivers_nothing_the_second_time() {
         let (_dir, server) = make_server().await;
-        let _ = call_tool(&server, "artifact", json!({"action": "find"})).await;
+        let _ = call_tool(&server, "doc", json!({"action": "find"})).await;
         let again =
-            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+            guide_blocks(&call_tool(&server, "doc", json!({"action": "find"})).await).join("");
         assert!(again.is_empty());
     }
 
@@ -8311,7 +8322,7 @@ mod guide_hint_tests {
         //     protects; the fallthrough must not cost it.
         let created = call_tool(
             &server,
-            "artifact",
+            "doc",
             json!({
                 "action": "create",
                 "rel_path": "docs/trackers/fallthrough-probe.md",
@@ -8339,7 +8350,7 @@ mod guide_hint_tests {
         // 2 — a `get` on that same tracker. Same result-based topic, now spent,
         //     so this call used to deliver nothing. `artifact.get` is declared by
         //     librarian.md § Artifact Model, which should now arrive.
-        let out = call_tool(&server, "artifact", json!({"action": "get", "id": id})).await;
+        let out = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
         let guide = guide_blocks(&out).join("");
         assert!(
             guide.contains("`id` and `rel_path` together are the canonical identifiers"),
@@ -8382,7 +8393,7 @@ mod guide_hint_tests {
         let ctx = shared_ctx(&server);
 
         let first =
-            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+            guide_blocks(&call_tool(&server, "doc", json!({"action": "find"})).await).join("");
         assert!(
             !first.is_empty(),
             "setup: the first call must deliver a section for there to be a stamp to refresh"
@@ -8410,7 +8421,7 @@ mod guide_hint_tests {
         };
 
         let again =
-            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+            guide_blocks(&call_tool(&server, "doc", json!({"action": "find"})).await).join("");
         assert!(
             again.is_empty(),
             "setup: the repeat shape must deliver nothing, got {} B",
@@ -8446,7 +8457,7 @@ mod guide_hint_tests {
         let id = create_tracker(&server, "docs/trackers/fixture-c.md").await;
         let out = call_tool(
             &server,
-            "artifact",
+            "doc",
             json!({"action": "state_at", "artifact_id": id, "timestamp": 1_700_000_000_000i64}),
         )
         .await;
@@ -8673,7 +8684,7 @@ mod guide_hint_tests {
 
         let create_out = call_tool_checked(
             &server,
-            "artifact",
+            "doc",
             json!({
                 "action": "create",
                 "rel_path": "docs/specs/p50-fixture.md",
@@ -8699,18 +8710,12 @@ mod guide_hint_tests {
         // the guide ledger dedups within a session. Any OTHER shape reporting 0 B is
         // suspicious, not normal.
         shape_total(
-            &call_tool_checked(
-                &server,
-                "artifact",
-                json!({"action": "get", "id": id}),
-                "get",
-            )
-            .await,
+            &call_tool_checked(&server, "doc", json!({"action": "get", "id": id}), "get").await,
         );
         shape_total(
             &call_tool_checked(
                 &server,
-                "artifact",
+                "doc",
                 json!({"action": "update", "id": id, "patch": {"status": "active"}}),
                 "update",
             )
@@ -8719,19 +8724,17 @@ mod guide_hint_tests {
         shape_total(
             &call_tool_checked(
                 &server,
-                "artifact",
+                "doc",
                 json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
                 "append_entry",
             )
             .await,
         );
-        shape_total(
-            &call_tool_checked(&server, "artifact", json!({"action": "find"}), "find").await,
-        );
+        shape_total(&call_tool_checked(&server, "doc", json!({"action": "find"}), "find").await);
         shape_total(
                 &call_tool_checked(
                     &server,
-                    "artifact",
+                    "doc",
                     json!({"action": "move", "id": id, "new_rel_path": "docs/specs/p50-fixture-moved.md"}),
                     "move",
                 )

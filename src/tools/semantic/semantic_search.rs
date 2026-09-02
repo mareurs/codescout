@@ -878,7 +878,7 @@ fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Valu
 ///
 /// `index(action="status")` has surfaced `last_sync_skipped` since
 /// `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`,
-/// and `artifact(action="find")` surfaces its catalog twin (`catalog_degraded`)
+/// and `doc(action="find")` surfaces its catalog twin (`catalog_degraded`)
 /// on every call. `semantic_search` — the tool that actually CONSUMES this index
 /// — surfaced neither, so the one health signal that existed sat where nobody
 /// reads it: a caller learned their index was incomplete only if they thought to

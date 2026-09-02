@@ -131,7 +131,7 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 ///
 /// See `docs/issues/archive/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
 pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
-    /// Wide objects exist (`artifact(get)` alone carries ~15); listing every key would
+    /// Wide objects exist (`doc(get)` alone carries ~15); listing every key would
     /// crowd out the arrays and scalars below, which carry more per byte.
     const MAX_KEYS: usize = 24;
     /// Long enough for a title or a status, short enough that a stray blob cannot
@@ -347,7 +347,7 @@ mod tests {
     /// See `docs/issues/archive/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
     #[test]
     fn the_generic_fallback_describes_the_payload_instead_of_the_envelope() {
-        // Shaped like a real librarian `artifact(get)` response — the measured case.
+        // Shaped like a real librarian `doc(get)` response — the measured case.
         let val = serde_json::json!({
             "id": "9a892c2a5976e296",
             "kind": "tracker",

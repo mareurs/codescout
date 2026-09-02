@@ -20,7 +20,7 @@ fn default_fields() -> Value {
 /// Patch one entry of a tracker's `entry_collection` in place.
 ///
 /// The counterpart `append_entry` never had. Without it the only way to change a
-/// row was `artifact(update, patch={params:{…}})`, whose RFC 7396 array semantics
+/// row was `doc(update, patch={params:{…}})`, whose RFC 7396 array semantics
 /// replace the whole collection — so flipping one row's status meant re-sending
 /// every other row, and getting that wrong silently deleted them.
 /// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
@@ -50,7 +50,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"update_entry\") requires 'id', 'entry_collection' and 'entry_id': {e}"), "e.g. artifact(action=\"update_entry\", id=\"<16-hex>\", entry_collection=\"observations\", entry_id=\"T-17\", fields={\"status\": \"closed\"}). This patches ONE row; patch={params:...} would replace the whole collection.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"update_entry\") requires 'id', 'entry_collection' and 'entry_id': {e}"), "e.g. doc(action=\"update_entry\", id=\"<16-hex>\", entry_collection=\"observations\", entry_id=\"T-17\", fields={\"status\": \"closed\"}). This patches ONE row; patch={params:...} would replace the whole collection.")
     })?;
     if !a.fields.is_object() {
         return Err(RecoverableError::new(

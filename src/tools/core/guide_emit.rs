@@ -268,7 +268,7 @@ mod tests {
     /// A topic that declares, plus a selector at least one of its sections
     /// serves. `librarian` is the only declaring topic in Phase 1.
     const DECLARING: &str = "librarian";
-    const SERVED_SELECTOR: &str = "artifact.find";
+    const SERVED_SELECTOR: &str = "doc.find";
 
     #[test]
     fn a_non_declaring_topic_ships_whole_and_stamps_the_bare_topic() {

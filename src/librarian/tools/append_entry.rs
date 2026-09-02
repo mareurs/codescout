@@ -40,7 +40,7 @@ fn default_entry() -> Value {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. artifact(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. doc(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
     })?;
     if !a.entry.is_object() {
         return Err(RecoverableError::new(
@@ -253,7 +253,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                      leads both the live body ({body}) and this machine's reservation table. \
                      Expected where entries were compacted out to an archive companion, or \
                      where the reservation table postdates them (a fresh clone, or an \
-                     artifact(move)); neither is drift.",
+                     doc(move)); neither is drift.",
                     body = outcome
                         .body_max
                         .map_or_else(|| "none".to_string(), |b| b.to_string()),
@@ -338,7 +338,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "This tracker keeps a rendered snapshot in its body, and {} row(s) are not in it. \
              Entry rows live in the catalog, which is machine-local and git-ignored — a row \
              absent from the body is in no repo. Add the row(s) to the body's table/section \
-             via artifact(action=\"update\", patch={{body_edits: [...]}}).",
+             via doc(action=\"update\", patch={{body_edits: [...]}}).",
             outcome.snapshot_missing.len()
         ));
     }

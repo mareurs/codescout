@@ -143,7 +143,7 @@ pub struct SectionRange {
 /// return the ambiguity error before the fuzzier prefix/substring tiers ever run, and
 /// even those could not separate two equal strings. Without a positional selector such
 /// a section is unreachable through every heading-addressed surface — including
-/// `artifact(update, patch={body_edits})`, which is the *only* edit path a
+/// `doc(update, patch={body_edits})`, which is the *only* edit path a
 /// librarian-managed artifact has, so the section becomes permanently uneditable.
 /// See `docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
 ///
