@@ -4451,10 +4451,10 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
             abs_path.clone(),
             format!(
                 "status is `{status}` (terminal) but `unverified:` is set, so the canonical \
-                 triage query — kind=\"bug\" with status in open/investigating — cannot reach \
-                 this record. The caveat says: \"{shown}\". Either discharge it and clear the \
-                 field, or leave both: the record stays honest AND findable, which is the \
-                 whole point of the field. See get_guide(\"tracker-conventions\") § Bug files."
+                 triage query — kind=\"bug\" with status in open/taken/investigating — cannot \
+                 reach this record. The caveat says: \"{shown}\". Either discharge it and \
+                 clear the field, or leave both: the record stays honest AND findable, which \
+                 is the whole point of the field. See get_guide(\"tracker-conventions\") § Bug files."
             ),
         ));
     }
@@ -5323,7 +5323,7 @@ fn scan_non_terminal_status_with_fix_anchor(
     };
     let mut stmt = conn.prepare(
         "SELECT id, abs_path, status FROM artifact \
-         WHERE kind = 'bug' AND status IN ('open', 'investigating') \
+         WHERE kind = 'bug' AND status IN ('open', 'taken', 'investigating') \
          ORDER BY abs_path",
     )?;
     let rows: Vec<(String, String, String)> = stmt
@@ -7216,6 +7216,36 @@ mod tests {
             "zombie owes no flip; investigating does: {v:#?}"
         );
         assert_eq!(v[0].artifact_id.as_deref(), Some("working"));
+    }
+
+    /// The IC-3 guard for this feature: a `taken` bug whose body declares a patch-id
+    /// owes a status flip exactly as `open` and `investigating` do. If the SQL in
+    /// `scan_non_terminal_status_with_fix_anchor` is not widened, this is silent.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_covers_taken() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        let body = format!("## Fix\n\nLanded. patch-id `{FIXTURE_PATCH_ID}`.");
+        seed_live_bug(
+            &cat,
+            &root,
+            "claimed-but-fixed",
+            "taken",
+            "claimed_by: sid-x\n",
+            &body,
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "a `taken` record with a fix anchor must be reported: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("claimed-but-fixed"));
     }
 
     /// A partial fix whose landed half has a patch-id is legitimately still open. `unverified:`

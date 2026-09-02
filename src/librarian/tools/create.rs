@@ -85,10 +85,17 @@ pub struct Args {
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
     pub augment: Option<AugmentSpec>,
 }
-/// The six statuses a `kind: bug` file may carry, per
+/// The seven statuses a `kind: bug` file may carry, per
 /// `get_guide("tracker-conventions")` § *Bug files*.
+///
+/// `taken` and `investigating` differ by **liveness-backing**: `taken` carries a
+/// `claimed_by` sessionId that `doctor`'s `claim_liveness` check resolves against the
+/// machine's session registries, and decays to `investigating` when that session is
+/// gone. `investigating` therefore means "worked, no live owner" — the residue of an
+/// unconcluded claim — rather than a second word for the same state.
 const BUG_STATUSES: &[&str] = &[
     "open",
+    "taken",
     "investigating",
     "fixed",
     "mitigated",
@@ -615,6 +622,14 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("{s} should be accepted: {e}"));
         }
+    }
+
+    #[test]
+    fn taken_is_an_accepted_bug_status() {
+        assert!(
+            BUG_STATUSES.contains(&"taken"),
+            "`taken` must be creatable; BUG_STATUSES = {BUG_STATUSES:?}"
+        );
     }
 
     #[tokio::test]
