@@ -722,7 +722,7 @@ rm -rf "$T"
 # ---------------------------------------------------------------------------
 # 10. A TEMPORARY INDEX IS NOT THE SHARED ONE
 #
-# docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
+# docs/issues/archive/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
 #
 # `git commit -- <paths>` runs hooks with GIT_INDEX_FILE pointing at a temporary
 # partial-commit index ($GIT_DIR/next-index-<pid>.lock) holding the pathspec content. Any

@@ -1,5 +1,5 @@
 ---
-id: '2266ffc0103534cd'
+id: 9c716e7f97865056
 kind: bug
 status: fixed
 title: 'BUG: a refused pathspec commit stamps the author''s own content as unowned, and no-op restaging cannot reclaim it'
@@ -195,6 +195,17 @@ wrong owner — the silent direction the whole design avoids.
 
 **Do not fix it by making the guard trust `-` more.** Over-refusing is the correct direction; the
 defect is upstream, in what the recorder is willing to describe.
+## Fix provenance
+
+- **SHA:** `cd1b138e` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `c374900d02eb47a131fc18c5e802e321ebf3dca4` — content hash of the diff; survives rebase and cherry-pick.
+
+Structured because `structured_fix_pointers` in `src/librarian/tools/doctor.rs` reads
+`- **SHA:**` / `- **patch-id:**` list items and nothing else, so the accurate prose form in
+§ *Fix* above read as **no anchor declared** — and this file's prose carries four commit-like
+hashes, of which only this one is the fix. Verified 2026-09-02 before archiving: the SHA
+resolves to a commit contained in `experiments`, and `git show cd1b138e | git patch-id --stable`
+reproduces the patch-id above.
 ## Tests added
 
 `tests/hooks-discrimination.sh` § 10. Confirmed RED against the unguarded script first — **both**

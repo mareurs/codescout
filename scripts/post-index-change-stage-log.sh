@@ -98,7 +98,7 @@ git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 #
 # `tests/hooks-discrimination.sh`'s `guard()` unsets GIT_INDEX_FILE for the mirror-image reason on
 # the reading side; this is the writing side of the same hazard.
-# docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
+# docs/issues/archive/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
 if [ -n "${GIT_INDEX_FILE:-}" ]; then
     case "$GIT_INDEX_FILE" in
         /*) _seen_index="$GIT_INDEX_FILE" ;;

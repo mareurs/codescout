@@ -1,5 +1,5 @@
 ---
-id: '6e71c4988858afbf'
+id: e359101007c7b2ed
 kind: bug
 status: fixed
 title: 'BUG: a worklist field announcing an absence outlives the mechanism that filled it, and dispatches the next session to rebuild it'
@@ -16,7 +16,7 @@ owner: marius
 related:
 - docs/issues/2026-09-02-a-doc-comment-announcing-unbuilt-work-outlives-the-work.md
 severity: high
-unverified: 'The INSTANCE is corrected at 3151201a; the CLASS is not, and is tracked on the sibling docs/issues/2026-09-02-a-doc-comment-announcing-unbuilt-work-outlives-the-work.md. No regression test exists or is obviously constructible: pinning the corrected sentence is monotone under the exact failure that produced this bug, since the next mechanism to land falsifies the new text as silently as it falsified the old. Nothing establishes that a fourth instance would be caught. Severity is high on the DISPATCH cost (the field is consumed as an H-N/I-N worklist), not on damage done: this instance was caught before any work was built, and by an unrelated directory listing rather than by any check.'
+unverified: 'No regression test, and § *Tests added* records that as a deliberate finding rather than an omission: a test would have to assert that no `Mechanism status` field in the corpus contradicts a later commit, which is the unbuilt mechanism itself and not a test of this fix. Recurrence of the class is therefore unguarded — the corrected field is pinned, the mechanism that would keep it correct is not.'
 ---
 
 # BUG: a worklist field announcing an absence outlives the mechanism that filled it, and dispatches the next session to rebuild it

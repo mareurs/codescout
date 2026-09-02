@@ -2556,7 +2556,7 @@ mod tests {
     /// derived from `server.tools` rather than from `action_contract`'s arms — a declared
     /// tool that is absent must not be a failure.
     ///
-    /// docs/issues/2026-09-02-index-description-omits-the-verify-action.md
+    /// docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md
     /// docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
     #[tokio::test]
     async fn tool_descriptions_name_every_action_they_claim_to_enumerate() {

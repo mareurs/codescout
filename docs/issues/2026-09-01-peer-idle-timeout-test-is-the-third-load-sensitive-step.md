@@ -343,7 +343,7 @@ explain that dissociation.
 ### Eighth observation, 2026-09-02 — load COUNTED rather than inferred, and a diff with no Rust in it at all
 
 Gate run during the `GIT_INDEX_FILE` recorder fix
-(`docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md`).
+(`docs/issues/archive/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md`).
 
 | run | lean | default | failures |
 |---|---|---|---|

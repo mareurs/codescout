@@ -116,8 +116,7 @@ that is a design question with its own cost, not a follow-up to this file.
 - True mechanism: `src/librarian/catalog/augmentation.rs:1089-1095`, `:1425-1436`
 - Introduced by `0cb617cc` (patch-id `a46d29d58e80446d0cc77d7bc42dad638862a707`), merged at `5eea9301`
 - Class: `IC-11`, `cluster/doc-contradicted-by-code`. Its sharpest sibling is
-  `docs/issues/2026-09-02-a-worklist-field-announcing-an-absence-outlives-the-mechanism.md`, where the
+  `docs/issues/archive/2026-09-02-a-worklist-field-announcing-an-absence-outlives-the-mechanism.md`, where the
   stale text was *consumed as a worklist* and so dispatched sessions to rebuild working machinery.
   This member's own twist: the falsifying edit and the false citation are **the same commit**, so
   even a reader diffing the citing commit against its parent would have seen a consistent pair.
-

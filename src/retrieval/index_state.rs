@@ -522,7 +522,7 @@ mod tests {
     /// assumption about this process at all. The pair covers what the single assertion
     /// covered, minus the dependency on who else is building.
     ///
-    /// docs/issues/2026-09-02-a-peer-build-unlinks-the-test-binary-and-reds-fourteen-tests.md
+    /// docs/issues/archive/2026-09-02-a-peer-build-unlinks-the-test-binary-and-reds-fourteen-tests.md
     #[cfg(target_os = "linux")]
     #[test]
     fn a_live_binary_does_not_report_itself_deleted() {

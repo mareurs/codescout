@@ -1,5 +1,5 @@
 ---
-id: dcbd9ee0aa40274c
+id: 374f88c2dbe411d3
 kind: bug
 status: fixed
 title: 'BUG: a peer''s cargo build unlinks the running test binary, so the stale-binary guard reds 13 tests for a session that changed nothing'
@@ -133,6 +133,16 @@ extracted as a pure function; `exe_is_deleted` becomes `read_link` + delegate. T
 inversion coverage moves to a deterministic fixture test, and the live test now
 compares against the filesystem either way, becoming a wiring test.
 
+## Fix provenance
+
+- **SHA:** `50b1605f` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `70c8ef6bae0c40471b06dde862c12cbab2b17cd8` — content hash of the diff; survives rebase and cherry-pick.
+
+Structured because `structured_fix_pointers` in `src/librarian/tools/doctor.rs` reads
+`- **SHA:**` / `- **patch-id:**` list items and nothing else, so the accurate prose form in
+§ *Fix* above read as **no anchor declared**. Verified 2026-09-02 before archiving: the SHA
+resolves to a commit contained in `experiments`, and `git show 50b1605f | git patch-id --stable`
+reproduces the patch-id above.
 ## Tests added
 
 `path_reports_deleted_discriminates_all_three_real_cases` — the three cases
@@ -174,4 +184,3 @@ peer's build from unlinking a running binary. Any other code that consults
 - The hazard the guard exists for:
   `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
 - Same `target/` clobber from the arming side: `OB-2`.
-

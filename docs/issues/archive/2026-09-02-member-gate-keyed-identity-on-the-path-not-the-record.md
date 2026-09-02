@@ -101,6 +101,17 @@ Identity is the dateless stem, compared as **sets** across the two trees; `HEAD`
 population via `git ls-tree -r --name-only HEAD docs/issues`; and `gained` derives from that same
 stem identity rather than from a count comparison.
 
+## Fix provenance
+
+- **SHA:** `610fe141` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `d40ee445623c44305491000598cc53c812f7d103` — content hash of the diff; survives rebase and cherry-pick.
+
+Structured because `structured_fix_pointers` in `src/librarian/tools/doctor.rs` reads
+`- **SHA:**` / `- **patch-id:**` list items and nothing else, so the accurate prose form in
+§ *Fix* above read as **no anchor declared** — and this file's prose carries five commit-like
+hashes, of which only this one is the fix. Verified 2026-09-02 before archiving: the SHA
+resolves to a commit contained in `experiments`, and `git show 610fe141 | git patch-id --stable`
+reproduces the patch-id above.
 ## Tests added
 
 Four mutations, and the fourth is what makes the other three mean anything:

@@ -1,16 +1,16 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-09-02
+tags:
+- cluster/selector-narrower-than-its-population
 closed: 2026-09-02
-severity: medium
+opened: 2026-09-02
 owner: marius
 related:
-  - docs/issues/2026-09-02-index-description-omits-the-verify-action.md
-  - docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
-tags:
-  - cluster/selector-narrower-than-its-population
-kind: bug
-unverified: "the 36cb17ed section-scoping fix was verified against the live corpus by a transcription of its two functions, not by the rebuilt MCP binary — re-run librarian(action=\"doctor\") after a rebuild to confirm the real check also reports 1 rather than 5"
+- docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md
+- docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+severity: medium
+unverified: the 36cb17ed section-scoping fix was verified against the live corpus by a transcription of its two functions, not by the rebuilt MCP binary — re-run librarian(action="doctor") after a rebuild to confirm the real check also reports 1 rather than 5
 ---
 
 # BUG: a finished bug record has no queryable way to say so, and the terminal-status selector returns a correct zero
@@ -270,7 +270,7 @@ itself: a record whose fix has landed and whose status does not say so. The chec
 on it, because the anchor it would key on is the thing that does not exist yet.
 ## References
 
-- `docs/issues/2026-09-02-index-description-omits-the-verify-action.md`,
+- `docs/issues/archive/2026-09-02-index-description-omits-the-verify-action.md`,
   `docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the two
   measured instances, both flipped at `8fb5f638`.
 - `docs/issues/archive/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md` — same family

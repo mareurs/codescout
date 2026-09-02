@@ -5297,7 +5297,7 @@ fn declared_patch_ids(content: &str) -> Vec<String> {
 /// a green gate while reading `status: open`. A peer's *terminal-but-unarchived* scan returned
 /// a correct **0** over them — its predicate never examines a record whose status understates —
 /// and that zero reached the peer's operator before a reader opened the bodies.
-/// docs/issues/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md
+/// docs/issues/archive/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md
 ///
 /// **`zombie` is excluded, for [`scan_terminal_status_without_fix_anchor`]'s `wontfix` reason
 /// read from the other end.** `zombie` means *no longer observed, root cause unconfirmed* — a
