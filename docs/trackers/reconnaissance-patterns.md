@@ -7669,6 +7669,53 @@ Validated by running it on **my own** id as a control, not merely on the id in q
 returned the pid, name and profile matching my `<-- you` row from the enumeration. On that
 basis `3e275c54` resolves to pid 3624594 / `compact-root-claude-md` / `.claude-sdd`.
 
+> **CORRECTION 2026-09-02, later the same day — the script above has two defects and both are
+> silent.** Kept as written, because the entry records a method that was run and a conclusion
+> drawn from it; rewriting it would falsify the record. Do **not** copy it. The corrected form
+> is below.
+>
+> 1. **`sed -n 's/.*"name":"\([^"]*\)".*/\1/p'` prints the FORMER name.** POSIX `.*` is greedy
+>    and binds to the last `"name":"` on the line; `formerNames` is a list of objects each
+>    carrying its own `name`. Any renamed session resolves to its old name.
+> 2. **`[ "$(tr -d '\0' </proc/$p/comm)" = claude ]` skips version-pinned sessions.** `comm` is
+>    the executable basename, and a pinned install names the binary after its version — measured
+>    2026-09-02, **3 of 21** socket-bound sessions report `comm=2.1.258`. Used here as a
+>    *liveness gate*, so such a session is skipped, the loop prints nothing, and a valid
+>    sessionId resolves to **"no such session"** rather than to an error.
+>
+> **The control validated nothing about either.** *"Validated by running it on my own id as a
+> control"* passed because the validating session was itself neither renamed nor version-pinned
+> — a control drawn from the population the defects exclude. It confirms the lookup direction,
+> which was the thing in doubt, and is blind to both of these, which were not.
+>
+> **Consequence for this entry's conclusion.** `3e275c54 -> pid 3624594 / `compact-root-claude-md`
+> / `.claude-sdd`` had its *name* read by the broken regex. The pid and profile come from the
+> filename and path and are unaffected; only the name is suspect. Pid 3624594 has since exited
+> and its registry row is gone, so **the name is now unverifiable** — which is this entry's own
+> lesson holding about this entry: a name is registry-minted and dies with the process, while
+> the sessionId is a scratchpad path component and does not.
+>
+> Fixed form — structural JSON read, and liveness by socket rather than by process name:
+>
+> ```bash
+> sid=<session-id>; u=$(id -u)
+> for f in "$HOME"/.claude*/sessions/*.json; do
+>   grep -q "\"sessionId\":\"$sid\"" "$f" || continue
+>   p=$(basename "$f" .json)
+>   [ -S "/run/user/$u/cc-socks/$p.sock" ] || continue
+>   printf '%s -> pid %s  name %s  profile %s\n' "$sid" "$p" \
+>     "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name") or "?")' "$f")" \
+>     "$(basename "$(dirname "$(dirname "$f")")")"
+> done
+> ```
+>
+> Both defects are filed —
+> `docs/issues/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md`
+> and `docs/issues/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md` — and both
+> are fixed at their other site, `reaching-peer-sessions/SKILL.md` Step 1. This is the **second**
+> site; the bug files named one. Found by grepping the tree while fixing the first, which is
+> `bug-fix-session-log:W-102`: checking the named site confirms the named site.
+
 **It still does not license "X did this", and that caveat is the sharper half of the
 entry.** The `comm` check guards pid reuse but not a *recycled* registry file — and **a
 session that compacts or resumes mints a new id for the same agent doing the same work.**
