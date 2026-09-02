@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 25
+entry_high_water_HY: 26
 entry_prefix: HY
 expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
 next-sweep-due: 2026-09-24
@@ -2008,6 +2008,66 @@ was a shape I did not predict and would have mis-binned as undated.
 
 **Status:** open — findings recorded, no mechanism built; option 1 is a one-sentence
 CLAUDE.md change and is the one to take first.
+
+## HY-26 — miss — docs/issues/ hygiene fell outside the detector set, and doctor already ships half of D8
+
+**Verdict:** miss — drift worked outside the detector set, so it earns D8 evidence rather than a sweep entry.
+
+**Valid:** dated 2026-09-02
+
+**Status:** open — D8 design input, not a task to pick up.
+
+**What happened.** A session invoked this skill to resolve four
+`non_terminal_status_with_fix_anchor` findings from `librarian(action="doctor")`. The skill
+excludes the work in its own § *When NOT to Use* — *"Anything in `docs/issues/` — bug-file
+discipline is v2 (D8), not yet here"* — so it was read, declined, and the work done
+directly. What follows is what that work would have needed from a D8, recorded while it is
+still measured rather than remembered.
+
+**1. D8 must CONSUME `doctor`, not re-derive it.** Four checks already ship the
+machine-checkable half of bug-file discipline: `terminal_status_without_fix_anchor`,
+`non_terminal_status_with_fix_anchor`, `terminal_status_with_caveat`, and
+`premature_archive_citation`. This is the same conclusion `CLAUDE.md` reached for the
+verify-open cadence — *"run `librarian(action="doctor")` before hand-rolling a scan"* — and
+the same failure mode applies: a hand-rolled scan returns a small number, never an error.
+
+**2. The archive decision is NOT machine-checkable, and D8 should not pretend otherwise.**
+`doctor` reports whether a `## Fix provenance` anchor *exists*. The archive bar in
+`CLAUDE.md` is *fix verified on `experiments` — gate green plus a regression test*, which
+requires reading the file. Measured across 5 clean candidates this session: 2 carried
+structured provenance, 2 carried SHA + patch-id as prose inside `## Fix` (which satisfies
+`CLAUDE.md` and still trips the check), and 1 carried neither despite its fix existing and
+being named in its own prose. Three different states, one check value. So D8's shape is
+**gate per finding with the file read**, like D3 and D10 — never a batch approve.
+
+**3. A shared-checkout precondition the current detectors do not have.** Of 9 terminal
+records, **4 held uncommitted changes belonging to other sessions**, and that is invisible
+from the catalog — `artifact(find)` reports status and path, never working-tree state. An
+`artifact(move)` on one would relocate a file out from under a peer's unstaged edits, which
+is `issue-clusters:IC-17`. D8 needs `git status --porcelain -- <path>` per candidate as a
+hard gate before any move, and the same check on every citing file before re-pointing: the
+citation sweep here touched 15 files, of which 2 were peer-held and were deliberately left
+stale and named in the commit message.
+
+**4. A precondition sibling for § *Is this catalog even this machine's?*, and it is worse
+than the catalog case.** Every detector here reads the **MCP server's binary image**;
+`run_command` reads the **checkout**. They diverge the moment anyone commits without
+rebuilding, and nothing in any tool response marks its own vintage. Measured this session:
+the server's image predated its own bug-fix by hours, so `doctor` reproduced a superseded
+version of a check and returned **4 false findings that a session had already diagnosed and
+fixed** — findings which, acted on, would have closed four correct open records. The
+catalog precondition is detectable by three cheap reads; this one has no in-band signal at
+all. The out-of-band check is
+`stat -c %y "$(readlink -f "$(command -v codescout)")"` against `git log -1 --format=%ci`,
+and it belongs beside the catalog gate.
+
+**Rests on:** `CLAUDE.md` § *Bug Tracking* (the archive bar and the SHA + patch-id rule) and
+§ *Observer Blindness* (the check that runs when nobody is worried). Both outlive the
+current `doctor` check names, which is why the entry cites them rather than the checks.
+
+**Promote-when:** a second sweep meets `docs/issues/` drift and reaches for these four
+points — at which stage D8 is specified by evidence rather than designed from scratch, and
+this entry is its input.
 
 ## Template for new entries
 
