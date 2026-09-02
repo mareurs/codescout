@@ -8,7 +8,9 @@ use crate::librarian::catalog::augmentation;
 use crate::librarian::catalog::find::{catalog_summary, count_matching, find, FindOpts};
 use crate::librarian::filter::FilterNode;
 
+// cap-class: RESULT_CAP artifact.find_limit — probed
 const MAX_LIMIT: usize = 500;
+// cap-class: RESULT_CAP artifact.find_offset — probed
 const MAX_OFFSET: usize = 100_000;
 use super::HIDDEN_STATUSES;
 

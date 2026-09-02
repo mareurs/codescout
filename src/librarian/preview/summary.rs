@@ -1,5 +1,6 @@
 //! Shared first-paragraph extractor (see spec "Summary Extractor Rules").
 
+// cap-class: RESULT_CAP preview.summary_chars — probed
 const MAX_SUMMARY_CHARS: usize = 200;
 
 /// Extract the first prose paragraph from a markdown body, trimmed to 200 chars.

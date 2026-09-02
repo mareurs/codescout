@@ -346,6 +346,7 @@ impl EmbeddingsSection {
     /// Resolve the concurrent in-flight embedding request limit for indexing.
     /// Defaults to 8. See `max_inflight` doc for tuning guidance.
     pub fn effective_max_inflight(&self) -> usize {
+        // cap-class: NOT_A_CAP — concurrency ceiling for in-flight embedding requests; it paces the work, every chunk is still indexed
         const DEFAULT_MAX_INFLIGHT: usize = 8;
         self.max_inflight
             .filter(|&n| n > 0)
@@ -534,8 +535,11 @@ impl ProjectConfig {
     /// every path check, every ignore walk. Cap the counts to keep a crafted
     /// or copy-pasted manifest from DoS'ing per-request hot paths.
     fn validate_list_limits(&self) -> Result<()> {
+        // cap-class: NOT_A_CAP — config validation ceiling; a breach bails with an error naming the count, no entry is silently dropped
         const MAX_EXTRA_WRITE_ROOTS: usize = 128;
+        // cap-class: NOT_A_CAP — config validation ceiling; a breach bails with an error naming the count, no entry is silently dropped
         const MAX_SHELL_DANGEROUS_PATTERNS: usize = 256;
+        // cap-class: NOT_A_CAP — config validation ceiling; a breach bails with an error naming the count, no entry is silently dropped
         const MAX_IGNORED_PATTERNS: usize = 1024;
 
         if self.security.extra_write_roots.len() > MAX_EXTRA_WRITE_ROOTS {

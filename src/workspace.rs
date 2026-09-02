@@ -235,7 +235,9 @@ pub fn discover_projects(
 /// alphabetically for deterministic output.
 /// (2026-06-03-project-languages-from-manifest-not-files)
 pub(crate) fn scan_languages_by_dominance(dir: &Path) -> Vec<String> {
+    // cap-class: RESULT_CAP workspace.scan_depth — probed
     const MAX_DEPTH: usize = 6;
+    // cap-class: RESULT_CAP workspace.scan_files — probed
     const FILE_CAP: usize = 1000;
     let mut counts: std::collections::HashMap<&'static str, usize> =
         std::collections::HashMap::new();

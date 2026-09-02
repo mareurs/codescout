@@ -104,6 +104,7 @@ pub struct ServerEnv {
 /// at the parse site (rather than in `expire_idle`, which this task does not
 /// own) means a malicious or fat-fingered env var degrades to "TTL effectively
 /// never fires" instead of unwinding every guide-eligible call.
+// cap-class: NOT_A_CAP — clamp on a parsed env-var duration guarding a chrono overflow panic; it bounds a TTL, not any returned content
 const MAX_GUIDE_TTL_SECS: u64 = 60 * 60 * 24 * 365 * 100;
 
 /// Parse `CODESCOUT_GUIDE_TTL_SECS`, clamped to [`MAX_GUIDE_TTL_SECS`]. `None`
@@ -3550,6 +3551,7 @@ mod tests {
     /// and cost nothing here — they are runtime messages, not schema, and they reach the
     /// caller who is already failing at exactly this.
     /// docs/issues/archive/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
+    // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
     const TOOL_SURFACE_CHAR_BUDGET: usize = 57_296;
 
     #[tokio::test]

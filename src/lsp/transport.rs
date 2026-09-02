@@ -40,6 +40,7 @@ pub async fn read_message<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<
     // 16 MiB per-message cap. LSP responses (documentSymbol, hover, references)
     // rarely exceed the KB-MB range even on huge files; a tight cap bounds
     // worst-case allocation per mux client and neutralizes oversized-header DOS.
+    // cap-class: NOT_A_CAP — per-message allocation ceiling; an oversized frame bails with an error, nothing is truncated
     const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
     if length > MAX_MESSAGE_SIZE {
         bail!(

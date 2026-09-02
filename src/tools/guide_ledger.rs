@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 /// maxima: 28.9-day lifespan, 27.0-day idle gap), so 35 gives six extra days
 /// of headroom, at a cost of ~60 bytes per file. See
 /// `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § 8.
+// cap-class: NOT_A_CAP — garbage-collection retention window for idle ledger files; it deletes bookkeeping state and no tool result reads it
 const GC_MAX_IDLE_DAYS: i64 = 35;
 
 /// Idle window after which an anonymous-tier topic re-arms. Two hours: measured

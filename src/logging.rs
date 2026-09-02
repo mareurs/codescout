@@ -77,6 +77,7 @@ pub fn rotate_diagnostic_logs(dir: &Path) {
 /// `Poll::Pending` emitted millions of WARN lines per second until two files
 /// reached 268 GB each). Count-based `rotate_logs` runs only at startup; this
 /// cap runs on every write.
+// cap-class: NOT_A_CAP — log-file rotation size; it bounds on-disk log growth and no tool result is derived from it
 const MAX_LOG_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
 
 /// Write-only file wrapper that rotates to numbered backups when growth would

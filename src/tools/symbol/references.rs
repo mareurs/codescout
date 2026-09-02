@@ -137,6 +137,7 @@ async fn resolve_binding_by_position(
     if !crate::symbol::query::collect_matching_symbols(symbols, name).is_empty() {
         return None;
     }
+    // cap-class: RESULT_CAP references.probe_positions — probed
     const MAX_PROBES: usize = 8;
     for (line, col) in ident_positions(text, name).into_iter().take(MAX_PROBES) {
         if matches!(
@@ -164,7 +165,9 @@ pub(crate) fn corroborate_zero_references(
     ident: &str,
     lang: &str,
 ) -> Vec<std::path::PathBuf> {
+    // cap-class: RESULT_CAP references.corroborate_files_scan — probed
     const MAX_FILES_SCAN: usize = 5_000;
+    // cap-class: RESULT_CAP references.corroborate_hits — probed
     const MAX_HITS: usize = 5;
     let mut hits: Vec<std::path::PathBuf> = Vec::new();
     let mut scanned = 0usize;

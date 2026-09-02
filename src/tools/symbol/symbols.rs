@@ -28,7 +28,9 @@ use crate::symbol::query::{
 
 pub struct Symbols;
 
+// cap-class: RESULT_CAP symbols.find_results — probed
 const FIND_SYMBOL_MAX_RESULTS: usize = 50;
+// cap-class: RESULT_CAP symbols.by_file — probed
 const BY_FILE_CAP: usize = 15;
 
 /// Build a per-file distribution from a list of symbol JSON objects.
@@ -578,6 +580,7 @@ async fn search_project_symbols(
     // tool call past the MCP 60 s ceiling. On timeout we yield an
     // empty result for that language; the tree-sitter fallback
     // below still runs if every language produces nothing.
+    // cap-class: RESULT_CAP symbols.per_lang_budget — probed
     const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
     let languages: Vec<&str> = languages.into_iter().collect();
     let mut join_set = tokio::task::JoinSet::new();
@@ -841,6 +844,7 @@ fn finalize_search_results(
 
     // When include_body is on and there are many results, strip bodies
     // beyond a threshold to avoid blowing the context window.
+    // cap-class: RESULT_CAP symbols.body_cap — probed
     const BODY_CAP: usize = 5;
     if include_body && matches.len() > BODY_CAP {
         for item in &mut matches[BODY_CAP..] {
@@ -914,7 +918,9 @@ fn finalize_search_results(
 /// or Python `@decorator` above the declaration won't be included. Callers who
 /// need canonical attr-aware bodies can still pass `include_body=true`.
 pub(crate) fn auto_inline_small_bodies(matches: &mut [Value], root: &std::path::Path) {
+    // cap-class: NOT_A_CAP — gate on an opt-in convenience (auto-inlining small bodies); above it the response is what an unenhanced call returns, and no requested content is removed
     const AUTO_INLINE_MAX_MATCHES: usize = 2;
+    // cap-class: NOT_A_CAP — gate on an opt-in convenience (auto-inlining small bodies); above it the response is what an unenhanced call returns, and no requested content is removed
     const AUTO_INLINE_MAX_LINES: u64 = 40;
 
     if matches.is_empty() || matches.len() > AUTO_INLINE_MAX_MATCHES {
@@ -1003,6 +1009,7 @@ pub(crate) fn focus_single_symbol(matches: &mut [Value], root: &std::path::Path)
         "Package",
     ];
     // Above this many lines, a container shows members instead of its full body.
+    // cap-class: RESULT_CAP symbols.container_inline_lines — probed
     const CONTAINER_INLINE_MAX_LINES: u64 = 80;
 
     let Some(item) = matches.first_mut() else {

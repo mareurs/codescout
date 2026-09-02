@@ -13,7 +13,9 @@ use std::path::PathBuf;
 
 use crate::librarian::filter::{eval, FilterNode};
 
+// cap-class: RESULT_CAP artifact.get_lines — probed
 const SOFT_CAP_LINES: usize = 500;
+// cap-class: RESULT_CAP artifact.get_overflow_headings — probed
 const OVERFLOW_HEADING_LIMIT: usize = 10;
 
 fn resolve_file_path(

@@ -26,6 +26,7 @@ struct Args {
     include_archived: bool,
 }
 
+// cap-class: RESULT_CAP context.max_tokens — probed
 const DEFAULT_MAX_TOKENS: usize = 4000;
 
 /// Per-neighbour byte cap used ONLY when an entry-grain neighbourhood does not fit whole.
@@ -67,6 +68,7 @@ const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
 /// UNDERCOUNTS — only ledger entries produce `entry_cite` rows, so a spec or bug file
 /// citing the Statement is invisible here — and undercounting is the conservative
 /// direction for an obligation.
+// cap-class: RESULT_CAP context.attestation_exposure — probed
 const ATTESTATION_EXPOSURE_THRESHOLD: usize = 5;
 
 const ANCHOR_MARKER: &str = "\n\n… [anchor truncated — reserved half the budget for its \
