@@ -20,7 +20,7 @@ that say their own work is unowned — and **they cannot reclaim them**, because
 byte-identical content is not an index write, so `post-index-change` never fires.
 
 The end state is the symptom of
-`docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` reached by a
+`docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` reached by a
 different route. That bug was ownership **destroyed**; this is ownership **never established**.
 Its fix (`5e522fa4`) does not reach here by construction: retention preserves rows that exist and
 creates none.
@@ -154,7 +154,7 @@ wrong habit.
 
 - `scripts/post-index-change-stage-log.sh` — `staging_op()` and the verb list.
 - `scripts/pre-commit-foreign-index.sh` — reads the log; correctly over-refuses on `-`.
-- `docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` — the
+- `docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` — the
   sibling: same symptom, ownership destroyed rather than never established. Fixed at `5e522fa4`.
 - `docs/conventions/shared-checkout-commit-sequence.md` — step 4 is the workaround.
 - `docs/trackers/issue-clusters.md` `IC-17` — the class; this is the residual hole its
@@ -165,4 +165,3 @@ wrong habit.
 Decide between the two fix directions above. The pathspec-keyed arm in `staging_op()` is the
 recommended one: write the regression case first and confirm it REDs, per `CLAUDE.md`
 § *Testing Discipline*.
-

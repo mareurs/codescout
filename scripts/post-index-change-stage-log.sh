@@ -379,7 +379,7 @@ done < <(git diff --cached --raw 2>/dev/null |
 # reset, a failed pre-commit's stash cycle) wrote an empty log and the rows were gone for
 # good. The carry-over lookup above cannot repair that: it reads the file this pass has
 # already replaced. `git stash` alone is the minimal trigger; no hook failure is needed.
-# docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
+# docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
 #
 # Rows are copied VERBATIM, owner and route together. Retention PRESERVES an owner and
 # never assigns one, so the claiming rule above stays the only writer of a new owner and a

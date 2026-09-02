@@ -304,7 +304,7 @@ Two things that window taught, neither of which is "commit faster":
   replace) whose ownership carry-over reads the rows the truncate just discarded, so an empty
   staged set both writes nothing and preserves nothing. Pre-commit's stash/restore is one route
   in; `reset` is another. Filed as
-  `docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` at
+  `docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` at
   `8c893060`. Kept here as written because the *reading* was correct when taken — which is the
   property this ledger is about — but do not cite this bullet for the mechanism; cite that file.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification

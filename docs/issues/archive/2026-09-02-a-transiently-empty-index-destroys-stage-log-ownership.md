@@ -1,5 +1,5 @@
 ---
-id: a25f881ebbae5be2
+id: 1e5b89d4cf5483f2
 kind: bug
 status: fixed
 title: 'BUG: a transiently-empty index permanently destroys stage-log ownership, so your own paths read as foreign'

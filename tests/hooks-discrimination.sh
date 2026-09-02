@@ -649,7 +649,7 @@ rm -rf "$T"
 # ---------------------------------------------------------------------------
 # 9. OWNERSHIP SURVIVES A TRANSIENTLY EMPTY INDEX
 #
-# docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
+# docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md
 #
 # The log was a projection of the CURRENT staged set: the write loop truncated and
 # re-emitted one row per staged pair, so any operation that transiently empties the index
