@@ -83,6 +83,31 @@ export CODESCOUT_STAGE_LOG_RUNNING=1
 export GIT_OPTIONAL_LOCKS=0
 git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 [ -n "$git_dir" ] || exit 0
+# A partial commit (`git commit -- <paths>`) runs hooks with GIT_INDEX_FILE pointing at a
+# TEMPORARY index -- `$GIT_DIR/next-index-<pid>.lock` -- holding the pathspec content. Any index
+# write inside a pre-commit hook fires this recorder, which inherits the variable, so without this
+# guard we read that temp index and write rows about it into the DURABLE log: a claim about state
+# git deletes moments later, stamped `-` because the writer is not a staging command. The author is
+# then refused on their own paths with no route back, since re-`git add`ing byte-identical content
+# is not an index write and so never fires this hook.
+#
+# This log is about ONE resource: the shared index. An index that is not that one has nothing to
+# say about ownership, so the correct action is to record NOTHING -- not to attribute better.
+# Claiming from a temp index would turn a conservative `-` into a confident wrong owner, which is
+# the silent direction this whole design avoids.
+#
+# `tests/hooks-discrimination.sh`'s `guard()` unsets GIT_INDEX_FILE for the mirror-image reason on
+# the reading side; this is the writing side of the same hazard.
+# docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
+if [ -n "${GIT_INDEX_FILE:-}" ]; then
+    case "$GIT_INDEX_FILE" in
+        /*) _seen_index="$GIT_INDEX_FILE" ;;
+        *) _seen_index="$(pwd -P)/$GIT_INDEX_FILE" ;;
+    esac
+    _git_dir_abs="$(cd "$git_dir" 2>/dev/null && pwd -P)" || exit 0
+    [ -n "$_git_dir_abs" ] || exit 0
+    [ "$_seen_index" = "$_git_dir_abs/index" ] || exit 0
+fi
 log="$git_dir/session-stage-log"
 tmp="$log.$$"
 me="${CLAUDE_CODE_SESSION_ID:--}"

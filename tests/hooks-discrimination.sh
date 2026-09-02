@@ -719,6 +719,47 @@ retained_rows="$(wc -l < .git/session-stage-log)"
 eq "the cap evicts the oldest, keeping the newest" "$(owner_of r6.txt)" "$S_R"
 rm -rf "$T"
 
+# ---------------------------------------------------------------------------
+# 10. A TEMPORARY INDEX IS NOT THE SHARED ONE
+#
+# docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md
+#
+# `git commit -- <paths>` runs hooks with GIT_INDEX_FILE pointing at a temporary
+# partial-commit index ($GIT_DIR/next-index-<pid>.lock) holding the pathspec content. Any
+# index write inside a pre-commit hook -- which the pre-commit framework performs on every
+# run -- fires the recorder, which inherits the variable. Without the guard it reads that
+# temp index and writes rows about it into the DURABLE log, stamped `-` because the writer
+# is not a staging command. The author is then refused on their own paths and cannot
+# reclaim them, since re-adding identical content is not an index write.
+#
+# NOT keyed on the pre-commit framework: any index write inside any pre-commit hook during
+# a pathspec commit reaches this. The hook below is a bare stash cycle for that reason.
+S_T=tempidx-sess
+
+new_repo
+printf 'base\n' > t.txt
+CLAUDE_CODE_SESSION_ID="$S_T" git add -- t.txt
+git commit -qm base
+cat > .git/hooks/pre-commit <<'PC'
+#!/usr/bin/env bash
+git stash push -q --keep-index -- . >/dev/null 2>&1
+git stash pop -q >/dev/null 2>&1
+exit 1
+PC
+chmod +x .git/hooks/pre-commit
+printf 'base\nmine\n' > t.txt
+# Cold, so there is no prior owned row for carry-over to preserve -- that is the case the
+# damage needs. A pair already staged AND owned survives a refused commit either way.
+rm -f .git/session-stage-log
+CLAUDE_CODE_SESSION_ID="$S_T" git commit -m x -- t.txt > /dev/null 2>&1
+eq "a temp partial-commit index writes no row" "$(owner_of t.txt)" ""
+# THE PAIRED POSITIVE. The assertion above is an absence and therefore monotone under
+# removal: a recorder deleted outright produces exactly the same silence. This is what
+# distinguishes the guard from a dead hook, and it must run in the SAME repo.
+CLAUDE_CODE_SESSION_ID="$S_T" git add -- t.txt
+eq "and the recorder still claims on the real index" "$(owner_of t.txt)" "$S_T"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

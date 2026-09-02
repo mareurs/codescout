@@ -13,18 +13,29 @@ unverified: no fix and no regression test. Root cause and minimal trigger are re
 
 ## Summary
 
-`git commit -- <paths>` writes the pathspec content into the **real** index before hooks run.
-`commit` is not one of the staging verbs `staging_op()` recognises, so every pair it stages is
-recorded `-` / `not-staging`. If a pre-commit hook then refuses, the author is left holding rows
-that say their own work is unowned — and **they cannot reclaim them**, because re-`git add`ing
-byte-identical content is not an index write, so `post-index-change` never fires.
+When `git commit -- <paths>` runs pre-commit hooks, git points `GIT_INDEX_FILE` at a **temporary
+partial-commit index** (`$GIT_DIR/next-index-<pid>.lock`) holding the pathspec content.
+`post-index-change` inherits that variable, so its `git diff --cached --raw` reads the *temporary*
+index while writing rows into the *durable* `$GIT_DIR/session-stage-log`. The rows therefore
+describe a transient index as though it were the shared one, and because the writer is not a
+recognised staging command they are stamped `-`.
+
+If the hook then refuses, the author is left holding rows saying their own work is unowned — and
+**they cannot reclaim them**, because re-`git add`ing byte-identical content is not an index
+write, so `post-index-change` never fires. A bare `git commit` then refuses their own path under
+`theirs:`.
 
 The end state is the symptom of
-`docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` reached by a
-different route. That bug was ownership **destroyed**; this is ownership **never established**.
-Its fix (`5e522fa4`) does not reach here by construction: retention preserves rows that exist and
-creates none.
+`docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md`
+reached by a different route. That bug was ownership **destroyed**; this is ownership **never
+established**. Its fix (`5e522fa4`) does not reach here by construction: retention preserves rows
+that exist and creates none.
 
+> **Root cause corrected 2026-09-02, after filing.** This file first said *"`git commit -- <paths>`
+> stages the pathspec into the real index before hooks run"*. That is **false** and is the reading
+> that sends a reader into `staging_op()`, which is not where the defect is. See § *Root cause* for
+> what actually happens and § *Hypotheses tried* for the two experiments that separated them. The
+> fix direction inverted with it.
 ## Symptom (Effect)
 
 A bare `git commit` refuses the author's own path under `theirs:`, with
@@ -65,20 +76,37 @@ lists it) and reads as a peer's.
 
 ## Root cause
 
-Two mechanisms compose, each correct alone:
+**One mechanism, plus one that makes it unrecoverable.**
 
-1. **`git commit -- <paths>` stages before hooks.** The hook fires with `PPID` = `git commit`.
-   `staging_op()` walks `/proc/$PPID/cmdline` for a recognised staging verb; `commit` is not one,
-   so `claimant="-"` and `claim_route="not-staging"`. This is the conservative direction and is
-   deliberate — a wrong `-` over-refuses loudly where a wrong claim goes silent.
-2. **A no-op `git add` is not an index write.** Restaging byte-identical content changes nothing,
-   so git never runs `post-index-change` and the row cannot be corrected. Only a *content change*
-   reclaims the pair — verified by appending a byte, after which the row came back `named` under
-   the author's id.
+**1. The recorder reads a temporary index and writes about it durably.** For a partial commit,
+git prepares `$GIT_DIR/next-index-<pid>.lock` and exports `GIT_INDEX_FILE` to the hooks. Any
+index-writing operation *inside* a pre-commit hook — which the `pre-commit` framework performs on
+every run, stashing and restoring unstaged content — fires `post-index-change`, which inherits the
+variable. Measured directly:
 
-Neither is wrong; together they leave a state with **no route out** that does not involve
-modifying the work.
+```
+GIT_INDEX_FILE=[.../.git/next-index-25659.lock]
+hook sees staged: [tracked.txt]          # <- the TEMP index, not the real one
+-> session-stage-log gains: `-  207f2a3  tracked.txt  unnamed`
+```
 
+`staging_op()` is working correctly throughout: the parent genuinely is not a staging command, and
+`-` is the conservative answer. The defect is that the recorder had no business writing a row at
+all — the index it was describing is not the resource the log is about, and is deleted moments
+later.
+
+**2. A no-op `git add` is not an index write.** Restaging byte-identical content changes nothing,
+so git never runs `post-index-change` and the row cannot be corrected. Only a *content change*
+reclaims the pair — verified by appending a byte, after which the row came back `named` under the
+author's id.
+
+Neither is wrong in isolation. Together they leave a state with **no route out** that does not
+involve modifying the work.
+
+**The codebase already knows this hazard from the other side.** `tests/hooks-discrimination.sh`'s
+`guard()` unsets `GIT_INDEX_FILE` deliberately, with a comment explaining that an inherited value
+makes git read the wrong index and the guard read everything as ours — *"silence for entirely the
+wrong reason"*. The recorder has the mirror-image exposure and no such precaution.
 ## Evidence
 
 ### The failure direction is safe, and that is again what makes it expensive
@@ -107,39 +135,87 @@ to preserve. The two bugs share a symptom and a class and need different remedie
 
 1. **Hypothesis** — the MCP `run_command` wrapper breaks `/proc/$PPID/cmdline` detection.
    **Test** — throwaway repo, real shim, `git add` through `run_command`.
-   **Verdict** — rejected. Records `SESS-PPID … named`.
+   **Verdict** — rejected. Records `SESS-PPID … named`. This is the reading that fits the first
+   observation and sends you into `staging_op()`; it is worth keeping precisely because it is
+   wrong in an attractive way.
 
-2. **Hypothesis** — the `pre-commit` framework's stash/restore cycle stamps the rows.
-   **Test** — throwaway repo with a hand-rolled pre-commit doing `git stash push --keep-index` /
-   `pop` then `exit 1`.
-   **Verdict** — rejected. The refused commit left no row for the path at all. The stamping is
-   `git commit`'s own index write, not the framework's.
+2. **Hypothesis** — `git commit -- <paths>` stages into the REAL index before hooks run.
+   **Test** — throwaway repo, tracked file modified but never staged, pre-commit that is a bare
+   `exit 1` doing no index writes at all.
+   **Verdict** — **rejected, and this was the filed root cause.** No row appears, and nothing is
+   staged afterwards. The real index is untouched. An earlier run of this test used an *untracked*
+   file, where `git commit -- <path>` fails before hooks run — a fixture flaw that produced the
+   right answer for the wrong reason and had to be redone.
 
+3. **Hypothesis** — the stamping needs the `pre-commit` framework's stash/restore specifically.
+   **Test** — pre-commit hook printing `GIT_INDEX_FILE` and `git diff --cached --name-only`, then
+   performing an index write, then `exit 1`.
+   **Verdict** — **confirmed, and generalised.** `GIT_INDEX_FILE` is the temp partial-commit index
+   and the hook sees the pathspec content in it. It is not the framework that matters but *any*
+   index write inside *any* pre-commit hook during a pathspec commit. The framework is merely the
+   one that always performs one.
+
+4. **Hypothesis** (raised by `codescout-cc`, sessionId `953b5e77`) — the hole is hook-independent,
+   so a commit refused by `ledger-counts` stamps already-owned rows `-` just as one refused by
+   `foreign-index` would.
+   **Test** — throwaway repo, non-`foreign-index` refusing hook; stage and confirm ownership
+   FIRST, then attempt the refused pathspec commit.
+   **Verdict** — **rejected in the direction that matters.** A pre-staged, owned row *survives*:
+   carry-over matches the pair and preserves the owner. The damage requires the pair to have **no
+   prior owned row**. So `codescout-cc`'s step 4 succeeded because their rows were still theirs,
+   not because a pathspec commit ignores ownership. Their report was explicit that this was
+   inferred rather than measured, their evidence having expired — which is why it was testable at
+   all.
 ## Fix
 
-Not implemented. Two directions, and the choice is not obvious:
+Implemented 2026-09-02. **The direction inverted when the root cause was corrected**, and the
+superseded proposal is kept below because it is the one the wrong root cause recommends.
 
-- **Treat `commit` as a staging verb when it carries a pathspec.** `git commit -- <paths>` is a
-  staging act in every sense that matters here: argv NAMES the paths, so the existing
-  `names_path` machinery already has what it needs and the claim stays argv-scoped. The risk is
-  that `commit` without a pathspec must NOT claim — it commits the whole shared index, and
-  claiming there is the capture this guard exists to prevent. So the arm has to key on the
-  pathspec, not on the verb.
-- **Give the author a reclaim route.** Any explicit `git add` naming a path could be made to
-  fire the recorder even when the index does not change — but git offers no hook for a write
-  that does not happen, so this needs a wrapper rather than a hook, which is a different shape
-  of solution.
+**Shipped — the recorder must not describe an index that is not the shared one.**
+`post-index-change-stage-log.sh` now exits early when `GIT_INDEX_FILE` is set and does not resolve
+to `$GIT_DIR/index`. Relative and absolute forms are both normalised before comparison. It sits
+beside the existing `CODESCOUT_STAGE_LOG_RUNNING` re-entry brake, is a few lines, and touches
+neither `staging_op()` nor the claiming rule. It removes the stamping at its source rather than
+making the recorder guess better about the parent.
 
-The first is narrower and uses machinery that already exists. **Do not fix it by making the
-guard trust `-` more** — over-refusing is the correct direction; the defect is in what the
-recorder can observe.
+It does **not** give the author a reclaim route — it removes the state that needed one. That is
+the right shape: `-` over-refusing stays correct, and the bad row is simply never written.
 
+Note it does **not** by itself give the author a reclaim route — it removes the state that needs
+one. That is the right shape: `-` over-refusing stays correct, and the bad row is simply never
+written.
+
+**Superseded direction, kept for its derivation** — *"treat `commit` as a staging verb when it
+carries a pathspec, since argv names the paths and `names_path` already has what it needs."* This
+follows from the false root cause and would have been actively wrong: it teaches the recorder to
+**claim** pairs read out of a temporary index, converting a conservative `-` into a confident
+wrong owner — the silent direction the whole design avoids.
+
+**Do not fix it by making the guard trust `-` more.** Over-refusing is the correct direction; the
+defect is upstream, in what the recorder is willing to describe.
 ## Tests added
 
-None yet. `tests/hooks-discrimination.sh` has no case for a *refused* commit's index write, which
-is why this shipped. The regression case is: attempt `git commit -- <path>` under a pre-commit
-that exits 1, then assert `owner_of <path>` is the author rather than `-`.
+`tests/hooks-discrimination.sh` § 10. Confirmed RED against the unguarded script first — **both**
+assertions failed — then green at 81/81.
 
+- a temp partial-commit index writes **no row**
+- and the recorder **still claims on the real index**, in the same repo
+
+**The second is not decoration.** The first is an absence assertion and therefore monotone under
+removal: deleting the recorder outright produces exactly the same silence. Only the pair
+distinguishes a working guard from a dead hook.
+
+**That both failed before the fix is itself the bug's second half on display.** The temp-index
+write stamps the pair `-`, after which the author's `git add` is a no-op and cannot reclaim it —
+so the positive assertion failed at `-` rather than at the author's id. With the guard, no row is
+written, the author's add is a first write for that pair, and it claims normally.
+
+The fixture's refusing hook is a bare stash cycle, **not** the `pre-commit` framework, on purpose:
+the defect is reached by any index write inside any pre-commit hook during a pathspec commit. The
+framework is merely the one that always performs one.
+
+End-to-end re-run of the original symptom: refused pathspec commit → no row; author's `git add` →
+`SESS-AUTHOR … named`; `pre-commit-foreign-index.sh` → exit 0, silent.
 ## Workarounds
 
 Stage **before** attempting the commit — `git add <paths>` then `git commit -- <paths>` — which
@@ -162,6 +238,15 @@ wrong habit.
 
 ## Resume
 
-Decide between the two fix directions above. The pathspec-keyed arm in `staging_op()` is the
-recommended one: write the regression case first and confirm it REDs, per `CLAUDE.md`
-§ *Testing Discipline*.
+Fixed; no resume owed.
+
+What this does **not** close, and stays with `IC-17`: the working tree's *unstaged* state still
+carries no owner and has no adjacent git primitive to extend. See the class's `Mechanism status`.
+
+One thing worth a separate look, raised by `codescout-cc`: step 4 of
+`docs/conventions/shared-checkout-commit-sequence.md` prescribes `git add <paths> && git commit
+-- <paths>`, which is the pathspec form this bug was about. **Staging first was always the
+correct avoidance** and the page was never wrong — but a reader who reached the page *after*
+hitting this bug had no way to see why the order mattered. With the guard shipped the hazard is
+gone, so the page owes nothing; recorded here in case the ordering rationale is ever thought
+optional.
