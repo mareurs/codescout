@@ -18,6 +18,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 severity: medium
+unverified: fix is implemented, tested and mutation-verified in a scratchpad harness but NOT applied to scripts/ — the hooks are live-shimmed for every session in this checkout, so applying it is a coordinated act, not an edit; patch held for codescout-0a
 ---
 
 ## Summary
@@ -82,6 +83,22 @@ session count — concurrency only raises the odds someone meets it.
 | 3 | `:158`, `:250-255` | **blanket form** — `names_path()` compares each STAGED path against the literal argv tokens; a directory token never matches a file beneath it, so `owner="-"` at `:290` |
 
 The guard's sentence names a fourth thing that no branch produces.
+
+> **Amended 2026-09-02 — there is a FOURTH route, and this file asserting "three" was the
+> same defect one level up.** `post-index-change-stage-log.sh:166-168` documents it in its
+> own comment: `patch_paths()` reads **default-prefix headers only**, so a patch written
+> with `--no-prefix` or applied with `-p0` "emits nothing and the write degrades to `-`".
+> That is a distinct route from the blanket form — argv *does* name the patch file, and the
+> paths inside it are unreadable rather than unnamed.
+>
+> Weaker evidence than the three above, and labelled as such: read from the code's comment
+> at the bytes, **not** dated by `git log -S` and **not** observed at runtime. It is enough
+> to settle the fix, which is the only thing it is used for.
+>
+> This is why § *Fix* takes level 2. A hand-maintained enumeration of routes was already
+> short by one **on the day it was proposed**, by a reader who had the recorder open — so
+> "list the real causes carefully" is not a remedy available to anyone, and level 1 would
+> re-ship the frozen-prose defect with a fresh timestamp.
 
 *Measured 2026-09-02*, by `git log -S` on each string:
 
@@ -152,28 +169,94 @@ proposes no change to the refusal.
 
 ## Fix
 
-Not implemented. Two levels.
+**Level 2 chosen, and the reproduction is what decided it.** Implemented and verified; **not
+applied** — see § *Resume* for why the apply is a coordinated act rather than an edit.
 
-**Cheap, and sufficient for the reported harm.** Replace the single asserted cause with
-the three real routes, leading with the blanket form since it is the common case and the
-one the guard exists to catch. The over-refusal keeps all its value; only the sentence
-stops asserting.
+Level 1 (replace the asserted cause with an enumeration of the real routes) is **not a
+step toward** level 2, and it is worse than the file originally judged: the enumeration it
+prescribed was **already short by one route on the day it was written**. This file's own
+table names three; `post-index-change-stage-log.sh:166-168` documents a fourth in its own
+comment — a patch applied with `--no-prefix` or `-p0` emits no paths from `patch_paths()`
+and "the write degrades to `-`". So a hand-maintained enumeration reproduces the exact
+defect being fixed: prose asserting a route set that the code has since outgrown. Level 2
+cannot go stale that way, because the recorder writes what it did rather than a reader
+predicting what it might have.
 
-**Better, and it makes the true cause knowable.** Record the route beside the owner —
-a fourth column at `post-index-change-stage-log.sh:293` — so the guard can name the
-branch that actually fired instead of enumerating candidates. This is the difference
-between a diagnostic that lists what *might* have happened and one that reports what
-*did*, and the cost is one field.
+**The change.**
 
-Do **not** change the refusal or the remedy. Both are correct; `:254-255` documents the
-pathspec form as the unaffected path and it worked first try in the observed case.
+- `scripts/post-index-change-stage-log.sh` (+38/−10) — a fourth `route` column. Set at
+  four sites: `named` (argv named this path), `unnamed` (staging op with a real id that did
+  not name it — blanket form or non-default-prefix patch), `id-unset` (no
+  `CLAUDE_CODE_SESSION_ID`), `not-staging` (unreadable or unrecognised parent). A row
+  carried over from an existing log keeps its recorded route, and a three-column row is
+  labelled `pre-route` rather than being given a guessed branch.
+- `scripts/pre-commit-foreign-index.sh` (+52/−7) — collects the routes seen on `-` rows
+  (`foreign_owners` dedupes to one `-` entry however many paths there are, so the branch is
+  lost with the duplicates unless collected separately) and prints one line per distinct
+  cause. The blanket-add line says outright that it is **probably the reader's own
+  staging**, which is what the old sentence got backwards.
 
+**STRICTLY DIAGNOSTIC, and this is the design constraint, not a note.** The refusal still
+keys on the `owner` column alone. A mis-recorded route can therefore produce only a wrong
+*explanation* — never a wrong refusal, and never a capture. That is what makes the change
+safe to ship on a checkout where six sessions commit through the hook: the failure
+direction is unchanged. The moment a route value gates the refusal, a recorder bug becomes
+a correctness bug on a shared index; mutation M7 below exists to fail if anyone does that.
+
+**The refusal and the remedy are untouched**, as this file required. Both were correct.
+
+**Not applied, deliberately.** `.git/hooks/post-index-change` is a thin shim exec'ing
+`$root/scripts/post-index-change-stage-log.sh`, and `.pre-commit-config.yaml:80` wires the
+guard by `entry:`. Writing either file changes commit-path behaviour for every session in
+this checkout on its next `git add`, with nothing telling them it changed. No SHA, no
+patch-id — there is no commit to cite yet.
 ## Tests added
 
-None — capture-on-notice. A regression test would assert the `Staged by:` block names no
-cause absent from the recorder's branch set, which is only cheap once the route is
-recorded (fix level 2); against the level-1 fix it degrades to a string match.
+14 cases in `tests/hooks-discrimination.sh` § 8 (+117 lines), which runs in **CI**
+(`.github/workflows/ci.yml:82`), not in pre-commit — so the tests could land separately
+without touching a peer's commit path, but **must not**: they assert the route column, so
+they would red CI until the scripts ship with them. The two move together.
 
+One case per route-writing site, per CLAUDE.md § *Testing Discipline* — a route is written
+at four sites and a kill at one says nothing about the other three.
+
+**Results.** Baseline (unmodified scripts, original suite) 49/49. Modified scripts against
+the **original** suite 49/49 — so no pre-existing case changes behaviour. Modified scripts
+with the new cases **63/63**.
+
+**Seven mutations, all killed**, each naming its own case:
+
+| mutation | killed |
+|---|---|
+| M1 `route="named"` → wrong value | `explicit-path add records route=named` |
+| M2 `${claim_route:-unnamed}` → `:-named` | `directory add records route=unnamed`, `guard names the blanket form` |
+| M3 drop the `id-unset` branch | `add with no session id records route=id-unset` (+2) |
+| M4 drop `claim_route="not-staging"` | `index write from an unrecognised parent records route=not-staging` |
+| M5 drop the `pre-route` fallback | `a legacy three-column row is labelled pre-route, not blank` (+3) |
+| M6 reinstate the false sentence | `guard no longer asserts the pre-guard cause` |
+| M7 let a route value gate the refusal | `an unrecognised route value still refuses on the owner` |
+
+M5's three extra kills are an artifact of the mutation, not of the change — the
+modified-scripts-against-original-suite run above is what rules that out.
+
+**The guard-text cases are a PAIR on purpose.** `has("blanket add")` is monotone under
+widening; `hasnt("staged before this guard was installed")` is monotone under deleting the
+whole block. Neither fires in the other's direction, so only together do they pin the
+replacement. M6 is the mutation that proves it.
+
+**Three harness bugs found while writing these, each returning a plausible result rather
+than an error** — recorded because the next person will hit them:
+
+1. A first draft of the `id-unset` case reused a path an earlier `git add <dir>` had
+   already recorded, so it exercised the **carry-over** branch and printed no error while
+   testing something other than what it claimed.
+2. A `pre-route` fixture built from `git hash-object` never matched: the log stores the
+   **abbreviated** blob `git diff --cached --raw` emits. A full 40-char sha silently
+   re-derives the row instead of carrying it — a passing test of nothing. `blob_of()` in
+   the suite exists for this and says so on the line.
+3. Two mutations reported `TARGET ABSENT` because the runner's `||` delimiter had no escape
+   against targets containing shell `||`. "Target absent" must not be read as "nothing to
+   verify" — both mutations killed their case once the delimiter was fixed.
 ## Workarounds
 
 Commit by pathspec, which never reads the shared index:
@@ -186,10 +269,28 @@ This is what the guard itself prints, and it is correct.
 
 ## Resume
 
-Decide between fix level 1 and level 2 before writing either — level 2 subsumes level 1
-and makes the regression test worth having, so shipping level 1 first would be work
-thrown away rather than a step toward it.
+**The fix is done; what remains is landing it, which is a coordination problem rather than
+an engineering one.** The full patch, the modified suite and the mutation runner are held
+in a session scratchpad (`fix/` and `harness/` under
+`/tmp/claude-1000/-home-marius-work-claude-codescout/9527bc6e-…/scratchpad`) — **session-
+local and not durable**, so whoever picks this up should expect to re-derive it from this
+section rather than find the files.
 
+To land it: copy both scripts and the § 8 test block, then commit **all three together** —
+the tests red CI without the scripts. Re-run `bash tests/hooks-discrimination.sh` (expect
+63/63) and re-run at least M6 and M7 before committing, since those two are the ones
+guarding the prose replacement and the diagnostic-only invariant.
+
+**Do not apply it while peers hold uncommitted work.** Both files are live-shimmed for
+every session in this checkout (§ *Fix*, last paragraph), and at the time of writing six
+peer sessions were committing through them with unstaged work in the tree. The patch was
+offered to `codescout-0a` (PID 4165881), who owns the adjacent tool-surface work from the
+`tool-collapse` worktree — a worktree's `git rev-parse --git-dir` resolves to
+`.git/worktrees/<name>`, so its stage log and its `scripts/` copy are both separate and it
+can carry this without disturbing the main checkout.
+
+**If a later session prefers the cheaper repair, read § *Fix* first.** Level 1 is not a
+smaller version of this fix; it is the same defect re-shipped.
 ## References
 
 - `scripts/pre-commit-foreign-index.sh:209-212` — the sentence.
@@ -202,4 +303,3 @@ thrown away rather than a step toward it.
 - Found by a peer session in this checkout on 2026-09-02, which observed the refusal and
   identified the sentence as an inference stated as fact. The route that fired was
   established afterwards by reading `names_path()`.
-

@@ -152,17 +152,30 @@ resolve_session() {
 mine=()
 theirs=()
 foreign_owners=()
+# Routes seen for `-` rows. `foreign_owners` dedupes to a single `-` entry however many
+# unrecorded paths there are, so the branch that produced them has to be collected
+# separately or it is lost with the duplicates.
+unrecorded_routes=()
 
 while IFS=$'\t' read -r blob path; do
     [ -n "$path" ] || continue
-    owner="$(awk -F'\t' -v b="$blob" -v p="$path" \
-        '$2 == b && $3 == p { print $1; exit }' "$log")"
+    prior="$(awk -F'\t' -v b="$blob" -v p="$path" \
+        '$2 == b && $3 == p { print $1 "\t" $4; exit }' "$log")"
+    IFS=$'\t' read -r owner route <<< "$prior"
     if [ -n "$owner" ] && [ "$owner" != "$me" ]; then
         theirs+=("$path")
         case " ${foreign_owners[*]-} " in
             *" $owner "*) ;;
             *) foreign_owners+=("$owner") ;;
         esac
+        if [ "$owner" = "-" ]; then
+            # A row written before route recording has an empty $4; name that state
+            # rather than letting it read as a recorded branch.
+            case " ${unrecorded_routes[*]-} " in
+                *" ${route:-pre-route} "*) ;;
+                *) unrecorded_routes+=("${route:-pre-route}") ;;
+            esac
+        fi
     else
         mine+=("$path")
     fi
@@ -206,10 +219,42 @@ done < <(git diff --cached --raw 2>/dev/null |
     echo "Staged by:"
     for owner in "${foreign_owners[@]-}"; do
         if [ "$owner" = "-" ]; then
-            echo "      (unrecorded) — staged before this guard was installed, so no"
-            echo "          session claimed it. Unknown is deliberate: it over-refuses"
-            echo "          until the pair churns out, where claiming it would have gone"
-            echo "          silent. Find the owner by asking, not by assuming it is yours."
+            echo "      (unrecorded) — no session id is on these rows. What the recorder"
+            echo "          logged about why, one line per distinct cause:"
+            for _r in "${unrecorded_routes[@]-}"; do
+                case "$_r" in
+                    unnamed)
+                        echo "            • blanket add — the staging command did not NAME"
+                        echo "              these paths: \`git add\` with -A, -u, \`.\`, or a"
+                        echo "              directory, or a patch carrying no default prefix."
+                        echo "              THIS IS PROBABLY YOUR OWN STAGING, and it is the"
+                        echo "              case this guard exists for — a blanket add followed"
+                        echo "              by a bare commit is exactly how a peer's work gets"
+                        echo "              filed under your message. Re-stage by explicit path"
+                        echo "              and the bare commit passes."
+                        ;;
+                    not-staging)
+                        echo "            • not a staging command — the index write came from"
+                        echo "              an unreadable or unrecognised parent, so nothing"
+                        echo "              could be claimed. Ask before assuming it is yours."
+                        ;;
+                    id-unset)
+                        echo "            • no session id — whoever staged these had no"
+                        echo "              CLAUDE_CODE_SESSION_ID, so there was no id to"
+                        echo "              record. A terminal commit is the usual cause."
+                        ;;
+                    pre-route)
+                        echo "            • route not recorded — these rows predate route"
+                        echo "              logging, so the branch is genuinely unknown here."
+                        echo "              Find the owner by asking, not by assuming."
+                        ;;
+                    *)
+                        echo "            • $_r"
+                        ;;
+                esac
+            done
+            echo "          Unknown ownership stays deliberate: it over-refuses, where"
+            echo "          claiming would have gone silent."
             continue
         fi
         info="$(resolve_session "$owner")"

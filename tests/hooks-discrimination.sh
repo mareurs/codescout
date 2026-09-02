@@ -495,6 +495,122 @@ cd "$T" || exit 1
 git worktree remove --force "$WT" > /dev/null 2>&1
 rm -rf "$WT" "$T"
 
+# ---------------------------------------------------------------------------
+# 8. THE ROUTE COLUMN — WHY `-` was recorded, not merely that it was.
+#
+# docs/issues/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md: the
+# guard asserted ONE cause ("staged before this guard was installed") for a state that
+# four separate branches reach, and the sentence had frozen while the recorder grew two
+# of them under it. Prose cannot be kept correct here by care — the enumeration proposed
+# as the cheap fix was ALREADY short by one route on the day it was written (a patch
+# whose headers carry no default prefix). So the recorder logs the branch it took and
+# the guard reports that instead of listing candidates.
+#
+# ONE CASE PER BRANCH. A route is written at four sites; a kill at one says nothing
+# about the other three.
+route_of() { awk -F'\t' -v p="$1" '$3 == p { print $4; exit }' .git/session-stage-log; }
+# The ABBREVIATED blob `git diff --raw` emits. A full 40-char sha never matches the log,
+# so a legacy-row fixture built from `git hash-object` is silently re-derived rather than
+# carried over — a case that passes while testing nothing. Cost this suite's author one
+# wrong green.
+blob_of() {
+    git diff --cached --raw |
+        awk -F'\t' -v p="$1" '$2 == p { split($1, x, " "); print x[4]; exit }'
+}
+hasnt() { printf '%s' "$2" | grep -qF "$3" && no "$1" "must NOT contain: $3" || ok "$1"; }
+
+S_A=route-sess-A
+
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+eq "explicit-path add records route=named" "$(route_of a.txt)" "named"
+eq "explicit-path add still records the real owner" "$(owner_of a.txt)" "$S_A"
+rm -rf "$T"
+
+new_repo
+mkdir -p sub
+echo b > sub/b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add sub/
+eq "directory add records route=unnamed" "$(route_of sub/b.txt)" "unnamed"
+eq "directory add leaves the owner unrecorded" "$(owner_of sub/b.txt)" "-"
+rm -rf "$T"
+
+new_repo
+echo a > a.txt
+env -u CLAUDE_CODE_SESSION_ID git add -- a.txt
+eq "add with no session id records route=id-unset" "$(route_of a.txt)" "id-unset"
+rm -rf "$T"
+
+# An unreadable or unrecognised parent is route 2. Invoking the hook from a plain shell
+# reproduces it exactly: $PPID is bash, not git, so staging_op() declines.
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+rm -f .git/session-stage-log
+CLAUDE_CODE_SESSION_ID="$S_A" bash -c '.git/hooks/post-index-change'
+eq "index write from an unrecognised parent records route=not-staging" \
+    "$(route_of a.txt)" "not-staging"
+rm -rf "$T"
+
+# Migration. Every log written before this change holds three columns, so this is the
+# case that fires FIRST in a live checkout, not an edge case.
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+printf 'SESS-OTHER\t%s\ta.txt\n' "$(blob_of a.txt)" > .git/session-stage-log
+echo b > b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- b.txt
+eq "a legacy three-column row keeps its owner" "$(owner_of a.txt)" "SESS-OTHER"
+eq "a legacy three-column row is labelled pre-route, not blank" \
+    "$(route_of a.txt)" "pre-route"
+rm -rf "$T"
+
+# The two guard-text cases below are a PAIR on purpose. `has` alone is monotone under
+# widening (any prose containing the phrase satisfies it) and `hasnt` alone is monotone
+# under deleting the whole block. Together they pin the replacement: the true cause is
+# named AND the false one is gone.
+new_repo
+mkdir -p sub
+echo b > sub/b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add sub/
+route_out="$(guard other-session)"
+has "guard names the blanket form for an unnamed row" "$route_out" "blanket add"
+hasnt "guard no longer asserts the pre-guard cause" \
+    "$route_out" "staged before this guard was installed"
+rm -rf "$T"
+
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+printf -- '-\t%s\ta.txt\n' "$(blob_of a.txt)" > .git/session-stage-log
+legacy_out="$(guard "$S_A")"
+has "guard reports an unknown route honestly for a legacy row" \
+    "$legacy_out" "route not recorded"
+hasnt "guard does not invent a blanket-add cause for a legacy row" \
+    "$legacy_out" "blanket add"
+rm -rf "$T"
+
+# THE INVARIANT THAT MAKES THIS SAFE TO SHIP ON A SHARED CHECKOUT, and the reason the
+# route is a diagnostic field rather than an input to the decision: the refusal keys on
+# the OWNER column alone. A garbage route can therefore only produce a wrong
+# explanation — never a wrong refusal, and never a capture. If a later edit makes a
+# route value gate the decision, these two cases are what fail.
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+printf 'SESS-OTHER\t%s\ta.txt\tgarbage-route-value\n' "$(blob_of a.txt)" \
+    > .git/session-stage-log
+has "an unrecognised route value still refuses on the owner" \
+    "$(guard "$S_A")" "EXIT=1"
+rm -rf "$T"
+
+new_repo
+echo a > a.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
+has "my own named paths still pass a bare commit" "$(guard "$S_A")" "EXIT=0"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

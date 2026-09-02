@@ -266,12 +266,30 @@ $_NAMED
 EOF
     return 1
 }
+# Why the ROUTE is recorded and not just the owner.
+#
+# `-` is reachable by four branches and the reason is discarded at write time, so the
+# paired guard can only ENUMERATE candidates -- and an enumeration in prose froze while
+# this file grew two new routes under it
+# (docs/issues/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md).
+# A fourth column costs one field and makes the true branch knowable at refuse time,
+# which is the difference between listing what MIGHT have happened and reporting what
+# did. The enumeration cannot be kept correct by care: it was already short by one route
+# on the day it was proposed.
+#
+# STRICTLY DIAGNOSTIC. The refusal decision still keys on the owner column alone, so a
+# mis-recorded route can only produce a wrong EXPLANATION -- never a wrong refusal, and
+# never a capture. Keep it that way: the moment a route value gates the refusal, a
+# recorder bug becomes a correctness bug on a shared index.
 if staging_op; then
     claimant="$me"
     _NAMED="$(argv_paths)"
+    # `-` here means the id was absent, which is route 1 and NOT the blanket form.
+    [ "$me" = "-" ] && claim_route="id-unset" || claim_route=""
 else
     claimant="-"
     _NAMED=""
+    claim_route="not-staging"
 fi
 : > "$tmp" || exit 0
 # `--raw` gives ":<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>"; field 4 of
@@ -279,18 +297,28 @@ fi
 while IFS=$'\t' read -r blob path; do
     [ -n "$path" ] || continue
     owner=""
+    route=""
     if [ -s "$log" ]; then
-        owner="$(awk -F'\t' -v b="$blob" -v p="$path" \
-            '$2 == b && $3 == p { print $1; exit }' "$log")"
+        # $4 is empty on a row written before route recording; awk still emits the tab,
+        # so `read` yields an empty route rather than folding the two fields together.
+        prior="$(awk -F'\t' -v b="$blob" -v p="$path" \
+            '$2 == b && $3 == p { print $1 "\t" $4; exit }' "$log")"
+        IFS=$'\t' read -r owner route <<< "$prior"
     fi
-    if [ -z "$owner" ]; then
-        if [ "$claimant" != "-" ] && names_path "$path"; then
-            owner="$claimant"
-        else
-            owner="-"
-        fi
+    if [ -n "$owner" ]; then
+        # Carried over from an existing row: preserve the route that row recorded, and
+        # label a pre-route row as such instead of guessing a branch for it.
+        [ -n "$route" ] || route="pre-route"
+    elif [ "$claimant" != "-" ] && names_path "$path"; then
+        owner="$claimant"
+        route="named"
+    else
+        owner="-"
+        # Staging op with a real id that did not NAME this path: a blanket form, or a
+        # patch whose headers carry no default prefix. Both land here.
+        route="${claim_route:-unnamed}"
     fi
-    printf '%s\t%s\t%s\n' "$owner" "$blob" "$path" >> "$tmp"
+    printf '%s\t%s\t%s\t%s\n' "$owner" "$blob" "$path" "$route" >> "$tmp"
 done < <(git diff --cached --raw 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
 # Atomic replace: peers run this hook concurrently against the same file.
