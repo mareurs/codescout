@@ -296,7 +296,7 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// keyed on their own schema-documented repair opt-in and over-approximated
     /// (`doctor` on `fix` being present at all, so a dry run is guarded too).
     ///
-    /// docs/issues/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
+    /// docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
     fn is_write(&self, input: &Value) -> bool {
         let action = input.get("action").and_then(Value::as_str);
         match self.inner.name() {

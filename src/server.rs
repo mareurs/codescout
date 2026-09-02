@@ -5747,7 +5747,7 @@ mod tests {
     /// reaches no tool and asserts nothing. Do not credit it with coverage on
     /// that lane; the `covered` count below is what makes the difference legible.
     ///
-    /// docs/issues/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
+    /// docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
     #[tokio::test]
     async fn is_write_classifies_every_action_outside_a_declared_read_set_as_a_write() {
         use serde_json::json;

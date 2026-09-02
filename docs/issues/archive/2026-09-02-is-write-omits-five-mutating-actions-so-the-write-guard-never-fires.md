@@ -1,5 +1,5 @@
 ---
-id: '328021e820100805'
+id: 93caba562c06a258
 kind: bug
 status: fixed
 title: 'BUG: is_write omits five mutating actions, so the cross-process write guard never fires for them'
@@ -15,7 +15,6 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: archive move held — a committed spec cites this artifact id in a sentence the fix falsified; re-point and archive after routing it to that spec's owner
 ---
 
 # BUG: `is_write` names five mutating actions it does not match, so the cross-process write guard never fires for them
@@ -193,25 +192,41 @@ sessions do issue the same id.
 
 ## Resume
 
-**Fixed, deliberately NOT archived.** Gate green on both lanes at the fix commit
-— lean 3476 passed / 0 failed (29 suites), default 5189 passed / 0 failed (31
-suites), clippy `--workspace --all-targets --features local-embed -D warnings`
-exit 0. The archive trigger is met; the move is held for a stated reason rather
-than forgotten.
+**Closed and archived.** Gate green on both lanes at the fix commit — lean 3476
+passed / 0 failed (29 suites), default 5189 passed / 0 failed (31 suites),
+clippy `--workspace --all-targets --features local-embed -D warnings` exit 0.
 
-**Why the move is held.** `artifact(action="move")` re-keys the artifact
-(`id = sha256(abs_path)`), and `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md:349`
-cites this id — in a sentence that the fix has already falsified, calling it
-*"that predicate's open hole"*. Archiving would turn one stale-but-true citation
-into a dangling one **and** require editing another work stream's committed
-design doc, where the repair is a judgement about their reasoning rather than a
-mechanical repoint. Holding the move keeps the id valid and their citation
-intact. Route the falsified sentence to that spec's owner; archive after.
+**The archive was held for about forty minutes and then released, which is worth
+recording because the release came from the other side.**
+`artifact(action="move")` re-keys on path, and
+`docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md:349`
+cited this artifact id — in a sentence the fix had already falsified, calling it
+*"that predicate's open hole"*. Moving would have converted a stale-but-true
+citation into a dangling one, and repairing it meant editing another work
+stream's committed design doc where the repair is a judgement about their
+reasoning rather than a mechanical repoint. It was routed to that spec's owner
+instead, identified from the `Session-Id` trailer on `649db39e` rather than from
+proximity to `src/engines/`.
 
-This is a `fixed`-but-unarchived record with its blocker in prose — the exact
-shape `docs/issues/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md`
-is about, from the opposite direction. The status is honest here because it
-understates nothing: `fixed` is true, and what is owed is the move, not the fix.
+They corrected it at `7795c7c6` and reported **one leg further than was
+claimed**: the sentence gave two reasons and *both* expired, not one — the same
+commit made the classification per-action, so the tool-level-grain objection
+went with the open-hole objection. Their conclusion survives on a reason that
+never depended on this code: `is_write` answers *"does this call mutate?"*,
+which is a **safety** predicate, while the question they were asking is a
+**pedagogy** one, and the two come apart in both directions.
+
+Two things fall out of that exchange and neither is about this bug:
+
+- **An argument from a defect dies when someone fixes the defect.** Their
+  retired sentence rested on this hole; the replacement rests on a distinction
+  that no fix can remove. Worth preferring the second kind when writing one.
+- **A quotation of a retired citation is indistinguishable from a live one.**
+  Their correction quotes the retired sentence, which originally reproduced the
+  16-hex id — reproducing it would have scheduled exactly the dangling ref the
+  hold existed to prevent. They elided it and cited the fix by SHA + patch-id
+  instead. That is `IC-6`'s no-escape half, met inside the repair of an unrelated
+  defect.
 
 One thing deliberately **not** done: `graft`'s delete path
 (`src/librarian/tools/graft.rs`) was not separately covered. It needs no new

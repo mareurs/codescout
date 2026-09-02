@@ -1,7 +1,7 @@
 ---
 id: '60b006d8acef1ff9'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: recoverable_error is never written to usage.db — 0 rows in 57k calls, and two queries filter on it'
 tags:
 - cluster/declared-not-wired
@@ -10,7 +10,7 @@ tags:
 - error-handling
 - analyze-usage
 - misleading-instrument
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related: []
@@ -93,27 +93,57 @@ existing enforcement as unmet need.
 
 ## Fix
 
-**Not yet applied.** Two candidate shapes:
+**Fixed on `experiments` at `b6a7330d`**, patch-id
+`805f3f60ff4116cdffcfaa2f6a9f199e567052f1`. The SHA is positional and dies when
+`experiments` is rebased; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick.
 
-1. Classify **after** `route_tool_error`, so the recorder sees the routed
-   disposition rather than the raw `Err`. Smallest change, correct value.
-2. Have `record_content` downcast the error to `RecoverableError` in its `Err`
-   arm and classify on that.
+Shape 2 of the two candidates — the `Err` arm downcasts to `RecoverableError`
+itself, the same downcast `route_tool_error` already performs. Chosen over
+shape 1 (classify after the router) because it needs no call-chain reordering
+and leaves `route_tool_error` the single place that decides the wire
+disposition; the recorder learns the disposition without becoming a second
+authority on it.
 
-Whichever lands, the regression test must traverse `record_content` end to end
-— asserting a stored row's `outcome`, not `classify_content_result`'s return —
-because the existing tests already pass against the broken path.
+**The `Ok` arm is left exactly as it was, and is still unreachable in
+practice.** It emits `recoverable_error` for a tool returning `Ok(content)`
+whose JSON body carries a top-level `error` key, and no live tool does that.
+Removing it was tempting and would have been wrong twice over: it is the
+documented contract for a tool that chooses that shape, and deleting a branch
+because today's corpus does not reach it is how the reachability claim decays
+into a design constraint. Recorded rather than removed.
 
-Consider also whether `err_family` should subsume `outcome`'s error split
-entirely; it is the taxonomy that actually carries information, and a
-three-value column whose third value is dead is a worse instrument than a
-two-value one that admits it.
-
+*Not* addressed here, and left open deliberately: the file's own closing
+question of whether `err_family` should subsume `outcome`'s error split
+entirely. That is a taxonomy decision with its own migration, not a fix to this
+defect — and the three-value column is now honest, which was the thing that
+was false.
 ## Tests added
 
-None yet. See *Fix* for the shape the regression test must take — a test that
-calls the classifier directly reproduces the existing blind spot exactly.
+`record_content_distinguishes_a_recoverable_error_from_a_hard_one`
+(`src/usage/mod.rs`, in `content_tests`).
 
+**It traverses `record_content` end to end and asserts the STORED ROW**, which
+is why it is sited beside the recorder rather than beside the classifier. This
+section's own instruction called for exactly that, and the reason is the shape
+of the bug: the defect was *ordering*, so a unit test of
+`classify_content_result` would have gone green against the broken path — it
+cannot see that `route_tool_error` runs after the write.
+
+**Both directions, in one database, because either alone is monotone.**
+Asserting only the recoverable row passes against a classifier that returns
+`recoverable_error` for everything — the same two-value column, relabelled.
+Asserting only the hard row is what the code already did.
+
+**Mutation-verified both ways:**
+
+| mutation | stored rows |
+|---|---|
+| `outcome = "error"` unconditionally | `[(edit_file, error), (read_file, error)]` — reproduces the original defect exactly |
+| `outcome = "recoverable_error"` unconditionally | `[(edit_file, recoverable_error), (read_file, recoverable_error)]` |
+
+Each failure message names the offending pair rather than reporting a bare
+mismatch.
 ## Workarounds
 
 Use `err_family` rather than `outcome` when distinguishing guard-fired from
@@ -122,12 +152,26 @@ combined".
 
 ## Resume
 
-Read `src/server.rs:1118-1145` — specifically the `Err(e)` arm of
-`record_content` and the position of `route_tool_error` relative to it. Move
-classification after the routing, then write a test that drives a real
-`RecoverableError`-returning tool through `record_content` and asserts the
-stored row reads `recoverable_error`. Confirm it reds before the change.
+**Closed.** The column now separates a guard firing correctly from a hard
+failure, and the two live queries that filter on `recoverable_error` will begin
+returning rows from the next recorded call.
 
+**Historical rows are not backfilled and cannot be.** Every pre-fix
+`recoverable_error` is recorded as `error` and nothing distinguishes it after
+the fact — the discriminating information was never written. Any query over
+`outcome` that spans 2026-09-02 is reading two different taxonomies under one
+column name, and will under-report `recoverable_error` in proportion to how much
+of its window predates this commit. Treat a low count as a boundary artefact
+before treating it as a finding.
+
+**Gate, reported rather than asserted.** fmt clean; clippy `--workspace
+--all-targets --features local-embed -D warnings` exit 0; both lanes report
+exactly one failure and it is not this change —
+`agent::tests::activate_home_with_read_only_true_is_honoured` is absent from
+HEAD and present only in another session's uncommitted diff to
+`src/agent/mod.rs`, a red-first test for the read_only bug they are filing.
+Verified positively (`git show HEAD:` lacks the name, `git diff` adds it), not
+by elimination. Otherwise lean 3297 passed, default 4946 passed.
 ## References
 
 - `src/server.rs:1118-1145` — the ordering
@@ -136,4 +180,3 @@ stored row reads `recoverable_error`. Confirm it reds before the change.
 - `src/usage/db.rs:989`, `:1079` — the two queries on the dead value
 - `src/usage/db.rs:551-603` — `err_family` taxonomy
 - Distribution query: `SELECT outcome, COUNT(*) FROM tool_calls GROUP BY outcome` against `.codescout/usage.db`
-
