@@ -171,13 +171,17 @@ proposes no change to the refusal.
 
 **Level 2 chosen, and the reproduction is what decided it.** Implemented, tested,
 mutation-verified and **committed on a feature branch** — `foreign-index-route-column`,
-SHA `25f6540c`, patch-id `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`. **Not on
+SHA `689ceffb`, patch-id `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`. **Not on
 `experiments`**, so this file is NOT archivable yet; see § *Resume* for the reason and the
 landing step.
 
-Record the patch-id rather than relying on the SHA: `25f6540c` is positional and dies when
-the branch is rebased onto a moving `experiments`, which is the normal case here. The
-patch-id is a content hash of the diff and survives rebase and cherry-pick both.
+Record the patch-id rather than relying on the SHA, and this file has now paid for the
+rule rather than merely citing it. The commit was first made as `25f6540c`; rebasing onto
+a moved `experiments` (`b6a7330d` -> `3151201a`, fifteen peer commits) orphaned it, and the
+fix is now `689ceffb`. **The patch-id did not move** — `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`
+is byte-identical before and after, because it hashes the diff rather than its position.
+So the SHA in this sentence has already been wrong once, in under an hour, exactly as
+`CLAUDE.md` predicts; the patch-id beside it is what stayed resolvable.
 
 Level 1 (replace the asserted cause with an enumeration of the real routes) is **not a
 step toward** level 2, and it is worse than the file originally judged: the enumeration it
@@ -286,7 +290,7 @@ This is what the guard itself prints, and it is correct.
 
 ## Resume
 
-**The fix is committed on `foreign-index-route-column` (`25f6540c`, patch-id
+**The fix is committed on `foreign-index-route-column` (`689ceffb`, patch-id
 `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`). The one remaining step is landing it on
 `experiments`, which is a coordination problem, not an engineering one.**
 
