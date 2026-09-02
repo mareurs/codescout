@@ -106,7 +106,7 @@ mod tests {
     }
 
     /// Site 3 of 4 for the `IC-15` param probe — see
-    /// `crate::librarian::tools::param_probe` for why it compares two calls and what
+    /// `crate::tools::param_probe` for why it compares two calls and what
     /// `accepts_any_json` admits.
     ///
     /// Required params are chosen to fail *after* deserialisation: a well-formed but
@@ -115,9 +115,7 @@ mod tests {
     /// shape and keeps the baseline failing on the id rather than on validation.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{
-            assert_all_honored, assert_required_are_advertised, Spec,
-        };
+        use crate::tools::param_probe::{assert_all_honored, assert_required_are_advertised, Spec};
 
         const NO_SUCH_ID: &str = "0000000000000000";
 

@@ -349,7 +349,7 @@ mod tests {
     /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
     /// than one asserted to fail, why `deny_unknown_fields` is unavailable (measured: adding
     /// it once broke every `artifact(update)` call), and what the `accepts_any_json` escape
-    /// admits — now lives on `crate::librarian::tools::param_probe`, shared with `librarian`,
+    /// admits — now lives on `crate::tools::param_probe`, shared with `librarian`,
     /// `artifact_event` and `artifact_refresh`.
     ///
     /// Required params are type-valid dummies chosen to **fail resolution**: a nonexistent
@@ -359,7 +359,7 @@ mod tests {
     /// differ for the wrong reason.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::assert_all_honored;
+        use crate::tools::param_probe::assert_all_honored;
 
         // 37 labelled keys across the 12 actions as of 2026-08-17. The floor leaves room for
         // the schema to shrink without a false alarm while still catching a break in the
@@ -454,8 +454,8 @@ mod tests {
         m
     }
 
-    fn probe_spec() -> crate::librarian::tools::param_probe::Spec<'static> {
-        crate::librarian::tools::param_probe::Spec {
+    fn probe_spec() -> crate::tools::param_probe::Spec<'static> {
+        crate::tools::param_probe::Spec {
             actions: &PROBE_ACTIONS,
             accepts_any_json: &[],
             required: probe_required,
@@ -463,7 +463,7 @@ mod tests {
     }
 
     /// Site 1 of 4, reverse direction. See
-    /// `crate::librarian::tools::param_probe::assert_required_are_advertised`.
+    /// `crate::tools::param_probe::assert_required_are_advertised`.
     ///
     /// Written before the fix it demanded, and red on first run: `graft` required
     /// `from_id` and `into_id`, and `artifact`'s schema advertised neither, so the action
@@ -471,7 +471,7 @@ mod tests {
     /// a real defect rather than staged by mutating a passing test.
     #[tokio::test]
     async fn every_required_param_is_advertised() {
-        use crate::librarian::tools::param_probe::assert_required_are_advertised;
+        use crate::tools::param_probe::assert_required_are_advertised;
 
         assert_required_are_advertised("artifact", &Artifact.input_schema(), &probe_spec());
     }

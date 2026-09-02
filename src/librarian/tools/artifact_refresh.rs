@@ -86,7 +86,7 @@ mod tests {
     }
 
     /// Site 4 of 4 for the `IC-15` param probe — see
-    /// `crate::librarian::tools::param_probe`.
+    /// `crate::tools::param_probe`.
     ///
     /// `gather` needs an id; a well-formed but nonexistent one keeps the failure after
     /// deserialisation. `list_stale` needs nothing, so its baseline succeeds — which is fine
@@ -94,9 +94,7 @@ mod tests {
     /// still diverges, because the ill-typed value fails the type check on the way in.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{
-            assert_all_honored, assert_required_are_advertised, Spec,
-        };
+        use crate::tools::param_probe::{assert_all_honored, assert_required_are_advertised, Spec};
 
         fn required(action: &str) -> serde_json::Map<String, Value> {
             let mut m = serde_json::Map::new();

@@ -275,15 +275,15 @@ impl Tool for Library {
                 },
                 "path": {
                     "type": "string",
-                    "description": "For action='register': directory path of the library."
+                    "description": "register: directory path of the library."
                 },
                 "name": {
                     "type": "string",
-                    "description": "For action='register': override the auto-detected library name."
+                    "description": "register: override the auto-detected library name."
                 },
                 "language": {
                     "type": "string",
-                    "description": "For action='register': override the auto-detected language."
+                    "description": "register: override the auto-detected language."
                 }
             },
             "required": ["action"]
@@ -602,5 +602,67 @@ mod tests {
         assert!(Library.is_write(&json!({ "action": "register" })));
         assert!(!Library.is_write(&json!({ "action": "list" })));
         assert!(!Library.is_write(&json!({})));
+    }
+
+    /// Site 5 for the `IC-15` param probe, and the first outside `src/librarian/` — see
+    /// `crate::tools::param_probe` for why it compares two calls and what `accepts_any_json`
+    /// admits.
+    ///
+    /// `library` sat on that probe's Owed list as one of three unprobed multi-action tools. Two
+    /// things had to change first, both **measured 2026-09-02 rather than inferred from the
+    /// list**:
+    ///
+    /// - Its three labelled keys read `For action='register': …`. `sweep` parses a label as
+    ///   `desc.split(':').next()`, which yields `For action='register'` — matching no action, so
+    ///   every key was skipped and the probe would have passed **having checked zero keys**.
+    ///   Relabelled to `register: …`. `floor` catches that convention breaking wholesale; it
+    ///   cannot catch one key losing its label, so this was invisible in the direction that
+    ///   matters.
+    /// - `name` and `language` are read `input["name"].as_str()` — an untyped accessor, where
+    ///   every wrong type reads as *absent*. No ill-typed value exists for them, so the probe
+    ///   cannot speak for either and they are declared in `accepts_any_json`: an admission, not
+    ///   a pass. `path` goes through `require_str_param_or_hint`, which type-checks, so it is
+    ///   genuinely probeable.
+    ///
+    /// **Hence the floor is 1, not 3, and 1 is the honest number.** A floor of 0 would have
+    /// reproduced the zero-keys defect at this new site while the shared helper stayed correct —
+    /// the reason `floor` is per-call-site rather than a constant inside `assert_all_honored`.
+    #[tokio::test]
+    async fn every_action_labelled_schema_key_is_honored_by_that_action() {
+        use crate::tools::param_probe::{assert_all_honored, assert_required_are_advertised, Spec};
+
+        fn required(action: &str) -> serde_json::Map<String, Value> {
+            let mut m = serde_json::Map::new();
+            if action == "register" {
+                // Type-valid, and chosen to fail resolution *after* deserialisation: the path
+                // does not exist, so the baseline dies in `RegisterLibrary`'s path check rather
+                // than in serde, and a deser error is visibly different from it. Reusing the
+                // literal from `register_library_fails_for_nonexistent_path`, which establishes
+                // that this input does fail.
+                m.insert("path".into(), json!("/nonexistent/path/to/lib"));
+            }
+            m
+        }
+
+        let spec = Spec {
+            actions: &["list", "register"],
+            accepts_any_json: &["name", "language"],
+            required,
+        };
+
+        assert_required_are_advertised("library", &Library.input_schema(), &spec);
+        assert_all_honored(
+            "library",
+            &Library.input_schema(),
+            &spec,
+            // Measured, not chosen: raising this to 99 reports "covered 1". `path` is the only
+            // type-checked key of the three labelled `register:` — `name` and `language` are
+            // untyped accessors and sit in `accepts_any_json`. If this ever reads 0 the relabel
+            // has been undone; if it reads 3 the two accessors have been given real types and
+            // should leave `accepts_any_json`.
+            1,
+            |args| async move { Library.call(args, &project_ctx().await).await },
+        )
+        .await;
     }
 }
