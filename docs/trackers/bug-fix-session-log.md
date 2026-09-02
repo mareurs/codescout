@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 98
-entry_high_water_W: 94
+entry_high_water_W: 95
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -154,6 +154,7 @@ entry_high_water_W: 94
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-95 | 2026-09-02 | high | **Before filing a bug against a tool this repo builds, compare the running binary's mtime to the commit time of the fix that would explain the finding** — `stat -c '%y' target/debug/codescout` against `git log -1 --format='%cd' <sha>`. Two commands, no build. `doctor` reported 5 files as `non_terminal_status_with_fix_anchor`; four were artifacts of a binary **141 seconds older than `36cb17ed`**, the commit that fixed exactly that misreading. The report was complete, self-consistent and reproducible on that binary — and wrong. Confirmed by rebuild: the same check now reports **0**, and the zero discriminates, because the fifth file's anchor genuinely is under `## Fix` and would still fire had its `unverified:` discharge (`dde26886`) not also worked. A mechanism, not a policy: the trigger is a category you already know you are in. |
 | W-94 | 2026-09-02 | high | **Get a claim checked by a peer whose SAMPLE differs** — different scope, different sample *time*, or different instrument; not a more careful reviewer, a differently-positioned one. Five errors in one ~5h session across seven co-located sessions, **none caught by its author**, two already committed: a stale compiler sample (`E0603` vs a peer's `E0425` on the same tree ~1min apart, no overlap), `F-97`, a committed-and-falsified count remedy, `F-98`, and a shared-blind-spot corroboration made **twice** — the second time 90 minutes after publishing the rule against it. Every correction came from the party who would have benefited from the error standing. The promotable form is **not** "get peer review" — that is a policy, and it failed against an author who had just written it down — but **state the scope and unit a claim was measured over**, so a reader can tell whether a second instrument is independent. |
 | W-93 | 2026-09-01 | high | A green fixture suite met real data and the correction was to the QUESTION, not the code — run the instrument against the corpus before believing its design, not merely before shipping it | `file-provenance.py` passed 34/34 fixtures, then answered its own motivating file with **fifteen** sessions, every one a genuine lifetime author. Not a bug: "who has ever written this?" is answerable and useless, while "this is dirty NOW and reds my build, is it mine?" is bounded by the path's last commit. No fixture could pose it — each had one write in an empty timeline, which is what a fixture author naturally writes. Three assertions in the same suite also passed VACUOUSLY, each differently: a marker matched its own fixture path name (`src/undated.rs`), a case was answered by an earlier section's write to the same path (`docs/new.md`), and a negative passed because its fixture source was out-of-tree and discarded before any logic ran | validated |
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
@@ -9735,6 +9736,39 @@ Instance count is a fact about this session. The mechanism claim — that differ
 **Rests on:** CLAUDE.md § *Observer Blindness* position 2 (the reviewer who does not share the author's context) and its independence rule (two instruments agreeing is evidence only if their scopes differ).
 
 **Fix idea / Pointer:** The cheap version, available in advance: before citing a confirming result, ask what property the two instruments share. If they share the one that would produce the error, their agreement is one blind spot counted twice.
+
+## W-95 — Compare the running binary's mtime to the fix's commit time before filing against your own tool
+
+**Observed:** 2026-09-02, working a 5-item `doctor` worklist in a repo whose MCP server *is* the binary under development.
+
+**Pattern:** Before filing a bug against a tool this repo builds, compare the running binary's mtime to the commit time of any fix that would explain the finding. Two commands, no build:
+
+```
+stat -c '%y' target/debug/codescout          # 11:05:41
+git log -1 --format='%cd' <suspect-fix-sha>  # 11:08:02
+```
+
+If the binary predates the fix, the finding is a **stale-instrument artifact**, not a defect.
+
+**Counterfactual — concrete, and it was three minutes wide.** `doctor` reported 5 bug files as `non_terminal_status_with_fix_anchor`. Four had their patch-id under `## References` / `## Symptom` / a sub-section rather than `## Fix`. Reading the check at HEAD showed it scans `declared_patch_ids(&fix_section_body(&content))` — Fix-section only — which is exactly `36cb17ed`, *"a patch-id outside a Fix section is a citation, not an anchor"*. That landed at **11:08:02**; the running binary's mtime was **11:05:41**. **The report was 141 seconds older than its own fix.** Without the mtime check I would have filed a bug report against an already-closed bug, citing four files as evidence — and the report would have been internally consistent, reproducible on my binary, and wrong.
+
+**Confirmed by rebuild, and the confirmation discriminates.** After `cargo rb` (binary mtime 11:29:19, now newer than the fix) the same check reports **0**. That zero is not merely agreeable: the fifth file's patch-id genuinely *is* under `## Fix`, so it would still fire unless the `unverified:` discharge (`dde26886`) had also worked. One hypothesis failing would have shown as 1, not 0. Publishing the confirmation rather than absorbing it, per CLAUDE.md § *Testing Discipline* — a re-derivation that confirms is a denominator.
+
+**Why this is a mechanism and not a policy:** it does not require noticing anything. The trigger is "about to file against a tool this repo builds", which is a category you already know you are in, and the check is two commands with no build step. Contrast the failure it prevents, which is invisible from the inside — a stale binary produces a *complete, self-consistent, reproducible* report.
+
+**Scope:** any repo where the agent's own tooling is the artifact under development. Here that is every codescout MCP tool. The same shape reaches `cargo rb` + `/mcp` generally: a tool's behaviour is a fact about the *running build*, never about `HEAD`.
+
+**Impact:** high — prevents a wrong bug report against a fixed defect, which costs the fixer's time and pollutes a triage query this repo treats as load-bearing.
+
+**Promote-when:** a second instance where a rebuild changes a tool's *reported findings* (not just its features). At two datapoints this belongs in CLAUDE.md beside the `cargo rb` + `/mcp` instruction, which today says how to rebuild and not when a stale build invalidates a measurement.
+
+**Status:** validated — one instance, caught before filing, confirmed by rebuild with a discriminating zero.
+
+**Valid:** dated 2026-09-02
+
+The 141-second margin is an accident of this session. The mechanism does not depend on it: any margin at all produces the same class of wrong report.
+
+**Rests on:** `F-97` (an instrument's result reported under another instrument's name) and `W-94` — this is the same family with the *time* axis rather than the scope axis, and unlike those it has a cheap standing check.
 
 ## Template for new entries
 
