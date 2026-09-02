@@ -1154,6 +1154,48 @@ git -C /home/marius/work/claude/codescout commit -m "fix(librarian): embed every
 
 ## Task 7: Write vectors to `artifact_vec_v2`, and fan out the delete cascade
 
+> **DONE 2026-09-02 at `04444ba2`** by session `ffb95976`. Outcome, including the three
+> ways the task as written did not survive contact with the code:
+>
+> | | |
+> |---|---|
+> | Shipped | `write_embeddings_v2`, `delete_chunk_vectors`, all three writers re-pointed, `SqliteVecArtifactStore::delete` reaching v2, the Qdrant grain guard |
+> | Dropped | the `gc.rs` edit — redundant *and* aimed at a non-delete site; see the correction in § *Step 3* |
+> | Moved | Step 1b's hydration test → Task 8 Step 1 |
+> | Mutation | run and **killed** — `chunk_ix = 0` produced `must report every vector it removed, left: 1, right: 3`, an assertion panic naming the test, not a compile error. Reverted, diff clean |
+>
+> **The plan's own code failed to compile, twice over.** `delete_chunk_vectors` as written
+> returns the `collect()` from a block, keeping a temporary alive past `stmt`'s drop
+> (E0597) — the same class as Task 6's `.into_iter().next()`, and the second time this plan
+> has shipped Rust that does not build. And `write_embeddings_v2` claims to mirror
+> `write_embeddings_with`'s dim guard while omitting one of its three parts: the
+> **intra-batch** consistency loop, which exists for the F-6b case (an embedder returning a
+> 1-element error sentinel inside an otherwise good batch). Added, with a test.
+>
+> **An existing test was the independent detector.** `concurrent_embed_queue_completes_all`
+> counted rows in `artifact_vec` and went red on the re-point — it had been pinning
+> `index_repo`'s target table without saying so. It now asserts `v2 == 16` **and**
+> `v1 == 0`, because the first alone is monotone under a writer that writes *both* tables,
+> which is exactly what a half-finished re-point looks like.
+>
+> **Step 3a's exit criterion is NOT satisfiable in Task 7, and that is correct.** It asks
+> that `grep artifact_vec` return only v1-migration paths and tests; `SqliteVecArtifactStore::knn`
+> still reads v1, and moving it is **Task 8's** by name (that task's Files list says
+> *"`knn` reads `artifact_vec_v2`"*). Re-check the criterion at the end of Task 8, not here.
+>
+> **Interim state, stated plainly: artifact semantic search stays broken until Task 8.** It
+> was already broken before this task — Task 6 re-keyed the queue to chunk ids and
+> `find_by_ids_filtered` hydrates against the `artifact` table — and Task 7 moves the data
+> to the right table without closing the loop. Writers now target v2, `knn` still reads v1,
+> and hydration still cannot map a chunk id to its artifact. **Task 8 closes all three.**
+>
+> **A guard no gate compiles.** The Qdrant guard and its test are `cfg(feature = "server-stack")`,
+> which is not in `default`, so **no lane of the four-command gate builds either one** — not
+> the lean lane, not the default lane, and not `clippy --features local-embed` (which adds to
+> default rather than replacing it). Verified separately: `cargo test --features server-stack
+> --lib librarian::artifact_store` → 6 passed. Recorded rather than fixed, because widening
+> the gate is a change to a sentence `CLAUDE.md` pins byte-for-byte.
+
 **AMENDED 2026-09-02 — this task originally produced `write_embeddings_v2` and
 never called it.** Verified: the only production call of `write_embeddings_v2`
 anywhere in this plan was Task 11's one-shot backfill, and Task 11 is blocked on
@@ -1200,7 +1242,7 @@ them. Resolve each site by SYMBOL, not by line — `symbols(name=…, include_bo
   `artifact_vec` must return only v1-migration and v1-test call sites — a
   production write to `artifact_vec` is a defect, not a leftover.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -1232,7 +1274,7 @@ fn write_embeddings_v2_still_refuses_a_dim_mismatch() {
 }
 ```
 
-- [ ] **Step 1b: The cross-seam test — RETARGETED 2026-09-02**
+- [x] **Step 1b: The cross-seam test — RETARGETED 2026-09-02**
 
 > **CORRECTION, found by scouting before implementing: the test below cannot go green in Task 7, and this step asserted that it would.** It requires a chunk id to *hydrate through `semantic_find`*. Hydration means mapping a chunk id to its artifact, and `src/librarian/catalog/find.rs` contains **zero** references to `artifact_chunk` — `find_by_ids_filtered` looks candidate ids up in the `artifact` table directly. **Task 8 owns that work by name** (`semantic_find`, `SemanticHit`, and `knn` reading `artifact_vec_v2`), so no edit available inside Task 7 turns this red green.
 >
@@ -1349,7 +1391,7 @@ async fn the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1() {
 
 **Expected RED before Step 3a:** the v1 count is non-zero, because `SqliteVecArtifactStore::upsert` still delegates to `write_embeddings`. That red names *this task's* defect, and Step 3a is what turns it green — which is the property the relocated test did not have.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib deleting_an_artifact_removes_all_its_chunk_vectors`
 Expected: FAIL — `cannot find function write_embeddings_v2`
@@ -1360,7 +1402,7 @@ Expected: FAIL — the page is empty, because the chunk ids were written to
 table. **Record the observed failure text.** "Empty page" and "function not
 found" are different reds; only the first one is evidence about this defect.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add next to `write_embeddings_with` in `indexer.rs`:
 
@@ -1433,7 +1475,7 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 >
 > **A live bug was found beside this and is filed, NOT fixed here.** `apply_rehome` updates `artifact.id` and never touches `artifact_chunk.artifact_id` (zero `artifact_chunk` references in `gc.rs`); the FK carries no `ON UPDATE` clause, so it is `NO ACTION`, and `PRAGMA defer_foreign_keys = ON` (`gc.rs:453`) defers that check to COMMIT rather than skipping it. Out of scope for Task 7.
 
-- [ ] **Step 3a: Re-point the production writers — the step the original plan omitted**
+- [x] **Step 3a: Re-point the production writers — the step the original plan omitted**
 
 Without this, `write_embeddings_v2` is dead code and the branch ships the
 defect. There are **three** production sites that write a chunk id into the
@@ -1462,7 +1504,7 @@ for `artifact_vec\b` across `src/` must return only v1-migration paths
 `migrate_vec_id`) and test modules. A production write to `artifact_vec` after
 this step is a defect, not a leftover.
 
-- [ ] **Step 3b: Guard `QdrantArtifactStore::upsert` — refuse a grain it cannot honour**
+- [x] **Step 3b: Guard `QdrantArtifactStore::upsert` — refuse a grain it cannot honour**
 
 Chunk-grain Qdrant is **deferred** (see § *Deferred*), and deferral is only
 honest if the deferred path *refuses* the input it cannot handle. Today it
@@ -1535,17 +1577,17 @@ That last parenthesis is the load-bearing half: without it the accept-direction
 assertion is satisfied by *any* error, including the guard wrongly firing, and
 the test is monotone in the direction it exists to check.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib librarian::indexer ; cargo test --lib librarian::catalog::gc`
 Expected: PASS.
 
-- [ ] **Step 5: Mutation check**
+- [x] **Step 5: Mutation check**
 
 Change `delete_chunk_vectors`'s query to `... WHERE artifact_id = ?1 AND chunk_ix = 0`.
 **Expected: `deleting_an_artifact_removes_all_its_chunk_vectors_not_only_the_first` FAILS.** Revert.
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit**
 
 ```bash
 cargo fmt
