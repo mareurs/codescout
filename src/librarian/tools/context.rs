@@ -685,7 +685,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // One chunk per artifact. `context` packs a NEIGHBOURHOOD — its
                 // value is breadth across artifacts, so several chunks of one
                 // ledger crowding out another artifact is the regression to
-                // avoid. Task 9 formalises this contract.
+                // avoid. Pinned by
+                // `context_packs_distinct_artifacts_never_two_chunks_of_one`,
+                // which at `2` packs one ledger twice and at `51` fills all 50
+                // candidate slots with a single artifact's chunks.
                 1,
                 51,
                 0,
@@ -1051,25 +1054,172 @@ mod tests {
         }
     }
 
-    fn mk_ctx(tmp_root: std::path::PathBuf, cat: Catalog) -> ToolContext {
-        // Realign rows whose `sample_row` placeholder abs_path is `/r/{rel}`
-        // to point under `tmp_root`, so files written under tmp_root resolve.
-        // Forward-slash — the catalog's abs_path column is a RepoPath and every
-        // LIKE query against it assumes `/`. A native-separator prefix here would
-        // write backslash paths into the catalog on Windows.
-        let new_prefix = format!("{}/", crate::util::fs::to_forward_slash(&tmp_root));
+    /// Realign rows whose `sample_row` placeholder abs_path is `/r/{rel}` to point
+    /// under `tmp_root`, so files written under `tmp_root` resolve.
+    ///
+    /// Forward-slash — the catalog's abs_path column is a RepoPath and every
+    /// LIKE query against it assumes `/`. A native-separator prefix here would
+    /// write backslash paths into the catalog on Windows.
+    ///
+    /// LOAD-BEARING, and hoisted out of `mk_ctx` so a fixture that needs a
+    /// store-backed context can reuse it rather than re-derive it: the packing
+    /// loop reads every candidate's body off DISK and `continue`s past a path it
+    /// cannot open. An unrealigned row is therefore skipped in SILENCE —
+    /// indistinguishable from "the search matched nothing".
+    fn realign_abs_paths(cat: &Catalog, tmp_root: &std::path::Path) {
+        let new_prefix = format!("{}/", crate::util::fs::to_forward_slash(tmp_root));
         cat.conn
             .execute(
                 "UPDATE artifact SET abs_path = REPLACE(abs_path, '/r/', ?1)",
                 rusqlite::params![new_prefix],
             )
             .unwrap();
+    }
+
+    fn mk_ctx(tmp_root: std::path::PathBuf, cat: Catalog) -> ToolContext {
+        realign_abs_paths(&cat, &tmp_root);
         TestToolContextBuilder::new(cat)
             .with_root(Root {
                 name: "r".into(),
                 path: tmp_root,
             })
             .build()
+    }
+
+    /// Returns one fixed vector for every text, so the fixture's KNN ranking is a
+    /// property of the FIXTURE rather than of whichever embedding model happens to
+    /// be configured.
+    struct ConstEmbedder(Vec<f32>);
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for ConstEmbedder {
+        fn dimensions(&self) -> usize {
+            self.0.len()
+        }
+        async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+            Ok(texts.iter().map(|_| self.0.clone()).collect())
+        }
+    }
+
+    /// `context` packs a NEIGHBOURHOOD, so its unit is the ARTIFACT — but the
+    /// vector store has been chunk-keyed since Task 7 and `semantic_find` returns
+    /// one hit per CHUNK. The `max_per_artifact = 1` at the call site is the only
+    /// thing keeping the two grains apart; this pins it.
+    ///
+    /// THREE FIXTURE DETAILS ARE LOAD-BEARING. Remove any one and what is left
+    /// passes while asserting nothing:
+    ///
+    /// 1. **`TOPIC` occurs in no artifact's title or topic.** When the semantic
+    ///    path is unavailable — no embedder, no store, or the hoisted block above
+    ///    stops being reached — the topic branch falls back to a
+    ///    `title|topic contains` filter. That fallback is artifact-grain, so it
+    ///    satisfies the distinctness assertion below while exercising none of the
+    ///    code under test. Because `TOPIC` matches neither field the fallback
+    ///    returns ZERO rows, which makes a skipped semantic path fail the
+    ///    "note present" assertion instead of passing in silence.
+    /// 2. **The ledger carries more chunks than `context`'s own 50-candidate
+    ///    truncation** (asserted below, not merely intended). With fewer, dropping
+    ///    the cap would only repeat the ledger; past 50 it EVICTS the note
+    ///    entirely, which is the harm the cap exists to prevent.
+    /// 3. **Every ledger chunk shares one vector and the note's is orthogonal**, so
+    ///    the ledger owns the head of the KNN list by construction rather than by
+    ///    luck.
+    ///
+    /// The two assertions catch different mutations and NEITHER SUBSUMES THE
+    /// OTHER: at `max_per_artifact = 2` the note still fits and only distinctness
+    /// fails; at `= 51` the ledger's chunks fill the page and only the note's
+    /// absence fails.
+    #[tokio::test]
+    async fn context_packs_distinct_artifacts_never_two_chunks_of_one() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+        use crate::librarian::catalog::chunk;
+
+        // Substring of neither title nor topic of either artifact — see (1).
+        const TOPIC: &str = "zzz-matches-no-title-or-topic-zzz";
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // 60 `####` entries → 61 chunks at the librarian's heading-depth-6 grain.
+        let mut ledger = String::from("# Gate Ledger\n\nintro\n\n");
+        for i in 1..=60 {
+            ledger.push_str(&format!("#### E-{i}\n\nentry {i} body\n\n"));
+        }
+        const NOTE: &str = "# Note\n\nnote body\n";
+        std::fs::write(root.join("ledger.md"), &ledger).unwrap();
+        std::fs::write(root.join("note.md"), NOTE).unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/ledger.md", "r", "ledger.md", "Gate Ledger", None),
+        )
+        .unwrap();
+        artifact::upsert(&cat, &sample_row("r/note.md", "r", "note.md", "Note", None)).unwrap();
+        realign_abs_paths(&cat, root);
+
+        let store = InMemoryArtifactStore::default();
+        let ledger_chunks = chunk::replace_chunks(
+            &cat,
+            "r/ledger.md",
+            &chunk::build_chunks("r/ledger.md", &ledger, 2048),
+        )
+        .unwrap();
+        assert!(
+            ledger_chunks.len() > 50,
+            "fixture must exceed context's 50-candidate truncation or (2) does not \
+             hold and this test stops discriminating; got {}",
+            ledger_chunks.len()
+        );
+        for c in &ledger_chunks {
+            store.upsert("p", &c.chunk_id, &[1.0, 0.0]).await.unwrap();
+        }
+        for c in &chunk::replace_chunks(
+            &cat,
+            "r/note.md",
+            &chunk::build_chunks("r/note.md", NOTE, 2048),
+        )
+        .unwrap()
+        {
+            store.upsert("p", &c.chunk_id, &[0.0, 1.0]).await.unwrap();
+        }
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_embedding(Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(Arc::new(ConstEmbedder(vec![
+                    1.0, 0.0,
+                ]))),
+            ))
+            .with_artifact_store(Arc::new(store))
+            .build();
+
+        let v = call(&ctx, json!({"topic": TOPIC, "max_tokens": 5000}))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str().unwrap())
+            .collect();
+
+        assert!(
+            ids.contains(&"r/note.md"),
+            "the ledger's chunks evicted the other artifact — context lost artifact \
+             grain (or the semantic path never ran; see (1)): {ids:?}"
+        );
+        let mut distinct = ids.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            ids.len(),
+            "context packed one artifact's body twice, once per chunk: {ids:?}"
+        );
     }
 
     #[tokio::test]
