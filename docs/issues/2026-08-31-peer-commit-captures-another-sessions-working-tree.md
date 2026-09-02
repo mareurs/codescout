@@ -337,6 +337,24 @@ The *expectation* is what makes it a signal — the number is meaningless withou
 
 **Not repaired, per the standing rule** — reported to `f13f8169` instead, and the index row committed separately by `ffb95976`. The mislabelled attribution stands as evidence rather than being rewritten away.
 
+
+### The same commit captured a STAGED file from a third session — which eliminates a route
+
+Added after the fact, from `codescout-dd` (sessionId `c45dd5ef`), who was captured by **the same commit** and said so unprompted. Their `docs/trackers/issue-clusters.md` content was **staged** (`git status --porcelain` showed `MM`, confirmed one tool call before the loss); mine was **unstaged**. One commit took both.
+
+That pair discriminates in a way neither observation does alone:
+
+| route | explains a STAGED capture | explains an UNSTAGED capture |
+|---|---|---|
+| bare index commit (`git commit`, no pathspec) | yes | **no** — eliminated |
+| pathspec commit (reads the working tree) | yes | yes — but see below |
+| `git add <paths>` then commit | yes | yes |
+
+So `5c353d8f` **read the working tree** at those paths; it was not a bare index commit. The pathspec route is *additionally* constrained: the `unreviewed-content` hook has been installed since `4e5f060e` (2026-08-31 23:52:42), two days earlier, and refuses precisely a pathspec commit carrying unstaged content — so that route requires `--no-verify`, which is in live use by at least one session and therefore not dismissible. Between `git add`-then-commit and a `--no-verify` pathspec commit, the evidence available from outside does not distinguish, and neither captured session should guess: the capturing session can settle it in one sentence.
+
+**The corollary is the part worth keeping, because it inverts the obvious remedy.** `codescout-dd`'s discipline is the recommended one — stage explicitly, then commit the index, never a pathspec. It did not protect them, and could not have: the loss came from *another* session's action on a shared index. Worse, **staging is what satisfies the hook and `git add` of a path another session is writing is also the capture vector**, so captured content arrives in the index looking reviewed. The hook does not prevent the capture; it converts an invisible one into a visible one, and only for a party who actually performs the `git diff --cached` read. That step is unenforceable — § *Loudness is a property of a PATH*: the alarm reaches an observer who must choose to look.
+
+**Method note.** This narrowing exists only because two sessions' observations had **different scopes** — one staged, one unstaged. Two sessions reporting the same capture state would have agreed and narrowed nothing, and the agreement would have been indistinguishable from corroboration at the point of use. Check independence, not agreement.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
