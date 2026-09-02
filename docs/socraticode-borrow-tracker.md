@@ -28,6 +28,10 @@ Features worth porting from `../socraticode` to codescout. One at a time.
 
 **A — Code graph + blast radius.** Queued. L3 ✅ unblocks this. Next: brainstorm design (LSP-backed, sqlite-cached, bidirectional `call_graph`).
 ## L3 cleanup follow-ups
+<!-- audit-doc-refs:ignore-refs `src/tools/usage.rs` — named inside a backlog item ABOUT
+     that file's test fixtures. The file was deleted by 0f28fc28 ("delete three unreachable
+     tools"), which is what makes the follow-up moot rather than what makes it a stale
+     citation. Scoped by token so the rest of this section's refs stay audited. -->
 
 - **Internal helper renames** — `format_find_references`, `run_find_references`, `format_goto_definition`, `format_hover`, and tests like `find_references_format_compact_shows_count` / `find_referencing_symbols_schema_includes_scope` still carry old tool-concept names. Private only; no MCP impact. Cheap end-of-L3 cleanup commit after Task 16.
 - **`symbol_at` minor follow-ups** — (1) add tests for `fields` validation paths (unknown-string, non-string-entry, empty-array, non-array); (2) extract shared col-resolution into `resolve_col(source_line, col_param, identifier, fallback)` to remove ~30 lines of duplication between `fetch_definition` / `fetch_hover`; (3) replace 5-tuple return of `read_position_inputs` with a `PositionInputs` struct.

@@ -132,6 +132,12 @@ word, then heading forms) before calling it dangling, on rule 3's own terms.
 ---
 
 ## Standalone scripts
+<!-- audit-doc-refs:ignore-refs `src/serve` `src/lsp/m` — these two are QUOTED EXAMPLES of
+     truncated paths, in the sentence documenting the 200-char `args` cut that produces
+     them. They are meant not to resolve; that is the point being made. Scoped by token,
+     not by section, because this section carries 27 real refs and a bare
+     `audit-doc-refs:ignore` would silence every one of them — in the document whose whole
+     job is telling a reader which instrument to trust. -->
 
 | Probe | Measures | Invoke | Know before you run it |
 |---|---|---|---|

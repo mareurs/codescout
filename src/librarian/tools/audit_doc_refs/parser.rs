@@ -18,20 +18,30 @@ pub fn parse_refs(
 
     let mut in_code_block = false;
     // Set by an `<!-- audit-doc-refs:ignore -->` comment, cleared at the next
-    // heading of any level. See `is_ignore_marker` for why the scope is a section.
-    let mut suppressed = false;
+    // heading of any level. See `Suppression` for why the scope is a section, and
+    // for the `ignore-refs` form that names individual tokens instead.
+    let mut suppression = Suppression::None;
     let parser = Parser::new_ext(text, opts).into_offset_iter();
     for (event, span) in parser {
         let line = byte_offset_to_line(text, span.start);
         match event {
-            Event::Html(html) | Event::InlineHtml(html) if is_ignore_marker(html.as_ref()) => {
-                suppressed = true;
+            Event::Html(html) | Event::InlineHtml(html)
+                if parse_ignore_marker(html.as_ref()).is_some() =>
+            {
+                // `is_some()` was checked in the guard, so this cannot re-enter the
+                // `None` arm and clear an active suppression.
+                suppression = parse_ignore_marker(html.as_ref()).unwrap_or(Suppression::None);
             }
-            Event::Start(Tag::Heading { .. }) => suppressed = false,
+            Event::Start(Tag::Heading { .. }) => suppression = Suppression::None,
             // A span that renders a code span literally is showing what a
             // reference looks like, not making one. See `is_markup_display`.
-            Event::Code(content) if !suppressed && !is_markup_display(content.as_ref()) => {
+            Event::Code(content)
+                if !suppression.blocks_everything() && !is_markup_display(content.as_ref()) =>
+            {
                 for raw in tokenize_code_span(content.as_ref()) {
+                    if suppression.blocks(raw) {
+                        continue;
+                    }
                     if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
@@ -45,8 +55,11 @@ pub fn parse_refs(
             }
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
-            Event::Text(content) if in_code_block && !suppressed => {
+            Event::Text(content) if in_code_block && !suppression.blocks_everything() => {
                 for raw in tokenize_code_span(content.as_ref()) {
+                    if suppression.blocks(raw) {
+                        continue;
+                    }
                     if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
@@ -64,7 +77,7 @@ pub fn parse_refs(
             // author intent to point somewhere real, which is why link targets are
             // otherwise unfiltered here.
             Event::Start(Tag::Link { dest_url, .. })
-                if !suppressed && !is_placeholder(dest_url.as_ref()) =>
+                if !suppression.blocks(dest_url.as_ref()) && !is_placeholder(dest_url.as_ref()) =>
             {
                 candidates.push(RefCandidate {
                     md_file: md_file.clone(),
@@ -424,28 +437,103 @@ fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
 fn is_markup_display(content: &str) -> bool {
     content.contains('`')
 }
-/// Whether an HTML comment is the audit's suppression marker.
+/// True when an HTML comment carries the suppression marker.
 ///
-/// Scope is **from the marker to the next heading of any level** — a section, not
-/// a line and not a file. Three reasons that granularity and not another:
+/// Deliberately a `contains`, not an exact match: the marker is written inside a
+/// comment that usually explains WHY, and requiring an exact string would force the
+/// reason to live somewhere the next reader will not find it.
 ///
-/// * A line-scoped marker cannot be expressed where it is most needed. Inserting
-///   an HTML comment between the rows of a markdown table breaks the table, and
-///   example refs cluster in tables (the audit's own manual page documents each
-///   `ref_kind` with one).
-/// * A file-scoped marker is too blunt for this repo. The pages carrying
-///   fictional teaching paths also cite real codescout modules, and that is
-///   precisely where drift costs a reader most.
-/// * Examples cluster by section anyway, so the section is the unit an author is
-///   already thinking in.
-///
-/// Use it for a run of deliberately fictional paths (`src/services/auth.rs` in a
-/// walkthrough), for user-created or runtime files the docs correctly name but a
-/// clean checkout will not have, and for configuration *values* that merely look
-/// like paths. Do not use it to silence a reference you have not checked — the
+/// **Scope is the enclosing section, not the file** — suppression clears at the next
+/// heading of any level, so a marker cannot leak past the passage it was reasoned
+/// about. Use it for text that is reference-SHAPED but is not a reference: a removal
+/// notice naming the path it removed, an example of what a citation looks like, a
+/// quoted truncation. Do not use it to silence a reference you have not checked — the
 /// whole value of the gate is that an unchecked stale path is loud.
 fn is_ignore_marker(html: &str) -> bool {
     html.contains("audit-doc-refs:ignore")
+}
+
+/// Which refs a marker suppresses.
+///
+/// The bare `audit-doc-refs:ignore` form silences an entire section, which is the
+/// only granularity that existed until 2026-09-02 and is too coarse for the case that
+/// motivated this: `docs/PROBES.md` names two truncated paths as *examples of
+/// truncation*, inside a section carrying **27** real refs. Silencing the section to
+/// clear two false positives would leave 25 genuine citations unguarded in the one
+/// document whose job is telling a reader which instrument to trust — so the coarse
+/// form is not merely inconvenient there, it is the wrong trade.
+///
+/// The scoped form `audit-doc-refs:ignore-refs` names its targets in **backticks**:
+///
+/// ```text
+/// <!-- audit-doc-refs:ignore-refs `src/serve` `src/lsp/m` — truncation examples -->
+/// ```
+///
+/// Backticks are the delimiter rather than whitespace or commas because the marker
+/// body also carries prose, and a whitespace split would read the explanation as
+/// targets. That is this very parser's own defect class one level up: a grammar over
+/// a namespace owes a way to say which token it means, and free prose beside a
+/// token list makes the two indistinguishable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Suppression {
+    /// No marker in scope.
+    None,
+    /// Bare `audit-doc-refs:ignore` — the whole section.
+    All,
+    /// `audit-doc-refs:ignore-refs` with backticked targets — only these raw refs.
+    /// An empty list is unreachable: `parse_ignore_marker` degrades to `All` rather
+    /// than silently suppressing nothing, because a marker someone wrote and that
+    /// matches no ref is a typo, and failing open there would hide the finding they
+    /// were trying to annotate.
+    Only(Vec<String>),
+}
+
+impl Suppression {
+    /// Whether this suppression hides `raw`.
+    fn blocks(&self, raw: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::Only(targets) => targets.iter().any(|t| t == raw),
+        }
+    }
+
+    /// Whether the whole event can be skipped without inspecting its tokens.
+    ///
+    /// Kept separate from [`Self::blocks`] so the `Only` case still walks its tokens:
+    /// collapsing the two would make a scoped marker behave like a bare one.
+    fn blocks_everything(&self) -> bool {
+        matches!(self, Self::All)
+    }
+}
+
+/// Read a marker comment into the suppression it declares.
+///
+/// Returns `None` for a comment that is not a marker at all, so the caller can leave
+/// the current suppression untouched rather than clearing it.
+fn parse_ignore_marker(html: &str) -> Option<Suppression> {
+    if !is_ignore_marker(html) {
+        return None;
+    }
+    if !html.contains("audit-doc-refs:ignore-refs") {
+        return Some(Suppression::All);
+    }
+    let targets: Vec<String> = backtick_re()
+        .captures_iter(html)
+        .map(|c| c[1].to_string())
+        .collect();
+    // A scoped marker naming nothing is a typo, not an instruction to suppress
+    // nothing — degrade to the coarse form so the author sees the effect they asked
+    // for rather than a silently inert comment.
+    if targets.is_empty() {
+        return Some(Suppression::All);
+    }
+    Some(Suppression::Only(targets))
+}
+
+fn backtick_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"`([^`]+)`").unwrap())
 }
 
 /// Trim trailing sentence punctuation (period, brackets, braces) that often
@@ -876,6 +964,91 @@ The extractor lives in `src/librarian/tools/audit_doc_refs/parser.rs`.
         assert!(
             refs.contains(&"src/librarian/tools/audit_doc_refs/parser.rs"),
             "suppression must stop at the next heading; got {refs:?}"
+        );
+    }
+    /// The scoped form silences the tokens it names and NOTHING else.
+    ///
+    /// This is the case the bare marker could not serve: `docs/PROBES.md` names two
+    /// truncated paths as examples of truncation, in a section carrying 27 real
+    /// refs. The fixture mirrors that shape — two targets to silence, one genuine
+    /// citation beside them that must survive.
+    ///
+    /// **The surviving ref is the load-bearing half of this test.** Assert only that
+    /// the examples are gone and the test passes just as well against
+    /// `Suppression::All`, which is the behaviour this form exists to avoid.
+    #[test]
+    fn ignore_refs_silences_only_the_named_tokens() {
+        let md = "\
+## Examples
+
+<!-- audit-doc-refs:ignore-refs `src/serve` `src/lsp/m` — truncation examples, not citations -->
+
+A 200-char cut leaves a truncated path (`src/serve`, `src/lsp/m`); the real probe is
+`scripts/peer-sessions.sh`.
+";
+        let (refs, _) = parse_refs(md, Path::new("d.md"), PathSyntax::DottedModules);
+        let got: Vec<&str> = refs.iter().map(|r| r.raw_ref.as_str()).collect();
+        assert!(
+            !got.contains(&"src/serve") && !got.contains(&"src/lsp/m"),
+            "named targets must be suppressed, got {got:?}"
+        );
+        assert!(
+            got.contains(&"scripts/peer-sessions.sh"),
+            "a ref the marker did NOT name must still be audited — without this the \
+             test cannot tell `ignore-refs` from a bare `ignore`, got {got:?}"
+        );
+    }
+
+    /// A scoped marker still clears at the next heading, like the bare form.
+    ///
+    /// Guards the seam between the two forms: `Suppression::None` is assigned on
+    /// `Tag::Heading` regardless of which variant was active, and nothing else
+    /// asserts that the scoped variant is included in that reset.
+    #[test]
+    fn ignore_refs_scope_ends_at_the_next_heading() {
+        let md = "\
+## First
+
+<!-- audit-doc-refs:ignore-refs `src/serve` -->
+
+Here `src/serve` is an example.
+
+## Second
+
+Here `src/serve` is a citation again.
+";
+        let (refs, _) = parse_refs(md, Path::new("d.md"), PathSyntax::DottedModules);
+        let hits: Vec<u32> = refs
+            .iter()
+            .filter(|r| r.raw_ref == "src/serve")
+            .map(|r| r.md_line)
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly the occurrence AFTER the next heading survives; got lines {hits:?}"
+        );
+    }
+
+    /// A scoped marker naming nothing degrades to the coarse form, not to inert.
+    ///
+    /// The failing-open alternative is the dangerous one: a typo'd marker that
+    /// suppresses nothing looks identical to no marker at all, so the author sees
+    /// the finding they were annotating and assumes the marker is wrong about the
+    /// ref rather than about its own syntax.
+    #[test]
+    fn ignore_refs_with_no_backticked_target_falls_back_to_suppressing_all() {
+        let md = "\
+## Examples
+
+<!-- audit-doc-refs:ignore-refs but I forgot the backticks -->
+
+A ref: `src/serve`, and another: `scripts/peer-sessions.sh`.
+";
+        let (refs, _) = parse_refs(md, Path::new("d.md"), PathSyntax::DottedModules);
+        assert!(
+            refs.is_empty(),
+            "an empty target list must not silently suppress nothing, got {refs:?}"
         );
     }
 
