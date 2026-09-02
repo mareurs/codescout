@@ -182,6 +182,7 @@ declare_checks! {
     ClaimHeldByDeadSession => "claim_held_by_dead_session",
     ClaimHeldByLiveSession => "claim_held_by_live_session",
     ClaimUnresolvableHere => "claim_unresolvable_here",
+    ClaimWithoutClaimant => "claim_without_claimant",
     DeclaredRootMissing => "declared_root_missing",
     DotdotSegmentInAbsPath => "dotdot_segment_in_abs_path",
     EntryCitedFromOutsideButUndeclared => "entry_cited_from_outside_but_undeclared",
@@ -5502,24 +5503,33 @@ fn scan_unterminated_fence(
     Ok(out)
 }
 
-/// `claim_held_by_live_session` / `claim_held_by_dead_session` / `claim_unresolvable_here`:
-/// resolves a `status: taken` bug file's `claimed_by` sessionId against this machine's
-/// session registries.
+/// `claim_held_by_live_session` / `claim_held_by_dead_session` / `claim_unresolvable_here` /
+/// `claim_without_claimant`: resolves a `status: taken` bug file's `claimed_by` sessionId
+/// against this machine's session registries.
 ///
 /// **The check that makes `taken` more than an assertion.** A record claiming a live owner
 /// with nothing re-checking it is `issue-clusters:IC-8`, and it fails in the costly
 /// direction: it tells a reader to stay off work nobody is doing.
 ///
-/// **Three outcomes, all reported, only two of them defects.** `claim_held_by_live_session`
-/// is INFORMATIONAL and says so in its first word — it exists to carry the paste-ready
-/// `to:` address, which is how a reader asks the holder rather than guessing.
-/// `claim_held_by_dead_session`'s remedy is a demotion to `investigating` — *not* `open`,
-/// because work probably happened and the body records it. `claim_unresolvable_here` is a
-/// separate check rather than a flavour of dead: it needs a different fix, and on any
-/// second machine EVERY foreign claim lands there, so reporting those as dead would be a
-/// confident wrong answer at scale. Per
+/// **Three liveness outcomes, all reported, only two of them defects.**
+/// `claim_held_by_live_session` is INFORMATIONAL and says so in its first word — it exists
+/// to carry the paste-ready `to:` address, which is how a reader asks the holder rather
+/// than guessing. `claim_held_by_dead_session`'s remedy is a demotion to `investigating` —
+/// *not* `open`, because work probably happened and the body records it.
+/// `claim_unresolvable_here` is a separate check rather than a flavour of dead: it needs a
+/// different fix, and on any second machine EVERY foreign claim lands there, so reporting
+/// those as dead would be a confident wrong answer at scale. Per
 /// `docs/adrs/2026-08-27-negative-results-name-their-scope.md` it names the directories it
 /// searched.
+///
+/// **`claim_without_claimant` is a fourth CHECK, not a fourth liveness bucket.** A `taken`
+/// bug with no readable `claimed_by:` names nobody, so it never reaches
+/// `SessionRegistry::resolve` at all — the three-outcome contract above is untouched by it.
+/// It gets its own name rather than folding into `claim_unresolvable_here` because the two
+/// remedies differ: "check the claiming machine" (a live claim, wrong host) versus "add or
+/// clear `claimed_by:`" (a locally malformed record) — and this design's organising
+/// principle is that outcomes needing different remedies get different names, which is the
+/// same reason `claim_unresolvable_here` is not folded into `claim_held_by_dead_session`.
 ///
 /// Reports only; there is no `fix=`. Releasing a claim is a judgement about whether the
 /// work stands, which this check cannot make.
@@ -5577,12 +5587,12 @@ fn scan_claim_liveness(
 
         let Some(sid) = claimed_by else {
             out.push(Violation::new(
-                "claim_unresolvable_here",
+                "claim_without_claimant",
                 Some(id.clone()),
                 abs_path.clone(),
-                "status is `taken` but no `claimed_by:` is set, so the claim names nobody and \
-                 nothing can check it. Either add the claiming session's id, or demote to \
-                 `investigating`. See get_guide(\"tracker-conventions\") § Bug files."
+                "status is `taken` but no readable `claimed_by:` is set, so the claim names \
+                 nobody and nothing can check it. Either add the claiming session's id, or \
+                 demote to `investigating`. See get_guide(\"tracker-conventions\") § Bug files."
                     .to_string(),
             ));
             continue;
@@ -13996,8 +14006,55 @@ body
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_dead_session");
         assert!(
-            v[0].detail.contains("investigating"),
-            "the remedy must name `investigating`, not `open`: {}",
+            v[0].detail.contains("Demote to `investigating`"),
+            "{}",
+            v[0].detail
+        );
+        assert!(!v[0].detail.contains("Demote to `open`"), "{}", v[0].detail);
+    }
+
+    /// A recycled pid is a distinct `DeadReason` from a plain absent process — swapping the
+    /// two arms' wording would pass every other test in this module, since they all reach
+    /// `SocketAbsent` via `live_pid: None`.
+    #[tokio::test]
+    async fn a_recycled_pid_names_pid_reuse_as_the_reason() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "recycled",
+            "taken",
+            "claimed_by: sid-recycled\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-recycled", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: Some(4242),
+            starttime: "999".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_held_by_dead_session");
+        assert!(
+            v[0].detail
+                .contains("the pid was recycled onto a stale row"),
+            "must name pid reuse, not a gone process or absent socket: {}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("no such process is running"),
+            "{}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("its messaging socket is gone"),
+            "{}",
             v[0].detail
         );
     }
@@ -14056,7 +14113,15 @@ body
             scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
-        assert_eq!(v[0].check, "claim_unresolvable_here");
+        assert_eq!(
+            v[0].check, "claim_without_claimant",
+            "must NOT share a check name with the registry-miss case: {v:#?}"
+        );
+        assert!(
+            v[0].detail.contains("no readable `claimed_by:`"),
+            "must name the missing-claimant cause, not a registry search: {}",
+            v[0].detail
+        );
     }
 
     #[tokio::test]
