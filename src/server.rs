@@ -3765,10 +3765,19 @@ mod tests {
     /// Every registered tool must supply a selector key. This is the routing
     /// PRECONDITION, and it is the direction no other gate runs in.
     ///
-    /// `call_content` gates operator-rule routing on `if selector.is_some()`
-    /// (`src/tools/core/types.rs`), so a tool returning `None` is unreachable by every
+    /// `emit_operator_rules` declines on `if ctx.selector.is_none()`
+    /// (`src/engines/emitters.rs`), so a tool returning `None` is unreachable by every
     /// `triggered` rule — permanently, and with no observable symptom: no error, no
     /// empty result, nothing in a log. The rule simply never fires.
+    ///
+    /// *(Until 2026-09-02 this paragraph named `call_content` and
+    /// `if selector.is_some()` in `src/tools/core/types.rs`. **Both halves of that
+    /// citation rotted, in opposite ways and in different commits:** `cb6aed69`
+    /// authored the emitter with the condition already inverted, and `a8d2e0d9`
+    /// deleted the inlined original — so the location moved AND the quoted expression
+    /// became its own negation. Recorded here because this plan had just ruled "cite
+    /// an expression, not a line", and the expression is what went stale. Name the
+    /// FUNCTION: it survived both changes.)*
     ///
     /// **Measured 2026-09-01, before `Tool::selector_key`'s default was inverted: 17 of
     /// the 21 registered tools returned `None`, and the entire routing suite was green.**
@@ -3953,9 +3962,9 @@ mod tests {
                     continue;
                 };
 
-                // Routing precondition: `call_content` gates `route()` on
-                // `if selector.is_some()`, so a tool returning `None` makes every rule
-                // serving it undeliverable.
+                // Routing precondition: `emit_operator_rules` declines on
+                // `if ctx.selector.is_none()` before ever calling `route()`, so a tool
+                // returning `None` makes every rule serving it undeliverable.
                 assert!(
                     tool.selector_key(&serde_json::json!({})).is_some(),
                     "{} serves `{}`, which is registered but returns `None` from \

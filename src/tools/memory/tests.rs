@@ -343,10 +343,11 @@ async fn write_and_read_roundtrip() {
 /// by any amount of `selector_key` work, and both want a companion-plugin hook.
 ///
 /// **It must be `call_content`, not `call`.** `call` returns the tool's own JSON and never
-/// consults the router at all: the selector projection, the `if selector.is_some()` guard,
-/// the once-per-session ledger stamp and the block rendering all live in `call_content`. A
-/// test against `call` would be green in a world where routing is entirely dead, which is
-/// the world that shipped for three days.
+/// consults the router at all: `call_content` projects the selector and runs the engine
+/// coordinator, and `emit_operator_rules` (`src/engines/emitters.rs`) declines on
+/// `if ctx.selector.is_none()`, then stamps the once-per-session ledger and renders the
+/// blocks. A test against `call` would be green in a world where routing is entirely dead,
+/// which is the world that shipped for three days.
 ///
 /// The write has to genuinely succeed. `call_content` propagates the tool's error with
 /// `?` before it reaches the routing block, so a failing write produces no operator
