@@ -43,6 +43,18 @@ with the same two candidates:
 T-14 × 12,  T-16 × 1,  T-17 × 4      (ambiguous: 17, dangling: 0)
 ```
 
+**The unit is `(source, token)` pairs — not mentions, and the difference is not cosmetic.**
+`link_scan` reports one occurrence per citing artifact per token, so a file citing `T-17`
+three times contributes **1**. Anyone reading `17` as "places to edit" will be short, and
+the shortfall grows with how carefully a document repeats itself — `tracker-conventions.md`
+alone holds two mentions inside one of these 17. `tracker-hygiene-log:HY-21` measured it
+directly: a predicted −3 came back −2 because one citer's two mentions had always been a
+single finding.
+
+So `17` is the count of **broken citation sites**, which is the right number for *how much
+is broken* and the wrong one for *how many edits repair it*. The second has not been
+derived.
+
 ## Why this is a recurrence, not the original
 
 `docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`
