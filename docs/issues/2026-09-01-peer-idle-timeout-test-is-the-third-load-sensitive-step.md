@@ -340,6 +340,50 @@ cluster against a quiescent `target/` to see it disappear, and that is the next 
 settles that the two signatures are **dissociable**: run 2 produced the cluster without this
 test, runs 1 and 3 produced this test without the cluster. A single shared cause would have to
 explain that dissociation.
+### Eighth observation, 2026-09-02 — load COUNTED rather than inferred, and a diff with no Rust in it at all
+
+Gate run during the `GIT_INDEX_FILE` recorder fix
+(`docs/issues/2026-09-02-a-refused-pathspec-commit-stamps-your-own-content-unowned.md`).
+
+| run | lean | default | failures |
+|---|---|---|---|
+| 5 | `0` | `101` | **this test only**, `src/peer/server.rs:752`, `run() did not exit within 10s of a 1s idle timeout` |
+| 6 | *(not re-run)* | `101` | **this test only**, same assertion — a deliberate re-run of the default lane alone, ~6 minutes after run 5, no code change |
+
+**Denominator: 8 isolated re-runs, 8 green.** The eighth took **1.14s against a 10s timeout** —
+a ~9× margin — immediately after run 5, no code change between.
+
+**Run 6 is the new shape here, and the denominator above does not describe it.** Every prior
+observation pairs a red full lane with a green isolated re-run, which reads as "transient".
+Run 6 shows the full lane failing **twice consecutively on the same test** while the isolated
+re-run stays green — so under *sustained* load the failure is not intermittent at lane grain,
+only at test grain. That distinction matters for the fix discussion: a retry-once mitigation
+would not have cleared this session, and "re-run it and it passes" is true of the test in
+isolation and false of the lane.
+
+**The load figure is a count this time, not an inference.** Previous observations argue load from
+`Blocking waiting for file lock on build directory` lines and from peers committing. This run has
+a number: **19 live sessions across 3 profiles, 7 of them in this checkout (6 peers plus me)**, by
+socket enumeration at the time of the run (`scripts/peer-sessions.sh`'s method — enumerate
+`/run/user/<uid>/cc-socks/*.sock`, resolve each PID's `CLAUDE_CONFIG_DIR`). Two peers were
+observed staging into the shared index during the same window, and a peer `cargo` had the build
+lock. That is the first membership count attached to an instance of this bug rather than a
+qualitative "peers were active".
+
+**Non-attribution is by mechanism and is stronger here than in run 4.** Run 4 could say the diff
+was comment-only. This one can say something simpler and tighter: `git status --short -- '*.rs'`
+returned **empty**. The working tree contained no Rust modification of any kind — the change was
+one shell script, one shell test, and markdown. There is no line for a reader to inspect and
+therefore no adjacency argument to make; the diff cannot reach `src/peer/server.rs` because it
+cannot reach any `.rs` file.
+
+**What this adds to the class, and what it does not.** It supplies the quantified load the earlier
+observations wanted and a cleaner exclusion, so it strengthens *load-sensitivity* as the reading.
+It does **not** advance the fix: nobody re-ran this against a quiescent machine to watch it
+disappear, which remains the step § *Seventh observation* named and nobody has taken. Recording a
+confirmation that changes no verdict is the point — per § *Sixth observation*, an unrecorded
+confirmation makes the population look self-correcting.
+
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).

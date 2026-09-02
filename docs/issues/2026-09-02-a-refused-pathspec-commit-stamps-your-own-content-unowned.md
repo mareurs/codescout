@@ -1,14 +1,14 @@
 ---
 id: '2266ffc0103534cd'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a refused pathspec commit stamps the author''s own content as unowned, and no-op restaging cannot reclaim it'
 tags:
 - cluster/shared-resource-carries-no-owner
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 severity: medium
-unverified: no fix and no regression test. Root cause and minimal trigger are reproduced live on the shared checkout; the fix direction is chosen but not implemented, and tests/hooks-discrimination.sh has no case for a REFUSED commit's index write, which is why this shipped.
 ---
 
 ## Summary
@@ -168,8 +168,10 @@ to preserve. The two bugs share a symptom and a class and need different remedie
    all.
 ## Fix
 
-Implemented 2026-09-02. **The direction inverted when the root cause was corrected**, and the
-superseded proposal is kept below because it is the one the wrong root cause recommends.
+Implemented 2026-09-02, on `experiments` at `cd1b138e`, patch-id
+`c374900d02eb47a131fc18c5e802e321ebf3dca4`. **The direction inverted when the root cause was
+corrected**, and the superseded proposal is kept below because it is the one the wrong root cause
+recommends.
 
 **Shipped — the recorder must not describe an index that is not the shared one.**
 `post-index-change-stage-log.sh` now exits early when `GIT_INDEX_FILE` is set and does not resolve
