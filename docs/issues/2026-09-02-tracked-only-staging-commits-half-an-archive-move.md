@@ -1,7 +1,7 @@
 ---
 id: '2a9e782b58f6844c'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: tracked-only staging commits half an artifact(move) archive, silently undoing it'
 owners:
 - marius
@@ -12,11 +12,12 @@ tags:
 - git
 - archive-flow
 topic: bug-file archive flow
-closed: ''
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related: []
 severity: high
+unverified: 'The author-facing half is not fixed and is not claimed: nothing can annotate a `git add -u` an operator types in their own shell, so the remedy reaches the tool surface only. `IC-18`''s `**Mechanism status:**` is unchanged by this fix.'
 ---
 
 ## Summary
@@ -158,6 +159,32 @@ Both candidates were taken:
 
 The author-facing half of `IC-18` remains unreachable and is not claimed: nothing can
 annotate a `git add -u` the operator types in their own shell.
+## Fix provenance
+
+- **SHA:** `489715ef` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `f2ce78ca43100d4b785c2c450ee71a707b0c985b` — content hash of the diff; survives rebase and cherry-pick.
+
+Structured because `structured_fix_pointers` in `src/librarian/tools/doctor.rs` reads
+`- **SHA:**` / `- **patch-id:**` list items and nothing else. Recorded at fix time, so
+nothing is owed later and no promotion path needs checking.
+
+**Gate at fix time:** `cargo fmt` clean, long-form `clippy` 0, lean lane 0, default lane
+4997 of 4998 green. The single failure was
+`peer::server::tests::run_exits_after_idle_timeout_with_no_connections` — the
+load-sensitive flake filed as
+`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+which **passed in isolation in 1.13s** on the same binary, and which this diff cannot
+reach (nothing staged touched `src/peer`). Run with roughly twenty codescout servers
+and several concurrent builds live.
+
+**One file of this fix is committed under another session's message.**
+`docs/trackers/issue-clusters.md` — carrying `IC-18`'s new member prose and the removal
+of its stored count — left this session's index between a `git status` check and the
+`git commit` one call later, and landed inside a peer's `5c353d8f` (*"retag the
+peer-serve notice bug to IC-22"*). Nothing was lost; the attribution is simply wrong,
+and `489715ef` therefore carries five of the six files. A live recurrence of
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`, observed
+while holding a warning about its mirror image.
 ## Tests added
 
 `move_names_the_staging_action_not_only_the_two_paths`, in `src/librarian/tools/mv.rs`
