@@ -73,7 +73,7 @@ Seven fields, and nothing else is required.
 |---|---|
 | `**Slug:**` | the `cluster/<slug>` tag value — the closed-set entry the gate checks against |
 | `**Claim:**` | the mechanism, stated so it can be false |
-| `**Members:**` | the query, plus `n=<count>` and the date it was run |
+| `**Members:**` | the query, plus a per-member derivation. **Never a bare `n=`** — counts are derived (`scripts/probe-cluster-census.py`), and `no_class_field_states_a_bare_n` refuses one here |
 | `**Blind party:**` | who structurally cannot see it, and why — or `none — ordinary design defect` |
 | `**Promotes to:**` | target surface, per the routing table below |
 | `**Mechanism status:**` | `none yet` \| `designed` \| `shipped (<what>)` — borrowed from `OB` |
@@ -86,6 +86,24 @@ which is what makes the cluster promotable.
 **One `cluster/` tag per bug file.** A bug spanning two classes names the one whose *mechanism*
 it instantiates and cites the other in prose. Multi-membership makes counts non-additive, and
 the counts are what drive promotion.
+
+**Classify by the claim, never by adjacency to a known instance.** `IC-6` and `IC-18` both
+present at the surface as *"the pattern matched the wrong thing"*, and the discriminator is
+**direction**: `IC-6` matches too much or cannot separate two tokens that collide, so it binds the
+**wrong** target; `IC-18` matches too **little**, so the members it never saw cannot be counted.
+Ask which one the finding does and the answer is usually immediate.
+
+Proximity pulls the other way, and it is closer to anti-evidence than to evidence: a second defect
+found *in the same file* as a known instance is exactly as likely to be a different class, and the
+shared location is precisely what makes it look like a duplicate. Recorded because it has now
+happened twice, both times reaching for `IC-6` on a too-narrow selector —
+`declared-patch-ids-per-line-scan-misses-a-wrapped-value` and
+`comm-filter-misses-version-pinned-claude-processes`, the second diagnosed by the peer who made
+it (*"I classified by adjacency — same script, one line away — rather than by the claim"*). The
+cost is not a mislabel: the buried half is systematically the class **nearest a threshold**, so
+adjacency-classification suppresses exactly the counts that were about to promote. This is the
+same rule `CLAUDE.md` § *Reaching a Peer Session* states for authorship — *never route by
+adjacency* — arriving at classification, and it fails the same way in both places.
 
 ## How a cluster becomes a rule
 
@@ -432,6 +450,21 @@ looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
 (`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
 none fit without forcing the claim, so filed under the escape hatch instead — which was created
 by the same fix round, and is flagged unadjudicated in the block above.
+
++1: `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) — a value
+computed in one coordinate space (lines within the frontmatter-stripped **body**) published
+under a name that states another (`start_line`, read by every consumer as a **file** line).
+Checked three: `IC-20` (`floor-published-under-the-name-of-a-total`) is closest by shape and
+still does not fit — there the true value is **unknowable** because the walk stopped, and the
+remedy is to rename the quantity or refuse to print it; here it is exactly recoverable by
+adding a constant the response simply omits, so neither the claim nor the remedy transfers.
+`IC-11` (`doc-contradicted-by-code`) fails because the code and its docs **agree** — both say
+"start line", and both are wrong about the same thing. `IC-13`
+(`capped-result-presented-as-complete`) fails because nothing is truncated. Filed under the
+escape hatch rather than forced into `IC-20`. **If a second instance appears, the candidate
+class is "a quantity is published in a coordinate space its name does not state"** — and the
+blind party would be the producer, for whom the two spaces are the same number in every test
+that seeds the body and compares against the body.
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
