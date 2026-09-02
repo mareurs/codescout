@@ -272,6 +272,29 @@ this exposure, not just this constant.
 that travelled with the captured hunk and acted on it — which is the one thing that stopped the
 raise from becoming permanent, and an argument for recording *why* at the constant rather than
 in a commit message that the capture would have detached anyway.
+
+**Closed 2026-09-02 at `1559daa5`** (patch-id `3e86d303136e5192d1761b91058b65bdeb3612df`). The
+second half of the split — `src/tools/config/mod.rs` — landed, so HEAD's
+`TOOL_SURFACE_CHAR_BUDGET = 56_497` is once more the exact measured total rather than carrying
+31 chars of slack. The window was roughly 90 minutes.
+
+Two things that window taught, neither of which is "commit faster":
+
+- **The coupling was only knowable from one side.** The measuring session could not have
+  detected it — its reading was correct for the tree in front of it — and it acted correctly
+  when told, declining to touch the file (*"it is yours, it is staged in your bug file, and the
+  31-byte slack is only real if your `src/tools/config/mod.rs` does not land"*). So the repair
+  channel was a message, not a check. Worth recording because § *Candidate remedies* is a list
+  of mechanisms, and this instance was closed by a peer being **told** rather than by any of
+  them firing.
+- **A failed commit strips ownership from the very rows the next attempt is judged on.**
+  Retrying the commit was refused by `foreign-index` with `theirs:` listing all ten of *my*
+  paths and `Staged by: (unrecorded) — not a staging command`. Cause is in the hook's own text:
+  pre-commit stashes unstaged files, and that index write comes from a parent the recorder
+  cannot attribute, overwriting rows that carried this session's id minutes earlier. So the
+  guard's failure mode under retry is to call your own staged work foreign — which is the safe
+  direction, and it is also indistinguishable from a real capture at the point of use. Filed
+  separately; the pathspec form the hook recommends is the working route.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because

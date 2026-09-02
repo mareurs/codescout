@@ -13,7 +13,7 @@ closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 severity: medium
-unverified: 'FIX VERIFIED, RECORD DELIBERATELY NOT ARCHIVED — no SHA or patch-id yet, because the change is UNCOMMITTED (no commit was requested), so the archive trigger has not fired and there is nothing to cite. Gate 2026-09-02 on the working tree: `cargo fmt` 0, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` 0, `cargo test --workspace --no-default-features` 0, `cargo test --workspace` **101** — the single red is `run_exits_after_idle_timeout_with_no_connections` (ee9d8d80ad5ecdc8, known load-sensitive; seventh observation appended there). It passed 7/7 in isolation and is excluded from this diff BY MECHANISM, not adjacency: every changed line in src/peer/server.rs is a `///` comment. CAVEAT that cannot be resolved from inside this session: the gate ran on a SHARED checkout carrying peer UNCOMMITTED edits to src/prompts/mod.rs, src/server.rs and src/librarian/tools/doctor.rs, and HEAD moved 6 commits mid-run — so a clean whole-lane green was never observable, and two earlier gate runs failed on peer work (build_with_workspace_appends_project_table, a retrieval::sync cluster). ALSO OUTSTANDING: src/server.rs now holds BOTH this fix''s TOOL_SURFACE_CHAR_BUDGET raise and a peer''s in-flight work, so a blanket commit of that path would capture theirs.'
+unverified: 'FIX LANDED at 1559daa5 (experiments), patch-id 3e86d303136e5192d1761b91058b65bdeb3612df — SHA + patch-id recorded, so nothing is owed later. NOT ARCHIVED YET, deliberately: the move re-points paths AND the 16-hex id, and this file is cited from four surfaces committed minutes ago (src/agent/mod.rs, src/server.rs, docs/superpowers/specs/2026-06-01-peer-delegation-protocol-design.md, and by slug in docs/trackers/issue-clusters.md). src/server.rs is peer-contended, so the citation sweep is a separate bounded task, not a drive-by. GATE CAVEAT: fmt 0, clippy 0, lean 0; `cargo test --workspace` returned 101 with ONE red — run_exits_after_idle_timeout_with_no_connections (ee9d8d80ad5ecdc8, known load-sensitive), 7/7 green in isolation and excluded from this diff by mechanism (every changed line in src/peer/server.rs is a /// comment). The gate also ran on a shared checkout carrying several peers'' uncommitted work, with HEAD moving ~10 commits during the session, so a clean whole-lane green was never observable here. RESOLVED by this commit: the TOOL_SURFACE_CHAR_BUDGET coupling described in the capture ledger — src/tools/config/mod.rs landed, so HEAD''s 56_497 is again the exact measured total rather than carrying 31 chars of slack.'
 ---
 
 ## Summary
@@ -169,6 +169,9 @@ cannot say.
 ## Fix
 
 **IMPLEMENTED 2026-09-02 — direction 1 (honour the flag).**
+
+**SHA:** `1559daa533140214f007ce61fcf1b49505e20559` (label: **`experiments`**).
+**patch-id:** `3e86d303136e5192d1761b91058b65bdeb3612df`.
 
 The rule is now one function, `AgentInner::resolve_read_only` (`src/agent/mod.rs`), expressed
 as `read_only.unwrap_or(!is_home)` rather than a `match`. That form was chosen so the defect
