@@ -233,6 +233,21 @@ pub fn find_by_ids_filtered(
     Ok(rows)
 }
 
+/// The chunk that matched, when the store is chunk-keyed.
+///
+/// `None` means the hit came back without a resolvable chunk row — a stale
+/// vector, or an artifact-grain store. A caller rendering a snippet should fall
+/// back to the artifact rather than treat this as an error.
+#[derive(Debug, Clone)]
+pub struct ChunkHit {
+    pub chunk_id: String,
+    pub chunk_ix: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub entry_token: Option<String>,
+    pub content: String,
+}
+
 /// One semantic hit: the hydrated row plus how far it sat from the query.
 ///
 /// `distance` is lower-is-closer and backend-scaled — see
@@ -242,6 +257,10 @@ pub fn find_by_ids_filtered(
 pub struct SemanticHit {
     pub row: ArtifactRow,
     pub distance: f32,
+    /// The chunk whose vector matched — the plan's whole point at the retrieval
+    /// layer: a hit names the ENTRY that matched, not merely the artifact
+    /// containing it.
+    pub chunk: Option<ChunkHit>,
 }
 
 /// A page of semantic hits, plus whether the filter starved it.
@@ -262,6 +281,12 @@ pub struct SemanticPage {
     /// The loop hit `K_CAP` and returned a SHORT page — the corpus, or the
     /// filter, genuinely ran out.
     pub exhausted: bool,
+    /// Hits dropped by `max_per_artifact`. Distinct from `exhausted`: the page
+    /// is full and relevant, but one artifact had more to say than it was
+    /// allowed. A caller that cannot see this cannot tell a capped page from a
+    /// corpus that simply had nothing else — the same silent-partial defect
+    /// this whole change exists to fix, one level up.
+    pub cap_suppressed: usize,
 }
 
 /// Project-scoped semantic artifact search: iterative-K backfill over a vector
@@ -279,6 +304,13 @@ pub struct SemanticPage {
 /// has `target` survivors. [`SemanticPage`] now reports both the reaching and the
 /// distances, so "backfilled past the point of relevance" is a readable state
 /// rather than an indistinguishable one.
+///
+/// **The store is chunk-keyed.** `knn` returns chunk ids, which are resolved to
+/// their artifacts before hydrating — the catalog filter is artifact-level — and
+/// the matching chunk rides along in [`SemanticHit::chunk`] so a hit names the
+/// entry that matched. `max_per_artifact` bounds how many chunks one artifact
+/// may contribute, applied in KNN order so each artifact keeps its BEST chunks;
+/// whatever it drops is counted in [`SemanticPage::cap_suppressed`].
 #[allow(clippy::too_many_arguments)]
 pub async fn semantic_find(
     store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
@@ -286,13 +318,17 @@ pub async fn semantic_find(
     project_id: Option<&str>,
     query: &[f32],
     filter: Option<&FilterNode>,
+    max_per_artifact: usize,
     limit: usize,
     offset: usize,
     cutoff_ms: i64,
 ) -> Result<SemanticPage> {
     let target = limit + offset;
-    let mut k = (target * 5).max(100);
-    const K_CAP: usize = 2000;
+    // With a per-artifact cap, candidates COLLAPSE before they are counted: one
+    // ledger can contribute a hundred chunks and still yield `max_per_artifact`
+    // hits, so `k` has to reach further than it did in the artifact-keyed era.
+    let mut k = (target * 5 * max_per_artifact.max(1)).max(200);
+    const K_CAP: usize = 8000;
     let mut widenings = 0usize;
 
     loop {
@@ -301,22 +337,87 @@ pub async fn semantic_find(
             return Ok(SemanticPage::default());
         }
 
-        // The distance rides in a side map keyed by id rather than through
-        // `find_by_ids_filtered`, which already preserves KNN order and needs no
-        // change: the SQL hydrate has no column to carry a score in, and widening
-        // `ArtifactRow` — a row type shared with every non-semantic read path —
-        // to hold one would put a query-relative number on a record that outlives
-        // the query.
-        let by_id: std::collections::HashMap<&str, f32> =
-            candidates.iter().map(|(id, d)| (id.as_str(), *d)).collect();
-        let candidate_ids: Vec<String> = candidates.iter().map(|(id, _)| id.clone()).collect();
+        // `knn` returns CHUNK ids. Resolve each to its artifact so the catalog
+        // filter still applies, and keep the chunk so the hit can name the entry.
+        let chunk_rows = {
+            let cat = catalog.lock();
+            crate::librarian::catalog::chunk::rows_by_chunk_ids(
+                &cat,
+                &candidates
+                    .iter()
+                    .map(|(id, _)| id.clone())
+                    .collect::<Vec<_>>(),
+            )?
+        };
+
+        // KNN order IS the ranking, so walk it in order: the cap then keeps each
+        // artifact's BEST chunks rather than an arbitrary `max_per_artifact` of
+        // them. A chunk id with no row is stale, not an error — skip it.
+        let mut seen_per_artifact: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut ordered: Vec<(ChunkHit, String, f32)> = Vec::new();
+        let mut cap_suppressed = 0usize;
+        for (chunk_id, distance) in &candidates {
+            let Some(row) = chunk_rows.get(chunk_id) else {
+                continue;
+            };
+            let n = seen_per_artifact
+                .entry(row.artifact_id.clone())
+                .or_insert(0);
+            if *n >= max_per_artifact {
+                cap_suppressed += 1;
+                continue;
+            }
+            *n += 1;
+            ordered.push((
+                ChunkHit {
+                    chunk_id: row.chunk_id.clone(),
+                    chunk_ix: row.chunk_ix,
+                    start_line: row.start_line,
+                    end_line: row.end_line,
+                    entry_token: row.entry_token.clone(),
+                    content: row.content.clone(),
+                },
+                row.artifact_id.clone(),
+                *distance,
+            ));
+        }
+
+        // Distinct artifact ids in first-appearance (best-chunk) order. NOT
+        // `dedup()`, which only collapses ADJACENT duplicates: two ledgers'
+        // chunks interleave in KNN order routinely, so `dedup` would leave
+        // repeats and hydrate the same artifact several times.
+        let candidate_ids: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            ordered
+                .iter()
+                .map(|(_, a, _)| a.clone())
+                .filter(|a| seen.insert(a.clone()))
+                .collect()
+        };
 
         let all_rows = {
             let cat = catalog.lock();
             find_by_ids_filtered(&cat, &candidate_ids, filter, cutoff_ms)?
         };
+        let surviving: std::collections::HashMap<String, ArtifactRow> =
+            all_rows.into_iter().map(|r| (r.id.clone(), r)).collect();
 
-        let enough = all_rows.len() >= target;
+        // Hits are CHUNKS whose artifact survived the filter, still in KNN order.
+        let hits_all: Vec<SemanticHit> = ordered
+            .iter()
+            .filter_map(|(chunk, artifact_id, distance)| {
+                surviving.get(artifact_id).map(|row| SemanticHit {
+                    row: row.clone(),
+                    distance: *distance,
+                    chunk: Some(chunk.clone()),
+                })
+            })
+            .collect();
+
+        // `target` counts SURVIVING hits after the cap, not raw candidates —
+        // otherwise a big ledger's suppressed chunks would read as a full page.
+        let enough = hits_all.len() >= target;
         // The vector store returned fewer candidates than asked for, so it holds
         // nothing further and widening `k` cannot find more. Without this the loop
         // re-queried a 2-row corpus five more times on its way to K_CAP, and —
@@ -328,15 +429,7 @@ pub async fn semantic_find(
 
         // Enough results, or nothing left to find → return the requested page.
         if enough || store_exhausted || capped {
-            let hits = all_rows
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .map(|row| {
-                    let distance = by_id.get(row.id.as_str()).copied().unwrap_or(f32::NAN);
-                    SemanticHit { row, distance }
-                })
-                .collect();
+            let hits = hits_all.into_iter().skip(offset).take(limit).collect();
             return Ok(SemanticPage {
                 hits,
                 widenings,
@@ -344,6 +437,7 @@ pub async fn semantic_find(
                 // A full page at K_CAP is the ordinary large-corpus case and is not
                 // exhaustion.
                 exhausted: !enough,
+                cap_suppressed,
             });
         }
 
@@ -427,13 +521,18 @@ mod tests {
         artifact::upsert(&cat, &art("b", "spec", "active")).unwrap();
         artifact::upsert(&cat, &art("c", "plan", "active")).unwrap();
 
+        let (ca, cb, cc) = (
+            one_chunk(&cat, "a"),
+            one_chunk(&cat, "b"),
+            one_chunk(&cat, "c"),
+        );
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", "a", &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", "b", &[0.8, 0.2]).await.unwrap();
-        store.upsert("proj", "c", &[0.0, 1.0]).await.unwrap();
+        store.upsert("proj", &ca, &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", &cb, &[0.8, 0.2]).await.unwrap();
+        store.upsert("proj", &cc, &[0.0, 1.0]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
-        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, 0)
+        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 1, 10, 0, 0)
             .await
             .unwrap();
         let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
@@ -449,13 +548,14 @@ mod tests {
         artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
         artifact::upsert(&cat, &art("b", "plan", "active")).unwrap();
 
+        let (ca, cb) = (one_chunk(&cat, "a"), one_chunk(&cat, "b"));
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", "a", &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", "b", &[0.9, 0.1]).await.unwrap();
+        store.upsert("proj", &ca, &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", &cb, &[0.9, 0.1]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
         let filter: FilterNode = serde_json::from_value(json!({"kind": {"eq": "spec"}})).unwrap();
-        let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 10, 0, 0)
+        let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 1, 10, 0, 0)
             .await
             .unwrap();
         let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
@@ -806,20 +906,304 @@ mod tests {
             )
             .unwrap();
 
+        let (c_live, c_old) = (one_chunk(&cat, "live"), one_chunk(&cat, "old"));
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", "live", &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", "old", &[0.9, 0.1]).await.unwrap();
+        store.upsert("proj", &c_live, &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", &c_old, &[0.9, 0.1]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
         let cutoff = 1000i64;
-        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, cutoff)
-            .await
-            .unwrap();
+        let rows = semantic_find(
+            &store,
+            &cat,
+            Some("proj"),
+            &[1.0, 0.0],
+            None,
+            1,
+            10,
+            0,
+            cutoff,
+        )
+        .await
+        .unwrap();
         let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
         assert_eq!(
             ids,
             vec!["live"],
             "hidden row excluded from semantic search results"
+        );
+    }
+
+    /// Give `id` a single chunk and return its chunk id, so a test can upsert a
+    /// CHUNK-keyed vector while still asserting about artifacts.
+    ///
+    /// The vector store has been chunk-keyed since Task 7. A test that upserts
+    /// an ARTIFACT id is exercising a contract that no longer exists — and it
+    /// fails SILENTLY rather than loudly, because an unresolvable candidate id
+    /// is skipped as stale, so the page simply comes back empty.
+    fn one_chunk(cat: &Catalog, id: &str) -> String {
+        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048);
+        let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
+        rows[0].chunk_id.clone()
+    }
+
+    /// A unit vector with `1.0` at `i`. Orthogonal per index, so a query for
+    /// index `j` selects chunk `j` deterministically under cosine.
+    fn unit(i: usize, n: usize) -> Vec<f32> {
+        let mut v = vec![0.0f32; n];
+        v[i] = 1.0;
+        v
+    }
+
+    /// One artifact whose body yields a preamble chunk plus two entry chunks,
+    /// each embedded with a distinct orthogonal vector. Returns the chunk rows
+    /// in `chunk_ix` order so a test can name the one it wants by POSITION —
+    /// never by a literal id, which would not survive a chunking change.
+    async fn fixture_two_entry_artifact() -> (
+        parking_lot::Mutex<Catalog>,
+        crate::librarian::artifact_store::test_support::InMemoryArtifactStore,
+        Vec<crate::librarian::catalog::chunk::ChunkRow>,
+    ) {
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let built = crate::librarian::catalog::chunk::build_chunks(
+            "a",
+            "# T\n\nintro\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+            2048,
+        );
+        let rows = crate::librarian::catalog::chunk::replace_chunks(&cat, "a", &built).unwrap();
+        assert!(
+            rows.len() > 2,
+            "fixture must yield a preamble plus >1 entry chunk, got {}",
+            rows.len()
+        );
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        for (i, r) in rows.iter().enumerate() {
+            store
+                .upsert("proj", &r.chunk_id, &unit(i, rows.len()))
+                .await
+                .unwrap();
+        }
+        (parking_lot::Mutex::new(cat), store, rows)
+    }
+
+    /// Two artifacts: `big` with six entry chunks that all rank ABOVE `small`'s
+    /// single one. The ranking gap is what makes the cap observable — without
+    /// it, `small` could reach the page by luck rather than by the cap yielding.
+    async fn fixture_big_and_small() -> (
+        parking_lot::Mutex<Catalog>,
+        crate::librarian::artifact_store::test_support::InMemoryArtifactStore,
+        usize,
+    ) {
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("big", "tracker", "active")).unwrap();
+        artifact::upsert(&cat, &art("small", "tracker", "active")).unwrap();
+        let big_body = (1..=6)
+            .map(|i| format!("## W-{i} — t\n\nbody {i}\n"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let big = crate::librarian::catalog::chunk::replace_chunks(
+            &cat,
+            "big",
+            &crate::librarian::catalog::chunk::build_chunks("big", &big_body, 2048),
+        )
+        .unwrap();
+        let small = crate::librarian::catalog::chunk::replace_chunks(
+            &cat,
+            "small",
+            &crate::librarian::catalog::chunk::build_chunks("small", "## W-9 — t\n\nbody\n", 2048),
+        )
+        .unwrap();
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        // Query is [1, 0]. `big`'s chunks sit essentially on it; `small`'s is
+        // 45° away, so every `big` chunk outranks it.
+        for (i, r) in big.iter().enumerate() {
+            store
+                .upsert("proj", &r.chunk_id, &[1.0, 0.01 * i as f32])
+                .await
+                .unwrap();
+        }
+        for r in &small {
+            store
+                .upsert("proj", &r.chunk_id, &[0.5, 0.5])
+                .await
+                .unwrap();
+        }
+        (parking_lot::Mutex::new(cat), store, big.len())
+    }
+
+    #[tokio::test]
+    async fn a_hit_names_the_chunk_that_matched_not_the_preamble() {
+        // The whole point of the plan, at the retrieval layer: a hit must name
+        // the ENTRY that matched, not the artifact's opening chunk.
+        let (cat, store, rows) = fixture_two_entry_artifact().await;
+        let want = rows.last().unwrap();
+        let q = unit(rows.len() - 1, rows.len());
+        let page = semantic_find(&store, &cat, None, &q, None, 3, 10, 0, 0)
+            .await
+            .unwrap();
+        let hit = &page.hits[0];
+        let chunk = hit.chunk.as_ref().expect("chunk-grain hit");
+        assert_eq!(chunk.chunk_id, want.chunk_id);
+        assert_eq!(chunk.entry_token.as_deref(), Some("W-2"));
+        assert!(chunk.start_line > 1, "must not be the preamble chunk");
+        assert!(chunk.content.contains("beta"));
+        // Still hydrates to its ARTIFACT — chunk grain in, artifact identity out.
+        assert_eq!(hit.row.id, "a");
+    }
+
+    #[tokio::test]
+    async fn max_per_artifact_caps_without_emptying_the_page() {
+        // All three clauses are required. "no more than 3" is an absence
+        // assertion, and a cap that drops EVERYTHING satisfies it.
+        let (cat, store, big_n) = fixture_big_and_small().await;
+        let page = semantic_find(&store, &cat, None, &[1.0, 0.0], None, 3, 10, 0, 0)
+            .await
+            .unwrap();
+        let from_big = page.hits.iter().filter(|h| h.row.id == "big").count();
+        assert_eq!(from_big, 3, "capped at 3, got {from_big}");
+        assert_eq!(
+            page.cap_suppressed,
+            big_n - 3,
+            "and it reports exactly what it suppressed"
+        );
+        assert!(
+            page.hits.iter().any(|h| h.row.id == "small"),
+            "a lower-ranked chunk from another artifact must still make the page — \
+             without this clause a cap that drops everything passes"
+        );
+    }
+
+    #[tokio::test]
+    async fn max_per_artifact_one_yields_distinct_artifacts() {
+        // Assert DISTINCTNESS, not a count: a count of N is satisfied by N
+        // chunks of ONE ledger, which is the regression this prevents.
+        let (cat, store, _) = fixture_big_and_small().await;
+        let page = semantic_find(&store, &cat, None, &[1.0, 0.0], None, 1, 10, 0, 0)
+            .await
+            .unwrap();
+        let mut ids: Vec<&str> = page.hits.iter().map(|h| h.row.id.as_str()).collect();
+        let before = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            before,
+            "max_per_artifact=1 must yield distinct artifacts"
+        );
+        assert_eq!(before, 2, "and both artifacts must be represented");
+    }
+
+    #[tokio::test]
+    async fn an_id_from_the_production_embed_queue_hydrates_through_semantic_find() {
+        // RELOCATED from Task 7, where it could not go green: hydration is this
+        // task's work. LOAD-BEARING: the ids fed to the store MUST come from
+        // `embed_queue_items`, never from a literal. Every other semantic_find
+        // test here hand-feeds an ARTIFACT id, which is exactly why all of them
+        // stayed green when Task 6 re-keyed the queue to chunk ids and
+        // hydration broke outright.
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let queue = crate::librarian::indexer::embed_queue_items(
+            &cat,
+            "a",
+            Some("T".into()),
+            "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+        )
+        .unwrap();
+        // Without >1 chunk the grain bug is UNREPRESENTABLE by this fixture.
+        assert!(
+            queue.len() > 1,
+            "fixture must yield >1 chunk, got {}",
+            queue.len()
+        );
+
+        let store = InMemoryArtifactStore::default();
+        for (id, _, _) in &queue {
+            store.upsert("proj", id, &[1.0, 0.0]).await.unwrap();
+        }
+
+        let cat = parking_lot::Mutex::new(cat);
+        let page = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 1, 10, 0, 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            page.hits
+                .iter()
+                .map(|h| h.row.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a"],
+            "a chunk id from the production queue must hydrate to its ARTIFACT, exactly once"
+        );
+        // The widening loop is the second half of the symptom: on the broken
+        // path neither `enough` nor `store_exhausted` holds, so semantic_find
+        // climbs toward K_CAP and re-queries repeatedly before returning empty.
+        // The empty page is the visible failure; the burn is the expensive one.
+        assert_eq!(page.widenings, 0, "hydration must not need to widen");
+    }
+
+    #[tokio::test]
+    async fn the_real_sqlite_path_writes_and_reads_the_same_table() {
+        // NOT in the plan, and it is the one that pins the actual outage. Every
+        // other test here uses InMemoryArtifactStore, which covers the
+        // hydration half and cannot see the half that broke: the production
+        // WRITER targets artifact_vec_v2 (Task 7) while the production READER
+        // — SqliteVecArtifactStore::knn — read artifact_vec. Writer and reader
+        // on different tables is invisible to any test that supplies its own
+        // store, because the table never enters the picture.
+        use crate::librarian::artifact_store::{ArtifactVectorStore, SqliteVecArtifactStore};
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let queue = crate::librarian::indexer::embed_queue_items(
+            &cat,
+            "a",
+            Some("T".into()),
+            "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+        )
+        .unwrap();
+        assert!(queue.len() > 1, "fixture must yield >1 chunk");
+
+        let shared = std::sync::Arc::new(parking_lot::Mutex::new(cat));
+        let store = SqliteVecArtifactStore::new(shared.clone());
+        // Write through the PRODUCTION writer, read through the PRODUCTION
+        // reader. Nothing in this test names a table.
+        for (i, (id, _, _)) in queue.iter().enumerate() {
+            // 768-dim: `artifact_vec_v2` is declared `vec0(id, embedding
+            // FLOAT[768])`, so a shorter vector is rejected by SQL rather than
+            // by anything this test is about.
+            store.upsert("proj", id, &unit(i, 768)).await.unwrap();
+        }
+
+        let page = semantic_find(
+            &store,
+            &shared,
+            None,
+            &unit(queue.len() - 1, 768),
+            None,
+            3,
+            10,
+            0,
+            0,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !page.hits.is_empty(),
+            "the production writer and reader must agree on a table — an empty \
+             page here is the end-to-end outage, not a fixture problem"
+        );
+        assert_eq!(page.hits[0].row.id, "a");
+        assert!(
+            page.hits[0].chunk.is_some(),
+            "and the hit must carry the chunk that matched"
         );
     }
 

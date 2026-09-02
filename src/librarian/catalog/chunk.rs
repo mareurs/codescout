@@ -233,6 +233,46 @@ pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
     Ok(rows)
 }
 
+/// Chunk rows for a set of chunk ids, keyed by `chunk_id`.
+///
+/// Ids with no row are simply absent from the map rather than an error: a
+/// vector whose chunk row is gone is **stale, not corrupt**. That happens
+/// normally — an artifact is re-chunked and its old chunk ids stop existing
+/// while a vector store that has not been re-indexed still returns them.
+/// Erroring there would turn an ordinary staleness window into a failed query.
+pub fn rows_by_chunk_ids(
+    cat: &Catalog,
+    chunk_ids: &[String],
+) -> Result<std::collections::HashMap<String, ChunkRow>> {
+    if chunk_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let placeholders = std::iter::repeat_n("?", chunk_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
+                content, content_hash
+           FROM artifact_chunk WHERE chunk_id IN ({placeholders})"
+    );
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(chunk_ids.iter()), |r| {
+            Ok(ChunkRow {
+                chunk_id: r.get(0)?,
+                artifact_id: r.get(1)?,
+                chunk_ix: r.get::<_, i64>(2)? as usize,
+                start_line: r.get::<_, i64>(3)? as usize,
+                end_line: r.get::<_, i64>(4)? as usize,
+                entry_token: r.get(5)?,
+                content: r.get(6)?,
+                content_hash: r.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows.into_iter().map(|r| (r.chunk_id.clone(), r)).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

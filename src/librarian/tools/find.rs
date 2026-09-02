@@ -756,6 +756,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 project_id.as_deref(),
                 &vec,
                 scoped_filter.as_ref(),
+                // One chunk per artifact, which PRESERVES this caller's current
+                // result shape: the store was artifact-keyed until Task 7, so
+                // every artifact appeared at most once. Task 10 decides whether
+                // `artifact(find, semantic=)` should surface several chunks per
+                // artifact; until then this is a grain fix, not a shape change.
+                1,
                 limit,
                 offset,
                 cutoff_ms,
@@ -1714,14 +1720,22 @@ mod tests {
     /// Park a unit vector for `id` on axis `axis` in the sqlite-vec table.
     /// `MockEmbedder` puts an "auth" query on axis 0 and everything else on axis
     /// 1, so `axis` selects whether a fixture is near or far from an auth query.
+    ///
+    /// **CHUNK-KEYED since Task 8.** `knn` reads `artifact_vec_v2`, whose ids
+    /// are chunk ids, and `semantic_find` resolves each back to its artifact
+    /// through `artifact_chunk`. Seeding `artifact_vec` — or seeding v2 under an
+    /// ARTIFACT id — leaves every candidate unresolvable, and the failure shows
+    /// up as an empty page rather than an error, so it reads like a ranking bug.
     fn seed_vec(cat: &Catalog, id: &str, axis: usize) {
+        let built = crate::librarian::catalog::chunk::build_chunks(id, "# T\n\nbody\n", 2048);
+        let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
         let mut v = vec![0.0f32; 768];
         v[axis] = 1.0;
         let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
         cat.conn
             .execute(
-                "INSERT OR REPLACE INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
-                rusqlite::params![id, blob],
+                "INSERT OR REPLACE INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![rows[0].chunk_id, blob],
             )
             .unwrap();
     }
@@ -1753,28 +1767,12 @@ mod tests {
         artifact::upsert(&cat, &sample_row("auth-doc", "Authentication Guide")).unwrap();
         artifact::upsert(&cat, &sample_row("deploy-doc", "Deployment Runbook")).unwrap();
 
-        let auth_blob: Vec<u8> = {
-            let mut v = vec![0.0f32; 768];
-            v[0] = 1.0;
-            v.iter().flat_map(|f| f.to_le_bytes()).collect()
-        };
-        let deploy_blob: Vec<u8> = {
-            let mut v = vec![0.0f32; 768];
-            v[1] = 1.0;
-            v.iter().flat_map(|f| f.to_le_bytes()).collect()
-        };
-        cat.conn
-            .execute(
-                "INSERT OR REPLACE INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
-                rusqlite::params!["auth-doc", auth_blob],
-            )
-            .unwrap();
-        cat.conn
-            .execute(
-                "INSERT OR REPLACE INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
-                rusqlite::params!["deploy-doc", deploy_blob],
-            )
-            .unwrap();
+        // Was two hand-rolled INSERTs into `artifact_vec`. `seed_vec` owns the
+        // chunk-keyed shape now, so there is ONE place to change when the
+        // storage grain moves again — this duplication is exactly why the grain
+        // change had a second site to fix.
+        seed_vec(&cat, "auth-doc", 0);
+        seed_vec(&cat, "deploy-doc", 1);
 
         let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
         let ctx = mk_ctx_with_embedder(cat, svc);
@@ -1894,17 +1892,24 @@ mod tests {
     /// trackers with `hints: {}` — and read as "nothing indexed covers this."
     /// Only the unfiltered control revealed the corpus answered it at #1.
     ///
-    /// The fixture needs MORE than the first `k` (100) candidates for the widen
-    /// path to be reachable at all, which is why it seeds 150.
+    /// The fixture needs MORE than the first `k` candidates for the widen path to
+    /// be reachable at all. **That floor moved in Task 8** — `k` now starts at
+    /// `(target * 5 * max_per_artifact.max(1)).max(200)`, so with `limit: 2` it is
+    /// 200, not the 100 it was when this test was written. The seed count went
+    /// 150 -> 250 to stay above it. Re-derive this number if either constant
+    /// changes: below the floor the store returns fewer rows than `k`,
+    /// `store_exhausted` fires on the first pass, and the test goes GREEN while
+    /// asserting nothing at all about starvation.
     ///
     /// BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
     #[tokio::test]
     async fn a_filter_that_excludes_the_nearest_matches_reports_starvation() {
         let cat = Catalog::open_in_memory().unwrap();
 
-        // 150 "note" artifacts sitting ON the auth axis — these are the nearest
+        // 250 "note" artifacts sitting ON the auth axis — these are the nearest
         // neighbours of an auth query, and the filter below removes every one.
-        for i in 0..150 {
+        // The count is LOAD-BEARING: it must exceed the initial `k`, now 200.
+        for i in 0..250 {
             let id = format!("note-{i}");
             let mut row = sample_row(&id, "Auth Note");
             row.kind = "note".into();
@@ -1934,7 +1939,7 @@ mod tests {
         assert_eq!(v["items"].as_array().unwrap().len(), 2);
         let starved = v["hints"]["semantic_starved"].as_u64().unwrap_or_else(|| {
             panic!(
-                "a filter that removed all 150 nearest rows must report starvation: {}",
+                "a filter that removed all 250 nearest rows must report starvation: {}",
                 v["hints"]
             )
         });

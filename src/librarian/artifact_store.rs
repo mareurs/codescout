@@ -274,7 +274,7 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         let blob: Vec<u8> = query.iter().flat_map(|f| f.to_le_bytes()).collect();
         let cat = self.catalog.lock();
         let mut stmt = cat.conn.prepare(
-            "SELECT id, distance FROM artifact_vec WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2",
+            "SELECT id, distance FROM artifact_vec_v2 WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2",
         )?;
         let hits = stmt
             .query_map(rusqlite::params![blob, k as i64], |row| {

@@ -682,6 +682,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 project_id.as_deref(),
                 &vec,
                 scoped_filter.as_ref(),
+                // One chunk per artifact. `context` packs a NEIGHBOURHOOD — its
+                // value is breadth across artifacts, so several chunks of one
+                // ledger crowding out another artifact is the regression to
+                // avoid. Task 9 formalises this contract.
+                1,
                 51,
                 0,
                 cutoff_ms,
