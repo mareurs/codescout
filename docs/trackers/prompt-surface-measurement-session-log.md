@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 47
+entry_high_water_F: 48
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -75,6 +75,7 @@ surfaces, not the definition.
 | F-45 | The documented pre-commit gate cannot see test code; CI's second clippy job can | fixed |
 | F-46 | I described a budget from its module name — `SIZE_CEILING` counts rules, at compile time, on the set that is never delivered | fixed-verified |
 | F-47 | A review base recorded before dispatch silently widened to three peers' commits — one git identity means `%an` cannot separate them | open |
+| F-48 | F-47's remedy names the unit "task", but the thing that needs a base is the DISPATCH — so a fix round re-uses the implementation commit and widens 14× | open |
 
 ## Wins Index
 
@@ -4204,6 +4205,33 @@ Three peer sessions committed into `experiments` while my Task 1 ran. `review-pa
 **Remedy, and why it is strictly better rather than a trade.** Derive the base from the task's own first commit after the fact — `<first-task-sha>^` — never from HEAD before dispatch. It is correct on a single-session checkout too, where it is identical to the recorded BASE, so there is no world in which the pre-recorded value is the better input. The skill's warning against `HEAD~1` still stands and is unaffected: `HEAD~1` is wrong because it is anchored to the range's *end*; this is anchored to its *start*.
 
 **What this does not claim.** I have not checked whether the other `scripts/` in that skill share the assumption, and I have not re-derived the peer's cross-subsystem instance myself — it is reported here as their observation, not my measurement.
+
+## F-48 — F-47's remedy names the unit "task", but the thing that needs a base is the DISPATCH — so a fix round re-uses the implementation commit and widens 14×
+
+**Valid:** conditional — an SDD review package's base is expressed relatively (`<sha>^..<sha>`, or `git show <sha>`) rather than as a literal SHA pair
+
+**Severity:** high — the same counterfactual as `prompt-surface-measurement-session-log:F-47`, deliberately rated the same: an Opus review seat spent on ten other commits, returning Important findings against work the dispatch never touched, which the controller then routes into a fix loop aimed at the wrong author.
+
+**Status:** open
+
+**Observed:** `prompt-surface-measurement-session-log:F-47`'s remedy reads *"derive the base from the task's own first commit after the fact — `<first-task-sha>^`"*. I wrote that remedy into Plan 2's stop-and-resume note as the range `cb6aed69..aab0c4ef`, annotated *"that range is the fix commit's true parent → head"*, and cited F-47 in the same sentence as the reason. **The annotation is false.** `aab0c4ef`'s parent is `dde26886`; `cb6aed69` is Plan 2's *implementation* commit, ten commits earlier.
+
+Measured 2026-09-02, building the package the note prescribed:
+
+| package | bytes | files |
+|---|---|---|
+| `git show aab0c4ef` (correct) | 10,674 | 3 — `src/engines/{coordinator,emitters,mod}.rs` |
+| `git diff cb6aed69 aab0c4ef` (as noted) | 148,930 | 20 |
+
+A factor of **14**, with 17 of the 20 files belonging to other work — four peer commits plus six of my own docs commits, all landed in the ~35 minutes between the two.
+
+**Why F-47's own remedy did not prevent this.** F-47 quantifies over *tasks*, and a task has more than one dispatch: implementation, then one fix round per review cycle, each producing a commit and each earning its own review. The unit that needs a base is the **dispatch**, not the task. Applied to a fix round, *"the task's first commit"* resolves to the implementation commit — the wrong end of the range, and wrong in precisely the direction F-47 exists to warn about. The remedy is not incorrect; its quantifier is one level too coarse, and the coarseness is invisible until a task has two dispatches.
+
+**The remedy that cannot drift: name the base relatively, never symbolically.** `<sha>^..<sha>`, or `git show <sha>` for a single-commit dispatch. A relative expression re-derives the parent from the object itself, so it is correct for whichever dispatch it names, correct on a single-session checkout (where it equals the pre-recorded BASE), and correct when written down and read hours later. **A literal SHA is a fact about an instant**, and on a shared checkout that instant expires in minutes — which is the same decay F-47 documents, arriving through a different door.
+
+**What caught it, and what would not have.** A routine `git log -1 --format=%P` before generating the package. What did *not* catch it: writing the note while citing F-47, and re-reading the note on resume. Knowing the class prevented neither the error nor the re-read — consistent with `observer-blindness:OB-1`'s measured finding that four instances of one class in one evening were each committed by an author actively writing about that class.
+
+**What this does not claim.** I have not checked whether the SDD skill's own `review-package` script can be given a relative base, nor whether its other scripts share the literal-SHA assumption. F-47 already declines the same check; this entry does not close it either.
 
 ## Template for new entries
 
