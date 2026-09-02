@@ -1,14 +1,14 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/accepted-parameter-silently-dropped
+closed: 2026-09-02
 opened: 2026-09-02
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md
-tags:
-  - cluster/accepted-parameter-silently-dropped
-kind: bug
+- docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md
+severity: medium
 ---
 
 # BUG: `read_markdown` silently ignores `offset` / `limit`, the aliases `read_file` learned to honour
@@ -112,7 +112,8 @@ Query and two rows under *Symptom*. Both rows have `error_msg` NULL.
 
 ## Fix
 
-Implemented 2026-09-02.
+Implemented 2026-09-02, on `experiments` at `567f3479`, patch-id
+`7a30d0b5dda01cc1ecc11fdd86acc0c881a9b839`.
 
 1. **Hoisted** `normalize_line_nav_aliases` from `read_file.rs` (private) into
    `src/tools/core/params.rs` as `pub fn`, beside `optional_u64_param`, which it calls.
