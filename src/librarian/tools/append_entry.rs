@@ -139,8 +139,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // working against a momentarily-stale catalog) for no safety, since a
         // deleted file cannot itself collide.
         // docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
+        // Scoped to a LEDGER. This guard sits in front of `allocate_entry_id`, which
+        // is the layer that actually decides whether `a.id` declares an
+        // `entry_prefix` (`augmentation.rs:975-995`) — so without a check here, a
+        // non-ledger artifact with unrelated unpushed commits on its own file is
+        // refused with "this ledger has commits..." and a "push, then allocate"
+        // remedy that does not unblock the call: push, retry, and
+        // `allocate_entry_id` refuses again with "does not declare an
+        // entry_prefix". Reading `row.abs_path` here (rather than adding a third
+        // `artifact::get`) is the same file access `ledger_has_unpushed_commits`
+        // already needs the path for.
         if let Some(row) = artifact::get(&cat, &a.id)? {
-            if ledger_has_unpushed_commits(std::path::Path::new(&row.abs_path)) {
+            let text = std::fs::read_to_string(&row.abs_path).unwrap_or_default();
+            let is_ledger =
+                !crate::util::librarian_guard::declared_entry_prefixes(&text).is_empty();
+            if is_ledger && ledger_has_unpushed_commits(std::path::Path::new(&row.abs_path)) {
                 return Err(RecoverableError::with_hint(
                     "append_entry: this ledger has commits that are not on its upstream \
                      branch, so its `entry_high_water_` mark is ahead of what any other \
@@ -149,7 +162,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "Push this ledger's commits, then allocate. Another clone reads its \
                      own committed high-water mark, so until yours is pushed both hosts \
                      resolve the same next id and the collision is only visible after \
-                     the branches merge — as one token with two definitions."
+                     the branches merge — as one token with two definitions. If you \
+                     cannot push right now (no network, no push access), do not write \
+                     the entry by hand instead — a declared `entry_prefix` puts this \
+                     file off-limits to direct `edit_markdown`. Note the entry \
+                     somewhere worktree-local instead, and fold it into the ledger once \
+                     these commits are pushed."
                         .to_string(),
                 ));
             }
@@ -1529,6 +1547,41 @@ mod tests {
             msg.contains("Push this ledger's commits, then allocate."),
             "hint must name the actual remedy sentence, not just any occurrence of \
              the word \"push\" (the explanatory second sentence also contains it): {msg}"
+        );
+        let _ = tmp;
+    }
+
+    /// The guard checks LEDGER-ness, not merely "unpushed commits touch this
+    /// file". Before this fix a non-ledger artifact (no `entry_prefix` in
+    /// frontmatter) with unpushed commits on its own file was refused with "this
+    /// ledger has commits..." and a "push, then allocate" remedy that would not
+    /// actually unblock the call — the real refusal, from `allocate_entry_id`,
+    /// is "does not declare an entry_prefix", and no amount of pushing fixes
+    /// that. LOAD-BEARING DETAIL: `plain.md` has NO `entry_prefix` at all, so
+    /// `declared_entry_prefixes` returns empty and this guard must be a no-op —
+    /// only the later, correctly-named refusal may fire.
+    #[tokio::test]
+    async fn unpushed_commits_on_a_non_ledger_file_are_not_refused_by_the_ledger_guard() {
+        let (tmp, work) = repo_with_upstream();
+        let plain = work.join("plain.md");
+        std::fs::write(&plain, "# Not a ledger\n\nno entry_prefix here\n").unwrap();
+        commit_path(&work, "plain.md", "add non-ledger file");
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "plain", &plain);
+
+        let err = call(&ctx, json!({"id": "plain", "id_prefix": "R", "entry": {}}))
+            .await
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            !msg.contains("this ledger has commits"),
+            "a non-ledger file's unpushed commits must not trip the ledger guard: {msg}"
+        );
+        assert!(
+            msg.contains("does not declare an entry_prefix"),
+            "the call must fall through to the REAL refusal (allocate_entry_id's), not \
+             be silently swallowed by the guard skip: {msg}"
         );
         let _ = tmp;
     }

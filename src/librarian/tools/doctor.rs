@@ -2736,11 +2736,28 @@ fn entry_indegree(
 /// make this check's positive case unrepresentable. `entry_sections` emits one
 /// `EntrySection` per matching heading with no such guard, so it is safe to
 /// build a duplicate-detector on top of it. `bug-fix-session-log:F-99`.
+///
+/// A sub-heading that repeats its OWN entry's token is not a second definition
+/// of it — `## A-28 — x` followed by nested `### A-28 — sub` is one entry with
+/// a documenting sub-section, the shape every ledger in this repo that grew
+/// past a one-line entry actually uses (`docs/trackers/prompt-hamsa-audit-log.md`
+/// nests `### A-28` five times under its own `## A-28`). By the letter of
+/// `get_guide("tracker-conventions")` § *Entry headings* that sub-heading still
+/// "defines" — level is not the discriminator there, and `entry_sections` and
+/// `def_re` are unchanged — but promoting every such nest to "defined N times"
+/// makes this check fire on 3 of 3 real ledgers on day one, none of them a
+/// collision. So this function alone drops a definition that is strictly
+/// DEEPER than, and lies inside the line span of, an earlier definition of the
+/// SAME token: `EntrySection::level` plus `heading_line`/`end_line` bound the
+/// nest with no new data. A genuine cross-host merge does not produce this
+/// shape — both clones allocate from the ledger's existing entries and so land
+/// at the SAME heading level (`outcome.heading_level`, `append_entry.rs:203`)
+/// — so the case this check exists to catch survives the filter untouched.
 fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
     use crate::librarian::tools::link_scan::extract::entry_sections;
     use std::collections::BTreeMap;
 
-    let mut seen: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    let mut by_id: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for section in entry_sections(text) {
         // `section.id` is only ever produced by `def_re`'s `[A-Z]{1,3}-\d+` capture,
         // so it always contains a dash — `.next()` on a non-empty split is never
@@ -2749,21 +2766,49 @@ fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u3
         if !prefixes.iter().any(|p| p == prefix) {
             continue;
         }
-        seen.entry(section.id.clone())
-            .or_default()
-            .push(section.heading_line);
+        by_id.entry(section.id.clone()).or_default().push(section);
     }
-    seen.into_iter()
-        .filter(|(_, lines)| lines.len() > 1)
-        .collect()
+
+    let mut out = Vec::new();
+    for (id, mut sections) in by_id {
+        sections.sort_by_key(|s| s.heading_line);
+        // `kept_spans` holds every SURVIVING (non-nested) definition seen so far
+        // for this token, as (level, end_line). A candidate is nested — and so
+        // not a redefinition — only when it is strictly deeper than some earlier
+        // survivor AND its heading line still falls inside that survivor's span;
+        // a same-level duplicate never matches this, however close the lines are.
+        let mut kept_spans: Vec<(usize, u32)> = Vec::new();
+        let mut kept_lines: Vec<u32> = Vec::new();
+        for section in &sections {
+            let nested = kept_spans.iter().any(|&(level, end_line)| {
+                section.level > level && section.heading_line <= end_line
+            });
+            if !nested {
+                kept_spans.push((section.level, section.end_line));
+                kept_lines.push(section.heading_line);
+            }
+        }
+        if kept_lines.len() > 1 {
+            out.push((id, kept_lines));
+        }
+    }
+    out
 }
 
 /// `entry_defined_twice`: one ledger defines the same `PREFIX-N` token twice.
 ///
 /// This is what a cross-host merge produces. Two clones read their own committed
 /// `entry_high_water_<PREFIX>`, allocate the same id, and the merge lands two
-/// `## PREFIX-N — <title>` headings in one file —
+/// `## PREFIX-N — <title>` headings in one file, at the SAME heading level —
 /// `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+/// It is not the only cause a same-level duplicate can have (a hand-edited
+/// ledger or a bad cherry-pick reach the same shape), so the detail below
+/// describes what the state IS rather than asserting the merge as certain.
+/// `duplicate_definitions` already excludes the shape that is NOT a collision:
+/// a sub-heading nested inside its own entry, at a strictly deeper level and
+/// within that entry's span (`## A-28` documented by nested `### A-28`), which
+/// is the shape every real ledger in this repo that grew past a one-line entry
+/// actually uses.
 ///
 /// Unreachable at two independent layers before this check, which is why neither
 /// `link_scan` nor `scan_undefined_entries` reports it: the extractor de-duplicates
@@ -2807,14 +2852,17 @@ fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation
                 abs_path.clone(),
                 format!(
                     "`{token}` is defined {} times in this ledger, at lines {lines_str}. \
-                     One token with two active definitions is what a cross-host merge \
-                     produces: two clones allocated it from their own committed \
-                     `entry_high_water_` mark. Every citation of `{token}` now resolves \
-                     to whichever definition the reader reaches first, and nothing else \
-                     reports this state — the extractor de-duplicates definitions at \
-                     parse time. Give the LATER entry a fresh id; never a suffix \
-                     (`{token}b` is not a valid token and can be neither defined nor \
-                     cited), and re-point citations that meant it.",
+                         Every citation of `{token}` binds the EARLIER of these definitions — \
+                         `extract()`'s `seen_defs` keeps the first heading in file order and \
+                     discards the rest — whichever one the citer actually meant, and \
+                     nothing else reports this state. The commonest cause is a cross-host \
+                     merge: two clones each allocated `{token}` from their own committed \
+                     `entry_high_water_` mark before either saw the other's commit. If \
+                     that is what happened here, give the LATER entry a fresh id; never a \
+                     suffix (`{token}b` is not a valid token and can be neither defined nor \
+                     cited), and re-point citations that meant it. If it was not a merge — \
+                     a hand-edit or a bad cherry-pick reach the same shape — resolve \
+                     whichever definition is stale before renumbering anything.",
                     lines.len()
                 ),
             ));
@@ -13427,6 +13475,42 @@ root = "work/elsewhere/ghost"
         assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
     }
 
+    /// A `### A-28` sub-heading NESTED inside its own `## A-28` entry is not a
+    /// second definition — it is the shape every ledger in this repo that grew
+    /// past a one-line entry actually uses (`docs/trackers/prompt-hamsa-audit-log.md`
+    /// nests five `### A-28` sub-headings under one `## A-28`). LOAD-BEARING
+    /// DETAIL: the `###` is strictly DEEPER than the `##` AND its line falls
+    /// inside the `##` entry's span (before the next `##`-or-shallower heading)
+    /// — flatten either half (make it `## A-28` again, or move it past the next
+    /// `##` sibling) and this becomes a real duplicate, which the paired test
+    /// below confirms still fires.
+    #[test]
+    fn duplicate_definitions_is_silent_on_a_nested_sub_heading_of_the_same_token() {
+        let body = "# L\n\n## A-28 — x\n\nprose\n\n### A-28 — sub\n\nmore prose\n";
+        assert!(
+            duplicate_definitions(body, &["A".to_string()]).is_empty(),
+            "a sub-heading documenting its own entry must not count as a redefinition"
+        );
+    }
+
+    /// The paired positive: two definitions at the SAME level are never "nested",
+    /// however close their lines are, so the filter added for the test above must
+    /// not swallow this — the shape a real cross-host merge actually produces,
+    /// since both clones allocate from the ledger's existing heading level
+    /// (`outcome.heading_level`, `append_entry.rs`).
+    #[test]
+    fn duplicate_definitions_still_fires_on_a_same_level_duplicate_beside_a_nested_one() {
+        let body = "# L\n\n## A-28 — x\n\n### A-28 — sub\n\n## A-28 — y\n";
+        let got = duplicate_definitions(body, &["A".to_string()]);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "A-28");
+        assert_eq!(
+            got[0].1.len(),
+            2,
+            "the nested ### must be dropped, leaving exactly the two ## definitions: {got:?}"
+        );
+    }
+
     /// A prefix the ledger does not declare is not this ledger's namespace.
     #[test]
     fn duplicate_definitions_ignores_an_undeclared_prefix() {
@@ -13540,10 +13624,18 @@ body
         );
         let detail = found[0]["detail"].as_str().unwrap();
         assert!(detail.contains("R-147"), "{detail}");
+        // Pin the RENDERED line list as `duplicate_definitions` actually joins it
+        // (`lines_str`, doctor.rs), not `detail.contains('7') && detail.contains("11")`
+        // — that pair is trivially satisfied by the token `R-147` alone (it contains
+        // both a '7' and, read across the dash, no "11", but a body with three or
+        // more definitions could satisfy '7'/"11" from digits in unrelated line
+        // numbers without `lines_str` ever being rendered correctly). The literal
+        // "at lines 7, 11" can only be produced by the real 1-indexed heading lines
+        // of this fixture's two `## R-147` headings, joined in order.
         assert!(
-            detail.contains('7') && detail.contains("11"),
-            "the 1-indexed defining lines must reach the message, not just the \
-             computation Task 1 already pins with vec![3, 7]: {detail}"
+            detail.contains("at lines 7, 11"),
+            "the rendered, comma-joined 1-indexed defining lines must reach the \
+             message verbatim: {detail}"
         );
     }
 
