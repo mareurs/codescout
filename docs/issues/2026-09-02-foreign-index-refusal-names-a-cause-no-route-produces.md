@@ -1,7 +1,7 @@
 ---
 id: '43377426520f683b'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the foreign-index guard''s refusal names a cause no route produces, and omits the route it exists to catch'
 owners:
 - marius
@@ -18,7 +18,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 severity: medium
-unverified: fix is implemented, tested and mutation-verified in a scratchpad harness but NOT applied to scripts/ — the hooks are live-shimmed for every session in this checkout, so applying it is a coordinated act, not an edit; patch held for codescout-0a
+unverified: fixed and mutation-verified on branch foreign-index-route-column (25f6540c), NOT on experiments — both scripts are live-shimmed for every session in the shared checkout, so landing it is gated on a quiet tree rather than on any remaining work. Not archivable until then.
 ---
 
 ## Summary
@@ -169,8 +169,15 @@ proposes no change to the refusal.
 
 ## Fix
 
-**Level 2 chosen, and the reproduction is what decided it.** Implemented and verified; **not
-applied** — see § *Resume* for why the apply is a coordinated act rather than an edit.
+**Level 2 chosen, and the reproduction is what decided it.** Implemented, tested,
+mutation-verified and **committed on a feature branch** — `foreign-index-route-column`,
+SHA `25f6540c`, patch-id `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`. **Not on
+`experiments`**, so this file is NOT archivable yet; see § *Resume* for the reason and the
+landing step.
+
+Record the patch-id rather than relying on the SHA: `25f6540c` is positional and dies when
+the branch is rebased onto a moving `experiments`, which is the normal case here. The
+patch-id is a content hash of the diff and survives rebase and cherry-pick both.
 
 Level 1 (replace the asserted cause with an enumeration of the real routes) is **not a
 step toward** level 2, and it is worse than the file originally judged: the enumeration it
@@ -205,11 +212,21 @@ a correctness bug on a shared index; mutation M7 below exists to fail if anyone 
 
 **The refusal and the remedy are untouched**, as this file required. Both were correct.
 
-**Not applied, deliberately.** `.git/hooks/post-index-change` is a thin shim exec'ing
-`$root/scripts/post-index-change-stage-log.sh`, and `.pre-commit-config.yaml:80` wires the
-guard by `entry:`. Writing either file changes commit-path behaviour for every session in
-this checkout on its next `git add`, with nothing telling them it changed. No SHA, no
-patch-id — there is no commit to cite yet.
+**Landed on a branch rather than on `experiments`, deliberately.**
+`.git/hooks/post-index-change` is a thin shim exec'ing
+`$root/scripts/post-index-change-stage-log.sh` off `--show-toplevel`, and
+`.pre-commit-config.yaml:80` wires the guard by `entry:`. Writing either file **in the
+shared checkout** changes commit-path behaviour for every session there on its next `git
+add`, with nothing telling them it changed; six peer sessions held unstaged work at the
+time.
+
+A worktree isolates the tracked `scripts/` copy and the per-worktree stage log, so the
+commit exercised the new recorder **on itself** — all four staged paths recorded `named`,
+and the modified guard passed its own commit. **That isolation holds only because this diff
+does not touch the shim:** `git rev-parse --git-path hooks` resolves to the **common**
+`.git/hooks` from inside a worktree (measured by `codescout-0a` from
+`.worktrees/tool-collapse`, confirmed here; `core.hooksPath` unset). A change that DID
+touch the shim would go live for every session wherever it landed.
 ## Tests added
 
 14 cases in `tests/hooks-discrimination.sh` § 8 (+117 lines), which runs in **CI**
@@ -269,25 +286,32 @@ This is what the guard itself prints, and it is correct.
 
 ## Resume
 
-**The fix is done; what remains is landing it, which is a coordination problem rather than
-an engineering one.** The full patch, the modified suite and the mutation runner are held
-in a session scratchpad (`fix/` and `harness/` under
-`/tmp/claude-1000/-home-marius-work-claude-codescout/9527bc6e-…/scratchpad`) — **session-
-local and not durable**, so whoever picks this up should expect to re-derive it from this
-section rather than find the files.
+**The fix is committed on `foreign-index-route-column` (`25f6540c`, patch-id
+`b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`). The one remaining step is landing it on
+`experiments`, which is a coordination problem, not an engineering one.**
 
-To land it: copy both scripts and the § 8 test block, then commit **all three together** —
-the tests red CI without the scripts. Re-run `bash tests/hooks-discrimination.sh` (expect
-63/63) and re-run at least M6 and M7 before committing, since those two are the ones
-guarding the prose replacement and the diagnostic-only invariant.
+To land it: rebase or cherry-pick the branch onto `experiments` **at a moment when peers do
+not hold unstaged work in the shared checkout**, then re-run `bash
+tests/hooks-discrimination.sh` (expect 63/63). Re-run at least M6 (reinstate the false
+sentence) and M7 (let a route value gate the refusal) before landing — those two guard the
+prose replacement and the diagnostic-only invariant respectively, and they are the two a
+reworker is most likely to break without noticing.
 
-**Do not apply it while peers hold uncommitted work.** Both files are live-shimmed for
-every session in this checkout (§ *Fix*, last paragraph), and at the time of writing six
-peer sessions were committing through them with unstaged work in the tree. The patch was
-offered to `codescout-0a` (PID 4165881), who owns the adjacent tool-surface work from the
-`tool-collapse` worktree — a worktree's `git rev-parse --git-dir` resolves to
-`.git/worktrees/<name>`, so its stage log and its `scripts/` copy are both separate and it
-can carry this without disturbing the main checkout.
+**Why the timing matters and is not fussiness.** The moment this reaches `experiments`,
+both scripts are live for every session in the shared checkout on its next `git add`. The
+change is designed so the failure direction is unchanged (§ *Fix*, diagnostic-only), so the
+risk is low rather than absent — but the population that absorbs it did not ask for it and
+will not be told. Land it when the tree is quiet.
+
+This file becomes archivable once that happens, per `CLAUDE.md`'s archive trigger (verified
+on `experiments`, gate green, regression test in place — the last two are already true).
+
+**`codescout-0a` declined to carry it and was right to.** Routing a 278-line git-hook
+diagnostic through a 13-task tool-surface-collapse branch would have made the whole-branch
+review incoherent, coupled this fix's fate to eleven unrelated tasks, and — decisively —
+**deferred and hidden the harm rather than avoiding it**: the hook change would still land
+for every session at merge, buried where nobody reviews it as a hook change. They offered a
+second pair of eyes on the diff instead, which is the useful form of help here.
 
 **If a later session prefers the cheaper repair, read § *Fix* first.** Level 1 is not a
 smaller version of this fix; it is the same defect re-shipped.
