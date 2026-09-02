@@ -422,6 +422,56 @@ field — that would reopen exactly the gate the sentence above disclaims — bu
 needs `**Members:**` to name it, the same as any IC-N slug, or the tag is untaggable the moment
 CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 
+> ✅ **ADJUDICATED 2026-09-03 — the hatch STANDS, and the archive campaign does not follow from
+> it.** The flag below bundles two questions, and the bundling is why neither was decided: the
+> hatch is cheap and evidence-backed, the campaign is expensive and has no evidence behind it yet.
+> Deciding the first does not license the second, and they are separated here.
+>
+> **The hatch exists — as a staging area with an exit, never a terminus.** Three reasons, in
+> order of weight:
+>
+> 1. **A forced tag is strictly worse than a parked one.** `n` is a partition and counts drive
+>    promotion, so a bug pushed into a class it does not instantiate moves that class toward its
+>    threshold on a false member. Parking costs a class nothing; a wrong tag costs every reader
+>    of that class's count.
+> 2. **The absence has already corrupted a promotion, and this ledger says so in its own words.**
+>    `IC-11` was promoted *"forced by a taggable instance arriving against a gate with no
+>    `cluster/unclassified` escape hatch, rather than by its count"*. That is the cost of not
+>    having it, already paid — a class promoted on the wrong grounds because an author needed
+>    somewhere to put a bug.
+> 3. **Both members did the work the hatch is supposed to require.** Neither is a shrug. Each
+>    names the classes it checked and why each fails, and `chunk-line-ranges-…` names the
+>    candidate class for a second instance. Two independent authors reached for the same missing
+>    token and both left a derivation behind rather than forcing a fit.
+>
+> **Admission conditions, which both current members already meet.** The tag requires (a) the
+> classes actually checked, named, with why each fails, and (b) a **named candidate class** for
+> the second instance. (b) is what makes this a queue rather than a parking lot: without it the
+> tag is terminal and nothing ever leaves. With it, the hatch feeds `IC-N` creation — which is
+> exactly what the candidate queue below did before it emptied.
+>
+> **The `IC-6` reading is accepted, and it argues FOR the hatch.** `e5b1c28f` was right that a
+> closed set with no escape is `addressing-without-an-escape-hatch` holding about its own
+> classifier. The remedy this ledger prescribes for `IC-6` is *provide the escape* — so the
+> finding's own class supplies the verdict.
+>
+> **NOT decided: the archive-coverage campaign.** § above notes every `n` is a floor and that
+> covering the archive would need this slug. It now exists, and that still does not authorise
+> tagging the archive. `CLAUDE.md` § *Observer Blindness* is explicit that **a coverage ratio
+> which is neither ~0% nor ~100% is a boundary someone drew before it is drift**, and that a
+> campaign over a population must first grep `tests/`, `scripts/pre-commit-*` and hooks for that
+> population's name — the exact sequence that once came one step from a 236-file campaign the
+> gate's own header forbade in writing. Whoever wants the archive covered opens that as its own
+> decision with its own evidence. **The floors stay floors — now by choice rather than by
+> omission, which is the whole of what this adjudication changes for them.**
+>
+> *Adjudicated by session `63083c9e-cc56-4dbd-9852-820f34261eeb` on the operator's direction.
+> Reversible: the remedy named below — a real slug on each member and removal of the pair —
+> stays available, and costs two retags.*
+>
+> **The original flag, kept whole because a withdrawn claim is worth more on the record than off
+> it:**
+>
 > ⚠ **NOT ADJUDICATED — created 2026-09-02 by a fix-round implementer, and the word "sanctioned"
 > below is withdrawn.** The sentence above this block calls the hatch *"a taxonomy decision, not a
 > gate one"*, and no such decision has been taken. What happened is narrower and worth stating
@@ -451,7 +501,8 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
 (`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
 none fit without forcing the claim, so filed under the escape hatch instead — which was created
-by the same fix round, and is flagged unadjudicated in the block above.
+by the same fix round, and was **adjudicated 2026-09-03** in the block above (the hatch stands;
+the archive campaign it would enable does not follow from it).
 +1: `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02) — a value
 computed in one coordinate space (lines within the frontmatter-stripped **body**) published
 under a name that states another (`start_line`, read by every consumer as a **file** line).
