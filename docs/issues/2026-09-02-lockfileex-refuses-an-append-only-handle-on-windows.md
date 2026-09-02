@@ -1,16 +1,17 @@
 ---
 id: d5788071fe38e536
 kind: bug
-status: open
+status: fixed
 title: LockFileEx needs GENERIC_READ/WRITE, and an append-only handle has neither — 21 tests red on every windows lane
 tags:
 - cluster/repro-env-diverges-from-gate-env
 topic: cross-platform path handling
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related: []
 severity: high
+unverified: 'No regression test, and one is not obviously writable: the property — "the handle passed to lock_exclusive carries read or write access" — is not observable from a `File`, and flock(2) ignores access mode so no Linux test can express the failure. NOT ARCHIVED for that reason; the documented archive trigger requires one. The call-site comment naming what breaks and why the line looks redundant is the interim guard. Separately: 2 of the original 21 failures REMAIN after this fix and are a DIFFERENT defect, unfiled as of this closure — see the section ''What remains, and it is not this bug''.'
 ---
 
 ## Summary
@@ -102,13 +103,54 @@ with `.write(true)` or `File::create`, both of which yield `GENERIC_WRITE`. Only
 
 ## Fix
 
+**Fixed at `6d89a69b`** (patch-id `798292c26c559177245374b53e0fe7658f3b93d5`), `experiments`.
+
 Add `.read(true)` to the `OpenOptions`, selecting the access-mode arm that carries
 `GENERIC_READ`. Append semantics are unchanged. Also wraps `lock_exclusive` in a
 `with_context` naming the file — the missing context is what made the failing line
 ambiguous for two rounds, and a bare `last_os_error()` under a `?` is the shape to avoid.
 
-**Unverifiable locally, by construction.** `flock(2)` ignores access mode, so no Linux
-test can distinguish fixed from broken. The verification is a lane run.
+**VERIFIED on the lanes, which is the only place it can be.** Run `33574961971`
+(`6d89a69b`) against run `33573899069` (`9a156bd4`), `Test (windows-latest / default)`:
+
+| | pre-fix | post-fix |
+|---|---|---|
+| passed / failed | 4806 / **21** | 4825 / **2** |
+| `Access is denied` panics | **19** | **0** |
+| `opening <path>` panics | 0 | 0 |
+
+The error string this bug is named for is gone, and 19 of 21 failures cleared. That is
+the outcome the diagnosis predicted, stated before the run rather than fitted after it.
+
+**Unverifiable locally, by construction** — `flock(2)` ignores access mode, so no Linux
+test can distinguish fixed from broken.
+
+## What remains, and it is not this bug
+
+Two of the original 21 still fail, and they are a **different defect**, unfiled:
+
+```
+delete_row_is_attributed_from_its_payload_not_a_live_join
+  assertion failed: a delete row with a usable payload must not fall through to
+  unattributed: ExportReport { exported: 0, …, unattributed: 1 }   left: 1  right: 0
+
+rows_from_different_months_land_in_different_files
+  read_dir(audit_dir(tmp)) -> Os { code: 3, kind: NotFound,
+                                   "The system cannot find the path specified." }
+```
+
+**They are consistent with one cause, though that is not yet proven:** `export` cannot
+**attribute** rows on Windows (`unattributed: 1`), so it writes nothing, so the audit
+directory is never created — and the second test's `read_dir` then fails with `NotFound`
+for exactly that reason (`export` creates the directory only when it has something to
+write; see the comment on the `lines` helper). Attribution compares an `abs_path` taken
+from a row payload against `repo_root`, which is the kind of comparison that is
+separator- and case-sensitive on Windows and not on Unix.
+
+**These two are also the pair the WINE lane failed in the very first run** — the 2-of-21
+sample this file's original, retracted diagnosis was drawn from. So that sample was not
+merely small: it was taken from the *minority* failure mode, and described a defect that
+was never the one causing the other 19.
 
 **A regression test is owed and is not obviously writable.** The property — "the handle
 passed to `lock_exclusive` carries read or write access" — is not observable from a
@@ -122,4 +164,3 @@ Found by pushing `experiments` so the `IC-5` wine pin (`58d85263`) could be veri
 The pin itself succeeded — the lane reports `>>> wine here: wine-11.16` — and is
 unrelated to this defect: the module did not exist at the pre-pin commit, and native
 `windows-latest` fails 21 where wine fails 2, which rules the emulator out.
-
