@@ -310,7 +310,14 @@ fn the_scan_actually_reads_files() {
 }
 
 // ---------------------------------------------------------------------------
-// The Index table's `n` column, checked against the corpus it summarises.
+// The Index table: which classes have a row, and that no row stores a count.
+//
+// Until 2026-09-02 this section checked an `n` column against the corpus it summarised. The
+// column is gone — counts are derived (`scripts/probe-cluster-census.py`) — so the parsers here
+// serve two opposite questions: `parse_index_rows` asks whether the table is still being read at
+// all, and `parse_index_counts` exists so `no_index_row_stores_a_count` can assert it comes back
+// empty. One parser cannot serve both, because the emptiness that is a PASS for one is the
+// failure mode of the other.
 // ---------------------------------------------------------------------------
 
 /// Every tracked bug file — open corpus **and** archive.
