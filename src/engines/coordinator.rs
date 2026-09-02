@@ -1,0 +1,279 @@
+//! The fan-out that decides what a tool response carries, Layer 2 of
+//! `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md`.
+//!
+//! Post phase only. This module owns **ordering**, **corpus exclusivity** and
+//! the **idle re-arm tick**; it owns no knowledge of guides, rules, or the
+//! `Tool` trait. Each engine's body lives in [`super::emitters`].
+
+use super::{Corpus, EngineDecl, ENGINES};
+use crate::tools::guide_emit::GuideDeliveryShape;
+use crate::tools::guide_ledger::GuideLedger;
+use rmcp::model::Content;
+use serde_json::Value;
+
+/// Everything a post-phase engine may read about the call.
+///
+/// `content_topic` is resolved by the caller rather than by asking the tool,
+/// for two reasons: the coordinator must not depend on the `Tool` trait, and
+/// a default trait method cannot coerce `&self` to `&dyn Tool` anyway.
+#[expect(
+    dead_code,
+    reason = "threaded through by run_post_in for Plan 2's emitters to read; no \
+              emitter exists yet, and the synthetic ones this task tests \
+              against ignore it, so no field is read under any build"
+)]
+pub(crate) struct PostCtx<'a> {
+    pub selector: Option<&'a str>,
+    pub value: &'a Value,
+    /// `Tool::relevant_guide_topic(value)`.
+    pub content_topic: Option<&'a str>,
+    /// The primary block will overflow into a `@tool_*` buffer, or the tool
+    /// pre-buffered and returned an `output_id`. Precomputed because deciding
+    /// it requires the serialised JSON, which the coordinator does not hold.
+    pub overflowing: bool,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "constructed and read by run_post_in, which becomes reachable \
+                  in Plan 3 when call_content wires run_post in; tests construct \
+                  and read it directly today"
+    )
+)]
+/// One engine's contribution to one response.
+#[derive(Default)]
+pub(crate) struct Emission {
+    /// Drives the single legacy `_guide_hint` field on the primary block.
+    /// There is exactly one such field, so at most one hint survives a
+    /// response — see `run_post_in`.
+    pub hint: Option<(String, GuideDeliveryShape)>,
+    pub blocks: Vec<Content>,
+}
+
+impl Emission {
+    #[expect(
+        dead_code,
+        reason = "no caller exists yet in any build; the Step 6 mutation check \
+                  exercises the equivalent guard by hand-editing run_post_in, and \
+                  Plan 2's emitters are the intended callers"
+    )]
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "constructed by run_post_in's per-engine loop, which becomes \
+                  reachable in Plan 3 when call_content wires run_post in; tests \
+                  construct and match on it directly today"
+    )
+)]
+/// Whether an engine's trigger fired — which is **not** the same question as
+/// whether it produced bytes.
+///
+/// The distinction is load-bearing and pre-dates this module. The session
+/// opener's pre-refactor branch returned `(None, Vec::new())` when its topic
+/// failed to build, rather than falling through to guide-sections: a fired
+/// trigger that ships nothing still spends the call. Collapsing these two into
+/// `Vec<Content>` would silently restore the fall-through.
+pub(crate) enum Emitted {
+    /// Trigger did not fire. Later engines in the same corpus may still run.
+    Declined,
+    /// Trigger fired. No later engine in the same corpus runs, even if this
+    /// emission is empty.
+    Claimed(Emission),
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "called only by run_post, which Plan 3 wires into call_content; \
+                  tests call this function directly today, which is why it is \
+                  split out at all — see its own doc comment"
+    )
+)]
+/// `run_post`'s logic, generic over the engine slice.
+///
+/// Split out so the ordering rules can be exercised against synthetic engines
+/// — the live registry cannot produce a claimed-but-empty first engine, and
+/// that is exactly the case worth pinning. Same idiom, same reason, as
+/// `operator_rules::route::route_in`.
+pub(crate) fn run_post_in(
+    engines: &[EngineDecl],
+    ctx: &PostCtx<'_>,
+    ledger: &mut GuideLedger,
+) -> Emission {
+    // Anonymous-tier idle re-arm, coordinator-level and FIRST. The session
+    // opener's trigger reads the ledger this may re-arm, so running the tick
+    // inside any one engine would order it against that engine alone.
+    let rearmed = ledger.tick();
+    if rearmed > 0 {
+        tracing::debug!("anonymous guide ledger idle TTL re-armed {rearmed} topic(s)");
+    }
+
+    let mut out = Emission::default();
+    let mut claimed: Vec<Corpus> = Vec::new();
+    for engine in engines {
+        let Some(emit) = engine.emit_post else {
+            continue;
+        };
+        if claimed.contains(&engine.corpus) {
+            continue;
+        }
+        let Emitted::Claimed(e) = emit(ctx, ledger) else {
+            continue;
+        };
+        claimed.push(engine.corpus);
+        if out.hint.is_none() {
+            out.hint = e.hint;
+        }
+        out.blocks.extend(e.blocks);
+    }
+    out
+}
+
+#[expect(
+    dead_code,
+    reason = "bound to call_content by Plan 3; nothing calls it yet, not even \
+              tests, which exercise run_post_in directly against synthetic engines"
+)]
+/// The live fan-out, bound to [`ENGINES`].
+pub(crate) fn run_post(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -> Emission {
+    run_post_in(ENGINES, ctx, ledger)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engines::{Mode, RetrievalKey};
+    use crate::tools::guide_ledger::GuideLedger;
+    use rmcp::model::Content;
+    use serde_json::json;
+
+    fn owns_nothing(_k: &str) -> bool {
+        false
+    }
+
+    fn decl(
+        id: &'static str,
+        corpus: Corpus,
+        emit: fn(&PostCtx<'_>, &mut GuideLedger) -> Emitted,
+    ) -> EngineDecl {
+        EngineDecl {
+            id,
+            key: RetrievalKey::CallShape,
+            corpus,
+            mode: Mode::Push,
+            writes_at: &[],
+            owns_key: owns_nothing,
+            emit_post: Some(emit),
+        }
+    }
+
+    fn claims_a_block(_c: &PostCtx<'_>, _l: &mut GuideLedger) -> Emitted {
+        Emitted::Claimed(Emission {
+            hint: Some(("first".into(), GuideDeliveryShape::Whole)),
+            blocks: vec![Content::text("FIRST")],
+        })
+    }
+    fn claims_nothing(_c: &PostCtx<'_>, _l: &mut GuideLedger) -> Emitted {
+        Emitted::Claimed(Emission::default())
+    }
+    fn declines(_c: &PostCtx<'_>, _l: &mut GuideLedger) -> Emitted {
+        Emitted::Declined
+    }
+    fn claims_second(_c: &PostCtx<'_>, _l: &mut GuideLedger) -> Emitted {
+        Emitted::Claimed(Emission {
+            hint: Some(("second".into(), GuideDeliveryShape::Whole)),
+            blocks: vec![Content::text("SECOND")],
+        })
+    }
+
+    fn ctx<'a>(v: &'a serde_json::Value) -> PostCtx<'a> {
+        PostCtx {
+            selector: Some("t.a"),
+            value: v,
+            content_topic: None,
+            overflowing: false,
+        }
+    }
+
+    fn texts(e: &Emission) -> Vec<String> {
+        e.blocks
+            .iter()
+            .filter_map(|b| b.as_text().map(|t| t.text.clone()))
+            .collect()
+    }
+
+    /// The load-bearing one. A CLAIMED-but-empty engine still spends its
+    /// corpus: the pre-refactor `if/else` returned `(None, Vec::new())` when
+    /// the opener's `guide_block` came back `None`, rather than falling
+    /// through to guide-sections. Mutating `Emitted::Claimed(e) if
+    /// e.is_empty() => continue` reds this test and only this test.
+    #[test]
+    fn a_claim_spends_its_corpus_even_when_it_emits_nothing() {
+        let v = json!({});
+        let engines = [
+            decl("empty-claimer", Corpus::CompiledGuides, claims_nothing),
+            decl("would-emit", Corpus::CompiledGuides, claims_a_block),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert!(texts(&out).is_empty(), "got {:?}", texts(&out));
+        assert!(out.hint.is_none());
+    }
+
+    #[test]
+    fn a_decline_passes_the_corpus_to_the_next_engine() {
+        let v = json!({});
+        let engines = [
+            decl("decliner", Corpus::CompiledGuides, declines),
+            decl("would-emit", Corpus::CompiledGuides, claims_a_block),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(texts(&out), vec!["FIRST".to_string()]);
+    }
+
+    #[test]
+    fn engines_in_different_corpora_both_emit_in_registry_order() {
+        let v = json!({});
+        let engines = [
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
+            decl("rules", Corpus::OperatorLedger, claims_second),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(texts(&out), vec!["FIRST".to_string(), "SECOND".to_string()]);
+    }
+
+    /// The primary block carries exactly one `_guide_hint` field, so a second
+    /// hint has nowhere to go. First claimant wins; later hints are dropped
+    /// rather than overwriting.
+    #[test]
+    fn only_the_first_hint_survives() {
+        let v = json!({});
+        let engines = [
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
+            decl("rules", Corpus::OperatorLedger, claims_second),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(out.hint.map(|(t, _)| t), Some("first".to_string()));
+    }
+
+    /// An engine with no emitter is skipped, not treated as a decline that
+    /// claims nothing — `craft-skills` is `Mode::Unmanaged` and must not be
+    /// able to spend a corpus it does not draw from.
+    #[test]
+    fn an_engine_without_an_emitter_is_skipped() {
+        let v = json!({});
+        let mut unwired = decl("unwired", Corpus::CompiledGuides, claims_a_block);
+        unwired.emit_post = None;
+        let engines = [unwired, decl("real", Corpus::CompiledGuides, claims_second)];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(texts(&out), vec!["SECOND".to_string()]);
+    }
+}

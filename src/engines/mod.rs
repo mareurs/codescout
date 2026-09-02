@@ -47,6 +47,8 @@
 //! [`Mode::Unmanaged`] is the honest state for an engine that ships and
 //! participates in nothing, which is where `craft-skills` sits today.
 
+pub mod coordinator;
+
 use crate::prompts::SESSION_OPENING_GUIDE;
 
 /// The key an engine retrieves on. This is the family's discriminator: it
@@ -113,6 +115,25 @@ pub struct EngineDecl {
     /// A function pointer rather than a prefix string because two of the three
     /// ledger-writing engines do not use a prefix at all — see the module docs.
     pub owns_key: fn(&str) -> bool,
+    /// This engine's post-phase emitter, or `None` while it is still inlined
+    /// in `call_content`. A function pointer rather than a trait object
+    /// because an engine is data, not behaviour with state — and because a
+    /// `&'static EngineDecl` must stay `Sync` without a `Box`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by engines::coordinator::run_post_in, which Plan 3 of \
+                      the Layer 2a sequence wires into call_content; tests call \
+                      run_post_in directly today, so it is live under cfg(test)"
+        )
+    )]
+    pub(crate) emit_post: Option<
+        fn(
+            &crate::engines::coordinator::PostCtx<'_>,
+            &mut crate::tools::guide_ledger::GuideLedger,
+        ) -> crate::engines::coordinator::Emitted,
+    >,
 }
 
 impl EngineDecl {
@@ -155,6 +176,7 @@ pub static ENGINES: &[EngineDecl] = &[
         mode: Mode::Both,
         writes_at: &["tools::core::guide_emit", "tools::guide"],
         owns_key: owns_guide_key,
+        emit_post: None,
     },
     EngineDecl {
         id: "session-opener",
@@ -163,6 +185,7 @@ pub static ENGINES: &[EngineDecl] = &[
         mode: Mode::Push,
         writes_at: &["tools::core::types"],
         owns_key: owns_session_opener_key,
+        emit_post: None,
     },
     EngineDecl {
         id: "operator-rules",
@@ -171,6 +194,7 @@ pub static ENGINES: &[EngineDecl] = &[
         mode: Mode::Push,
         writes_at: &["tools::core::types"],
         owns_key: owns_operator_key,
+        emit_post: None,
     },
     EngineDecl {
         id: "craft-skills",
@@ -179,6 +203,7 @@ pub static ENGINES: &[EngineDecl] = &[
         mode: Mode::Unmanaged,
         writes_at: &[],
         owns_key: owns_nothing,
+        emit_post: None,
     },
 ];
 
