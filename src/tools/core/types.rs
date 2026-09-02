@@ -85,11 +85,7 @@ pub struct ToolContext {
     pub workspace_override: Option<std::path::PathBuf>,
 }
 
-/// Ledger key for [`worktree_read_notice`]. Lives in the ledger's `notices`
-/// set, never in its guide-topic set — see `GuideLedger::notices`.
-const WORKTREE_READ_NOTICE: &str = "worktree-read-root";
-
-/// One-shot notice that reads are resolving against a tree the caller never chose.
+/// Notice that reads are resolving against a tree the caller never chose.
 ///
 /// `guard_worktree_write` refuses WRITES on exactly these two facts. Reads had
 /// no equivalent, so after a session switched into a linked worktree, `symbols`,
@@ -105,15 +101,49 @@ const WORKTREE_READ_NOTICE: &str = "worktree-read-root";
 /// route around it. Same philosophy as `removed_attributes`: the operation is
 /// allowed, and it says what it did.
 ///
+/// **Gated on the CONDITION, never on novelty — this is load-bearing and was
+/// once the other way.** Until 2026-09-02 the last gate here was
+/// `notice_once(WORKTREE_READ_NOTICE)`, one-shot per conversation, on the stated
+/// grounds that "a notice on every call is noise". The measured consequence was
+/// worse than noise: the notice fired once, early, while the agent was still
+/// orienting and had no worktree work to do — and was then **silent for the rest
+/// of the conversation**, including across every `/mcp` reconnect. A reconnect
+/// clears `project_chosen_this_session` and so *recreates* the exact state this
+/// notice describes, but re-arms nothing: only `GuideLedger::clear` (an
+/// `activate`, or a post-compact) and `rekey` restore the key, and an `activate`
+/// is precisely the act that makes the notice unnecessary. So the one-shot was
+/// structurally guaranteed to be spent on the wrong episode.
+///
+/// Measured on a live transcript, `docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`:
+/// an unpinned read and a *refused* write in the same window — the refusal proving
+/// the slot was empty and worktrees present — carried no notice, while the first
+/// read after a ledger clear carried one. Six reconnects, zero notices; one clear,
+/// one notice.
+///
+/// The condition is self-limiting, which is why emitting on every call is
+/// affordable: it requires linked worktrees to EXIST and no tree to have been
+/// chosen, so a repo without worktrees never sees it, and the two documented
+/// remedies — `workspace(action='activate')`, or passing `workspace=` per call —
+/// each silence it permanently. The correct path ends in a quiet state, so
+/// compliance leaves nothing armed.
+///
+/// **A pinned call is silent**, because it already named the tree it meant.
+/// `workspace_override` is the per-call form of the choice `activate` makes for
+/// the session; warning a caller who supplied it would be reporting a
+/// resolution that cannot be wrong.
+///
 /// **Agent-agnostic by construction.** Both facts are git/filesystem
 /// observations; nothing here learns any harness's worktree tool by name.
 ///
-/// Ordered cheapest-check-first, and the ledger is touched LAST so the key is
-/// only consumed on a call that actually emits. The lock is taken after every
-/// `.await` — `parking_lot` guards must not cross one.
+/// Ordered cheapest-check-first.
 ///
 /// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
 async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>) -> Option<String> {
+    if ctx.workspace_override.is_some() {
+        // The call named its own tree. Nothing was resolved by default, so there
+        // is no default to disclose.
+        return None;
+    }
     if ctx.agent.is_project_chosen_this_session().await {
         // The caller already made the choice this notice would ask for.
         //
@@ -130,19 +160,13 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
     if worktrees.is_empty() {
         return None;
     }
-    if !ctx
-        .guide_hints_emitted
-        .lock()
-        .notice_once(WORKTREE_READ_NOTICE)
-    {
-        return None;
-    }
     let list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
     Some(format!(
         "Reads are resolving against \"{}\". This repo also has linked git \
          worktrees [{}] and no project has been explicitly activated, so results \
          describe the main checkout even if you are working in a worktree. Call \
-         workspace(action='activate', path=\"{}\") to pin the tree you mean.",
+         workspace(action='activate', path=\"{}\") to pin the tree you mean, or \
+         pass workspace=\"<abs path>\" on a single call.",
         root.display(),
         list.join(", "),
         list[0],

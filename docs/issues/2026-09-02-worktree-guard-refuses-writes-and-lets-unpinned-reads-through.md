@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the worktree-ambiguity guard refuses writes and lets reads through, so an unpinned read silently answers from the wrong tree'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -122,21 +122,105 @@ diagnosis.
 
 ## Fix
 
-Not implemented. The primary claim is the asymmetry, which is nameable and checkable **independently
-of the still-open causal question** — that framing is `codescout-0a`'s and is adopted deliberately:
+Fixed 2026-09-02. **The mechanism already existed and was silent.** This file said *"No
+equivalent exists on the read path"*; that was wrong, and the correction is the fix.
 
-1. **Give the read path the write path's guard**, or at minimum make an unpinned read in a
-   worktree-bearing checkout name the tree it answered from. The ADR already requires a suspicious
-   zero to name its scope; this extends it to a suspicious *non*-zero, which Tier 3 shows is the
-   more dangerous case.
-2. Do **not** silence it by auto-pinning to the active project — that is the current behaviour and
-   is what produces the wrong answer.
+`worktree_read_notice` (`src/tools/core/types.rs`) has shipped since
+`docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md`, wired into
+`Tool::call_content` so it covers every read tool. Its last gate was
+`notice_once(WORKTREE_READ_NOTICE)` — one-shot per conversation, on the stated grounds that
+*"a notice on every call is noise"*, pinned by a test asserting the second read carries
+nothing.
 
+**The one-shot was structurally guaranteed to be spent on the wrong episode.** The notice
+fires on the first qualifying read — early, while the agent is orienting and has no worktree
+work to do. A `/mcp` reconnect then clears `project_chosen_this_session`, *recreating* the
+exact ambiguity the notice describes, and re-arms nothing: only `GuideLedger::clear` (an
+`activate`, or a post-compact) and `rekey` restore the key — and `activate` is precisely the
+act that makes the notice unnecessary. So the one state that re-arms it is the one state
+where it has nothing to say.
+
+### Measured on this session's own transcript
+
+| line | event | notice |
+|---|---|---|
+| 2516 | `/mcp` reconnect — clears the slot | — |
+| 2863–2936 | Tier 3: unpinned read **and** a write refused for worktree ambiguity | **absent** |
+| ~3770 | `workspace(post_compact=true)` → `GuideLedger::clear()` | — |
+| 3775 | the very next read | **fires** |
+
+Six reconnect markers in that file, zero notices across them; one ledger clear, a notice
+immediately. The refused write in the same window is what makes the absence diagnostic
+rather than circumstantial — it proves the slot was empty and worktrees present, i.e. every
+condition met.
+
+### What changed
+
+1. **The novelty gate is gone.** The notice is gated on the CONDITION — worktrees exist, no
+   tree chosen — so it speaks whenever the answer could be from a tree the caller did not
+   pick. The condition is self-limiting: a repo without linked worktrees never sees it, and
+   either documented remedy silences it permanently, so the correct path ends quiet and
+   compliance leaves nothing armed.
+2. **A pinned call is now silent.** `workspace_override` is the per-call form of the choice
+   `activate` makes for the session, so a caller who named their tree gets nothing. This is
+   what makes (1) affordable rather than merely louder: it removes the notice from exactly
+   the calls already doing the right thing, which is the shape that otherwise gets a guard
+   disabled.
+
+The `WORKTREE_READ_NOTICE` const was removed with its only reader. `GuideLedger::notice_once`
+now has **no production caller** — it survives as a `pub` ledger facility with test coverage
+and nothing reaching it, which is the shape CLAUDE.md names under *loudness is a property of
+a PATH*. Left in place deliberately rather than silently: named here so the next reader finds
+it as a fact rather than discovering it.
+
+### Two peers converged on this independently, without seeing the code
+
+`codescout-17` predicted the defect from first principles while the fix was being scoped —
+*"do not novelty-gate the banner … a once-per-window banner is suppressed exactly when it is
+needed, because it already fired for an unrelated reason. Gate it on the condition, not on
+novelty."* `codescout-0a` arrived at the same place from the other side — *"the discriminator
+is not in the result, it is in the CALL: was this a worktree-bearing checkout, and was the
+call unpinned"* — and supplied the argument this file adopts for why
+`docs/adrs/2026-08-27-negative-results-name-their-scope.md` does not transfer: a zero is
+already a prompt to doubt and the scope line finishes the thought, while a populated answer
+supplies no such prompt, so there is nothing for the reader's judgement to act on. Both were
+asked about the design, neither was shown `types.rs`.
+
+### One consequence, filed rather than absorbed
+
+Removing the one-shot makes the notice repeat for peer-serve clients, who can act on neither
+remedy: `workspace` is absent from `PEER_EXPOSED_TOOLS` and `handle_tool_call_inner` strips
+the `workspace` argument before dispatch. That strip is the fix for
+`docs/issues/archive/2026-06-01-peer-workspace-arg-pin-escape.md` and must stay. No
+discriminator exists at this seam — `home_root` cannot separate peer-serve from the ordinary
+startup fallback, which is the case the notice must fire on. Filed as
+`docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`.
 ## Tests added
 
-None yet. A regression test needs a two-tree fixture where the trees differ on one string, which is
-Tier 2's recipe.
+Two, in `src/tools/core/tests.rs`, and **the first is an inverted assertion rather than a new
+one** — it is the same test that previously pinned the defect.
 
+- `a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen` — its repeat
+  assertion flipped from `!second.contains("_workspace_notice")` to `second.contains(...)`.
+  Its doc comment records what it used to assert and why, so flipping it back reads as a
+  regression rather than a tidy-up.
+- `a_pinned_read_gets_no_worktree_notice_even_though_the_tree_is_unchosen` — new, and it
+  opens with a **fixture check** asserting the same context DOES emit while unpinned. Without
+  that, the silence it asserts would be satisfied by a context that emits nothing for any
+  reason, which is an absence assertion monotone under the mechanism simply not running.
+
+**Both mutations were run against the production path, not asserted about.** One kill per
+guarded site, because a kill at one site says nothing about the other:
+
+| mutation (in `types.rs`) | killed | survived |
+|---|---|---|
+| re-add `notice_once` gate | `a_read_says_which_tree_…` at its repeat assertion | the pinned test — **vacuously**: with the one-shot back, its first call consumes the key and the pinned call is silent for the wrong reason |
+| `if false && ctx.workspace_override.is_some()` | `a_pinned_read_gets_no_worktree_notice_…` | the other |
+
+The second row of that table is the point. Under mutation 1 the pinned test stays green
+while proving nothing — so a single mutation run would have reported the pair as covered.
+Each message named its own mutation; the file was restored between runs and the suite
+re-verified green.
 ## Resume
 
 **CLOSED 2026-09-02 — the experiment this file named as unowned has been run, and the answer is a

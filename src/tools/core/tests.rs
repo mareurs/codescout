@@ -594,11 +594,23 @@ async fn echo_once(ctx: &ToolContext) -> String {
 }
 
 /// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
+/// docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
 ///
 /// `guard_worktree_write` refuses writes on these two facts; reads used to
-/// resolve against the main checkout and say nothing. One-shot, or it becomes
-/// noise on every call — the failure mode `removed_attributes` was designed
-/// around.
+/// resolve against the main checkout and say nothing.
+///
+/// **The repeat assertion below is the regression guard, and it used to assert
+/// the opposite.** Until 2026-09-02 this test pinned one-shot behaviour —
+/// `!second.contains(...)`, "a notice on every call is noise" — and that gate
+/// made the notice silent in the only state it exists to report. The notice
+/// fires early, while the agent is orienting; a `/mcp` reconnect then clears
+/// `project_chosen_this_session` and recreates the ambiguity while re-arming
+/// nothing, because only `GuideLedger::clear`/`rekey` restore the key and
+/// `activate` — the act that restores it — is also the act that makes the
+/// notice unnecessary. Measured on a live transcript: six reconnects, zero
+/// notices, including a window holding an unpinned read AND a write refused for
+/// worktree ambiguity. Flipping this assertion back to `!` restores that
+/// silence, and no other test in the suite would notice.
 #[tokio::test]
 async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
     let tmp = tempfile::tempdir().unwrap();
@@ -631,8 +643,48 @@ async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
 
     let second = echo_once(&ctx).await;
     assert!(
-        !second.contains("_workspace_notice"),
-        "one-shot: a notice on every call is noise, got: {second}"
+        second.contains("_workspace_notice"),
+        "the notice is gated on the CONDITION, not on novelty: while the tree is \
+         still unchosen every read is still answering from a tree the caller did \
+         not pick, and a one-shot spends its only shot before the caller has any \
+         worktree work to do. Got: {second}"
+    );
+}
+
+/// The escape that makes emitting on every call affordable, and the reason the
+/// change above is not simply "more noise".
+///
+/// A call carrying `workspace_override` has named the tree it means — that is
+/// the per-call form of the choice `activate` makes for the session — so there
+/// is no default resolution to disclose and nothing the notice could tell the
+/// caller that they did not just say. Without this, dropping the one-shot would
+/// tax the calls that are already doing the right thing, which is the shape that
+/// gets a guard disabled.
+#[tokio::test]
+async fn a_pinned_read_gets_no_worktree_notice_even_though_the_tree_is_unchosen() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+
+    // Same context the test above proves DOES emit — worktrees present, no
+    // project chosen this session — differing only in the pin. That shared
+    // origin is what makes this a discriminating test rather than a second
+    // assertion about a quiet fixture.
+    let mut ctx = rooted_ctx(&root).await;
+    let unpinned = echo_once(&ctx).await;
+    assert!(
+        unpinned.contains("_workspace_notice"),
+        "fixture check: this context must emit when unpinned, or the silence \
+         asserted below proves nothing, got: {unpinned}"
+    );
+
+    ctx.workspace_override = Some(root.clone());
+    let pinned = echo_once(&ctx).await;
+    assert!(
+        !pinned.contains("_workspace_notice"),
+        "a call that named its own tree resolved nothing by default, so there is \
+         no default to warn about, got: {pinned}"
     );
 }
 
