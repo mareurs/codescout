@@ -9976,6 +9976,22 @@ is wrong — measured, a ~90-minute window where a budget raise had landed and t
 it had not. Agreement is evidence about the **trees**, never about the change. The probe now says
 so in the silent case, which is the only case where a reader forms the belief.
 
+**A candidate arrived later, and it is recorded as a candidate — the identification stays lost.**
+This entry's own instance included a default-lane run reporting `4957 passed; 1 failed` whose test
+name my `| grep` filter discarded. `codescout-0d` reports (denominator: **8 isolated re-runs, 8
+green**) that `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` is a known
+load-sensitive flake, filed at
+`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`. It sits in the
+same target (`-p codescout --lib`), and my run was concurrent with three peer builds and logged
+`Blocking waiting for file lock`.
+
+**Consistent is not identified.** Every one of those facts holds equally if the failure was
+something else in that target. The one artifact that would decide it — the name line — was
+*destroyed* by the filter, not merely unread, and that is this entry's own law: a later fact cannot
+reconstitute an observation the recording never made. Calling it "the flake" would be elimination
+over an incomplete population, which this session has refused three times tonight on smaller
+provocation. Strongest available candidate; nothing more.
+
 ## W-97 — When a surface is removed, repair the POINTERS and leave the RECORDS
 
 **Valid:** dated 2026-09-02
@@ -10051,6 +10067,36 @@ the corrected split is: the machine enumerates, the reader classifies, and neith
 
 `codescout-0d`'s null run (10 paths, 9 resolve, 1 fixture) reads differently in this light too —
 its "1 fixture" was a *classification it performed*, not a pass the check gave it.
+
+**And one step deeper, traced by `0d` after the above was written.** Its classification of that
+fixture was made by **trusting an earlier message of mine saying I had verified it**, not by
+tracing it. So the run was machine-enumerates / reader-classifies exactly as corrected — with the
+reader partly deferring to *another reader*. The denominator is unaffected (10 enumerated, 1
+needing judgement); what moved is that its "known" was doing work nobody had done at that moment.
+The fixture is real — `issue-clusters.md:701` quotes `Executable scripts/does-not-exist.sh not
+found` to argue that a `language: system` hook naming a missing script fails **loud**, i.e. a
+record in this entry's own sense — but it was *established* one message later than it was
+*asserted*. Deference is the cheapest form of the recording filter: it produces a confident
+classification with no observation behind it, and looks identical to one with.
+
+### Three tiers of mechanisability — the ordering is the claim
+
+| | check | who does what | moved tonight? |
+|---|---|---|---|
+| 1 | path exists | machine **enumerates**, reader **classifies** | **yes** |
+| 2 | pointer vs record | reader classifies, **no enumerator** | no |
+| 3 | claim was tested | **neither** | no |
+
+Tier 1's enumerator is what removes **the noticing**, and the noticing is the scarce resource:
+`probe-cluster-express.py` was caught inside a minute by a maximally-primed author, while `0d`'s
+wrong `## Root cause` survived a commit precisely because nothing enumerated it.
+
+**Tier 3 may be genuinely unmechanisable rather than merely unbuilt, and that is worth stating so
+it stops reading as a gap someone will fill.** `0d`'s proposal — require a `## Reproduction` block
+to carry an executed command with its real output — founders on *real*: nothing distinguishes a
+pasted transcript from an invented one, so a check that accepts a plausible-looking block is
+`cluster/assertion-satisfiable-by-accident`. A tier-3 check that cannot fail on a fabricated
+reproduction is not a weak check; it is the class this repo already tracks.
 
 **Promotion candidate, not promoted:** if the pointer/record cut recurs on a third removal it earns
 a place in `docs/conventions/`. Two instances (this one, `0d`'s) are not a rule yet — and the
