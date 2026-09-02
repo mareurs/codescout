@@ -221,10 +221,19 @@ impl Tool for References {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["symbol", "path"],
+            "required": ["symbol"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
+            ],
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
                 "path": { "type": "string", "description": "File containing the symbol" },
+                "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },

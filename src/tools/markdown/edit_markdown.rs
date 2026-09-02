@@ -1251,11 +1251,15 @@ impl Tool for EditMarkdown {
             "type": "object",
             "anyOf": [
                 { "required": ["path"] },
-                { "required": ["file_path"] }
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
             ],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "heading": { "type": "string", "description": "Target section heading (fuzzy matched). Required unless using edits[] batch mode." },
                 "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when `heading` matches several sections. Two byte-identical headings admit no distinguishing query, so this is the only way to reach either one; omit it and several exact matches are an ambiguity error naming their line numbers." },
                 "action": {

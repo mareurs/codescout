@@ -2710,9 +2710,12 @@ mod tests {
 
     // ---------- Registry-wide schema honesty gates (Task 3) ----------
 
-    /// Every advertised property carries a description. A param with type and default
-    /// only is one the model cannot choose to use. Measured 2026-09-02: 12 such params
-    /// across 7 tools; this test listed them and each was described in the same change.
+    /// Every advertised TOP-LEVEL property carries a description. A param with type and
+    /// default only is one the model cannot choose to use. Measured 2026-09-02: 12 such
+    /// params across 7 tools; this test listed them and each was described in the same
+    /// change. Scope: walks `properties` at the schema root only — nested item schemas
+    /// (e.g. `edit_file.edits.items.properties.*`, `edit_markdown.edits.items.*`,
+    /// `doc.augment.properties.*`) are invisible to it and are not asserted here.
     #[tokio::test]
     async fn every_property_has_a_description() {
         let (_dir, server) = make_server().await;
@@ -2818,6 +2821,7 @@ mod tests {
     async fn required_names_no_key_that_has_a_declared_alias() {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
+        let mut total_aliases_found = 0usize;
         for t in &server.tools {
             let schema = t.input_schema();
             let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
@@ -2827,6 +2831,13 @@ mod tests {
                 continue;
             };
             // property name -> the name it declares itself an alias of.
+            //
+            // FIXTURE NOTE — the literal `"Alias for "` prefix parsed here is what
+            // makes a schema property register as an alias for this test's purposes.
+            // Reword it (e.g. to "Same as path") on any property and that property
+            // silently drops out of `aliases` — the derivation goes quiet, not red, on
+            // its own. `total_aliases_found` below is the check that turns that
+            // silence into a failing assertion instead of a no-op pass.
             let aliases: Vec<(&str, &str)> = props
                 .iter()
                 .filter_map(|(name, def)| {
@@ -2836,6 +2847,7 @@ mod tests {
                     Some((name.as_str(), target))
                 })
                 .collect();
+            total_aliases_found += aliases.len();
             for req in required.iter().filter_map(|v| v.as_str()) {
                 for (alias_name, target) in &aliases {
                     if *target == req {
@@ -2848,10 +2860,99 @@ mod tests {
             }
         }
         assert!(
+            total_aliases_found > 0,
+            "no property anywhere in the tool set matched the \"Alias for \" prefix this \
+             test derives its alias relation from — either every declared alias was \
+             removed (unlikely) or the phrasing was reworded, which silently empties the \
+             alias list and turns the offender check below into a no-op. This assertion \
+             exists so a reword goes red instead of silently passing."
+        );
+        assert!(
             offenders.is_empty(),
             "these schemas name a required key that another property declares itself an \
              alias of — the true requirement is an alternation; express it with `anyOf` \
              (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// Companion to the prose-driven gate above — that gate is blind to an alias that
+    /// exists in code but is never advertised via matching schema prose (a property
+    /// whose description does not start "Alias for <name>", or that has no property at
+    /// all). `PATH_PARAM_ALIASES` (`src/fs/mod.rs`) is exactly that: a runtime accept-set
+    /// consumed directly by six tools and via `require_path_param`/`get_path_param` by
+    /// others, independent of whatever prose a schema does or does not carry. This test
+    /// is derived from that constant, not from prose, so rewording a description cannot
+    /// blind it.
+    ///
+    /// Scope: tools verified by reading `call()` to reach `require_path_param` with
+    /// `path` (or an alias) genuinely required — i.e. excluding tools where `path` is
+    /// optional (`grep`, whose `required` is `["pattern"]` alone; `symbols`,
+    /// `list_overview`, which use `get_path_param` with `path` optional).
+    #[tokio::test]
+    async fn required_path_branch_covers_all_path_param_aliases() {
+        const TOOLS_REQUIRING_PATH_VIA_ALIASES: &[&str] = &[
+            "read_file",
+            "create_file",
+            "edit_file",
+            "edit_markdown",
+            "read_markdown",
+            "edit_code",
+            "call_graph",
+            "references",
+            "symbol_at",
+        ];
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        for t in &server.tools {
+            if !TOOLS_REQUIRING_PATH_VIA_ALIASES.contains(&t.name()) {
+                continue;
+            }
+            let schema = t.input_schema();
+            // A flat top-level `required: [..., "path", ...]` makes `path` mandatory
+            // even when an alias is supplied instead — the true requirement is an
+            // alternation, which only `anyOf` can express.
+            if let Some(req) = schema.get("required").and_then(|r| r.as_array()) {
+                if req.iter().any(|v| v.as_str() == Some("path")) {
+                    offenders.push(format!(
+                        "{}: flat required=[...] names \"path\" directly, which cannot \
+                         be satisfied by {:?} even though require_path_param accepts \
+                         them at runtime",
+                        t.name(),
+                        crate::fs::PATH_PARAM_ALIASES
+                    ));
+                    continue;
+                }
+            }
+            // Every one of PATH_PARAM_ALIASES (plus "path" itself) needs its own
+            // anyOf branch requiring exactly that key, so the schema states the same
+            // alternation `require_path_param` accepts at runtime.
+            let branch_names: std::collections::HashSet<&str> = schema
+                .get("anyOf")
+                .and_then(|a| a.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|b| b.get("required").and_then(|r| r.as_array()))
+                        .flat_map(|r| r.iter().filter_map(|v| v.as_str()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut needed: Vec<&str> = vec!["path"];
+            needed.extend(crate::fs::PATH_PARAM_ALIASES.iter().copied());
+            for name in needed {
+                if !branch_names.contains(name) {
+                    offenders.push(format!(
+                        "{}: no anyOf branch requires {name:?}, but require_path_param \
+                         accepts it at runtime",
+                        t.name()
+                    ));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these schemas' required/anyOf structure does not state the full path-param \
+             alternation PATH_PARAM_ALIASES accepts at runtime:\n  {}",
             offenders.join("\n  ")
         );
     }
@@ -3049,7 +3150,12 @@ mod tests {
     ///
     /// Provisional: raised by Task 3's schema descriptions; Task 10 ratchets it to
     /// the post-collapse measurement.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_497;
+    ///
+    /// Re-measured 2026-09-02 after the review-remediation pass on Task 3 (nine
+    /// tools' `anyOf` path-alias branches added, Fix 6's own trims applied): actual
+    /// total was 59_338, already over the stale 57_497 figure — this line raises the
+    /// budget to match rather than trims further, since nothing here was padding.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 59_338;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

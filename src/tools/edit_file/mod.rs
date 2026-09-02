@@ -379,11 +379,15 @@ impl Tool for EditFile {
             "type": "object",
             "anyOf": [
                 { "required": ["path"] },
-                { "required": ["file_path"] }
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
             ],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert or edits is set." },
                 "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },

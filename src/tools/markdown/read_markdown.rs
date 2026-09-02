@@ -496,11 +496,15 @@ impl Tool for ReadMarkdown {
             "type": "object",
             "anyOf": [
                 { "required": ["path"] },
-                { "required": ["file_path"] }
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
             ],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "heading": { "type": "string", "description": "Markdown section by heading (e.g. \"## Auth\")." },
                 "headings": {
                     "type": "array",

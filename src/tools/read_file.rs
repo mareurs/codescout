@@ -34,11 +34,15 @@ impl Tool for ReadFile {
             "anyOf": [
                 { "required": ["path"] },
                 { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] },
                 { "required": ["output_id"] }
             ],
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "output_id": { "type": "string", "description": "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back." },
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },

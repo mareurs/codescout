@@ -58,7 +58,7 @@ impl Tool for Librarian {
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
                 "anchor_id": { "type": "string", "description": "context: artifact id to anchor the bundle (uses link graph)" },
                 "max_tokens": { "type": "integer", "default": 4000, "description": "context: approximate token budget" },
-                "include_archived": { "type": "boolean", "default": false, "description": "context: include archived and superseded artifacts when gathering." },
+                "include_archived": { "type": "boolean", "default": false, "description": "context/workspace_state_at: include archived and superseded artifacts when gathering." },
                 "scope": {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],

@@ -106,14 +106,23 @@ impl Tool for EditCode {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["symbol", "path", "action"],
+            "required": ["symbol", "action"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
+            ],
             "properties": {
                 "symbol":   {
                     "type": "string",
                     "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\". Alias: `name_path` (symbols()' name for the same address) is accepted."
                 },
                 "path":     { "type": "string", "description": "File path (relative to project root) containing the symbol." },
-                "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"], "description": "Edit to perform: rename (LSP-aware), remove, replace (overwrite body), or insert (adjacent code)." },
+                "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
+                "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"], "description": "Edit to perform." },
                 "new_name": {
                     "type": "string",
                     "description": format!(
@@ -125,8 +134,8 @@ impl Tool for EditCode {
                     "type": "string",
                     "description": format!(
                         "{} 'replace': the new symbol body. 'insert': the code to inject. \
-                         Not read by 'rename' or 'remove'. Alias: `content` \
-                         (edit_markdown's name for the same argument) is accepted.",
+                     Not read by 'rename' or 'remove'. Alias: `content` \
+                     (edit_markdown's name for the same argument) is accepted.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
                 },

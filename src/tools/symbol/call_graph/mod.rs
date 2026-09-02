@@ -369,11 +369,20 @@ impl Tool for CallGraph {
             "properties": {
                 "symbol":       { "type": "string", "description": "Symbol identifier. Plain method: 'MyStruct/method'. Trait impl method: 'impl Trait for Struct/method'." },
                 "path":         { "type": "string", "description": "File containing the symbol (required for seed resolution)" },
+                "file_path":    { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file":         { "type": "string", "description": "Alias for path" },
                 "direction":    { "type": "string", "enum": ["callers", "callees", "both"], "default": "callers", "description": "Which edges to walk: functions that call the symbol, functions it calls, or both." },
                 "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },
-                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "'full' includes each node's source body; 'exploring' returns names and locations only." }
+                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "'exploring' (default): compact edge list. 'full': every node with its file and line." }
             },
-            "required": ["symbol", "path"]
+            "required": ["symbol"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
+            ]
         })
     }
 

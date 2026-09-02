@@ -29,11 +29,15 @@ impl Tool for CreateFile {
             "required": ["content"],
             "anyOf": [
                 { "required": ["path"] },
-                { "required": ["file_path"] }
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
             ],
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "content": { "type": "string", "description": "Content to write" },
                 "overwrite": {
                     "type": "boolean",

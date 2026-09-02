@@ -351,9 +351,18 @@ impl Tool for SymbolAt {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path", "line"],
+            "required": ["line"],
+            "anyOf": [
+                { "required": ["path"] },
+                { "required": ["file_path"] },
+                { "required": ["relative_path"] },
+                { "required": ["file"] }
+            ],
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
+                "file_path": { "type": "string", "description": "Alias for path" },
+                "relative_path": { "type": "string", "description": "Alias for path" },
+                "file": { "type": "string", "description": "Alias for path" },
                 "line": { "type": "integer", "description": "1-indexed line number" },
                 "col": { "type": "integer", "description": "1-indexed column. Preferred — LSP-native, no identifier-mismatch risk. When known (e.g. from symbols), pass directly." },
                 "identifier": { "type": "string", "description": "Optional fallback when col not known. The substring is searched on the line; mismatch errors. Prefer col." },

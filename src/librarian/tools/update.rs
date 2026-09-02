@@ -399,6 +399,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // An explicit `patch: null` is NOT saved by `Args.patch`'s `#[serde(default)]`
+    // — that attribute only fires when the key is MISSING, not when it is present
+    // and null, so without this normalisation `from_value` below dies on a bare
+    // `invalid type: null, expected struct UpdatePatch`: it names the field but not
+    // the action, and it fires before `lift_top_level_param!` runs, so
+    // `doc(update, id, patch=null, status="fixed")` — exactly the shape a JSON-RPC
+    // client emits when it materialises absent optionals as null — would be refused
+    // with the repair machinery never reached. Deleting the key here makes it
+    // MISSING again, so the same default the absent-key case already relies on
+    // applies uniformly.
+    let mut args = args;
+    if args.get("patch").is_some_and(|p| p.is_null()) {
+        if let Some(obj) = args.as_object_mut() {
+            obj.remove("patch");
+        }
+    }
+
     let mut a: Args = serde_json::from_value(args)?;
 
     // Every top-level param the artifact schema advertises for `update` is lifted
@@ -910,6 +927,55 @@ mod tests {
                 .iter()
                 .any(|c| c.as_str().unwrap_or_default().contains("status")),
             "{corrections:?}"
+        );
+    }
+    /// A JSON-RPC client that materialises absent optionals as explicit `null` sends
+    /// `patch: null` for exactly the same intent as an absent `patch` key. Before this
+    /// fix `!p.is_null()` let `null` straight through to `serde_json::from_value`, where
+    /// `Args.patch`'s `#[serde(default)]` does NOT apply — that attribute only fires on a
+    /// MISSING key, not a present-and-null one — so the call died on a bare `invalid
+    /// type: null, expected struct UpdatePatch` before `lift_top_level_param!` ever ran,
+    /// making `doc(update, id, patch=null, status="fixed")` unreachable by the repair
+    /// machinery built specifically for a missing/empty patch.
+    #[tokio::test]
+    async fn patch_null_is_treated_as_absent_and_lifts_still_run() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        let v = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": null, "status": "fixed"}),
+        )
+        .await
+        .expect("an explicit null patch must be normalised to absent, not rejected");
+
+        // Mutation control: reverting the `patch.is_null()` normalisation makes this
+        // fail with `invalid type: null, expected struct UpdatePatch`.
+        assert_eq!(v["updated"], true);
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "fixed", "the lift must actually write");
+    }
+
+    /// The guard's rejection path for a non-object, non-null patch — `sweep`'s
+    /// `ill_typed("object")` probe exercises this indirectly, but it had no direct
+    /// caller or observer of its own. `patch: []` is the array shape the guard's own
+    /// message calls out explicitly ("a patch that is an array or scalar").
+    #[tokio::test]
+    async fn patch_array_is_rejected_with_a_clear_error() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        let err = call(&ctx, serde_json::json!({"id": id, "patch": []}))
+            .await
+            .expect_err("an array patch is not a valid RFC 7396 merge document")
+            .to_string();
+
+        assert!(err.contains("must be a JSON object"), "{err}");
+        assert!(
+            !err.contains("missing field"),
+            "bare serde message leaked: {err}"
         );
     }
 
