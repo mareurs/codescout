@@ -156,6 +156,25 @@ impl AgentInner {
             .focused_active_mut()?
             .as_active_mut()
     }
+    /// Resolve the effective `read_only` for a root about to be activated.
+    ///
+    /// An explicit request wins at either root: `Some(false)` opens a foreign
+    /// root, `Some(true)` protects the home one. Absent a request, home is
+    /// read-write and a foreign root is protected.
+    ///
+    /// Expressed as `unwrap_or` rather than a `match` deliberately. The earlier
+    /// form placed a `_ if is_home => false` guard arm ABOVE the explicit case,
+    /// so it swallowed `Some(true)` — which made `read_only: true` inert at
+    /// EVERY root, a foreign one already defaulting to protected. In this form an
+    /// explicit value cannot be shadowed by a default, so that class of edit
+    /// cannot recur here. Three copies of the rule existed when this was
+    /// extracted, one of them dead; keep this the only one.
+    ///
+    /// See docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md
+    fn resolve_read_only(read_only: Option<bool>, is_home: bool) -> bool {
+        read_only.unwrap_or(!is_home)
+    }
+
     /// Assemble a `Workspace` for `root` from pre-loaded `ProjectResources`,
     /// under the caller's write lock. Reuses an already-resident project's
     /// write/file/dirty locks (so re-activation serializes correctly against
@@ -184,11 +203,7 @@ impl AgentInner {
             .as_ref()
             .map(|h| h.as_path() == root)
             .unwrap_or(true);
-        let effective_read_only = match read_only {
-            Some(false) => false,
-            _ if is_home => false,
-            _ => true,
-        };
+        let effective_read_only = AgentInner::resolve_read_only(read_only, is_home);
 
         // Re-activating the same root must keep the SAME write_lock, file_lock,
         // and dirty_files — otherwise an in-flight tool holding the old locks
@@ -971,11 +986,8 @@ impl Agent {
             .as_ref()
             .map(|h| *h == abs_root)
             .unwrap_or(false);
-        let effective_read_only_snapshot = match read_only {
-            Some(false) => false,
-            _ if is_home_snapshot => false,
-            _ => true,
-        };
+        let effective_read_only_snapshot =
+            AgentInner::resolve_read_only(read_only, is_home_snapshot);
         let _ = effective_read_only_snapshot; // recomputed under write lock below
 
         // Open the lock file before acquiring the write lock — involves blocking
@@ -1006,13 +1018,10 @@ impl Agent {
 
         let abs_root = ws.root.join(&relative_root);
 
-        // Determine read_only: explicit > home (always rw) > default (ro)
+        // Determine read_only: an explicit request wins; absent one, home is rw
+        // and a foreign root is ro. Single rule at AgentInner::resolve_read_only.
         let is_home = home_root.as_ref().map(|h| *h == abs_root).unwrap_or(false);
-        let effective_read_only = match read_only {
-            Some(false) => false,
-            _ if is_home => false,
-            _ => true,
-        };
+        let effective_read_only = AgentInner::resolve_read_only(read_only, is_home);
 
         // If already activated, just switch focus and optionally update read_only
         let already_activated = ws
@@ -2964,7 +2973,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activate_home_always_writable() {
+    async fn activate_home_defaults_to_writable() {
         let dir1 = tempdir().unwrap();
         let dir2 = tempdir().unwrap();
         std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
@@ -2987,6 +2996,81 @@ mod tests {
         assert!(
             agent.security_config().await.file_write_enabled,
             "home project should always be writable"
+        );
+    }
+
+    #[tokio::test]
+    async fn activate_home_with_read_only_true_is_honoured() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        // The home root, explicitly asked to be protected. Until 2026-09-02 the
+        // `_ if is_home => false` guard arm sat ABOVE the explicit case and
+        // swallowed this, which made `read_only: true` inert at EVERY root —
+        // home came back writable, and a foreign root was already protected by
+        // default, so no root could observe the flag. See
+        // docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md
+        agent
+            .activate(dir.path().to_path_buf(), Some(true))
+            .await
+            .unwrap();
+
+        let config = agent.security_config().await;
+        assert!(
+            !config.file_write_enabled,
+            "explicit read_only=true must protect the home root; if this fails, \
+             an is_home branch is shadowing the caller's explicit request again"
+        );
+    }
+
+    /// The whole domain of the read-only rule, at its single site.
+    ///
+    /// Six rows, and the discriminating one is `Some(true) + home`: before the
+    /// rule was extracted it returned `false`, agreeing with `None + home`, and
+    /// that agreement is what made the flag inert. A foreign-root-only test is
+    /// monotone under the defect — deleting the explicit case entirely leaves
+    /// both foreign rows correct — so the home rows are the coverage here.
+    #[test]
+    fn resolve_read_only_covers_its_whole_domain() {
+        // An explicit request wins at either root.
+        assert!(!AgentInner::resolve_read_only(Some(false), true));
+        assert!(AgentInner::resolve_read_only(Some(true), true));
+        assert!(!AgentInner::resolve_read_only(Some(false), false));
+        assert!(AgentInner::resolve_read_only(Some(true), false));
+        // Absent a request: home is read-write, a foreign root is protected.
+        assert!(!AgentInner::resolve_read_only(None, true));
+        assert!(AgentInner::resolve_read_only(None, false));
+    }
+
+    /// Pins the agreement between `activate_within_workspace`'s two branches.
+    ///
+    /// The already-activated branch applies `read_only` directly rather than
+    /// through the shared rule, so it honoured `Some(true)` even while the other
+    /// branch swallowed it. That disagreement is what established the swallow as
+    /// a defect rather than intent — this test exists so the two cannot drift
+    /// apart again. The root project is the case that reaches this branch:
+    /// `Agent::new` activates it, so it is never the not-yet-activated path.
+    #[tokio::test]
+    async fn activate_within_workspace_honours_read_only_true_on_the_root_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        assert!(
+            agent.security_config().await.file_write_enabled,
+            "home starts writable — otherwise this test asserts nothing"
+        );
+
+        agent
+            .activate_within_workspace(crate::workspace::ROOT_PROJECT_ID, Some(true))
+            .await
+            .unwrap();
+
+        assert!(
+            !agent.security_config().await.file_write_enabled,
+            "read_only=true on the root project must protect it"
         );
     }
 

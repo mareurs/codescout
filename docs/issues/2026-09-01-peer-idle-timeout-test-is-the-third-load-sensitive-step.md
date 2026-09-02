@@ -288,6 +288,57 @@ cannot speak to the cluster. The fifth's `next` step stands unclaimed.
 re-derivation *confirmed*, and a confirmation that goes unrecorded makes the population look
 self-correcting. Counting only the surprises is how a load-sensitive class stays at "flaked
 once".
+
+### Seventh observation, 2026-09-02 — twice in one session, plus a directly-observed mechanism for the FIFTH's cluster
+
+Gate runs during the `read_only`-inert fix (`docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md`).
+Three full gate runs on one tree, ~40 minutes apart, with peers committing throughout (HEAD
+moved 6 commits in ~22 minutes and the tree carried peer *uncommitted* edits to
+`src/prompts/mod.rs`, `src/server.rs`, `src/librarian/tools/doctor.rs`).
+
+| run | lean | default | failures |
+|---|---|---|---|
+| 1 | `0` | `101` | **this test** + `tool_surface_under_budget` (that one genuinely mine) |
+| 2 | `101` | `101` | `build_with_workspace_appends_project_table` (peer's in-flight fix) + `a_live_binary_does_not_report_itself_deleted` + **5× `retrieval::sync::tests::*`** — this test did **not** fail |
+| 3 | `0` | `101` | **this test only**, `src/peer/server.rs:752`, `run() did not exit within 10s of a 1s idle timeout` |
+
+**Denominator: 7 isolated re-runs, 7 green** (4 after run 1, 3 after run 3), no code change
+between any of them. Recorded per § *Sixth observation* — a confirmation that goes unrecorded
+makes the population look self-correcting.
+
+**A sharper non-attribution than previous observations could offer.** Runs 1 and 3 happened on
+a tree where `src/peer/server.rs` **was** modified — so "nothing under `src/peer/`" was not
+available as the argument. Instead: `git diff -U0 src/peer/server.rs` piped through a
+comment/header filter left **zero** changed lines, i.e. every changed line is a `///` doc
+comment. A comment cannot change timing, so the diff is excluded by mechanism rather than by
+adjacency.
+
+**Run 2 is the interesting one, and it speaks to the fifth observation's open question.** The
+`retrieval::sync` cluster reappeared, and this time it arrived next to an assertion that names
+a mechanism:
+
+```
+---- retrieval::index_state::tests::a_live_binary_does_not_report_itself_deleted ----
+assertion `left == right` failed: the test runner's own executable exists, so this must be
+a definite false — None would mean 'could not tell' and true would mean the predicate is
+inverted
+  left: Some(true)
+ right: Some(false)
+```
+
+The predicate reported the running test binary as **deleted** — which is *correct* when a peer's
+concurrent `cargo` replaces `target/debug/deps/*` mid-run, since the executing inode is
+unlinked. This session logged `Blocking waiting for file lock on build directory` on five
+separate commands, so concurrent builds are directly observed, not inferred.
+
+**What that does and does not settle.** It offers the fifth's cluster a candidate mechanism
+that is **not** the idle timer and not lock duration: a shared `target/` mutated by another
+process during the run, which would plausibly disturb any test that stats build artefacts or
+index state. It is a *lead with an observed instance*, not a confirmation — nobody ran the
+cluster against a quiescent `target/` to see it disappear, and that is the next step. It also
+settles that the two signatures are **dissociable**: run 2 produced the cluster without this
+test, runs 1 and 3 produced this test without the cluster. A single shared cause would have to
+explain that dissociation.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).

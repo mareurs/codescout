@@ -36,7 +36,7 @@ impl Tool for Workspace {
                 },
                 "read_only": {
                     "type": "boolean",
-                    "description": "For action='activate': open in read-only mode (default: false)."
+                    "description": "For action='activate': read-only mode (default: false at home, true elsewhere; explicit wins)."
                 },
                 "post_compact": {
                     "type": "boolean",
@@ -187,8 +187,9 @@ impl Tool for ActivateProject {
         //     so the browse-an-excursion semantics the read-only hint assumes are
         //     untouched.
         //   * `read_only` does not move: `Agent::activate` and
-        //     `activate_within_workspace` derive it with the same
-        //     `explicit > home > read-only` match.
+        //     `activate_within_workspace` both derive it from the one rule in
+        //     `AgentInner::resolve_read_only` — an explicit request wins at
+        //     either root, otherwise home is rw and a foreign root is ro.
         //
         // docs/issues/archive/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
         let focus_target: Option<String> = {

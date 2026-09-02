@@ -1,7 +1,7 @@
 ---
 id: c752708c2757e139
 kind: bug
-status: investigating
+status: mitigated
 title: Workspace read_only flipped to true twice mid-session with no activate call from this session, silently blocking every write
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -10,13 +10,14 @@ tags:
 - concurrency
 - multi-session
 - tool-quirk
+closed: 2026-09-02
 opened: 2026-08-26
 owner: marius
 related:
 - '4574d18db7aacec8'
 - '3be6b587a9c92a7a'
 severity: high
-unverified: 'MECHANISM confirmed for both symptom forms at path:line. Diagnosis is now closed at three levels: the two earlier gaps (00948381, 76e287f8) plus 3ccfefb2, LIVE-VERIFIED 2026-08-28 on binary 404f4622 by staging the real condition - a foreign root activated read-only, then a write attempted against a codescout path, which named the foreign root. The underlying CLOBBER is still not fixed: Agent::activate clears the registry and reassigns default_workspace_root for anything sharing the process, and the two structural remedies stand (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). Per-incident trigger logging is deliberately NOT done - naming the project answers the practical question without it.'
+unverified: 'MITIGATED, NOT FIXED — the default_workspace_root clobber in Agent::activate is untouched and unpinned callers remain exposed. Diagnosis is closed at three levels (00948381, 76e287f8, 3ccfefb2, the last live-verified 2026-08-28 on binary 404f4622) and per-call pinning is a complete, probe-verified escape, which is what makes mitigated honest. Prevention was DECLINED 2026-09-02 rather than deferred: option 2 as written recreates the wrong-project symptom in the opposite direction, and a take_default param was rejected as a second axis on a one-axis call — see the Reclassified section for both derivations. Route A re-verified 2026-09-02 (rmcp still 1.3.0, no per-caller identity in RequestContext). NOT established: whether any occurrence exists in which pinning was unavailable as an escape — that is the re-open trigger and nothing currently watches for it.'
 ---
 
 ## Summary
@@ -378,6 +379,40 @@ MEANS (option 2 — e.g. a read-only activation stays resident but does not take
 or wait for a transport that carries caller identity (option 3). Both are the operator's
 call, now on measured rather than presumed grounds.
 
+
+### Reclassified `mitigated` 2026-09-02 — prevention is a decision that was made, not a task still open
+
+The structural remedy was considered and **declined**, on measured grounds rather than
+deferred a third time:
+
+- **Option 2 as written — "a read-only activation stays resident but does not take the
+  default" — recreates the class it fixes.** Because `read_only: true` was inert
+  (`docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md`), *every* foreign
+  activation without an explicit `read_only=false` **is** a read-only activation. So option 2
+  means no foreign activation ever takes the default unless the caller requests **write**
+  access to a tree it only wants to read — while `get_guide("workspace-state")` §
+  *Cross-project workflow pattern* documents the opposite as the supported way to work in a
+  sibling. Unpinned reads after `activate(sibling)` would silently resolve to **home**: this
+  file's own wrong-project symptom, pointing the other way.
+- **A `take_default` parameter was rejected as the remedy.** It bolts a second axis onto a
+  call that already has one. `read_only` answers *"may I write here?"*; the clobber question
+  is *"whose default is this?"*. Overloading either flag with the other's axis is precisely
+  how the inert slot came to exist, so the fix spent its effort on making the existing flag
+  honest instead.
+- **Routes A and B stay closed** (§ *Measured 2026-08-28*), and route A was re-verified
+  2026-09-02: `Cargo.toml` still pins `rmcp = "1.3"` and `Cargo.lock` resolves `1.3.0`, so
+  `RequestContext` still carries no per-caller identity. That measurement is current, not
+  inherited.
+
+What makes `mitigated` honest rather than a shrug: the **escape is complete and measured** —
+route B's probe showed a pinned call survives the clobber, and pinning needs no prior
+residency — and the **diagnosis is closed at three levels** (`00948381`, `76e287f8`,
+`3ccfefb2`), so the consequence is one read away rather than four occurrences away. What is
+**not** fixed is the `default_workspace_root` reassignment itself, and only for unpinned
+callers.
+
+**Re-open trigger:** a transport that carries per-caller identity (route A becomes available),
+or an occurrence in which per-call pinning was *not* an available escape.
 ## Workarounds
 
 `workspace(action="activate", path="<project root>", read_only=false)` restores writes

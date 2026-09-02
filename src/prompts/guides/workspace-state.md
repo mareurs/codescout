@@ -44,6 +44,14 @@ activation. The `read_only` param defaults differ:
 - **foreign**: `read_only = true` (read-only by default; pass
   `read_only=false` explicitly to enable writes)
 
+**An explicit `read_only` wins at either root.** The two values above are
+*defaults*; passing the flag overrides them in both directions —
+`read_only=false` opens a foreign root, and `read_only=true` protects the
+home one. Before 2026-09-02 the second half was not true: `true` was
+silently dropped, which made it inert at every root, since a foreign root
+already defaults to protected. On an older build, read the `read_only`
+field echoed in the response rather than assuming the value took effect.
+
 This matters because the MCP server is shared state across the session.
 Activating a foreign project leaves the server pointed at it until you
 explicitly restore home or end the session.
@@ -96,14 +104,17 @@ next session inherits the foreign root as "active." This is the
 **workspace gate** from `server_instructions` — restore home before
 the turn ends.
 
-For one-off reads, prefer `read_only=true`:
+For one-off reads, say so with `read_only=true`:
 
 ```
 workspace(activate, path="/sibling", read_only=true)
 ```
 
-Read-only mode blocks writes at the agent layer regardless of the
-caller's intent — defense against accidental edits while scouting.
+On a foreign root that is already the default, so the flag is redundant
+there — but it is not a no-op in general: on the home root it is the only
+way to ask for the guard. Read-only mode blocks writes at the agent layer
+regardless of the caller's intent — defense against accidental edits while
+scouting.
 
 ## Subagent semantics
 
@@ -144,7 +155,7 @@ clears your block by flipping the substrate under whoever set it, mid-task. Pass
 `workspace=<absolute path>` on the call resolves it for you alone and leaves their
 activation intact. Measured 2026-09-01: the pin worked first try during an SDD run
 where re-activation would have disrupted a running implementer
-(`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`).
+(`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`).
 ## Anti-patterns
 
 - **Forgetting to restore home.** Iron-Law-grade. Server is shared
@@ -159,9 +170,13 @@ where re-activation would have disrupted a running implementer
   depends on the predicate in § Per-session state reset — don't assume it
   survives. If a hint was useful, capture the guide content in the
   parent's prompt or call `get_guide(topic)` again after activation.
-- **Treating `read_only=true` as a no-op.** It blocks mutations at
-  the agent layer; tools that try to write will fail with
-  `RecoverableError`. Use it deliberately for scout-only work.
+- **Treating `read_only=true` as advisory.** It is enforced at the agent
+  layer on any root, home included — tools that try to write fail with
+  `RecoverableError`. Pass it deliberately for scout-only work, including on
+  your own project, which is the case that silently did nothing before
+  2026-09-02. What it does *not* do is protect you from a peer sharing the
+  process: activation is process-wide, so pin per call (`workspace=<path>`)
+  when the concern is someone else moving the default under you.
 
 ## Related
 

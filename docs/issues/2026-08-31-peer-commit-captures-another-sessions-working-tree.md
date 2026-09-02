@@ -187,6 +187,91 @@ than as Instance 6 because the count is no longer the interesting variable — *
 file the capture rate approaches one**, and a session cannot write the record of this mechanism
 without the record being taken by it. That is the argument for remedy (2) stated as strongly as
 it can be stated.
+
+## Instance 6 — 2026-09-02, and the capture split a TWO-FILE change across the commit boundary
+
+| fact | value |
+|---|---|
+| capturing commit | `2fc064f7` — *"fix(prompts): the activation banner named a param two of its three tools drop"* |
+| captured hunk | `TOOL_SURFACE_CHAR_BUDGET` raise 56_519 → 56_547 in `src/server.rs`, plus its ~13-line rationale doc comment |
+| capturing commit's `--stat` | `src/server.rs | 183 ++++-` alongside `src/prompts/mod.rs`, `src/tools/memory/{mod,tests}.rs`, one spec |
+| captured session's own files | `src/agent/mod.rs`, `src/peer/server.rs`, `src/tools/config/mod.rs`, one guide — all still uncommitted, none captured |
+
+**Verification, not inference.** `git log -S'read-only-true-is-inert' -- src/server.rs` and
+`git log -S'still wrong about half its domain' -- src/server.rs` each return `2fc064f7` and
+nothing else. Both strings were authored in the captured session, in a doc comment that did not
+exist before it. The pickaxe names the commit; no adjacency argument was needed.
+
+### What is new: the capture left a defect at HEAD that NEITHER session can see from its own side
+
+The captured hunk was a **budget raise**. The change that justified it — a 31-char schema
+description in `src/tools/config/mod.rs` — was **not** captured and is still uncommitted. So
+HEAD now carries `TOOL_SURFACE_CHAR_BUDGET = 56_547` while the bytes accounting for 31 of it
+are absent. That is precisely what the constant's own doc comment forbids:
+
+> Set to the exact measured total, never rounded up: the ratchet still bites on the very next
+> added byte, which is the only thing keeping this honest.
+
+The ratchet is now silently loosened at HEAD, and `tool_surface_under_budget` passes with slack
+rather than on the line. The blindness is symmetric, which is why it belongs in this ledger:
+
+- the **capturing** session cannot see it — the raise is not theirs, so it reads as
+  pre-existing, and their own change is complete and consistent;
+- the **captured** session cannot see it either without separately inspecting HEAD, because
+  *its* working tree is consistent: both halves are present there.
+
+So this is a sharper harm than "an unrelated hunk under a wrong message," which is how instances
+1–5 read. It is an **internally inconsistent hunk** under a wrong message — a coupled two-file
+change bisected by the capture. Any check that asks "is this commit's diff self-consistent?"
+would have to know the coupling, and nothing records it but the prose in the doc comment that
+travelled with the wrong half.
+
+**Detection that worked, again for free:** the capturing commit's own `--stat` (§ *Detection*).
+183 changed lines in `src/server.rs` under a message about a prompt banner is legible on its
+face. The content check would also have fired here, but only for a reader who knew which
+strings to pickaxe — which the captured session did and the capturing one could not.
+
+**Noted, not attributed:** the same tree carries an untracked file literally named
+``head.\naab0c4ef'\"s`` — a shell-quoting accident from some session, sitting in the repo root.
+Recorded only as a measure of how much concurrent shell traffic this checkout carries.
+
+### Correction, same session: the coupling got STRONGER, because a third party then measured against the captured tree
+
+The section above is right that HEAD carries a raise whose justifying bytes are uncommitted, and
+right that the slack is 31. What it missed, because it happened minutes later, is what the
+capturing side did **next** — and that is the part worth keeping:
+
+| step | commit | total | budget | note |
+|---|---|---|---|---|
+| baseline | — | 56_516 | 56_519 | 3 chars of headroom |
+| captured session's `+31` schema fix | *uncommitted* | 56_547 | — | measured in the shared tree |
+| raise captured | `2fc064f7` | — | **56_547** | raise + rationale swept in under a prompts message |
+| peer trims `memory`'s schema by 50 | `a55396ec` | 56_497 | **56_497** | *"the first payback, and it retires one of the two debts above by its exact size"* |
+
+The payback is correct arithmetic and exactly what the constant's doc comment asks for — and it
+is **measured against a tree containing another session's uncommitted 31 bytes.** So HEAD's
+budget is now only honest *if that session's change lands*. Revert it and the total drops to
+56_466 against a 56_497 budget: 31 chars of silent slack, in a constant whose entire purpose is
+to have none.
+
+So the capture's harm compounds rather than sitting still. A hunk under a wrong message is a
+bookkeeping problem; a **shared invariant re-derived from a tree that mixes committed and
+uncommitted work from two sessions** is a correctness problem, and neither party can detect it:
+the measurer's reading was accurate for the tree in front of them, and the captured session's
+tree is self-consistent. The only state that is wrong is the one nobody's working copy shows —
+HEAD.
+
+**What this adds to § *Candidate remedies*:** a check on the *commit* cannot catch it, because
+no single commit is wrong. It needs a measurement taken against a **clean** tree — `git stash`
+is the obvious way and is itself a capture vector (§ *The read-side twin*), so on a shared
+checkout the affordable form is to derive the number from HEAD in a scratch worktree, never
+from the working copy. Any budget, baseline or golden value re-derived in a shared checkout has
+this exposure, not just this constant.
+
+**Credit where due:** the payback itself is the mechanism working. The peer read the rationale
+that travelled with the captured hunk and acted on it — which is the one thing that stopped the
+raise from becoming permanent, and an argument for recording *why* at the constant rather than
+in a commit message that the capture would have detached anyway.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because

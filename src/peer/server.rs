@@ -50,10 +50,16 @@ pub struct PeerServe {
 ///
 /// When `read_only`, flip the served (default) workspace's `read_only` flag so the
 /// Agent write-guard engages as a second layer behind the `PEER_EXPOSED_TOOLS`
-/// allow-list. `Agent::new` makes `root` the home, and home is read-write by
-/// default (`build_workspace`'s `is_home => rw` invariant); peer-serve is a pure
-/// reader, so we override that here. Peer dispatch is unpinned and resolves to
-/// the default workspace, so this covers every served call.
+/// allow-list. `Agent::new` makes `root` the home, and home defaults to
+/// read-write, so the flag has to be set explicitly. Peer dispatch is unpinned
+/// and resolves to the default workspace, so this covers every served call.
+///
+/// Set via `with_project_at_mut` rather than `activate(root, Some(true))`, which
+/// since 2026-09-02 would also express it correctly: `activate` additionally sets
+/// `project_chosen_this_session`, and that flag gates `guard_worktree_write` and
+/// `worktree_read_notice`. Peer-serve was *given* its root rather than choosing
+/// it, so asserting session intent would start emitting worktree notices on
+/// served reads. This is the narrow mutation on purpose — not a workaround.
 pub async fn build_server_for(root: &Path, read_only: bool) -> Result<PeerServe> {
     build_server_for_with_env(root, read_only, ServerEnv::from_env()).await
 }
