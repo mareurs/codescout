@@ -1601,6 +1601,53 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): artifact_v
 
 ## Task 8: `semantic_find` returns chunk hits, capped per artifact
 
+> **DONE 2026-09-02** by session `ffb95976`. **This is the task that closes the outage** —
+> writers (Task 7) and reader now name the same table, and hydration maps a chunk id back to
+> its artifact. Mutation run and **both** predicted tests killed: disabling the cap gave
+> `capped at 3, got 6` and `must yield distinct artifacts` (7 hits collapsing to 2 distinct
+> artifacts — exactly the regression the distinctness assertion exists for). Reverted.
+>
+> **Four ways the task as written did not survive contact with the code.**
+>
+> **1. `ids.dedup()` is wrong and would have hydrated duplicates.** `dedup()` collapses only
+> *adjacent* duplicates, and two ledgers' chunks interleave in KNN order as a matter of
+> course — which is the normal case, not an edge one. Replaced with a first-appearance
+> `HashSet` filter, preserving best-chunk order.
+>
+> **2. "update their call sites to pass `max_per_artifact`" is not enough for the three
+> existing `semantic_find` tests.** They hand-feed **artifact** ids to the store, so after
+> this change every candidate is unresolvable and the page comes back empty. They needed
+> chunk rows, via a new `one_chunk` helper. Note the failure direction: an unresolvable
+> candidate is skipped as *stale* rather than erroring, so a test left in the old shape goes
+> **silently empty** rather than red-with-a-reason.
+>
+> **3. Raising the `k` floor to 200 silently invalidated an annotated load-bearing fixture.**
+> `a_filter_that_excludes_the_nearest_matches_reports_starvation` seeded 150 rows *because*
+> the old floor was 100, and said so in its doc comment. At the new floor the store returns
+> fewer rows than `k`, `store_exhausted` fires on the first pass, and the test would have
+> gone **green while asserting nothing about starvation**. Seed raised to 250 **and the
+> annotation rewritten** — leaving the stale "(100)" would have been the exact silent decay
+> § *Testing Discipline* warns about.
+>
+> **4. A second seeding site the Files list does not name.** `tools/find.rs`'s `seed_vec`
+> helper wrote into `artifact_vec` keyed by artifact id, plus one test that hand-rolled the
+> same INSERT twice. Both re-pointed; the hand-rolled pair now routes through `seed_vec`, so
+> the next grain change has one site rather than three.
+>
+> **A test the plan does not have, and it is the one that pins the outage.**
+> `the_real_sqlite_path_writes_and_reads_the_same_table` drives the production writer
+> (`SqliteVecArtifactStore::upsert`) and the production reader (`knn`) and names **no table
+> at all**. Every other test here supplies its own `InMemoryArtifactStore`, which covers
+> hydration and is structurally blind to writer-and-reader-on-different-tables — the actual
+> defect between Tasks 7 and 8. A test that supplies the store cannot see which table the
+> store uses.
+>
+> **Both production callers pass `max_per_artifact = 1`**, which *preserves* today's result
+> shape rather than changing it: the store was artifact-keyed until Task 7, so every artifact
+> appeared at most once. `context.rs` gets 1 because its value is breadth across artifacts
+> (Task 9 formalises that contract); `tools/find.rs` gets 1 until Task 10 decides whether
+> `artifact(find, semantic=)` should surface several chunks per artifact.
+
 **Files:**
 - Modify: `src/librarian/catalog/find.rs:242-245` (`SemanticHit`), `:257-265` (`SemanticPage`), `:283-357` (`semantic_find`)
 - Modify: `src/librarian/artifact_store.rs:228-252` (`knn` reads `artifact_vec_v2`)
@@ -1618,7 +1665,7 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): artifact_v
   `SemanticPage` gains `pub cap_suppressed: usize`.
   `semantic_find(..., max_per_artifact: usize, ...)` — a new parameter placed after `filter`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test]
@@ -1662,12 +1709,12 @@ async fn max_per_artifact_one_yields_distinct_artifacts() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib catalog::find::tests::a_hit_names_the_chunk`
 Expected: FAIL — `this function takes 8 arguments but 9 were supplied`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `artifact_store.rs`, point `knn`'s SQL at the new table:
 
@@ -1801,17 +1848,17 @@ Raise the widening constants — with a cap, candidates collapse before counting
     const K_CAP: usize = 8000;
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib catalog::find`
 Expected: PASS, including the pre-existing `semantic_find` tests (update their call sites to pass `max_per_artifact`).
 
-- [ ] **Step 5: Mutation check**
+- [x] **Step 5: Mutation check**
 
 Replace the cap check with `if false {`.
 **Expected: `max_per_artifact_caps_without_emptying_the_page` AND `max_per_artifact_one_yields_distinct_artifacts` both FAIL.** Revert.
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit**
 
 ```bash
 cargo fmt
