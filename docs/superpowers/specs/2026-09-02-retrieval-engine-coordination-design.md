@@ -345,9 +345,36 @@ refuted on exactly that case.
 
 **Declared, not derived.** *When this arrives* is the most load-bearing fact about a piece
 of injected guidance, and deriving it would put that fact where the corpus author cannot
-read it — `OB-1` § *the third position*. Deriving it from `is_write` specifically would
-also inherit that predicate's open hole (`328021e820100805`), and `is_write` is
-tool-level where this needs per-action resolution.
+read it — `OB-1` § *the third position*.
+
+> ⚠ **Corrected 2026-09-02, by a commit from another work stream.** This paragraph used to
+> close: *"Deriving it from `is_write` specifically would also inherit that predicate's
+> open hole (…), and `is_write` is tool-level where this needs per-action resolution."*
+> The elided parenthetical was the bug file's 16-hex catalog id; it is dropped rather than
+> quoted, because `id = sha256(abs_path)` re-keys on the archive move and a *quotation* of
+> a retired sentence is not a citation worth dangling — the resolver cannot tell the two
+> apart. The durable pointer is the fix itself, below.
+>
+> **Both legs have expired.** The hole was closed by `354ffac4` (patch-id
+> `d4e6237ea3526776bc5b4441abd4677632624c0b`), which classifies librarian writes by
+> exclusion rather than enumeration; and the same commit made the classification
+> **per-action**, so the grain objection went with it. Verified here rather than accepted:
+> `LibrarianAdapter::is_write` (`src/librarian/adapter.rs:300`) now reads the `action`
+> field, and `is_write_classifies_every_action_outside_a_declared_read_set_as_a_write`
+> (`src/server.rs:5752`) is its regression test.
+>
+> The conclusion stands, on a reason that never depended on the implementation and should
+> have been the stated one: **`is_write` answers "does this call mutate?", which is not the
+> question phase asks.** Phase asks "should this guidance arrive *before* the call?" — and
+> the two come apart in both directions. A read can deserve a pre (an `artifact.get` under
+> `docs/issues/` wants the taxonomy as much as a `create` does); a write can not need one
+> (an `edit_file` on a scratch path). Deriving phase from mutation-ness conflates a
+> **safety** predicate with a **pedagogy** predicate, and would do so however correctly
+> `is_write` is implemented.
+>
+> Recorded rather than silently rewritten because the superseded form was an argument from
+> a *defect*, and an argument that dies when someone fixes the defect was never load-bearing
+> — the durable one was sitting underneath it the whole time.
 
 **Phase 2a must be byte-identical.** Post-only, pure refactor, no new behaviour.
 
