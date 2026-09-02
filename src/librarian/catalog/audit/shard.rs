@@ -904,6 +904,64 @@ mod tests {
         out
     }
 
+    /// Build an `artifact`/`delete` audit payload the way the catalog's own triggers do
+    /// — through a serializer, never by interpolation.
+    ///
+    /// **A fixture helper that exists because its absence cost 2 CI failures.** Two tests
+    /// wrote `format!("'{{\"abs_path\":\"{p}\"}}'")` with `p` straight from
+    /// `tempdir().join(..)`. On Unix that is `/tmp/.tmpAbC/gone.md` and the JSON is valid;
+    /// on Windows it is `C:\Users\RUNNER~1\...` and `\U`, `\A`, `\T` are not legal JSON
+    /// escapes, so `serde_json::from_str` in [`attribute`] fails, the row resolves to
+    /// `None`, and export reports `unattributed: 1`. Green on every developer machine,
+    /// red on all four Windows lanes.
+    ///
+    /// Production was never affected: the audit triggers build payloads with SQLite
+    /// expressions and `json_object()` over bound parameters (`audit/mod.rs`), so only
+    /// hand-written fixtures could reach this.
+    ///
+    /// See `docs/issues/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md`.
+    fn delete_payload(abs_path: &str) -> String {
+        serde_json::json!({ "abs_path": abs_path }).to_string()
+    }
+
+    /// A path containing backslashes must survive the fixture round-trip.
+    ///
+    /// **This is the guard the sibling Windows bug could not have.** `LockFileEx`'s
+    /// access-mode defect is unobservable from Linux because `flock(2)` ignores access
+    /// mode — nothing local can express it. This one is different in kind: the trigger is
+    /// the *content* of the path, not the platform, so a Windows-shaped string exercises
+    /// it fully on any OS. Reverting [`delete_payload`] to string interpolation fails this
+    /// test on Linux, which is precisely what the two original fixtures could not do.
+    ///
+    /// Mutation caught: `format!("{{\"abs_path\":\"{abs_path}\"}}")` in place of the
+    /// serializer.
+    #[test]
+    fn a_backslash_path_survives_the_delete_payload_round_trip() {
+        let windows_shaped = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpAbC\gone.md";
+        let payload = delete_payload(windows_shaped);
+
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap_or_else(|e| {
+            panic!(
+                "fixture payload is not valid JSON ({e}): {payload} — a path was \
+                    interpolated instead of serialized"
+            )
+        });
+        assert_eq!(
+            parsed.get("abs_path").and_then(|v| v.as_str()),
+            Some(windows_shaped),
+            "the path must round-trip byte-for-byte, backslashes included"
+        );
+
+        // And end-to-end through the real resolver, which is where the failure surfaced:
+        // `attribute` parses this payload and must recover the path rather than `None`.
+        let conn = Catalog::open_in_memory().unwrap().conn;
+        assert_eq!(
+            attribute(&conn, "artifact", "delete", "gone", Some(&payload)),
+            Some(PathBuf::from(windows_shaped)),
+            "attribute() must resolve a delete row whose payload holds a backslash path"
+        );
+    }
+
     #[test]
     fn export_writes_rows_past_the_watermark_and_advances_it() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1072,12 +1130,10 @@ mod tests {
         let new_path = tmp.path().join("new.md").to_string_lossy().to_string();
         cat.conn
             .execute(
-                &format!(
-                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
-                     VALUES(1751328000000,'artifact','delete','old','unknown','{{\"abs_path\":\"{old_path}\"}}'),
-                           (1788220800000,'artifact','delete','new','unknown','{{\"abs_path\":\"{new_path}\"}}')"
-                ),
-                [],
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
+                 VALUES(1751328000000,'artifact','delete','old','unknown',?1),
+                       (1788220800000,'artifact','delete','new','unknown',?2)",
+                rusqlite::params![delete_payload(&old_path), delete_payload(&new_path)],
             )
             .unwrap();
         export(&cat.conn, tmp.path()).unwrap();
@@ -1353,12 +1409,9 @@ mod tests {
         let gone_path = tmp.path().join("gone.md").to_string_lossy().to_string();
         cat.conn
             .execute(
-                &format!(
-                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
-                     VALUES(1751328000000,'artifact','delete','gone','unknown',
-                            '{{\"abs_path\":\"{gone_path}\"}}')"
-                ),
-                [],
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
+                 VALUES(1751328000000,'artifact','delete','gone','unknown',?1)",
+                rusqlite::params![delete_payload(&gone_path)],
             )
             .unwrap();
 
