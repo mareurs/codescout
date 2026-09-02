@@ -2463,6 +2463,176 @@ mod tests {
         }
     }
 
+    /// Which contract a tool's `description()` makes about its `action` enum.
+    ///
+    /// **Declared, never inferred** — the same rule `entry_prefix` follows, for the same
+    /// reason. The bug that prompted this gate proposed sniffing for an "enumeration
+    /// marker" (`Actions:`, `action='…'`, a `/`-joined run) to decide which descriptions
+    /// promise an inventory. That is a parser over a namespace with no escape —
+    /// `CLAUDE.md` § *Parsers Over a Namespace*, this corpus's largest defect class at 27
+    /// instances — and it fails in BOTH directions: a description mentioning "Actions:"
+    /// in passing is conscripted into a promise it never made, and one that enumerates
+    /// without the marker is silently exempted. Neither errors; both return a smaller
+    /// number that looks like an answer.
+    ///
+    /// A tool declared in NEITHER arm fails the gate, so adding a tool with an `action`
+    /// enum forces the decision rather than defaulting to unguarded. That is also what
+    /// makes this survive the tool-surface collapse: renamed or merged tools arrive
+    /// undeclared and stop the build, instead of silently leaving the surface unguarded.
+    enum ActionContract {
+        /// The description IS an inventory: it names every value in the enum.
+        Inventory,
+        /// The description is thematic — it says what the tool is for and deliberately
+        /// does not enumerate. Guarded in the opposite direction; see the test.
+        Thematic,
+    }
+
+    /// The declared contract for every tool whose schema carries an `action` enum.
+    ///
+    /// Returning `None` is what makes an unclassified tool a failure rather than a pass.
+    fn action_contract(tool: &str) -> Option<ActionContract> {
+        Some(match tool {
+            "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_event"
+            | "artifact_refresh" | "librarian" => ActionContract::Inventory,
+            // `artifact` (12 actions) and `edit_markdown` (5) describe by theme on
+            // purpose: an inventory would not fit the surface budget, and the client
+            // already receives the `action` enum itself in the schema. The thematic arm
+            // is an escape hatch, so the test asserts against it in the opposite
+            // direction rather than treating it as an exemption.
+            "artifact" | "edit_markdown" => ActionContract::Thematic,
+            _ => return None,
+        })
+    }
+
+    /// Does `haystack` name `token` as a standalone word?
+    ///
+    /// Plain substring matching is wrong here and the counter-example is LIVE, not
+    /// hypothetical: `artifact_refresh`'s enum is `["gather", "list_stale"]`, so a
+    /// substring test for a `list` action would be satisfied by `list_stale`, and the
+    /// gate would certify an inventory that never named it. The reference probe in the
+    /// bug report used Python's `in` and inherits exactly this hole.
+    ///
+    /// Case-SENSITIVE for the mirror reason: `edit_markdown`'s description opens "Edit a
+    /// Markdown document", where `Edit` is the English verb and not the `edit` action.
+    /// Folding case would let ordinary prose discharge an inventory's obligation.
+    fn names_action(haystack: &str, token: &str) -> bool {
+        let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        haystack.match_indices(token).any(|(i, _)| {
+            haystack[..i]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !is_word(c))
+                && haystack[i + token.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !is_word(c))
+        })
+    }
+
+    /// A tool's `description()` must not under-report its own `action` enum.
+    ///
+    /// The failure this catches is silent by construction: adding a variant to an
+    /// `action` enum compiles, dispatches, is covered by its own tests and ships, while
+    /// the description — a hand-written string literal in a different method of the same
+    /// `impl` — keeps naming the old set. Nothing in the language relates the two.
+    ///
+    /// Observer and reader, per `CLAUDE.md` § *Observer Blindness*: the party who
+    /// structurally cannot see the drift is the enum's author, because the description is
+    /// not in their diff and the compiler is silent about it; the party who acts on it is
+    /// every agent reading `tools/list` before its first call, which learns an inventory
+    /// short by one and never calls the missing action. "Review more carefully" is the
+    /// wrong instrument — this is the check that runs when nobody is worried.
+    ///
+    /// **This gate has one site but several members, so verify it per MEMBER**
+    /// (`CLAUDE.md` § *Testing Discipline*): revert each description independently, and
+    /// do not credit a single kill to the rest.
+    ///
+    /// Measured at HEAD `7d2b3ee7`: two members failed — `index` omitted `verify`
+    /// (17 calls in `usage.db`) and `memory` omitted `refresh_anchors` (35 calls). Both
+    /// descriptions are fixed in the same commit that adds this test.
+    ///
+    /// Feature-gate note: the lean lane (`--no-default-features`) advertises no librarian
+    /// tools, so this loop simply sees fewer members. That is why the population is
+    /// derived from `server.tools` rather than from `action_contract`'s arms — a declared
+    /// tool that is absent must not be a failure.
+    ///
+    /// docs/issues/2026-09-02-index-description-omits-the-verify-action.md
+    /// docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+    #[tokio::test]
+    async fn tool_descriptions_name_every_action_they_claim_to_enumerate() {
+        let (_dir, server) = make_server().await;
+        let mut undeclared: Vec<String> = Vec::new();
+        let mut under_reported: Vec<String> = Vec::new();
+        let mut thematic_but_complete: Vec<String> = Vec::new();
+
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let Some(actions) = schema
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(Value::as_array)
+            else {
+                continue;
+            };
+            let actions: Vec<&str> = actions.iter().filter_map(Value::as_str).collect();
+            if actions.is_empty() {
+                continue;
+            }
+
+            let d = t.description();
+            let missing: Vec<&str> = actions
+                .iter()
+                .copied()
+                .filter(|a| !names_action(d, a))
+                .collect();
+
+            match action_contract(t.name()) {
+                None => undeclared.push(format!("{} (enum: {})", t.name(), actions.join(", "))),
+                Some(ActionContract::Inventory) if !missing.is_empty() => under_reported.push(
+                    format!("{} omits {:?} of {}", t.name(), missing, actions.len()),
+                ),
+                // The thematic arm is guarded in the OPPOSITE direction. An
+                // `Inventory`-style assertion is monotone under widening the
+                // description, so it can never fire on an over-broad exemption; without
+                // this, `Thematic` would be a list that only ever grows and silences.
+                // A thematic description that has grown to name every action IS an
+                // inventory and must be declared one.
+                Some(ActionContract::Thematic) if missing.is_empty() => {
+                    thematic_but_complete.push(format!("{} names all {}", t.name(), actions.len()))
+                }
+                Some(_) => {}
+            }
+        }
+
+        assert!(
+            undeclared.is_empty(),
+            "these tools declare an `action` enum but no contract in `action_contract`: {}.\n\
+             Add each to the `Inventory` arm (its description names every action) or the \
+             `Thematic` arm (it describes by theme and does not enumerate). Unclassified \
+             is a failure on purpose — the decision is the point.",
+            undeclared.join("; ")
+        );
+        assert!(
+            under_reported.is_empty(),
+            "these descriptions promise an inventory of their `action` enum and are short: \
+             {}.\n\
+             An agent reads the description before its first call, so an omitted action is \
+             one it never learns exists. Add the missing action(s) to the description, or \
+             re-declare the tool `Thematic` in `action_contract` if it no longer \
+             enumerates. Mind `TOOL_SURFACE_CHAR_BUDGET`.",
+            under_reported.join("; ")
+        );
+        assert!(
+            thematic_but_complete.is_empty(),
+            "these tools are declared `Thematic` but their descriptions now name every \
+             action: {}.\n\
+             That is an inventory. Move them to the `Inventory` arm so the gate holds them \
+             to it from here on.",
+            thematic_but_complete.join("; ")
+        );
+    }
+
     #[tokio::test]
     async fn tool_descriptions_report_lengths() {
         // Companion to `tool_descriptions_stay_under_budget` — no assertions,

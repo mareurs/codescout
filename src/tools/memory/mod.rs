@@ -641,7 +641,8 @@ impl Tool for Memory {
     }
 
     fn description(&self) -> &str {
-        "Persistent project memory. Topic-based: read/write/list/delete with path-like keys. \
+        "Persistent project memory. Topic-based: read/write/list/delete/refresh_anchors with \
+         path-like keys. \
          Semantic: remember/recall/forget with bucket classification and meaning-based search."
     }
 
@@ -654,6 +655,7 @@ impl Tool for Memory {
              - `action=\"read\"`: retrieve by exact topic.\n\
              - `action=\"list\"`: list all topics.\n\
              - `action=\"delete\"`: remove a topic.\n\
+             - `action=\"refresh_anchors\"`: re-hash a topic's code anchors, clearing staleness.\n\
              \n\
              **Semantic** (embedded, meaning-based search):\n\
              - `action=\"remember\"`: embed and store a free-text fact.\n\

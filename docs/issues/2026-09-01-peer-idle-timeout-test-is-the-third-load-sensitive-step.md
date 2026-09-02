@@ -259,6 +259,35 @@ index lock rather than a timeout, it is a **separate bug file**, not a step of t
 and recording it here as membership would be the elimination-by-plausibility this repo
 keeps paying for. Recorded on this file only because the signature was observed in the same
 run as this test, which is a fact about the run rather than about the cause.
+### Sixth observation, 2026-09-02 — the assertion text the fifth asked for, and it names the timeout
+
+Gate run during unrelated work (the `description`↔`action`-enum parity gate, touching only
+`src/server.rs` tests and two description string literals — nothing under `src/peer/`).
+
+| fact | value |
+|---|---|
+| result | `4927 passed; 1 failed` — **this test only**, not the fifth's 14-red cluster |
+| assertion | `run() did not exit within 10s of a 1s idle timeout`, `src/peer/server.rs:746:9` |
+| load | directly observed — a peer session held the cargo build lock; this session's own earlier commands logged `Blocking waiting for file lock on build directory` |
+| isolated re-run | `cargo test --lib run_exits_after_idle_timeout_with_no_connections` → **ok in 1.14s**, no code change between runs |
+| full re-run | `cargo test --workspace` → **exit 0**, whole lane green |
+
+**This is the capture the fifth observation asked for and deliberately did not do.** The
+stdout block exists this time, and it names *the idle timer* — not the index lock. So for
+this occurrence the mechanism is the one this file has claimed since it was opened, and the
+`retrieval::sync` lock-duration lead is **neither confirmed nor implicated**: those thirteen
+did not recur here at all.
+
+**What that does and does not settle.** It settles that a lone red with the timeout assertion
+still happens, under load, on a tree with no `src/peer/` change — one more datapoint for the
+original class, with the evidence attached rather than inferred. It settles **nothing** about
+whether the fifth's cluster shares this mechanism; a run in which the cluster did not appear
+cannot speak to the cluster. The fifth's `next` step stands unclaimed.
+
+**Published as a denominator, not as a catch** (`CLAUDE.md` § *Testing Discipline*): the
+re-derivation *confirmed*, and a confirmation that goes unrecorded makes the population look
+self-correcting. Counting only the surprises is how a load-sensitive class stays at "flaked
+once".
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).

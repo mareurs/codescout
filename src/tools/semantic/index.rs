@@ -834,8 +834,9 @@ impl Tool for Index {
 
     fn description(&self) -> &str {
         "Semantic index operations. Actions: \
-             `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
+             `build` (build/update the index; `scope='lib:<name>'` for a library), \
              `status` (show index stats), \
+             `verify` (check coverage against the filesystem; read-only), \
              `cancel` (abort an in-flight reindex — no-op if nothing is running)."
     }
 
