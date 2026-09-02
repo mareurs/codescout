@@ -42,9 +42,12 @@ enum CapClass {
     ResultCap(String),
     NotACap(String),
     Unclassified,
-    /// `NOT_A_CAP` with an empty reason. Distinguished from `Unclassified`
-    /// because "the annotation exists" is not the property we want, and the
-    /// two need different failure text.
+    /// An annotation is present but unusable: either a `NOT_A_CAP` with an
+    /// empty reason, or a `RESULT_CAP` whose id does not match the
+    /// grammar's `[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*` production (e.g.
+    /// `RESULT_CAP probed`, a bare word with no dot). Distinguished from
+    /// `Unclassified` because "the annotation exists" is not the property
+    /// we want, and the two need different failure text.
     MalformedReason,
 }
 
@@ -122,6 +125,27 @@ const REAL_MAX: usize = 1;
 }
 
 #[test]
+fn cap_constants_reads_an_annotation_through_an_attribute() {
+    let src = "\
+// cap-class: RESULT_CAP grep.lines — probed
+#[allow(dead_code)]
+const GREP_LINE_LIMIT: usize = 50;
+";
+    let got = cap_constants(src, "src/x.rs");
+    assert_eq!(got.len(), 1, "one cap-shaped const");
+    assert_eq!(
+        got[0].annotation.as_deref(),
+        Some("RESULT_CAP grep.lines — probed"),
+        "the #[allow(dead_code)] attribute sits between the doc comment and the \
+         const; annotation_above must skip over it rather than stopping the \
+         upward walk there. Deleting the `#[` skip branch in annotation_above \
+         makes this fail: the walk hits the attribute line first, it does not \
+         start with \"//\", so `break` fires before the comment above it is \
+         ever collected and this assertion goes from Some(..) to None."
+    );
+}
+
+#[test]
 fn classify_reads_the_three_states_and_rejects_an_empty_reason() {
     let mk = |ann: Option<&str>| CapDecl {
         name: "X_MAX".into(),
@@ -190,6 +214,59 @@ fn classify_does_not_match_a_longer_token_sharing_the_prefix() {
         "RESULT_CAPACITY_THING must not be read as RESULT_CAP with id \
          ACITY_THING; without a word boundary after the token this falls \
          through to a garbage classification instead of Unclassified"
+    );
+}
+
+#[test]
+fn classify_rejects_a_hyphen_inside_a_word_with_no_real_separator() {
+    let decl = CapDecl {
+        name: "X_MAX".into(),
+        file: "src/x.rs".into(),
+        line: 1,
+        annotation: Some("NOT_A_CAP no-real-separator-here".into()),
+    };
+    assert_eq!(
+        classify(&decl),
+        CapClass::MalformedReason,
+        "the hyphens here are inside a word, not a whitespace-delimited \
+         separator immediately after NOT_A_CAP; a search unanchored to \
+         position would find the first '-' anywhere in the payload and \
+         wrongly split on it"
+    );
+}
+
+#[test]
+fn classify_takes_the_reason_after_the_first_separator_even_when_a_later_em_dash_exists() {
+    let decl = CapDecl {
+        name: "X_MAX".into(),
+        file: "src/x.rs".into(),
+        line: 1,
+        annotation: Some("NOT_A_CAP - reason with an em dash — inside it".into()),
+    };
+    assert_eq!(
+        classify(&decl),
+        CapClass::NotACap("reason with an em dash — inside it".into()),
+        "the first separator positionally (a plain hyphen, right after \
+         NOT_A_CAP) must win; a fixed-preference search that always tried \
+         the em dash first would instead split on the later '—' and \
+         truncate the reason to 'inside it'"
+    );
+}
+
+#[test]
+fn classify_rejects_a_result_cap_id_without_a_dot() {
+    let decl = CapDecl {
+        name: "X_MAX".into(),
+        file: "src/x.rs".into(),
+        line: 1,
+        annotation: Some("RESULT_CAP probed".into()),
+    };
+    assert_eq!(
+        classify(&decl),
+        CapClass::MalformedReason,
+        "\"probed\" has no dot and does not match the id grammar \
+         [a-z][a-z0-9_]*.[a-z][a-z0-9_]*; classify must not silently accept \
+         it as ResultCap(\"probed\")"
     );
 }
 
@@ -304,7 +381,15 @@ fn annotation_above(lines: &[&str], decl_idx: usize) -> Option<String> {
     for i in (0..decl_idx).rev() {
         let t = lines[i].trim_start();
         if t.starts_with("#[") {
-            continue; // attributes sit between the doc block and the item
+            // Attributes sit between the doc block and the item. This only
+            // recognizes single-line attributes: a multi-line attribute's
+            // closing line (e.g. the `))]` of a wrapped `#[cfg(...)]`) does
+            // not start with "#[", so it falls through to the `break` below
+            // and ends the walk early, silently losing the annotation above
+            // it. Fails safe — the decl becomes Unclassified, not a wrong
+            // classification — but a future reader shouldn't have to
+            // rediscover this by tracing the loop.
+            continue;
         }
         if t.starts_with("//") {
             block.push(t);
@@ -335,14 +420,47 @@ fn annotation_above(lines: &[&str], decl_idx: usize) -> Option<String> {
     found
 }
 
-/// Split an annotation payload into its class and the text after the dash.
+/// Split a `NOT_A_CAP` annotation payload into the text after its
+/// separator.
+///
+/// The separator must sit immediately after the `NOT_A_CAP` token
+/// (whitespace-delimited: `" — "`, `" – "`, or `" - "`) — not merely occur
+/// somewhere in the payload. Two defects that shape guards against:
+/// unanchored `split_once` would treat a hyphen buried inside a word
+/// (`"NOT_A_CAP LSP-handshake deadline"`) as the separator and truncate the
+/// reason mid-word; and searching in a fixed dash-preference order across
+/// the WHOLE payload would match a later em-dash inside the reason itself
+/// before the real, earlier separator, silently discarding everything
+/// before it. Checking each separator only as a prefix of the text
+/// immediately following the token — at one fixed position — takes
+/// whichever one is actually there positionally, since at most one can
+/// match at that position.
 fn split_reason(payload: &str) -> Option<&str> {
+    let rest = payload.strip_prefix("NOT_A_CAP")?;
+    let trimmed = rest.trim_start();
     for sep in ["—", "–", "-"] {
-        if let Some((_, rest)) = payload.split_once(sep) {
-            return Some(rest.trim());
+        if let Some(after_sep) = trimmed.strip_prefix(sep) {
+            if after_sep.is_empty() || after_sep.starts_with(char::is_whitespace) {
+                return Some(after_sep.trim());
+            }
         }
     }
     None
+}
+
+/// True when `id` matches the annotation grammar's `<id>` production:
+/// `[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*` — dotted lowercase, e.g. `grep.lines`.
+/// A bare word with no dot (`probed`) does not match.
+fn is_valid_cap_id(id: &str) -> bool {
+    let Some((head, tail)) = id.split_once('.') else {
+        return false;
+    };
+    let valid_segment = |s: &str| {
+        let mut chars = s.chars();
+        matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+            && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    valid_segment(head) && valid_segment(tail)
 }
 
 fn classify(decl: &CapDecl) -> CapClass {
@@ -363,7 +481,7 @@ fn classify(decl: &CapDecl) -> CapClass {
                 .next()
                 .unwrap_or_default()
                 .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_');
-            if id.is_empty() {
+            if id.is_empty() || !is_valid_cap_id(id) {
                 return CapClass::MalformedReason;
             }
             return CapClass::ResultCap(id.to_string());
