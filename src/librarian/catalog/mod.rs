@@ -281,6 +281,22 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
          )",
         [],
     )?;
+    // `artifact_vec_v2` is keyed by `chunk_id`, not `artifact_id`, so neither
+    // the `artifact_vec_cascade_delete` trigger (schema.sql:54, keyed on
+    // artifact.id) nor the startup orphan sweep reaches it. `artifact_chunk`
+    // rows vanish silently via the FK cascade above when an artifact is
+    // deleted — this trigger is what turns that into a matching vector
+    // delete instead of an orphan. Verified (not assumed): SQLite fires
+    // `AFTER DELETE` triggers on the child table under an FK cascade delete
+    // regardless of `recursive_triggers` (tested both OFF and ON).
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS artifact_vec_v2_cascade_delete
+           AFTER DELETE ON artifact_chunk
+         BEGIN
+           DELETE FROM artifact_vec_v2 WHERE id = OLD.chunk_id;
+         END",
+        [],
+    )?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version) VALUES (11)",
         [],
@@ -646,6 +662,13 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+        // artifact_vec_v2 is the other half of v11's deliverable — dropping its
+        // CREATE VIRTUAL TABLE left every other test green (Task 4 review Finding 1).
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
     }
 
     #[test]
@@ -694,6 +717,105 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "FK cascade must remove the chunk rows");
+    }
+    #[test]
+    fn artifact_chunk_rejects_a_duplicate_chunk_ix_for_the_same_artifact() {
+        // UNIQUE (artifact_id, chunk_ix) is what makes chunk_ix a stable
+        // per-artifact ordinal — Task 5's replace_chunks (id preservation) and
+        // Task 11's backfill both rest on it. Dropping the UNIQUE clause left
+        // every other v11 test green (Task 4 review Finding 2).
+        use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+
+        fn art(
+            id: &str,
+            kind: &str,
+            status: &str,
+        ) -> crate::librarian::catalog::artifact::ArtifactRow {
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/{id}.md"))
+                .with_kind(kind)
+                .with_status(status)
+                .with_file_sha256("x")
+                .build()
+        }
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_chunk
+                   (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+                 VALUES ('c1','a',0,1,9,NULL,'body','h')",
+                [],
+            )
+            .unwrap();
+        let err = cat
+            .conn
+            .execute(
+                "INSERT INTO artifact_chunk
+                   (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+                 VALUES ('c2','a',0,10,19,NULL,'body2','h2')",
+                [],
+            )
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("UNIQUE") || msg.contains("unique"),
+            "expected a UNIQUE constraint violation, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn deleting_an_artifact_cascades_its_vec_v2_row_via_the_chunk_trigger() {
+        // artifact_vec_v2 is keyed by chunk_id, so neither the existing
+        // artifact_vec_cascade_delete trigger (keyed on artifact.id) nor the
+        // startup orphan sweep reaches it. artifact_vec_v2_cascade_delete
+        // (AFTER DELETE ON artifact_chunk) is what turns the FK-cascaded
+        // artifact_chunk deletion into a matching vector delete instead of an
+        // orphan (Task 4 review Finding 3) — this is what distinguishes a
+        // live trigger from a decorative one.
+        use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+
+        fn art(
+            id: &str,
+            kind: &str,
+            status: &str,
+        ) -> crate::librarian::catalog::artifact::ArtifactRow {
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/{id}.md"))
+                .with_kind(kind)
+                .with_status(status)
+                .with_file_sha256("x")
+                .build()
+        }
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_chunk
+                   (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+                 VALUES ('c1','a',0,1,9,NULL,'body','h')",
+                [],
+            )
+            .unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_vec_v2 (id, embedding) VALUES ('c1', ?1)",
+                [vec![0u8; 768 * 4]],
+            )
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='a'", [])
+            .unwrap();
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            n, 0,
+            "artifact_vec_v2_cascade_delete must remove the vec row"
+        );
     }
 
     #[test]
