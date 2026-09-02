@@ -445,6 +445,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut desired: BTreeSet<(String, String)> = BTreeSet::new();
     let mut self_cites = 0usize;
     let mut ambiguous: Vec<Value> = Vec::new();
+    // Layer 3c. A `**Rests on:**` value whose token the resolver refused: the author
+    // named a proof the graph cannot reach. Reported rather than guessed, same rule as
+    // every other refusal here — but reported SEPARATELY from `ambiguous`, because the
+    // remedy differs. An ambiguous prose citation is usually incidental; an unresolvable
+    // `**Rests on:**` is a Statement whose declared basis does not resolve, which is the
+    // one thing the field exists to prevent.
+    let mut rests_on_unresolvable: Vec<Value> = Vec::new();
+    let mut rests_on_unresolvable_total = 0usize;
     let mut dangling: Vec<Value> = Vec::new();
     let mut cross_repo: Vec<Value> = Vec::new();
     let mut malformed_qualifier: Vec<Value> = Vec::new();
@@ -711,7 +719,36 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let dst = match resolve::resolve(rc, &row.id, &rel_dir, &index, &corpus) {
                     Some(resolve::Outcome::Edge { dst_id })
                     | Some(resolve::Outcome::SelfCite { dst_id }) => dst_id,
-                    _ => continue,
+                    other => {
+                        // `None` is suppressed noise — a prose acronym, or a rel-path
+                        // link that is `audit_doc_refs`'s jurisdiction. Reporting it
+                        // would make every ordinary capitalised word in a declaration a
+                        // finding, which is how a worklist becomes unreadable.
+                        let (reason, extra) = match &other {
+                            Some(resolve::Outcome::Ambiguous { candidates, total }) => (
+                                "ambiguous",
+                                json!({"candidates": candidates, "candidates_total": total}),
+                            ),
+                            Some(resolve::Outcome::Dangling) => ("dangling", json!({})),
+                            Some(resolve::Outcome::CrossRepo) => ("cross_repo", json!({})),
+                            Some(resolve::Outcome::MalformedQualifier) => {
+                                ("malformed_qualifier", json!({}))
+                            }
+                            _ => continue,
+                        };
+                        let mut f = finding(&row.id, rc, extra);
+                        if let Some(o) = f.as_object_mut() {
+                            o.insert("entry".into(), json!(section.id));
+                            o.insert("reason".into(), json!(reason));
+                        }
+                        push_windowed(
+                            &mut rests_on_unresolvable,
+                            &mut rests_on_unresolvable_total,
+                            window,
+                            f,
+                        );
+                        continue;
+                    }
                 };
                 if let Some((s, l, d)) = rests_on_edge(section, rc, &row.id, &dst, &id_to_slug) {
                     rests_on_derived += 1;
@@ -833,6 +870,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // `written`/`skipped_existing` cover both rels together, because the
                 // insert loop does.
                 "rests_on_derived": rests_on_derived,
+                // Statements whose declared basis the resolver refused. NOT a subset of
+                // `derived` — these produced no edge at all — and not comparable to the
+                // top-level `ambiguous` count, which is over prose citations.
+                "rests_on_unresolvable": rests_on_unresolvable_total,
             },
             "edges_desired": desired.len(),
             "edges_unchanged": d.unchanged,
@@ -873,6 +914,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // is true while nothing remains, which would report every final page as cut and
             // make the flag useless precisely for the caller who paged to reach the end.
             "truncated": {
+                "rests_on_unresolvable": more_beyond(
+                    window,
+                    rests_on_unresolvable_total,
+                    rests_on_unresolvable.len(),
+                ),
                 "ambiguous": more_beyond(window, ambiguous_total, ambiguous.len()),
                 "dangling": more_beyond(window, dangling_total, dangling.len()),
                 "cross_repo": more_beyond(window, cross_repo_total, cross_repo.len()),
@@ -890,6 +936,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         },
         "edges_missing": edge_view(&d.to_add),
         "edges_stale": edge_view(&d.stale),
+        "rests_on_unresolvable": rests_on_unresolvable,
         "ambiguous": ambiguous,
         "dangling": dangling,
         "cross_repo": cross_repo,
@@ -1509,6 +1556,88 @@ mod tests {
             out["counts"]["entry_edges"]["rests_on_derived"],
             json!(0),
             "neither a mention nor an unresolvable target is an edge: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["entry_edges"]["rests_on_unresolvable"],
+            json!(0),
+            "and NEITHER is a worklist item. `ZZZ-999` is a prefix nothing defines \
+             anywhere, which resolves as prose noise (`None`) rather than `Dangling` — \
+             the same gate that keeps `UTF-8` and `SHA-256` silent. Reporting suppressed \
+             noise would make every capitalised word in a declaration a finding, which \
+             is how a worklist stops being read: {out:#?}"
+        );
+    }
+
+    /// Layer 3c's worklist. A `**Rests on:**` naming a token with two active definers
+    /// resolves to `Ambiguous` — no edge, but the author declared a basis the graph
+    /// cannot reach, which is the one failure this field exists to prevent. Reported,
+    /// never guessed.
+    ///
+    /// **Fixture needs three files, and that is load-bearing.** Two ledgers must define
+    /// `F-1` for it to be ambiguous at all, and the *citing* file must be a third: put
+    /// the declaration in either definer and `resolve` returns `SelfCite` instead (the
+    /// local definition wins), which is a different arm and would silently pass.
+    #[tokio::test]
+    async fn an_ambiguous_rests_on_declaration_is_reported_with_its_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let a = tmp.path().join("a.md");
+        std::fs::write(&a, "## F-1 — one definer\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "aa", &a, "alpha");
+
+        let b = tmp.path().join("b.md");
+        std::fs::write(&b, "## F-1 — the other definer\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "bb", &b, "beta");
+
+        let c = tmp.path().join("c.md");
+        std::fs::write(
+            &c,
+            "## W-1 — the entry that declares an unreachable basis\n\
+             \n\
+             **Rests on:** F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "cc", &c, "gamma");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+
+        assert_eq!(
+            out["counts"]["entry_edges"]["rests_on_derived"],
+            json!(0),
+            "ambiguity is never guessed into an edge: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["entry_edges"]["rests_on_unresolvable"],
+            json!(1),
+            "but it MUST be reported — a silent drop here is a Statement whose declared \
+             basis nothing can reach, with no signal to its author: {out:#?}"
+        );
+        let f = &out["rests_on_unresolvable"][0];
+        assert_eq!(
+            f["entry"],
+            json!("W-1"),
+            "names the declaring entry: {out:#?}"
+        );
+        assert_eq!(f["reason"], json!("ambiguous"), "{out:#?}");
+        assert_eq!(
+            f["candidates_total"],
+            json!(2),
+            "and carries the candidates, which is the actionable part — they tell the \
+             author which qualified form to write: {out:#?}"
         );
     }
 
