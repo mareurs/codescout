@@ -23,6 +23,8 @@
 - **Task 1 must be byte-identical.** Any pre-existing test whose expectation needs editing is evidence the refactor was not faithful — stop rather than adjust the test.
 - **A worktree exists at `.worktrees/tool-collapse`.** Use `git -C /home/marius/work/claude/codescout` for every git mutation; bare `git commit` is hook-blocked.
 - **Shared checkout.** Never `git add -A`. Stage by pathspec → `git diff --cached --name-only` → `git diff --cached` → commit by pathspec.
+
+  **If the shared index holds paths you did not stage, leave them exactly as they are.** Commit by pathspec — it ignores the index for paths it does not name, so foreign staged paths cannot reach your commit and need no removal. Do **not** run `git restore --staged`, `git reset`, or anything else that unstages them. Measured 2026-09-02 earlier in this same sequence: an implementer found three of another session's `docs/issues/*.md` staged alongside its own file, correctly refused to commit them, and then unstaged them — which bought nothing and destroyed a peer's staging intent. Report a foreign index; never repair one.
 - **A derived number ships with its derivation and its population.** Task 2 sets a new ceiling; the value alone is not the deliverable. See that task's Step 7.
 
 ---
