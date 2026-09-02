@@ -19,7 +19,8 @@ pub struct IndexReport {
     pub unknown_ids: Vec<String>,
 }
 
-/// Items queued for embedding: `(artifact_id, title, body_chunk_text)`.
+/// Items queued for embedding: `(chunk_id, title, chunk_text)`. One per CHUNK,
+/// not per artifact — `chunk_id` keys `artifact_vec_v2`.
 pub type EmbedQueueItem = (String, Option<String>, String);
 
 /// Return the text of the first H1 in a markdown body, or `None` if none is
@@ -51,27 +52,53 @@ pub fn first_h1(body: &str) -> Option<String> {
     None
 }
 
-/// Build the embed-queue entry for `body`, or `None` when its first chunk is
-/// empty/whitespace-only.
+/// Build the embed-queue entries for `body`: ONE PER CHUNK, keyed by chunk id.
 ///
-/// Empty bodies are skipped deliberately: the embedder's own guard bails the
-/// WHOLE batch on a single empty input (see
-/// `docs/issues/archive/2026-05-17-reindex-embedding-dim-mismatch.md`), which
-/// would otherwise abort an entire bulk reindex/backfill run over one
-/// near-empty file.
+/// Writes the artifact's `artifact_chunk` rows as a side effect, because the
+/// chunk ids the queue is keyed on are assigned there — the queue and the rows
+/// cannot be built independently without the two disagreeing.
+///
+/// Empty/whitespace-only chunks are filtered PER CHUNK, not per artifact: the
+/// embedder's guard bails the WHOLE batch on a single empty input (see
+/// `docs/issues/archive/2026-05-17-reindex-embedding-dim-mismatch.md`), and
+/// with N chunks per artifact one blank section would otherwise abort an entire
+/// bulk reindex.
 ///
 /// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
 /// path and the forced-re-embed path through the unchanged-row early return.
 /// Keeping it in one place is what stops those two from drifting apart.
-fn embed_queue_item(id: &str, title: Option<String>, body: &str) -> Option<EmbedQueueItem> {
-    let first_chunk = codescout_embed::chunk_markdown(body, 512)
+fn embed_queue_items(
+    cat: &Catalog,
+    id: &str,
+    title: Option<String>,
+    body: &str,
+) -> Result<Vec<EmbedQueueItem>> {
+    // 2048 chars = 512 tokens. Do NOT swap this for chunk_size_for_model:
+    // that returns a CEILING (2048 tokens for CodeRankEmbed), and this project
+    // deliberately chunks below it for ranking sharpness. See
+    // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
+    const CHUNK_CHARS: usize = 512 * 4;
+
+    let built = crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS);
+    let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
+    Ok(stored
         .into_iter()
-        .next()
-        .unwrap_or_else(|| body.to_string());
-    if first_chunk.trim().is_empty() {
-        return None;
-    }
-    Some((id.to_string(), title, first_chunk))
+        .filter(|r| !r.content.trim().is_empty())
+        .map(|r| {
+            // Give a MID-entry chunk its entry's identity. `## W-81 — Choose a
+            // gate's surface` may be thousands of characters upstream, so a
+            // chunk from the middle of a five-chunk entry would otherwise embed
+            // with no idea what it belongs to. Skipped when the chunk already
+            // opens with its own heading, which is the common case.
+            let text = match &r.entry_token {
+                Some(tok) if !r.content.trim_start().starts_with('#') => {
+                    format!("{tok}\n\n{}", r.content)
+                }
+                _ => r.content,
+            };
+            (r.chunk_id, title.clone(), text)
+        })
+        .collect())
 }
 
 /// Synchronous part of indexing: walk files, upsert artifact rows, collect embedding queue.
@@ -247,9 +274,7 @@ pub fn index_repo_sync(
             // path instead would rewrite every row and misreport them as
             // `updated`.
             if want_embeddings && force_embed {
-                if let Some(item) = embed_queue_item(&id, title, body) {
-                    embed_queue.push(item);
-                }
+                embed_queue.extend(embed_queue_items(cat, &id, title, body)?);
             }
             seen_ids.push(id);
             report.unchanged += 1;
@@ -282,9 +307,7 @@ pub fn index_repo_sync(
         // project). Re-classification alone, without either signal, does not
         // require recomputing the embedding.
         if want_embeddings && (!content_unchanged || force_embed) {
-            if let Some(item) = embed_queue_item(&id, title, body) {
-                embed_queue.push(item);
-            }
+            embed_queue.extend(embed_queue_items(cat, &id, title, body)?);
         }
 
         seen_ids.push(id.clone());
@@ -1387,9 +1410,152 @@ kind = "memory"
             1,
             "only the file with real body content may reach the embed queue, got: {queue:?}"
         );
+
+        // Element 0 is a CHUNK id now (Task 6), not an artifact id — resolve it
+        // back to `real.md`'s artifact via the artifact_chunk row it names.
+        let real_id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/real.md"));
+        let owner: String = cat
+            .conn
+            .query_row(
+                "SELECT artifact_id FROM artifact_chunk WHERE chunk_id = ?1",
+                [&queue[0].0],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(
-            queue[0].0,
-            crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/real.md"))
+            owner, real_id,
+            "the queued chunk must belong to the only artifact with real content"
+        );
+    }
+
+    #[test]
+    fn embed_queue_items_emits_every_chunk_not_just_the_first() {
+        // The regression test for this whole plan. Mutating the implementation back
+        // to `.next()` must fail HERE.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
+        let items = embed_queue_items(&cat, "a", Some("Log".into()), body).unwrap();
+        assert!(
+            items.len() >= 3,
+            "preamble + two entries, got {}",
+            items.len()
+        );
+        let texts: Vec<&str> = items.iter().map(|(_, _, t)| t.as_str()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("alpha")),
+            "W-1's body must be embedded"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("beta")),
+            "W-2's body must be embedded"
+        );
+    }
+
+    #[test]
+    fn embed_queue_items_keys_on_chunk_ids_that_exist_in_artifact_chunk() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let items = embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nx\n").unwrap();
+        for (chunk_id, _, _) in &items {
+            let n: i64 = cat
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM artifact_chunk WHERE chunk_id = ?1",
+                    [chunk_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "every queued id must be a real chunk row");
+        }
+    }
+
+    #[test]
+    fn a_whitespace_only_section_is_dropped_without_dropping_the_batch() {
+        // The embedder's guard bails the WHOLE batch on one empty input
+        // (archive/2026-05-17-reindex-embedding-dim-mismatch.md). With N chunks the
+        // filter has to be per-chunk, or one blank section aborts a full reindex.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let body = "# T\n\n## W-1 — real\n\ncontent\n\n##    \n\n\n\n## W-2 — also real\n\nmore\n";
+        let items = embed_queue_items(&cat, "a", None, body).unwrap();
+        assert!(!items.is_empty(), "the real chunks survive");
+        assert!(
+            items.iter().all(|(_, _, t)| !t.trim().is_empty()),
+            "no empty text may reach the embedder"
+        );
+    }
+
+    #[test]
+    fn embed_queue_items_on_empty_body_deletes_every_chunk_and_vector_via_the_cascade() {
+        // build_chunks(id, "", _) returns vec![], so replace_chunks deletes every
+        // existing row for the artifact — and, via
+        // `artifact_vec_v2_cascade_delete`, every vector that named one of those
+        // rows. Correct for an emptied artifact, but nothing asserted it before,
+        // and embed_queue_items is the path that reaches it.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+
+        // Seed non-empty chunks first, so there is something for an empty body to delete.
+        let seeded =
+            embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nsome content\n").unwrap();
+        assert!(!seeded.is_empty(), "sanity: the seed body produced chunks");
+        let before: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = 'a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(before > 0);
+
+        // Now reindex with an empty body.
+        let items = embed_queue_items(&cat, "a", None, "").unwrap();
+        assert!(
+            items.is_empty(),
+            "an empty body queues nothing for embedding"
+        );
+
+        let after: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = 'a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after, 0,
+            "every chunk row for the emptied artifact must be gone"
         );
     }
 
