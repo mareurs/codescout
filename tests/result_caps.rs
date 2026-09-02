@@ -507,17 +507,29 @@ struct TruncSite {
 #[test]
 fn truncation_sites_finds_the_operations_instrument_a_cannot_see() {
     let src = "\
-let first = chunk_markdown(body).next();
 let head = items.take(10);
 s.truncate(80);
+let out = truncate_compact(&s, 80);
+let first = chunk_markdown(body).next();
 ";
     let ops: Vec<String> = truncation_sites(src, "src/x.rs")
         .into_iter()
         .map(|s| s.op)
         .collect();
-    assert!(ops.contains(&".next()".to_string()), "got {ops:?}");
-    assert!(ops.contains(&".take(".to_string()), "got {ops:?}");
-    assert!(ops.contains(&".truncate(".to_string()), "got {ops:?}");
+    assert_eq!(
+        ops,
+        vec![
+            ".take(".to_string(),
+            ".truncate(".to_string(),
+            "truncate_compact(".to_string(),
+            ".next()".to_string(),
+        ],
+        "every OPS entry must be reached by this fixture, and the assertion \
+         must be an exact assert_eq! on the whole vector rather than a \
+         per-entry `contains` — `contains` is monotone under widening (an \
+         extra unrelated hit still passes), so deleting any ONE entry from \
+         OPS must red THIS test, not pass silently"
+    );
 }
 
 #[test]
@@ -561,6 +573,62 @@ let head = items.take(n);
         Some("NOT_A_CAP — bounded by the caller's explicit line range"),
         "one annotation grammar for both instruments — a second grammar is \
          a second thing to get wrong"
+    );
+}
+
+#[test]
+fn truncation_sites_does_not_report_a_fully_commented_out_call() {
+    // Guards the `code.starts_with("//")` skip against silent removal: a
+    // fully commented-out call is not code, and this is the only fixture
+    // in the file where the commented line itself holds an OPS substring —
+    // delete the skip and this line starts getting reported.
+    let src = "// let head = items.take(10);\n";
+    assert!(
+        truncation_sites(src, "src/x.rs").is_empty(),
+        "a line-leading `//` comment is not a live call site, commented-out \
+         or not"
+    );
+}
+
+#[test]
+fn truncation_sites_reports_an_op_inside_a_trailing_comment_known_limitation() {
+    // KNOWN LIMITATION, not a decision: the skip only recognizes a comment
+    // that starts the line. A trailing `//` comment on a real code line is
+    // not distinguished from code, so an op token mentioned there is
+    // reported exactly as if it were a live call site. This pins the
+    // CURRENT behavior (over-reporting — the safe direction for a gate
+    // whose failure mode is a caller missing a marker) rather than
+    // silently changing or worsening it; narrowing the skip to handle this
+    // is out of scope for this pass.
+    let src = "let n = x; // .take(5)\n";
+    let ops: Vec<String> = truncation_sites(src, "src/x.rs")
+        .into_iter()
+        .map(|s| s.op)
+        .collect();
+    assert_eq!(
+        ops,
+        vec![".take(".to_string()],
+        "current (unproven-safe) behavior: a trailing comment's op text is \
+         reported because the skip is line-leading only"
+    );
+}
+
+#[test]
+fn truncation_sites_reports_the_correct_file_and_one_indexed_line() {
+    // The op sits on line 3, not line 1 — a fixture with the op on line 1
+    // cannot distinguish a 0-indexed `idx` from the correct 1-indexed
+    // `idx + 1`, since both would read back as 1.
+    let src = "\
+let filler_one = 1;
+let filler_two = 2;
+let head = items.take(10);
+";
+    let sites = truncation_sites(src, "src/y.rs");
+    assert_eq!(sites.len(), 1, "got {sites:?}");
+    assert_eq!(sites[0].file, "src/y.rs");
+    assert_eq!(
+        sites[0].line, 3,
+        "1-indexed line number, not the 0-indexed idx"
     );
 }
 
