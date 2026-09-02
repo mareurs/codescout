@@ -9,7 +9,7 @@ tags:
 - compaction
 topic: prompt-surfaces
 entry_high_water_F: 9
-entry_high_water_W: 14
+entry_high_water_W: 15
 entry_prefix:
 - F
 - W
@@ -100,6 +100,7 @@ entry_prefix:
 | W-13 | 2026-08-19 | med | When one fix carries two separable behaviours, mutate them separately and name which fixture died | M6b passed the fixture written to pin its property — once fences were skipped that fixture's remaining backticks were incidentally even, so per-line pairing had zero discriminating coverage while looking fully covered | validated |
 | W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for 7 of the 9 unanchored records — the hashes are environments and siblings, never the fix — and the `grep -c patch-id` used to measure THIS entry scored two more as anchored on prose mentions | validated |
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
+| W-15 | 2026-09-02 | med | A substring join on `input_json` reads a value as a key — join on the key (`json_extract`) and read the rows before publishing a count | A bug file would have opened with "8 field instances in 30 days" for a defect with 0 real ones; a second join the same hour read 48 for a real count of 1 | open |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -156,6 +157,143 @@ paths, and `librarian` (20.5 KB) fired on the following `append_entry` — 43.8 
 
 ---
 
+## Re-measurement and full-surface review (2026-09-02)
+
+Ground truth from `scripts/probe_tool_surface.py` against `target/debug/codescout` (stdio
+`initialize` + `tools/list`), cross-checked against the per-tool table the probe prints; every
+param description below was read from that dump, and every claim about code was verified at the
+cited line. Raw payload and per-param report kept for the session at
+`/tmp/claude-1000/-home-marius-work-claude-codescout/2cb44cd3-8673-4604-a8ac-5adea75ca54b/scratchpad/`.
+
+| quantity | 2026-08-18 baseline | 2026-09-02 |
+|---|---:|---:|
+| tools advertised (all caps true) | 27 | 26 |
+| description chars | 8,521 | 7,688 |
+| schema chars | 47,745 | 48,830 |
+| **total** | **58,572** | **56,518** |
+| `TOOL_SURFACE_CHAR_BUDGET` | 58,572 | 56,519 — **1 char headroom, flagged DEBT since 2026-08-28** |
+| librarian family (`artifact`, `librarian`, `artifact_augment`, `artifact_event`, `artifact_refresh`) | 28,788 (48.9%) | 28,636 (**50.7%**) |
+| injected `workspace` pin | 24 × 225 | 23 × 166 = 3,818 (6.8%) |
+
+The schema half **grew** by 1,085 while descriptions shrank by 833: growth keeps moving sideways
+into `input_schema()`, as the spec predicted. Six largest params, all prose: `librarian.fix`
+1,133 · `artifact.patch` 1,102 · `edit_markdown.edits` 847 · `edit_markdown.frontmatter` 810 ·
+`edit_markdown.action` 678 · `artifact.augment` 588.
+
+[[W-2]] still governs: the surface is 100% `cache_read`, so none of what follows is a cost case.
+The review is organised by what it found instead — **defects first, legibility second, bytes
+last** — and the byte numbers are given so the next cut can be funded, not so it can be justified.
+
+### 1. Defects — six bug files opened, one one-token fix noted
+
+Each was verified at the wire *and* at the code, and two were reproduced live.
+
+| bug file (`docs/issues/2026-09-02-…`) | class | what the surface says vs what the code does |
+|---|---|---|
+| `read-markdown-silently-ignores-offset-and-limit` | IC-15 | `read_file` normalises native-`Read` `offset`/`limit` (`read_file.rs:466`); `read_markdown` never calls it and returns the heading map. Reproduced live; 2 field instances 2026-08-25, both `success`. |
+| `activation-banner-names-a-project-param-symbols-does-not-have` | IC-15 | `src/prompts/mod.rs:203` says pass `project:` to `symbols`/`semantic_search`/`memory`. `symbols` has no such param and dropped it live; `semantic_search`'s is `project_id`; only `memory` honours `project`, via an alias added for a **2026-06-09 bug filed against this same sentence** (`memory/mod.rs:448`). Fixed once, on one of three. |
+| `workspace-schema-requires-an-action-the-code-does-not` | IC-11 | `required: ["action"]` (`config/mod.rs:46`); code and the companion hook (`session-start.mjs:338`) use `post_compact=true` alone — 31 of 120 such calls in 30 days, all OK. |
+| `artifact-patch-schema-describes-a-failure-that-no-longer-happens` | IC-11 | `patch` opens with 170 chars about `missing field 'patch'`, removed by `60df0d76` (2026-08-27, `#[serde(default)]` at `update.rs:95`). Largest param on the surface, on every request. |
+| `index-description-omits-the-verify-action` | IC-11 | description enumerates 3 actions; enum/dispatch have 4; `verify` called 16× in 30 days. |
+| `artifact-action-labels-omit-delete-move-and-update-entry` | IC-11 | `id` labelled `get/update/graph/append_entry` while `delete.rs:10`, `mv.rs:11`, `update_entry.rs:9` require it; `delete` has **zero** labelled params. |
+
+**One-token stale reference, no file (commit-message class):** `artifact_augment`'s description
+ends *"Replaces artifact_update_params."* — no such tool exists; the only occurrence in `src/` is
+that string (`augment.rs:272`). `prompt_surfaces_reference_only_real_tools` scans the three prompt
+surfaces, not tool descriptions.
+
+### 2. Legibility — what a reader of the schema cannot learn from it
+
+**Twelve params carry no description at all** (type/enum/default only): `symbols.include_body`,
+`call_graph.direction` (also no `type`), `call_graph.detail_level`, `edit_code.path`,
+`edit_code.action`, `memory.action`, `semantic_search.limit`, `artifact.include_archived`,
+`artifact.limit`, `artifact.offset`, `artifact.include_observations`, `librarian.include_archived`.
+`artifact.include_observations` is a `get` param (`get.rs:187`) that nothing on the surface
+attributes to any action. `all_tools_have_valid_schemas` asserts `is_object` and `type=="object"`;
+an empty description passes it.
+
+**The `<action>:` label convention is checked in one direction only.** The two flattened-union
+tools rely on a prose prefix to say which action a param serves.
+`every_action_labelled_schema_key_is_honored_by_that_action` (`artifact.rs:361`) proves every
+labelled key is honoured; `assert_required_are_advertised` (`tools/mod.rs:578`) proves every
+required key is advertised. Nothing proves every honoured key is labelled — the monotone gap
+§ *Testing Discipline* names. Computed from the wire: `artifact.delete` 0 labelled params,
+`artifact.move` 1 (not `id`), `librarian` 6 unlabelled (`include_archived`, `write`, `root`,
+`old_root`, `new_root`, `confirm` — the last four are labelled by *fix mode*, not action, which
+is a second labelling grammar inside one tool). `state_at` alone names its artifact `artifact_id`
+(`artifact.rs:169`, `state_at.rs:149`); ten other actions say `id`, with no alias between them.
+
+**Aliases are represented three different ways.** `file_path` works on *every* path-bearing tool
+by design (`fs/mod.rs:230`, `PATH_PARAM_ALIASES`) but is advertised as a property on 6 of 15
+(`read_file`, `grep`, `create_file`, `edit_file`, `edit_markdown`, `read_markdown`); `edit_code`
+and `memory` mention their aliases in the canonical param's prose; `symbols` advertises both
+spellings as peers and labels one *"alias of"* the other. Usage (30 days) says the labels point
+the wrong way in `symbols`: `name` 2,378 vs `query` 87; `name_path` 1,045 vs `symbol` 561 — the
+"alias" is the majority spelling in both pairs. `read_file`'s four alias params (`file_path`,
+`output_id`, `offset`, `limit` — 464 chars, 29% of its schema) are all earning their place:
+364 / 243 / 125 uses. Unadvertised-but-honoured works fine where it is deliberate: `edit_code`
+took `file_path` 24 times, `symbol_at` twice, all OK.
+
+**Restatement inside one tool — A-27's shape, untested here.** `artifact` states the prose-ledger
+vs `entry_collection` distinction three times (description, `entry_collection`, `anchor_heading`)
+and the RFC 7396 array warning twice (description, `patch`; the second is Rule B and should stay).
+`patch` restates `edit_markdown.edits`' item shape as prose while `edit_markdown` carries it as
+real nested schema. `get_guide`'s description names 7 of the 10 topics its own enum lists.
+`artifact.augment` (create) carries the full 7-field nested schema of `artifact_augment` —
+the augmentation shape is on the wire twice. A-27 found 20/20 with zero statements of a rule
+that had been stated seven times; none of these has been measured, and per [[W-2]] each wants
+an arm, not a cut.
+
+**A friction met live, not filed:** `artifact.rel_path` advertises a `find` shorthand *"lifted to
+filter=… and reported under corrections"*; using it returns a `hint` that says *use the canonical
+form next time*. Advertised and scolded on the same call.
+
+### 3. Tool count — the consolidation question, with numbers
+
+[[F-3]] and A-26 stand: a null does not authorise a deletion, and `call_graph`'s zero was
+substitution, not ignorance. Folding is not deletion — capability survives — but every fold
+renames a tool that guides, hooks, `CLAUDE.md`, `TAXONOMY.md` and tests cite by name, and that
+ripple is the real cost. Counted 2026-09-02 (`grep -rl`, files):
+
+| fold | chars on wire | calls / 30d | docs `.md` | guides | companion | `src/` | verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `artifact_augment` → `artifact(action="augment")` | 2,924 | 59 | 114 | 4 | 1 | 8 | **only fold with a legibility case**: `artifact.augment` already schemas the same 7 fields; `merge` semantics would join them |
+| `artifact_refresh` → `artifact` / `librarian` | 1,151 | 4 | 44 | 2 | 5 | 6 | clean param fit (`scope`, `limit`, `id` already exist); low traffic, mostly explains that `gather` does not write |
+| `artifact_event` → `artifact` | 2,258 | 27 | 59 | 1 | 0 | 8 | **blocked**: `kind` collides (artifact kind vs event kind) — IC-6's disambiguator problem |
+| `approve_write` → `workspace` | 611 | 8 | 21 | 0 | 1 | 5 | bytes only |
+| `onboarding` → `workspace` | 555 | 2 | 249 | 2 | 12 | 10 | bytes only; huge citation ripple |
+| `library` → `index` | 825 | 0 | 216 | 2 | 6 | 13 | bytes only; availability gate just fixed (`095088c4`) |
+| `read_markdown` → `read_file` | 953 | 2,500 | 160 | 4 | 11 | 10 | **doctrine change** (Iron Laws 4/5, hooks, guard) — not a compaction |
+
+Maximum recoverable by every fold that is not blocked or doctrinal: ~5.5K chars, ~10%, worth
+~$0.0004 per request. The structural alternative that *would* change legibility is a per-action
+schema (`oneOf` / `if`–`then` on `action`) for `artifact` and `librarian`: it replaces the prose
+label grammar with one a machine can check (`required` per action becomes structural, and
+§ 2's gap closes by construction). It needs two things before it is a proposal: a probe that
+Claude Code passes a nested `oneOf` through to the model unchanged, and an arm measuring
+parameter selection against the flat form. Bytes would go **up**.
+
+### 4. What to do, in order
+
+1. **Fix the six filed defects.** They are correctness, not compaction. The `patch` trim alone
+   (~−100) funds advertising `offset`/`limit` on `read_markdown` and naming `verify`.
+2. **Describe the 12 undescribed params and complete `artifact`'s labels**, then add the two
+   gates the review found missing: every property has a non-empty description; for tools whose
+   description enumerates actions, every enum value appears in it; and a registry-wide,
+   bidirectional `required` ↔ `call()` probe (today's runs one direction, librarian only).
+3. **Run A-27-style arms** on the restatements in § 2 before cutting any of them — the
+   candidates are named there.
+4. **Consolidate only `artifact_augment` and `artifact_refresh`**, if at all, and only after the
+   `oneOf` probe says which shape the folded tool should take. Leave `read_markdown` alone.
+5. **Ratchet `TOOL_SURFACE_CHAR_BUDGET` down** with every trim; it has been debt for five days.
+
+**Measurement notes for whoever re-runs this.** A `LIKE '%"project"%'` join on `usage.db`
+returned 8 `symbols` calls that looked like the banner defect firing; all 8 were searches *for a
+symbol named* `project_id`. Join on the param key, then read the rows — see [[W-15]]. And
+`LIKE '%state_at%'` over `artifact` calls matched 48 rows of tracker *bodies* mentioning
+`workspace_state_at`; the real count of `state_at` calls was 1.
+
+---
 ## F-1 — `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema
 
 **Observed:** 2026-08-18, prompt-surface audit — reserving R-106 in `docs/trackers/reconnaissance-patterns.md`.
@@ -1639,6 +1777,26 @@ Worth noting as the honest outcome: **re-costing a deferral does not always over
 that test seven weeks later. R-95's other nine rationales were falsified because none of them
 had ever been executed — not because deferrals are generally wrong. The RSS trend (0.9% →
 2.22%, 2.5× in seven weeks) is recorded here since nothing else will notice it.
+
+## W-15 — A substring join on `input_json` reads a value as a key — 8 of 8 "instances" were searches for a symbol named `project_id`
+
+**Valid:** dated 2026-09-02
+
+**Observed:** 2026-09-02, full-surface review, joining the live `tools/list` dump against `usage.db` to check whether the activation banner's `project:` instruction had misdirected any `symbols` call.
+
+**Pattern.** A `LIKE '%"project"%'` on `input_json` returned **8** `symbols` calls and read, for about a minute, as eight field instances of a silent-drop defect — a number that would have gone straight into a bug file's Symptom section with a query beside it to make it look derived. Reading the eight rows: every one was `{"name":"project_id",…}` or `{"query":"project_id"}` — searches *for a symbol called* `project_id`, not a `project` param. Real count: **0**. A second join the same hour did the same thing in the other direction: `LIKE '%state_at%'` over `artifact` calls matched **48** rows, 47 of them tracker *bodies* mentioning `workspace_state_at`; the real `state_at` call count was **1**.
+
+Both are the shape `scripts/probe_tool_surface.py`'s docstring already warns about — a query that returns a plausible number rather than an error — but at a level the probe's traps do not name: **a substring match on serialised JSON cannot tell a key from a value.** The remedy that worked was not a cleverer pattern (`'%"project":%'` still matches a *value* of `"project":` inside a body string); it was reading the rows before publishing the count, which cost one `SELECT … LIMIT 10`. Where the join is load-bearing, `json_extract(input_json, '$.project')` is the key-level form and is what the next such query should use.
+
+**Counterfactual.** Without the row read, the `activation-banner` bug file would have opened with *"8 field instances in 30 days"* — a false severity, in a file whose whole point is that a surface says one thing and the tool does another.
+
+**Confirming data points:** the two joins above, same session, opposite directions (false positives on a param key; false positives on an action value).
+
+**Impact:** medium — no wrong number shipped, but it was one paste away, and the query looked like evidence.
+
+**Promote-when:** a third usage.db join is caught reading a value as a key. Then add `json_extract` as the prescribed form to `scripts/probe_tool_surface.py`'s docstring traps and to `docs/PROBES.md`'s usage.db row.
+
+**Status:** open — two datapoints, awaiting the third.
 
 ## Template for new entries
 
