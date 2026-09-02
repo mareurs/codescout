@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 46
+entry_high_water_F: 47
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -73,6 +73,8 @@ surfaces, not the definition.
 | F-43 | My promotion plan skipped two gates the skill documents — and named the weaker of two destinations for this rule's failure class | open |
 | F-44 | Half the tasks carried a defect inherited from the plan's own reference code | open |
 | F-45 | The documented pre-commit gate cannot see test code; CI's second clippy job can | fixed |
+| F-46 | I described a budget from its module name — `SIZE_CEILING` counts rules, at compile time, on the set that is never delivered | fixed-verified |
+| F-47 | A review base recorded before dispatch silently widened to three peers' commits — one git identity means `%an` cannot separate them | open |
 
 ## Wins Index
 
@@ -4180,6 +4182,28 @@ passes, and is cited later as proof the budgets are unified.
 
 **Rests on:** `src/operator_rules/budget.rs`, `src/operator_rules/route.rs`,
 `a_p50_session_stays_under_the_committed_guide_byte_ceiling`'s `shape_total`.
+
+## F-47 — A review base recorded before dispatch silently widened to three peers' commits — and one git identity means `%an` cannot separate them
+
+**Valid:** conditional — `superpowers:subagent-driven-development` derives a task's review base from the task's own commits rather than from a HEAD recorded before dispatch
+
+**Severity:** high — would have spent an Opus review seat on three other sessions' diffs and returned Important findings against work the task never touched, which I would then have routed into a fix loop aimed at the wrong implementer.
+
+**Status:** open
+
+**Observed:** The SDD skill prescribes recording `BASE = git rev-parse HEAD` *before* dispatching an implementer, and warns explicitly against `HEAD~1` because it "silently drops all but the last commit of a multi-commit task". Both halves are correct — and on a shared checkout the guard **inverts**.
+
+Three peer sessions committed into `experiments` while my Task 1 ran. `review-package … e20b794f e701ec59` therefore produced **4 commits, 119,298 bytes** — `a24c93a7`, `781633e4` and `655c0b6f` are other sessions' work. Re-scoped to the commit's true parent, `781633e4..e701ec59`: **1 commit, 15,523 bytes.**
+
+**Why the usual disambiguator is dead here.** Every commit in this repo is authored `Marius Ailinca` — one git identity across every concurrent session — so `%an` separates nothing inside a range. The `Session-Id:` trailer is the only positive discriminator, and it is per-commit rather than per-range, so it cannot be used to *scope* a range, only to audit one afterwards.
+
+**Why it is silent.** The widened range is a valid range; the diff is well-formed; the reviewer reads it and produces findings. Nothing errors. The only tell was the script's own `4 commit(s)` line in its success message — a number printed beside a path, in a step whose purpose is generating a file. Had the task been multi-commit I would have had no cheap tell at all, because "more than one commit" is then the expected state.
+
+**The class.** *A correct method whose precondition the environment withdraws.* "Record BASE before dispatch" is correct exactly when the branch advances only through the controller — which the method never states, because on a single-session checkout it cannot be false. `codescout-ca` observed the same shape in a different subsystem the same night (a prescribed ledger remedy whose second half lived in a file frozen by another session's uncommitted work), which is what suggests it is a class rather than a one-off.
+
+**Remedy, and why it is strictly better rather than a trade.** Derive the base from the task's own first commit after the fact — `<first-task-sha>^` — never from HEAD before dispatch. It is correct on a single-session checkout too, where it is identical to the recorded BASE, so there is no world in which the pre-recorded value is the better input. The skill's warning against `HEAD~1` still stands and is unaffected: `HEAD~1` is wrong because it is anchored to the range's *end*; this is anchored to its *start*.
+
+**What this does not claim.** I have not checked whether the other `scripts/` in that skill share the assumption, and I have not re-derived the peer's cross-subsystem instance myself — it is reported here as their observation, not my measurement.
 
 ## Template for new entries
 
