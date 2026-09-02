@@ -63,6 +63,42 @@ surface. It is the sixth surface of one policy change: three updated by the orig
 inversion, a fourth by `4647762b` (a peer), a fifth by `707bff08`, and this one. Each repair
 was made by an author reading one section and discharged there.
 
+## The surface count, with its unit — because it has two defensible values
+
+This file calls itself "a sixth surface". That number is only meaningful with the unit
+attached, and a peer session derived the alternative rather than accepting mine:
+
+| unit | count | members |
+|---|---|---|
+| surfaces that **instruct an author** | **6** | 3 from the original inversion, `4647762b`, `707bff08`, this one |
+| surfaces that **state what the field carries** | **8** | the six, plus two internal doc comments |
+
+The two extra are present-tense rationale inside the enforcement layer itself, both verified
+verbatim:
+
+- `scripts/pre-commit-ledger-counts.py:272` — *"Both fields are read: `**Members:**` states the
+  count, `**Promotes to:**` reasons from it…"*
+- `tests/issue_clusters.rs:551` — *"Both fields are read. `**Members:**` states the count;
+  `**Promotes to:**` *reasons* from it…"*
+
+Under current policy a `**Members:**` field must **not** state a count — which is what the
+function each sentence documents exists to refuse. So each is a sentence describing the retired
+policy, sitting in the code that enforces its replacement.
+
+**Deliberately not filed and not fixed.** The operative half of both — *both fields are scanned,
+and `**Promotes to:**` is where the 2026-09-01 drifts did their damage* — is still true, the
+audience is whoever maintains the gate rather than an author writing a field, and a tense repair
+in two internal rationales is not worth a gate run on a nine-session tree. Filing them would be
+padding a defect population inside a record about how populations get padded.
+
+**Why this section exists at all.** "Seven surfaces" was published in a peer message and was
+wrong twice over: the enumeration behind it listed six, and the unit was never stated, so even
+the corrected 6 is the right answer to only one of two reasonable questions. CLAUDE.md:
+*"A count of a defect population must arrive with its unit or not at all — one population
+yielded four defensible numbers inside an hour, each the right answer to a different
+question."* That law, breaking inside the ledger whose Index blockquote retired a stored count
+for the same reason, is worth more on the record than a tidy figure would have been.
+
 ## Fix
 
 `docs/trackers/issue-clusters.md` § *Template for new entries* — the `**Members:**` line now
