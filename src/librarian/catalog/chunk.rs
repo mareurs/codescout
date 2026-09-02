@@ -46,47 +46,97 @@ pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<Chu
         .collect()
 }
 
-/// Replace an artifact's chunk rows, preserving `chunk_id` wherever
-/// `(chunk_ix, content_hash)` is unchanged so untouched chunks keep their
-/// vectors. Returns the rows as stored.
+/// Replace an artifact's chunk rows with a targeted diff, preserving `chunk_id`
+/// wherever `(chunk_ix, content_hash)` is unchanged so untouched chunks keep
+/// their vectors. Returns the rows as stored.
+///
+/// This must NOT be a blanket delete-then-insert: `artifact_vec_v2_cascade_delete`
+/// (`AFTER DELETE ON artifact_chunk`) fires on every deleted row, including ones
+/// whose `chunk_id` a blanket delete-then-insert would otherwise "preserve" —
+/// the id survives but the embedding it was preserving the id for does not.
+/// Four branches, keyed on `chunk_ix`:
+///   - same `chunk_ix`, same `content_hash` → touch nothing (no DELETE, no
+///     INSERT, no UPDATE) — this is the branch that keeps the vector alive.
+///   - same `chunk_ix`, different `content_hash` → DELETE + INSERT (a new
+///     `chunk_id`); the vector is correctly destroyed, content changed.
+///   - old `chunk_ix` absent from the new rows (body shrank) → DELETE.
+///   - new `chunk_ix` absent from the old rows → INSERT.
+///
+/// Deletes run before inserts so a body that shrinks AND changes in the same
+/// edit never collides with a stale row still holding the freed `chunk_ix`
+/// under `UNIQUE (artifact_id, chunk_ix)`.
 pub fn replace_chunks(
     cat: &Catalog,
     artifact_id: &str,
     rows: &[ChunkRow],
 ) -> Result<Vec<ChunkRow>> {
     let existing = chunks_for(cat, artifact_id)?;
+    let existing_by_ix: std::collections::HashMap<usize, &ChunkRow> =
+        existing.iter().map(|e| (e.chunk_ix, e)).collect();
+    let new_ixs: std::collections::HashSet<usize> = rows.iter().map(|r| r.chunk_ix).collect();
+
+    // Old chunk_ix values with no surviving row at all — the shrunk tail.
+    let mut delete_ixs: Vec<usize> = existing
+        .iter()
+        .filter(|e| !new_ixs.contains(&e.chunk_ix))
+        .map(|e| e.chunk_ix)
+        .collect();
+
     let mut out = Vec::with_capacity(rows.len());
+    let mut to_insert: Vec<ChunkRow> = Vec::new();
     for row in rows {
-        let reuse = existing
-            .iter()
-            .find(|e| e.chunk_ix == row.chunk_ix && e.content_hash == row.content_hash)
-            .map(|e| e.chunk_id.clone());
         let mut stored = row.clone();
-        stored.chunk_id = reuse.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        match existing_by_ix.get(&row.chunk_ix) {
+            Some(e) if e.content_hash == row.content_hash => {
+                // Unchanged: preserve the id, touch nothing in the DB — this is
+                // the branch the whole function exists for.
+                stored.chunk_id = e.chunk_id.clone();
+            }
+            Some(e) => {
+                // Same ordinal, different content: the old row must go so the
+                // vector cascade fires, and a fresh row (fresh id) replaces it.
+                delete_ixs.push(e.chunk_ix);
+                stored.chunk_id = uuid::Uuid::new_v4().to_string();
+                to_insert.push(stored.clone());
+            }
+            None => {
+                // A genuinely new ordinal.
+                stored.chunk_id = uuid::Uuid::new_v4().to_string();
+                to_insert.push(stored.clone());
+            }
+        }
         out.push(stored);
     }
 
-    cat.conn.execute(
-        "DELETE FROM artifact_chunk WHERE artifact_id = ?1",
-        [artifact_id],
-    )?;
-    let mut stmt = cat.conn.prepare(
-        "INSERT INTO artifact_chunk
-           (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-    )?;
-    for r in &out {
-        stmt.execute(rusqlite::params![
-            r.chunk_id,
-            r.artifact_id,
-            r.chunk_ix as i64,
-            r.start_line as i64,
-            r.end_line as i64,
-            r.entry_token,
-            r.content,
-            r.content_hash
-        ])?;
+    if !delete_ixs.is_empty() {
+        let mut del_stmt = cat
+            .conn
+            .prepare("DELETE FROM artifact_chunk WHERE artifact_id = ?1 AND chunk_ix = ?2")?;
+        for ix in &delete_ixs {
+            del_stmt.execute(rusqlite::params![artifact_id, *ix as i64])?;
+        }
     }
+
+    if !to_insert.is_empty() {
+        let mut ins_stmt = cat.conn.prepare(
+            "INSERT INTO artifact_chunk
+               (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for r in &to_insert {
+            ins_stmt.execute(rusqlite::params![
+                r.chunk_id,
+                r.artifact_id,
+                r.chunk_ix as i64,
+                r.start_line as i64,
+                r.end_line as i64,
+                r.entry_token,
+                r.content,
+                r.content_hash
+            ])?;
+        }
+    }
+
     Ok(out)
 }
 
@@ -181,6 +231,72 @@ mod tests {
                 .iter()
                 .any(|r| r.entry_token.as_deref() == Some("A-1")),
             "and KEEPS the surviving one — without this the test passes on total deletion"
+        );
+    }
+
+    fn vec_row_count(cat: &Catalog, chunk_id: &str) -> i64 {
+        cat.conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id = ?1",
+                [chunk_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn seed_vec_row(cat: &Catalog, chunk_id: &str) {
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![chunk_id, vec![0u8; 768 * 4]],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn an_unchanged_chunk_keeps_its_vector_across_a_reindex() {
+        // LOAD-BEARING: the id-preservation test alone cannot see this — vectors live
+        // in artifact_vec_v2, which Task 5 never writes. A blanket DELETE fires
+        // artifact_vec_v2_cascade_delete and destroys the embedding whose id was just
+        // preserved, making preservation pointless while every other test stays green.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let body = "# T\n\nx\n\n## W-1 — t\n\ny\n";
+        let first = build_chunks("a", body, 2048);
+        let stored1 = replace_chunks(&cat, "a", &first).unwrap();
+        let chunk_id = stored1[0].chunk_id.clone();
+        seed_vec_row(&cat, &chunk_id);
+
+        // Re-index with IDENTICAL content — the case replace_chunks exists for.
+        let second = build_chunks("a", body, 2048);
+        let stored2 = replace_chunks(&cat, "a", &second).unwrap();
+        assert_eq!(stored2[0].chunk_id, chunk_id, "id preservation still holds");
+        assert_eq!(
+            vec_row_count(&cat, &chunk_id),
+            1,
+            "unchanged content must keep its vector across a re-index"
+        );
+    }
+
+    #[test]
+    fn a_changed_chunk_loses_its_vector_across_a_reindex() {
+        // Negative leg — without it, "the vector survived" above would also be
+        // satisfied by a replace_chunks that never deletes anything at all.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048);
+        let stored1 = replace_chunks(&cat, "a", &first).unwrap();
+        let chunk_id = stored1[0].chunk_id.clone();
+        seed_vec_row(&cat, &chunk_id);
+
+        // Re-index with DIFFERENT content at the same chunk_ix (the preamble).
+        let second = build_chunks("a", "# T\n\nCHANGED\n\n## W-1 — t\n\ny\n", 2048);
+        replace_chunks(&cat, "a", &second).unwrap();
+
+        assert_eq!(
+            vec_row_count(&cat, &chunk_id),
+            0,
+            "changed content must lose its now-stale vector"
         );
     }
 }
