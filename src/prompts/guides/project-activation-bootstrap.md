@@ -8,7 +8,7 @@ bug is the one you never re-investigate because the project already documented i
 - `memory(action="list")`, then read the topics matching your task.
   `architecture`, `gotchas`, and `conventions` usually pay off.
 - Bug or regression work:
-  `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` —
+  `doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` —
   `status="open"` alone hides `investigating` (actively being worked) and
   `zombie` (recurring-but-unconfirmed — a "has this come back?" check, not a
   task to pick up) —

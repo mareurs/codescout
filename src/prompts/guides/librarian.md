@@ -31,7 +31,7 @@ Use `id` for stable references (links, events); use `rel_path` for filesystem-or
 
 **Required fields for `action="create"`:**
 ```
-artifact(
+doc(
   action="create",
   kind="...",          ← required
   title="...",         ← required
@@ -43,7 +43,7 @@ artifact(
   topic="...",         ← optional — used by librarian(action="context") grouping
 )
 ```
-The file at `rel_path` must not exist — `artifact(action="find")` first to avoid collisions.
+The file at `rel_path` must not exist — `doc(action="find")` first to avoid collisions.
 
 ---
 
@@ -56,9 +56,9 @@ event history, cross-project relationships.
 
 Always enter via the catalog:
 ```
-artifact(action="find", semantic="my topic")         ← search
-artifact(action="get", id="<id>")                   ← read full content
-artifact(action="get", id="<id>", heading="## Foo") ← read one section
+doc(action="find", semantic="my topic")         ← search
+doc(action="get", id="<id>")                   ← read full content
+doc(action="get", id="<id>", heading="## Foo") ← read one section
 ```
 
 ---
@@ -86,7 +86,7 @@ Filters are AST nodes. Two shapes:
 **Shortcut params** — `kind` and `status` as top-level params expand to `eq` filters
 and combine with `filter` via AND:
 ```
-artifact(action="find", kind="tracker", status="active")
+doc(action="find", kind="tracker", status="active")
 ```
 Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"}}]}`.
 
@@ -99,7 +99,7 @@ Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"
 - `scope="repo"` — widen to the active project's enclosing git repo
 - `scope="umbrella"` — all projects in the umbrella the active project belongs to (requires `[[umbrella]]` in workspace.toml)
 
-**Entry-grain filtering** — `artifact(action="get", entry_filter=…)` is the per-row twin of
+**Entry-grain filtering** — `doc(action="get", entry_filter=…)` is the per-row twin of
 artifact-grain `filter`. It uses the same AST and ops, but runs in-memory over the array
 named by the augmentation's `entry_collection` field instead of querying the SQL catalog.
 `contains` is case-insensitive (matches SQL LIKE behaviour). A filter field absent from
@@ -123,9 +123,9 @@ mechanics that apply to all kinds.
 A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 **augmented artifact**: attach a `params` array + `render_template` (+ optional
 `entry_collection`) once via `doc(action="augment")`, then add rows with
-`artifact(action="append_entry")`, change one with
-`artifact(action="update_entry")`, and filter them with
-`artifact(action="get", entry_filter={…})`. Reach for a raw
+`doc(action="append_entry")`, change one with
+`doc(action="update_entry")`, and filter them with
+`doc(action="get", entry_filter={…})`. Reach for a raw
 `doc(action="augment", merge=true)` params patch only for a deliberate bulk rewrite —
 it replaces the collection rather than merging into it. Merge semantics + the full-array rule
 are in *Augmentation Lifecycle* below.
@@ -175,9 +175,9 @@ its key — a bare-array patch under `merge` is a silent no-op.
 not in git, so nothing recovers it. Two purpose-built paths exist so you never have to:
 
 ```
-artifact(action="append_entry", id=…, entry_collection="tasks",
+doc(action="append_entry", id=…, entry_collection="tasks",
          id_prefix="T", entry={...})                        # add a row
-artifact(action="update_entry", id=…, entry_collection="tasks",
+doc(action="update_entry", id=…, entry_collection="tasks",
          entry_id="T-7", fields={"status": "done"})         # change a row
 ```
 
@@ -195,7 +195,7 @@ that performed it.
 **Refresh cycle** (run by the agent, not automatic):
 1. `doc(action="gather", id="...")` — collects context; does NOT write
 2. Synthesize the new body from the gathered context
-3. `artifact(action="update", id="...", patch={body: "..."}, commit_refresh=true)` — write + record timestamp
+3. `doc(action="update", id="...", patch={body: "..."}, commit_refresh=true)` — write + record timestamp
 
 **Stale check:**
 ```
@@ -214,9 +214,9 @@ index. **Editing the body has three surfaces, with different blast radius:**
 
 | Surface | Shape | Effect | When to use |
 |---|---|---|---|
-| `artifact(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_markdown`'s batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. action is one of replace, insert_before, insert_after, remove, edit - `edit` = scoped text swap (old_string/new_string), `replace` = whole-section overwrite (content). Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
-| `artifact(update, patch={body: "..."})` | Total overwrite | The new string replaces the entire body. **Gated by the 50% shrink guard** unless `force=true` is passed. | Initial body authoring, intentional full rewrite. |
-| `edit_markdown` | Refused on managed files | Returns a `librarian_guard` error pointing back at `artifact(update)`. | Never on augmented artifacts. |
+| `doc(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_file`'s heading-grammar batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. action is one of replace, insert_before, insert_after, remove, edit - `edit` = scoped text swap (old_string/new_string), `replace` = whole-section overwrite (content). Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
+| `doc(update, patch={body: "..."})` | Total overwrite | The new string replaces the entire body. **Gated by the 50% shrink guard** unless `force=true` is passed. | Initial body authoring, intentional full rewrite. |
+| `edit_file` (any grammar) | Refused on managed files | Returns a `librarian_guard` error pointing back at `doc(update)`. Refused on **every** branch — heading grammar, `old_string`/`new_string`, `insert`, `replace_all`. | Never on augmented artifacts. |
 | `edit_file` | Refused on managed files, **on every write path** | Batch `edits[]`, `insert` prepend/append, and single `old_string`/`new_string` all guard. The `.md` gate's `replace_all=true` escape is not a way around it. | Never on augmented artifacts. |
 
 ### Choosing a mode — anti-patterns
@@ -225,14 +225,14 @@ index. **Editing the body has three surfaces, with different blast radius:**
 **Avoid this anti-pattern** (caused a real ~600-line tracker body loss):
 
 ```text
-1. artifact(get, id=X, heading="Currently Shipped")  → returns one section
-2. artifact(update, id=X, patch={body: <just that section>})  → WIPES rest of body
+1. doc(get, id=X, heading="Currently Shipped")  → returns one section
+2. doc(update, id=X, patch={body: <just that section>})  → WIPES rest of body
 ```
 
 The fix:
 
 ```text
-artifact(update, id=X, patch={body_edits: [{
+doc(update, id=X, patch={body_edits: [{
     heading: "Currently Shipped",
     action: "insert_after",
     at: "after-heading-line",
@@ -246,7 +246,7 @@ only decides whether that's refused or permitted — reconstructing a section
 from memory to append one entry silently drops any child you forgot:
 
 ```text
-artifact(update, id=X, patch={body_edits: [{
+doc(update, id=X, patch={body_edits: [{
     heading: "## Wins", action: "replace", include_subsections: true,
     content: "## Wins\n\n### W-3 — new\n..."     # W-1, W-2 are GONE
 }]})
@@ -305,7 +305,7 @@ nothing, which is why it lives here rather than in the tool schema.
 | `fix=` | what it does |
 |---|---|
 | `prune_missing` | Drops `artifact` + `commits` rows under a dead/renamed root. |
-| `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Collisions are **reported, not reseated** — resolve those with `artifact(action="graft")`. |
+| `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Collisions are **reported, not reseated** — resolve those with `doc(action="graft")`. |
 | `rehome` | Migrates a moved repo's rows from `old_root` to `new_root`, preserving ids and history. |
 | `repair_frontmatter_id` | Rewrites every `frontmatter_id_mismatch` file's `id:` to its catalog row's id, for every artifact under one root. A file with **no** frontmatter id is left alone rather than stamped — stamping one would newly subject it to the librarian guard. |
 | `mint_slugs` | Backfills `artifact.slug` where NULL. |
@@ -336,11 +336,11 @@ replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates, so a
 
 ---
 
-## artifact(action="graph") — Relationship Map
+## doc(action="graph") — Relationship Map
 <!-- serves: doc.graph, doc.link -->
 
 ```
-artifact(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
+doc(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
 ```
 
 Returns BFS traversal of linked artifacts up to `depth` (1–3).
@@ -382,7 +382,7 @@ main checkout's catalog instead of a wholesale fork:
 <!-- serves: doc.move, doc.delete -->
 
 Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
-get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",
+get_guide("tracker-conventions"). At the artifact layer, `doc(action="move",
 new_rel_path=...)` is the safe path — it updates the catalog atomically.
 
 **A move mints a new id.** Catalog identity is `id = sha256(abs_path)`, so moving a
@@ -411,7 +411,7 @@ A bare `git mv` skips all of this: the row keeps pointing at the vanished path, 
 the next `reindex` mints a fresh id for the new one — with no graft, so the events go
 with the old row.
 
-To remove an artifact entirely, `artifact(action="delete", id=...)` deletes the file **and**
+To remove an artifact entirely, `doc(action="delete", id=...)` deletes the file **and**
 the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to the artifact's augmentation,
 links, observations, and events — no orphaned rows. The artifact must live under a managed
 workspace root; a missing file is tolerated (the catalog row is still dropped, so `delete` also
@@ -420,15 +420,15 @@ repairs a stale entry). Prefer `move` for relocation — `delete` is irreversibl
 
 | Mistake | Fix |
 |---------|-----|
-| `read_file("docs/trackers/foo.md")` | `artifact(action="find", semantic="foo")` then `artifact(action="get", id=...)` |
-| `git mv docs/trackers/foo.md docs/archive/foo.md` | `artifact(action="move", id="<id>", new_rel_path="docs/archive/foo.md")` — bare git mv orphans the catalog record |
-| `artifact(action="update", patch={"rel_path":"..."})` | `artifact(action="move", id="<id>", new_rel_path="...")` — `rel_path` is not patchable via `update` |
+| `read_file("docs/trackers/foo.md")` | `doc(action="find", semantic="foo")` then `doc(action="get", id=...)` |
+| `git mv docs/trackers/foo.md docs/archive/foo.md` | `doc(action="move", id="<id>", new_rel_path="docs/archive/foo.md")` — bare git mv orphans the catalog record |
+| `doc(action="update", patch={"rel_path":"..."})` | `doc(action="move", id="<id>", new_rel_path="...")` — `rel_path` is not patchable via `update` |
 | `filter={"eq":{"field":"kind","value":"tracker"}}` | `filter={"kind":{"eq":"tracker"}}` — leaf is `{field:{op:value}}` not `{op:{field,value}}` |
 | `filter={"in":{"field":"title","value":[...]}}` | `filter={"title":{"in":[...]}}` — same inverted-format mistake |
-| `artifact(action="create")` without active project AND without `repo` | Either activate a project via `workspace(action="activate", path=...)` OR pass `repo="<workspace-root-name>"` |
+| `doc(action="create")` without active project AND without `repo` | Either activate a project via `workspace(action="activate", path=...)` OR pass `repo="<workspace-root-name>"` |
 | `scope="all"` without umbrella | Use `scope="repo"` to widen beyond current project |
-| Creating without searching first | `artifact(action="find", semantic="...")` — prevent duplicates |
-| Forgetting `commit_refresh=true` after writing a refreshed body | Pass it in the same `artifact(action="update")` call |
+| Creating without searching first | `doc(action="find", semantic="...")` — prevent duplicates |
+| Forgetting `commit_refresh=true` after writing a refreshed body | Pass it in the same `doc(action="update")` call |
 
 ---
 

@@ -341,7 +341,7 @@ Proposed CLAUDE.md memory-table update:
 Apply? [y/N]
 ```
 
-On `y`: `edit_markdown(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
+On `y`: `edit_file(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
 ## Gathered Project Data
 
 The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.

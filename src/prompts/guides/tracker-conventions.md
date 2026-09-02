@@ -6,8 +6,8 @@ fix. **Trackers** live in `docs/trackers/` — multi-entry living state
 (session logs, observation tables, ADR indexes) maintained across many
 sessions. **Specs / plans / ADRs** live in `docs/specs/`, `docs/plans/`,
 `docs/adrs/` — design artifacts. All three are indexed by the librarian:
-discover them with `artifact(action="find", kind="bug" | "tracker" | …)`
-and read them with `artifact(action="get", id=...)`. Never edit a
+discover them with `doc(action="find", kind="bug" | "tracker" | …)`
+and read them with `doc(action="get", id=...)`. Never edit a
 tracker file by raw path lookup — go through the catalog.
 
 ## Bug files (docs/issues/)
@@ -74,7 +74,7 @@ Commands*, whose `cargo test --workspace` and long clippy form are each there be
 narrower one shipped a defect) and a regression test in place. Reaching `master` is **not** required:
 `experiments` is never deleted, so an unmerged fix is not at risk of being lost, and
 holding the file back only grows a pile of `fixed`-but-unarchived bugs that no query
-ever surfaces (`artifact(action="find", kind="bug", status="open")` filters on
+ever surfaces (`doc(action="find", kind="bug", status="open")` filters on
 `status`, not on path).
 
 The file MUST carry the fix SHA when archived experiments-only, because nothing
@@ -127,7 +127,7 @@ instructions, not open debt** — the SHA in each was correct when written. Do n
 them. Measured 2026-08-19: 10 of 63 had nonetheless lost their SHA to a rebase, which is
 why the patch-id now rides alongside.)
 
-Archive through the catalog — `artifact(action="move", id=…,
+Archive through the catalog — `doc(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
 sha256(abs_path)`, so a hand-move orphans the catalog row.
 
@@ -189,7 +189,7 @@ is the check — not a green CI run.
 repairs citations that *were* correct when written; it can never reach one that was wrong
 on the day it was written. A citation is authored at **fix** time; the archive move is a
 separate, **later** event — `fixed` is terminal, archiving is a manual
-`artifact(action="move")`, and a *partial* fix cancels it outright. So writing
+`doc(action="move")`, and a *partial* fix cancels it outright. So writing
 `docs/issues/archive/<slug>.md` for a bug still sitting in `docs/issues/` schedules no
 repair at all: no archive event ever fires, therefore no sweep is ever triggered and no
 procedure owns the fix — it survives until a reader follows the link. Measured 2026-08-26:
@@ -255,7 +255,7 @@ row above defines it for **trackers**: *scoped / watching, not yet active*. In
 `docs/plans/` this repo uses it to mean *shipped, deliberately unarchived because a named
 residual is still open* — a plan says so in its own text (*"this plan stays active (do NOT
 ARCHIVE) while 4b is open"*) and the residual lives in a companion `resume-*` tracker.
-Both surfaces are catalogued with the same `status` column, so `artifact(action="find")`
+Both surfaces are catalogued with the same `status` column, so `doc(action="find")`
 returns them side by side with nothing marking which vocabulary a row speaks.
 
 Measured 2026-09-01: a triage pass sorting on `status` reported
@@ -270,10 +270,10 @@ that would have corrected it. **Before reading a `draft` as "not started", check
 catalog:
 
 ```
-artifact(action="update", id="<id>", patch={"status": "archived"})
+doc(action="update", id="<id>", patch={"status": "archived"})
 ```
 
-If you must also move the file on disk, use `artifact(action="move",
+If you must also move the file on disk, use `doc(action="move",
 id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 `git mv`, which orphans the catalog record.
 
@@ -366,7 +366,7 @@ form: rows, frontmatter and body all rebuild from disk on `reindex`, but the
 augmentation lived only in the catalog, which is machine-local and git-ignored. Its
 absence is silent in every direction — `reindex` preserves augmentation keyed by id
 rather than regenerating it, so it reports healthy after a loss and repairs nothing;
-`artifact(get)` returns `augmentation: null` without comment; the documented
+`doc(get)` returns `augmentation: null` without comment; the documented
 `append_entry` / `update_entry` / `entry_filter` calls fail only at use, one caller at
 a time.
 
@@ -408,7 +408,7 @@ entry_prefix:            #   a session log carries both F-N frictions and W-N wi
   - W
 ```
 
-Set it with `artifact(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`.
+Set it with `doc(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`.
 
 **Frontmatter, because the catalog is machine-local and git-ignored.** A
 declaration stored in the augmentation is absent in a fresh clone, so every
@@ -435,7 +435,7 @@ letters, a hyphen, digits, and **nothing else**.
   cannot represent. If two entries share a number, give the later one a **fresh**
   id.
 - **Let the server allocate, and let it write the section too.**
-  `artifact(action="append_entry", id_prefix="R", anchor_heading="## Template for
+  `doc(action="append_entry", id_prefix="R", anchor_heading="## Template for
   new entries", title=…, body=…)` assigns the next id atomically **and** writes
   `## R-N — <title>` — the only shape that defines a citable token — in the same
   file write. Passing `anchor_heading` + `title` + `body` together is what selects
@@ -492,7 +492,7 @@ entry_high_water_HY: 11
 
 Do not hand-edit it downward, and do not delete it when compacting. It is the only
 one of the allocator's three inputs that survives a fresh clone, an
-`artifact(action="move")`, and compaction — the live body's maximum *drops* when
+`doc(action="move")`, and compaction — the live body's maximum *drops* when
 entries move to an archive companion, and the machine-local reservation does not
 travel. Without the committed mark, a compacted-and-archived ledger reissues `HY-1`,
 and because the resolver binds a token to its sole **active** definer, every
@@ -698,7 +698,7 @@ The ladder is **live body → archived section (heading kept) → nothing furthe
   artifact is `archived` — archived is not nonexistent. Where two artifacts define
   one token, the sole *active* one wins.
 - **Archive into the ledger's existing archive artifact.** Check first —
-  `artifact(action="find", filter={"rel_path": {"contains": "archive/<ledger>"}},
+  `doc(action="find", filter={"rel_path": {"contains": "archive/<ledger>"}},
   include_archived=true)`. Forking a second archive for one ledger splits the
   definitions and creates ambiguous tokens.
 
@@ -717,10 +717,11 @@ knowing rather than just deleting:
 - It guards on **catalog membership**, the axis the guard's own pinned test rejects.
   `a_catalogued_but_unaugmented_file_stays_directly_editable` argues that membership-
   guarding would refuse `docs/RELEASE.md`, `CONTRIBUTING.md` and every ADR — all catalog
-  rows — and it names a prose tracker that `CLAUDE.md` documents `edit_markdown` for.
+  rows — and it names a prose tracker that `CLAUDE.md` documents direct heading-addressed
+  editing for.
   Stamping an id converts a file by hand into the case that test exists to forbid.
 - It was tried, and it broke a documented workflow. Stamping `id:` into
-  `reconnaissance-patterns.md` silently disabled `docs/TAXONOMY.md`'s `edit_markdown`
+  `reconnaissance-patterns.md` silently disabled `docs/TAXONOMY.md`'s heading-addressed
   append path for R-N; confirmed by probe, reverted in `bb9a94d7`.
 
 The diagnosis the old advice rested on is still true — the guard reads the file's **own
@@ -735,7 +736,7 @@ The canonical "what's live right now" query — archived rows are hidden
 by the default scope:
 
 ```
-artifact(action="find", kind="tracker")
+doc(action="find", kind="tracker")
 ```
 
 For bugs, swap the kind. **Constrain on all three non-terminal states, not just `open`**
@@ -746,7 +747,7 @@ no other status fits — which is what makes it unreachable if the canonical tri
 omits it too:
 
 ```
-artifact(action="find", kind="bug",
+doc(action="find", kind="bug",
          filter={"status": {"in": ["open", "investigating", "zombie"]}})
 ```
 
@@ -760,20 +761,20 @@ specifically want only the actionable two.
 Surface archived rows when needed:
 
 ```
-artifact(action="find", kind="tracker", include_archived=true)
+doc(action="find", kind="tracker", include_archived=true)
 ```
 
 Read a tracker's full body or one section:
 
 ```
-artifact(action="get", id="<id>", full=true)
-artifact(action="get", id="<id>", heading="## Foo")
+doc(action="get", id="<id>", full=true)
+doc(action="get", id="<id>", heading="## Foo")
 ```
 
 **Filterable trackers** — augmented trackers that store structured rows in a params array
 can be queried at entry grain via `entry_filter`. Call `doc(action="augment")` with
 `augment={entry_collection: "<array-key>"}` to enable it, then pass `entry_filter={…}` (same AST as
-`filter`) to `artifact(action="get")`. Prose trackers need retrofit first.
+`filter`) to `doc(action="get")`. Prose trackers need retrofit first.
 
 For deeper artifact / augmentation / event mechanics see
 `get_guide("librarian")`. For how augmented trackers carry cross-session
@@ -799,17 +800,17 @@ How artifacts reference each other, and who maintains the link graph:
   reported, never guessed), and materializes/prunes scanner-owned
   `rel="cites"` edges. `write=false` (default) reports; `write=true`
   applies. Idempotent — safe to re-run any time, and the repair path after
-  reindex. `artifact(action="move")` now grafts an artifact's links onto its
+  reindex. `doc(action="move")` now grafts an artifact's links onto its
   new id itself, so the move no longer drops them; the scan is what heals the
   cases that bypass it — a bare `git mv`, or any other route that leaves a row
   whose id does not match its path for the abs_path pre-clean to cascade-drop.
 - **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`,
-  `refutes` via `artifact(action="link")` — use sparingly; a wrong edge
+  `refutes` via `doc(action="link")` — use sparingly; a wrong edge
   pollutes context packing. `supersedes` is side-effectful (flips dst
   status, emits an event): archiving a tracker that has a successor
-  REQUIRES a supersedes edge — created through `artifact(action="link")`,
+  REQUIRES a supersedes edge — created through `doc(action="link")`,
   never a bare status edit.
-- **Where links pay off:** `artifact(action="get", include_links=true)`,
-  `artifact(action="graph", depth=1-3)`, and
+- **Where links pay off:** `doc(action="get", include_links=true)`,
+  `doc(action="graph", depth=1-3)`, and
   `librarian(action="context", anchor_id=…)` all read the graph — a
   well-cited tracker gets neighborhood packing for free.

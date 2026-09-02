@@ -200,7 +200,7 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
                 ));
             }
             table.push_str(
-                "\nUse `project_id: \"<id>\"` in `semantic_search` / `memory` to scope to a specific project. `symbols` has no project param — scope it with `path` (its `scope` is a different axis: project/libraries/all).\n",
+                "\nUse `project_id: \"<id>\"` in `semantic_search` / `memory` to scope to a specific project, or pass an absolute workspace path on a single call to pin it. `symbols` has no project param — scope it with `path` (its `scope` is a different axis: project/libraries/all).\n",
             );
             segs.push(StatusSegment {
                 text: table,
@@ -1954,6 +1954,20 @@ mod tests {
         "rename_symbol",
         "search_pattern",
         "read_markdown",
+        // Retired by the 2026-09-02 tool-surface collapse. `read_markdown` above
+        // went in Task 7; these five are Tasks 4-6 and 8.
+        "edit_markdown",
+        "artifact_augment",
+        "artifact_event",
+        "artifact_refresh",
+        // `artifact(` WITH the paren, never the bare word. The tool was renamed to
+        // `doc`, but "artifact" remains the correct noun for the thing it manages and
+        // survives legitimately in prose ("a librarian-managed artifact"), in Rust
+        // paths (`crate::librarian::catalog::artifact`), in SQL (the `artifact`
+        // table) and in every `artifact_id` field name. A bare-word entry would make
+        // this gate unsatisfiable without lying about the domain; the paren catches
+        // exactly the call form and nothing else.
+        "artifact(",
     ];
 
     /// `CLAUDE.md` is injected into every session as a `<system-reminder>` but is

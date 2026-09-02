@@ -65,7 +65,7 @@ premise that every addition falsifies.
   self-correcting.
 - **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question about
   one *line*; where a law is implemented at N call sites, one kill says nothing about the other N−1.
-  (`artifact_augment`'s two shape-writing paths killed **different** tests, neither failing under
+  (`doc(action="augment")`'s two shape-writing paths killed **different** tests, neither failing under
   the other's mutation.)
 - **Loudness is a property of a PATH, not of a failure.** An alarm nothing reaches is exactly as
   informative as no alarm — `BL-66` *aborts the process* and survived anyway, because every in-tree
@@ -109,10 +109,10 @@ premise that every addition falsifies.
 
 Four behaviors are load-bearing and easy to skip:
 
-- **Declare the defect class** — every bug file carries exactly one reserved `cluster/<slug>` tag in frontmatter, from the closed set defined in [`docs/trackers/issue-clusters.md`](docs/trackers/issue-clusters.md) (`IC-N`, artifact `1b5a080fe2efcb6b`). That tag is what makes *"which architectural problem do these bugs share?"* a query instead of a re-reading, and what lets a class reach its promotion threshold (**≥3 instances spanning ≥2 subsystems**) rather than being re-noticed and forgotten — three open files today carry a sentence of the form *"this is the third instance of one mechanism"* and had nowhere to put the count. Slugs are claim-shaped (`blast-radius-exceeds-visibility`), never topic-shaped (`concurrency`, which spans three classes). **Write it through the catalog** — `artifact(action="update", id=…, patch={tags:[…]})` or `codescout artifact update <id> --tags …`. A direct frontmatter edit does **not** reach the catalog (BL-48), so the tag sits on disk while every `find` reports the bug unclassified.
+- **Declare the defect class** — every bug file carries exactly one reserved `cluster/<slug>` tag in frontmatter, from the closed set defined in [`docs/trackers/issue-clusters.md`](docs/trackers/issue-clusters.md) (`IC-N`, artifact `1b5a080fe2efcb6b`). That tag is what makes *"which architectural problem do these bugs share?"* a query instead of a re-reading, and what lets a class reach its promotion threshold (**≥3 instances spanning ≥2 subsystems**) rather than being re-noticed and forgotten — three open files today carry a sentence of the form *"this is the third instance of one mechanism"* and had nowhere to put the count. Slugs are claim-shaped (`blast-radius-exceeds-visibility`), never topic-shaped (`concurrency`, which spans three classes). **Write it through the catalog** — `doc(action="update", id=…, patch={tags:[…]})` or `codescout artifact update <id> --tags …`. A direct frontmatter edit does **not** reach the catalog (BL-48), so the tag sits on disk while every `find` reports the bug unclassified.
 
 - **Capture on notice** — add the bug file the moment a bug is noticed (wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools), not at task end.
-- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. Archive via `artifact(action="move", …)`, never a bare `git mv`.
+- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. Archive via `doc(action="move", …)`, never a bare `git mv`.
 - **Record the fix SHA *and* its patch-id — never a pending-master-SHA line.** `git show <sha> | git patch-id --stable`. The SHA is positional and dies when `experiments` is rebased (which happens after every ship); the patch-id is a content hash of the diff and survives rebase *and* cherry-pick. Record the pair once at fix time: there is no promotion path to check and nothing owed later. (Measured 2026-08-19: 10 of 63 archived bug files had already lost their SHA to a rebase; zero patch-id collisions across 3594 commits. Many archived files still carry the older master-SHA-owed form — stale instructions, not open debt; do not sweep them.) **A merge commit has no patch-id** — `git show <merge>` emits no diff, so the pipeline returns empty and exits `0`, giving you no error and no value. Cite the merged branch's constituent commits instead; never record an empty patch-id field. Full rule → `get_guide("tracker-conventions")` § *Bug files*.
 
 **Run the reproduction before reading the fix plan — the plan is a hypothesis about the
@@ -149,8 +149,8 @@ would restate, including the exact `append_entry` call for each prefix. The cont
 
 Two rules here carry data-loss consequences and are the reason this section is not purely a pointer:
 
-> ⚠ **Archive through the librarian** — `artifact(action="update", …, patch={status:"archived"})`
-> then `artifact(action="move", …)`, never a bare `status:` edit plus `git mv`. `id =
+> ⚠ **Archive through the librarian** — `doc(action="update", …, patch={status:"archived"})`
+> then `doc(action="move", …)`, never a bare `status:` edit plus `git mv`. `id =
 > sha256(abs_path)`, so a hand-move orphans the catalog row's events and augmentation.
 
 > ⚠ **Never hand-build a params array.** `doc(action="augment", id=…, merge=true, augment={params:{observations:
@@ -179,13 +179,13 @@ harness does what you asked in a way that reads as something else, and the failu
 The canonical "what's live right now" queries — archived rows are hidden by default:
 
 ```
-artifact(action="find", kind="tracker")
-artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})
+doc(action="find", kind="tracker")
+doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})
 ```
 
 `status="open"` alone hides `investigating` (actively being worked) and `zombie`
 (recurring-but-unconfirmed — a "has this come back?" check, not a task to pick up). Read one
-tracker, or one section of it, with `artifact(action="get", id=…, heading=…)`; filter an augmented
+tracker, or one section of it, with `doc(action="get", id=…, heading=…)`; filter an augmented
 tracker's rows with `entry_filter={…}`.
 
 **Verify-open cadence:** before any "what's open?" report or backlog triage, reconcile session-log
@@ -421,7 +421,7 @@ Files:
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
 - `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety
-- **[`docs/conventions/cross-machine-catalog-resume.md`](docs/conventions/cross-machine-catalog-resume.md)** — **Run this after pulling onto a machine that has not been building codescout.** The catalog (`~/.local/share/librarian/catalog.db`) is machine-local and gitignored, so a clone always arrives missing three layers — semantic index, `cites` edges, and artifact augmentations — and **each is silent in a different way**: `artifact(get)` returns `augmentation: null` without comment; a missing edge is indistinguishable from an artifact that cites nothing. (The augmentation third is now partly automatic — since `f565504a` shape travels in a committed sidecar and `reindex` re-attaches a declared one, reporting `augmentations_restored`. What stays manual is any artifact whose shape was never exported; the page says which is which.) Nothing fails — you quietly get less. **And a fifth mode runs the other way: an artifact the other host archived arrives as a file rename, but `id = sha256(abs_path)` means your catalog keeps the pre-move row.** `doctor`'s `missing_file` is what names it — re-read that field *after* the pull, because the page's own triage calls `missing_file` mostly other-repo noise and that is true of the majority and wrong about you; `reindex` is the repair. Measured 2026-08-28 on a 437-commit pull: 21 of 23 memories invisible to `recall`, 697 of 1117 `cites` edges absent, 22 trackers' augmentations gone (including the three CLAUDE.md gives append/query recipes for). The page also carries the two measurement traps that pass produced, both of which return a plausible **number** rather than an error.
+- **[`docs/conventions/cross-machine-catalog-resume.md`](docs/conventions/cross-machine-catalog-resume.md)** — **Run this after pulling onto a machine that has not been building codescout.** The catalog (`~/.local/share/librarian/catalog.db`) is machine-local and gitignored, so a clone always arrives missing three layers — semantic index, `cites` edges, and artifact augmentations — and **each is silent in a different way**: `doc(get)` returns `augmentation: null` without comment; a missing edge is indistinguishable from an artifact that cites nothing. (The augmentation third is now partly automatic — since `f565504a` shape travels in a committed sidecar and `reindex` re-attaches a declared one, reporting `augmentations_restored`. What stays manual is any artifact whose shape was never exported; the page says which is which.) Nothing fails — you quietly get less. **And a fifth mode runs the other way: an artifact the other host archived arrives as a file rename, but `id = sha256(abs_path)` means your catalog keeps the pre-move row.** `doctor`'s `missing_file` is what names it — re-read that field *after* the pull, because the page's own triage calls `missing_file` mostly other-repo noise and that is true of the majority and wrong about you; `reindex` is the repair. Measured 2026-08-28 on a 437-commit pull: 21 of 23 memories invisible to `recall`, 697 of 1117 `cites` edges absent, 22 trackers' augmentations gone (including the three CLAUDE.md gives append/query recipes for). The page also carries the two measurement traps that pass produced, both of which return a plausible **number** rather than an error.
 - **[`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md)** — why the four gate commands are those four, in that order. Read before changing, shortening or reordering the gate; the executable copy stays in § *Development Commands* by a 2026-08-30 ruling, and this holds the measurements.
 - **[`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md)** — the derivations behind § *Testing Discipline*'s laws: the mutation runs, the four-defensible-numbers count, and the two superseded formulations (including a "pair an absence test with a positive one" remedy the `e6414362` run falsified).
 - `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow

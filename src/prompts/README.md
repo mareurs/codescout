@@ -70,7 +70,7 @@ The `server_instructions` slice is under a hard **1900-character cap** (rule 8, 
 
 ## Measure before shipping — the subtract-and-measure protocol
 
-Editing style/caps is covered above; whether a prompt-surface **change ships at all** is governed by the subtract-and-measure protocol (P-1..P-8) in `docs/trackers/prompt-hamsa-audit-log.md` § Protocol — read it via `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol — subtract-and-measure (P-1..P-8)")`. Short form: name a locally-observed failure first; pre-register the audit row with a numeric ship/no-ship rule; run the **base arm first** (no change) — at ceiling, don't ship; deletions instead prove the cut regresses nothing; mechanical trace checks over judges; mutation-test the checker; pin the generator model. Harness: `prompt-tdd` in `../prompt-engineering/` (template: `scenarios/fable-tidying/`).
+Editing style/caps is covered above; whether a prompt-surface **change ships at all** is governed by the subtract-and-measure protocol (P-1..P-8) in `docs/trackers/prompt-hamsa-audit-log.md` § Protocol — read it via `doc(action="get", id="59ebeebb6ed05c89", heading="Protocol — subtract-and-measure (P-1..P-8)")`. Short form: name a locally-observed failure first; pre-register the audit row with a numeric ship/no-ship rule; run the **base arm first** (no change) — at ceiling, don't ship; deletions instead prove the cut regresses nothing; mechanical trace checks over judges; mutation-test the checker; pin the generator model. Harness: `prompt-tdd` in `../prompt-engineering/` (template: `scenarios/fable-tidying/`).
 ## Research
 
 Evidence behind these rules:

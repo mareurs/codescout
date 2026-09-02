@@ -11,7 +11,7 @@ caps, the catalog DB location, or the event-authorship protocol.
 
 ## Default scope details
 
-Listing tools (`artifact(find)`, `librarian(context)`) default to the
+Listing tools (`doc(find)`, `librarian(context)`) default to the
 active project and hide archived/superseded rows. Responses include a
 `scope` block (applied scope + resolved `abs_path` / `git_root` /
 `umbrella`) and a `hints` block reporting extra rows: `more_in_repo`,
@@ -31,7 +31,7 @@ blocks. `scope="umbrella"` errors if no umbrella is declared.
 
 - `limit` capped at 500, `offset` at 100_000.
 - Default `limit` is 50 for list/find, 20 for links.
-- `artifact(graph)` depth is 1–3.
+- `doc(graph)` depth is 1–3.
 - Semantic search requires `LIBRARIAN_EMBED_MODEL` env at server
   start; otherwise `semantic="..."` falls back to LIKE-match on
   `title` / `topic`.
@@ -46,7 +46,7 @@ Times are ms-epoch integers, not ISO-8601.
 
 ## Writes round-trip
 
-`artifact(create)` / `artifact(update)` modify the on-disk markdown
+`doc(create)` / `doc(update)` modify the on-disk markdown
 file first, then re-index. **The file + frontmatter is the source of
 truth; the catalog is a derived index.** Reindex regenerates the
 catalog from disk — never the other way around.
@@ -117,7 +117,7 @@ filterable `params`):
   a live row is never overwritten, and `augmentations_restored` distinguishes a
   run that repaired nothing from one with nothing to repair.
 - **They do NOT survive a file delete+recreate.** A recreated file gets a
-  new `id`, orphaning the old augmentation. Use `artifact(action="move")`
+  new `id`, orphaning the old augmentation. Use `doc(action="move")`
   to relocate a tracker, never delete+recreate.
 
   **`move` also mints a new `id`** — identity is `sha256(abs_path)`, so it
@@ -172,7 +172,7 @@ tags = ["codescout"]
 Query the family back with array-membership (`contains`, not `in`):
 
 ```
-artifact(action="find", filter={"tags": {"contains": "codescout"}})
+doc(action="find", filter={"tags": {"contains": "codescout"}})
 ```
 ## Event authorship discipline
 
@@ -214,14 +214,14 @@ and what to do first.
 tracker with:
 
 ```
-artifact(action="find", kind="tracker", filter={"and":[
+doc(action="find", kind="tracker", filter={"and":[
   {"tags": {"in": ["passover"]}},
   {"status": {"eq": "active"}}
 ]})
 ```
 
 **Resume protocol** — read the full body
-(`artifact(action="get", id="<id>", full=true)`), work through its
+(`doc(action="get", id="<id>", full=true)`), work through its
 `## Next actions` checklist, verify the state claims, and resume the
 prior thread. The tracker *is* the cross-session behavior: following it
 is what continuity means.

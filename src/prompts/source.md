@@ -12,7 +12,7 @@ Subagents inherit these rules. Pass them along.
    (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
    sed) is OK. Shell on source files is blocked.
 4. `read_file` on markdown → heading-addressed (force=true raw).
-5. NEVER edit_file markdown → edit_markdown (heading-addressed).
+5. `edit_file` on markdown → heading+action (managed → doc).
 6. Subagents see only what you brief them with. Name the guides they
    must fetch themselves, prior results, paths, symbols — at every
    spawn. Re-discovery is your dispatch defect, not theirs.
@@ -381,7 +381,7 @@ Proposed CLAUDE.md memory-table update:
 Apply? [y/N]
 ```
 
-On `y`: `edit_markdown(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
+On `y`: `edit_file(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
 ## Gathered Project Data
 
 The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.

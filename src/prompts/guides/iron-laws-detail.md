@@ -189,7 +189,7 @@ path is used** — anything under `docs/trackers/`, or any file whose
 frontmatter carries an `id:`. *Every* `edit_file` write path refuses
 those: a direct write bypasses the catalog, so no `field_patch` event
 is recorded, the body-shrink guard never runs, and `updated_at` goes
-stale. Use `artifact(action="update", id=…, patch={body_edits: […]})`
+stale. Use `doc(action="update", id=…, patch={body_edits: […]})`
 — its entries mirror `edit_file`'s heading-addressed batch shape.
 
 **Batch mode:** `edit_file`'s `edits: [...]` array is applied

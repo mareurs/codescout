@@ -29,7 +29,13 @@ use super::{parse_bool_param, Tool, ToolContext};
 // topic="system-prompt"). The bump triggers regeneration so already-onboarded projects
 // write the root file the always-on injection actually reads. See
 // docs/issues/archive/2026-06-12-onboarding-writes-system-prompt-to-memory-not-root.md.
-pub(crate) const ONBOARDING_VERSION: u32 = 29;
+// Bumped 2026-09-03 (tool-surface collapse): the onboarding slice's CLAUDE.md-memories
+// recipe called `edit_markdown`, folded into `edit_file` by Task 8, and Iron Law 5 named it
+// too. An already-onboarded project caches the rendered prompt, so without this bump those
+// projects keep handing agents a call naming a tool the server no longer registers.
+// (`server_instructions` changes alone would NOT warrant a bump — that surface is injected
+// fresh per session. See src/prompts/README.md.)
+pub(crate) const ONBOARDING_VERSION: u32 = 30;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.
