@@ -280,10 +280,39 @@ project. They split two and two, and the split is the finding:
 
 | finding | verdict |
 |---|---|
-| `docs/manual/src/tools/ast.md:4` → `src/tools/ast.rs` | **genuine** — path does not exist |
-| `docs/socraticode-borrow-tracker.md:34` → `src/tools/usage.rs` | **genuine** — path does not exist |
+| ~~`docs/manual/src/tools/ast.md:4` → `src/tools/ast.rs`~~ | **RETRACTED — was not drift.** Page deleted 2026-09-02, finding gone |
+| `docs/socraticode-borrow-tracker.md:34` → `src/tools/usage.rs` | **not drift either** — the path is named inside a backlog item *describing work on that file* |
 | `docs/PROBES.md:146` → `src/serve` | **false positive** |
 | `docs/PROBES.md:146` → `src/lsp/m` | **false positive** |
+
+**The "genuine" column above was wrong when first written, and the error is worth more than
+the correction.** `ast.md:4` was graded *genuine — path does not exist* by checking whether
+`src/tools/ast.rs` resolved, **without reading the sentence containing it**. That sentence was a
+tombstone: *"Removed 2026-09-01. … `src/tools/ast.rs` was deleted along with them … This page is
+kept as a redirect because older docs, plans and session logs link to it."* The page was a
+deliberate redirect with four inbound links, not stale drift — **so the classification reproduced,
+by hand, the exact defect it was classifying.** Same for `socraticode-borrow-tracker.md:34`, where
+the path sits in a work item *about* that file.
+
+**So all four findings are one defect and none is drift:** `audit_doc_refs` cannot distinguish
+**mentioning** a path from **citing** one, which makes the sentence *"X was deleted"*
+unrepresentable about `X`. Removal notices, truncation examples and historical work items are all
+unwritable under the gate. `IC-6`, both halves — no escape for the inline case, and the escape that
+does exist (`<!-- audit-doc-refs:ignore -->`, `parser.rs:447`) is scoped to the next **heading**, so
+it cannot name one token: applying it to `PROBES.md`'s section would silence **27** real refs in the
+one document whose job is telling you which instrument to trust.
+
+**Resolution taken 2026-09-02 (operator's call, after the correction was put to them):** `ast.md`
+deleted outright rather than marked — file and catalog row via `artifact(action="delete")`, since it
+was a catalog `doc` artifact and a `git rm` would have orphaned the row; `SUMMARY.md`'s TOC entry
+removed with it. **Left untouched deliberately:** the two inbound references in
+`docs/issues/archive/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md:185` and
+`docs/superpowers/plans/2026-03-01-docs-full-audit-plan.md:54,573` — an archived bug file and a
+completed March plan are historical snapshots, and this repo's archive rule is that rewriting them
+to satisfy a linter falsifies the record. Also untouched: `tests/e2e/harness.rs:359`, whose doc
+comment names the deleted tool in the same mention-not-citation way and is correct as written.
+
+**Still open:** the three remaining findings, all needing a parser change rather than a doc change.
 
 **The two false positives are a parser defect, not doc drift, and they are self-referential.**
 `PROBES.md:146` mentions `src/serve` and `src/lsp/m` **as quoted examples of truncated paths** —
