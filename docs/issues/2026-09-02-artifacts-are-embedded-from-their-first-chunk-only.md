@@ -1,7 +1,7 @@
 ---
 id: '7a37f1179d2f0e21'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: an artifact is embedded from its first chunk only — a 189-entry ledger is represented by its preamble'
 tags:
 - cluster/capped-result-presented-as-complete
@@ -10,11 +10,12 @@ tags:
 - semantic-search
 - retrieval-grain
 - silent-partial-result
-closed: null
+closed: 2026-09-03
 opened: 2026-09-02
 owner: marius
 related: []
 severity: high
+unverified: 'Chunk-grain retrieval has never been exercised end-to-end on this deployment. The code fix and its regression tests are verified on experiments and green, but the live backend is Qdrant, where Task 7''s guard refuses chunk ids outright (reindex 2026-09-03: embedded 0, embed_error_count 59). The plan''s Deferred section names this as an undecided open question, not a defect. What IS established: every chunk is queued and its artifact_chunk row written; what is NOT: that a chunk vector is ever stored or retrieved on the default server-build backend.'
 ---
 
 # BUG: an artifact is embedded from its FIRST CHUNK only — a 189-entry ledger is represented by its preamble

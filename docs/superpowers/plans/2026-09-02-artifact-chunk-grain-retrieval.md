@@ -38,6 +38,7 @@ under another profile; the sessionId survives both).
 | 9 | `e67c3221` | `ffb95976` |
 | 10 | `95b77262` | `ffb95976` |
 | 11 | `98eb5adc`, `488192e8` — **backfill + fix (c) only; the swap is NOT written** | `ffb95976` |
+| 12 | `36afd405`, `6ff477b8` — **Steps 1–4 done; 5 and 7 held on open question 4** | `ffb95976` |
 
 `19e0e253-6b26-4a74-a201-33c92fbd0b30` is session `codescout-20` (profile `~/.claude`).
 `ffb95976-dc89-4cca-87aa-c026544faf2f` is the session that wrote this block.
@@ -2331,6 +2332,43 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): resumable 
 ---
 
 ## Task 12: Re-run the benchmark, record the delta, close the bug
+
+> **TASK 12 RAN 2026-09-03 — Steps 1–4 DONE, 5 and 7 held, and the result
+> reframes the plan.** hits@5 **0/12 → 2/12**, MRR 0.0 → 0.1667, first non-zero
+> this instrument has produced. Recorded at `6ff477b8` in
+> `docs/trackers/retrieval-benchmark.md`.
+>
+> **Read the denominator: 2/12 is 2 of 2 reachable.** The two suite targets
+> holding `artifact_chunk` rows both rank **1**; the other ten hold zero and are
+> absent from the index, so no ranking change reaches them.
+>
+> **The gate on Steps 1–3 was a defect this session found and fixed.** Chunk
+> ranges were numbered against the frontmatter-stripped body and published as
+> file lines, so every hit on a frontmatter-carrying document landed inside the
+> PREVIOUS entry. Fixed at `36afd405` (patch-id
+> `6ba7ae81ba07d8fde8870fc6162c6330093159b8`), two guards each observed RED under
+> its own mutation. 47 artifacts' stored ranges were migrated in place; nothing
+> was re-embedded, because `content_hash` is over `content` alone — so the whole
+> 0→2 delta is attributable to the coordinate fix and to nothing else.
+>
+> **§ *Deferred* turned out to be the live constraint, not a footnote.** This
+> deployment resolves to **Qdrant**, and a reindex returned `embedded: 0,
+> embed_error_count: 59`, every one Task 7's guard refusing a chunk id. That
+> section already said *"if it is Qdrant, this plan does not apply to it yet"*.
+> It is. So chunk-grain is inert here by design, and the 55 artifacts carrying
+> chunk rows carry them because `embed_queue_items` writes the ROWS as a side
+> effect of queueing even when the vector upsert is then refused.
+>
+> **Step 5 (archive) and Step 7 (commit the archive) are deliberately held.**
+> Bug `7a37f1179d2f0e21` is now `status: fixed` with an `unverified:` field
+> naming exactly what is not established. Archiving it would file a shipped
+> feature that is unreachable on the default server backend. The decision it
+> waits on is the plan's **open question 4**: point this project at sqlite-vec,
+> or implement Qdrant chunk-grain parity. That is a deployment call, not a fix.
+>
+> Three artifacts were refused by the migration's round-trip check — their chunk
+> rows are stale against the current file (17/41, 2/20, 3/10 chunks reproducing).
+> A separate defect; only a re-chunk cures it.
 
 **Files:**
 - Modify: `docs/trackers/retrieval-benchmark.md` (via `artifact` tools — augmented)
