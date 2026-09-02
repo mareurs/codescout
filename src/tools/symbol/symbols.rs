@@ -1036,6 +1036,36 @@ pub(crate) fn focus_single_symbol(matches: &mut [Value], root: &std::path::Path)
     } else {
         root.join(&file)
     };
+    let line_span_source_end = end;
+    // rust-analyzer's `workspace/symbol` answers with a range covering the declaration's
+    // NAME line only, so a symbol whose signature WRAPS arrives as `end == start`. The leaf
+    // branch below then slices exactly one line and stores it as `body` — rendering
+    // `pub fn wrapped(` with arity 0, no return type, and nothing marking it partial,
+    // because no code on this path knows it cut anything. Recover the true span from the
+    // AST, which reports full ranges.
+    //
+    // Guarded three ways so this corrects a degenerate range without ever inventing one:
+    // the AST span must CONTAIN the reported line (a same-named symbol elsewhere in the
+    // file is rejected), and it must be genuinely multi-line. A real one-line function also
+    // arrives as `end == start` and its AST span is also one line, so it falls through to
+    // the original values rather than expanding into whatever follows it.
+    //
+    // Only reachable WITH a language server: the AST fallback path already reports true
+    // ranges, so a cold probe sees correct output and this code never runs.
+    // docs/issues/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
+    let (start, end) = if end == start {
+        crate::ast::extract_symbols(&abs)
+            .ok()
+            .and_then(|syms| {
+                // `SymbolInfo` line fields are 0-indexed; these are 1-indexed.
+                find_symbol_recursive(&syms, &name)
+                    .map(|f| (f.start_line as u64 + 1, f.end_line as u64 + 1))
+            })
+            .filter(|&(s, e)| s <= start && e >= line_span_source_end && e > s)
+            .unwrap_or((start, end))
+    } else {
+        (start, end)
+    };
     let line_span = end - start + 1;
     let is_container = CONTAINER_KINDS.contains(&kind.as_str());
 

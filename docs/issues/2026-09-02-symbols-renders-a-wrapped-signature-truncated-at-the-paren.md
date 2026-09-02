@@ -175,26 +175,79 @@ class, asserting a different property of it.
 
 ## Fix
 
-Not attempted. Two things the fix must decide, and they are separable:
+Implemented 2026-09-02 — **(1) completeness**, which subsumes (2).
 
-1. **Completeness** — render the full declaration through the closing `)` and return type,
-   or
-2. **Honesty** — if a partial render is kept for budget reasons, mark it, the way every
-   other capped surface in this codebase does. `docs/PROGRESSIVE_DISCLOSURE.md` is the
-   governing convention and `truncate_compact`'s `… (truncated)` is the in-repo precedent.
+`focus_single_symbol` (`src/tools/symbol/symbols.rs`) now recovers the true span from the
+AST when the LSP hands it a degenerate `end == start` range, before `line_span` is computed:
 
-(2) alone closes the harm even if (1) is judged too expensive: a marked truncation sends
-the agent to `include_body=true`; an unmarked one does not.
+```rust
+let (start, end) = if end == start {
+    crate::ast::extract_symbols(&abs).ok()
+        .and_then(|syms| find_symbol_recursive(&syms, &name)
+            .map(|f| (f.start_line as u64 + 1, f.end_line as u64 + 1)))
+        .filter(|&(s, e)| s <= start && e >= line_span_source_end && e > s)
+        .unwrap_or((start, end))
+} else { (start, end) };
+```
 
-Case 3's silent absence should be reconciled in the same change — three renderings for one
-input class is itself the bug.
+**Honesty is not owed separately once completeness lands** — there is nothing left cut to
+mark. Option (2) was the fallback for "if (1) is judged too expensive"; it was not, because
+the AST lookup this needs was **already in this function**, used by the large-container
+branch four lines above. Reuse, not new machinery.
 
+Three guards, so it corrects a degenerate range without ever inventing one:
+
+- `s <= start && e >= line_span_source_end` — the AST span must **contain** the reported
+  line, so a same-named symbol elsewhere in the file is rejected rather than jumped to.
+- `e > s` — the span must be genuinely multi-line. A real one-line function *also* arrives
+  as `end == start` and its AST span is also one line, so it falls through to the original
+  values. The two inputs are identical in shape; only the file distinguishes them.
+- `0-indexed → 1-indexed` conversion. `SymbolInfo.start_line`/`end_line` are 0-indexed while
+  the match JSON is 1-indexed; without `+ 1` the slice is off by one and silently renders the
+  line above the declaration.
+
+**Cost:** one AST parse per degenerate-range match. `focus_single_symbol` acts on
+`matches.first_mut()` only, so it is one parse per search, and the container branch already
+paid the same price.
+
+**Case 3 (`stale_to_remove`, multi-match) is NOT fixed and is deliberately out of scope.**
+Its cause is downstream — the multi-match display path renders no inlined body, so the
+corrected `body` this change now produces still never reaches the reader. That is a display
+concern in a different function, and folding it in would have made a four-guard
+range-correction into a rendering change too. The bug file's *"three renderings for one input
+class is itself the bug"* still stands and is now the only part outstanding.
 ## Tests added
 
-None yet. The regression test must assert on the **rendered output**, not on
-`SymbolInfo`, and must cover all three observed cases — a test written only against
-`discover_projects` would pass under a fix that leaves `stale_to_remove` blank.
+`src/tools/symbol/tests.rs`, two cases. RED observed first on the production path, then
+green; the whole `tools::symbol` module is 336 passing.
 
+- `focus_single_symbol_completes_a_declaration_the_lsp_reported_as_one_line`
+- `focus_single_symbol_leaves_a_genuinely_one_line_function_alone`
+
+**The RED printed the defect verbatim** — `got: "pub fn wrapped("` — which is the symptom
+string from § *Symptom*, reproduced in a unit test.
+
+**They solve the "invisible without a language server" problem by not needing one.** § *Root
+cause* records that a fixture which does not wait for rust-analyzer observes the CORRECT
+behaviour and passes — the bug is only reachable at full capability. Rather than warm an LSP
+in a test, the fixture **injects the degenerate `end_line == start_line` range the LSP
+actually produces** and calls `focus_single_symbol` directly. That is the production
+function, not a re-implementation, so it is not the "second level asserting about its own
+re-implementation" trap.
+
+**The first test asserts on the parts that were MISSING, never on the part always present.**
+`contains("pub fn wrapped(")` would have **passed against the broken code** — the truncated
+line contains exactly that — so it is monotone under the truncation it would claim to guard.
+The assertions are on `alpha: &str`, `beta: usize` and `-> Result<Vec<String>>`.
+
+**The second is the discriminating pair, and without it the suite is satisfiable by a wrong
+fix.** Any unconditional "take the AST span" passes the first test. The one-liner case is
+byte-identical in *shape* — also `end == start` — and only the file distinguishes them, so
+this is what makes `e > s` load-bearing rather than decorative. It asserts both that the
+one-liner still renders and that expansion does not swallow the next symbol.
+
+Neither test covers case 3; see § *Fix*. A test written only against the single-match path
+cannot detect it, which is the warning this section carried before the fix and still does.
 ## Workarounds
 
 `symbols(name=…, include_body=true)` returns the true signature in every case observed.

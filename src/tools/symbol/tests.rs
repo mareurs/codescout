@@ -8708,6 +8708,67 @@ fn focus_single_symbol_shows_members_for_large_container() {
 }
 
 #[test]
+fn focus_single_symbol_completes_a_declaration_the_lsp_reported_as_one_line() {
+    use super::symbols::focus_single_symbol;
+    let dir = tempfile::TempDir::new().unwrap();
+    // A WRAPPED signature: params and return type live below the name line.
+    let content = "pub fn wrapped(\n    alpha: &str,\n    beta: usize,\n) -> Result<Vec<String>> {\n    Ok(vec![])\n}\n";
+    std::fs::write(dir.path().join("wrapped.rs"), content).unwrap();
+    // end_line == start_line is NOT an invented input: rust-analyzer's `workspace/symbol`
+    // answers with a range covering the declaration's NAME line only, so every
+    // symbols(name=…) match arrives this way. The old guard `if start == 0 || end < start`
+    // let equality through, computed line_span = 1, classified the function as a leaf, and
+    // sliced ONE line -- yielding `pub fn wrapped(`, arity 0, no return type, unmarked.
+    // docs/issues/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
+    let mut matches = vec![json!({
+        "name": "wrapped", "symbol": "wrapped", "kind": "Function",
+        "file": "wrapped.rs", "start_line": 1, "end_line": 1,
+    })];
+    focus_single_symbol(&mut matches, dir.path());
+
+    let body = matches[0]["body"].as_str().unwrap_or("");
+    // Assert on the PARTS THAT WERE MISSING, not on the part that was always present.
+    // `contains("pub fn wrapped(")` passed against the broken code -- the truncated line
+    // contains it -- so it is monotone under the very truncation this guards.
+    assert!(
+        body.contains("alpha: &str") && body.contains("beta: usize"),
+        "the parameters must survive a declaration-name-only LSP range, got: {body:?}"
+    );
+    assert!(
+        body.contains("-> Result<Vec<String>>"),
+        "the return type must survive too, got: {body:?}"
+    );
+}
+
+#[test]
+fn focus_single_symbol_leaves_a_genuinely_one_line_function_alone() {
+    use super::symbols::focus_single_symbol;
+    let dir = tempfile::TempDir::new().unwrap();
+    // THE DISCRIMINATING PAIR. The test above is satisfied by any fix that expands the
+    // range; this one fails if a fix expands UNCONDITIONALLY. A real one-liner also
+    // arrives with end_line == start_line, and its correct render is that same one line
+    // -- so the two inputs are byte-identical in shape and only the file distinguishes
+    // them. Without this, "always take the AST span" would look correct.
+    let content = "pub fn tiny() -> u8 { 7 }\n\npub fn other() -> u8 { 9 }\n";
+    std::fs::write(dir.path().join("tiny.rs"), content).unwrap();
+    let mut matches = vec![json!({
+        "name": "tiny", "symbol": "tiny", "kind": "Function",
+        "file": "tiny.rs", "start_line": 1, "end_line": 1,
+    })];
+    focus_single_symbol(&mut matches, dir.path());
+
+    let body = matches[0]["body"].as_str().unwrap_or("");
+    assert!(
+        body.contains("pub fn tiny() -> u8 { 7 }"),
+        "the one-liner itself must still render, got: {body:?}"
+    );
+    assert!(
+        !body.contains("other"),
+        "expansion must not swallow the NEXT symbol, got: {body:?}"
+    );
+}
+
+#[test]
 fn attach_docstrings_attaches_symbol_doc() {
     use super::symbols::attach_docstrings;
     let dir = tempfile::TempDir::new().unwrap();
