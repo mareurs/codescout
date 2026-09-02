@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 107
+entry_high_water_F: 108
 entry_high_water_W: 102
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 102
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-108 | 2026-09-03 | med | shared-state | open | **A rebuild plus `/mcp` upgraded 1 MCP server of 15, and I reported the fix as live.** Measured 00:44:02 by `readlink /proc/<pid>/exe` over processes matching `codescout start --debug`: **1** on the image built at 00:42:44, **14** still mapping a deleted pre-fix binary. All 15 share one catalog. `embed_queue_items` writes `artifact_chunk` rows as a side effect of QUEUEING, so any stale server reindexing a **changed** artifact rewrites its rows at body-relative coordinates and silently reverts `36afd405`'s migration for it — which already happened once this session, through my own reindex on the old image (`added: 2, updated: 1`). **The obvious instrument cannot see it:** "did I rebuild and reconnect?" is truthfully yes, and `/mcp` reports success accurately about the one server it owns — the population that matters is per-MACHINE while the instrument is per-SESSION, the same scope error `CLAUDE.md` records for `ListAgents`. Unit stated because a first pass counted the `mux --socket` LSP multiplexers too and got 22. Damage is to reproducibility rather than data: a later benchmark run could move for a reason neither the code nor the catalog explains. Ship the probe, not the resolve — `(deleted)` in `/proc/<pid>/exe` is the whole test and needs no cooperation from the peer |
 | F-106 | 2026-09-02 | high | plan-drift | fixed-verified | **A plan named the wrong file in BOTH the places that name it, so the natural check — does the plan contradict itself? — passed cleanly.** Task 10's Files list said `artifact.rs` for the response builder and its Step 6 staged `artifact.rs src/server.rs`; the builder is in `tools/find.rs`, which that `git add` names nowhere. Only the schema description was where the plan said. **The second mention reads as corroboration of the first** — internal consistency is not evidence of external correctness, and two expressions of one fact fail together because they share an author and one mistake. The shipped failure would have been the expensive shape, not a loud one: a tool schema advertising `matched` (line range, entry token, snippet) beside a build emitting none of it, with `tools/find.rs` simply unmodified and untested, so **the gate stays green**. Caught by one `grep` for `semantic_find` before the first edit, run only because Task 8 had touched a file the plan did not name. Owed by any plan step naming both a file and a `git add`: re-derive the staging line from where the symbol lives. Sibling of `F-105` — same plan, same root, different mechanism, neither catchable from inside the document |
 | F-105 | 2026-09-02 | high | test-rigor | fixed-verified | **A plan specified a complete test that could not fail, and the reason was a fallback the plan never mentions.** Task 9's test asserted only that `context`'s candidate ids hold no duplicate. Two defects were loud (it read `candidate_ids`, a field the tool does not emit; it called two non-existent helpers). The third is the one a careful transcription still ships: the fixture supplied **no embedder and no store**, which routes `context`'s topic branch into a `title\|topic contains` fallback that is **artifact-grain** — so the distinctness assertion is satisfied by the fallback while exercising none of the code under test, and is monotone under narrowing besides, so an empty page satisfies it too. Fix the two loud defects and it is green on a tree with `max_per_artifact` deleted. **The remedy is a fixture property, not an assertion:** the topic string matches no artifact's title or topic, so the fallback returns **zero** rows and a skipped semantic path reds a positive assertion instead of passing in silence. Adds a question the monotone-direction law does not reach — *what runs INSTEAD when this path is unavailable, and does that also pass?* A fallback is not a mutation of the feature, it is a second implementation of the same signature |
 | F-104 | 2026-09-02 | med | delivery-path | promoted-to-bug-tracker | **The notice I fixed, verified and shipped is injected into the response and then discarded by 18 compact renderers.** `inject_notice` writes `_workspace_notice` into the `Value`; `call_content` hands that `Value` to `self.format_compact(&val)`, and no `format_compact` reads the key — so it survives only on the pretty-JSON branch. It reaches `artifact`; it does not reach `symbols`, `grep`, `tree`, `read_file`, `references`, `semantic_search`. **Both regression tests drive `EchoTool`, which takes the pretty-JSON branch**, so they exercise the one path production read tools do not; the two mutations I ran killed on the **decision** path (`notice_once`, `workspace_override`) and nothing reaches the **delivery** path. Found by a `/mcp` reconnect that recreated the original conditions, with a **refused write as the control** — the guard gates on the same flag, so its refusal proved every precondition held while two reads stayed silent. Three plausible causes were checked and died at the bytes first (stale binary, worktrees gone, peer activation). The live production check I had reported as satisfying `codescout-0a`'s standing ask is what hid it: every response I read the string in was `artifact`, the one shape where it works |
@@ -10654,6 +10655,59 @@ members. None of the three would have produced an error — each returns a plaus
 **Rests on:** `F-107` (the +2 instance), and
 `docs/issues/2026-09-02-the-count-gate-cannot-fire-on-the-template-that-mints-its-violations.md`
 § *The surface count, with its unit*
+
+## F-108 — `cargo rb` + `/mcp` upgraded 1 MCP server of 15, and the other 14 share the catalog
+
+**Valid:** dated 2026-09-03
+
+**Observed:** After landing `36afd405` (chunk line ranges become file-relative) I
+ran `cargo rb`, the user ran `/mcp`, and I reported the fix as live. Scouting the
+reconnect seam afterwards showed that `/mcp` upgraded **one** server. Measured
+2026-09-03 00:44:02 by enumerating `/proc` for processes matching
+`codescout start --debug` and reading each one's `/proc/<pid>/exe`:
+
+| image | processes |
+|---|---|
+| current (`target/release/codescout`, built 00:42:44) | **1** |
+| deleted — a pre-fix binary still mapped | **14** |
+
+Unit: MCP **server processes**, not sessions and not peers. The `mux --socket`
+processes are LSP multiplexers and are a different population; a first pass
+counted them together and got 22, which is why the unit is stated here.
+
+**Impact:** all 15 share `~/.local/share/librarian/catalog.db`. `embed_queue_items`
+writes an artifact's `artifact_chunk` rows as a side effect of QUEUEING it, so any
+of the 14 pre-fix servers that reindexes a **changed** artifact rewrites that
+artifact's rows at body-relative coordinates — silently reverting the migration
+for it. This is not hypothetical: a `librarian(action="reindex")` I ran through the
+old image earlier in the same session reported `added: 2, updated: 1` and put three
+artifacts back into the wrong coordinate space. Nothing reports it; the rows look
+identical apart from being ~12–18 lines short.
+
+**Cost:** the reversion is bounded to artifacts whose content changes before the
+last stale server exits, and is cured by any reindex on a correct image — so the
+durable damage is to *reproducibility*, not to data. A benchmark re-run after a
+peer's reindex would show a number neither the code nor the catalog explains.
+
+**Severity:** med.
+
+**Why the obvious instrument misses it:** the check everyone reaches for is "did I
+rebuild and reconnect?", and both answers are yes. The stale images are invisible
+from inside the session that upgraded — `/mcp` reports success truthfully about
+the one server it owns. The population that matters is per-MACHINE and the
+instrument is per-SESSION, which is the same scope error `CLAUDE.md` § *Reaching a
+Peer Session* records for `ListAgents`. Ship a probe, not a resolution to remember:
+`readlink /proc/<pid>/exe` printing `(deleted)` is the whole test, and it needs no
+cooperation from the peer.
+
+**Status:** open
+
+**Rests on:** the fact that a Linux process keeps its original executable image
+after the file is replaced, so a rebuild upgrades no running process. Invariant.
+
+**Promote-when:** a second measured instance of "a rebuild was reported as live
+while N peer servers held the old image" — at which point the remedy is a
+version/build-id handshake the server reports on connect, not a habit.
 
 ## Template for new entries
 
