@@ -111,9 +111,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // row is fetched again here rather than reused, which is the cost of being a
         // sibling rather than nested inside the block that already fetched one.
         //
-        // Same ordering constraint as the worktree guard above: BEFORE
-        // resolve_write_target, or a refused call still leaves a shadow row,
-        // augmentation, fork event and lineage link (the 2026-07-17 regression).
+        // Sited BEFORE resolve_write_target as defense-in-depth, matching the
+        // worktree guard's placement above — NOT because this guard can reach that
+        // hazard today. `resolve_write_target` forks only when `current_project` and
+        // `main_root` are both `Some`, the row exists, and `is_main_checkout_artifact`
+        // is true; the worktree guard above already refuses on exactly that
+        // condition set (`is_main_checkout_artifact` itself returns `false` when
+        // `main_root` is `None`). So every call that reaches this point has already
+        // been proven, by the guard above, to hit `resolve_write_target`'s early
+        // return with no side effect — reordering this guard is unobservable, not
+        // merely untested. Kept here in case that identity ever stops holding (e.g.
+        // the worktree guard becomes conditional), not because it is load-bearing now.
         //
         // PARTIAL BY CONSTRUCTION, and labelled so. This does not prevent the
         // collision — a peer at origin allocates from origin's mark and collides
@@ -1517,7 +1525,11 @@ mod tests {
         .await
         .unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("push"), "hint must name the remedy: {msg}");
+        assert!(
+            msg.contains("Push this ledger's commits, then allocate."),
+            "hint must name the actual remedy sentence, not just any occurrence of \
+             the word \"push\" (the explanatory second sentence also contains it): {msg}"
+        );
         let _ = tmp;
     }
 
@@ -1528,11 +1540,20 @@ mod tests {
     /// walks `@{upstream}..HEAD`, so with HEAD still equal to upstream there is no
     /// unpushed commit on this file (or any file) regardless of what the working
     /// tree holds, and allocation must proceed normally.
+    ///
+    /// `other.md` is committed but left UNPUSHED, so the repository as a whole DOES
+    /// have unpushed commits — only not on the ledger. This is the distinguishing
+    /// case between a per-file and a per-branch implementation at the `call()`
+    /// wiring site (the property itself is already covered at the helper's own
+    /// site by `unpushed_is_per_file_not_per_branch`): a branch-wide check would
+    /// wrongly refuse this call.
     #[tokio::test]
     async fn allocation_proceeds_when_the_ledger_has_no_unpushed_commits() {
         let (tmp, work) = repo_with_upstream();
         let ledger = work.join("ledger.md");
         std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n## L\n\n## R-1 — a\n").unwrap();
+        std::fs::write(work.join("other.md"), "changed").unwrap();
+        commit_path(&work, "other.md", "touch other.md, left unpushed");
 
         let ctx = mk_ctx();
         seed_prose(&ctx, "led", &ledger);
