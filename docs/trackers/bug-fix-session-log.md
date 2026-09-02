@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 100
-entry_high_water_W: 96
+entry_high_water_W: 97
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -155,6 +155,7 @@ entry_high_water_W: 96
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-97 | 2026-09-02 | med | **When a change removes a surface, sweep its references and sort each into POINTER (go consult this) or RECORD (this once happened). Repair the pointers; leave the records** — deleting a record to satisfy a sweep falsifies the evidence the surface ever existed. Paired with a mechanical twin that needs no judgement: `grep -ohE 'scripts/[a-z_-]+\.(py\|sh)' <touched files> \| sort -u`, then stat each | Measured on the `n`-column removal: **14** surviving references, **13 records, 1 pointer** — a linter flagging all 14 would be right once and destructive thirteen times. The live pointer was a section banner in `tests/issue_clusters.rs` (`6070ae75`); a second, found independently by `codescout-0d` (`005dd9e6`), was **itself the remedy for a stale claim** — a fix outliving its own surface with nothing pointing backwards from the removal commit. The path check caught a dangling pointer **inside the commit fixing dangling pointers** (`probe-cluster-express.py`, no such file) under a minute after writing it, by a maximally-primed author: priming did not help, the mechanism did. Denominator published — `0d` ran the same check over its own 6 files + `docs/conventions/*.md`, **10 paths, 9 resolve, 1 known fixture, no defect** — because a check mentioned only when it fires has none | validated |
 | W-96 | 2026-09-02 | med | **`-z` and NUL-splitting travel together or neither travels.** Adding `-z` to a consumer that splits on *lines* turns a correct instrument into a wrong one, so *"harden it with `-z`"* is the specific regression to refuse when reviewing any path enumerator | A zero-byte file named `head.\naab0c4ef'"s` — newline plus both quote characters — appeared in the repo root minutes after two line-oriented hook parsers changed underneath this session (`689ceffb`). Both obvious moves were wrong. **The parser is fine:** `core.quotePath` defaults true, so `git diff --cached --raw` C-quotes the path onto ONE tab-delimited line and both hooks parse 2 rows for 2 staged files, field intact. **`-z` is the defect:** `git ls-files --others \| wc -l` → 2 (correct), `-z \| wc -l` → **1**, and `-z` + Python `.splitlines()` → the *right count* with *garbage rows*. No newline is needed to reach it — `core.quotePath` quotes any non-ASCII byte, so an em-dash in a bug-file slug counts correctly then cannot be opened (`git show :"…\342\200\224….md"` → rc=128). **Exposure today is 0** — nothing in `scripts/`, `tests/*.sh`, `.pre-commit-config.yaml` or `src/` pairs `-z` with a line splitter, and 0 tracked paths are C-quoted — so this is recorded as latent rather than live, with `_prime_index`'s `cat-file --batch` path left explicitly untested for want of a population. Subject expired mid-investigation: the file was gone ~6 min later and a `(none)` grep result was nearly read as a grep bug rather than a changed world; the finding survived only because it had already been reproduced in a throwaway repo the peers could not reach | validated |
 | W-95 | 2026-09-02 | high | **Before filing a bug against a tool this repo builds, compare the running binary's mtime to the commit time of the fix that would explain the finding** — `stat -c '%y' target/debug/codescout` against `git log -1 --format='%cd' <sha>`. Two commands, no build. `doctor` reported 5 files as `non_terminal_status_with_fix_anchor`; four were artifacts of a binary **141 seconds older than `36cb17ed`**, the commit that fixed exactly that misreading. The report was complete, self-consistent and reproducible on that binary — and wrong. Confirmed by rebuild: the same check now reports **0**, and the zero discriminates, because the fifth file's anchor genuinely is under `## Fix` and would still fire had its `unverified:` discharge (`dde26886`) not also worked. A mechanism, not a policy: the trigger is a category you already know you are in. |
 | W-94 | 2026-09-02 | high | **Get a claim checked by a peer whose SAMPLE differs** — different scope, different sample *time*, or different instrument; not a more careful reviewer, a differently-positioned one. Five errors in one ~5h session across seven co-located sessions, **none caught by its author**, two already committed: a stale compiler sample (`E0603` vs a peer's `E0425` on the same tree ~1min apart, no overlap), `F-97`, a committed-and-falsified count remedy, `F-98`, and a shared-blind-spot corroboration made **twice** — the second time 90 minutes after publishing the rule against it. Every correction came from the party who would have benefited from the error standing. The promotable form is **not** "get peer review" — that is a policy, and it failed against an author who had just written it down — but **state the scope and unit a claim was measured over**, so a reader can tell whether a second instrument is independent. |
@@ -9974,6 +9975,62 @@ boundary** leaves `HEAD` internally inconsistent, and all three sources then agr
 is wrong — measured, a ~90-minute window where a budget raise had landed and the bytes justifying
 it had not. Agreement is evidence about the **trees**, never about the change. The probe now says
 so in the silent case, which is the only case where a reader forms the belief.
+
+## W-97 — When a surface is removed, repair the POINTERS and leave the RECORDS
+
+**Valid:** dated 2026-09-02
+
+**The cut:** when a change removes a surface, sweep for references to it and sort each into
+**pointer** — prose telling a reader to go consult that surface — or **record** — prose narrating
+what once happened. Repair the pointers. **Leave the records**, because deleting one to satisfy a
+sweep falsifies the evidence that the surface ever existed.
+
+**Measured 2026-09-02** on the removal of `issue-clusters.md`'s `n` column: **14** surviving
+references corpus-wide, **13 records, 1 pointer**. The records are quoted panic output in two bug
+files, past-tense incident narration in `claim-decay.md:401` and `issue-clusters.md:493`, and the
+removal commit's own "the column is gone" notes. A linter that flagged all 14 would have been
+right 1 time in 14 and destructive the other 13.
+
+The one pointer was a live section banner in `tests/issue_clusters.rs` describing a check the
+removal deleted, repaired at `6070ae75`. A second, in `issue-clusters.md:385`, was found and
+repaired independently by `codescout-0d` at `005dd9e6` — and its shape is the sharper one: **that
+sentence was itself the remedy for a stale claim**, so a fix outlived its own surface, with nothing
+pointing backwards from the removal commit. No diff hunk in that paragraph, no broken link, no
+check.
+
+**The mechanism, which is the point — the discriminator above still needs a human, this does not.**
+Every script path named in the files you touched, statted:
+
+```
+grep -ohE 'scripts/[a-z_-]+\.(py|sh)' <touched files> | sort -u    # then stat each
+```
+
+It caught a dangling pointer **inside the commit that was fixing dangling pointers** — the banner's
+first draft cited `scripts/probe-cluster-express.py`, which does not exist — under a minute after
+writing it, by an author who could not have been more primed. Priming did not help; the check did.
+
+**Its denominator, published because a check mentioned only when it fires has none.** `codescout-0d`
+ran the same check across its own six touched files plus `docs/conventions/*.md`: **10 paths, 9
+resolve, 1 the known `scripts/does-not-exist.sh` fixture**, ~10 seconds, no defect found. That null
+result is the reason the catch above is worth anything. Both runs flagged the same fixture — a
+quoted probe result whose whole point is that the path is absent — and both verified it rather than
+waving it through, which is the step "obviously a fixture" skips.
+
+**Offered by `codescout-0d`, recorded as offered:** it filed a bug whose `## Root cause`
+confidently named the wrong mechanism (`git commit -- <paths>` staging into the real index), having
+just written the reproduction, and learned otherwise only because a peer's unrelated inference was
+cheap to test. The true cause is a temporary `GIT_INDEX_FILE` during partial-commit hooks. Same
+shape one level down: maximally primed, still wrong, caught by something mechanical run by someone
+not looking for it.
+
+**Where it stops being mechanisable, stated rather than papered over.** `0d`'s proposed twin — a
+check that a bug file's `## Root cause` has an executed reproduction attached — has no
+implementation either of us can see, and it left it there rather than inventing one. That is the
+honest boundary: the *pointer/record* cut needs a reader, the *path resolves* check does not, and
+the *claim was tested* check is currently neither.
+
+**Promotion candidate, not promoted:** if the pointer/record cut recurs on a third removal it earns
+a place in `docs/conventions/`. Two instances (this one, `0d`'s) are not a rule yet.
 
 ## Template for new entries
 
