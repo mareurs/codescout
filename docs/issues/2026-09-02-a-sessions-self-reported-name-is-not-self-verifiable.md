@@ -147,10 +147,36 @@ excused.
 
 ## Workarounds
 
-Attribute by **sessionId** or **socket PID**, never by name. Reply by copying a message's
-`from=` attribute verbatim. When quoting a peer's identity to a third party, state the field:
-`sessionId 9716a130`, not `codescout-17`. Read a name as a display label, not an identifier.
+**Attribute by `sessionId`. Route by socket PID. Never use a name for either.** Three tiers,
+not two — and this file's first version got that wrong, see below.
 
+| identifier | lifetime | good for |
+|---|---|---|
+| `sessionId` | survives restart, profile change, compaction, resume | **attribution** |
+| PID / socket path | dies on restart — shorter than the session | **routing only** |
+| name | re-minted by compaction, resume, or a restart under another profile | neither; a display label |
+
+Reply by copying a message's `from=` attribute verbatim. When quoting a peer's identity to a
+third party, state the field: `sessionId 9716a130`, not `codescout-17`.
+
+> **Corrected 2026-09-02, within an hour of filing, and the correction is the same shape as
+> the bug.** This section first read *"attribute by **sessionId** or **socket PID**, never by
+> name"* — pairing the two as if equally durable. A peer supplied the counterexample from its
+> own restart, verified here: sessionId `953b5e77-b804-4956-9198-b3ac8696b4c9` moved from
+> **PID 2299153, profile `.claude-kat`, name `codescout-00`** to **PID 1720384, profile
+> `.claude`, name `codescout-cc`** when its operator restarted the CLI under a different
+> profile and the harness resumed the same conversation. PID 2299153 is dead and its registry
+> entry is gone; 1720384 is alive with the **same sessionId**.
+>
+> So a PID is stable only *within a process lifetime*, which is a boundary shorter than the
+> session and one this file published without. **The consequence runs the useful way:**
+> `.git/session-stage-log` and `scripts/file-provenance.py` are both keyed on sessionId, so
+> that peer's rows kept attributing to it correctly across the restart. Only *addressability*
+> broke — anyone holding the old socket path or the old name had a dead handle. Attribution
+> survived precisely because it does not use the two fields that decayed.
+>
+> Anything that assumes pid↔session is stable for the life of a sessionId has a live
+> counterexample: one sessionId, two PIDs, two profiles, hours apart.
 ## Resume
 
 Amend `CLAUDE.md` § *Observer Blindness*'s "the id is *given*, not inferred" sentence to name
@@ -172,4 +198,3 @@ sentence is load-bearing for a procedure several sessions are actively following
 - `docs/trackers/observer-blindness.md` `OB-1` — knowing the class prevents no instances.
 - Observation and withdrawal by sessionId 9716a130; the field-provenance diagnosis was its
   reply to this session's measurement.
-
