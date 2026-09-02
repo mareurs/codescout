@@ -4,6 +4,39 @@ use serde_json::{json, Value};
 
 use super::{RecoverableError, Tool, ToolContext};
 
+/// `event_create` arrives as `{id, event: {kind, payload, …}}` so the event kind never
+/// shares a key with the document `kind`. `event_create::Args` is flat and reads
+/// `artifact_id`; lift the object and carry the id under that name.
+fn flatten_event_args(args: &Value) -> Result<Value> {
+    let id = args["id"].as_str().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "doc(action=\"event_create\") requires 'id'",
+            "e.g. doc(action=\"event_create\", id=\"<16-hex>\", event={kind: \"note\", payload: {text: \"…\"}})",
+        )
+    })?;
+    let mut flat = match args.get("event") {
+        Some(Value::Object(m)) => m.clone(),
+        _ => {
+            return Err(RecoverableError::with_hint(
+                "doc(action=\"event_create\") requires an `event` object",
+                "event={kind: <note|reviewed|status_change|field_patch|superseded_by|external_signal|intent|verdict>, payload: {…}}",
+            ))
+        }
+    };
+    flat.insert("artifact_id".into(), json!(id));
+    Ok(Value::Object(flat))
+}
+
+/// `event_list` says `id`; `timeline::Args` reads `artifact_id`. Copy, don't rename the
+/// module's field — internals keep their names.
+fn id_as_artifact_id(args: &Value) -> Value {
+    let mut a = args.clone();
+    if let (Some(id), Some(obj)) = (args.get("id").cloned(), a.as_object_mut()) {
+        obj.entry("artifact_id").or_insert(id);
+    }
+    a
+}
+
 pub struct Artifact;
 
 #[async_trait]
@@ -35,7 +68,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -85,7 +118,7 @@ impl Tool for Artifact {
                     "type": "integer",
                     "default": 50,
                     "maximum": 500,
-                    "description": "find: max rows (default 50, max 500)."
+                    "description": "find: max rows (default 50, max 500). event_list: max events (default 50)."
                 },
                 "offset": {
                     "type": "integer",
@@ -95,7 +128,7 @@ impl Tool for Artifact {
                 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry: document id (16-hex). find and create take none."
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list: document id (16-hex). find and create take none."
                 },
                 "include_links": { "type": "boolean", "default": false, "description": "get: include link edges" },
                 "links_direction": {
@@ -221,7 +254,39 @@ impl Tool for Artifact {
                 "anchor_heading": {
                     "type": "string",
                     "description": "append_entry: prose ledgers — pass with `title` + `body` (all three or none; a partial set is refused naming what is missing) and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
-                }
+                },
+                "event": {
+                    "type": "object",
+                    "description": "event_create: the event to append — an immutable record anchored to git, distinct from a field patch. `kind` lives inside this object so it never shares a key with the document `kind`.",
+                    "required": ["kind", "payload"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": super::event_create::ALLOWED_KINDS,
+                            "description": "event kind"
+                        },
+                        "payload": {
+                            "type": "object",
+                            "description": format!("event payload (a JSON object). {}", super::event_create::payload_requirements_sentence())
+                        },
+                        "author": { "type": "string", "description": "event author" },
+                        "anchor_commit": { "type": "string", "description": "git commit to anchor the event to" },
+                        "head_commit": { "type": "string", "description": "HEAD commit at write time — pass it explicitly when the task produces no commit of its own" },
+                        "parent_event_id": { "type": "string", "description": "parent event id for threading" },
+                        "resolves_intent_event_id": { "type": "string", "description": "intent event id this verdict resolves" },
+                        "also_mutates": { "type": "array", "items": { "type": "string" }, "description": "additional document ids mutated by this event" },
+                        "source": {
+                            "type": "object",
+                            "description": "external signal source",
+                            "properties": { "uri": { "type": "string" }, "kind": { "type": "string" }, "payload": {} },
+                            "required": ["uri", "kind"]
+                        }
+                    }
+                },
+                "kinds": { "type": "array", "items": { "type": "string" }, "description": "event_list: filter to these event kinds" },
+                "since": { "type": "integer", "format": "int64", "description": "event_list: return events after this ms epoch" },
+                "until": { "type": "integer", "format": "int64", "description": "event_list: return events before this ms epoch" }
             }
         })
     }
@@ -229,7 +294,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry",
+                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list",
             )
         })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
@@ -250,8 +315,10 @@ impl Tool for Artifact {
             "state_at" => super::state_at::call(ctx, args).await,
             "append_entry" => super::append_entry::call(ctx, args).await,
             "update_entry" => super::update_entry::call(ctx, args).await,
+            "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
+            "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list"
             ))),
         }
     }
@@ -392,7 +459,7 @@ mod tests {
 
     const PROBE_NO_SUCH_ID: &str = "0000000000000000";
 
-    const PROBE_ACTIONS: [&str; 12] = [
+    const PROBE_ACTIONS: [&str; 14] = [
         "find",
         "get",
         "create",
@@ -405,6 +472,8 @@ mod tests {
         "state_at",
         "append_entry",
         "update_entry",
+        "event_create",
+        "event_list",
     ];
 
     /// The minimum type-valid args each action needs to get *past* deserialisation.
@@ -457,6 +526,16 @@ mod tests {
             }
             "state_at" => {
                 m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+            }
+            "event_list" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+            }
+            "event_create" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert(
+                    "event".into(),
+                    json!({"kind": "note", "payload": {"text": "probe"}}),
+                );
             }
             "create" => {
                 m.insert("kind".into(), json!("bug"));
@@ -539,6 +618,112 @@ mod tests {
                  no such field — so the param is silently discarded and the query runs \
                  at defaults. Either honor it on find or stop documenting it there."
             );
+        }
+    }
+
+    /// One catalog row, no file. `TestArtifactRowBuilder` is what `timeline.rs` tests use.
+    fn seed_row(ctx: &ToolContext, id: &str) {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
+        let cat = ctx.catalog.lock();
+        upsert(&cat, &TestArtifactRowBuilder::new(id).build()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn event_create_lifts_the_nested_event_and_event_list_reads_it_back() {
+        let ctx = mk_ctx();
+        let id = "aaaaaaaaaaaaaaaa";
+        seed_row(&ctx, id);
+        let created = Artifact
+            .call(
+                &ctx,
+                json!({"action": "event_create", "id": id,
+                               "event": {"kind": "note", "payload": {"text": "hello"}}}),
+            )
+            .await
+            .expect("event_create succeeds");
+        assert!(created["event_id"].is_string(), "{created}");
+        let listed = Artifact
+            .call(&ctx, json!({"action": "event_list", "id": id}))
+            .await
+            .expect("event_list succeeds");
+        let events = listed["items"].as_array().expect("items array");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["kind"], "note");
+    }
+
+    #[tokio::test]
+    async fn event_create_without_an_event_object_is_refused_with_the_shape() {
+        let err = Artifact
+            .call(
+                &mk_ctx(),
+                json!({"action": "event_create", "id": "aaaaaaaaaaaaaaaa", "kind": "note"}),
+            )
+            .await
+            .unwrap_err();
+        let re = err.downcast_ref::<RecoverableError>().expect("recoverable");
+        assert!(
+            re.hint.as_deref().unwrap().contains("event={kind:"),
+            "{re:?}"
+        );
+    }
+
+    /// Moved verbatim from `artifact_event.rs` (Task 4 folded that tool into `doc`).
+    ///
+    /// The first half executes `validate_payload` rather than reading
+    /// `REQUIRED_PAYLOAD_FIELDS`, so the table cannot drift from the validator: drop a
+    /// check there and this fails instead of the schema confidently describing a rule that
+    /// is no longer enforced.
+    ///
+    /// See `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
+    #[test]
+    fn every_required_payload_field_is_enforced_and_advertised() {
+        use crate::librarian::tools::event_create::REQUIRED_PAYLOAD_FIELDS;
+
+        let desc = Artifact.input_schema()["properties"]["event"]["properties"]["payload"]
+            ["description"]
+            .as_str()
+            .expect("payload must carry a description")
+            .to_string();
+
+        for (kind, fields) in REQUIRED_PAYLOAD_FIELDS {
+            if fields.is_empty() {
+                assert!(
+                    desc.contains(kind),
+                    "`{kind}` has no required keys and the description must say so: {desc}"
+                );
+                continue;
+            }
+            assert!(
+                desc.contains(kind),
+                "the description must name kind `{kind}`: {desc}"
+            );
+
+            for omitted in *fields {
+                // Every OTHER required field present, so the failure is unambiguously the
+                // omitted one and not simply the first check in the arm.
+                let mut payload = serde_json::Map::new();
+                for f in *fields {
+                    if f != omitted {
+                        payload.insert((*f).to_string(), serde_json::json!("x"));
+                    }
+                }
+                let err = crate::librarian::tools::event_create::validate_payload(
+                    kind,
+                    &serde_json::Value::Object(payload),
+                )
+                .expect_err("a missing required payload field must be refused");
+
+                assert_eq!(
+                    err.to_string(),
+                    format!("{kind}.{omitted} required"),
+                    "the refusal must name kind and field, which is the shape \
+                     usage::db::normalize_err_family classifies on"
+                );
+                assert!(
+                    desc.contains(omitted),
+                    "`{kind}.{omitted}` is enforced but never advertised: {desc}"
+                );
+            }
         }
     }
 }

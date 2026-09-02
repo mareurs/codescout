@@ -24,7 +24,7 @@ fn default_limit() -> usize {
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact_event(action=\"list\") requires 'artifact_id': {e}"), "e.g. artifact_event(action=\"list\", artifact_id=\"<16-hex>\"). Add kinds=[...] to filter, or since/until (ms epoch) to bound the window.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"event_list\") requires 'id': {e}"), "e.g. doc(action=\"event_list\", id=\"<16-hex>\"). Add kinds=[...] to filter, or since/until (ms epoch) to bound the window.")
     })?;
     let kinds_owned: Option<Vec<String>> = a.kinds.clone();
     let kinds_refs: Option<Vec<&str>> = kinds_owned

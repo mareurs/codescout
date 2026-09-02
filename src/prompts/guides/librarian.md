@@ -314,14 +314,14 @@ nothing, which is why it lives here rather than in the tool schema.
 Which params each mode needs is on `root` / `old_root` / `new_root` in the schema,
 because that is what you need to *form* the call.
 
-## artifact_event — Event Log
-<!-- serves: artifact_event.create, artifact_event.list -->
+## doc — Event Log
+<!-- serves: doc.event_create, doc.event_list -->
 
 Events are immutable, append-only, anchored to git commits.
 
 ```
-artifact_event(action="create", artifact_id="...", kind="note", payload={...})
-artifact_event(action="list",   artifact_id="...", kinds=["note", "verdict"])
+doc(action="event_create", id="...", event={kind: "note", payload: {...}})
+doc(action="event_list",   id="...", kinds=["note", "verdict"])
 ```
 
 Event kinds: `note`, `reviewed`, `status_change`, `field_patch`, `superseded_by`,
@@ -357,7 +357,7 @@ main checkout's catalog instead of a wholesale fork:
   it writes one. `find`/`get` dedup shadow vs. main — where both exist for
   the same lineage, the shadow wins and is annotated `"overlay": true`.
 - **Fork-on-first-write:** the first mutating call (`append_entry`, `update`,
-  `artifact_event`, `artifact_augment`, `link`) against a main-root artifact
+  `doc(event_create)`, `artifact_augment`, `link`) against a main-root artifact
   from a worktree session forks it — seeds a shadow row at the worktree path,
   a `worktree_fork` event carrying the fork-time base params/frontmatter, and
   a `worktree_of` lineage link. Every write after that lands on the shadow.

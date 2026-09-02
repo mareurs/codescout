@@ -300,15 +300,22 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// (`doctor` on `fix` being present at all, so a dry run is guarded too).
     ///
     /// docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
+    ///
+    /// Task 4 folded the `artifact_event` tool into `doc` (`event_create` /
+    /// `event_list`); `event_list` joins the doc read-set below, `event_create`
+    /// falls through the `doc` arm's default (write), same as every other
+    /// mutating `doc` action.
     fn is_write(&self, input: &Value) -> bool {
         let action = input.get("action").and_then(Value::as_str);
         match self.inner.name() {
-            // CRUD tool. find/get/graph/state_at are the only reads; create,
-            // update, move, delete, link, graft, append_entry and update_entry
-            // all mutate, as does any action added after this line.
-            "doc" => !matches!(action, Some("find" | "get" | "graph" | "state_at")),
-            // Append-only event log: `create` writes, `list` reads.
-            "artifact_event" => action == Some("create"),
+            // CRUD tool. find/get/graph/state_at/event_list are the only reads;
+            // create, update, move, delete, link, graft, append_entry,
+            // update_entry and event_create all mutate, as does any action
+            // added after this line.
+            "doc" => !matches!(
+                action,
+                Some("find" | "get" | "graph" | "state_at" | "event_list")
+            ),
             // Always attaches/replaces/merges an augmentation row.
             "artifact_augment" => true,
             // gather / list_stale are both read-only — the write-back is

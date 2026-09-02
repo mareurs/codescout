@@ -54,7 +54,7 @@ pub struct SourceArg {
     pub payload: Option<Value>,
 }
 
-const ALLOWED_KINDS: &[&str] = &[
+pub(crate) const ALLOWED_KINDS: &[&str] = &[
     "note",
     "reviewed",
     "status_change",
@@ -271,7 +271,7 @@ fn next_monotonic_id() -> String {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("artifact_event(action=\"create\") requires 'artifact_id', 'kind' and 'payload': {e}"), "e.g. artifact_event(action=\"create\", artifact_id=\"<16-hex>\", kind=\"note\", payload={\"text\": \"...\"}). Required payload keys depend on kind: note->text, status_change->to, field_patch->field+to, verdict->outcome.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"event_create\") requires 'id', 'event.kind' and 'event.payload': {e}"), "e.g. doc(action=\"event_create\", id=\"<16-hex>\", event={kind: \"note\", payload: {\"text\": \"...\"}}). Required payload keys depend on kind: note->text, status_change->to, field_patch->field+to, verdict->outcome.")
     })?;
 
     if !ALLOWED_KINDS.contains(&a.kind.as_str()) {

@@ -382,7 +382,6 @@ pub mod schema_validate;
 pub mod tracker_design;
 
 pub mod artifact;
-pub mod artifact_event;
 pub mod artifact_refresh;
 pub mod librarian;
 
@@ -403,7 +402,6 @@ pub use temp_write_guard::TempGuardEnv;
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(artifact::Artifact),
-        Arc::new(artifact_event::ArtifactEvent),
         Arc::new(augment::ArtifactAugment),
         Arc::new(artifact_refresh::ArtifactRefreshTool),
         Arc::new(librarian::Librarian),
@@ -589,9 +587,7 @@ mod required_param_routing_tests {
                 "{name}: the refusal must name what wanted the field; got: {msg}"
             );
             assert!(
-                msg.contains("doc(")
-                    || msg.contains("artifact_event(")
-                    || msg.contains("artifact_refresh("),
+                msg.contains("doc(") || msg.contains("artifact_refresh("),
                 "{name}: the refusal must name the TOOL and action, since `missing field \
                  \\`x\\`` names neither; got: {msg}"
             );

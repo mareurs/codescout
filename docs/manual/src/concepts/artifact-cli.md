@@ -42,8 +42,8 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 
 | Subcommand | Mirrors MCP action |
 |---|---|
-| `create` | `artifact_event(action="create")` |
-| `list` | `artifact_event(action="list")` |
+| `create` | `doc(action="event_create")` |
+| `list` | `doc(action="event_list")` |
 
 ### `codescout artifact-refresh ...` — augmentation lifecycle
 

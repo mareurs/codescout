@@ -2600,7 +2600,7 @@ mod redesign_invariants {
         // After Task 14 lands, the librarian block must not be appended.
         let rendered = build_server_instructions(None);
         assert!(
-            !rendered.contains("artifact_event(action=\"create\")"),
+            !rendered.contains("doc(action=\"event_create\")"),
             "librarian guide content should not be in instructions; \
              move it to get_guide(\"librarian\")"
         );

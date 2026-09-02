@@ -2486,7 +2486,7 @@ mod tests {
     }
 
     /// Name-prefix classifier for the librarian tool family (`artifact`,
-    /// `artifact_event`, `artifact_augment`, `artifact_refresh`, `librarian`,
+    /// `artifact_augment`, `artifact_refresh`, `librarian`,
     /// `tracker_design`, `workspace_state_at`, ...), used only to size the
     /// "core" (non-librarian) tool surface in `server_registers_all_tools`
     /// and `server_tool_count_is_l3_target`. NOT used for the description-cap
@@ -2534,8 +2534,8 @@ mod tests {
     /// Returning `None` is what makes an unclassified tool a failure rather than a pass.
     fn action_contract(tool: &str) -> Option<ActionContract> {
         Some(match tool {
-            "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_event"
-            | "artifact_refresh" | "librarian" => ActionContract::Inventory,
+            "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_refresh"
+            | "librarian" => ActionContract::Inventory,
             // `doc` (12 actions) and `edit_markdown` (5) describe by theme on
             // purpose: an inventory would not fit the surface budget, and the client
             // already receives the `action` enum itself in the schema. The thematic arm
@@ -6472,7 +6472,7 @@ mod tests {
         // polarities are asserted below. An entry here is therefore not a claim
         // that the action never writes — only that its no-argument call does not.
         let read_sets: &[(&str, &[&str])] = &[
-            ("artifact", &["find", "get", "graph", "state_at"]),
+            ("doc", &["find", "get", "graph", "state_at", "event_list"]),
             (
                 "librarian",
                 &[
@@ -7346,9 +7346,10 @@ mod guide_hint_tests {
         assert!(!server.is_write_call("doc", &json!({"action": "get"})));
         assert!(!server.is_write_call("doc", &json!({"action": "graph"})));
         assert!(!server.is_write_call("doc", &json!({"action": "state_at"})));
-        // artifact_event: create writes, list reads.
-        assert!(server.is_write_call("artifact_event", &json!({"action": "create"})));
-        assert!(!server.is_write_call("artifact_event", &json!({"action": "list"})));
+        // doc(event_create/event_list): create writes, list reads (folded from
+        // the deleted `artifact_event` tool in Task 4).
+        assert!(server.is_write_call("doc", &json!({"action": "event_create"})));
+        assert!(!server.is_write_call("doc", &json!({"action": "event_list"})));
         // artifact_augment always writes (no read action).
         assert!(server.is_write_call("artifact_augment", &json!({"id": "x"})));
         // artifact_refresh gather/list_stale are read-only.
@@ -7478,56 +7479,51 @@ mod guide_hint_tests {
         );
     }
 
-    #[tokio::test]
     /// Pre-Task-8 name retained; behaviour updated deliberately for section-grain
     /// (Task 8, `feat(guides): emit section slices for declaring topics, preamble
     /// on no match`). Before that change, `librarian` was delivered as one whole
     /// topic gated on a bare `"librarian"` ledger key, so ANY second
     /// librarian-topic tool call in the same session — regardless of shape — hit
     /// the same key and got nothing. `librarian.md` declares
-    /// `artifact_event.create, artifact_event.list` (a section distinct from
-    /// `artifact.find`'s), so under section grain a genuinely different declared
-    /// shape now legitimately delivers its own section once; only a REPEAT of the
-    /// same shape delivers nothing. The old blanket "no hint" assertion is now
-    /// false by design, not a regression.
+    /// `doc.event_create, doc.event_list` (a section distinct from `doc.find`'s),
+    /// so under section grain a genuinely different declared shape now
+    /// legitimately delivers its own section once; only a REPEAT of the same
+    /// shape delivers nothing. The old blanket "no hint" assertion is now false
+    /// by design, not a regression. Task 4 folded `artifact_event` into `doc`
+    /// (`action="event_list"`), so both calls now go through the single `doc`
+    /// tool handle instead of two distinct tools.
+    #[tokio::test]
     async fn a_distinct_declared_shape_delivers_its_own_section_but_a_repeat_does_not() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
-        let artifact = tool_by_name(&server, "doc");
-        let event = tool_by_name(&server, "artifact_event");
-        let _ = artifact
+        let doc = tool_by_name(&server, "doc");
+        let _ = doc
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
             .unwrap();
-        let first = event
-            .call_content(
-                json!({"action": "list", "artifact_id": "nonexistent"}),
-                &ctx,
-            )
+        let first = doc
+            .call_content(json!({"action": "event_list", "id": "nonexistent"}), &ctx)
             .await
             .unwrap();
         // `extract_hint` only proves SOMETHING shipped — the `_guide_hint`
         // field fires for a matched section AND for the preamble fallback
-        // alike, so it cannot tell "artifact_event.list matched its declared
+        // alike, so it cannot tell "doc.event_list matched its declared
         // section" apart from "no section matched, here's the preamble".
-        // Deleting `librarian.md`'s `<!-- serves: artifact_event.create,
-        // artifact_event.list -->` declaration would leave this assertion
+        // Deleting `librarian.md`'s `<!-- serves: doc.event_create,
+        // doc.event_list -->` declaration would leave this assertion
         // green while its stated claim ("delivers its own section") went
         // false. Assert on the actual section marker instead.
         let first_guide = guide_blocks(&first).join("");
         assert!(
-            first_guide.contains("§ artifact_event — Event Log"),
-            "a distinct declared shape (artifact_event.list) must deliver its own \
-             `artifact_event — Event Log` section, even though a differently-shaped \
+            first_guide.contains("§ doc — Event Log"),
+            "a distinct declared shape (doc.event_list) must deliver its own \
+             `doc — Event Log` section, even though a differently-shaped \
              librarian-topic call already fired this session; got: {}",
             first_guide.chars().take(400).collect::<String>()
         );
-        let second = event
-            .call_content(
-                json!({"action": "list", "artifact_id": "nonexistent"}),
-                &ctx,
-            )
+        let second = doc
+            .call_content(json!({"action": "event_list", "id": "nonexistent"}), &ctx)
             .await
             .unwrap();
         assert!(
