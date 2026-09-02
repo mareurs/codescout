@@ -255,6 +255,34 @@ population accumulator, which is honest, and per-tool is separately covered by
 `every_tool_description_under_cap`. That correction is kept because a class shown once is an
 incident, and a mis-assigned member is a different error from a short count.
 
+### A symbol name is a claim scoped to a TREE — and three doubts that confirmed
+
+**The correction above was itself published without its scope.** Both greps were right.
+`every_tool_description_is_under_its_cap` exists on branch `tool-collapse`
+(`src/server.rs:2445`, where a refactor replaced the `experiments` test) and **nowhere on
+`experiments`**; `every_tool_description_under_cap` exists on `experiments` (`:3354`) and **nowhere
+on that branch**. So "zero definitions" and "one definition" were both correct answers to different
+questions, and `0d2ab2b1`'s commit message — which reads *"has ZERO definitions … one was wrong"* —
+is true of this tree and uncharitable about the peer who cited it from theirs. **When citing a
+symbol across sessions on a shared repo, name the branch.** On a checkout with live worktrees that
+is not pedantry: it is the same shape as everything else on this page, a claim true inside a
+boundary and published without it.
+
+**Three doubts raised in that run all confirmed, and they are recorded because confirmations are
+the denominator this page's recording-filter law asks for.** None is a catch; absorbing them as
+catches is what makes a population look self-correcting.
+
+| doubt raised | outcome |
+|---|---|
+| "the per-tool cap is 1800, but a commit message argues from 300 — is one wrong?" | **Both real, different populations.** `tool_descriptions_stay_under_budget` (`src/server.rs:2449`) asserts `d.len() <= 300` and skips the librarian family via `is_librarian_tool`; `every_tool_description_under_cap` (`:3354`) asserts `CAP = 1800` over everything. A non-librarian tool is bound by 300, so the 304-char breach that commit describes was exact. |
+| "`over.is_empty()` in the per-tool cap test is an absence assertion, monotone under an empty population" | **Closed by a pair.** `server_registers_all_tools` (`:2228`) and `server_tool_count_is_l3_target` (`:2278`) pin the count independently, so a broken or empty `server.tools` reds there first. |
+| "is the aggregate/member split covered elsewhere, or is this systemic?" | **Generally covered by a pair, where anyone has looked.** Both cases above are two-level. The p50 test is the one where the pair was missing — which is what makes it an instance rather than the norm. |
+
+Note the shape of the second and third: *the aggregate/member split is usually guarded by two tests
+at different levels.* That is the remedy pattern, and its absence — not the presence of an
+aggregate — is what identifies an instance. An aggregate assertion is not a defect; an aggregate
+assertion **standing alone** where a per-member claim is being made is.
+
 ## Related
 
 - The laws themselves: [`CLAUDE.md`](../../CLAUDE.md) § *Testing Discipline*.
