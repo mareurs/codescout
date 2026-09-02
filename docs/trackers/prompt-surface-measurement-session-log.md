@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 49
+entry_high_water_F: 50
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -77,6 +77,7 @@ surfaces, not the definition.
 | F-47 | A review base recorded before dispatch silently widened to three peers' commits — one git identity means `%an` cannot separate them | open |
 | F-48 | F-47's remedy names the unit "task", but the thing that needs a base is the DISPATCH — so a fix round re-uses the implementation commit and widens 14× | open |
 | F-49 | One fact had four representations, and three review rounds each fixed the one named — a grep over the known phrasings cannot find the form nobody has described yet | open |
+| F-50 | I attributed three files from index membership while citing the Session-Id trailer as the right channel in the same message — and the true author was a third session | open |
 
 ## Wins Index
 
@@ -4261,6 +4262,29 @@ Plus a fourth form the same rounds turned up piecemeal: `EngineDecl::emit_post`'
 **Remedy, and its limit.** Ask *"how many representations does this fact have?"* before repairing any of them — count the sites, then fix the count. For a fact with a **data** representation, prefer deriving it: `writes_at` could be checked against the crate's actual `ledger.insert` call sites, which would convert this from a documentation habit into a gate. What this entry does **not** claim is that the count is now right: rounds 1 and 2 both ended with me believing I had swept.
 
 **Rests on:** `observer-blindness:OB-1` § *the third position* — a check that runs when nobody is worried, rather than a resolution to be careful.
+
+## F-50 — I attributed three files from index membership while citing the Session-Id trailer as the right channel in the same message — and the true author was a third session
+
+**Valid:** invariant
+
+**Severity:** med — the assertion was the recommendation. I told a peer three files were theirs; they were a third session's, and had the peer accepted it they would have gone to repair records they had never written.
+
+**Status:** open
+
+**Observed:** A peer's bare `git commit` captured four of my staged files. Handling it, I told them their name appeared in three bug files and added *"all three were in the index as your staged paths when I looked."* Both halves of the inference were wrong:
+
+1. **Index membership is not authorship** on a shared index. It establishes that a path was staged, and says nothing about who wrote it — which is the *same* inference that produced the capture I was responding to.
+2. The authorship it appeared to establish **was not even the peer's.** `git log -1 --format='%b'` on each file returns `Session-Id: ffb95976-dc89-4cca-87aa-c026544faf2f` — a **third** session. `git show --name-only` across all four of the peer's commits returns **0** hits for the three filenames.
+
+**The positive identifier was one command away, and I cited it for my own work in the same message.** Every commit in this repo carries a `Session-Id:` trailer; I named mine as the channel I want my work attributed by, then reached for adjacency for someone else's. `CLAUDE.md` § *Observer Blindness* states the rule — *"identify positively, never by elimination"* — and `reconnaissance-patterns:R-19` states its narrower form: asserting a specific checkable fact without reading it this session, **especially when the assertion will be presented as a recommendation**.
+
+**Why "be careful" is the wrong reading.** The error is not that I skipped a check I knew about; it is that **`git status` was already open in front of me and `git log` was not.** Index membership is the fact the tool I had just run happens to report, and it is *adjacent* to authorship in the way `git diff --stat`'s insertions are adjacent to it — near enough to substitute without the substitution feeling like one. The available instrument shaped the claim. That is the same mechanism as `F-49`'s finding-shaped field of view, one instrument over.
+
+**What the peer's correction added that I could not have derived.** The name is in those files *because they had signed early peer messages with it before understanding the collision* — so the ambiguity has an authoring history, not merely a state, which is why three of eight occurrences already carry the disambiguating sessionId. They had begun repairing it mid-stream. No amount of reading the files would have surfaced that; it took asking.
+
+**Remedy.** For any authorship claim about a shared checkout: `git log -1 --format='%b' -- <path>` and read the `Session-Id:` trailer, or ask the session to quote its own scratchpad path — the harness makes the id a path component, so it is *given* rather than inferred. Never `git status`, never `git diff --stat`, never index membership. And when the claim is going into a message **to** the party it is about, the cost of being wrong is that they act on it: state the instrument you used in the same sentence as the claim, so they can refuse it.
+
+**Rests on:** `reconnaissance-patterns:R-19`; `observer-blindness:OB-1`.
 
 ## Template for new entries
 
