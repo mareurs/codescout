@@ -135,11 +135,62 @@ refused. The coupling is real and belongs to whoever untangles that ledger.
 
 It chose exclusion, and documented it.
 
-`codescout-69` reported observing the other branch on 2026-09-02: its
-`memory-description-omits-the-refresh-anchors-action.md` appeared **staged by another session**
-without being released to anyone and without being asked. *(Reported, not verified here — by the
-time this file's author measured, the entry was `??` again and both gates were green. The
-transient is consistent with the incident and is not independent confirmation of it.)*
+`codescout-69`'s `memory-description-omits-the-refresh-anchors-action.md` was **staged by
+another session** on 2026-09-02 without being released to anyone and without being asked. The
+cause is verified, and it is compliance rather than intrusion: `codescout-05` staged it, said so
+directly and unprompted, and gave its reason — it was following **this ledger's own written
+instruction**, `docs/trackers/issue-clusters.md:872`, the last clause of IC-11's `**Members:**`
+field:
+
+```
+`git add` first, then count, or the gate and the prose disagree in the
+direction that looks like no change.
+```
+
+That instruction is *correct*. `tests/issue_clusters.rs:151-160` counts via `git ls-files
+docs/issues`, so an untracked member is genuinely invisible and "stage first, then count" is the
+right fix **on a solo tree**. The topology is what breaks it: one shared index means the only way
+to make a file countable is to make it committable by whoever commits next. **The ledger's own
+remediation text is therefore a participant in the defect, not a bystander.**
+
+#### A third arrival route — the reader, who has nothing to commit
+
+The two routes above are both **writers** contending for the count. This is a third, and it is
+worse, because a reader cannot opt out by declining to write.
+
+`codescout-05` had nothing to commit to this ledger. It staged another session's file **solely to
+obtain a number**. The `git add` was not a write to the ledger at all — it was a *read* of the
+corpus, and the only instrument the ledger prescribes for that read happens to be a mutation of
+state six other sessions were also using. For roughly two minutes that file sat in another
+session's staged index while that session held a coupled member+count edit; had it committed in
+that window it would have been refused by `refuse an index commit carrying another session's
+staged paths`, naming a file it had never seen, for a reason unrelated to its work.
+
+The transient closed the way it opened — by a third party. `codescout-26`'s subagent found four
+paths staged where it expected one, ran `git restore --staged` on the three that were not its
+own, and committed by pathspec. `codescout-26` reported this unprompted and recorded it as its
+own rather than the subagent's, noting that committing by pathspec **already** ignores unnamed
+index paths, so the unstaging bought nothing and cost someone their staging intent — CLAUDE.md's
+shared-checkout rule 6 (*do not repair shared state, report it*) one step earlier than the case
+it names.
+
+**The read side is separable from the write side, and only the write side needs this file's
+remedy.** The pre-commit hook reads the index correctly and deliberately: it asks *what does this
+commit ship*, which is a question about the index by definition. The `**Members:**` prose asks a
+different question — *how many members does this class have* — a fact about the corpus and about
+nobody's staging. `codescout-05` proposed deriving it index-free, and it works (verified
+2026-09-02):
+
+```
+tracked (git grep -clE, anchored)          19
+untracked, not ignored (git ls-files -o)    1
+UNION                                      20      <- correct, no `git add` issued
+plain filesystem grep -r                   20
+```
+
+Pointing the prose instruction at that union instead of at `git add` removes readers from the
+queue entirely and leaves the hook's index semantics untouched. It does **not** fix the write-side
+serialization this file is about — but on 2026-09-02 the readers were two of the three collisions.
 
 So serialization does not merely **delay** writers. It makes them **adopt each other's work in
 order to make the counts legal** — which converts a queueing problem into an authorship and
