@@ -67,7 +67,7 @@ pub fn first_h1(body: &str) -> Option<String> {
 /// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
 /// path and the forced-re-embed path through the unchanged-row early return.
 /// Keeping it in one place is what stops those two from drifting apart.
-fn embed_queue_items(
+pub(crate) fn embed_queue_items(
     cat: &Catalog,
     id: &str,
     title: Option<String>,
@@ -607,6 +607,126 @@ pub fn write_embeddings_with(
     Ok(())
 }
 
+/// Write pre-computed CHUNK vectors into `artifact_vec_v2`.
+///
+/// The v2 table is keyed by `chunk_id`, not `artifact_id` — one row per chunk.
+/// As with [`write_embeddings_with`], `vec0` does not honor `INSERT OR REPLACE`
+/// conflict resolution, so each id is explicitly `DELETE`d before insert, which
+/// keeps re-embedding idempotent.
+///
+/// Mirrors [`write_embeddings_with`]'s dimension guard in all three parts —
+/// zero-dim, intra-batch consistency, and agreement with existing rows — and
+/// runs every check BEFORE the first `DELETE`, so a rejected batch is a loud,
+/// safe stop rather than a silent partial write. The intra-batch check is the
+/// F-6b case: an embedder returning a 1-element error sentinel mixed into an
+/// otherwise good batch.
+///
+/// Unlike v1 there is deliberately no `allow_dim_migration` path. `artifact_vec_v2`
+/// is populated by a backfill, so a model change is handled by re-running that
+/// rather than by rebuilding the table in place.
+pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+    use rusqlite::OptionalExtension;
+
+    if embeddings.is_empty() {
+        return Ok(());
+    }
+
+    let batch_dim = embeddings[0].1.len();
+    if batch_dim == 0 {
+        anyhow::bail!(
+            "embedding dim is 0 — embedder produced an empty vector. \
+             Likely an embedder misconfiguration or an error sentinel returned by \
+             the backend. Inspect the embedder service before retrying."
+        );
+    }
+    for (id, vec) in embeddings {
+        if vec.len() != batch_dim {
+            anyhow::bail!(
+                "embedding dim mismatch within batch: id={} expected {} got {}. \
+                 All embeddings in one batch must share the same dimensionality.",
+                id,
+                batch_dim,
+                vec.len()
+            );
+        }
+    }
+
+    let existing_blob_len: Option<i64> = cat
+        .conn
+        .query_row(
+            "SELECT length(embedding) FROM artifact_vec_v2 LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(blob_len) = existing_blob_len {
+        // Each f32 takes 4 bytes in the little-endian blob serialization.
+        let existing_dim = (blob_len / 4) as usize;
+        if batch_dim != existing_dim {
+            anyhow::bail!(
+                "embedding dim mismatch vs artifact_vec_v2: batch={}, existing={}. \
+                 The chunk vector table is populated by a backfill — re-run it for the \
+                 new model rather than mixing dimensions in one table.",
+                batch_dim,
+                existing_dim
+            );
+        }
+    }
+
+    for (chunk_id, vec) in embeddings {
+        let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+        cat.conn.execute(
+            "DELETE FROM artifact_vec_v2 WHERE id = ?1",
+            rusqlite::params![chunk_id],
+        )?;
+        cat.conn.execute(
+            "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+            rusqlite::params![chunk_id, blob],
+        )?;
+    }
+    Ok(())
+}
+
+/// Delete every `artifact_vec_v2` row belonging to `artifact_id`, returning the
+/// number removed.
+///
+/// **This is NOT what collects vectors when an artifact is deleted**, and an
+/// earlier draft of the chunk-grain plan said it was. That path is handled by
+/// the schema: `artifact_chunk.artifact_id` is `ON DELETE CASCADE`, and the
+/// `artifact_vec_v2_cascade_delete` trigger fires `AFTER DELETE ON
+/// artifact_chunk` (both in `catalog::apply_migrations_in_txn`), so deleting an
+/// artifact already collects its chunk vectors with no help from here.
+///
+/// This exists for the one caller that removes an artifact's vectors **without
+/// deleting the artifact row** — `SqliteVecArtifactStore::delete`. No
+/// `artifact_chunk` delete occurs there, so the trigger is unavailable and the
+/// chunk ids have to be read out and deleted explicitly.
+///
+/// It follows that this must run while the chunk rows still exist. That is not
+/// a hazard to guard against so much as a statement of when the function is
+/// useful at all: once the artifact is gone the trigger has already done the
+/// work, and this would find nothing to delete.
+pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
+    let ids: Vec<String> = {
+        let mut stmt = cat
+            .conn
+            .prepare("SELECT chunk_id FROM artifact_chunk WHERE artifact_id = ?1")?;
+        // Bound to a local before the block ends: returning the collect()
+        // directly keeps a temporary alive past `stmt`'s drop (E0597).
+        let rows = stmt
+            .query_map([artifact_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        rows
+    };
+    for id in &ids {
+        cat.conn.execute(
+            "DELETE FROM artifact_vec_v2 WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+    }
+    Ok(ids.len())
+}
+
 /// Opt-in gate for [`rebuild_artifact_vec_at_dim`]. Default OFF — a dimension
 /// mismatch is a loud, safe stop by default (see F-6b/F-9 history in
 /// `docs/archive/old-trackers/bug-tracker.md` and
@@ -705,7 +825,7 @@ pub async fn index_repo(
                         s.upsert(project_id, id, vec).await?;
                     }
                 } else {
-                    write_embeddings(cat, &batch)?;
+                    write_embeddings_v2(cat, &batch)?;
                 }
                 report.embedded += batch.len();
                 batch.clear();
@@ -718,7 +838,7 @@ pub async fn index_repo(
                     s.upsert(project_id, id, vec).await?;
                 }
             } else {
-                write_embeddings(cat, &batch)?;
+                write_embeddings_v2(cat, &batch)?;
             }
         }
     }
@@ -1627,6 +1747,112 @@ kind = "memory"
     }
 
     #[test]
+    fn delete_chunk_vectors_removes_every_chunk_vector_not_only_the_first() {
+        // Mutation target: narrowing the SELECT that feeds the delete (a
+        // `LIMIT 1`, or an added `AND chunk_ix = 0`). The fixture MUST yield
+        // >1 chunk or that mutation is UNREPRESENTABLE — a single-chunk
+        // artifact behaves identically under "delete all" and "delete first".
+        //
+        // SCOPE, verified 2026-09-02 — do not widen this test's name to
+        // "deleting an artifact": that path does NOT go through this function.
+        // `artifact_chunk.artifact_id` is `ON DELETE CASCADE` (catalog/mod.rs)
+        // and the `artifact_vec_v2_cascade_delete` trigger collects the vectors,
+        // pinned by `deleting_an_artifact_cascades_its_vec_v2_row_via_the_chunk_trigger`.
+        // `delete_chunk_vectors` exists for `SqliteVecArtifactStore::delete`,
+        // which drops an artifact's vectors WITHOUT deleting the artifact row,
+        // so no `artifact_chunk` delete occurs and the trigger cannot fire.
+        let cat = Catalog::open_in_memory().unwrap();
+        crate::librarian::catalog::artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let built = crate::librarian::catalog::chunk::build_chunks(
+            "a",
+            "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+            2048,
+        );
+        let stored = crate::librarian::catalog::chunk::replace_chunks(&cat, "a", &built).unwrap();
+        assert!(
+            stored.len() > 1,
+            "fixture must yield >1 chunk or this proves nothing, got {}",
+            stored.len()
+        );
+
+        let vecs: Vec<(String, Vec<f32>)> = stored
+            .iter()
+            .map(|r| (r.chunk_id.clone(), vec![0.5f32; 768]))
+            .collect();
+        write_embeddings_v2(&cat, &vecs).unwrap();
+        // Pairs with the `== 0` below. Without this, a writer that silently
+        // wrote nothing satisfies the final assertion — the absence assertion
+        // is monotone under the write never happening.
+        let before: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            before as usize,
+            stored.len(),
+            "every chunk vector must be written before the delete is meaningful"
+        );
+
+        let removed = delete_chunk_vectors(&cat, "a").unwrap();
+        assert_eq!(removed, stored.len(), "must report every vector it removed");
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "every chunk vector must go, not only the first");
+    }
+
+    #[test]
+    fn write_embeddings_v2_refuses_a_dim_mismatch_against_existing_rows() {
+        let cat = Catalog::open_in_memory().unwrap();
+        write_embeddings_v2(&cat, &[("c1".into(), vec![0.1f32; 768])]).unwrap();
+        let err = write_embeddings_v2(&cat, &[("c2".into(), vec![0.1f32; 384])]).unwrap_err();
+        assert!(err.to_string().contains("dim"), "got: {err}");
+        // The doc-comment promises a "loud, safe stop rather than a silent
+        // partial write". Asserting only the Err leaves that half unchecked —
+        // a writer that DELETEs then bails also returns Err.
+        let n: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id = 'c2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "a refused batch must leave nothing behind");
+    }
+
+    #[test]
+    fn write_embeddings_v2_refuses_a_dim_mismatch_within_one_batch() {
+        // The F-6b shape: an embedder returns a 1-element error sentinel mixed
+        // into an otherwise good batch. `write_embeddings_with` catches this
+        // BEFORE any DELETE; v2 must too, or the delete-then-insert loop
+        // half-writes the batch and only then bails.
+        let cat = Catalog::open_in_memory().unwrap();
+        let err = write_embeddings_v2(
+            &cat,
+            &[
+                ("c1".into(), vec![0.1f32; 768]),
+                ("c2".into(), vec![0.1f32; 1]),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("within batch"), "got: {err}");
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "nothing may be written when the batch is rejected");
+    }
+
+    #[test]
     fn ignore_globs_skip_matching_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -1879,11 +2105,26 @@ kind = "memory"
 
         let count: i64 = cat
             .conn
-            .query_row("SELECT count(*) FROM artifact_vec", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM artifact_vec_v2", [], |row| row.get(0))
             .unwrap();
         assert_eq!(
             count, 16,
             "all 16 embeddings must be written via buffer_unordered"
         );
+        // CHANGED from `artifact_vec` (v1) when `index_repo`'s two flush
+        // sites were re-pointed to `write_embeddings_v2`. Do NOT restore the
+        // v1 form: the embed queue is keyed by `chunk_id`, so a v1 row here
+        // means a chunk id sitting in the artifact-keyed table, which is the
+        // defect the chunk-grain work exists to remove.
+        //
+        // This pair is what makes the test a guard for the re-point rather
+        // than a casualty of it: `v2 == 16` alone is monotone under a writer
+        // that writes BOTH tables, which is exactly what a half-finished
+        // re-point looks like.
+        let v1: i64 = cat
+            .conn
+            .query_row("SELECT count(*) FROM artifact_vec", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(v1, 0, "no chunk id may reach the artifact-keyed v1 table");
     }
 }
