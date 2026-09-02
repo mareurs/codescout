@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 6
+entry_high_water_F: 7
 entry_high_water_W: 1
 ---
 
@@ -84,6 +84,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-4 | 2026-09-01 | med | methodological | fixed-verified | a design cost was illustrated with a use case the source never claimed, and no caller can reach |
 | F-5 | 2026-09-01 | high | measurement | fixed-verified | two systems agreed and both were the wrong sample — a correct ruling was one message from retraction |
 | F-6 | 2026-09-02 | low | measurement | wontfix-false-alarm | the ledger-count hook's "skip" was correct — the name is broader than its `files:` scope (**denominator, not a catch**) |
+| F-7 | 2026-09-02 | high | architectural | fixed-verified | "impossible by construction" was a claim about Rust, not about the capability — C's last cost was reachable in the shell |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -119,20 +120,36 @@ unrecorded by default.
   eight, do not build**, with an explicit note that "2 of 10" is not a rate: both were found
   while being worked on, which is `design-backlog-session-log:F-5`'s selection error.
 
-- [ ] **T3 — `run-command-pipeline.md`: the surfaces that do not need a human.** #2
-  (exclusivity), #4 (pipefail semantics — shell half already settled by R1), #5 (output shape)
-  and #8 (`format_compact` display) are marked *decidable as written*. Draft rulings for
-  approval; do not self-approve. #1 already leans `stages` XOR `command`, re-founded on
-  `src/tools/run_command/mod.rs:211`.
+- [x] **T3 — PARTIALLY DONE, and the task's own premise was wrong.** Done 2026-09-02 for #2 only,
+  recorded as `run-command-pipeline.md` § *Rulings* **R2** (exclusivity, adopted as written; all
+  three excluded modes verified at `path:line`, completeness derived from the review's nine-mode
+  inventory rather than assumed). **#4, #5 and #8 are NOT "decidable as written"** — they encode
+  *sequential* stages, and R1 has tilted #7 toward a single concurrent shell pipeline. Two
+  measurements, both in the tracker: (a) bare `set -o pipefail` returns **141** on
+  `seq 1 100000 | grep 5 | head -3` — a fully successful run — because `head` closes the pipe and
+  SIGPIPEs upstream, so the feature's primary use case reports failure; and the tracker's own
+  § *Tests needed* happy path uses `wc`, which consumes all input and therefore **cannot detect
+  this**; (b) "stop on first non-zero" and #5's *"truncated stages array"* describe an event that
+  does not occur in a shell pipeline, where every stage starts at once. Remedy available only
+  because R1 gave us bash: read `PIPESTATUS` (Ubuntu's dash answers `Bad substitution`) and treat
+  SIGPIPE on a non-final stage as success. **My task list contradicted the tracker's own § *Resume*
+  step 2, which already said to rule #7 first.** Corrected order: #2 → #7 (T5) → #4/#5/#8.
+
+- [ ] **T3b — #4, #5, #8 rulings.** Blocked on T5. Drafts exist in the measurement block; they
+  are one-line consequences once the strategy is fixed.
 
 - [ ] **T4 — #6 and the source-gate bug should be ruled once, together.** #6 is the per-stage
   dangerous-command gate; `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
   is the same question already filed against a shipped surface — and fired **twice on this
   session's own commands**. One ruling covers both.
 
-- [ ] **T5 — #7 (Strategy C vs A/B) needs the user.** Unblocked by R1; its only remaining real
-  cost is that per-stage timeout becomes impossible. Not draftable — it is a product call about
-  whether that cost is acceptable, and § *Resume* step 2 says to rule it knowingly.
+- [ ] **T5 — #7 (Strategy C vs A/B) — LARGELY DISSOLVED 2026-09-02, awaiting confirmation.** Both
+  of C's stated costs are gone: per-stage cancellation withdrawn (`design-backlog-session-log:F-4`,
+  no caller can reach it) and per-stage timeout shown reachable in the shell
+  (`design-backlog-session-log:F-7`, `timeout <n> <stage>` beside the tee tap — measured
+  `PIPESTATUS=0 124 0` on a bounded middle stage). What remains is Concern 1's original argument,
+  which runs *for* C. Still the user's call, but it is now a confirmation rather than a trade-off.
+  One unverified caveat: `timeout` on Windows Git Bash.
 
 - [ ] **T6 — #9 (`exec_one_stage` extraction) is a prerequisite under every strategy.** Verified
   absent (`symbols(name="exec_one_stage")` → 0 matches). Real code, gated on T5.
@@ -771,6 +788,74 @@ sees `Skipped` on a tracker commit spends zero attention on it.
 
 **Rests on:** `.pre-commit-config.yaml:136-142`, read 2026-09-02; the `Skipped` line in the
 pre-commit output of `89b07961`, `31b34960`, `187bb192`, `8047f552` and `1df40eb1`.
+
+## F-7 — "impossible by construction" was a claim about Rust, not about the capability — C's last cost was reachable in the shell
+
+**Valid:** dated 2026-09-02
+
+**Category:** architectural · **Severity:** high · **Status:** fixed-verified
+
+**Observed.** I put Strategy C's cost to the user as *"per-stage timeout becomes impossible —
+the one irreversible choice in the set"*, quoting Concern 1's *"per-stage timeout impossible
+(single shell process)"*. The user asked what per-stage timeout **is**. Measuring it to answer
+showed the claim is false.
+
+**Got.** Under `bash -c`:
+
+    echo hi | timeout 1 sleep 30 | cat
+    → exit=0   PIPESTATUS=0 124 0
+
+A **middle** stage bounded independently and killed at 1s (`124` = `timeout` timed out), both
+neighbours completing normally. Per-stage timeout is `timeout <n> <stage>` composed into the
+shell string — the same layer Concern 1 **already uses** for per-stage cwd
+(`(cd <dir> && <stage>) | tee …`). It needs no Rust handle, no second buffering mechanism, and
+no change to the single-shell-process model.
+
+**Root cause — the claim was true of the wrong subject.** Concern 1 reasoned about *Rust*:
+one `bash -c` child means one `tokio::time::timeout`, so Rust cannot bound a stage. Correct,
+and it does not follow that the **capability** is unavailable — only that Rust is the wrong
+layer for it. **"Impossible by construction" is a claim about one construction.** The
+disproof is not a cleverer argument; it is asking *"unavailable to whom, at which layer?"*
+and then running one command.
+
+**This is the second time in two days that a cost attributed to Strategy C evaporated on
+contact, and the two failed differently — which is what makes it a pattern rather than a
+repeat.** `design-backlog-session-log:F-4`'s per-stage cancellation had **no caller** — the
+capability was unreachable *and unwanted*, and the test that found it was "name the caller and
+the surface." This one is **wanted-and-available**, just at a layer the reviewer was not
+looking at, and the test that found it was "run it." A single heuristic would have caught
+neither; what catches both is refusing to carry a stated cost forward until it has been
+either exercised or disproved.
+
+**Net effect: Strategy C has no established cost, and T5 largely dissolves.** Its two stated
+drawbacks are now one withdrawn and one false. What remains is Concern 1's original argument,
+which runs *for* C — `inject_tee` is already one-stage-deep pipeline buffering in production,
+and A/B would stand a second mechanism of that shape beside it.
+
+**What I did NOT establish, stated because the temptation was to round it up.** `timeout` is
+GNU coreutils and I did not verify it on Windows Git Bash. The same package supplies
+`grep`/`head`/`tail`/`sed`, which `src/platform/windows.rs:182-193` already depends on by
+design, so it is *likely* present — and `design-backlog-session-log:F-5` is this session's
+record of what reasoning-about-another-system costs when the measurement was available. The
+check is one command on a Windows host: `<git-bash> -c 'command -v timeout'`. If absent,
+per-stage timeout degrades to unavailable-**on-Windows**, not unavailable-everywhere; total
+timeout is unaffected on both platforms.
+
+**Second-order finding, folded into the tracker.** A timed-out stage exits `124` and its
+downstream neighbours then see a clean EOF and exit `0` — so the pipeline reads as successful
+unless `PIPESTATUS` is consulted. That is the same failure mode as the SIGPIPE-`141` finding
+recorded the same day, and the two compose into one rule: **decide from `PIPESTATUS`, never
+from the pipeline's aggregate status.**
+
+**Provenance.** Found because the user asked *"per-stage timeout what is it?"* — a request for
+the **definition**, which forced writing down what the thing was, which is what exposed that
+its impossibility had never been tested. The second high-value finding this session from a
+short user question that proposed no alternative and only asked for grounding
+(`design-backlog-session-log:F-4` was the first).
+
+**Rests on:** measured 2026-09-02 via `bash -c 'echo hi | timeout 1 sleep 30 | cat'`,
+GNU coreutils `timeout` 9.11; `docs/trackers/run-command-pipeline.md` § *Architectural review*
+Concern 1 (*now harder*) and § *Rulings*; `src/platform/windows.rs:182-193`.
 
 ## Template for new entries
 

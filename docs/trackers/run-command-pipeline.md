@@ -1,7 +1,7 @@
 ---
 id: '5d022cd3b41009f4'
 kind: tracker
-status: draft — first ruling recorded (R1)
+status: 'draft — R2 recorded; #4/#5/#8 reclassified as blocked on #7'
 title: run_command(pipeline=[...]) design
 tags:
 - run_command
@@ -244,6 +244,133 @@ is that per-stage timeout is impossible, which § *Resume* step 2 says to rule k
 > killing a producer EOFs its consumers) are free in any shell pipeline and survive under C —
 > `unix.rs:80` resets SIGPIPE to `SIG_DFL` in `pre_exec` precisely so they work. See
 > `design-backlog-session-log:F-4`.
+
+### Measured 2026-09-02 — #4, #5 and #8 are NOT "decidable as written"
+
+These three were carried as *decidable as written*. They are not. Both reasons were found by
+measuring rather than reading, and neither is visible in the surfaces text.
+
+**(a) `set -o pipefail` verbatim reports FAILURE on this feature's primary use case.** Measured
+under `bash -c`, the shell R1 mandates:
+
+| pipeline | `pipefail` | exit | `PIPESTATUS` |
+|---|---|---|---|
+| `seq 1 100000 \| grep 5 \| head -3` | on | **141** | `141 141 0` |
+| `seq 1 100000 \| grep 5 \| head -3` | off | 0 | `141 141 0` |
+| `seq 1 100 \| grep ^5 \| wc -l` | on | 0 | `0 0 0` |
+
+`head -3` exits after three lines and closes the pipe; upstream stages die of SIGPIPE (141 =
+128+13). Under `pipefail` the pipeline inherits the rightmost non-zero, so a **fully successful**
+`… | head -N` returns 141. That is the exact shape IL-3 exists to redirect (`cargo test | grep
+FAILED | head`) and therefore the shape `pipeline=` is built to serve.
+
+**§ *Tests needed* cannot catch this, and the reason is structural.** Its happy-path case is
+`seq 1 100 | grep ^5 | wc -l`, and `wc` **consumes all input** — no early close, no SIGPIPE, exit
+`0 0 0`. Its pipefail case plants a non-zero on a stage directly. Neither uses a *trimmer*, so
+the suite is monotone under this defect: it passes whether or not the bug is present. Add a
+`… | head -N` case whose assertion is `success`, or the first real user is the detector.
+
+**Remedy available because R1 gave us bash: do not use bare `set -o pipefail`.** `PIPESTATUS`
+exposes every stage's code (and is a bashism — Ubuntu's dash answers `Bad substitution`, so R1
+is load-bearing here too, not only for `pipefail`). Read it and apply an explicit policy:
+SIGPIPE (141) on a **non-final** stage is success when a later stage exited 0, because that is
+`head` working. Everything else is a failure.
+
+**(b) "Stop on first non-zero" presumes SEQUENTIAL stages; Strategy C runs them CONCURRENTLY.**
+A shell pipeline starts every stage at once. By the time stage 0 exits non-zero, stages 1..N
+have been running and consuming. There is no "stop" to perform and no *"truncated stages
+array"* (#5) to emit — every stage ran. Under C, `stopped_at` is not a thing that happens; it is
+a thing **derived** from `PIPESTATUS` after the fact, and the honest field is every stage's exit
+code, which is strictly more information than the original design proposed.
+
+**Consequence for sequencing.** #4, #5 and #8 are **downstream of #7**, not independent of it.
+#5's envelope and #8's `✗ pipeline 2/3` display both encode stopping. Rule #7 first — as §
+*Resume* step 2 already says — and these three follow from it. Only **#2** is genuinely
+independent of the strategy choice.
+
+### R2 (2026-09-02, marius) — #2 mutual exclusivity: adopt as written
+
+**Ruled: a pipeline call cannot co-exist with `run_in_background`, `interactive`, or an `@ack_*`
+handle as the command.** Adopted verbatim from surface #2; no revision needed.
+
+**Why this one could be ruled now and the others could not.** #2 is the only surface whose
+content does not encode an execution model. #4, #5 and #8 all presume *sequential* stages and
+are downstream of #7 — see the measurement block above. #2 asks which other modes conflict, and
+the answer is the same under every strategy.
+
+**Substrate verified 2026-09-02** — all three named modes exist, so the exclusion list refers to
+real things rather than to the tracker's memory of them:
+
+| mode | site |
+|---|---|
+| `run_in_background` | `spawn_background_command`, `src/tools/run_command/inner.rs:89-144` |
+| `interactive` | `run_command_interactive`, `src/tools/run_command/interactive.rs:25-238` |
+| `@ack_*` re-dispatch | the `acknowledge_risk` flow on `RunCommand` |
+
+**The list is complete, checked against the review's own inventory** rather than accepted as
+given. § *Architectural review* enumerates nine dispatch modes: interactive, ack-redispatch,
+`resolve_refs`, dangerous-cmd gate, source-file block, shell-mode check, background spawn, tee
+injection, foreground exec. Of those, exactly three are *alternative execution modes* a caller
+selects — the three above. The rest are gates or transforms every call passes through, which a
+pipeline must also pass through rather than exclude. So there is no fourth candidate.
+
+**Refusal shape.** `RecoverableError` naming the specific conflicting flag, per the project's
+error-handling convention — not a silent precedence rule, and not a schema-level `oneOf` that
+would be invisible in the tool description an agent reads. **Refuse before any stage runs**,
+for the same reason #6 leans that way: a partially-executed pipeline whose refusal arrives at
+stage 2 has already had side effects.
+
+**Consequences.** Now easier: each mode keeps its current single-command semantics untouched,
+and `pipeline` needs no interaction design with any of them. Now harder: a caller wanting a
+backgrounded pipeline has no path — accepted, because that is the streaming abstraction
+Concern 1's *Revisit-when* already names as the thing that would break the single-shell-process
+assumption. If backgrounded pipelines are ever wanted, #7 gets reopened, not #2.
+
+**Confidence:** high. The ruling restates the surface, its three referents are verified at
+`path:line`, and its completeness was derived from the mode inventory rather than assumed.
+
+### Measured 2026-09-02 — "per-stage timeout impossible" is false, and it was C's last remaining cost
+
+Concern 1 lists, under *now harder*: **"per-stage timeout impossible (single shell process);
+only total via existing `tokio::time::timeout`."** That is true of **Rust** and false of the
+**capability**. Per-stage timeout composes in the shell string, which is the same layer
+Concern 1 already uses for per-stage cwd (`(cd <dir> && <stage>) | tee …`).
+
+Measured under `bash -c`:
+
+    echo hi | timeout 1 sleep 30 | cat
+    → exit=0   PIPESTATUS=0 124 0
+
+Stage 1 was bounded independently and killed at 1s (`124` is `timeout`'s timed-out code) while
+stages 0 and 2 completed normally. A per-stage budget is `timeout <n> <stage>` injected beside
+the tee tap — no Rust handle needed, no second buffering mechanism, no change to the
+single-shell-process model.
+
+**Consequence: Strategy C now has no established cost.** Its two stated drawbacks were
+per-stage cancellation and per-stage timeout. The first was withdrawn 2026-09-01 — no caller
+can reach it (`design-backlog-session-log:F-4`). The second is reachable, as above. What
+remains is Concern 1's original argument, which runs *for* C: `inject_tee` is already
+one-stage-deep pipeline buffering in production, and A/B would put a second mechanism of the
+same shape beside it.
+
+**Two caveats, neither hidden.**
+
+- **`timeout` is GNU coreutils and its presence on Windows Git Bash is NOT verified here.** The
+  same package supplies `grep`/`head`/`tail`/`sed`, which `src/platform/windows.rs:182-193`
+  already depends on by design — so it is *likely* present, and likely is not measured. Run
+  `<git-bash> -c 'command -v timeout'` on a Windows host before relying on it. If absent,
+  per-stage timeout degrades to unavailable-on-Windows rather than unavailable-everywhere, and
+  total timeout still works on both.
+- **`124` needs a policy slot next to `141`.** A timed-out stage exits 124 and its downstream
+  neighbours then see a clean EOF and exit 0 — so the pipeline looks successful unless
+  `PIPESTATUS` is read. That is the same reason the block above rules against bare
+  `set -o pipefail`; the two findings compose into one rule: **decide from `PIPESTATUS`, never
+  from the pipeline's aggregate status.**
+
+**Both of Strategy C's costs were enumerated by reasoning about the mechanism rather than by
+testing whether the capability was reachable at another layer, and both were wrong.**
+*"Impossible by construction"* is a claim about **one construction**, not about the capability.
+See `design-backlog-session-log:F-7`.
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).
