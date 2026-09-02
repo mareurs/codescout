@@ -4,6 +4,8 @@ kind: tracker
 status: active
 title: Test-Escape Hardening — interventions from the entry-graph Stage 2 review lessons
 topic: test escape hardening
+entry_high_water_I: 8
+entry_prefix: I
 expects_augmentation: docs/augmentations/docs-trackers-test-escape-hardening.yaml
 ---
 

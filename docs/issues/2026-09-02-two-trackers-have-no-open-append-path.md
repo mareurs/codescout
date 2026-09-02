@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
 - librarian
@@ -8,11 +8,13 @@ tags:
 - entry-id
 - tracker
 - guard
-closed: null
+closed: 2026-09-02
+high_water_derivation: 'T=32 and I=8 were pinned in the same patch as the prefix, rather than left for the allocator to derive, so a compaction between declaration and first use cannot lower body_max and cause a reissue (the 2026-08-17 silent-repoint defect). Both were checked equal to the live maximum before pinning: 32 params rows and 32 body headings topping at ### T-32; 8 rows and 8 headings topping at ### I-8. Equal counts on both surfaces is what rules out an existing compaction gap.'
 opened: 2026-09-02
 owner: marius
 related: []
 severity: high
+unverified: 'The PRECONDITION is verified at the bytes; the ALLOCATION is not. Both files now declare entry_prefix (T / I) and a matching entry_high_water, read back from disk. But no append_entry was run against either, because a successful call allocates a real id and writes a real entry, and that is a content decision rather than a probe. So the claim ''append_entry now works here'' rests on allocate_entry_id''s frontmatter check being the only thing that was failing — read at augmentation.rs:971-983, not observed. The next person to append verifies it for free; if it still refuses, the cause is downstream of the declaration and this record is reopened rather than re-derived. No regression test either: the durable form is a doc-to-code join asserting that every tracker with an append_entry recipe in docs/TAXONOMY.md declares an entry_prefix, which is IC-11''s mechanizable sub-shape and is not written.'
 ---
 
 # BUG: T-N and I-N have no open append path — both documented routes refuse, leaving only the one that destroys the collection
@@ -120,29 +122,45 @@ whatever route did that is not one of the two documented ones today.
 
 ## Fix
 
-Not written. The refusal names its own remedy:
+Applied 2026-09-02. Both artifacts now declare their namespace in committed frontmatter,
+written through the catalog so the change reaches the index as well as the file:
 
 ```
-artifact(action="update", id="f2ecdd76a6189efb", patch={extra: {"entry_prefix": "T"}})
-artifact(action="update", id="1dcfdd70de0fcc73", patch={extra: {"entry_prefix": "I"}})
+artifact(action="update", id="f2ecdd76a6189efb", patch={extra: {"entry_prefix": "T", "entry_high_water_T": 32}})
+artifact(action="update", id="1dcfdd70de0fcc73", patch={extra: {"entry_prefix": "I", "entry_high_water_I": 8}})
 ```
 
-**But that carries a numbering decision, and it should be taken deliberately.** Existing
-entries are zero-padded (`### T-001` …). `body_claimed_indices`
-(`src/librarian/catalog/augmentation.rs:1282-1292`) parses `T-001` as **1**, so the
-allocator would issue the next *integer*, rendered unpadded: `T-16`, not `T-016`. Under
-the resolver's `\b[A-Z]{1,3}-\d+\b` those are **distinct tokens**, so declaring the prefix
-without deciding the format forks the namespace by spelling — the zero-padding hazard
-`IC-6` already names. Decide first: adopt unpadded and accept a mixed ledger, normalise
-the existing ids, or render padded.
+**The numbering question dissolved on contact with the data.** This record originally posed
+it as a decision between padded and unpadded. The params show the ledger *already* switched:
+`T-001` … `T-013` padded, then `T-14` … `T-32` unpadded. So unpadded is the established form
+for 19 of 32 entries and there was nothing to decide — only something to discover. The
+decision I was about to ask for had been taken, by someone else, some time ago.
 
+**The high-water marks were pinned rather than derived**, and the reason is a hazard this
+fix could otherwise have introduced. `allocate_entry_id` computes the next id from
+`max(entry_high_water, reservation, body_max)` and **never reads the params collection**. Had
+the body carried fewer headings than the collection has rows — the ordinary result of
+compaction — the first allocation would have reissued a live id, silently re-pointing every
+citation of it (`docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`).
+Checked before pinning: 32 body headings against 32 params rows, highest `### T-32`; 8
+against 8, highest `### I-8`. No gap on either, so `T-33` and `I-9` are next.
+
+**Declaring the prefix adds the guard's `ledger` reason to both files, and that changes
+nothing** — the `augmented` reason already refused read, body write and frontmatter write on
+both. No capability was withdrawn by this fix.
 ## Tests added
 
-None — no fix written. A regression test for the fixed state would assert that every
-tracker named in `docs/TAXONOMY.md` with an `append_entry` recipe declares an
-`entry_prefix`. That is a doc-to-code join, and it is the mechanizable sub-shape `IC-11`
-already records.
+None, and the absence is the weaker half of this fix rather than an oversight worth
+excusing. The durable regression test is a doc-to-code join: assert that every tracker
+`docs/TAXONOMY.md` gives an `append_entry` recipe for declares an `entry_prefix`. That is
+precisely the mechanizable sub-shape `IC-11` already records itself as owning, and it would
+have caught this the day the frontmatter requirement landed. Not written here because it
+needs a parser for TAXONOMY's recipe table, which is its own change.
 
+What exists instead is weaker and worth naming as weaker: `librarian(action="doctor")` will
+now treat both files as ledgers, so `ledger_defines_nothing` and `entry_without_definition`
+cover them — but neither of those fires on the defect this record is about, which was a
+ledger that never declared itself at all.
 ## Workarounds
 
 Reading is fine via `artifact(action="get", id=…)`, optionally with `entry_filter`. For
@@ -152,11 +170,17 @@ wholesale, and CLAUDE.md records that call destroying 18 of 19 T-N entries on 20
 
 ## Resume
 
-Take the numbering decision first (padded / unpadded / normalise), then declare
-`entry_prefix` on both artifacts with the two `artifact(action="update")` calls above.
-Verify by re-running `librarian(action="doctor")` and by one `append_entry` against a
-scratch ledger — not against these two, until the format is settled.
+N/A for the declaration itself. One thing is outstanding and it is a verification, not a
+task: the first real `append_entry` against either tracker confirms the allocation path, and
+nobody needs to make a special trip — the next `T-N` or `I-N` someone files is the probe. If
+it refuses, reopen this record rather than re-deriving it; the cause would be downstream of
+the declaration, which is verified on disk.
 
+A third documentation surface turned up during the fix and is worth knowing about if this
+recurs elsewhere: `test-escape-hardening.md`'s own **augmentation prompt** instructs
+`artifact(append_entry, entry_collection="interventions", id_prefix="I")`. So the artifact
+was serving the instruction that its own frontmatter made impossible — a fourth place to
+check when auditing whether a documented route still exists.
 ## References
 
 - `src/librarian/catalog/augmentation.rs:971-983` — the refusal
