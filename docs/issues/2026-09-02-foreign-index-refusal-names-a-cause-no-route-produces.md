@@ -18,7 +18,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 severity: medium
-unverified: fixed and mutation-verified on branch foreign-index-route-column (25f6540c), NOT on experiments — both scripts are live-shimmed for every session in the shared checkout, so landing it is gated on a quiet tree rather than on any remaining work. Not archivable until then.
 ---
 
 ## Summary
@@ -290,35 +289,60 @@ This is what the guard itself prints, and it is correct.
 
 ## Resume
 
-**The fix is committed on `foreign-index-route-column` (`689ceffb`, patch-id
-`b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805`). The one remaining step is landing it on
-`experiments`, which is a coordination problem, not an engineering one.**
+**N/A — landed and verified on `experiments`.** Nothing outstanding.
 
-To land it: rebase or cherry-pick the branch onto `experiments` **at a moment when peers do
-not hold unstaged work in the shared checkout**, then re-run `bash
-tests/hooks-discrimination.sh` (expect 63/63). Re-run at least M6 (reinstate the false
-sentence) and M7 (let a route value gate the refusal) before landing — those two guard the
-prose replacement and the diagnostic-only invariant respectively, and they are the two a
-reworker is most likely to break without noticing.
+> **Follow-up: the fix carried this same defect one level down.** Found in review by
+> `codescout-0a`, fixed at `d7eb09c2` (patch-id `208e88ed8bd5cd208a67b3f1ef9def78dd6bea69`) — the pair, because the SHA in this
+> very sentence has now been re-keyed twice by rebases onto a moving `experiments`. `route="${claim_route:-unnamed}"` made `unnamed` the
+> catch-all, and `unnamed` is not neutral — the guard renders it *"blanket add … PROBABLY
+> YOUR OWN STAGING"*. A pair already in the index when a later staging command ran reaches
+> the same branch, and **an unattributable pre-existing pair is frequently a peer's**, so the
+> guard was advising readers toward the capture this pair prevents. Reproduced first:
+> `git add -- p.txt`, drop the log, `git add -- q.txt` → `p.txt` records `unnamed`, and
+> nothing about it was blanket-added.
+>
+> Both arms now key on an **observable** — did argv name nothing at all, or a directory
+> covering this path, or other paths entirely? — rather than on an inferred cause. The arms
+> are exhaustive over `_NAMED`, so a fifth route reads as the observable true of it instead
+> of a wrong specific answer. The new `pre-staged` route claims only what is known and tells
+> the reader **not** to assume the path is theirs.
+>
+> **The first attempt was wrong and a test caught it.** Keying on *"argv named nothing"*
+> reported every directory add as a lost row, because `git add sub/` does put `sub` in argv —
+> it is `names_path` that refuses a directory prefix, not `argv_paths` that omits it. The
+> discrimination case (*"a blanket add still records unnamed, not pre-staged"*) is what
+> failed; without it the change would have renamed the fallback rather than discriminating,
+> and every new `pre-staged` assertion would still have passed. `under_named` computes the
+> subtree match for the **route only** — `names_path` must keep refusing it for ownership,
+> since claiming a subtree hands a session its peers' files.
+>
+> 69/69, and three more mutations killed: M8 reinstates the reported defect (3 kills,
+> including the safety-critical one), M9/M10 flip `under_named` and kill in **opposite**
+> directions, which is what proves it discriminates rather than merely being present.
 
-**Why the timing matters and is not fussiness.** The moment this reaches `experiments`,
-both scripts are live for every session in the shared checkout on its next `git add`. The
-change is designed so the failure direction is unchanged (§ *Fix*, diagnostic-only), so the
-risk is low rather than absent — but the population that absorbs it did not ask for it and
-will not be told. Land it when the tree is quiet.
+Fast-forwarded into `experiments` at `f72a93f6` (tip of the three commits below), so no
+merge commit exists and no hook ran against the shared tree; every peer's in-flight work
+was verified intact afterwards — 13 modified files plus one untracked, all theirs.
 
-This file becomes archivable once that happens, per `CLAUDE.md`'s archive trigger (verified
-on `experiments`, gate green, regression test in place — the last two are already true).
+| commit | patch-id | what |
+|---|---|---|
+| `689ceffb` | `b2be19e0bf0cb3aa6cc342e1b64035e2b21f0805` | the fix + 14 tests |
+| `5ff50899` | `c63471342dac548d8171286077a68c0cd830ce0a` | records + cluster counts |
+| `f72a93f6` | see § *Fix* | the orphaned-SHA correction |
 
-**`codescout-0a` declined to carry it and was right to.** Routing a 278-line git-hook
-diagnostic through a 13-task tool-surface-collapse branch would have made the whole-branch
-review incoherent, coupled this fix's fate to eleven unrelated tasks, and — decisively —
-**deferred and hidden the harm rather than avoiding it**: the hook change would still land
-for every session at merge, buried where nobody reviews it as a hook change. They offered a
-second pair of eyes on the diff instead, which is the useful form of help here.
+Verified **after** the rebase rather than only on the development base:
+`tests/hooks-discrimination.sh` 63/63 in the shared checkout, M6 and M7 each still killing
+their case, and all 22 cluster classes reconciling claimed-vs-actual.
 
-**If a later session prefers the cheaper repair, read § *Fix* first.** Level 1 is not a
-smaller version of this fix; it is the same defect re-shipped.
+The six other sessions in this checkout were notified that their commit path changed,
+because a live-shimmed hook changing underneath a session reads as a new bug in whatever
+they are working on. That notice is the part no test can cover.
+
+**One thing genuinely left, and it is not this bug's:** the `route` column is now written
+but only the guard reads it. If a later probe wants to ask *"how often does a blanket add
+precede a bare commit?"*, the data is being recorded from now on and no instrument reads
+it yet. That is a new capability, not a residual — open a tracker item if it is wanted,
+rather than reopening this.
 ## References
 
 - `scripts/pre-commit-foreign-index.sh:209-212` — the sentence.
