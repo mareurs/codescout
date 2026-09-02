@@ -7,7 +7,9 @@ tags:
 - prompt-hamsa
 - prompt
 - audit
+entry_prefix: A
 expects_augmentation: docs/augmentations/docs-trackers-prompt-hamsa-audit-log.yaml
+entry_high_water_A: 37
 ---
 
 # Prompt Hamsa — Audit Log
@@ -1855,3 +1857,106 @@ precisely what that script exists for, and it recovered the whole base arm at no
 surface is still unparsed (`extract_citations_DOC = …`, 1 of 10) and is left **deliberately**
 unfixed: loosening the pattern enough to catch it risks false positives, and a checker that
 over-accepts is worse than one that under-accepts at a known, recorded rate.
+
+
+## A-37 — CAP-10's practice rule, v3: multi-turn and trace-scored against a REAL trap
+
+**Status:** run 2026-09-02, **base arm only**. Branch (4) fired — **no treatment
+result may be cited from this run**, and none was purchased.
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** the CAP-10 premise that an injected practice rule which does not
+measurably change behaviour is decoration.
+
+### A-37 — the result
+
+| arm | score | distinct | classes |
+|---|---|---|---|
+| base | **10/10** | 10 | PASS=10 |
+
+`distinct=10` matters as much as the score: ten different plans, all correct. This is
+not a stuck generator or a manipulation that never arrived — the A-26 signature is
+`distinct=1`, and this is its opposite.
+
+### A-37 — why it is decisive where A-35 and A-36 were only suggestive
+
+Those two ceilinged at base 9/10 in `mode: output`, which can ask only *"is the answer
+right"*. Both died under their own branch (4) with no account of **why**. A-37 is
+trace-scored, so the process is observable, and the answer is unambiguous:
+
+```
+6 runs   Read()                                          native, whole file
+4 runs   cs:symbols(path=src/lib.rs)                     overview, to orient
+         cs:symbols(name=resolve_manifest, include_body=True)
+         cs:symbols(name=merge_entries,   include_body=True)
+```
+
+**10 of 10 runs opened the body. 0 of 10 ever asked a listing for a signature.**
+The four codescout runs performed the rule's prescribed sequence *exactly* — overview
+to orient, then `include_body=true` on each function named — with no rule present in
+the context. The rule describes a behaviour that is already the default.
+
+**A truncated render appeared in 0 of 14 symbol observations.** Not because the trap
+was absent: `warm_lsp.py` is a blocking setup command that fails the run unless it
+confirms the truncation is live, and all ten runs cleared it. The trap was present and
+simply never queried.
+
+### A-37 — the substrate was real, and that is what makes the null worth something
+
+A-35/A-36 used synthetic Python fixtures whose naive answer had to be *detectably*
+wrong, so they measured "can the model reason around a planted trap". A-37's trap is a
+genuine defect in codescout's own output — `bc0d99757221c176`, filed during this scout:
+`symbols(name=…)` asks the language server, rust-analyzer returns a name-only range, and
+`focus_single_symbol` inlines a **one-line body slice**, so a wrapped signature renders
+`pub fn resolve_manifest(` — arity 0, no return type, no truncation marker. The model
+was never protected from it. It just never went there.
+
+### A-37 — two confounds found by smoke runs, at $0.09 each
+
+1. **The fixture leaked the experiment to the subject.** Load-bearing annotations
+   written *in the fixture source* — following `CLAUDE.md` § *Testing Discipline*'s
+   "annotate on the fixture line" — were read by the model, which opened its answer with
+   *"the doc comments there are calibrated to make truncated tooling infer a wrong
+   signature"*. **That law assumes the fixture's reader is a developer.** When the
+   fixture is planted into the run, the reader is the participant. The annotation moved
+   to `fixtures/README.md`, which is never copied in. This is a genuine gap in the law as
+   written and is the transferable finding here.
+2. **Native `Read` routes around codescout entirely** (A-29's G-11(b)). Not fixable by
+   editing the fixture, and deliberately **not** fixed by tool restriction: the
+   `anthropic_mcp` adapter has no `disallowed_tools`, and more importantly `CLAUDE.md`
+   records that native `Read` reaches source files unblocked in the real profile. So the
+   bypass is faithful to deployment; denying it would have made the eval *less* realistic
+   and manufactured an effect.
+
+### A-37 — what this does and does not license
+
+It licenses **branch (3), the rule is DECORATION** for this task class, and CAP-10's own
+standard retires it rather than re-tuning the wording. Three audits, three stimuli,
+three ceilings — the third with the mechanism visible. That is evidence about the LAYER,
+not the phrasing.
+
+It does not license a claim about the field deficit CAP-10 recorded (6 of 6 subagent
+briefs carrying shape defects in one SDD run). The gap between that and 10/10 here is
+the finding worth chasing: a single-task prompt with abundant budget does not reproduce
+a deficit that appeared under multi-task planning load. **The next instrument is not
+another wording — it is a stimulus with enough breadth that opening every body is
+genuinely expensive.**
+
+### A-37 — method deviation, stated rather than buried
+
+P-2 asks for pre-registration in this ledger **before** the run, as A-35 had
+(`c0451481`, committed before its scenario existed). A-37's decision rule was written
+into `base/scenario.yaml` by the generator before any arm ran — verifiable, since the
+smoke runs executed against it — but it was **not** committed here first. Weaker than
+A-35's discipline. It did not change the outcome (branch (4) is triggered by base alone,
+and base was the first arm run), but the next audit should commit the ledger entry first.
+
+### A-37 — spend
+
+$1.43 for A-37 — $0.27 + $0.09 + $0.09 of smoke runs, then $0.97 for base at n=10.
+Running the remaining three arms would have cost roughly $3 and every number would have
+been uncitable under a branch fixed before the run. The pre-registration paid for itself
+here.
+
+Cumulative across A-35, A-36, A-37: **$5.74**.

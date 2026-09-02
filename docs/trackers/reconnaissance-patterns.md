@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 175
+entry_high_water_R: 176
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-176 | 2026-09-02 | miss, self-caught on a re-run — and it nearly cost a correct peer report (1 instance; a second session hit the same thing and was saved by a guard) | **A pipeline's `$?` is the LAST stage's status.** Verifying a peer's claim that a pre-commit hook was failing, I ran `python3 hook.py 2>&1 \| tail -15; echo "exit=$?"` and got `exit=0`. The hook was exiting **1** the whole time — `$?` reported `tail`'s status. **Severity is that I almost dismissed an accurate report on it:** the green was not a weak signal to weigh but a confident, specific, wrong answer, arriving attached to real output that made it look corroborated. **Sibling of `CLAUDE.md`'s `&&` gate ruling** — a composition operator silently changing *which command's status you read*, failing in the direction that reads as "nothing wrong". `\|` is the worse of the two: `&&` at least visibly skips a command, whereas a pipeline runs everything and hands you a status belonging to a different program, so there is no missing output to notice. **The tell is that the exit code and the printed text disagree**, and a reader who checks only the code never sees the text contradicting it. **Remedy is structural:** redirect and read `$?` directly, or `set -o pipefail` (preferred over `${PIPESTATUS[0]}` — no index to go stale when a stage is added). **The non-obvious half:** the peer's own check came out RIGHT, not from care but because codescout's IL-3 guard refused their unbounded pipe and forced a redirect. That guard is documented as **context economy**; nobody would look in it for exit-code integrity, and a guard whose second benefit is undocumented gets removed for failing to justify its first. | `R-171` twin (a bound cutting the payload; this cuts the *status*), `R-174` (instruments in different worlds), `OB-1` § *the third position*; peer `codescout-5e` supplied the guard observation |
+| R-175 | 2026-09-02 | near-miss, caught by a pre-implementation scout of the write sites (1 instance) | **A gate quantified over a population you never enumerated is a hypothesis in gate's clothing.** A spec written ~1 hour earlier, same session and author, specified a gate as *"no registered `ledger_prefix` is a prefix of another"*. Two `grep`s over every `GuideLedger` mutation returned **six** production writers where the spec assumed two — and the session opener stamps `SESSION_OPENING_GUIDE`, a bare topic name `guide-sections` also owns, an overlap argued deliberately at the site. **The spec contained no wrong fact**; every sentence was true of the two engines it had examined. The error was generalising a rule over *all* engines from a population never counted. **It would have red on correct code the day it landed**, and the cheap repairs at that moment — delete the overlapping registration, or widen to a negative predicate — both erase the finding and one makes the gate permanently unfalsifiable. **Second-order:** the same enumeration surfaced a **seventh engine**, invisible to the prompt-surface inventory the roster had walked; the discriminator was sound and the *instrument* was narrow, so "six" was a count of what one instrument could see rather than of a closed set. | spec `0021bead4e5a01e2` § *Gates*, which carries the correction inline rather than shipping the fixed form silently; `64a0a64c`; kin the `serves:`-coverage gate built as a finite 88-row checklist for the same reason |
 | R-174 | 2026-09-02 | near-miss, caught by an instrument DISAGREEMENT run for an unrelated reason (1 instance) | **A line number is a coordinate in a WORLD, and on a shared checkout the tools do not share one.** Writing a spec closure whose whole argument is two call sites, I cited `types.rs:1076-1083` and `:1063-1066` from codescout's `grep`/`read_file`. Chasing an unrelated question I ran `symbols` and `git show HEAD:` on the same file and got **1484** where `grep` said **1278**: the file was `M` and **206 lines shorter than HEAD** (1321 vs 1527), a peer mid-refactor extracting `guide_emit.rs`. `grep`/`read_file` read the **worktree**, `symbols` the **AST/LSP index**, `git show HEAD:` the **commit** — three instruments, two worlds, **no error from any of them**; the numbers described code that exists in no commit and may never. **Not simply the promoted substrate law — its REMEDY fails here.** That law says to read the instrument's `loaded N from X` preamble and reconcile it; codescout's navigation tools print no preamble and no N, so the prescribed check is a **no-op** against the tool this project uses most — `OB-1`'s *supplied-and-unread* shape, where a remedy that cannot apply is worse than none because it reads as covered. **And the catch INVERTS the usual worry:** agreement would have been the failure (`grep` and `read_file` share a world, so they corroborate perfectly while both describe uncommitted code) and the *disagreement* with a differently-scoped instrument carried the information. **Remedy, unconditional and cheap:** resolve any line ref against `git show HEAD:<path>` before it enters a spec, bug file, tracker or commit message, and say which world it names — HEAD is the only one of the three that is stable and shared with the reader. **Second-order:** a normal stale ref is *decay* (`audit_doc_refs`, `DC-N` cover it); this one is **false at the moment of writing** and no freshness check catches it, because re-running the citation's own instrument reproduces the same number. | `07a808c0`; kin `R-89` (a fourth freshness axis — the copy that ANSWERS you, not the one that serves you), `R-170`, `OB-1` § *the third position* |
 | R-173 | 2026-09-02 | miss, unrecoverable — emitted before it was noticed (1 instance) | **A classifier's REJECTED branch is where the leak is — scan a config for a property, print the key and the verdict, never the value.** Measuring `IC-4`'s env surface, a loop asked only *"does each path-valued var in `.env` still resolve?"* — and its `*)` arm, written as a courtesy to show what was skipped, printed a credential in full into a transcript. `.env` is gitignored and untracked, so nothing reached git; the exposure was created **entirely by the read**. **The asymmetry is structural:** the accepted branch is what the task is about and gets the attention, so the else-arm is written as an afterthought and reviewed as one. `.env`, `settings.json`, `.npmrc`, `~/.cargo/credentials` and CI variable dumps are all files whose *shape* is the subject of routine questions and whose *contents* are not. **Remedy:** emit the value only in the branch where the value IS the finding — a missing path must name itself to be actionable, a resolving one need not. **Checked, and not a repo defect:** no script under `scripts/` reads `.env` or dumps `key=value`; the hazard lives in ad-hoc shell written for a one-off question, which is exactly the code no reviewer sees. | pairs with `R-171` as its opposite — that one is a read emitting too LITTLE (a bound cutting the payload, an absence then acted on), this one a read emitting too MUCH in the arm chosen for completeness; both from fixing the output shape before knowing the input |
 | R-172 | 2026-09-02 | hit, narrowly — caught by an isolating re-run before sending (1 instance) | **A result that falsifies a documented invariant is usually the invariant's already-recorded RESIDUAL.** The full four-command gate, run in the documented order, gave 10 of 11 `cli_artifact` failures — the librarian-less binary — against `CLAUDE.md`'s bold claim that *"following the gate cannot arm the trap … provided both lanes actually run"*. Both ran, both exited 0, and a draft saying the claim was false got written. Re-running the two lanes ALONE: lean leaves it lean, default restores it, exit 0, 11/11 — the ordering is sound and a peer's concurrent lean lane had landed inside the window. **What makes it an entry: the corpus had predicted it three days earlier, in a field built for exactly that, and reading the claim could never have found it.** The fix's own bug file (`…-shared-target-dir-feature-clobber-reds-the-cli-tests.md`, `status: fixed`, **archived**) carries in `unverified:`: *"the fix closes the TERMINAL state only, not the window … two sessions gating concurrently still collide and nothing detects that."* The residual is invisible to the canonical triage query by construction — archiving is the normal end state — so the check is `find(kind="bug", include_archived=true, …)` and then read `unverified:` before writing the word "false". **Not `R-163`:** there the attributed cause was the unchecked claim; here observation and cause were both right and the error under construction was the CONCLUSION'S SCOPE — a true local measurement generalised into a falsification, by an instrument that could not see the concurrency it was subject to. | residual confirmation recorded on `d2b0e9c1b9802432`'s `unverified:`; gate green at 01:32; kin `R-166` (the residual survived only because it was in a queryable field, not a commit message) |
@@ -7957,6 +7959,99 @@ un-enumerated population"* appears. Two so far — this, and the
 finite 88-row checklist *because* an open-ended coverage claim is
 unfalsifiable. That spec reached the right answer from the same pressure, which
 is why this is a pattern and not an incident.
+
+## R-176 — a pipeline's `$?` is the LAST stage's status — `script | tail` reports tail's success, and it reads as green
+
+**Status:** open
+
+**Valid:** invariant
+
+**Rests on:** POSIX shell semantics — `$?` is the exit status of the last command in
+a pipeline — and `CLAUDE.md` § *Development Commands*' `&&` ruling, of which this is
+the sibling case.
+
+**Observed 2026-09-02**, by two sessions independently within the same hour, on the
+same check. A peer reported that a pre-commit hook was failing. I verified with:
+
+```
+python3 scripts/pre-commit-ledger-counts.py 2>&1 | tail -15; echo "exit=$?"
+```
+
+It printed `exit=0`. The hook was exiting **1** the whole time; `$?` had reported
+`tail`'s status. Re-run without the pipe:
+
+```
+python3 scripts/pre-commit-ledger-counts.py > /tmp/hook-out.txt 2>&1
+echo "REAL exit=$?"        # 1, with both findings named
+```
+
+**Severity: I nearly dismissed a correct peer report on the strength of the wrong
+number.** The green was not a weak signal to be weighed — it was a confident,
+specific, wrong answer to the question I asked, and it arrived attached to real
+output that made it look corroborated.
+
+### Why this belongs next to the `&&` ruling rather than in a shell-tips list
+
+`CLAUDE.md` § *Development Commands* already records that `&&` between the two test
+lanes withdraws the repair step **exactly when something is wrong**. This is the same
+family with a different operator: a composition operator silently changes *which
+command's status you read*, and both fail in the direction that reads as "nothing
+wrong".
+
+`|` is the worse of the two, for one reason: `&&` at least does something visible —
+the later command does not run. A pipeline runs everything and hands you a status
+belonging to a different program, so there is no missing output to notice. **The tell
+is that the exit code and the printed text disagree about how the run went** — here,
+findings on stdout and `exit=0` — and a reader who only checks the code never sees
+the text that contradicts it.
+
+### One layer out, this is `R-171` — and that framing is a peer's, with the instances
+
+`R-171` is a bounded READ returning an absence indistinguishable from a real one;
+this is a bounded STATUS doing the same. The shared shape is neither `tail` nor `|`:
+it is **choosing the bound before knowing the payload's extent**. `$?` after a pipe
+and `| tail` over an unknown-length output both answer confidently about a thing they
+only partly saw.
+
+The author of `R-171` supplied this and had four instances the same night to my one —
+`tail -8` losing a failure message whose own doc comment says it names the offending
+file, `tail -3` losing which 2 of 18 failed, `tail -c 1300` cutting the **head** of a
+single long line and producing a drafted accusation against a peer that was false, and
+a 47-line `sed` window over a 76-line entry that would have been reported as an
+absence. Recorded here rather than only in `R-171` because the two entries are
+reachable from different searches — someone chasing an exit code will not grep for
+`tail`.
+
+### The remedy is structural, not attentional
+
+Do not resolve to remember. Redirect and read `$?` directly, as above. Where a pipe
+is genuinely wanted, `${PIPESTATUS[0]}` (bash) or `set -o pipefail` is the answer,
+and `pipefail` is the one to prefer because it needs no index and cannot go stale
+when a stage is added.
+
+### The part that was not obvious: codescout's IL-3 guard already blocks this class
+
+The peer's own check came out **right**, and not because they were more careful —
+codescout's Iron Law 3 refused their unbounded pipe twice and forced them to redirect
+to a file, which is precisely the correct form. The guard is documented and justified
+as **context economy** (don't flood the transcript); nobody would look in it for
+exit-code integrity, and its own documentation does not claim it.
+
+So it earns its keep a second way, and the two sessions form a natural experiment on
+it: same check, same hour, one routed through the guard and one not — the guarded one
+got the true exit code, the unguarded one got `tail`'s. **A guard whose second benefit
+is undocumented gets removed for failing to justify its first**, which is the reason
+to write this down rather than merely enjoy it.
+
+Same shape as `observer-blindness`' third position: the person holding the parameter
+that would reveal the benefit is not the person who reads the justification.
+
+### Promote-when
+
+A third instance of an operator silently redirecting which command's status is read —
+`|`, `&&`, `;`, a subshell, `time`, or a wrapper like `timeout` — at which point this
+stops being two shell gotchas and becomes a rule about composition operators, and
+belongs in `CLAUDE.md` next to the `&&` sentence rather than here.
 
 ## Template for new entries
 
