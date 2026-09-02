@@ -152,6 +152,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })),
         "old_abs_path": to_forward_slash(&old_full),
         "new_abs_path": to_forward_slash(&new_full),
+        // A move is a tracked DELETION plus an untracked ADDITION, so every
+        // selector defined over index entries — `git add -u`, `git commit -a` —
+        // enumerates only the first half and silently undoes the archive with a
+        // green commit. Both paths were always reported; what the caller could not
+        // read off two adjacent fields is that they must be staged TOGETHER, so the
+        // imperative is carried here rather than left to be inferred. At the catalog
+        // layer this move IS atomic — the split only becomes visible one tool call
+        // later, at the git layer, to a different observer.
+        // docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
+        "stage_together": [to_forward_slash(&old_full), to_forward_slash(&new_full)],
+        // Deliberately path-free. `stage_together` is relativized by
+        // `path_strip::PATH_KEYS` and a prose string is not, so a path embedded here
+        // would render absolute beside a relative sibling.
+        "stage_hint": "Stage both halves of this move together — `git add -- <old> <new>` \
+                       using the two entries of `stage_together` — then confirm that `git \
+                       status --short` shows a single `R` rename line. `git add -u` and `git \
+                       commit -a` are defined over paths that already have an index entry, \
+                       so they take the deletion and never enumerate the addition, which \
+                       undoes the archive without reporting anything.",
         "moved": true
     }))
 }
@@ -319,6 +338,74 @@ mod tests {
         assert!(
             artifact::get(&cat, "aabbccdd11223344").unwrap().is_none(),
             "the old id must not linger as a second row"
+        );
+    }
+
+    /// A move must name the STAGING ACTION, not merely the two paths.
+    ///
+    /// **The regression test the bug file proposed would have passed against the
+    /// defect, and that is the finding.**
+    /// `docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
+    /// § *Tests added* specifies that "a regression test would assert that a `move`
+    /// response names both paths" — but `old_abs_path` / `new_abs_path` were already
+    /// emitted unconditionally when that file was written, so the proposed assertion
+    /// is green on the broken shape. What was missing was never the data.
+    ///
+    /// Measured 2026-09-02: one session ran six archive moves in a row, read both
+    /// path fields in all six responses, and still had to consult that file's
+    /// § *Workarounds* to learn that `git add -u` takes only the tracked deletion.
+    /// Data presence did not produce the action across six consecutive
+    /// opportunities, which is why this asserts on the imperative.
+    ///
+    /// `stage_hint` deliberately carries no path of its own: `stage_together` is
+    /// relativized by `path_strip::PATH_KEYS` and a prose string is not, so a path
+    /// embedded here would print absolute beside a relative sibling.
+    ///
+    /// Mutation this kills: deleting `stage_together` / `stage_hint` and keeping the
+    /// two path fields — exactly the shape that shipped.
+    #[tokio::test]
+    async fn move_names_the_staging_action_not_only_the_two_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let pair = result["stage_together"]
+            .as_array()
+            .expect("stage_together must be an array naming both halves of the move");
+        assert_eq!(pair.len(), 2, "both halves, in `git add` order: {pair:?}");
+        assert!(
+            pair[0].as_str().unwrap().ends_with("docs/trackers/foo.md"),
+            "first element is the vanished path — the tracked deletion: {pair:?}"
+        );
+        assert!(
+            pair[1].as_str().unwrap().ends_with("docs/archive/foo.md"),
+            "second element is the new path — the untracked addition: {pair:?}"
+        );
+
+        let hint = result["stage_hint"]
+            .as_str()
+            .expect("stage_hint must name the command rather than leave it inferred");
+        assert!(
+            hint.contains("git add --"),
+            "the hint must name the pathspec form that works: {hint}"
+        );
+        assert!(
+            hint.contains("git add -u"),
+            "the hint must name the selector that silently half-stages: {hint}"
+        );
+        assert!(
+            hint.contains('R'),
+            "the hint must name the rename line that confirms both halves landed: {hint}"
         );
     }
 

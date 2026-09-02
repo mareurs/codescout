@@ -138,6 +138,18 @@ observations and augmentation onto the new id in the same call and returns
 response — the old one stops resolving immediately, and a later call with it
 returns `unknown id`.
 
+**And stage BOTH halves of the move together — `git add -- <old> <new>`.** At the
+catalog layer the move is atomic; on disk it is a tracked *deletion* plus an untracked
+*addition*, so every selector defined over index entries — `git add -u`, `git commit
+-a` — enumerates only the deletion and commits an archive that silently un-happened.
+There is no count of what was missed, because an untracked file is never a skipped
+candidate: it is never enumerated. `git status --short` showing one `R` rename line per
+pair is the positive confirmation; a ` D` plus a `??` is half-staged. The `move`
+response carries `stage_together` and `stage_hint` saying exactly this — both paths
+were always reported, and reporting them was measured insufficient: one session read
+them six times across six moves and still had to be told the action.
+`docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
+
 **Then re-point the citations, in the same commit as the move —
 paths *and* ids.** The move changes both, and archiving is a bug file's *normal*
 end state — so every citation of `docs/issues/<slug>.md`, and every citation of

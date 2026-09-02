@@ -129,28 +129,48 @@ class from two consecutive steps of one recipe.
 
 ## Fix
 
-Not yet implemented. Two candidates, not mutually exclusive:
+**Implemented 2026-09-02 — and the mechanism candidate as originally written was aimed
+one step off, which is the finding worth keeping.**
 
-- **Documentation (cheap, partial).** Add the staging step to
-  `get_guide("tracker-conventions")` § *Bug files*, beside the citation sweep: *stage
-  both halves of the move together; `git add -u` will take only the deletion.* This is
-  the same remedy shape the `2026-08-26` member got, and it has the same weakness —
-  it protects only readers who read it.
-- **Mechanism (better).** Have `artifact(action="move")` report the pair explicitly in
-  its response — e.g. `stage_together: [<old>, <new>]` beside the existing
-  `id_changed: true` — so the correct next action is carried by the response rather
-  than by the reader's memory. This puts the fact on the surface the caller is already
-  reading, which is what `IC-18`'s *Mechanism status* calls the tool-facing half.
+The proposal here asked for `move` to "report the pair explicitly". But `old_abs_path`
+and `new_abs_path` were *already* returned unconditionally by the `json!` block in
+`src/librarian/tools/mv.rs` on the day this file was written. The data was never
+missing; the **action** was. Note the asymmetry that made it invisible: `previous_id`
+carries four lines of comment stating what the caller must then do, while the two path
+fields carried none.
 
-The author-facing half of `IC-18` is not reachable here and should not be claimed:
-nothing can annotate a `git add -u` the operator types in their own shell.
+Evidence the distinction is real rather than pedantic: one session ran six archive moves
+in a row for `c71e97c7`, read both path fields in all six responses, and still had to
+return to § *Workarounds* to learn that `git add -u` takes only the tracked deletion.
+Six consecutive opportunities produced no inference.
 
+Both candidates were taken:
+
+- **Mechanism.** `move` now returns `stage_together: [<old>, <new>]`, added to
+  `path_strip::PATH_KEYS` so it relativizes like its two sibling path fields, plus
+  `stage_hint` — an imperative naming `git add -- <old> <new>`, the single `R` rename
+  line that confirms both halves landed, and `git add -u` / `git commit -a` as the
+  selectors with an index-entry precondition. `stage_hint` deliberately carries no path
+  of its own: it is not a `PATH_KEYS` member, so an embedded path would render absolute
+  beside a relativized sibling.
+- **Documentation.** `get_guide("tracker-conventions")` § *Bug files* now carries the
+  staging step beside the citation sweep — the omission this file identified.
+
+The author-facing half of `IC-18` remains unreachable and is not claimed: nothing can
+annotate a `git add -u` the operator types in their own shell.
 ## Tests added
 
-None yet — this file is a capture-on-notice record, not a fix. A regression test would
-assert that a `move` response names both paths; it is cheap and belongs with the
-mechanism fix above.
+`move_names_the_staging_action_not_only_the_two_paths`, in `src/librarian/tools/mv.rs`
+beside `move_renames_file_and_updates_catalog`. Confirmed RED first — panicked at
+*"stage_together must be an array naming both halves of the move"* — then green: 13/13
+in that module, 14/14 in `path_strip`.
 
+**The test this file originally specified would have passed against the defect, and
+that is kept rather than quietly replaced.** It asked to "assert that a `move` response
+names both paths", which was already true when written — a green assertion over the
+broken shape. The assertion had to move to the *imperative*: `stage_together` present
+and ordered deletion-first, and `stage_hint` naming `git add --`, `git add -u`, and
+`R`. Asserting on the paths tests the half that was never broken.
 ## Workarounds
 
 Stage the move explicitly, naming both sides:
@@ -165,21 +185,30 @@ is half-staged.
 
 ## Resume
 
+> **SUPERSEDED 2026-09-02 — the blocker described below cleared, and the fix has since
+> landed.** This section instructed the reader that the file was "intentionally left
+> **untracked**" pending an untangled `docs/trackers/issue-clusters.md`. It was in fact
+> committed at `781633e4` (2026-09-02 05:31) as `IC-18`'s sixth member, ~11 hours before
+> this note. The class has gained members since; derive the count with `python3
+> scripts/probe-cluster-census.py` rather than reading a cell — the ledger stopped
+> storing derived counts on 2026-09-02 (`no_class_field_states_a_bare_n`). A reader
+> following the instruction below
+> today would decline a commit that is already made. Read § *Fix* and § *Tests added*
+> for the current state.
+
+Historical record, accurate when written:
+
 **Blocked on an unrelated file, deliberately — do not "fix" this by committing it.**
 This bug file is intentionally left **untracked**. Staging it would add a sixth member
 to `cluster/selector-narrower-than-its-population`, and the count gate
 (`every_index_count_matches_the_corpus`, `every_bare_n_in_a_class_field_matches_the_corpus`)
 would then require `docs/trackers/issue-clusters.md` to move `IC-18` from `n=5` to
-`n=6` — in both the Index row and the `**Members:**` field.
+`n=6` — in both the Index row and the `**Members:**` field. As of 2026-09-02 that file
+carried three sessions' uncommitted edits and could not be committed by any one of
+them.
 
-As of 2026-09-02 that file carries three sessions' uncommitted edits and cannot be
-committed by any one of them. Once it is untangled: update both `IC-18` counts, add
-this file to the member list, `git add` this file and the ledger together, and the gate
-should go green in the same commit.
-
-Note the irony and do not let it pass as a joke — this record is itself sitting in the
+Note the irony and do not let it pass as a joke — this record was itself sitting in the
 half-state it describes, for a different reason.
-
 ## References
 
 - `IC-18` in `docs/trackers/issue-clusters.md` — the defect class.
@@ -189,4 +218,3 @@ half-state it describes, for a different reason.
   `tracked_all_bug_files`, and the doc comment that names this state.
 - `7d2b3ee7` (`experiments`, patch-id `3f9dd6822aeb24684307e4802ee3867dc667faff`) — the
   archive commit whose staging surfaced this.
-

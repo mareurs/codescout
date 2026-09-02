@@ -23,9 +23,10 @@ use serde_json::Value;
 /// **Scope of the corpus gate.** `src/server.rs`'s
 /// `no_absolute_project_paths_in_rendered_output` only covers the file-tool
 /// surface (`tree`, `grep`, `read_file`, `read_markdown`, `symbols`) — no
-/// librarian tool is in its fixture set, so the six keys librarian emits
+/// librarian tool is in its fixture set, so the seven keys librarian emits
 /// (`deleted_abs_path`, `main_path`, `new_abs_path`, `new_path`,
-/// `old_abs_path`, `targets`) are exercised only by synthetic-`Value` unit
+/// `old_abs_path`, `stage_together`, `targets`) are exercised only by
+/// synthetic-`Value` unit
 /// tests below, not by that gate. Of the keys the gate *can* see, only a
 /// forgotten key on `grep` currently fails the negative assertion — the rest
 /// are masked by tool-specific rendering (see the liveness-guard note on that
@@ -45,6 +46,7 @@ pub(crate) const PATH_KEYS: &[&str] = &[
     "path",
     "prompt_path",
     "rel_path",
+    "stage_together",
     "synthesis_prompt_path",
     "targets",
 ];
