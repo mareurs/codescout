@@ -2018,7 +2018,6 @@ trait Drawable {
     fn draw(&self);
 }
 
-// cap-class: NOT_A_CAP — text inside a raw-string Rust fixture for the AST extractor, not a bound any code reads
 const MAX: u32 = 100;
 
 mod utils {
@@ -2219,7 +2218,6 @@ type ID = string | number;
 macro_rules! my_macro { () => {}; }
 union MyUnion { a: i32 }
 pub trait MyTrait {
-    // cap-class: NOT_A_CAP — text inside a raw-string Rust fixture for the AST extractor, not a bound any code reads
     const LIMIT: i32;
     type Item;
     fn required(&self);

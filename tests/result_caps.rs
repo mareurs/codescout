@@ -19,18 +19,24 @@
 //!
 //! ## Census — 2026-09-02
 //!
-//! **105 cap-shaped `const` declarations** in tracked `src/` (unit: `const`
+//! **103 cap-shaped `const` declarations** in tracked `src/` (unit: `const`
 //! declarations matching [`is_cap_shaped`], one count per declaration, not
 //! per use site — a constant read at six call sites still counts once):
-//! **66** `RESULT_CAP` across 66 distinct ids, **39** `NOT_A_CAP`. Derived by
+//! **66** `RESULT_CAP` across 66 distinct ids, **37** `NOT_A_CAP`. Derived by
 //! running [`every_cap_constant_is_classified`]'s own parser over
 //! `git ls-files src`, not by a shell grep — a second selector answers a
 //! slightly different question, which is the `IC-18` mistake this gate
 //! exists to catch.
 //!
-//! The census is a floor on the cap population, not a census of caps:
-//! [`is_cap_shaped`] cannot see a bound named `PAGE_SIZE`, and instrument B
-//! ([`truncation_sites`]) is what covers the operations it misses.
+//! The census is a floor on the cap population, not a census of caps.
+//! `LATEST_OBSERVATIONS: usize = 3` (`src/librarian/preview/memory.rs:9`) is
+//! a live result cap — `memory.rs:18` truncates the observation list to it,
+//! so a preview shows three of however many exist — and [`is_cap_shaped`]
+//! cannot see it, because its name carries no `MAX`/`CAP`/`LIMIT`/`BUDGET`
+//! token. It sits ONE LINE above `OBSERVATION_TEXT_MAX`, which this census
+//! does count. A miss that close to a hit is the plainest statement of why
+//! instrument B ([`truncation_sites`]) exists: it reads the truncating
+//! OPERATION, which no name regex can be widened into.
 
 // Consumed by Task 5's probe_row_ids; allow until then.
 #[allow(unused_imports)]
@@ -158,6 +164,64 @@ const GREP_LINE_LIMIT: usize = 50;
          start with \"//\", so `break` fires before the comment above it is \
          ever collected and this assertion goes from Some(..) to None."
     );
+}
+#[test]
+fn cap_constants_does_not_report_a_const_inside_a_raw_string_fixture() {
+    // A parser test's INPUT DATA, not code. `src/ast/parser.rs` holds two of
+    // these; before `raw_string_lines` the gate demanded `cap-class:`
+    // annotations for them, which is `IC-6`'s no-escape half inside the gate
+    // for `IC-13`.
+    let src = "\
+fn rust_symbols_are_extracted() {
+    let source = r#\"
+const MAX: u32 = 100;
+\"#;
+}
+";
+    assert!(
+        cap_constants(src, "src/x.rs").is_empty(),
+        "a const inside r#\"...\"# is fixture text, not a declaration"
+    );
+}
+
+#[test]
+fn cap_constants_still_reports_a_const_after_a_closed_raw_string() {
+    // The direction the absence test above cannot see. Over-skipping — a
+    // region that never closes, or a closer the scan misses — hides real
+    // declarations from the gate, and the absence assertion is MONOTONE under
+    // exactly that failure: it gets *more* satisfied as the skip widens. This
+    // asserts the whole reported set, so a leak of INSIDE_MAX and a swallow of
+    // OUTSIDE_MAX each fail it.
+    let src = "\
+fn f() {
+    let source = r#\"
+const INSIDE_MAX: usize = 1;
+\"#;
+}
+
+const OUTSIDE_MAX: usize = 2;
+";
+    let names: Vec<String> = cap_constants(src, "src/x.rs")
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+    assert_eq!(names, vec!["OUTSIDE_MAX"]);
+}
+
+#[test]
+fn unclosed_raw_opener_pairs_each_opener_with_its_own_closer() {
+    // One line that opens and closes twice opens nothing: without per-opener
+    // pairing, the second `r#"` would leave the region open and swallow the
+    // rest of the file.
+    assert_eq!(unclosed_raw_opener("    f(r#\"a\"#, r#\"b\"#);"), None);
+    // Hash count is part of the delimiter: `"#` does not close `r##"`.
+    assert_eq!(
+        unclosed_raw_opener("    let s = r##\"x\"#;").as_deref(),
+        Some("\"##")
+    );
+    // `r` must start a token — a word ending in `r` before a normal string is
+    // not an opener.
+    assert_eq!(unclosed_raw_opener("    let separator = \"x\";"), None);
 }
 
 #[test]
@@ -341,17 +405,109 @@ fn is_cap_shaped(name: &str) -> bool {
         .any(|t| name.contains(t))
 }
 
+/// Lines of `src` that sit INSIDE a raw string literal and must not be read
+/// as declarations.
+///
+/// A LINE-LEVEL HEURISTIC, not a lexer. It exists because [`cap_constants`]
+/// reads source as TEXT: without it a `const MAX: u32 = 100;` written inside
+/// an `r#"..."#` test fixture — input DATA for a parser under test, never code
+/// — is reported as an unclassified cap, and the gate demands an annotation
+/// the fixture should not carry. That is `IC-6`'s *no escape* half occurring
+/// inside the gate built for `IC-13`: a scanner over a namespace with no way
+/// to say "this token is data". Two such fixtures live in
+/// `src/ast/parser.rs`; they were annotated before this escape existed, and
+/// that was harmless only because both are Rust (tree-sitter read the
+/// inserted `//` as a comment) and both assert on symbol names rather than
+/// line numbers. A Python or Go fixture, or one line-number assertion, would
+/// have broken.
+///
+/// Rule: a line holding a raw-string opener (`r"`, `r#"`, `r##"`, …) with no
+/// matching closer later on that same line opens a skipped region, which ends
+/// on the first line holding the matching closer. The opener line is still
+/// parsed; the closer line is skipped whole.
+///
+/// What it deliberately does NOT handle — each would need a real lexer:
+/// - a raw-string delimiter appearing inside an ordinary `"..."` literal, or
+///   inside a TRAILING comment, is read as a real delimiter. Only a LEADING
+///   `//` exempts a line, so prose that mentions a raw-string opener cannot
+///   open a phantom region;
+/// - a `const` sharing a line with the closing delimiter is skipped with it;
+/// - a raw string whose closer never appears (an unterminated literal, which
+///   would not compile) skips the rest of the file.
+///
+/// Fails toward SILENCE rather than toward a wrong classification:
+/// over-skipping hides a real declaration from the gate. So
+/// `cap_constants_still_reports_a_const_after_a_closed_raw_string` is the
+/// load-bearing test — an absence assertion alone is monotone under exactly
+/// the over-skip this can cause, and would not fire.
+fn raw_string_lines(lines: &[&str]) -> Vec<bool> {
+    let mut out = vec![false; lines.len()];
+    let mut open_closer: Option<String> = None;
+    for (idx, raw) in lines.iter().enumerate() {
+        if let Some(closer) = open_closer.clone() {
+            out[idx] = true;
+            if raw.contains(closer.as_str()) {
+                open_closer = None;
+            }
+            continue;
+        }
+        if raw.trim_start().starts_with("//") {
+            continue;
+        }
+        open_closer = unclosed_raw_opener(raw);
+    }
+    out
+}
+
+/// The closing delimiter of a raw string opened on `line` and not closed on
+/// it, or `None` when the line opens no unclosed raw string.
+///
+/// Walks the line left to right, pairing each opener with its own closer, so a
+/// line that opens AND closes several raw strings is correctly reported as
+/// opening none. The `r` must start a token — the preceding byte may not be
+/// alphanumeric or `_` — so an identifier ending in `r` is not an opener.
+fn unclosed_raw_opener(line: &str) -> Option<String> {
+    let b = line.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        if b[i] != b'r' || (i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < b.len() && b[j] == b'#' {
+            j += 1;
+        }
+        if j >= b.len() || b[j] != b'"' {
+            i += 1;
+            continue;
+        }
+        let closer = format!("\"{}", "#".repeat(j - i - 1));
+        match line[j + 1..].find(&closer) {
+            Some(off) => i = j + 1 + off + closer.len(),
+            None => return Some(closer),
+        }
+    }
+    None
+}
+
 /// Cap-shaped `const` declarations in `src`, each with the `cap-class:`
 /// annotation from the contiguous comment block directly above it.
+///
+/// Lines inside a raw string literal are skipped — see [`raw_string_lines`].
 ///
 /// Takes `&str` rather than reading the file so the meta-tests above drive
 /// THIS function on fixtures — not a second copy that could drift from it
 /// (`missing_index_rows` precedent, `tests/issue_clusters.rs:461-471`).
 fn cap_constants(src: &str, file: &str) -> Vec<CapDecl> {
     let lines: Vec<&str> = src.lines().collect();
+    let in_raw_string = raw_string_lines(&lines);
     let mut out = vec![];
 
     for (idx, raw) in lines.iter().enumerate() {
+        if in_raw_string[idx] {
+            continue;
+        }
         let t = raw.trim_start();
         let after_vis = t
             .strip_prefix("pub(crate) ")
