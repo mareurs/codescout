@@ -162,7 +162,9 @@ smaller declaring sections, not consolidating them.
 > `serves: artifact.update` breaks the gate"* came true from a different direction: a
 > peer's +555 B to a section serving `artifact.create` reddened it, against a ceiling
 > re-derived down to 12,244 the same day. Record:
-> `docs/issues/2026-09-02-a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout.md`.
+> `docs/issues/archive/2026-09-02-a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout.md`
+> (fixed and archived the same day at `6b1276fb`, patch-id
+> `1ece0070092134f53547016c8200abf7b8e7d812`).
 >
 > **Resolved by decomposing the second child.** *The shrink guard, force, and event
 > forensics* held a `field_patch` / `artifact_event(action="list")` paragraph addressed

@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related:
@@ -11,7 +11,6 @@ related:
 - docs/issues/archive/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md
 - docs/superpowers/plans/2026-08-27-get-guide-section-grain.md
 severity: medium
-unverified: no remedy attempted here — decomposition is out of scope for fix round 1, and trimming the just-landed `artifact.move` section would edit another session's work; whether the deficit (427 B) closes on its own as other sections shrink, or needs an explicit trim, is unknown.
 ---
 
 # BUG: a freshly-corrected byte ceiling reds within 20 minutes of landing, on a shared checkout
@@ -127,6 +126,44 @@ from "this growth should trip the gate," because it only sees the sum.
    **Verdict** — rejected. All growth is committed history.
 
 ## Fix
+
+**FIXED 2026-09-02 — `6b1276fb` on `experiments`, patch-id
+`1ece0070092134f53547016c8200abf7b8e7d812`.** Both remedy directions below stand as
+written; the one taken was decomposition, and `CEILING` was not touched.
+
+§ *The shrink guard, force, and event forensics* in `librarian.md` carried three
+paragraphs under `serves: artifact.update`. One — the `field_patch` payload shape and
+`artifact_event(action="list")` — is addressed to `artifact_event` rather than to
+`artifact.update`, and duplicated the only fact an update caller needs from it
+(`replaced_subsections` reveals a destroyed child), which the sibling anti-patterns
+section already states outright. Moved into § *artifact_event — Event Log*, whose kind
+list already names `field_patch`.
+
+| | before | after |
+|---|---|---|
+| `librarian.md` whole topic | 23,554 B | **23,551 B** (−3) |
+| p50 served draw | 12,330 B | **11,885 B** (−445) |
+| margin vs `CEILING` 12,244 | **−86 B** | **+359 B** |
+
+**The 3 B against 445 B is the finding, not a curiosity.** Decomposition moves bytes to
+the action that needs them; it does not delete them. So whole-topic size is nearly
+useless as a progress signal for this class of work, and anyone measuring it would have
+concluded almost nothing happened.
+
+Measured by temporarily setting `CEILING` to 1, reading the panic's own figure, and
+restoring — the committed constant is unchanged at 12,244. All four gate commands exit
+**0**.
+
+**Partial progress by another session, and it could never have closed this alone:**
+`c45dd5ef` compressed 341 B of near-duplicate prose from the section that tripped the
+gate (`4baf8afc`, patch-id `8931808157a4fa8905be23b3db87a2a8ceb248d7`), taking the
+deficit 427 B → 86 B. They noted before writing a line that the paragraph was 494 B
+total, so deletion caps the saving at ~424 B against a 427 B deficit — recorded here so
+nobody reads the 86 B as an almost-fix and tries another trim.
+
+**Still open, and not this bug:** § *Choosing a mode — anti-patterns* (1,366 B) is the
+remaining half of the decomposition, tracked at
+`resume-get-guide-section-grain-phases-2-3:GG-4`.
 
 Not attempted here — out of scope for fix round 1, which is explicitly
 scoped to the five review findings in
