@@ -30,9 +30,34 @@ session log is represented by **1,404 of 766,860 bytes — 0.18%**. Corpus-wide,
 
 ## Symptom (Effect)
 
-No error. `semantic_search` and `artifact(action="find", semantic=…)` return
-plausible, ranked results. They are ranked on content the caller assumes was
-searched and was not.
+No error. `artifact(action="find", semantic=…)` and `librarian(action="context",
+topic=…)` return plausible, ranked results. They are ranked on content the caller
+assumes was searched and was not.
+
+> **Corrected 2026-09-02 — `semantic_search` is NOT affected. The original
+> wording named it first, and that error was load-bearing.**
+>
+> codescout runs **two** vector indexes over the same markdown, in two
+> databases. `semantic_search` rides `code_chunk`/`code_vec` in the
+> project-local `.codescout/embeddings/<project>.db`, which is fully chunked:
+> **33,032 markdown chunks over 1,363 files**, including **809 chunks covering
+> lines 1–9648** of the same 766 KB tracker that `artifact_vec` represents with
+> one preamble vector.
+>
+> Probed rather than reasoned: both paths were run against a phrase at line
+> 7814 of `docs/trackers/bug-fix-session-log.md`.
+> `semantic_search(mode="full")` returned it **ranked 2nd and 3rd**;
+> `artifact(find, semantic=…)` did not return the file at all.
+>
+> Affected consumers are exactly the two that read `artifact_vec`:
+> `src/librarian/catalog/find.rs:299` (`semantic_find`) is its sole production
+> caller, reached from `artifact(find, semantic=…)` and from
+> `src/librarian/tools/context.rs:679`.
+>
+> This matters past accuracy. It means chunk-grain markdown retrieval **already
+> exists in this binary**, so the fix below is a **port with a working reference
+> implementation**, not an invention — and building it blind would have been the
+> two-implementations defect this corpus already names.
 
 **measured 2026-09-02** — the five artifacts with the most entries:
 
@@ -86,6 +111,97 @@ requires a compound key.
 `artifact_vec_rowids` (ordinary SQLite — note the `vec0` module is NOT loaded in
 the plain `sqlite3` CLI, so `artifact_vec` itself is unqueryable there).*
 
+## The chunk budget — RETRACTED as a defect; it is a benchmarked trade-off
+
+> **Retracted 2026-09-02, the same day it was added.** An earlier revision of
+> this section called the `512` literal at `indexer.rs:67` a defect — *"4× too
+> small"* — because `chunk_size_for_model("CodeRankEmbed")` returns 2048.
+> **That reasoning was wrong. The model's figure is a CEILING, and this project
+> deliberately chunks well below it.**
+>
+> The prior decision is explicit and benchmark-backed —
+> `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`:
+> `STACK_CHUNK_TARGET = 1200` is *"benchmark-backed, and under every local
+> model's real ceiling"*; `AST_CHUNK_TARGET = 3000`
+> (`src/embed/ast_chunker.rs:953`) caps **every** code-index chunk under the
+> comment *"smaller chunks produce sharper embeddings for retrieval regardless
+> of file type"*; and a since-deleted `DEFAULT_CAP = 4096` existed precisely
+> because large-context models *"would otherwise default to ~20k chars per
+> chunk, which both slows indexing and **dilutes ranking signal**"*.
+>
+> At 512 tokens the librarian chunks at **2,048 chars — inside the project's
+> deliberate 1,200–3,000 window.** It is not misconfigured.
+>
+> **The error has a name, and its precedent is in this record's own ancestor.**
+> That archived file carries a § *Correction to this file's own analysis*
+> retracting a 92% figure built by *"reading `chunk_size_for_model`'s raw output
+> and attributing it to"* a different function. This retraction is the same
+> mistake one layer along — raw ceiling read as target. Two authors, one
+> function, thirteen days apart. `chunk_size_for_model` returns a number that
+> looks like a budget and is named like a budget; the only thing making it a
+> ceiling lives in a constant three files away.
+
+### What the measurement actually shows
+
+The entry-alignment figures stand as data. Only their interpretation was wrong.
+
+Population: headings matching `^#{2,4}\s+[A-Z]{1,3}-\d+\s+[—–-]\s` — entries the
+resolver's definition rule actually defines — over
+`git ls-files docs/trackers docs/issues`. **n = 1,482 defined entries** (1,027 at
+`##`, 391 at `###`, 64 at `####`). Not the same population as the 1,601 counted
+in § *Summary*, which uses a different selector; both are stated with their
+derivation rather than reconciled.
+
+| chunk budget | entries that are exactly ONE chunk | chunks over those entries |
+|---|---|---|
+| 2,048 chars — today's literal | 607 / 1,482 = **41.0%** | 3,302 |
+| 8,000 chars — the model's ceiling | 1,297 / 1,482 = **87.5%** | 2,080 |
+
+Read correctly this is a **trade-off**, not a gap: larger chunks align better
+with entry boundaries *and* embed more bluntly. This project has already priced
+the second half empirically, on this corpus, and chosen small.
+
+### The trade-off dissolves — `entry_token` buys the alignment for free
+
+Entry alignment was only ever wanted so that a hit could **name an entry**.
+Storing the enclosing entry's token on **every** chunk delivers exactly that
+without touching the budget: a chunk from the middle of a five-chunk `W-81`
+still reports `bug-fix-session-log:W-81`, carrying its own line range for the
+precise match.
+
+So the budget stays at 512 tokens, retrieval keeps its benchmarked sharpness,
+and entry-grain naming comes from a `TEXT` column instead of from blunter
+vectors. **No budget change is part of this fix.**
+
+### Retained from the retracted section: resizing alone could never have worked
+
+Independently true, and worth keeping because it explains why first-chunk-only
+is not a sizing bug at all. `chunk_markdown` forces a section break at **every**
+heading regardless of size (`chunker.rs:141-152`, *"headings always force a new
+section even if small"*), so chunk 0 ends at the first heading whatever the cap
+is. Raising the budget changes only those files whose preamble already exceeds
+the cap — rare. There was never a version of this bug that a bigger number
+fixed.
+## Cost model — measured, no longer unmeasured
+
+The original *"do not treat embed-every-chunk as free"* warning was right to
+refuse a guess. Derived 2026-09-02 over `git ls-files docs` → 1,325 markdown
+files, 22,309,731 bytes:
+
+| chunk budget | chunks for codescout `docs/**.md` |
+|---|---|
+| **2,048 chars — today's literal, which this fix KEEPS** | **26,514** |
+| 8,000 chars — the model ceiling, *not* chosen; see the retraction | 22,414 |
+
+Extrapolated across the catalog's **10 repos / 4,523 artifacts** (of which 1,355
+are codescout): **~90,500 chunks ≈ 278 MB of float32 vectors at 768 dims**,
+against a `catalog.db` that is 66 MB today.
+
+**The extrapolation is crude** — it scales by artifact count and assumes other
+repos' documents resemble this one's. Re-derive per repo before sizing storage.
+If 278 MB proves unacceptable, the lever is vector quantization or a
+chunk-eligibility rule, **not** the chunk budget — that one is spent on ranking
+quality and buying it back costs retrieval.
 ## Evidence
 
 ### The failure is silent in the direction that matters
@@ -119,22 +235,53 @@ that rest on this"* is resting on a layer that does not exist.
 
 ## Fix
 
-**Not yet applied**, and it is two changes, not one:
+**Not yet applied.** Two schema/indexer changes plus one payload field. Revised
+2026-09-02; an intermediate revision listed a chunk-budget change as item 1 and
+it has been retracted — see § *The chunk budget*.
 
-1. **Schema** — `artifact_vec`'s `id TEXT PRIMARY KEY` must become a compound
-   key (`artifact_id`, `chunk_ix`) before more than one vector per artifact can
-   be stored. Note the `AFTER DELETE ON artifact` cascade at
-   `schema.sql:54-58` must follow.
-2. **Indexer** — `indexer.rs:69`, stop discarding; embed each chunk.
+1. **Schema** — one vector per artifact is the binding constraint, but a
+   **compound key is not required**: `vec0` accepts a TEXT primary key, so
+   `artifact_vec` can simply be re-keyed on an opaque `chunk_id`, with an
+   `artifact_chunk` side table carrying `artifact_id`, `chunk_ix`, `start_line`,
+   `end_line`, `entry_token`, `content`, `content_hash` and
+   `UNIQUE(artifact_id, chunk_ix)`. That is `code_chunk`/`code_vec`'s existing
+   shape — a **port with a working reference implementation**, not an invention.
 
-Then decide the retrieval semantics — max-over-chunks or mean — and whether a
-hit reports the artifact or the chunk. Reporting the chunk is what would make
-entry-grain retrieval real, and is the point of doing this.
+   Prefer an **opaque** `chunk_id` over a derived `<artifact_id>#<ix>`: since
+   `id = sha256(abs_path)`, archiving re-keys an artifact, and archiving is a
+   bug file's normal end state. A derived id makes every move an O(chunks) loop
+   through `gc.rs:406`'s `migrate_vec_id` — which exists only because `vec0`
+   rejects `UPDATE ... SET id`. An opaque id makes a move one
+   `UPDATE artifact_chunk SET artifact_id`, touching no vectors.
 
-**Do not treat "embed every chunk" as free**: the 189-entry ledger alone is
-766 KB, and the cost model for re-embedding the whole corpus at chunk grain is
-unmeasured.
+   The `AFTER DELETE ON artifact` cascade at `schema.sql:54-58` must fan out
+   over an artifact's chunks, and must read `artifact_chunk` **before** the FK
+   cascade empties it — so `BEFORE DELETE`, or explicit code in `gc.rs`, which
+   already handles `artifact_vec` by hand for this same "no FK, trigger-only"
+   reason.
 
+2. **Indexer** — `indexer.rs:69`, stop discarding; embed every chunk. Switch
+   from `chunk_markdown` (returns `Vec<String>`, no line numbers) to the
+   line-aware `split_markdown` → `Vec<RawChunk>`, which the code index already
+   uses via `ast_chunker.rs:982`. Note the two disagree on heading depth:
+   `chunk_markdown` breaks on levels **1–6**, `split_markdown` on **1–3** only,
+   which affects the 64 entries defined at `####`.
+
+   `chunk_markdown` has exactly **one caller in the tree** — the defective line
+   itself — so consolidating on `split_markdown` removes a chunker rather than
+   adding one.
+
+3. **`entry_token`** — populate from the enclosing `## <ID> — <title>` heading
+   (`link_scan` already has the parser) so a chunk hit names a **citable** entry
+   rather than a line range. This is what makes entry-grain retrieval real, and
+   it replaces the budget change an earlier revision proposed.
+
+**The chunk budget stays at 512 tokens / 2,048 chars.** Changing it is not part
+of this fix and would cost ranking quality.
+
+Then the retrieval semantics: `semantic_find` (`find.rs:299`) returns
+chunk-grain hits rather than artifact rows — decided 2026-09-02 in favour of
+returning the entry, not the artifact.
 ## Tests added
 
 None yet. A regression test should assert that an artifact whose distinguishing
