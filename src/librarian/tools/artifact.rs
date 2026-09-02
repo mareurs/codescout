@@ -444,9 +444,9 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // 37 labelled keys across the 12 actions as of 2026-08-17. The floor leaves room for
-        // the schema to shrink without a false alarm while still catching a break in the
-        // `<action>:` label convention.
+        // 56 labelled keys across the 14 actions as of 2026-09-02. The floor leaves
+        // room for the schema to shrink without a false alarm while still catching a
+        // break in the `<action>:` label convention.
         assert_all_honored(
             "doc",
             &Artifact.input_schema(),
@@ -650,6 +650,34 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["kind"], "note");
     }
+    /// The whole point of nesting the event under `event: {kind: …}` is that the event's kind
+    /// can never share a key with the document's own `kind` — `flatten_event_args` only ever
+    /// reads `kind` from the nested object. Send a top-level `kind` that DIFFERS from the
+    /// nested one and assert the stored event kind is the nested one, never the top-level one.
+    /// Mutation-verified: making `flatten_event_args` let top-level keys win over the nested
+    /// object's reds this test (2026-09-02).
+    #[tokio::test]
+    async fn event_create_nested_kind_wins_over_a_colliding_top_level_kind() {
+        let ctx = mk_ctx();
+        let id = "bbbbbbbbbbbbbbbb";
+        seed_row(&ctx, id);
+        let created = Artifact
+            .call(
+                &ctx,
+                json!({"action": "event_create", "id": id, "kind": "verdict",
+                               "event": {"kind": "note", "payload": {"text": "hello"}}}),
+            )
+            .await
+            .expect("event_create succeeds");
+        assert!(created["event_id"].is_string(), "{created}");
+        let listed = Artifact
+            .call(&ctx, json!({"action": "event_list", "id": id}))
+            .await
+            .expect("event_list succeeds");
+        let events = listed["items"].as_array().expect("items array");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["kind"], "note", "{events:?}");
+    }
 
     #[tokio::test]
     async fn event_create_without_an_event_object_is_refused_with_the_shape() {
@@ -725,5 +753,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Regression: `docs/issues/archive/2026-05-21-artifact-event-create-payload-rejected.md`.
+    /// With no declared `type` on `payload`, MCP clients transported the value as a
+    /// stringified JSON, which the server's `.as_object()` guard then rejected with "payload
+    /// must be object". The original guard, `payload_schema_declares_object_type`, lived in
+    /// the deleted `src/librarian/tools/artifact_event.rs` and was not moved when Task 4
+    /// nested `payload` under `event` — `every_required_payload_field_is_enforced_and_advertised`
+    /// reads only the *description* at this path, not the `type`, so it does not cover this.
+    #[test]
+    fn event_payload_schema_declares_object_type() {
+        let schema = Artifact.input_schema();
+        assert_eq!(
+            schema["properties"]["event"]["properties"]["payload"]["type"], "object",
+            "payload must declare type=object so clients send an object, not a JSON string"
+        );
     }
 }

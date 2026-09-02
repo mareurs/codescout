@@ -604,7 +604,7 @@ mod tests {
         assert!(!Library.is_write(&json!({})));
     }
 
-    /// Site 5 for the `IC-15` param probe, and the first outside `src/librarian/` — see
+    /// Site 4 of 4 for the `IC-15` param probe, and the first outside `src/librarian/` — see
     /// `crate::tools::param_probe` for why it compares two calls and what `accepts_any_json`
     /// admits.
     ///

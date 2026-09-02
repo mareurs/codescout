@@ -84,7 +84,7 @@ mod tests {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
-    /// Site 4 of 4 for the `IC-15` param probe — see
+    /// Site 3 of 4 for the `IC-15` param probe — see
     /// `crate::tools::param_probe`.
     ///
     /// `gather` needs an id; a well-formed but nonexistent one keeps the failure after
@@ -118,7 +118,7 @@ mod tests {
         )
         .await;
 
-        // Reverse direction, site 4 of 4 — see `param_probe::assert_required_are_advertised`.
+        // Reverse direction, site 3 of 4 — see `param_probe::assert_required_are_advertised`.
         // Reuses the same `required` table rather than restating it: the point of the check is
         // that the two representations agree, so a second copy would defeat it.
         assert_required_are_advertised(

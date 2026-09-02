@@ -2485,16 +2485,17 @@ mod tests {
         assert_eq!(raised, vec!["doc", "librarian"]);
     }
 
-    /// Name-prefix classifier for the librarian tool family (`artifact`,
-    /// `artifact_augment`, `artifact_refresh`, `librarian`,
-    /// `tracker_design`, `workspace_state_at`, ...), used only to size the
-    /// "core" (non-librarian) tool surface in `server_registers_all_tools`
-    /// and `server_tool_count_is_l3_target`. NOT used for the description-cap
+    /// Name-prefix classifier for the librarian tool family (`doc`,
+    /// `artifact_augment`, `artifact_refresh`, `librarian`, `tracker_design`,
+    /// `workspace_state_at`, ...), used only to size the "core"
+    /// (non-librarian) tool surface in `server_registers_all_tools` and
+    /// `server_tool_count_is_l3_target`. NOT used for the description-cap
     /// exemption anymore — see `Tool::description_cap` for that, which a
     /// tool rename (e.g. `artifact` → `doc`) cannot silently orphan the way
     /// this prefix list can. This helper is scoped to the two tool-count
-    /// tests below and is expected to be retired alongside them when the
-    /// tool-surface-collapse plan folds the `artifact_*` family into `doc`.
+    /// tests below and is expected to be retired alongside them; Task 4 of
+    /// the tool-surface-collapse plan already folded the `artifact_*` family
+    /// into `doc` (`artifact` itself no longer exists).
     fn is_librarian_tool(name: &str) -> bool {
         name.starts_with("artifact_")
             || name.starts_with("librarian_")
@@ -2536,7 +2537,7 @@ mod tests {
         Some(match tool {
             "workspace" | "library" | "edit_code" | "index" | "memory" | "artifact_refresh"
             | "librarian" => ActionContract::Inventory,
-            // `doc` (12 actions) and `edit_markdown` (5) describe by theme on
+            // `doc` (14 actions) and `edit_markdown` (5) describe by theme on
             // purpose: an inventory would not fit the surface budget, and the client
             // already receives the `action` enum itself in the schema. The thematic arm
             // is an escape hatch, so the test asserts against it in the opposite

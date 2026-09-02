@@ -2598,11 +2598,22 @@ mod redesign_invariants {
     #[test]
     fn server_instructions_does_not_concat_librarian() {
         // After Task 14 lands, the librarian block must not be appended.
+        //
+        // The needle used to be `doc(action="event_create")` — that literal substring
+        // occurs NOWHERE in the tree (`git grep -c 'doc(action="event_create")' -- src/`
+        // returns zero; the guide writes `doc(action="event_create", id="...", event={...})`,
+        // comma not paren), so this assertion could never fire. Verified by committing the
+        // regression it guards — concatenating `librarian.md` into
+        // `build_server_instructions` — and watching the old assertion pass anyway.
+        //
+        // `<!-- serves: doc.event_create` is the guide's own machine-readable declaration
+        // (`src/prompts/guides/librarian.md`, just above the `## doc — Event Log` heading)
+        // and is stable under prose edits to the section around it.
         let rendered = build_server_instructions(None);
         assert!(
-            !rendered.contains("doc(action=\"event_create\")"),
+            !rendered.contains("<!-- serves: doc.event_create"),
             "librarian guide content should not be in instructions; \
-             move it to get_guide(\"librarian\")"
+                 move it to get_guide(\"librarian\")"
         );
     }
 
