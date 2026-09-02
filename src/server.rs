@@ -2868,32 +2868,27 @@ mod tests {
             let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
                 continue;
             };
-            for req in required.iter().filter_map(|v| v.as_str()) {
-                for (alias_name, target) in &aliases {
-                    if *target == req {
-                        offenders.push(format!(
-                            "{}: required=[{req:?}] but {alias_name:?} is declared an alias of it",
-                            t.name()
-                        ));
-                    }
-                }
-            }
+            let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+            // Round 3 fix: this now calls the SAME offender-matching function the synthetic
+            // fixture test below calls, rather than a hand-typed copy of the loop — a mutated
+            // or dead production detector fails the fixture too, not just this real sweep.
+            offenders.extend(find_alias_offenders(t.name(), &required, &aliases));
         }
         for (tool, expected) in EXPECTED_ALIAS_COUNTS_BY_TOOL {
             let actual = alias_counts_by_tool.get(tool).copied().unwrap_or(0);
             assert_eq!(
                 actual, *expected,
                 "{tool}: expected {expected} \"Alias for \" property description(s), found \
-                 {actual} — either an alias description was reworded (silently blinding \
-                 both this per-tool check and the offender scan above for {tool} alone) or \
-                 a genuinely new/removed alias needs this table updated to match"
+             {actual} — either an alias description was reworded (silently blinding \
+             both this per-tool check and the offender scan above for {tool} alone) or \
+             a genuinely new/removed alias needs this table updated to match"
             );
         }
         assert!(
             offenders.is_empty(),
             "these schemas name a required key that another property declares itself an \
-             alias of — the true requirement is an alternation; express it with `anyOf` \
-             (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
+         alias of — the true requirement is an alternation; express it with `anyOf` \
+         (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
             offenders.join("\n  ")
         );
     }
@@ -2914,6 +2909,34 @@ mod tests {
                 Some((name.as_str(), target))
             })
             .collect()
+    }
+
+    /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
+    /// `alias_offender_detection_catches_a_synthetic_offender`: given a `required` array and
+    /// the aliases `parse_declared_aliases` derived for the same schema, return one formatted
+    /// offender string per (required key, alias) pair where an alias declares itself an alias
+    /// of a required key. `label` prefixes each message — the tool's name in production, or
+    /// `"synthetic"` in the fixture test — so extracting this cost neither call site its
+    /// existing wording. Round 3 fix: previously the synthetic test re-typed this loop
+    /// instead of calling the production one, so a broken *production* offender scan (e.g.
+    /// `if *target == req && false`) left every alias test green — the fixture guarded a
+    /// private copy of the logic, not the logic it was added to guard.
+    fn find_alias_offenders<'a>(
+        label: &str,
+        required: &[&'a str],
+        aliases: &[(&'a str, &'a str)],
+    ) -> Vec<String> {
+        let mut offenders = Vec::new();
+        for req in required {
+            for (alias_name, target) in aliases {
+                if *target == *req {
+                    offenders.push(format!(
+                        "{label}: required=[{req:?}] but {alias_name:?} is declared an alias of it"
+                    ));
+                }
+            }
+        }
+        offenders
     }
 
     /// Tools known (as of this writing) to declare at least one `"Alias for path"`
@@ -2970,25 +2993,21 @@ mod tests {
             aliases,
             vec![("file_path", "path")],
             "the synthetic fixture's own alias declaration was not parsed — \
-             parse_declared_aliases is broken independent of any production schema"
+         parse_declared_aliases is broken independent of any production schema"
         );
-        let mut offenders = Vec::new();
-        for req in required.iter().filter_map(|v| v.as_str()) {
-            for (alias_name, target) in &aliases {
-                if *target == req {
-                    offenders.push(format!(
-                        "synthetic: required=[{req:?}] but {alias_name:?} is declared an \
-                         alias of it"
-                    ));
-                }
-            }
-        }
+        let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        // Round 3 fix: calls the SAME find_alias_offenders the production sweep above calls,
+        // instead of a re-typed copy of its loop. Previously this test built its own inline
+        // offender loop, so mutating the PRODUCTION loop alone (e.g. `if *target == req &&
+        // false`, making the real scan unreachable) left this test green — it was asserting
+        // about a private copy, not the logic it exists to guard.
+        let offenders = find_alias_offenders("synthetic", &required, &aliases);
         assert_eq!(
             offenders.len(),
             1,
             "the synthetic offender (required=[\"path\"] with file_path declared an alias \
-             of path) was not detected — the offender-matching logic itself is broken, \
-             independent of whatever today's 26 production tools say"
+         of path) was not detected — the offender-matching logic itself is broken, \
+         independent of whatever today's 26 production tools say"
         );
     }
 
