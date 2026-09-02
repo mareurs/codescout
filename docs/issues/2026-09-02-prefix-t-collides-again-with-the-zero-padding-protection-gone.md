@@ -130,6 +130,55 @@ now do. The exemption was keyed on a property that `get_guide("tracker-conventio
 later instructed every ledger author to set, so the comment describes a corpus that no
 longer exists.
 
+## Propagation surfaces — where `T-17` is used as a worked example
+
+Raised by a peer session (`codescout-0a`), who found the first of these and framed it as
+*"hints get copied"*. Verified, and the population is larger than the one they named — the
+stronger instance is in a **served prompt surface**, and it is already one of the broken
+citations counted above.
+
+**1. `src/prompts/guides/tracker-conventions.md` — served to every agent** via
+`include_str!` at `src/prompts/mod.rs:576`, returned by `get_guide("tracker-conventions")`.
+Two uses:
+
+- `:565`, under the heading *Citing an entry — bare, or qualified*:
+
+  > Cite by **bare token** when the prefix has exactly one ledger: `R-98`, `HY-10`,
+  > `T-17`, `CAP-5`.
+
+  `T-17` is the guide's own example of *a prefix with exactly one ledger*, and it is one of
+  the four tokens that now has two. The guide instructs, by example, the single citation
+  form that cannot resolve for this token — and it is the document every session is told to
+  read before touching a tracker.
+
+- `:389`, listing example entry ids (`F-3`, `R-91`, `T-17`, `BUG-40`).
+
+**This surface is catalogued** (`e0802ffca04e9bf7`, `kind: doc`) and **is one of the 17
+ambiguous citers measured above** — `link_scan` reports it at line 390. Both occurrences
+fold into that one finding, because the scanner reports one occurrence per
+`(source, token)` pair rather than per mention (`tracker-hygiene-log:HY-21`). So the guide
+teaching the rule is itself an instance of the rule being broken.
+
+**2. `src/librarian/tools/update_entry.rs:53`** — the `RecoverableError` hint for a missing
+required param uses `entry_id="T-17"` in its worked example. Weaker than the peer's framing
+suggested, and the distinction is worth keeping: an `entry_id` is a *params-row key*, not a
+prose citation, so no scanner reaches it and copying it produces a wrong-row patch rather
+than a broken link. It is a bad example inside a contested namespace, not a citation vector.
+
+**Why this belongs on this bug rather than a separate one.** CLAUDE.md's
+§ *Parsers Over a Namespace* already lists *"a documentation example of citation syntax
+counted as a real citation"* as an instance of this class. The guide is that sentence about
+itself: it cannot demonstrate a bare citation without making one.
+
+**Remedy, not applied here.** Drop `T-17` from the `:565` list and the `:389` list — the
+other three examples in each (`R-98`, `HY-10`, `CAP-5`) are single-definer and verified so
+by the same `prefix_conflicts` run, so no substitute is needed and none should be invented
+without re-checking. Deliberately deferred: this is a served prompt surface with gated byte
+ceilings (`a_p50_session_stays_under_the_committed_emission_byte_ceiling`,
+`tool_surface_under_budget`), it is read by several concurrent sessions, and 32 commits are
+unpushed on this branch. The correction is one line in each place and needs the gate run,
+not a design decision.
+
 ## References
 
 - `src/librarian/tools/link_scan/resolve.rs` — `prefix_conflicts`, and the stale
