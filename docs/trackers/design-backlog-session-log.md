@@ -135,21 +135,26 @@ unrecorded by default.
   SIGPIPE on a non-final stage as success. **My task list contradicted the tracker's own § *Resume*
   step 2, which already said to rule #7 first.** Corrected order: #2 → #7 (T5) → #4/#5/#8.
 
-- [ ] **T3b — #4, #5, #8 rulings.** Blocked on T5. Drafts exist in the measurement block; they
-  are one-line consequences once the strategy is fixed.
+- [ ] **T3b — #4, #5, #8 rulings.** UNBLOCKED by R3. Drafts exist in the measurement block; they
+  are one-line consequences now that the strategy is fixed.
+
+- [ ] **T7 — #3 (timeout policy), re-opened by R3.** Its "total" lean rested on per-stage being
+  impossible, which `design-backlog-session-log:F-7` falsified. Both implementable. No caller for
+  per-stage has been named — the same test that retired per-stage cancellation — so total remains
+  the correct default until one is. Decide explicitly rather than inheriting the old lean.
 
 - [ ] **T4 — #6 and the source-gate bug should be ruled once, together.** #6 is the per-stage
   dangerous-command gate; `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
   is the same question already filed against a shipped surface — and fired **twice on this
   session's own commands**. One ruling covers both.
 
-- [ ] **T5 — #7 (Strategy C vs A/B) — LARGELY DISSOLVED 2026-09-02, awaiting confirmation.** Both
-  of C's stated costs are gone: per-stage cancellation withdrawn (`design-backlog-session-log:F-4`,
-  no caller can reach it) and per-stage timeout shown reachable in the shell
-  (`design-backlog-session-log:F-7`, `timeout <n> <stage>` beside the tee tap — measured
-  `PIPESTATUS=0 124 0` on a bounded middle stage). What remains is Concern 1's original argument,
-  which runs *for* C. Still the user's call, but it is now a confirmation rather than a trade-off.
-  One unverified caveat: `timeout` on Windows Git Bash.
+- [x] **T5 — #7 ruled: Strategy C.** Done 2026-09-02, recorded as `run-command-pipeline.md`
+  § *Rulings* **R3**. A confirmation rather than a trade-off: both of C's stated costs had been
+  falsified first — per-stage cancellation withdrawn (`design-backlog-session-log:F-4`, no caller)
+  and per-stage timeout shown reachable in the shell (`design-backlog-session-log:F-7`,
+  `PIPESTATUS=0 124 0`). Concern 1's positive argument carried it unopposed. **Re-opens #3**
+  (timeout policy), whose "total" lean rested on per-stage being impossible — both are now
+  implementable, and total stays the default only because no caller for per-stage has been named.
 
 - [ ] **T6 — #9 (`exec_one_stage` extraction) is a prerequisite under every strategy.** Verified
   absent (`symbols(name="exec_one_stage")` → 0 matches). Real code, gated on T5.

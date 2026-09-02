@@ -1,7 +1,7 @@
 ---
 id: '5d022cd3b41009f4'
 kind: tracker
-status: 'draft — R2 recorded; #4/#5/#8 reclassified as blocked on #7'
+status: 'draft — R3 recorded; #7 settled, #3 re-opened'
 title: run_command(pipeline=[...]) design
 tags:
 - run_command
@@ -371,6 +371,51 @@ same shape beside it.
 testing whether the capability was reachable at another layer, and both were wrong.**
 *"Impossible by construction"* is a claim about **one construction**, not about the capability.
 See `design-backlog-session-log:F-7`.
+
+### R3 (2026-09-02, marius) — #7: Strategy C
+
+**Ruled: Strategy C — shell-pipeline rewrite with per-stage tee taps, generalizing
+`inject_tee` from "tee the penultimate stage" to "tee every stage."** A and B stay rejected on
+Concern 1's and Concern 2's original grounds: A stands a second pipeline-buffering mechanism
+beside one already in production, B duplicates killpg/SIGPIPE/timeout machinery.
+
+**This was a confirmation, not a trade-off, and the record should say why.** When #7 was first
+put to a human it carried a real cost — *"per-stage timeout and per-stage cancellation become
+impossible by construction"* — and was framed as the one irreversible choice in the set. Both
+halves were then falsified, on separate days, by separate methods:
+
+| stated cost | fate | how it fell |
+|---|---|---|
+| per-stage cancellation | **withdrawn** — no caller can reach it | named the caller and the surface; neither exists (`design-backlog-session-log:F-4`) |
+| per-stage timeout | **available** — in the shell, not in Rust | ran it: `PIPESTATUS=0 124 0` on a bounded middle stage (`design-backlog-session-log:F-7`) |
+
+So C was ruled with **no established cost remaining**, and Concern 1's positive argument — one
+mechanism rather than two — carrying the decision unopposed.
+
+**§ *Architectural review* Concern 1's *now harder* list is superseded by this ruling and is
+kept as the dated record that argued for it.** Do not read *"per-stage timeout impossible"*
+there as current; the measurement block above is.
+
+**What R3 unblocks, and one surface it re-opens:**
+
+- **#4, #5, #8** — now decidable. All three encoded sequential stages; under C they follow from
+  `PIPESTATUS`. Drafts are in the measurement block.
+- **#9** (`exec_one_stage` extraction) — the prerequisite is now known to serve C specifically.
+- **#3 (timeout policy) is RE-OPENED as a genuine choice.** It asked "total or per-stage?" and
+  leaned total *because per-stage was believed impossible*. `F-7` removes that constraint, so
+  the lean now rests on nothing but simplicity. Both are implementable; decide it on merit,
+  and note the honest state of the evidence — no caller wanting per-stage timeout has been
+  named, which is the same test that retired per-stage *cancellation*. Total remains the
+  correct default until one is.
+
+**Revisit-when:** a streaming-output requirement lands (`stream_tail`, live `@bg_*` peek) —
+unchanged from Concern 1, and still the thing that would break the single-shell-process
+assumption. Backgrounded pipelines re-open #7, not #2 (see R2).
+
+**Confidence:** high on the choice, medium on one input — `timeout`'s availability on Windows
+Git Bash is unverified, and if absent, per-stage timeout degrades to unavailable-on-Windows.
+That bears on #3, not on R3: C's selection does not depend on it, since total timeout works on
+both platforms via the existing `tokio::time::timeout`.
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).
