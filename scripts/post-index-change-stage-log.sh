@@ -281,6 +281,28 @@ EOF
 # mis-recorded route can only produce a wrong EXPLANATION -- never a wrong refusal, and
 # never a capture. Keep it that way: the moment a route value gates the refusal, a
 # recorder bug becomes a correctness bug on a shared index.
+# ROUTE ONLY, NEVER OWNERSHIP: is $1 beneath a path argv actually named?
+#
+# `names_path` deliberately refuses this match, and must keep refusing it -- claiming a
+# subtree would hand a session its peers' files, which is the false hit it exists to
+# avoid. For the DIAGNOSTIC field the same fact is safe and is the only thing that
+# separates a blanket form (argv named a directory covering this path) from a lost row
+# (argv named other files, so this pair was already in the index). Getting this wrong is
+# not hypothetical: keying the split on "argv named nothing" instead reported every
+# directory add as a lost row, because `git add sub/` DOES put `sub` in argv.
+under_named() {
+    _un_target="$1"
+    [ -n "${_NAMED:-}" ] || return 1
+    while IFS= read -r _un_tok; do
+        [ -n "$_un_tok" ] || continue
+        _un_tok="${_un_tok%/}"
+        [ "$_un_tok" = "." ] && return 0
+        case "$_un_target" in "$_un_tok"/*) return 0 ;; esac
+    done <<EOF
+$_NAMED
+EOF
+    return 1
+}
 if staging_op; then
     claimant="$me"
     _NAMED="$(argv_paths)"
@@ -312,11 +334,26 @@ while IFS=$'\t' read -r blob path; do
     elif [ "$claimant" != "-" ] && names_path "$path"; then
         owner="$claimant"
         route="named"
+    elif [ -z "${_NAMED:-}" ] || under_named "$path"; then
+        owner="-"
+        # Argv named nothing (a `-A`/`-u` form, a prefix-less patch, or a pathspec-less
+        # verb like `stash`), or it named a directory covering this path. Either way the
+        # staging command reached this pair on purpose: its own work, almost certainly.
+        route="${claim_route:-unnamed}"
     else
         owner="-"
-        # Staging op with a real id that did not NAME this path: a blanket form, or a
-        # patch whose headers carry no default prefix. Both land here.
-        route="${claim_route:-unnamed}"
+        # The command DID name paths, just not this one -- so this pair was already in the
+        # index when it ran and its row was lost or never written. That is the case the
+        # recorder cannot attribute, and it is frequently a PEER's: `unnamed` must not be
+        # the fallback here, because `unnamed` asserts a blanket add and the guard turns
+        # that into "probably your own staging" -- advice that invites the capture this
+        # pair exists to prevent. Caught by codescout-0a reviewing the diff; the class is
+        # the one this very fix addresses, one level down.
+        #
+        # Both arms now key on an OBSERVABLE (did argv name anything?) rather than on an
+        # inferred cause, and the two are exhaustive -- so a fifth route reaching here
+        # reads as the observable that is true of it, never as a wrong specific answer.
+        route="${claim_route:-pre-staged}"
     fi
     printf '%s\t%s\t%s\t%s\n' "$owner" "$blob" "$path" "$route" >> "$tmp"
 done < <(git diff --cached --raw 2>/dev/null |

@@ -233,6 +233,14 @@ done < <(git diff --cached --raw 2>/dev/null |
                         echo "              filed under your message. Re-stage by explicit path"
                         echo "              and the bare commit passes."
                         ;;
+                    pre-staged)
+                        echo "            • already staged when a later command ran — that"
+                        echo "              command named other paths, so this pair's row was"
+                        echo "              lost or never written and the recorder cannot"
+                        echo "              attribute it. DO NOT read this one as yours: an"
+                        echo "              unclaimed pre-existing pair is frequently a peer's."
+                        echo "              Ask, and commit by pathspec meanwhile."
+                        ;;
                     not-staging)
                         echo "            • not a staging command — the index write came from"
                         echo "              an unreadable or unrecognised parent, so nothing"

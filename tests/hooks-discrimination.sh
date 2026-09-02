@@ -611,6 +611,41 @@ CLAUDE_CODE_SESSION_ID="$S_A" git add -- a.txt
 has "my own named paths still pass a bare commit" "$(guard "$S_A")" "EXIT=0"
 rm -rf "$T"
 
+# `unnamed` vs `pre-staged` -- the fallback must not assert a cause it did not determine.
+#
+# Found by codescout-0a reviewing the fix: `route="${claim_route:-unnamed}"` made `unnamed`
+# the catch-all, and `unnamed` is NOT neutral -- the guard renders it "blanket add ...
+# PROBABLY YOUR OWN STAGING". A pair already in the index when a later command ran reaches
+# the same branch, is frequently a PEER's, and was being handed that advice. Both arms now
+# key on an observable (did argv name anything at all?) instead of an inferred cause.
+new_repo
+echo p > p.txt
+echo q > q.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- p.txt
+rm -f .git/session-stage-log
+# argv names q.txt; p.txt was already staged, so its row is rebuilt without a claim.
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- q.txt
+eq "a pre-existing staged pair is pre-staged, NOT unnamed" "$(route_of p.txt)" "pre-staged"
+eq "the path argv actually named is still claimed" "$(owner_of q.txt)" "$S_A"
+prestaged_out="$(guard other-session)"
+has "guard explains a pre-staged row as already-staged" \
+    "$prestaged_out" "already staged when a later command ran"
+# THE SAFETY-CRITICAL HALF. Telling a reader an unattributable pre-existing pair is
+# "probably your own staging" invites exactly the capture this pair prevents.
+hasnt "guard does NOT call a pre-staged row the reader's own staging" \
+    "$prestaged_out" "PROBABLY YOUR OWN STAGING"
+rm -rf "$T"
+
+# The blanket case must still reach `unnamed` -- the split has to discriminate, not just
+# rename. Without this, replacing `unnamed` with `pre-staged` everywhere would pass.
+new_repo
+mkdir -p sub
+echo b > sub/b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add sub/
+eq "a blanket add still records unnamed, not pre-staged" "$(route_of sub/b.txt)" "unnamed"
+has "guard still names the blanket form for it" "$(guard other-session)" "blanket add"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]
