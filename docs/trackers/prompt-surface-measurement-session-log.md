@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 48
+entry_high_water_F: 49
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -76,6 +76,7 @@ surfaces, not the definition.
 | F-46 | I described a budget from its module name — `SIZE_CEILING` counts rules, at compile time, on the set that is never delivered | fixed-verified |
 | F-47 | A review base recorded before dispatch silently widened to three peers' commits — one git identity means `%an` cannot separate them | open |
 | F-48 | F-47's remedy names the unit "task", but the thing that needs a base is the DISPATCH — so a fix round re-uses the implementation commit and widens 14× | open |
+| F-49 | One fact had four representations, and three review rounds each fixed the one named — a grep over the known phrasings cannot find the form nobody has described yet | open |
 
 ## Wins Index
 
@@ -4232,6 +4233,34 @@ A factor of **14**, with 17 of the 20 files belonging to other work — four pee
 **What caught it, and what would not have.** A routine `git log -1 --format=%P` before generating the package. What did *not* catch it: writing the note while citing F-47, and re-reading the note on resume. Knowing the class prevented neither the error nor the re-read — consistent with `observer-blindness:OB-1`'s measured finding that four instances of one class in one evening were each committed by an author actively writing about that class.
 
 **What this does not claim.** I have not checked whether the SDD skill's own `review-package` script can be given a relative base, nor whether its other scripts share the literal-SHA assumption. F-47 already declines the same check; this entry does not close it either.
+
+## F-49 — One fact had four representations, and three review rounds each fixed the one named — a grep over the known phrasings cannot find the form nobody has described yet
+
+**Valid:** invariant
+
+**Severity:** med — each round costs a review dispatch and a commit, and the intermediate states ship a *partially* repaired doc, which reads more trustworthy than the original because the site a reader is most likely to check has just been corrected.
+
+**Status:** open
+
+**Observed:** One fact — *where the session-opener and operator-rule ledger keys are written* — was represented in **four** places in `src/engines/mod.rs`. Plan 3's wiring commit falsified all four at once. Three successive review rounds each named one, I repaired the one named, and the next round found the next:
+
+| round | site the reviewer named | representation | what I left |
+|---|---|---|---|
+| task review | `mod.rs` § *What this module is NOT* | prose paragraph | the table, 20 lines above |
+| fix round 1 | the six-ledger-writers **table** rows | prose table | `writes_at`, 150 lines below |
+| fix round 2 | `writes_at: &["tools::core::types"]` ×2 | **data** field | — (swept) |
+
+Plus a fourth form the same rounds turned up piecemeal: `EngineDecl::emit_post`'s doc, `route::ledger_key`'s `**Load-bearing:**` doc, and a *quotation* of a prose comment the wiring commit had deleted, whose quoted bytes existed nowhere.
+
+**Why "check harder" is the wrong instrument.** A repairer's field of view is set by the **finding**, not by the file. The finding names a site; the fix lands at that site; the sibling representations are outside the frame the reviewer handed over. That is why it recurred three times *while I was actively writing about the class* — Plan 2's ledger records the same shape from this morning (a remedy list covering fewer sites than its finding named), and knowing it prevented none of the three.
+
+**And the obvious check is monotone in the wrong direction.** After round 2 I offered a greppable sweep — no `types.rs:<line>`, no `"documented at the site"`, no `"tools::core::types"`, no `"rule branch"` under `src/engines/`. Every one of those patterns is a phrasing **a previous round had already named**. A grep over the known phrasings cannot find the representation nobody has described yet, and it returns a clean zero either way, which reads as completeness.
+
+**The representation that survives longest is the one with no enforcing test, and the test's shape is why.** `writes_at`'s only read is `assert!(e.writes_at.is_empty())` in `an_unmanaged_engine_is_registered_and_owns_nothing` — which exercises `craft-skills`, whose list is empty **by definition**. The assertion holds over a population that excludes every member capable of falsifying it. So the field is the last to be fixed and the first to rot, and no gate moves in either direction.
+
+**Remedy, and its limit.** Ask *"how many representations does this fact have?"* before repairing any of them — count the sites, then fix the count. For a fact with a **data** representation, prefer deriving it: `writes_at` could be checked against the crate's actual `ledger.insert` call sites, which would convert this from a documentation habit into a gate. What this entry does **not** claim is that the count is now right: rounds 1 and 2 both ended with me believing I had swept.
+
+**Rests on:** `observer-blindness:OB-1` § *the third position* — a check that runs when nobody is worried, rather than a resolution to be careful.
 
 ## Template for new entries
 
