@@ -79,6 +79,17 @@ pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<Chu
 /// Deletes run before inserts so a body that shrinks AND changes in the same
 /// edit never collides with a stale row still holding the freed `chunk_ix`
 /// under `UNIQUE (artifact_id, chunk_ix)`.
+///
+/// Not wrapped in a transaction: this is deliberate house style, not an
+/// oversight. Leaf `&Catalog` writers here (`commits::upsert_many`,
+/// `event_edges::insert_many`, `link_scan/diff.rs`'s apply step,
+/// `merge_worktree.rs` — see its rationale at `:217-221`) don't open
+/// `unchecked_transaction()` themselves, so a composite caller can wrap the
+/// whole multi-step operation (e.g. chunking + re-embedding) in one. Two facts
+/// the next caller needs: `Connection::transaction()` requires `&mut
+/// Connection` and is unreachable through `&Catalog`, so the option here is
+/// `conn.unchecked_transaction()`; and `unchecked_transaction()` must never be
+/// nested — the caller opens at most one across the whole composite operation.
 pub fn replace_chunks(
     cat: &Catalog,
     artifact_id: &str,
@@ -166,9 +177,25 @@ pub fn replace_chunks(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for r in &to_insert {
+            // Bind the PARAMETER, not `r.artifact_id`: the row field is
+            // caller-supplied data, and if it ever disagreed with `artifact_id`
+            // (the id this function queried and deleted under), binding the
+            // field would silently insert under the wrong artifact — a
+            // mismatch `chunks_for` on the real id would report as an empty
+            // result, not an error. The debug_assert below is belt-and-suspenders
+            // on top of that fix, not a substitute for it: it only fires in
+            // debug builds, so the correctness the fix provides is unconditional
+            // and holds in release too; the assert exists to catch a caller bug
+            // loudly during development rather than let it ship silent.
+            debug_assert_eq!(
+                r.artifact_id, artifact_id,
+                "replace_chunks: row.artifact_id disagrees with the artifact_id \
+                 parameter — this row would be inserted under the wrong artifact \
+                 if this assert weren't here to catch it in a debug build"
+            );
             ins_stmt.execute(rusqlite::params![
                 r.chunk_id,
-                r.artifact_id,
+                artifact_id,
                 r.chunk_ix as i64,
                 r.start_line as i64,
                 r.end_line as i64,
@@ -227,13 +254,22 @@ mod tests {
         let rows = build_chunks("a", body, 2048);
         assert!(rows.len() >= 2, "preamble and entry are separate chunks");
         assert_eq!(rows[0].entry_token, None, "the preamble is inside no entry");
+        // Pinned to real output (verified by a one-off probe run before writing
+        // this): chunk 0 is the discriminating case for an off-by-one — it's
+        // the only chunk here whose end is not the file's last line, so an
+        // inclusive vs exclusive end-line reading would disagree on it. The
+        // brief's `w.start_line <= 5 && w.end_line >= 7` is one-sided in BOTH
+        // directions and cannot see `start_line.saturating_sub(1)` or
+        // `end_line + 1` — both mutations survived the old assertion.
+        assert_eq!((rows[0].start_line, rows[0].end_line), (1, 4));
         let w = rows
             .iter()
             .find(|r| r.entry_token.as_deref() == Some("W-81"))
             .unwrap();
-        assert!(
-            w.start_line <= 5 && w.end_line >= 7,
-            "range brackets the entry"
+        assert_eq!(
+            (w.start_line, w.end_line),
+            (5, 7),
+            "range brackets the entry exactly"
         );
     }
 
