@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 8
+entry_high_water_F: 9
 entry_high_water_W: 1
 ---
 
@@ -86,6 +86,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-6 | 2026-09-02 | low | measurement | wontfix-false-alarm | the ledger-count hook's "skip" was correct — the name is broader than its `files:` scope (**denominator, not a catch**) |
 | F-7 | 2026-09-02 | high | architectural | fixed-verified | "impossible by construction" was a claim about Rust, not about the capability — C's last cost was reachable in the shell |
 | F-8 | 2026-09-02 | med | architectural | open | #9 was carried as a prerequisite, and Strategy C dissolves it — third unexamined Strategy-A claim |
+| F-9 | 2026-09-02 | low | measurement | mitigated | a `;`-chained gate reports the echo's exit status, not the gate's |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -208,6 +209,23 @@ unrecorded by default.
 report-don't-attribute changing another session's action. Two exist. Manufacturing a third is
 not available, and turning a waiting-criterion into a task is how a Promote-when gets harvested
 early.
+
+- [x] **T10 — Resume convention written into `get_guide("tracker-conventions")`.** Done
+  2026-09-02. New § *A `## Resume` states its own currency* in
+  `src/prompts/guides/tracker-conventions.md`, placed under § *Tracker artifacts* where the nine
+  measured candidates live. States both real forms (dated heading, or a supersession banner that
+  redirects), and carries the measurement plus the reason this is a convention and not the
+  `doctor` check `capability-proposals:CAP-12` proposed: **the marker does not prevent staleness,
+  it makes staleness legible**, which no check can do.
+
+  **Gate:** `clippy=0`, both test lanes `101`. **Red is not mine and `experiments` is green** —
+  identified positively, not by elimination: all four failing counts in
+  `tests/issue_clusters.rs` are exactly accounted for by a peer's eight staged-but-uncommitted
+  bug files (11+1=12, 15+2=17, 1+1=2, 7+4=11), and the HEAD corpus counts are 11/15/1/7,
+  matching the committed Index table. That test reads the **working tree**, which CLAUDE.md
+  documents. The peer is mid-fix (`issue-clusters.md` is `MM`); not broadcast, per the measured
+  lesson that the fifth instance of this class was closed by its own author unprompted and the
+  entire cost was the misrouting around it.
 ## Promotion status
 
 **Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,
@@ -965,6 +983,43 @@ timeout-hint text, since both are response formatting and `pipeline=` needs diff
 **Rests on:** `src/tools/run_command/inner.rs:279-605` read in full 2026-09-02;
 `docs/trackers/run-command-pipeline.md` § *Architectural review* Concern 2 and § *Rulings* R3,
 R4, R7.
+
+## F-9 — a `;`-chained gate reports the echo's exit status, not the gate's
+
+**Valid:** dated 2026-09-02
+
+**Category:** measurement · **Severity:** low · **Status:** mitigated
+
+**Observed.** The four-command gate was run as one `;`-chained shell command. `run_command`
+returned a result object whose first field read **`"exit_code": 0`** — and, further down,
+`"failed": 3`. The two disagree, and the reassuring one is listed first.
+
+**Cause.** A `;`-chain exits with its **last** command's status, and mine ended in
+`echo "### GATE: …"`. So `exit_code: 0` is the echo's, faithfully reported and describing
+nothing about the gate. The same class as CLAUDE.md's note that an unbounded pipe once masked
+a non-zero `cargo test` exit — a wrapper's status standing in for the work's.
+
+**Why it cost nothing this time, and why that is not the lesson.** I had written
+`echo "### <lane> exit=$?"` after each lane precisely so the per-lane statuses survived the
+chain, and grepping the buffer gave `clippy=0 lean=101 default=101`. The guard worked. But it
+worked because I *happened* to build it while composing the command, not because anything
+required it — a plain `a; b; c` produces the same misleading `exit_code: 0`, and the next
+session composing a gate run has no reason to add the echoes.
+
+**The general rule, which is about reading rather than writing.** When a tool result carries
+both a process status and parsed content, **the parsed content is the verdict**. Here
+`failed: 3` and `passed: 8279` came from the harness parsing cargo's own output; `exit_code`
+came from the shell. Trust the parse. A result object that reports `exit_code: 0` beside
+`failed: 3` is not inconsistent — it is answering two different questions, and only one of
+them was asked.
+
+**Mitigation, not fix.** Emit a per-stage status marker and grep the buffer for it, as done
+here. Chaining with `&&` is the wrong remedy for a *gate*: it would have skipped the default
+lane after the lean lane failed, leaving `target/debug/codescout` librarian-less for five peer
+sessions — the trap CLAUDE.md's gate ordering exists to close.
+
+**Rests on:** `@cmd_5f9bf05a` (`### clippy exit=0`, `### lean exit=101`, `### default exit=101`)
+and the task-notification result object for `kjrsjvfi0`, 2026-09-02.
 
 ## Template for new entries
 

@@ -249,6 +249,38 @@ If you must also move the file on disk, use `artifact(action="move",
 id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 `git mv`, which orphans the catalog record.
 
+
+### A `## Resume` states its own currency
+
+A tracker that accumulates review passes by *appending* leaves its oldest navigational
+section — the one saying "start here / do this next" — at the **bottom**, below every
+later correction, with nothing marking which is current. A reader told to start there
+starts at the stalest text in the file.
+
+**So a `## Resume` either dates its heading, or opens with a banner naming what
+superseded it and where the current state lives.** Both forms are already in use:
+
+    ## Resume — state at compaction, 2026-08-16
+
+    ## Resume — where this stands (2026-08-11)
+
+    > **CLOSED 2026-08-13 — merged at `e6484b16`.** Everything below this line is the
+    > historical record. Read § *Integration* for the current state.
+
+**The marker does not prevent staleness; it makes staleness legible** — and that is the
+whole of it. A dated Resume whose facts have since moved is still doing its job, because
+the reader can see the date and check. That is also why this is a convention rather than
+a `doctor` check: no check can separate "old and still right" from "old and wrong", and
+one keyed on age would fire on every correctly-dated section while catching nothing the
+marker does not already cover.
+
+Measured 2026-09-02 across every `## Resume` under `docs/trackers/` and `docs/plans/` —
+nine candidates, after excluding the 497 bug files whose Resume is a short form field
+inherited from `docs/issues/_TEMPLATE.md` rather than a navigational instruction.
+**0 of 5 carrying a marker were misleading; 3 of 3 without one were stale** — one of them
+routing an implementer to a strategy its own file had rejected, one pointing at a peer
+session whose process no longer exists. Five authors had invented the marker
+independently; none had written it down.
 ## Declaring an augmentation
 
 If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name
