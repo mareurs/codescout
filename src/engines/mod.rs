@@ -26,9 +26,14 @@
 //! | `engines::emitters::emit_operator_rules` | `op:OP-N` | `operator-rules` |
 //!
 //! `session-opener` writes a **bare topic name**, which `guide-sections` also
-//! owns. That overlap is deliberate and documented at the site: keying the
-//! opener finer "would desync this trigger from what `GuideLedger::re_arm`
-//! actually re-arms". A global prefix-disjointness gate would fail on a
+//! owns. That overlap is deliberate: keying the opener finer would desync the
+//! trigger from what `GuideLedger::re_arm` re-arms, and no delivery assertion
+//! can see that — which is why
+//! `emitters::tests::the_opener_stamps_the_bare_topic_name` pins the key shape
+//! separately from the trigger. (This paragraph quoted the prose comment at
+//! the original site until Plan 3 deleted it with `call_content`'s inlined
+//! branch; the reason now lives in that test's doc comment, so it is restated
+//! here rather than quoted.) A global prefix-disjointness gate would fail on a
 //! correct, load-bearing arrangement.
 //!
 //! So disjointness is conditioned on [`Corpus`]: **two engines drawing from
@@ -45,14 +50,21 @@
 //! calls [`coordinator::run_post`], which fans out through the `emit_post`
 //! pointers below. What it is still not is *complete*: [`Mode::Unmanaged`]
 //! is the honest state for an engine that ships and participates in nothing,
-//! which is where `craft-skills` sits today. Three of the four rows carry a
-//! wired `emit_post` and are **offered** every call; whether each *delivers*
-//! is its own trigger's business — `guide-sections` declines when the tool
-//! names no topic, and `operator-rules` declines a tool that opted out of
-//! `selector_key`. The fourth row carries `None` and is reached by no phase,
-//! which is what [`tests::registry_order_is_delivery_precedence`] pins in
-//! both directions: `take(3).all(|e| e.emit_post.is_some())` and
-//! `ENGINES[3].emit_post.is_none()`.
+//! which is where `craft-skills` sits today.
+//!
+//! Three of the four rows carry a wired `emit_post`; the fourth carries
+//! `None` and is reached by no phase, which
+//! `registry_order_is_delivery_precedence` pins in both directions —
+//! `take(3).all(|e| e.emit_post.is_some())` and `ENGINES[3].emit_post
+//! .is_none()`. **Wired is not the same as invoked on every call**, and the
+//! gap is corpus exclusivity rather than the engine's own trigger:
+//! `run_post_in` skips a row whose [`Corpus`] an earlier row already claimed,
+//! `continue`-ing *before* it calls `emit`. So when `session-opener` claims
+//! [`Corpus::CompiledGuides`], `guide-sections`' emitter is never entered at
+//! all. Of the rows that are entered, each may still decline on its own terms
+//! — `session-opener` when its topic is already stamped (the most frequent
+//! decline of the three), `guide-sections` when the tool names no topic,
+//! `operator-rules` when the tool opted out of `selector_key`.
 
 pub mod coordinator;
 pub mod emitters;
@@ -117,6 +129,17 @@ pub struct EngineDecl {
     /// Module paths that write this engine's keys into the shared ledger.
     /// Empty for [`Mode::Unmanaged`]. Documentation for a reader tracing a
     /// stamp back to its author; not consulted at run time.
+    ///
+    /// **Nothing enforces this field**, and it has already been wrong: the
+    /// opener and rule rows named `tools::core::types` until Plan 3 moved
+    /// both writes into `engines::emitters`, and the review that caught it
+    /// found the prose table above had been repaired in the same commit that
+    /// left these two rows stale. The only read is
+    /// `tests::an_unmanaged_engine_is_registered_and_owns_nothing`'s
+    /// `assert!(e.writes_at.is_empty())`, which exercises the one row that
+    /// cannot be stale — `craft-skills`, whose list is empty by definition.
+    /// So when you move a `ledger.insert` call, this field is the thing no
+    /// compiler and no test will remind you about.
     pub writes_at: &'static [&'static str],
     /// Whether a ledger key belongs to this engine.
     ///
@@ -174,7 +197,7 @@ pub static ENGINES: &[EngineDecl] = &[
         key: RetrievalKey::SessionPhase,
         corpus: Corpus::CompiledGuides,
         mode: Mode::Push,
-        writes_at: &["tools::core::types"],
+        writes_at: &["engines::emitters"],
         owns_key: owns_session_opener_key,
         emit_post: Some(crate::engines::emitters::emit_session_opener),
     },
@@ -192,7 +215,7 @@ pub static ENGINES: &[EngineDecl] = &[
         key: RetrievalKey::Operator,
         corpus: Corpus::OperatorLedger,
         mode: Mode::Push,
-        writes_at: &["tools::core::types"],
+        writes_at: &["engines::emitters"],
         owns_key: owns_operator_key,
         emit_post: Some(crate::engines::emitters::emit_operator_rules),
     },
@@ -227,7 +250,7 @@ mod tests {
     /// engines emit, and the gate below would then test that claim rather than
     /// the engines. Both sources are the ones production actually stamps —
     /// `GUIDE_INDEX.ledger_keys()` is what `guide_blocks_for` writes, and
-    /// `route::ledger_key` is what `call_content`'s rule branch writes.
+    /// `route::ledger_key` is what `emitters::emit_operator_rules` writes.
     fn live_keys() -> Vec<String> {
         let mut keys: Vec<String> = crate::prompts::guide_index::GUIDE_INDEX.ledger_keys();
         keys.extend(crate::prompts::GUIDE_TOPICS.iter().map(|t| t.to_string()));

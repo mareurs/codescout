@@ -11,11 +11,13 @@
 //!
 //! **What established the move was faithful, and what did not.** A reviewer
 //! compared the deleted block against these functions clause by clause and
-//! `diff`'d the rule wrapper literal; separately, `git diff cb6aed69 HEAD`
-//! over the non-test region of this file is empty, so the bodies never
-//! diverged in the first place. The p50 guide total was *unchanged* across
-//! the cut at 11,872 bytes, which is consistent with faithfulness and is
-//! **not** a proof of it: `a_p50_session_stays_under_the_committed_guide_byte_ceiling`
+//! `diff`'d the rule wrapper literal; separately, the bodies below are
+//! unchanged since Plan 2 committed them (`cb6aed69`, patch-id
+//! `7b18f0c4494b0104cba822b8e335dae351ef5896` — cited as a patch-id because
+//! `experiments` is rebased after every ship, and a `HEAD`-relative claim is
+//! the most volatile form there is), so the two copies never diverged in the
+//! first place. The p50 guide total was *unchanged* across the cut at 11,872
+//! bytes, which is consistent with faithfulness and is **not** a proof of it: `a_p50_session_stays_under_the_committed_guide_byte_ceiling`
 //! runs every call through `call_tool_checked`, which stamps the opener's
 //! ledger key first — so `emit_session_opener` declines on all six shapes —
 //! and its `shape_total` sums only blocks containing
