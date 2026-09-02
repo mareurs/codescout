@@ -17,8 +17,10 @@ topic: prompt-surfaces
 
 # Retrieval engine coordination — one selector, one ledger, one operator surface
 
-Six retrieval engines were enumerated 2026-08-27. Two of them ship. This spec is about the
-thing between them, which already exists in the tree, has no name, and cannot be seen.
+Seven retrieval engines are known; four ship, and only three are coordinated at all — the
+fourth spends the same context window while participating in no ledger and no budget. This
+spec is about the thing between them, which already exists in the tree, has no name, and
+cannot be seen.
 
 **Companion specs:** `2026-08-27-get-guide-section-grain-design.md` (engine 1),
 `2026-08-27-operator-rules-engine-design.md` (engine 5, and the current home of the
@@ -40,8 +42,10 @@ That purpose has never been written down anywhere. This spec is its home.
 
 ## The family
 
-Six engines, enumerated 2026-08-27 by walking the surface inventory in
-`src/prompts/README.md` § *Surfaces* plus the tracker corpus. **This table is canonical and
+**Seven engines.** Six were enumerated 2026-08-27 by walking the surface inventory in
+`src/prompts/README.md` § *Surfaces* plus the tracker corpus; the seventh was found
+2026-09-02 by enumerating ledger write sites instead — see the note under the table, which
+is also the reason to read this roster as open rather than closed. **This table is canonical and
 lives only here** (§ *Gates*, gate 5); the operator-rules spec, which held it until
 2026-09-02, now points at this section.
 
@@ -125,7 +129,12 @@ Nothing enumerates the engines at runtime. Nothing can answer *"what would this 
 draw?"* without issuing the call and reading the result. Nothing renders the graph. The
 namespace disjointness that keeps the two ledgers from corrupting each other is defended by
 **one hand-written pairwise test**, which is correct for two engines and does not scale to
-six.
+seven.
+
+> **Partly closed 2026-09-02.** Layer 1 shipped `src/engines/mod.rs`, so the engines *are*
+> now enumerable at runtime and the pairwise test is subsumed by a property over the
+> registry. The other three clauses stand: preview is Layer 3, the graph is Layer 4, and
+> the registry still cannot see a path that bypasses the fan-out entirely (Gate 1).
 
 An operator's only instrument today is to make a call and inspect what came back — which
 also stamps the ledger, so the instrument spends the thing it measures.
@@ -200,37 +209,164 @@ nor `ctx`. You cannot register what is inlined. GG-3 is already the queue's
 *"highest-value item on the deferred list"* on testability grounds alone; it is also this
 spec's first task.
 
-### Layer 2 — Coordinator: the fan-out, named
+### Layer 2 — Coordinator: two phases, one of them total
 
-Extract what `call_content` already does into a `retrieval::Coordinator`:
+> ⚠ **Rewritten 2026-09-02, after scouting the dispatch site.** The signature below
+> replaces `engine.emit(sel, &val, &mut ledger)`, which made a pre-execution phase
+> **unrepresentable** — `val` is the tool's *result* and does not exist before the call.
+> The same scout re-aimed Gate 1 (see there), and found that three of the four things a
+> blocking phase needs already ship, built for unrelated reasons.
+
+The coordinator fans out **twice** around `self.call`, and the two halves live at
+different sites because they need different data:
+
+| phase | site | has | totality |
+|---|---|---|---|
+| **Pre** | `server.rs::call_tool_inner`, above `acquire_write_guard_if_writing` | `req.name`, `&input_for_record` | **total** — the one production dispatch, unoverridable |
+| **Post** | `types.rs::call_content` | `&val` | one known bypass, `Onboarding::call_content` |
 
 ```
-selector_key(input)  ──┐
-                       ├─→ for each ENGINE (registry order)
-result value      ──┘        └─ engine.emit(sel, &val, &mut ledger) -> Vec<Block>
-                             ↓
-                       one ordered block list, one budget, one ledger
+// server.rs::call_tool_inner
+sel = tool.selector_key(&input_for_record)
+(pre_blocks, verdict) = coordinator.run(Phase::Pre, sel, &input_for_record, &mut ledger)
+if verdict == Block { record(blocked); return CallToolResult::success(pre_blocks) }
+...acquire_write_guard_if_writing...
+
+// types.rs::call_content
+val = self.call(input, ctx).await?
+post_blocks = coordinator.run(Phase::Post, sel, &val, &mut ledger)
 ```
 
-Three things move here that today have nowhere to live:
+`tool` is in scope at the dispatch site, so the pre phase calls the **trait method** rather
+than `action_selector_key` directly — a tool that overrides `selector_key` must not see a
+different key in the two phases. The two phases compute it independently rather than
+threading it through `call_content`'s signature, which is safe **only** because
+`selector_key` is required to be a pure function of the input. Nothing enforces that today;
+Gate 1's neighbourhood is where it belongs.
 
-- **Ordering** is currently the source order of two inlined blocks. It becomes registry
-  order, and therefore reviewable.
-- **The budget** becomes one number over all engines, absorbing Task 10's ceiling rather
-  than sitting beside it. § *Gates* makes this the shape of the gate.
-- **Ledger stamping** happens in exactly one place, so *"was this delivered?"* has one
-  answer.
+Both phases pass a `&Value` — the input pre, the result post — so `Shape::matches` is
+reused **verbatim**: its `tool`/`action` clauses read `sel`, and its `path~` clause reads
+whichever `Value` the phase supplies.
 
-Behaviour must be byte-identical on the first commit. This layer is a refactor.
+That reuse is not wishful. `names_path_containing` checks top-level `rel_path` first, and
+an `artifact(action="create", rel_path=…)` **input** carries `rel_path` at top level — so
+`serves: pre artifact.create(path~docs/issues/)`, the motivating example, matches with no
+matcher change at all. **It works by intersection rather than by design**, and the
+difference is load-bearing: the function is named and documented for *responses*, and its
+other two shapes (`items`, `violations`) are response-only. Input shapes need their own
+enumerated list, and that function's doc comment already warns why — a missing shape
+fails as a *wrong guide* rather than an error.
+
+Three things move here that today have nowhere to live: **ordering** becomes registry
+order rather than source order, and therefore reviewable; **the budget** becomes one
+number over all engines; **ledger stamping** happens in exactly one place, so *"was this
+delivered?"* has one answer.
+
+#### Why the pre phase goes to the server
+
+`src/server.rs:1122` is the **only** production call to `call_content` — every other hit
+in the tree is a test. Placing the pre fan-out there closes the `Onboarding` bypass
+**structurally** rather than by gate: the correct path becomes the only path, which is the
+shape `73066479` established for gate ordering. It also puts the strongest guarantee under
+the riskiest mechanism, and a blocked call never takes the cross-process write lock,
+because the block returns above `acquire_write_guard_if_writing`.
+
+Three preconditions were already satisfied by machinery built for other reasons:
+
+| a blocking phase needs | already in the tree |
+|---|---|
+| a way to return without executing | `acquire_write_guard_if_writing`'s `Err(result) => return Ok(result)` (`server.rs:1113-1116`) — the write guard's contention refusal exercises it today |
+| the input, before dispatch | `let input_for_record = input.clone();` (`server.rs:1101`) — unconditional, for usage recording |
+| a bound on how often a rule fires | the ledger's dedup (`types.rs:1130`) — see below |
+
+That unconditional clone also **scopes** the anti-clone argument in
+`get-guide-section-grain` § 3: it is correct inside `call_content`, and moot at the
+server, where the clone is already paid one line above.
+
+#### Disposition, and why the breaker is the ledger
+
+A rule carries a disposition. `advise` appends blocks alongside the result; `block`
+returns them **instead of** the result, so the tool does not run and the agent re-issues
+the call.
+
+`block` × `post` is incoherent — the side effects have happened and the agent cannot see
+them — so it is made **unrepresentable** rather than rejected: `PreVerdict { Proceed,
+Block }` exists only in the pre fan-out. A validator rejecting the combination would be a
+weaker statement of the same rule.
+
+**The breaker is the existing ledger, and it gives N = 1 with nothing to tune.**
+`types.rs:1130` reads `if emitted.contains(&key) { continue; }` before
+`emitted.insert(key)`, so a triggered rule delivers **exactly once per session**, keyed
+`op:OP-N`. A rule can therefore block **at most once per session, by construction**. No
+rule can brick a session, because no rule can fire twice.
+
+That is strictly stronger than the in-tree precedent it replaces: codescout-companion's
+`pre-tool-guard.mjs` ships a `BREAKER_THRESHOLD = 3` stand-down, which still permits three
+blocks and requires the threshold to be right. It is also the correct *semantics*. The
+purpose is **"make sure you have seen the taxonomy before filing"**, not **"prevent
+filing"** — an agent that re-issues the call has done the thing the rule wanted.
+**Visibility is not authority** applies to our own engines, not only to peer sessions.
+
+Three gaps the ledger does not close, each with its own mechanism:
+
+| gap | mechanism |
+|---|---|
+| **TTL re-arm.** `expire_idle` re-arms keys after idle, so a re-armed rule would block a second time. | Block does not re-arm. Once a rule has blocked, it degrades to `advise` for the life of the process, marked in the ledger's non-expiring `notices`. |
+| **Cross-session brick.** A bad rule blocks the first matching call in *every* session, and the ledger is per-session. `corpus.rs:16` is `include_str!` — **editing `operator-rules.md` does not disarm a rule without a rebuild**, which the site's own comment states: *"Only ROUTING is pinned to build time."* | `CODESCOUT_BLOCK=off`, read once at the edge per [`../../conventions/test-env-isolation.md`](../../conventions/test-env-isolation.md) option A, degrading every block to `advise`. Given compile-time routing this is the only disarm available *inside* a session, so it is mandatory rather than defensive. Default **on** — a switch that defaults off is a feature nobody runs. |
+| **"Policy, or is the tool broken?"** The blocked agent is the observer and cannot tell the two apart. | The block text names the rule id and states that the call did not execute; Layer 3's `engines preview --selector artifact.create` answers the question without issuing the call. This is why Rollout makes block depend on Layer 3. |
+
+**A blocked call must be recorded.** The block returns above `recorder.record_content`, so
+without an explicit record it is invisible to `usage.db` — and therefore to
+`/analyze-usage` and `docs/trackers/tool-usage-patterns.md`, which is precisely where
+whether blocking works would be measured. An enforcement mechanism whose effects no
+instrument can see is this project's own `Loudness is a property of a PATH`.
+
+#### Phase is declared, at shape grain
+
+`EngineDecl` gains `phases: &'static [Phase]`.
+
+| engine | phases | why |
+|---|---|---|
+| `guide-sections` | Post | a 2,500 B section before every write is a byte disaster, and reference material is not time-critical |
+| `session-opener` | Post | it already fires on the first eligible call |
+| `operator-rules` | **Pre and Post** | declared per shape |
+| `craft-skills` | none | `Mode::Unmanaged` |
+
+The `serves:` grammar gains an optional `pre` marker at **shape** grain, defaulting to
+`post`:
+
+```
+<!-- serves: pre artifact.create(path~docs/issues/), artifact.update -->
+```
+
+Shape grain rather than section or rule grain, because one section can serve
+`artifact.create` (worth a pre) and `artifact.get` (post-only) — section grain was
+refuted on exactly that case.
+
+**Declared, not derived.** *When this arrives* is the most load-bearing fact about a piece
+of injected guidance, and deriving it would put that fact where the corpus author cannot
+read it — `OB-1` § *the third position*. Deriving it from `is_write` specifically would
+also inherit that predicate's open hole (`328021e820100805`), and `is_write` is
+tool-level where this needs per-action resolution.
+
+**Phase 2a must be byte-identical.** Post-only, pure refactor, no new behaviour.
 
 ### Layer 3 — Preview: ask without spending
 
 ```rust
-pub fn preview(sel: Option<&str>, result: &Value) -> Vec<(EngineId, Vec<Block>)>;
+pub fn preview(phase: Phase, sel: Option<&str>, value: &Value)
+    -> Vec<(EngineId, Vec<Block>, Option<PreVerdict>)>;
 ```
 
-Given a selector key and optionally a result shape, return what **every** engine would emit
-— without emitting it and without stamping the ledger.
+Given a phase, a selector key and the `Value` that phase would see — the input pre, the
+result post — return what **every** engine would emit, without emitting it and without
+stamping the ledger.
+
+The verdict is in the return type because *"what would **block** this call?"* is the
+question a blocked agent and its operator most need answered, and it is the reason
+Rollout makes step 2c depend on this layer rather than the other way round. A preview
+that could only show `advise` blocks would answer everything except the question with
+teeth.
 
 This is the management primitive, and the precedent is already shipped:
 `codescout operator-rules check` is exactly this for one engine, complete with a `Drift`
@@ -305,17 +441,28 @@ design consequence, and it is available now.
 
 ## Gates
 
-1. **Registry totality.** Every code path that can stamp `GuideLedger` is a registered
-   engine. Mirrors `every_registered_tool_supplies_a_selector_key`; fails the build on a
-   new unregistered writer.
+1. **Totality over call PATHS, not over ledger keys.**
 
-   > **Shipped at partial resolution, and the shortfall is named rather than hidden.**
-   > `engines::tests::every_live_ledger_key_has_a_registered_owner` asserts every key the
-   > *registered* corpora emit has an owner. A brand-new engine writing a brand-new
-   > namespace passes it trivially — the gate cannot see a writer it was never told
-   > about. Closing that needs key **construction** to route through the registry, so
-   > that an unregistered engine cannot mint a key at all. That is Layer 2's job, and it
-   > is the difference between a gate and a convention.
+   > ⚠ **Re-aimed 2026-09-02 by the Layer 2 scout.** This gate read *"every code path
+   > that can stamp `GuideLedger` is a registered engine"*, which catches an
+   > unregistered **writer**. The live hole is an unregistered **bypasser**:
+   > `Onboarding::call_content` (`src/tools/onboarding.rs:294`) is the tree's only
+   > override of the trait method, calls `self.call(input, ctx)` directly, and therefore
+   > receives no selector, no ledger, no guide block and no rule. Nothing in the tree
+   > declares that deliberate — and it is the *onboarding* tool, whose whole job is
+   > orienting a session that has just arrived.
+   >
+   > Neither shipped gate can see it. `every_live_ledger_key_has_a_registered_owner`
+   > enumerates **keys**; `engines_over_different_corpora_own_disjoint_key_spaces`
+   > enumerates **corpora**. A bypasser writes no key, so it is invisible to both — the
+   > exact mirror of the shortfall `src/engines/mod.rs` already admits about writers,
+   > and a second instance of a gate returning a plausible pass rather than an error.
+
+   Layer 2 closes the **pre** half structurally: the pre fan-out sits at
+   `server.rs:1122`, the single production dispatch, which no tool can override. The
+   **post** half keeps a declared exemption list — today of size one — where each entry
+   states its reason, on `PULL_ONLY_GUIDE_TOPICS`' convention that a waiver is written
+   down rather than assumed.
 2. **Disjointness, conditioned on corpus.** Two engines drawing on **different**
    corpora must own disjoint key spaces. Replaces `op_keys_collide_with_no_guide_key`
    at N engines instead of 2. Shipped as
@@ -358,6 +505,22 @@ design consequence, and it is available now.
    asserts no other spec carries a copy — the failure mode being cured is a stale duplicate,
    which is what § *Problem 1* is an instance of.
 
+Three more arrive with `block` (Rollout step 2c), and none of them is a byte gate — a
+control surface is not priced in bytes:
+
+6. **A `block` rule names an explicit action.** `serves: artifact` plus `block` bricks a
+   whole tool for the first matching call of every session; only a shape carrying an
+   action (`artifact.create`) may block. Checked in `validate`, against the parsed
+   `Shape`, not against the source text.
+7. **Block budget, separate from `SIZE_CEILING`.** Blocks are counted as control
+   surfaces and capped at **3**. Gate 3's byte ceiling says nothing about them, and
+   `SIZE_CEILING` counts a disjoint set (`always` rules) — folding either into the other
+   is the mistake § *Problem 4* records.
+8. **A block is self-describing and observable.** Its rendered text names the rule id and
+   states that the call did not run; the blocked call appears in `usage.db`. Both
+   asserted on the emitted bytes and the recorded row — not on presence, which is
+   monotone under the failure being guarded.
+
 ---
 
 ## Rollout
@@ -366,13 +529,21 @@ design consequence, and it is available now.
 |---|---|---|
 | 0 | **GG-3** — extract the delivery helpers out of the 408-line trait method. Pure refactor. | — **done** `d0065423` |
 | 1 | Layer 1 registry + gates 1 and 2 | — **done** `src/engines/mod.rs` |
-| 2 | Layer 2 coordinator, byte-identical behaviour + gate 3 | Layer 1 |
-| 3 | Layer 3 preview + `codescout engines` CLI + gate 4 | Layer 2 |
-| 4 | Layer 4 dashboard routes | Layer 3 |
+| 2a | Layer 2 coordinator, **Post phase only**, byte-identical + gate 3 | Layer 1 |
+| 2b | **Pre phase** at `call_tool_inner`, `advise` only + gate 1 | 2a |
+| 3 | Layer 3 preview + `codescout engines` CLI + gate 4 | 2a |
+| 2c | **Block**: disposition, `CODESCOUT_BLOCK` switch, gates 6–8 | 2b **and 3** |
+| 4 | Layer 4 dashboard routes | 3 |
 | — | Move the engine table here; leave a pointer in the operator spec + gate 5 | — (do first, it is one edit) |
 
-Steps 0–2 are worth doing even if Layers 3 and 4 never ship: they replace a pairwise test
-with a property, give two competing budgets one number, and make the fan-out reviewable.
+**2c depends on Layer 3, and the order is deliberate.** Preview is the instrument that
+answers *"policy, or broken tool?"* for a blocked agent. Shipping block first would leave
+the only observer of a misfire with no recourse but the env switch — which disarms every
+rule at once and so cannot distinguish the bad one.
+
+Steps 0–2b are worth doing even if block, Layer 3 and Layer 4 never ship: they replace a
+pairwise test with a property, extend one byte accounting to emitters that have none, make
+the fan-out reviewable, and close the `Onboarding` bypass.
 
 ## Not in scope
 
@@ -389,6 +560,24 @@ with a property, give two competing budgets one number, and make the fan-out rev
 ## Measurements this spec rests on
 
 Verified 2026-09-02 by reading the tree unless marked otherwise.
+
+**Layer 2 scout, 2026-09-02** — the facts the two-phase design rests on, each read this
+session:
+
+- `src/server.rs:1122` (`CodeScoutServer::call_tool_inner`) is the **only** production
+  call to `call_content`. 76 matches across 10 files; every other one is a test.
+- `src/tools/onboarding.rs:294` is the tree's **only** override of `Tool::call_content`,
+  and it calls `self.call(input, ctx)` directly — no selector, no ledger, no injection.
+- `let input_for_record = input.clone();` — `server.rs:1101`, unconditional.
+- The return-without-executing path already exists: `server.rs:1113-1116`,
+  `Err(result) => return Ok(result)` from `acquire_write_guard_if_writing`.
+- Per-session rule dedup: `types.rs:1130-1133`, `contains` then `insert` on `op:OP-N`.
+- `OPERATOR_RULES` is `include_str!`'d (`src/operator_rules/corpus.rs:16`); the site's
+  comment states *"Only ROUTING is pinned to build time"* — `compile`/`check` read disk.
+- `Shape::matches` (`src/prompts/guide_index.rs:179`) reads `tool`/`action` from the
+  selector and `path~` from the supplied `Value`.
+- `names_path_containing` (`src/util/librarian_response.rs:36`) scans top-level
+  `abs_path`/`rel_path`, then `items[]`, then `violations[]`.
 
 - Engine 1 Phase 1 complete: ten tasks traced to commits `1cb4d588` (splitter) →
   `00020b88` (grammar) → `52265dfc` (index) → `34f5ad44` (matching + closure) →
