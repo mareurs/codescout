@@ -22,8 +22,8 @@
 //! | `guide_emit::guide_blocks_for` (fallback) | `<topic>#<preamble>` | `guide-sections` |
 //! | `guide_emit::guide_blocks_for` (matched) | `<topic>#<heading>` | `guide-sections` |
 //! | `tools::guide` (explicit fetch) | `<topic>` | `guide-sections`, **pull** |
-//! | `core::types::call_content` (opener) | `project-activation-bootstrap` | `session-opener` |
-//! | `core::types::call_content` (rules) | `op:OP-N` | `operator-rules` |
+//! | `engines::emitters::emit_session_opener` | `project-activation-bootstrap` | `session-opener` |
+//! | `engines::emitters::emit_operator_rules` | `op:OP-N` | `operator-rules` |
 //!
 //! `session-opener` writes a **bare topic name**, which `guide-sections` also
 //! owns. That overlap is deliberate and documented at the site: keying the
@@ -46,9 +46,13 @@
 //! pointers below. What it is still not is *complete*: [`Mode::Unmanaged`]
 //! is the honest state for an engine that ships and participates in nothing,
 //! which is where `craft-skills` sits today. Three of the four rows carry a
-//! wired `emit_post` and run on every call; the fourth carries `None` and is
-//! reached by no phase, which is what `registry_order_is_delivery_precedence`
-//! pins in both directions.
+//! wired `emit_post` and are **offered** every call; whether each *delivers*
+//! is its own trigger's business — `guide-sections` declines when the tool
+//! names no topic, and `operator-rules` declines a tool that opted out of
+//! `selector_key`. The fourth row carries `None` and is reached by no phase,
+//! which is what [`tests::registry_order_is_delivery_precedence`] pins in
+//! both directions: `take(3).all(|e| e.emit_post.is_some())` and
+//! `ENGINES[3].emit_post.is_none()`.
 
 pub mod coordinator;
 pub mod emitters;
@@ -119,8 +123,9 @@ pub struct EngineDecl {
     /// A function pointer rather than a prefix string because two of the three
     /// ledger-writing engines do not use a prefix at all — see the module docs.
     pub owns_key: fn(&str) -> bool,
-    /// This engine's post-phase emitter, or `None` while it is still inlined
-    /// in `call_content`. A function pointer rather than a trait object
+    /// This engine's post-phase emitter, or `None` for an engine no phase
+    /// reaches — [`Mode::Unmanaged`]'s honest state. A function pointer
+    /// rather than a trait object
     /// because an engine is data, not behaviour with state — and because a
     /// `&'static EngineDecl` must stay `Sync` without a `Box`.
     pub(crate) emit_post: Option<
@@ -315,7 +320,9 @@ mod tests {
     /// The session opener precedes guide-sections because the pre-refactor
     /// `if/else` in `call_content` tried it first — deliberately, so a
     /// one-shot `artifact` call receives the 2.5 KB opener rather than 18 KB
-    /// of librarian guide (`types.rs:968`). Both draw `Corpus::CompiledGuides`,
+    /// of librarian guide. That `if/else` is gone as of Plan 3; the trade now
+    /// lives in this row order plus [`emitters::emit_session_opener`]'s own
+    /// trigger. Both draw `Corpus::CompiledGuides`,
     /// so under `run_post_in` the earlier one claims and the later never runs.
     /// Swapping these two rows silently inverts that trade with no other test
     /// failing, which is why the order is pinned here rather than commented.

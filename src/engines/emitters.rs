@@ -4,11 +4,25 @@
 //! `emit_post` pointers.
 //!
 //! These functions were moved verbatim out of `call_content`'s inlined
-//! fan-out, and for one commit the two copies ran side by side with a
-//! standing requirement to stay byte-identical. **That requirement is
-//! discharged** — the inlined branch is deleted, this is the only copy, and
-//! the byte-for-byte oracle that proved the move faithful was the p50 guide
-//! total, unchanged at 11,872 bytes across the cut.
+//! fan-out. For 35 commits the two copies coexisted under a standing
+//! requirement to stay byte-identical — only ever *one* of them running,
+//! this one being unreachable — and that requirement is now **discharged**:
+//! the inlined branch is deleted and this is the only copy.
+//!
+//! **What established the move was faithful, and what did not.** A reviewer
+//! compared the deleted block against these functions clause by clause and
+//! `diff`'d the rule wrapper literal; separately, `git diff cb6aed69 HEAD`
+//! over the non-test region of this file is empty, so the bodies never
+//! diverged in the first place. The p50 guide total was *unchanged* across
+//! the cut at 11,872 bytes, which is consistent with faithfulness and is
+//! **not** a proof of it: `a_p50_session_stays_under_the_committed_guide_byte_ceiling`
+//! runs every call through `call_tool_checked`, which stamps the opener's
+//! ledger key first — so `emit_session_opener` declines on all six shapes —
+//! and its `shape_total` sums only blocks containing
+//! `<!-- auto-injected get_guide(`, so operator-rule bytes count zero. That
+//! total measures exactly one of the three wired engines. Its blindness is
+//! filed and *measured*, not merely suspected:
+//! `docs/issues/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md`.
 //!
 //! Each function answers one question — *"does my trigger fire on this call,
 //! and if so what do I ship?"* — and answers nothing about ordering. Ordering

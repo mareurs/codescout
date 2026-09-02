@@ -23,26 +23,32 @@ pub(crate) struct PostCtx<'a> {
     pub content_topic: Option<&'a str>,
     /// Whether the progressive-disclosure gate fires:
     /// `exceeds_inline_limit(&json) || output_id is a STRING`, exactly as
-    /// computed at `call_content`'s `"progressive-disclosure"` topic check
-    /// (`src/tools/core/types.rs:1075-1082`). Precomputed because deciding
-    /// it requires the serialised JSON, which the coordinator does not hold.
+    /// computed where `call_content` builds this struct — the `overflowing:`
+    /// field of its `PostCtx { … }` literal. Precomputed because deciding it
+    /// requires the serialised JSON, which the coordinator does not hold.
     ///
     /// Read `is a string` literally: the gate is `.and_then(|v| v.as_str())`,
     /// so a present-but-non-string `output_id` does **not** fire it. No
     /// producer emits a non-string today, which is what makes transcribing
     /// this as `get("output_id").is_some()` a divergence nothing would catch.
     ///
-    /// **Not** the same condition as the separate buffering decision
-    /// (`exceeds_inline_limit(&json) && !self.force_inline()`,
-    /// `types.rs:1162`) — that one carries a `force_inline` term, this gate
-    /// does not. A `force_inline` tool whose JSON exceeds the inline limit
-    /// is never buffered, but this field must still be `true` for it,
-    /// because the disjunction above never consults `force_inline` either.
-    /// Latent today (the only `force_inline` tool, `get_guide`, declares no
-    /// `relevant_guide_topic`, so `emit_guide_sections` never reaches the
-    /// check this field feeds) — computing `overflowing` from the buffering
-    /// decision instead of from `types.rs:1075` is the silent byte diff Plan
-    /// 3 has no other detector for.
+    /// **Not** the same condition as the separate buffering decision —
+    /// `call_content`'s `let primary = if exceeds_inline_limit(&json) &&
+    /// !self.force_inline()`, a few lines below the construction. That one
+    /// carries a `force_inline` term, this gate does not. A `force_inline`
+    /// tool whose JSON exceeds the inline limit is never buffered, but this
+    /// field must still be `true` for it, because the disjunction above never
+    /// consults `force_inline` either. Latent today (the only `force_inline`
+    /// tool, `get_guide`, declares no `relevant_guide_topic`, so
+    /// `emit_guide_sections` never reaches the check this field feeds) —
+    /// computing `overflowing` from the buffering decision instead is a
+    /// silent byte diff with no dedicated detector.
+    ///
+    /// Both references above name an **expression**, not a line. This doc
+    /// carried three `types.rs:<line>` citations until Plan 3, and the commit
+    /// that wired the coordinator invalidated all three — one of them
+    /// (`:1162`) pointing past a file that is now 1112 lines long. A line
+    /// number is a claim about a revision; the expression survives the edit.
     pub overflowing: bool,
 }
 
