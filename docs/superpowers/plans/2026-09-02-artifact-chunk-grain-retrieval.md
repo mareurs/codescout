@@ -33,6 +33,9 @@ under another profile; the sessionId survives both).
 | 4 | `a3d2aba3`, `79cafa16` | `19e0e253` |
 | 5 | `e811ffd6`, `22845220`, `dbfd1d0c`, `9e71f25e` | `19e0e253` |
 | 6 | `411a6523`; hardening in `de434ca5` | `19e0e253`; `ffb95976` |
+| 7 | `04444ba2` | `ffb95976` |
+| 8 | `9e2b93d2`, `dcf3940a` | `ffb95976` |
+| 9 | `e67c3221` | `ffb95976` |
 
 `19e0e253-6b26-4a74-a201-33c92fbd0b30` is session `codescout-20` (profile `~/.claude`).
 `ffb95976-dc89-4cca-87aa-c026544faf2f` is the session that wrote this block.
@@ -45,10 +48,17 @@ nothing in the tree, so those ticks rest on the commit sequence rather than on a
 observation. Read a tick as *"this task shipped"*, never as *"every step was witnessed"*.
 Task 6 Step 5 is the one exception — it was run and the red observed; see its annotation.
 
-**Tasks 7–12 have not started**, verified negatively at the surfaces they would touch:
-`src/librarian/catalog/gc.rs` contains no `artifact_chunk` or `artifact_vec_v2` reference
-(its three `chunk` hits are `slice::chunks` inside `detect_move_candidates`), and
-`src/librarian/catalog/find.rs` contains no `max_per_artifact`.
+**Tasks 7, 8 and 9 shipped on 2026-09-02**, and unlike the rows above them those three ticks
+*are* a live trace — written by the session that made them, as each landed. **Task 8 closes
+the outage**: between Tasks 6 and 8 artifact semantic search returned an empty page for every
+re-indexed artifact.
+
+**Tasks 10–12 have not started.** The negative verification that used to stand here for 7–12
+has been consumed by those three tasks and is not re-derivable: `src/librarian/catalog/find.rs`
+now contains `max_per_artifact`, and Task 7's `gc.rs` half was **withdrawn as redundant**
+rather than performed — the trigger plus the FK cascade already collect chunk vectors, and the
+plan aimed the change at `apply_rehome`, which is not a delete site. Read Task 7's own block
+before treating its absence from `gc.rs` as evidence of anything.
 
 Two carried rulings for whoever picks them up:
 
@@ -1872,6 +1882,45 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): chunk-grai
 
 ## Task 9: `librarian(context)` keeps artifact grain
 
+> **DONE 2026-09-02** by session `ffb95976`. Commit `e67c3221`. **Step 3 was already in the
+> tree** — Task 8 (`9e2b93d2`) landed the `max_per_artifact = 1` at this call site, so Task 9
+> reduced to writing its guard. Writing the guard is what found the problem.
+>
+> **The test as specified would have passed with the cap removed**, in three independent
+> ways, and only the third survives careful transcription.
+>
+> **1. It reads a field the tool does not emit.** `out["candidate_ids"]` — `context` returns
+> `included_ids`. `.as_array().unwrap()` on `None` panics, so this one at least is loud.
+>
+> **2. `fixture_with_one_ledger_of_many_chunks()` and `run_context()` do not exist**, and no
+> fixture in this module supplies an embedder or a store: `TestToolContextBuilder` has both
+> setters, and every one of the 31 pre-existing context tests leaves both `None`.
+>
+> **3. The assertion cannot fail — this is the one a careful transcription still ships.**
+> With no embedder or no store, `context`'s topic branch falls back to a `title|topic
+> contains` filter. That fallback is **artifact-grain**, so it satisfies a distinctness
+> assertion while exercising none of the code under test. Distinctness is monotone under
+> narrowing besides: an empty page satisfies it perfectly. The plan's test would have been
+> green on a tree with the cap deleted.
+>
+> **So the discriminator has to live in the FIXTURE, not the assertion.** The topic string
+> here is a substring of no artifact's title or topic, so the fallback returns **zero** rows —
+> which turns a skipped semantic path into a red on the "note is present" assertion rather
+> than a pass in silence.
+>
+> **Two assertions, two disjoint mutation kills, both observed.** At `max_per_artifact = 2`
+> the note still fits and only distinctness fires: `["r/ledger.md", "r/ledger.md",
+> "r/note.md"]`. At `51` the ledger's 61 chunks fill every candidate slot and only the note's
+> absence fires — `included_ids` came back as **50 copies of one artifact**, the entire token
+> budget spent on one body, while `candidates_capped` reported `capped`. A plausible answer,
+> not an error. Neither assertion subsumes the other, and the docstring says so, because
+> trimming either one as redundant halves the guard silently.
+>
+> **Also shipped:** `realign_abs_paths`, hoisted out of `mk_ctx` so a store-backed fixture can
+> reuse it. The packing loop reads every candidate body off **disk** and `continue`s past a
+> path it cannot open, so an unrealigned row is skipped in silence — indistinguishable from
+> "the search matched nothing".
+
 **Files:**
 - Modify: `src/librarian/tools/context.rs:679-695`
 - Test: `src/librarian/tools/context.rs` test module
@@ -1879,7 +1928,8 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): chunk-grai
 **Interfaces:**
 - Consumes: `semantic_find(..., max_per_artifact, ...)` (Task 8)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — rewritten; see the block above for why the
+      specified one could not fail.
 
 ```rust
 #[tokio::test]
@@ -1898,12 +1948,14 @@ async fn context_candidates_are_distinct_artifacts_after_the_chunk_change() {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails** — not reachable as written: Step 3 shipped with
+      Task 8, so the red was produced by mutating the production line instead (Step 4).
 
 Run: `cargo test --lib context_candidates_are_distinct_artifacts`
 Expected: FAIL — duplicate ids, because `semantic_find` now returns chunk hits.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement** — already in the tree from `9e2b93d2`; the call-site comment now
+      names the pinning test and both mutation values.
 
 At `context.rs:679`, pass the cap:
 
@@ -1925,12 +1977,15 @@ At `context.rs:679`, pass the cap:
             .await?;
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes** — 32/32 `librarian::tools::context` green, and the
+      two mutations above each killed exactly one assertion.
 
 Run: `cargo test --lib librarian::tools::context`
 Expected: PASS.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit** — `e67c3221`. fmt/clippy clean; lean 3386 passed / 1 failed
+      (a peer mid-write of `issue-clusters.md`), default 5008 passed / 2 failed (a peer's
+      committed ceiling correction, and the known-flaky peer idle-timeout test).
 
 ```bash
 cargo fmt

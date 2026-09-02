@@ -116,6 +116,67 @@ belonging to a commit that did not touch it.
 *"pre-commit stashes all unstaged work once per installed stage"* — as an argument about
 where to install hooks. Its consequence for concurrent readers is not drawn there.
 
+
+### 2026-09-02 — the first observed downstream failure, and it named the wrong component
+
+Sequence, in one session (`ffb95976`), during a mutation check on
+`src/librarian/tools/context.rs`:
+
+1. `edit_file` changed an **unstaged** line from `1,` to `2,` — **ok**.
+2. `cargo test` ran and failed in the way `2,` predicts, proving the working tree held `2,`.
+3. `edit_file` was asked to change `2,` to `51,` and **refused**:
+
+```
+old_string not found in src/librarian/tools/context.rs.
+Nearest content at lines 689-690:
+                1,
+                51,
+```
+
+4. `read_file` over the same range, seconds later, returned `2,`.
+
+Steps 3 and 4 contradict each other, and step 3 is not a hedge — it **quotes** the content it
+claims to have found, at a line number.
+
+**Ruling out the obvious explanation is what made this expensive.** `edit_file` reads its
+target through `read_edit_target` (`src/tools/edit_file/mod.rs:678`), a bare
+`std::fs::read_to_string` with no cache, and `not_found_msg` is handed *that same string*, so
+the display and the matcher cannot disagree. A two-edit scratch-file probe did not reproduce
+it either. Both findings point away from the tool and toward the disk — but the reading they
+invite is *"a cache that only affects indexed source files"*, and a bug filed on that premise
+would have sent the next reader hunting for something that does not exist.
+
+**What actually happened, confirmed at the byte level rather than inferred.** Peer commit
+`c22fb929` landed at 21:04:14 and its hook run stashed the working tree. That patch is still
+on disk and contains the mutation:
+
+```console
+$ grep -n -E '^[-+] +(1|2|51),$' ~/.cache/pre-commit/patch1788372254-1160295
+16248:-                1,
+16249:+                2,
+```
+
+So for the duration of that hook run the file on disk carried `1,` — exactly what `edit_file`
+read and reported. The restore is why `read_file` saw `2,` moments later. The commit that
+emptied the file touched nothing under `librarian/`.
+
+**A durable AFTER-THE-FACT oracle, which this file did not previously name.** Every remedy
+listed above and in `IC-12` — `artifact_event` byte counts, `wc -c` against
+`git show HEAD:<path>` — must be run *during* the window, which is the one thing a surprised
+reader cannot do. But pre-commit writes its stash to `~/.cache/pre-commit/patch<epoch>-<pid>`
+and **never deletes it**, so the window is reconstructible afterwards from three commands that
+need no foresight:
+
+```bash
+ls -la --time-style=+%H:%M:%S ~/.cache/pre-commit/ | grep patch  # every window, timestamped
+grep -c '<your path>'        ~/.cache/pre-commit/patch<epoch>-<pid>   # was your file stashed?
+grep -n  '<the line you wrote>' ~/.cache/pre-commit/patch<epoch>-<pid>
+```
+
+**And `git log` is not a complete index of the windows.** Two of the four stash events
+bracketing this session's mutation run (`20:57:31`, `21:01:28`) correspond to **no commit at
+all** — an aborted or rejected hook run stashes just the same. The patch directory is the
+complete record; the commit log is a subset of it.
 ## Impact
 
 A peer running `cargo test`, `cargo build`, or any file read during another session's
@@ -125,7 +186,14 @@ diagnostic agrees the files are fine. A build failure from this looks like flaki
 `git status` afterwards reports the truth, which is what makes the earlier lie hard to
 credit.
 
-Not merely possible: **observed** on 2026-08-31, where the reading session saw its own work absent and `git status` agreed. What has not been observed is a concrete *downstream* failure — a build or test that failed because of it — and that is stated deliberately rather than assumed away. The window is short, and short windows produce rare events, not absent ones.
+**Observed 2026-09-02** — see the Evidence subsection below. The realised failure was a
+**refused tool call whose error message quoted the stashed content as fact, at a line
+number**. That is worse than the build failure anticipated here: a build failure is a
+*symptom*, whereas this is a confident, specific, wrong answer about a file's contents — and
+it implicates the component that *read* the file rather than the one that emptied it. The
+session came within one call of filing a bug against `edit_file`, and the two diagnostics it
+ran (no cache in `read_edit_target`; a scratch-file probe that did not reproduce) both pointed
+away from the real cause while looking like progress.
 
 ## Fix
 
@@ -158,8 +226,10 @@ for a different reason.
 
 Decide whether this stays a known-and-accepted property or motivates per-session
 worktrees. If it stays: add one line to `.pre-commit-config.yaml`'s header drawing the
-consequence for concurrent readers, so the next person who meets an unreproducible build
-failure has somewhere to land. That is a knowledge fix and this ledger's own standard says
+consequence for concurrent readers, **and name `~/.cache/pre-commit/patch<epoch>-<pid>` as the
+after-the-fact oracle** (Evidence, 2026-09-02) — that is the one instrument a surprised reader
+can still use, because it survives the window that everything else requires you to be inside
+of. That is a knowledge fix and this ledger's own standard says
 so — see `IC-12`'s `Mechanism status`.
 
 ## References

@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 104
-entry_high_water_W: 100
+entry_high_water_F: 105
+entry_high_water_W: 101
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,7 @@ entry_high_water_W: 100
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-105 | 2026-09-02 | high | test-rigor | fixed-verified | **A plan specified a complete test that could not fail, and the reason was a fallback the plan never mentions.** Task 9's test asserted only that `context`'s candidate ids hold no duplicate. Two defects were loud (it read `candidate_ids`, a field the tool does not emit; it called two non-existent helpers). The third is the one a careful transcription still ships: the fixture supplied **no embedder and no store**, which routes `context`'s topic branch into a `title\|topic contains` fallback that is **artifact-grain** — so the distinctness assertion is satisfied by the fallback while exercising none of the code under test, and is monotone under narrowing besides, so an empty page satisfies it too. Fix the two loud defects and it is green on a tree with `max_per_artifact` deleted. **The remedy is a fixture property, not an assertion:** the topic string matches no artifact's title or topic, so the fallback returns **zero** rows and a skipped semantic path reds a positive assertion instead of passing in silence. Adds a question the monotone-direction law does not reach — *what runs INSTEAD when this path is unavailable, and does that also pass?* A fallback is not a mutation of the feature, it is a second implementation of the same signature |
 | F-104 | 2026-09-02 | med | delivery-path | promoted-to-bug-tracker | **The notice I fixed, verified and shipped is injected into the response and then discarded by 18 compact renderers.** `inject_notice` writes `_workspace_notice` into the `Value`; `call_content` hands that `Value` to `self.format_compact(&val)`, and no `format_compact` reads the key — so it survives only on the pretty-JSON branch. It reaches `artifact`; it does not reach `symbols`, `grep`, `tree`, `read_file`, `references`, `semantic_search`. **Both regression tests drive `EchoTool`, which takes the pretty-JSON branch**, so they exercise the one path production read tools do not; the two mutations I ran killed on the **decision** path (`notice_once`, `workspace_override`) and nothing reaches the **delivery** path. Found by a `/mcp` reconnect that recreated the original conditions, with a **refused write as the control** — the guard gates on the same flag, so its refusal proved every precondition held while two reads stayed silent. Three plausible causes were checked and died at the bytes first (stale binary, worktrees gone, peer activation). The live production check I had reported as satisfying `codescout-0a`'s standing ask is what hid it: every response I read the string in was `artifact`, the one shape where it works |
 | F-103 | 2026-09-02 | med | docs-drift | fixed-verified | **The guide section a tool's caller actually receives is routable by `serves:`, so "the docs" is not one surface.** `489715ef` added `stage_together`/`stage_hint` to `artifact(action="move")` and documented the staging step in `tracker-conventions` § *Bug files* — but the section marked `<!-- serves: artifact.move, artifact.delete -->` in `src/prompts/guides/librarian.md` still printed the pre-fix response example, and `stage_together` appeared nowhere in that file. So the surface designed to teach a move caller taught the old shape. Surfaced **not by review**: the live probe run for `W-100` auto-injected the stale section into the same tool result as a response carrying the two fields it omits — drift and refutation arrived together. *Loudness is a property of a PATH* one layer up: the fix went on a path the caller does not traverse. Owed by anyone changing a response shape — grep `serves: <tool>.<action>` across `src/prompts/guides/`, a check nothing currently runs. Fixed in the same session |
 | F-102 | 2026-09-02 | high | test-discipline | open | **Five assertions in one feature satisfied by text that survives deleting the thing they name — and the fifth was committed by the fix for the fourth.** `len()==2` where a constant, `h.level` and 0-indexing all pass; a `contains` on the token where replacing the rendered line list with an empty string stays green; a `contains` on *push* satisfied by the hint's explanatory sentence rather than by its remedy; a `contains` on `'7'` satisfied by the token `R-147` itself; and `len()==2` again, its message reading *leaving exactly the two `##` definitions*, equally satisfied by `[6,7]` — precisely what the mutation it guards against produces. Instance 5 sits in the diff written to fix instance 4, in the merge blocker's own evidence test, written by an implementer whose dispatch said *treat this as a class — fix any other assertion satisfiable by text that survives deleting the thing it names*; their report says **no fifth instance to report**. `OB-1` under controlled conditions: the author was not merely aware of the class, they were **holding an instruction to sweep for it, in the file they were sweeping**. Every catch came from a reviewer asking *what else satisfies this string?* — a different question, not a more careful reading of the same one, which is why care is the wrong instrument. Instance 5 shipped at `5eea9301`, parked with a ruling |
@@ -160,6 +161,7 @@ entry_high_water_W: 100
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
 | W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
 | W-99 | 2026-09-02 | med | **A safety measure adopted by REASONING about a mechanism, rather than by reading it, is a hypothesis — and `git commit -- <paths>` is the one that fails.** A pathspec commit ignores the index — true, and where the reasoning stops — and reads the **working tree** at those paths, which is the half that matters on a shared checkout: it commits whatever a concurrent session wrote to the same file since you last looked. Staging is what satisfies the `unreviewed-content` hook; the pathspec is not | The hook refused a commit from a session that had reasoned about index safety explicitly across several windows and reached the wrong form **by** that reasoning — care was the instrument, and care is what failed. **Not an averted capture:** all 34 deleted lines were verified mine, so the refused commit would in fact have been clean. What was prevented is the *belief* persisting, and it emits no symptom until the one time a peer has touched the same file. The situation was real — 7 paths staged, 6 the peer's — so only the remedy was wrong, which is why nothing about the situation could have flagged it | validated |
 | W-98 | 2026-09-02 | high | **A question about METHOD is a request to re-measure, not to re-explain — and when you re-derive, change the INSTRUMENT, not the care.** A challenge to a conclusion invites defence, and defending is often right; a challenge to the method cannot be answered by re-asserting the conclusion at all, because a sound conclusion drawn by an unsound method is indistinguishable from an unsound one at the point of publication. A more careful application of the same instrument reproduces the same blind spot — this is `W-94`'s *check it against a sample that differs* applied reflexively, when no peer is available | Two applications in one session, **one of which changed the answer**. (1) *Both owed citations closed, verified* rested on an unpinned `grep` returning zero; re-run **pinned** it returned zero again — sound, but the pinned run is the only reason that could be said, so the honest write-up was *the claim stands; the method that produced it did not deserve to be trusted*. (2) Measuring fix-SHA decay, `git cat-file -e` over 123 archived citations returned **0 dead** — which reads as *SHAs never die here*, and would have made a merge-vs-rebase decision look stakeless. `cat-file -e` tests object EXISTENCE; an orphan survives in the object store until `git gc` prunes it. Re-measured by **reachability** against `experiments` and `master`: **1 orphan**. Nothing in the first output marked it as answering a different question, it was self-consistent, and it pointed the same direction as the truth — which is exactly what would have made it durable | validated |
@@ -10401,6 +10403,103 @@ path" has to mean the delivery path too, not only the decision).
 **Promote-when:** a second instance of a framework-injected response field that a per-tool
 renderer drops. `inject_hint` sits on the identical code path with the identical exposure and
 was not checked here.
+
+## F-105 — A plan's test could not fail — the fallback it never named is artifact-grain
+
+**Category:** plan-drift / test-rigor
+**Severity:** high
+**Status:** fixed-verified
+**Commit:** `e67c3221` (Task 9 of `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md`)
+
+**Observed.** Task 9 specified a complete test — the "mechanical transcription" shape a model
+is most likely to trust — and that test **could not fail**. Three things were wrong with it and
+only the third is dangerous.
+
+1. It read `out["candidate_ids"]`; `context` emits `included_ids`. Loud — `.as_array().unwrap()`
+   panics on `None`.
+2. It called `fixture_with_one_ledger_of_many_chunks()` and `run_context()`, neither of which
+   exists. Also loud.
+3. **Its fixture supplied no embedder and no store.** `context`'s topic branch then falls back
+   to a `title|topic contains` filter — and that fallback is **artifact-grain**, so it satisfies
+   a distinctness assertion while exercising none of the code under test. Distinctness is
+   monotone under narrowing besides: an empty page satisfies it perfectly. Fix the two loud
+   defects and the result is green on a tree with `max_per_artifact` deleted.
+
+**Cost.** None realised — caught in Phase 1 scouting, before the test was written. Had it been
+transcribed, Task 9 would have shipped a green non-guard over the contract the whole 12-task
+plan exists to establish, behind a ticked box.
+
+**Remedy — put the discriminator in the FIXTURE, not the assertion.** The topic string is a
+substring of no artifact's title or topic, so the fallback returns **zero** rows; a skipped
+semantic path then fails a positive "the other artifact is present" assertion instead of
+passing in silence. Confirmed by mutating the production line twice: at `max_per_artifact = 2`
+only distinctness fires (`["r/ledger.md", "r/ledger.md", "r/note.md"]`); at `51` only the note's
+absence fires (`included_ids` = 50 copies of one artifact). Neither assertion subsumes the
+other.
+
+**Generalises to any code path with a SILENT FALLBACK.** The existing law is *"ask which
+direction your assertion is monotone under"*. This adds a second question that the first does
+not reach: **what does the system do instead when this path is unavailable, and does that also
+pass?** A fallback is not a mutation of the feature — it is a *different implementation* of the
+same signature, so an assertion written against the signature is blind to which one ran. Here
+the fallback's grain happened to be the very property under test. The tell is cheap: if the
+fixture omits any dependency the path requires, name what runs in its place.
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** `src/librarian/tools/context.rs` keeping a non-semantic topic branch. If the
+fallback is ever removed, condition (1) of the test's docstring becomes vacuous rather than
+wrong, and the test quietly weakens — it does not break.
+
+## W-101 — Verifying before filing turned an edit_file bug into a byte-level proof of a peer's stash window
+
+**Status:** validated
+**Promote-when:** a second instance appears where a tool's error message is treated as evidence about the world rather than about the tool's own read.
+
+**Pattern.** Before filing a bug against the component that *reported* an anomaly, ask what
+else was writing to the resource it read. On a shared checkout the answer is routinely "a
+peer's pre-commit hook, which empties the working tree of every unstaged change for the
+duration of its run".
+
+**What happened.** `edit_file` refused a mutation with `old_string not found … Nearest content
+at lines 689-690:` followed by the **pre-edit** content, quoted, at a line number — while
+`read_file` seconds later returned the post-edit content, and a `cargo test` in between had
+already proven the post-edit content was live. A bug file against `edit_file` was drafted.
+
+**Counterfactual, and it is not "one wasted file".** Two diagnostics had already run and both
+pointed the wrong way while looking like progress: `read_edit_target`
+(`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a
+two-edit scratch-file probe did not reproduce. Reading those as "so the cache must be specific
+to indexed source files" is the natural next step, and it is the story the bug file would have
+carried — sending the next reader after a cache that does not exist, in a tool that is not at
+fault, while the real class (`IC-12`, `cluster/transient-shared-state-lies-to-readers`) gained
+no member and kept its *"no downstream failure observed"* line.
+
+**What closed it.** Not more care — a different question. `IC-12`'s own member list names
+`pre_commit/staged_files_only.py:108`, and pre-commit leaves its stash on disk at
+`~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**. The patch from the peer commit that
+landed inside the window contains, verbatim:
+
+```
+16248:-                1,
+16249:+                2,
+```
+
+— the exact unstaged mutation, proving the file on disk carried the old line for that run.
+Mechanism confirmed at the byte level, ~4 tool calls, no speculation left over.
+
+**The reusable half is the oracle, not the caution.** Every remedy this class previously
+named must be run *during* the window, which is the one thing a surprised reader cannot do.
+The patch directory is readable afterwards and is a **more complete** index than `git log`:
+two of the four stash events bracketing this window correspond to no commit at all, because an
+aborted hook run stashes too. Written up in
+`docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` § *Evidence*.
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** pre-commit retaining stash patches under `~/.cache/pre-commit/`. If it ever
+starts cleaning them up, the oracle disappears and the class returns to being diagnosable only
+from inside the window.
 
 ## Template for new entries
 
