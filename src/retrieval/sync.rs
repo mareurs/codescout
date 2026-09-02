@@ -107,6 +107,45 @@ pub(crate) fn guard_stale_binary(exe_deleted: Option<bool>) -> Result<()> {
     Ok(())
 }
 
+/// The staleness signal for a sync whose caller injected no [`WriterProvenance`].
+///
+/// Production reads the live process. **In test builds this is always
+/// `Some(false)`, and that is a fix rather than a convenience.**
+///
+/// The hazard [`guard_stale_binary`] exists for is a long-lived **server** that
+/// keeps re-indexing after its binary was replaced, stamping vectors from code that
+/// no longer exists into shared per-project state. A test process has neither
+/// property: it writes to a tempdir and exits. So the guard was answering a question
+/// nobody had asked, with the live process's own `/proc/self/exe`.
+///
+/// What that cost, measured 2026-09-02: a peer running `cargo build` on this shared
+/// checkout unlinks `target/debug/deps/codescout-<hash>` **while the suite is
+/// running**, the guard correctly observes its own executable is gone, and every
+/// `sync_*` test that did not inject a writer refuses before doing any work — 13 of
+/// them, reproducibly, in the same order. Under `--workspace` there are ~68s in
+/// which a peer build can land; in isolation 0.63s, which is why the same 13 pass
+/// alone and fail together. Not timing-sensitivity: it tracks *who else is
+/// building*, not what the tests do, which is why it appeared and vanished without
+/// anyone touching test code.
+///
+/// **What this deliberately stops covering.** The production branch — snapshotting
+/// the live process — now has no test exercising it. It never had a deliberate one:
+/// those 13 tests reached it incidentally, and that incidental coverage is precisely
+/// what broke. The policy itself is covered directly and does not go through here
+/// ([`guard_stale_binary`]'s three unit tests, plus the call-site wiring proof that
+/// injects `exe_deleted: Some(true)`), so what is untested is the one-line snapshot,
+/// not the rule.
+fn ambient_exe_deleted() -> Option<bool> {
+    #[cfg(test)]
+    {
+        Some(false)
+    }
+    #[cfg(not(test))]
+    {
+        crate::retrieval::index_state::current_writer().exe_deleted
+    }
+}
+
 impl std::fmt::Display for SyncReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -766,7 +805,7 @@ pub async fn sync_worktree(
         writer
             .as_ref()
             .map(|w| w.exe_deleted)
-            .unwrap_or_else(|| crate::retrieval::index_state::current_writer().exe_deleted),
+            .unwrap_or_else(ambient_exe_deleted),
     )?;
 
     const STACK_CHUNK_TARGET: usize = 1200;
@@ -1011,7 +1050,7 @@ impl crate::retrieval::client::RetrievalClient {
             opts.writer
                 .as_ref()
                 .map(|w| w.exe_deleted)
-                .unwrap_or_else(|| crate::retrieval::index_state::current_writer().exe_deleted),
+                .unwrap_or_else(ambient_exe_deleted),
         )?;
 
         // chunk=1200 was the universal sweet spot in the Phase 5.5 chunk×model matrix

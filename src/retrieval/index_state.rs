@@ -146,6 +146,21 @@ pub fn current_writer() -> WriterProvenance {
     }
 }
 
+/// The pure half of [`exe_is_deleted`]: does this resolved `/proc/self/exe` target
+/// report an unlinked binary?
+///
+/// Split out 2026-09-02 so the *predicate* can be tested without depending on whether
+/// this process's own executable happens to still exist. It does not always: on a
+/// shared checkout a peer's `cargo build` unlinks the running test binary mid-suite,
+/// which falsifies the premise of `a_live_binary_does_not_report_itself_deleted` and
+/// made it fail while reporting an inverted predicate — a true statement about the
+/// environment, misattributed to the code. The three cases the doc comment above
+/// describes in prose are fixtures against this function now.
+#[cfg(target_os = "linux")]
+fn path_reports_deleted(p: &std::path::Path) -> bool {
+    p.to_string_lossy().ends_with(" (deleted)") && !p.exists()
+}
+
 /// Whether this process's executable has been unlinked since it started.
 ///
 /// Measured 2026-08-28 by deleting a running binary's file and having it read its
@@ -161,7 +176,7 @@ pub fn current_writer() -> WriterProvenance {
 #[cfg(target_os = "linux")]
 fn exe_is_deleted() -> Option<bool> {
     let p = std::fs::read_link("/proc/self/exe").ok()?;
-    Some(p.to_string_lossy().ends_with(" (deleted)") && !p.exists())
+    Some(path_reports_deleted(&p))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -490,23 +505,93 @@ mod tests {
         );
     }
 
-    /// Pins the direction of the deleted-binary predicate.
+    /// Pins the direction of the deleted-binary predicate against ground truth,
+    /// whichever way that truth points.
     ///
-    /// The test binary is running from a file that exists, so the only correct
-    /// answer is `Some(false)`. Weak in absolute terms — it cannot exercise the
-    /// true branch, since deleting the test runner mid-run is not something a
-    /// suite can do to itself — but it is the assertion that fails if the
-    /// predicate is ever inverted, which is the realistic regression. The true
-    /// branch was verified by hand on 2026-08-28 against a binary deleted while
-    /// running.
+    /// **It used to assert `Some(false)` unconditionally**, on the premise that "the
+    /// test binary is running from a file that exists". That premise is not the test's
+    /// to make on a shared checkout: a peer's `cargo build` unlinks
+    /// `target/debug/deps/codescout-<hash>` mid-suite, and this then failed saying the
+    /// predicate was inverted — a true statement about the *environment*, misattributed
+    /// to the code, alongside 13 `retrieval::sync` failures from the same cause.
+    ///
+    /// So it now compares the answer to the filesystem rather than to a constant. That
+    /// makes it a WIRING test — `exe_is_deleted` reads `/proc/self/exe` and delegates to
+    /// [`path_reports_deleted`] — and inversion is caught by
+    /// [`path_reports_deleted_discriminates_all_three_real_cases`], which needs no
+    /// assumption about this process at all. The pair covers what the single assertion
+    /// covered, minus the dependency on who else is building.
+    ///
+    /// docs/issues/2026-09-02-a-peer-build-unlinks-the-test-binary-and-reds-fourteen-tests.md
     #[cfg(target_os = "linux")]
     #[test]
     fn a_live_binary_does_not_report_itself_deleted() {
+        let answer = exe_is_deleted();
+        assert!(
+            answer.is_some(),
+            "on Linux /proc/self/exe exists, so the check must return a definite \
+             answer; None would mean 'could not tell'"
+        );
+
+        let exe = std::fs::read_link("/proc/self/exe").expect("linux has /proc/self/exe");
+        let truth = path_reports_deleted(&exe);
         assert_eq!(
-            exe_is_deleted(),
-            Some(false),
-            "the test runner's own executable exists, so this must be a definite false — \
-             None would mean 'could not tell' and true would mean the predicate is inverted"
+            answer,
+            Some(truth),
+            "exe_is_deleted must report what the filesystem says about its own \
+             executable ({exe:?}). If truth is true here, a concurrent `cargo build` \
+             unlinked this test binary mid-run — that is the environment, and the \
+             predicate agreeing with it is CORRECT, not a regression."
+        );
+    }
+
+    /// The predicate itself, over the three real cases — no dependency on this process.
+    ///
+    /// This is where inversion is actually caught. Each case is a distinct decision and
+    /// the conjunction is what makes the third one right:
+    ///
+    /// - a live path (no suffix, exists) → not deleted;
+    /// - a `" (deleted)"`-suffixed path that does NOT exist → deleted;
+    /// - a file genuinely **named** `"x (deleted)"` that DOES exist → not deleted.
+    ///
+    /// Drop the `!p.exists()` conjunct and case 3 flips; drop the suffix check and a
+    /// stat failing for an unrelated reason (permissions) reports a live binary as
+    /// deleted. Neither mutation is caught by the wiring test above, which is why this
+    /// is a separate test rather than an extra assertion in it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn path_reports_deleted_discriminates_all_three_real_cases() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let live = dir.path().join("codescout");
+        std::fs::write(&live, b"x").unwrap();
+        assert!(
+            !path_reports_deleted(&live),
+            "a live binary path is not deleted"
+        );
+
+        let unlinked = dir.path().join("codescout (deleted)");
+        assert!(
+            !unlinked.exists(),
+            "fixture precondition: this path must NOT exist, or case 2 is not the \
+             case it claims to be"
+        );
+        assert!(
+            path_reports_deleted(&unlinked),
+            "a suffixed path that does not exist is the unlinked-binary case"
+        );
+
+        // Load-bearing: a real file whose NAME ends in " (deleted)". Deleting this
+        // fixture leaves both remaining cases passing under a predicate that ignores
+        // `!p.exists()` — the conjunction would then be untested and could be dropped
+        // silently.
+        let named = dir.path().join("weird (deleted)");
+        std::fs::write(&named, b"x").unwrap();
+        assert!(
+            !path_reports_deleted(&named),
+            "a file genuinely NAMED '… (deleted)' that exists is alive; the \
+             conjunction with !p.exists() is what keeps this from being a false \
+             positive"
         );
     }
 
