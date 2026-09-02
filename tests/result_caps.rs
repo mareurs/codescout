@@ -495,3 +495,209 @@ fn classify(decl: &CapDecl) -> CapClass {
 
     CapClass::Unclassified
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TruncSite {
+    op: String,
+    file: String,
+    line: usize,
+    annotation: Option<String>,
+}
+
+#[test]
+fn truncation_sites_finds_the_operations_instrument_a_cannot_see() {
+    let src = "\
+let first = chunk_markdown(body).next();
+let head = items.take(10);
+s.truncate(80);
+";
+    let ops: Vec<String> = truncation_sites(src, "src/x.rs")
+        .into_iter()
+        .map(|s| s.op)
+        .collect();
+    assert!(ops.contains(&".next()".to_string()), "got {ops:?}");
+    assert!(ops.contains(&".take(".to_string()), "got {ops:?}");
+    assert!(ops.contains(&".truncate(".to_string()), "got {ops:?}");
+}
+
+#[test]
+fn truncation_sites_ignores_stream_next_which_is_iteration_not_capping() {
+    let src = "while let Some(res) = stream.next().await {\n";
+    assert!(
+        truncation_sites(src, "src/x.rs").is_empty(),
+        "`stream.next().await` drains an async stream — it caps nothing. \
+         src/librarian/indexer.rs:918,1051 are exactly this and must stay \
+         silent, or the gate cries wolf where the real member (a bare \
+         `.next()` on a chunk iterator) was one line away"
+    );
+}
+
+#[test]
+fn truncation_sites_does_not_exclude_a_sync_next_on_a_receiver_ending_in_s() {
+    let src = "let first = items.next();\n";
+    let ops: Vec<String> = truncation_sites(src, "src/x.rs")
+        .into_iter()
+        .map(|s| s.op)
+        .collect();
+    assert_eq!(
+        ops,
+        vec![".next()".to_string()],
+        "`items.next()` has no `.await` — it is a synchronous iterator call, \
+         not a stream drain. Excluding it because the receiver's name ends \
+         in `s` (as `.contains(\"s.next()\")` would) silently drops \
+         `items.next()`, `lines.next()`, `rows.next()`, `chars.next()` — the \
+         exact permissive-direction under-reporting this gate exists to catch"
+    );
+}
+
+#[test]
+fn truncation_sites_reads_an_annotation_the_same_way_declarations_do() {
+    let src = "\
+// cap-class: NOT_A_CAP — bounded by the caller's explicit line range
+let head = items.take(n);
+";
+    assert_eq!(
+        truncation_sites(src, "src/x.rs")[0].annotation.as_deref(),
+        Some("NOT_A_CAP — bounded by the caller's explicit line range"),
+        "one annotation grammar for both instruments — a second grammar is \
+         a second thing to get wrong"
+    );
+}
+
+#[test]
+fn unclassified_decls_names_every_offender_and_is_not_a_bare_count() {
+    let decls = vec![
+        CapDecl {
+            name: "A_MAX".into(),
+            file: "src/a.rs".into(),
+            line: 3,
+            annotation: None,
+        },
+        CapDecl {
+            name: "B_LIMIT".into(),
+            file: "src/b.rs".into(),
+            line: 9,
+            annotation: Some("RESULT_CAP b.rows — probed".into()),
+        },
+        CapDecl {
+            name: "C_CAP".into(),
+            file: "src/c.rs".into(),
+            line: 4,
+            annotation: Some("NOT_A_CAP".into()),
+        },
+    ];
+    let got = unclassified_decls(&decls);
+    assert_eq!(
+        got,
+        vec![
+            "src/a.rs:3 A_MAX — no cap-class annotation".to_string(),
+            "src/c.rs:4 C_CAP — NOT_A_CAP with no reason".to_string(),
+        ],
+        "the classified one must not appear, and each offender must arrive \
+         with its file:line — a count tells nobody which constant to go fix"
+    );
+}
+
+/// THE GATE. Every cap-shaped constant in tracked `src/` is classified.
+#[test]
+#[ignore = "un-ignored by Task 3, which classifies the backlog this names. \
+                Kept as a test rather than deleted so `cargo test -- --ignored` \
+                prints the live worklist."]
+fn every_cap_constant_is_classified() {
+    let mut offenders = vec![];
+    for file in tracked_src_files() {
+        let path = repo_root().join(&file);
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        offenders.extend(unclassified_decls(&cap_constants(&src, &file)));
+    }
+    assert!(
+        offenders.is_empty(),
+        "{} cap constant(s) carry no usable `cap-class:` annotation.\n\n{}\n\n\
+         Add ONE of these on the line above each, in its doc comment:\n  \
+         // cap-class: RESULT_CAP <surface>.<what> — probed\n  \
+         // cap-class: NOT_A_CAP — <why this never shapes a result>\n\n\
+         RESULT_CAP means a caller can receive a partial result because of \
+         this bound; it then needs a probe row in \
+         src/tools/core/cap_probe.rs. NOT_A_CAP needs a REASON, not just \
+         the token — a timeout, a batch size, a retry ceiling. Why this \
+         gate exists: docs/trackers/issue-clusters/\
+         IC-13-capped-result-presented-as-complete.md",
+        offenders.len(),
+        offenders.join("\n")
+    );
+}
+
+/// Truncation OPERATIONS, the scope instrument A cannot reach.
+///
+/// `.next()` is included because the `indexer.rs` first-chunk-only member
+/// (fixed at `488192e8`) was a bare `.next()` on a chunk iterator with no
+/// constant anywhere — invisible to a declaration scan by construction.
+///
+/// Exactly one shape is excluded: `.next().await` — an async stream drain,
+/// which caps nothing. The exclusion is anchored to `.await`, not to any
+/// substring of the receiver's name. An earlier draft excluded
+/// `.contains("s.next()")` to catch `stream.next()`, but that pattern
+/// matches ANY receiver whose name ends in `s` — `items.next()`,
+/// `lines.next()`, `rows.next()`, `chars.next()` — which is silent
+/// under-reporting in the permissive direction, the exact defect class this
+/// gate exists to catch, occurring inside the gate itself. `.await` is
+/// unambiguous: a synchronous `.next()` never has one. Pinned narrow by
+/// `truncation_sites_ignores_stream_next_which_is_iteration_not_capping`
+/// (the real exclusion) and
+/// `truncation_sites_does_not_exclude_a_sync_next_on_a_receiver_ending_in_s`
+/// (the over-broad pattern this rejects), because an over-broad instrument
+/// that fires on every iterator teaches readers to annotate noise, and an
+/// annotation written to silence a gate classifies nothing.
+fn truncation_sites(src: &str, file: &str) -> Vec<TruncSite> {
+    const OPS: [&str; 4] = [".take(", ".truncate(", "truncate_compact(", ".next()"];
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = vec![];
+
+    for (idx, raw) in lines.iter().enumerate() {
+        let code = raw.trim_start();
+        if code.starts_with("//") {
+            continue;
+        }
+        for op in OPS {
+            if !code.contains(op) {
+                continue;
+            }
+            if op == ".next()" && code.contains(".next().await") {
+                continue;
+            }
+            out.push(TruncSite {
+                op: op.to_string(),
+                file: file.to_string(),
+                line: idx + 1,
+                annotation: annotation_above(&lines, idx),
+            });
+        }
+    }
+    out
+}
+
+/// Declarations the gate refuses, each named with its location.
+///
+/// Extracted so [`every_cap_constant_is_classified`] and
+/// `unclassified_decls_names_every_offender_and_is_not_a_bare_count` run the
+/// SAME filter rather than two copies that could drift.
+fn unclassified_decls(decls: &[CapDecl]) -> Vec<String> {
+    let mut out: Vec<String> = decls
+        .iter()
+        .filter_map(|d| match classify(d) {
+            CapClass::Unclassified => Some(format!(
+                "{}:{} {} — no cap-class annotation",
+                d.file, d.line, d.name
+            )),
+            CapClass::MalformedReason => Some(format!(
+                "{}:{} {} — NOT_A_CAP with no reason",
+                d.file, d.line, d.name
+            )),
+            CapClass::ResultCap(_) | CapClass::NotACap(_) => None,
+        })
+        .collect();
+    out.sort();
+    out
+}
