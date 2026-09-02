@@ -7937,6 +7937,13 @@ pub(crate) mod test_support {
     /// guide blocks `call_content` appends, whether that is the single
     /// whole-topic block (non-declaring topic) or N section-slice blocks
     /// (declaring topic).
+    ///
+    /// `#[cfg(feature = "librarian")]`-gated: `guide_hint_tests`, its only
+    /// consumer, is itself librarian-gated. Ungated, this compiled under
+    /// `--no-default-features` with no caller, producing a permanent
+    /// dead-code warning on the lean lane that this attribute exists to
+    /// prevent (`bug-fix-session-log`-adjacent finding, fix round 1).
+    #[cfg(feature = "librarian")]
     pub(crate) fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
         content
             .iter()

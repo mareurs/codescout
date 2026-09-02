@@ -17,6 +17,21 @@ use crate::server::test_support::{call_tool_checked, make_server, shared_ctx};
 /// makes a BAD ROW look like a finding.
 #[tokio::test]
 async fn the_lifted_driver_reaches_a_real_tool_from_this_module() {
+    // What this actually proves, and what it does not:
+    //
+    // - Reachability of `test_support` from `src/tools/core` is a COMPILE-time
+    //   fact, not a runtime one — if `test_support` or any of these three
+    //   names were not `pub(crate)`, this file would not build. The runtime
+    //   assertion below is near-inert on top of that: the fresh `make_server`
+    //   temp dir has no source files, so "fn " matches zero, and `format_grep`
+    //   renders that as the literal text "0 matches" — any non-empty string
+    //   satisfies `!primary.text.is_empty()`.
+    // - It does NOT exercise `call_tool_checked`'s `RecoverableError` check
+    //   (isError:false + body {"ok": false}): "0 matches" fails
+    //   `serde_json::from_str::<Value>`, so that branch inside
+    //   `call_tool_checked` is skipped and only the `is_error` half runs.
+    //   A future probe row that actually drives a tool past its cap is what
+    //   exercises that path; this smoke test does not.
     let (_dir, server) = make_server().await;
     let out = call_tool_checked(
         &server,
@@ -25,13 +40,11 @@ async fn the_lifted_driver_reaches_a_real_tool_from_this_module() {
         "smoke",
     )
     .await;
-    let primary = out[0].as_text().expect("primary block is text");
-    // Not a JSON-shape assertion: `Grep` declares `OutputForm::Text`, so its
-    // `call_content` output is ripgrep-style plain text even for a trivial
-    // zero-match result (`format_grep`'s `"0 matches"` — the fresh `make_server`
-    // temp dir has no source files for "fn " to match). Parsing that as JSON
-    // panics on trailing characters. The test's only claim is reachability, so
-    // assert the driver produced *some* real content, not a specific shape.
+    let primary = out
+        .first()
+        .expect("call_tool_checked returned no content blocks at all")
+        .as_text()
+        .expect("primary block is text");
     assert!(
         !primary.text.is_empty(),
         "a real tool response arrived through the lifted driver"
