@@ -104,6 +104,48 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        // SIBLING of the worktree guard above, deliberately NOT nested inside the
+        // `current_project` block: this refusal does not depend on a current project
+        // (the majority of callers, and every test built on `mk_ctx()`, have none), so
+        // nesting it there would make it unreachable outside a workspace project. The
+        // row is fetched again here rather than reused, which is the cost of being a
+        // sibling rather than nested inside the block that already fetched one.
+        //
+        // Same ordering constraint as the worktree guard above: BEFORE
+        // resolve_write_target, or a refused call still leaves a shadow row,
+        // augmentation, fork event and lineage link (the 2026-07-17 regression).
+        //
+        // PARTIAL BY CONSTRUCTION, and labelled so. This does not prevent the
+        // collision — a peer at origin allocates from origin's mark and collides
+        // with these unpushed entries whether or not this caller is refused. What
+        // it converts is an invisible divergence into a pushed one, which is why
+        // the hint names pushing rather than the refusal.
+        //
+        // `ledger_has_unpushed_commits` allows (returns `false`) when `row.abs_path`
+        // does not exist on disk — `git2::Repository::discover()` errs for a
+        // nonexistent path even inside a valid repo, and every failure path in the
+        // helper allows by design (Task 3). A catalog row surviving its file's
+        // deletion is a pre-existing, separately-tracked condition (a stale catalog
+        // row), not one this guard is positioned to detect; treating a missing file
+        // as a hard failure here would trade a real capability (allocation still
+        // working against a momentarily-stale catalog) for no safety, since a
+        // deleted file cannot itself collide.
+        // docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
+        if let Some(row) = artifact::get(&cat, &a.id)? {
+            if ledger_has_unpushed_commits(std::path::Path::new(&row.abs_path)) {
+                return Err(RecoverableError::with_hint(
+                    "append_entry: this ledger has commits that are not on its upstream \
+                     branch, so its `entry_high_water_` mark is ahead of what any other \
+                     host can see"
+                        .to_string(),
+                    "Push this ledger's commits, then allocate. Another clone reads its \
+                     own committed high-water mark, so until yours is pushed both hosts \
+                     resolve the same next id and the collision is only visible after \
+                     the branches merge — as one token with two definitions."
+                        .to_string(),
+                ));
+            }
+        }
         // All three or none. A partial trio is an incomplete intent, and the two
         // halves fail differently: without `anchor_heading` the server would have to
         // GUESS placement, and this project's input-handling law is that a write
@@ -298,9 +340,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// no remote has no second host, so refusing there is a false positive with no
 /// recoverable reading, and this guard is partial by construction — degrading it to
 /// a hard failure trades a real capability for no safety.
-// Not yet called from `call()` — Task 4 wires this into `append_entry`'s refusal
-// path. Tests below exercise it directly.
-#[allow(dead_code)]
 fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
     let Ok(repo) = git2::Repository::discover(abs_path) else {
         return false;
@@ -1451,6 +1490,63 @@ mod tests {
             ledger_has_unpushed_commits(&nested),
             "an unpushed commit on THIS nested ledger must be reported"
         );
+        let _ = tmp;
+    }
+
+    /// Refusal names the PUSH remedy, not the refusal. The guard does not prevent
+    /// the collision — a peer at origin collides with these unpushed entries whether
+    /// or not this caller is refused. What it converts is an INVISIBLE divergence into
+    /// a pushed one, so the hint is the entire value and the assertion is on the hint.
+    #[tokio::test]
+    async fn allocation_is_refused_while_the_ledger_has_unpushed_commits() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n# L\n\n## R-1 — a\n").unwrap();
+        commit_path(&work, "ledger.md", "add ledger");
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b"
+            }),
+        )
+        .await
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("push"), "hint must name the remedy: {msg}");
+        let _ = tmp;
+    }
+
+    /// The allow side, built from the SAME fixture machinery as the refusal test
+    /// above, so the machinery is proven live rather than the guard being proven
+    /// merely unreached. `repo_with_upstream`'s base commit is already pushed to
+    /// `origin`, and the working-tree edit below is left UNCOMMITTED — the guard
+    /// walks `@{upstream}..HEAD`, so with HEAD still equal to upstream there is no
+    /// unpushed commit on this file (or any file) regardless of what the working
+    /// tree holds, and allocation must proceed normally.
+    #[tokio::test]
+    async fn allocation_proceeds_when_the_ledger_has_no_unpushed_commits() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n## L\n\n## R-1 — a\n").unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "R-2");
         let _ = tmp;
     }
 }
