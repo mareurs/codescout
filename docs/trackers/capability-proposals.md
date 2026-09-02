@@ -34,21 +34,31 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 
 ## Index
 
+> **Status column reconciled against entry bodies 2026-09-02.** Three rows were stale: CAP-5 and
+> CAP-7 were terminal and still listed `proposed`, and CAP-10's partial settlement (`14857607`,
+> 2026-09-02) had not reached the table. Verified at the bodies, not inferred — CAP-7's three
+> cited commits (`b34bf10e`, `067ced2c`, `f632e7ef`) all resolve and name their checks, and
+> CAP-5's shipped mechanism is the `append_entry(anchor_heading, title, body)` in use today.
+
 | ID | Opened | Status | Size | Title |
 |----|--------|--------|------|-------|
 | CAP-1 | 2026-08-15 | proposed | small–medium | Session artifact-touch ledger — expose what this session read and wrote |
 | CAP-2 | 2026-08-15 | brainstorm | large | Second arm — a codescout-issued LLM controller that challenges unverified claims |
 | CAP-3 | 2026-08-15 | research | medium | Background / async tool execution — surface what already works, then decide on MCP `ext-tasks` |
 | CAP-4 | 2026-08-16 | proposed | — | Cross-session collision hint — tell a session when another one just touched this file |
-| CAP-5 | 2026-08-17 | proposed | medium | Server-assigned entry ids for prose trackers — make allocation atomic instead of advisory |
+| CAP-5 | 2026-08-17 | **shipped** 2026-08-26 | medium | Server-assigned entry ids for prose trackers — make allocation atomic instead of advisory |
 | CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
-| CAP-7 | 2026-08-19 | proposed | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
-| CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
-| CAP-10 | 2026-08-20 | proposed | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
+| CAP-7 | 2026-08-19 | **complete** 2026-08-19 | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
+| CAP-8 | 2026-08-19 | open | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
+| CAP-10 | 2026-08-20 | open — 1 of 4 decisions settled | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 | CAP-11 | 2026-08-26 | proposed | small–medium | Reconcile memory files against memory points — a doctor check, because only doctor can see both projects |
 
+**Open: 9 of 11** — all but CAP-5 and CAP-7. Derived 2026-09-02 by reading each entry's own
+`**Status:**` line, not by counting rows above; the two counts agree, which is the check.
 ## CAP-1 — Session artifact-touch ledger
+
+**Status:** proposed · **Opened:** 2026-08-15 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
 
 **Ask.** Within a session, record every tracker/artifact the agent touched, classify each as
 read-only or read-write, keep a lightweight diff and some statistics, and expose a method that
@@ -136,6 +146,8 @@ is the difference between a discipline and a record.
 
 ## CAP-2 — Second arm: a codescout-issued LLM controller
 
+**Status:** brainstorm · **Opened:** 2026-08-15 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
+
 **Ask.** Let codescout itself issue a separate LLM call (Anthropic) at chosen moments, acting as a
 controller that challenges the primary agent — specifically targeting claims it is **not certain**
 of, or that rest on code it **did not read**. Explicitly a long brainstorming task, not a plan.
@@ -200,6 +212,8 @@ already recover — the natural experiment in that document is pre-registered fo
 has not been run. **Running it is arguably the real first task of CAP-2.**
 
 ## CAP-3 — Background / async tool execution
+
+**Status:** research · **Opened:** 2026-08-15 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
 
 **Ask.** Claude Code now accepts MCP calls that run in the background and can be waited on. It is
 visibly working already, but codescout surfaces none of it in `get_guide`. Understand it first,
@@ -988,6 +1002,8 @@ the load-bearing part of a CAP entry, and mine missed a shipped feature.
 
 ## CAP-9 — Friction observability: fix attribution first, then a two-predicate detector and an in-band `friction()` self-report
 
+**Status:** proposed · **Opened:** 2026-08-20 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
+
 **Ask.** In the requester's words: *"what do we need more to measure frictions with the
 agent, maybe a column in the db, maybe a feedback tool, more logs... I want to be able to
 easily spot frictions from logic/systemic/tool usage/etc."*
@@ -1466,6 +1482,8 @@ the question assumed one, which is the entry's main content. Two corrections wor
 <!-- Insert new CAP-N entries above the "## Anti-goals" heading. Also add an Index row.
 
 ## CAP-4 — Cross-session collision hint: tell a session when another one just touched this file
+
+**Status:** proposed · **Opened:** 2026-08-16 · *(status backfilled from the Index 2026-09-02 — the entry never carried one; no completion marker exists anywhere in its body)*
 
 **Ask (from the operator, 2026-08-16).** Track recently-modified trackers/files and, when
 edits to the same file are recorded under different sessions, hint the current session
