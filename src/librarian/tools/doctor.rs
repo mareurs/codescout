@@ -4080,11 +4080,12 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
                      `update_entry` can repair it: the first always allocates the next free id \
                      (folding the body's max in), so it mints a NEW row rather than the missing \
                      ones, and the second only patches a row that already exists. Write the \
-                     whole collection instead — `artifact_augment(id=…, merge=true, \
-                     params={{\"{coll}\": [ …every row… ]}})`, or the CLI's `--params @<file>` \
-                     past the inline budget — and note a params patch REPLACES the array, so a \
-                     partial one drops the rest. Do NOT re-render the body from `params`: that \
-                     is `snapshot_drift`'s remedy and here it would delete the newer record.",
+                     whole collection instead — `doc(action=\"augment\", id=…, merge=true, \
+                     augment={{params: {{\"{coll}\": [ …every row… ]}}}})`, or the CLI's \
+                     `--params @<file>` past the inline budget — and note a params patch \
+                     REPLACES the array, so a partial one drops the rest. Do NOT re-render the \
+                     body from `params`: that is `snapshot_drift`'s remedy and here it would \
+                     delete the newer record.",
                 n = unrowed.len(),
                 total = in_body.len(),
                 coll = ledger.collection,
@@ -4635,7 +4636,7 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
                  healthy regardless. The shape survives only in the catalog of a machine \
                  that has not lost it — run librarian(action=\"doctor\", \
                  fix=\"export_augmentations\") THERE and commit the result. Failing that, \
-                 re-author with artifact_augment(id=…, prompt=…, …)."
+                 re-author with doc(action=\"augment\", id=…, augment={{prompt=…, …}})."
             )
         };
 
@@ -4652,7 +4653,7 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
 /// `sidecar_shape_drift`: the artifact HAS an augmentation row, declares a sidecar, that
 /// sidecar exists on disk — and the two disagree about the shape.
 ///
-/// **This is the safety net for `artifact_augment`'s write-through, and it is why that
+/// **This is the safety net for `doc(action="augment")`'s write-through, and it is why that
 /// write-through is trustworthy.** Write-through can only ever cover the call sites someone
 /// remembered to sweep; this check covers the invariant regardless of how the disagreement
 /// arose — a hand-edit, a graft, a worktree merge, a future writer nobody swept. The failure
@@ -4779,9 +4780,9 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
                  successfully, and repairs nothing. If the SIDECAR is \
                  right (you pulled someone else's shape change), do NOT export — that would \
                  overwrite their shape with your stale row; apply the committed values with \
-                 artifact_augment instead, which also rewrites the file and so leaves the two \
-                 agreeing. Until this is resolved, a fresh clone restores whatever the sidecar \
-                 says and reports success.",
+                 doc(action=\"augment\") instead, which also rewrites the file and so leaves \
+                 the two agreeing. Until this is resolved, a fresh clone restores whatever the \
+                 sidecar says and reports success.",
                 fields.join(", ")
             ),
         ));
@@ -9517,7 +9518,7 @@ mod tests {
         let v = scan_params_behind_body(&cat.conn).unwrap();
         let detail = &v[0].detail;
         assert!(
-            detail.contains("artifact_augment"),
+            detail.contains("doc(action=\"augment\""),
             "must name the wholesale params write — the only surface that can create a row \
                  at a GIVEN id: {detail}"
         );
@@ -13215,7 +13216,7 @@ root = "work/elsewhere/ghost"
         path
     }
 
-    /// The safety net for `artifact_augment`'s write-through, which can only ever cover the
+    /// The safety net for `doc(action="augment")`'s write-through, which can only ever cover the
     /// call sites someone remembered to sweep.
     ///
     /// PAIRING NOTE — this test and `..._is_silent_when_the_two_agree` are monotone in

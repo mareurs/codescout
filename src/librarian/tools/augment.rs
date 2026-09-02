@@ -1,11 +1,8 @@
 use crate::librarian::catalog::{artifact, augmentation};
-use crate::librarian::tools::{RecoverableError, Tool, ToolContext};
+use crate::librarian::tools::{RecoverableError, ToolContext};
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-
-pub struct ArtifactAugment;
 
 #[derive(Deserialize)]
 struct Args {
@@ -254,282 +251,210 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
     Ok(json!("ok"))
 }
 
-#[async_trait]
-impl Tool for ArtifactAugment {
-    fn name(&self) -> &'static str {
-        "artifact_augment"
-    }
-
-    fn description(&self) -> &'static str {
-        "Attach or replace a persistent prompt + params on an artifact. merge=false (default) \
-         overwrites seven fields — prompt, params, render_template, params_schema, \
-         append_mode, history_cap, entry_collection; fields you omit silently reset. \
-         merge=true patches just what you pass."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["id"],
-            "properties": {
-                "id": { "type": "string", "description": "Artifact id" },
-                "prompt": {
-                    "type": "string",
-                    "description": "Required when merge=false. Persistent instruction: what to maintain and how to format it."
-                },
-                "params": {
-                    "type": "object",
-                    "description": "The data params payload on the augmentation row. On merge=false (default — create/replace), fully replaces existing params. On merge=true, RFC 7396 merge-patched into existing params. NOT gather config — gather behavior is controlled by gather_from/format/max_tokens fields written into the params payload itself by callers that need them."
-                },
-                "params_path": {
-                    "type": "string",
-                    "description": "Filesystem path to a JSON file holding the params payload, read server-side (absolute path recommended). Mutually exclusive with params. Use when params are too large to pass inline (≳9 KB) — see get_guide(\"librarian\") § Augmentation Lifecycle."
-                },
-                "render_template": {
-                    "type": "string",
-                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body."
-                },
-                "params_schema": {
-                    "type": "object",
-                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
-                },
-                "merge": {
-                    "type": "boolean",
-                    "description": "When true, patch only the fields you provide onto the existing augmentation: params is RFC 7396 merge-patched, any sibling field you pass is overlaid, omitted fields are preserved. prompt is not required. Requires an existing augmentation."
-                },
-                "append_mode": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block."
-                },
-                "history_cap": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append."
-                },
-                "entry_collection": {
-                    "type": "string",
-                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables doc(get, entry_filter=...)."
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let mut a: Args = serde_json::from_value(args).map_err(|e| {
+/// `doc(action="augment", id=…, augment={prompt, params, …})` dispatches here via
+/// `artifact.rs`'s `flatten_augment_args`, which lifts the nested `augment` object
+/// and carries `id`/`merge` into it — so this function still reads a flat `Args`.
+pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let mut a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(
-            format!("artifact_augment requires 'id': {e}"),
-            "e.g. artifact_augment(id=\"<16-hex>\", prompt=\"...\"). Get an id from doc(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
+            format!("doc(action=\"augment\") requires 'id': {e}"),
+            "e.g. doc(action=\"augment\", id=\"<16-hex>\", augment={prompt: \"...\"}). Get an id from doc(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
         )
     })?;
 
-        // Best-effort: identity enrichment must never fail a tool call; a failed
-        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
-        // No action param on this tool — the verb is the constant tool name.
-        if let Err(e) = ctx.catalog.lock().set_audit_verb("artifact_augment") {
-            tracing::warn!("audit verb stamp failed: {e}");
+    // params_path: read the params JSON from a filesystem path server-side.
+    // A large params array (≳9 KB) can't be round-tripped through the model
+    // to rebuild the inline `params` argument — the MCP result buffer caps
+    // inline reads, so every read-back of the file buffers. Writing the JSON
+    // to a file and pointing here sidesteps that. Filesystem path only (the
+    // librarian ToolContext has no output_buffer, so @ref buffers are not
+    // resolvable here). See get_guide("progressive-disclosure").
+    if let Some(path) = a.params_path.take() {
+        if a.params.is_some() {
+            return Err(RecoverableError::new(
+                "pass at most one of `params` or `params_path`",
+            ));
         }
-
-        // params_path: read the params JSON from a filesystem path server-side.
-        // A large params array (≳9 KB) can't be round-tripped through the model
-        // to rebuild the inline `params` argument — the MCP result buffer caps
-        // inline reads, so every read-back of the file buffers. Writing the JSON
-        // to a file and pointing here sidesteps that. Filesystem path only (the
-        // librarian ToolContext has no output_buffer, so @ref buffers are not
-        // resolvable here). See get_guide("progressive-disclosure").
-        if let Some(path) = a.params_path.take() {
-            if a.params.is_some() {
-                return Err(RecoverableError::new(
-                    "pass at most one of `params` or `params_path`",
-                ));
-            }
-            let raw = std::fs::read_to_string(&path)
-                .map_err(|e| RecoverableError::new(format!("params_path: reading {path}: {e}")))?;
-            let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
-                RecoverableError::new(format!("params_path content is not valid JSON: {e}"))
-            })?;
-            // The schema's `"type": "object"` constrains only the INLINE `params`
-            // argument — `params_path` bypasses that boundary entirely. Without
-            // this check a bare top-level array is valid JSON, reaches
-            // `apply_merge_patch`, misses its `(Object, Object)` arm, and is
-            // discarded while the call reports "ok".
-            // See docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
-            if !parsed.is_object() {
-                let shape = match &parsed {
-                    Value::Array(_) => "array",
-                    Value::String(_) => "string",
-                    Value::Number(_) => "number",
-                    Value::Bool(_) => "boolean",
-                    Value::Null => "null",
-                    Value::Object(_) => unreachable!(),
-                };
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "params_path: top-level JSON must be an object, found {shape}"
-                    ),
-                    format!(
-                        "Wrap it under the key it belongs to, e.g. {{\"<entry_collection>\": <your {shape}>}}. \
-                         A bare {shape} cannot be merge-patched into params and would be silently discarded."
-                    ),
-                ));
-            }
-            a.params = Some(parsed);
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| RecoverableError::new(format!("params_path: reading {path}: {e}")))?;
+        let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
+            RecoverableError::new(format!("params_path content is not valid JSON: {e}"))
+        })?;
+        // The schema's `"type": "object"` constrains only the INLINE `params`
+        // argument — `params_path` bypasses that boundary entirely. Without
+        // this check a bare top-level array is valid JSON, reaches
+        // `apply_merge_patch`, misses its `(Object, Object)` arm, and is
+        // discarded while the call reports "ok".
+        // See docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
+        if !parsed.is_object() {
+            let shape = match &parsed {
+                Value::Array(_) => "array",
+                Value::String(_) => "string",
+                Value::Number(_) => "number",
+                Value::Bool(_) => "boolean",
+                Value::Null => "null",
+                Value::Object(_) => unreachable!(),
+            };
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "params_path: top-level JSON must be an object, found {shape}"
+                ),
+                format!(
+                    "Wrap it under the key it belongs to, e.g. {{\"<entry_collection>\": <your {shape}>}}. \
+                     A bare {shape} cannot be merge-patched into params and would be silently discarded."
+                ),
+            ));
         }
-
-        {
-            let mut cat = ctx.catalog.lock();
-            a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-        }
-
-        // D11: when the gate ran and passed, capture evidence to emit a
-        // `note` event after the catalog lock is released (event_create is
-        // async and acquires its own lock).
-        let mut gate_check_evidence: Option<Value> = None;
-
-        if a.merge {
-            // Scope the catalog lock so it's dropped before the async
-            // event_create call below (parking_lot MutexGuard is !Send).
-            {
-                let cat = ctx.catalog.lock();
-                let patch = a
-                    .params
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or(Value::Object(Default::default()));
-                let mut patched_siblings = false;
-                if let Some(existing) = augmentation::get(&cat, &a.id)? {
-                    let mut current: Value = serde_json::from_str(&existing.params)
-                        .unwrap_or(Value::Object(Default::default()));
-                    let pre_status = current
-                        .get("status")
-                        .and_then(|s| s.as_str())
-                        .map(String::from);
-                    augmentation::apply_merge_patch(&mut current, &patch);
-
-                    // F-5: validate merged params against the EFFECTIVE schema —
-                    // the new one if this call provides it, otherwise the stored one.
-                    validate_merged_against_schema(
-                        &current,
-                        a.params_schema.as_ref(),
-                        existing.params_schema.as_deref(),
-                    )?;
-
-                    // Goal-tracker merge: scope-growth guard + auto-close gate.
-                    // Evidence (if any) is emitted as a note event after the lock drops.
-                    gate_check_evidence = process_goal_tracker_merge(
-                        &current,
-                        &existing.params,
-                        pre_status.as_deref(),
-                    )?;
-
-                    // F-5: when this call also provides sibling fields (prompt /
-                    // params_schema / render_template / entry_collection / flags),
-                    // patch them onto the existing row here via a full upsert that
-                    // PRESERVES every field the caller did not provide. Removes the
-                    // merge=false foot-gun where an omitted field silently resets to
-                    // None — merge=true now patches whatever you pass, keeps the rest.
-                    if a.prompt.is_some()
-                        || a.params_schema.is_some()
-                        || a.render_template.is_some()
-                        || a.entry_collection.is_some()
-                        || a.append_mode.is_some()
-                        || a.history_cap.is_some()
-                    {
-                        let now = chrono::Utc::now()
-                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                            .to_string();
-                        let params_schema_str = match a.params_schema.as_ref() {
-                            Some(s) => Some(serde_json::to_string(s)?),
-                            None => existing.params_schema.clone(),
-                        };
-                        augmentation::upsert(
-                            &cat,
-                            &augmentation::AugmentationRow {
-                                artifact_id: a.id.clone(),
-                                prompt: a.prompt.clone().unwrap_or_else(|| existing.prompt.clone()),
-                                params: serde_json::to_string(&current)?,
-                                last_refreshed_at: existing.last_refreshed_at.clone(),
-                                refresh_count: existing.refresh_count,
-                                created_at: existing.created_at.clone(),
-                                updated_at: now,
-                                render_template: a
-                                    .render_template
-                                    .clone()
-                                    .or_else(|| existing.render_template.clone()),
-                                params_schema: params_schema_str,
-                                append_mode: a.append_mode.unwrap_or(existing.append_mode),
-                                history_cap: a
-                                    .history_cap
-                                    .map(|v| v as i64)
-                                    .or(existing.history_cap),
-                                entry_collection: a
-                                    .entry_collection
-                                    .clone()
-                                    .or_else(|| existing.entry_collection.clone()),
-                                refreshed_at_commit: existing.refreshed_at_commit.clone(),
-                            },
-                        )?;
-                        // Merge semantics: the upsert above PRESERVED every field this call
-                        // did not pass, so only the passed ones were authored here. Anything
-                        // else must not be republished over a sidecar that disagrees.
-                        let mut authored: Vec<&'static str> = Vec::new();
-                        if a.prompt.is_some() {
-                            authored.push("prompt");
-                        }
-                        if a.params_schema.is_some() {
-                            authored.push("params_schema");
-                        }
-                        if a.render_template.is_some() {
-                            authored.push("render_template");
-                        }
-                        if a.entry_collection.is_some() {
-                            authored.push("entry_collection");
-                        }
-                        if a.append_mode.is_some() {
-                            authored.push("append_mode");
-                        }
-                        if a.history_cap.is_some() {
-                            authored.push("history_cap");
-                        }
-                        sidecar_write_through(
-                            &cat,
-                            &a.id,
-                            crate::librarian::augmentation_sidecar::Authored::Only(&authored),
-                        )?;
-                        patched_siblings = true;
-                    }
-                }
-                if !patched_siblings {
-                    let found = augmentation::merge_params(&cat, &a.id, &patch)?.found;
-                    if !found {
-                        return Err(RecoverableError::new(format!(
-                            "no augmentation for artifact '{}' — call artifact_augment first",
-                            a.id
-                        )));
-                    }
-                }
-            } // cat dropped here
-
-            // D11 — emit gate_check note event after the catalog lock is
-            // released. Best-effort: if event emission fails, the augment
-            // itself still succeeded.
-            if let Some(payload) = gate_check_evidence {
-                let _ = crate::librarian::tools::event_create::call(
-                    ctx,
-                    json!({
-                        "artifact_id": &a.id,
-                        "kind": "note",
-                        "payload": payload,
-                    }),
-                )
-                .await;
-            }
-
-            return Ok(json!("ok"));
-        }
-
-        create_or_replace_augmentation(ctx, a)
+        a.params = Some(parsed);
     }
+
+    {
+        let mut cat = ctx.catalog.lock();
+        a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+    }
+
+    // D11: when the gate ran and passed, capture evidence to emit a
+    // `note` event after the catalog lock is released (event_create is
+    // async and acquires its own lock).
+    let mut gate_check_evidence: Option<Value> = None;
+
+    if a.merge {
+        // Scope the catalog lock so it's dropped before the async
+        // event_create call below (parking_lot MutexGuard is !Send).
+        {
+            let cat = ctx.catalog.lock();
+            let patch = a
+                .params
+                .as_ref()
+                .cloned()
+                .unwrap_or(Value::Object(Default::default()));
+            let mut patched_siblings = false;
+            if let Some(existing) = augmentation::get(&cat, &a.id)? {
+                let mut current: Value = serde_json::from_str(&existing.params)
+                    .unwrap_or(Value::Object(Default::default()));
+                let pre_status = current
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .map(String::from);
+                augmentation::apply_merge_patch(&mut current, &patch);
+
+                // F-5: validate merged params against the EFFECTIVE schema —
+                // the new one if this call provides it, otherwise the stored one.
+                validate_merged_against_schema(
+                    &current,
+                    a.params_schema.as_ref(),
+                    existing.params_schema.as_deref(),
+                )?;
+
+                // Goal-tracker merge: scope-growth guard + auto-close gate.
+                // Evidence (if any) is emitted as a note event after the lock drops.
+                gate_check_evidence =
+                    process_goal_tracker_merge(&current, &existing.params, pre_status.as_deref())?;
+
+                // F-5: when this call also provides sibling fields (prompt /
+                // params_schema / render_template / entry_collection / flags),
+                // patch them onto the existing row here via a full upsert that
+                // PRESERVES every field the caller did not provide. Removes the
+                // merge=false foot-gun where an omitted field silently resets to
+                // None — merge=true now patches whatever you pass, keeps the rest.
+                if a.prompt.is_some()
+                    || a.params_schema.is_some()
+                    || a.render_template.is_some()
+                    || a.entry_collection.is_some()
+                    || a.append_mode.is_some()
+                    || a.history_cap.is_some()
+                {
+                    let now = chrono::Utc::now()
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string();
+                    let params_schema_str = match a.params_schema.as_ref() {
+                        Some(s) => Some(serde_json::to_string(s)?),
+                        None => existing.params_schema.clone(),
+                    };
+                    augmentation::upsert(
+                        &cat,
+                        &augmentation::AugmentationRow {
+                            artifact_id: a.id.clone(),
+                            prompt: a.prompt.clone().unwrap_or_else(|| existing.prompt.clone()),
+                            params: serde_json::to_string(&current)?,
+                            last_refreshed_at: existing.last_refreshed_at.clone(),
+                            refresh_count: existing.refresh_count,
+                            created_at: existing.created_at.clone(),
+                            updated_at: now,
+                            render_template: a
+                                .render_template
+                                .clone()
+                                .or_else(|| existing.render_template.clone()),
+                            params_schema: params_schema_str,
+                            append_mode: a.append_mode.unwrap_or(existing.append_mode),
+                            history_cap: a.history_cap.map(|v| v as i64).or(existing.history_cap),
+                            entry_collection: a
+                                .entry_collection
+                                .clone()
+                                .or_else(|| existing.entry_collection.clone()),
+                            refreshed_at_commit: existing.refreshed_at_commit.clone(),
+                        },
+                    )?;
+                    // Merge semantics: the upsert above PRESERVED every field this call
+                    // did not pass, so only the passed ones were authored here. Anything
+                    // else must not be republished over a sidecar that disagrees.
+                    let mut authored: Vec<&'static str> = Vec::new();
+                    if a.prompt.is_some() {
+                        authored.push("prompt");
+                    }
+                    if a.params_schema.is_some() {
+                        authored.push("params_schema");
+                    }
+                    if a.render_template.is_some() {
+                        authored.push("render_template");
+                    }
+                    if a.entry_collection.is_some() {
+                        authored.push("entry_collection");
+                    }
+                    if a.append_mode.is_some() {
+                        authored.push("append_mode");
+                    }
+                    if a.history_cap.is_some() {
+                        authored.push("history_cap");
+                    }
+                    sidecar_write_through(
+                        &cat,
+                        &a.id,
+                        crate::librarian::augmentation_sidecar::Authored::Only(&authored),
+                    )?;
+                    patched_siblings = true;
+                }
+            }
+            if !patched_siblings {
+                let found = augmentation::merge_params(&cat, &a.id, &patch)?.found;
+                if !found {
+                    return Err(RecoverableError::new(format!(
+                        "no augmentation for artifact '{}' — call doc(action=\"augment\") first",
+                        a.id
+                    )));
+                }
+            }
+        } // cat dropped here
+
+        // D11 — emit gate_check note event after the catalog lock is
+        // released. Best-effort: if event emission fails, the augment
+        // itself still succeeded.
+        if let Some(payload) = gate_check_evidence {
+            let _ = crate::librarian::tools::event_create::call(
+                ctx,
+                json!({
+                    "artifact_id": &a.id,
+                    "kind": "note",
+                    "payload": payload,
+                }),
+            )
+            .await;
+        }
+
+        return Ok(json!("ok"));
+    }
+
+    create_or_replace_augmentation(ctx, a)
 }
 
 #[cfg(test)]
@@ -573,17 +498,16 @@ mod tests {
     async fn creates_augmentation_row() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "art1");
-        let result = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "art1",
-                    "prompt": "Keep me updated",
-                    "params": {"format": "table"}
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({
+                "id": "art1",
+                "prompt": "Keep me updated",
+                "params": {"format": "table"}
+            }),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!("ok"));
         let cat = ctx.catalog.lock();
         let row = augmentation::get(&cat, "art1").unwrap().unwrap();
@@ -593,32 +517,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_stamps_the_audit_verb() {
-        let ctx = mk_ctx();
-        seed_artifact(&ctx, "art1");
-        // no action param on this tool — the stamp is the constant tool name
-        let _ = ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "Keep me updated"}))
-            .await;
-        let verb: Option<String> = ctx
-            .catalog
-            .lock()
-            .conn
-            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(verb.as_deref(), Some("artifact_augment"));
-    }
-
-    #[tokio::test]
     async fn idempotent_update_replaces_prompt() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "art1");
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "Old"}))
+        call(&ctx, json!({"id": "art1", "prompt": "Old"}))
             .await
             .unwrap();
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "New"}))
+        call(&ctx, json!({"id": "art1", "prompt": "New"}))
             .await
             .unwrap();
         let cat = ctx.catalog.lock();
@@ -629,8 +534,7 @@ mod tests {
     #[tokio::test]
     async fn missing_artifact_returns_recoverable_error() {
         let ctx = mk_ctx();
-        let err = ArtifactAugment
-            .call(&ctx, json!({"id": "nope", "prompt": "Test"}))
+        let err = call(&ctx, json!({"id": "nope", "prompt": "Test"}))
             .await
             .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
@@ -640,22 +544,21 @@ mod tests {
     async fn persists_render_template_and_params_schema() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "rt-art");
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "rt-art",
-                    "prompt": "p",
-                    "render_template": "**Status:** {{ status }}",
-                    "params_schema": {
-                        "type": "object",
-                        "properties": { "status": { "type": "string" } }
-                    },
-                    "params": { "status": "green" }
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "id": "rt-art",
+                "prompt": "p",
+                "render_template": "**Status:** {{ status }}",
+                "params_schema": {
+                    "type": "object",
+                    "properties": { "status": { "type": "string" } }
+                },
+                "params": { "status": "green" }
+            }),
+        )
+        .await
+        .unwrap();
         let row = augmentation::get(&ctx.catalog.lock(), "rt-art")
             .unwrap()
             .unwrap();
@@ -670,22 +573,21 @@ mod tests {
     async fn rejects_initial_params_violating_schema() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "bad-init");
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "bad-init",
-                    "prompt": "p",
-                    "params_schema": {
-                        "type": "object",
-                        "required": ["status"],
-                        "properties": { "status": { "type": "string" } }
-                    },
-                    "params": {}
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "bad-init",
+                "prompt": "p",
+                "params_schema": {
+                    "type": "object",
+                    "required": ["status"],
+                    "properties": { "status": { "type": "string" } }
+                },
+                "params": {}
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("violate params_schema"),
             "got: {err}"
@@ -697,22 +599,20 @@ mod tests {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "aug-1");
         // First, augment with a prompt and initial params
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "aug-1", "prompt": "do stuff", "params": {"a": 1, "b": 2}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "aug-1", "prompt": "do stuff", "params": {"a": 1, "b": 2}}),
+        )
+        .await
+        .unwrap();
 
         // Now merge-patch: add c, delete b
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "aug-1", "merge": true, "params": {"c": 3, "b": null}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "aug-1", "merge": true, "params": {"c": 3, "b": null}}),
+        )
+        .await
+        .unwrap();
 
         let cat = ctx.catalog.lock();
         let aug = crate::librarian::catalog::augmentation::get(&cat, "aug-1")
@@ -732,51 +632,49 @@ mod tests {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "aug-sib");
         // Initial full augmentation with every caller-controlled field set.
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "aug-sib",
-                    "prompt": "keep the list",
-                    "params": {"items": [{"id": "X-1", "status": "open"}]},
-                    "params_schema": {
+        call(
+            &ctx,
+            json!({
+                "id": "aug-sib",
+                "prompt": "keep the list",
+                "params": {"items": [{"id": "X-1", "status": "open"}]},
+                "params_schema": {
+                    "type": "object",
+                    "properties": {"items": {"type": "array", "items": {
                         "type": "object",
-                        "properties": {"items": {"type": "array", "items": {
-                            "type": "object",
-                            "properties": {"status": {"enum": ["open", "done"]}}
-                        }}}
-                    },
-                    "render_template": "ORIGINAL TEMPLATE",
-                    "entry_collection": "items"
-                }),
-            )
-            .await
-            .unwrap();
+                        "properties": {"status": {"enum": ["open", "done"]}}
+                    }}}
+                },
+                "render_template": "ORIGINAL TEMPLATE",
+                "entry_collection": "items"
+            }),
+        )
+        .await
+        .unwrap();
 
         // F-5: widen the schema enum (add "blocked") AND add an item using it, in
         // ONE merge=true call. Pre-fix this needed a full merge=false re-send of
         // prompt/render_template/entry_collection or they'd reset to None.
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "aug-sib",
-                    "merge": true,
-                    "params": {"items": [
-                        {"id": "X-1", "status": "open"},
-                        {"id": "X-2", "status": "blocked"}
-                    ]},
-                    "params_schema": {
+        call(
+            &ctx,
+            json!({
+                "id": "aug-sib",
+                "merge": true,
+                "params": {"items": [
+                    {"id": "X-1", "status": "open"},
+                    {"id": "X-2", "status": "blocked"}
+                ]},
+                "params_schema": {
+                    "type": "object",
+                    "properties": {"items": {"type": "array", "items": {
                         "type": "object",
-                        "properties": {"items": {"type": "array", "items": {
-                            "type": "object",
-                            "properties": {"status": {"enum": ["open", "done", "blocked"]}}
-                        }}}
-                    }
-                }),
-            )
-            .await
-            .unwrap();
+                        "properties": {"status": {"enum": ["open", "done", "blocked"]}}
+                    }}}
+                }
+            }),
+        )
+        .await
+        .unwrap();
 
         let cat = ctx.catalog.lock();
         let aug = crate::librarian::catalog::augmentation::get(&cat, "aug-sib")
@@ -809,17 +707,16 @@ mod tests {
     async fn merge_true_without_existing_augmentation_errors() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "aug-2");
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "aug-2", "merge": true, "params": {"x": 1}}),
-            )
-            .await;
+        let err = call(
+            &ctx,
+            json!({"id": "aug-2", "merge": true, "params": {"x": 1}}),
+        )
+        .await;
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
         assert!(
-            msg.contains("artifact_augment"),
-            "error must mention artifact_augment"
+            msg.contains("doc(action=\"augment\")"),
+            "error must tell the caller how to create the augmentation it's missing: {msg}"
         );
     }
 
@@ -827,9 +724,7 @@ mod tests {
     async fn non_merge_without_prompt_errors() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "aug-3");
-        let err = ArtifactAugment
-            .call(&ctx, json!({"id": "aug-3", "params": {"x": 1}}))
-            .await;
+        let err = call(&ctx, json!({"id": "aug-3", "params": {"x": 1}})).await;
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
         assert!(msg.contains("prompt"), "error must mention prompt");
@@ -839,18 +734,17 @@ mod tests {
     async fn persists_append_mode_and_history_cap() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "a99");
-        ArtifactAugment
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "id": "a99",
-                    "prompt": "track me",
-                    "append_mode": true,
-                    "history_cap": 10,
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": "a99",
+                "prompt": "track me",
+                "append_mode": true,
+                "history_cap": 10,
+            }),
+        )
+        .await
+        .unwrap();
         let cat = ctx.catalog.lock();
         let row = augmentation::get(&cat, "a99").unwrap().unwrap();
         assert!(row.append_mode);
@@ -861,13 +755,12 @@ mod tests {
     async fn append_mode_defaults_to_false_when_absent() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "a100");
-        ArtifactAugment
-            .call(
-                &ctx,
-                serde_json::json!({"id": "a100", "prompt": "no append"}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": "a100", "prompt": "no append"}),
+        )
+        .await
+        .unwrap();
         let cat = ctx.catalog.lock();
         let row = augmentation::get(&cat, "a100").unwrap().unwrap();
         assert!(!row.append_mode);
@@ -884,8 +777,7 @@ mod tests {
         // Seed goal with two done children + two met signals, status=active.
         let goal_id = "g-pass";
         seed_artifact(&ctx, goal_id);
-        let _ = ArtifactAugment
-            .call(
+        let _ = call(
                 &ctx,
                 serde_json::json!({
                     "id": goal_id,
@@ -908,17 +800,16 @@ mod tests {
             .unwrap();
 
         // Flip status to done — gate passes, note event must emit.
-        ArtifactAugment
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "id": goal_id,
-                    "merge": true,
-                    "params": {"status": "done"}
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": goal_id,
+                "merge": true,
+                "params": {"status": "done"}
+            }),
+        )
+        .await
+        .unwrap();
 
         // Inspect events for this artifact.
         use crate::librarian::catalog::events::timeline_for_artifact;
@@ -954,8 +845,7 @@ mod tests {
         let goal_id = "g-block";
         seed_artifact(&ctx, goal_id);
         // Seed with 1 child (too few — D9 blocks the gate).
-        ArtifactAugment
-            .call(
+        call(
                 &ctx,
                 serde_json::json!({
                     "id": goal_id,
@@ -974,16 +864,15 @@ mod tests {
             .unwrap();
 
         // Attempt to flip status to done — gate blocks.
-        let res = ArtifactAugment
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "id": goal_id,
-                    "merge": true,
-                    "params": {"status": "done"}
-                }),
-            )
-            .await;
+        let res = call(
+            &ctx,
+            serde_json::json!({
+                "id": goal_id,
+                "merge": true,
+                "params": {"status": "done"}
+            }),
+        )
+        .await;
         assert!(res.is_err(), "expected gate to block status flip");
 
         use crate::librarian::catalog::events::timeline_for_artifact;
@@ -1013,18 +902,17 @@ mod tests {
     async fn persists_entry_collection() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "ec-tool");
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "ec-tool",
-                    "prompt": "maintain the failures list",
-                    "params": { "failures": [] },
-                    "entry_collection": "failures"
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "id": "ec-tool",
+                "prompt": "maintain the failures list",
+                "params": { "failures": [] },
+                "entry_collection": "failures"
+            }),
+        )
+        .await
+        .unwrap();
         let row = {
             let cat = ctx.catalog.lock();
             augmentation::get(&cat, "ec-tool").unwrap().unwrap()
@@ -1039,17 +927,16 @@ mod tests {
         let payload =
             serde_json::to_string(&json!({"findings": [{"uf": "UF-1"}, {"uf": "UF-2"}]})).unwrap();
         std::fs::write(tmp.path(), &payload).unwrap();
-        let result = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-art",
-                    "prompt": "keep findings",
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({
+                "id": "pp-art",
+                "prompt": "keep findings",
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, json!("ok"));
         let cat = ctx.catalog.lock();
         let row = augmentation::get(&cat, "pp-art").unwrap().unwrap();
@@ -1063,34 +950,32 @@ mod tests {
     async fn params_path_works_with_merge() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "pp-merge");
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-merge",
-                    "prompt": "p",
-                    "params": {"findings": [{"uf": "UF-1", "dev_status": "open"}]}
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "id": "pp-merge",
+                "prompt": "p",
+                "params": {"findings": [{"uf": "UF-1", "dev_status": "open"}]}
+            }),
+        )
+        .await
+        .unwrap();
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let payload = serde_json::to_string(
             &json!({"findings": [{"uf": "UF-1", "dev_status": "fixed-verified"}]}),
         )
         .unwrap();
         std::fs::write(tmp.path(), &payload).unwrap();
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-merge",
-                    "merge": true,
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "id": "pp-merge",
+                "merge": true,
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap();
         let cat = ctx.catalog.lock();
         let row = augmentation::get(&cat, "pp-merge").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
@@ -1103,18 +988,17 @@ mod tests {
         seed_artifact(&ctx, "pp-conflict");
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), "{}").unwrap();
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-conflict",
-                    "prompt": "x",
-                    "params": {"a": 1},
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "pp-conflict",
+                "prompt": "x",
+                "params": {"a": 1},
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("at most one of"),
             "expected mutual-exclusion error, got: {err}"
@@ -1127,17 +1011,16 @@ mod tests {
         seed_artifact(&ctx, "pp-bad");
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), "{not json").unwrap();
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-bad",
-                    "prompt": "p",
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "pp-bad",
+                "prompt": "p",
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("not valid JSON"),
             "expected JSON parse error, got: {err}"
@@ -1157,17 +1040,16 @@ mod tests {
         seed_artifact(&ctx, "pp-arr");
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), r#"[{"id": "F-1"}, {"id": "F-2"}]"#).unwrap();
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-arr",
-                    "prompt": "p",
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "pp-arr",
+                "prompt": "p",
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.downcast_ref::<RecoverableError>().is_some(),
             "must be recoverable so the caller can retry with a wrapped object"
@@ -1184,27 +1066,25 @@ mod tests {
     async fn params_path_bare_array_is_refused_on_the_merge_path_too() {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "pp-arr-merge");
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "pp-arr-merge", "prompt": "p", "params": {"keep": 1}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "pp-arr-merge", "prompt": "p", "params": {"keep": 1}}),
+        )
+        .await
+        .unwrap();
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), r#"["a", "b"]"#).unwrap();
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-arr-merge",
-                    "merge": true,
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "pp-arr-merge",
+                "merge": true,
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
 
         // A refused call must not disturb what was already stored.
@@ -1223,102 +1103,17 @@ mod tests {
         seed_artifact(&ctx, "pp-scalar");
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), "42").unwrap();
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "pp-scalar",
-                    "prompt": "p",
-                    "params_path": tmp.path().to_str().unwrap()
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "pp-scalar",
+                "prompt": "p",
+                "params_path": tmp.path().to_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
-    }
-
-    /// Inverted guard: pins the ABSENCE of a refuted intervention.
-    ///
-    /// Until 2026-08-18 five properties each restated the merge=false rule for
-    /// themselves — 882 characters, on a surface delivered with every request. hamsa
-    /// A-27 measured them and they buy nothing:
-    ///
-    /// | arm | statements of the rule | preservation cue | passed |
-    /// |---|---|---|---|
-    /// | base | 7 | yes | 10/10 |
-    /// | treatment (this cut) | 2 | yes | 10/10 |
-    /// | control-null | 0 | yes | 10/10 |
-    /// | control-positive | 0 + mandatory merge=false | yes | 0/10 |
-    /// | uncued control-null | 0 | **no** | 10/10 |
-    ///
-    /// The positive control is what makes that data rather than theatre: the same
-    /// fixture channel, stimulus, checker and model move 10/10 to 0/10, so the surface
-    /// demonstrably reaches the model and the ties are real. The uncued arm closes the
-    /// other hole — with zero statements AND no "change nothing else" cue, the model
-    /// still passed `merge=true` ten times out of ten. The behaviour is carried by the
-    /// parameter's own semantics, not by the prose.
-    ///
-    /// Re-adding any of it needs a NEW base arm (P-3), not an intuition that more
-    /// warning is safer. Note what is deliberately NOT cut: the tool description and
-    /// the `merge` property still state the rule once each, and `params`' RFC 7396
-    /// sentence is untouched — array replacement is a DIFFERENT rule, and it is the one
-    /// that actually caused data loss (an entry collection went 19 rows to 1 on
-    /// 2026-08-16). Cutting those two survivors is a different intervention needing its
-    /// own arm.
-    ///
-    /// The BEHAVIOUR remains pinned by `merge_true_patches_sibling_fields_preserving_rest`
-    /// — this guard is about the prose only.
-    ///
-    /// Ledger: `docs/trackers/prompt-hamsa-audit-log.md` A-27.
-    /// Scenario: `prompt-engineering/scenarios/augment-merge-restatement/`.
-    #[test]
-    fn augment_schema_does_not_restate_the_merge_rule_per_field() {
-        let schema = ArtifactAugment.input_schema();
-        let props = schema["properties"]
-            .as_object()
-            .expect("schema has properties");
-
-        for field in [
-            "render_template",
-            "params_schema",
-            "append_mode",
-            "history_cap",
-            "entry_collection",
-        ] {
-            let desc = props[field]["description"].as_str().unwrap_or_default();
-            assert!(
-                !desc.contains("On merge=false this field is overwritten"),
-                "`{field}` restates the merge=false rule again. A-27 measured five arms \
-                 and the rule text moves nothing (0 statements still scored 10/10 with \
-                 no cue); re-adding needs a new base arm, not an intuition."
-            );
-        }
-
-        // The two surviving statements are load-bearing as DOCUMENTATION even though
-        // they proved not load-bearing as ROUTING; an over-zealous later cut that
-        // removes them is a different intervention and must not ride on A-27.
-        assert!(
-            ArtifactAugment
-                .description()
-                .contains("fields you omit silently reset"),
-            "the tool description must still state the merge=false rule once"
-        );
-        assert!(
-            props["merge"]["description"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("omitted fields are preserved"),
-            "the `merge` property must still state the rule once"
-        );
-        // Rule B is a different rule and the one with a real incident behind it.
-        assert!(
-            props["params"]["description"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("RFC 7396"),
-            "`params` must keep its RFC 7396 sentence — array replacement is the rule \
-             that actually caused data loss, and A-27 did not test it"
-        );
     }
 
     /// A real repo on disk: `.git`, an artifact declaring its sidecar, and the catalog row.
@@ -1375,15 +1170,13 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "before"}))
+        call(&ctx, json!({"id": "art1", "prompt": "before"}))
             .await
             .unwrap();
         export_sidecar(&ctx, &sidecar, "art1");
         assert_eq!(sc::read(&sidecar).unwrap().prompt, "before");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "after"}))
+        call(&ctx, json!({"id": "art1", "prompt": "after"}))
             .await
             .unwrap();
 
@@ -1397,7 +1190,7 @@ mod tests {
 
     /// `merge=true` with a sibling field is the OTHER shape-writing path. Hooking only
     /// `create_or_replace_augmentation` would leave this one stale, and it is the path the
-    /// documented `artifact_augment(merge=true, ...)` recipe in CLAUDE.md actually uses.
+    /// documented `doc(action="augment", merge=true, ...)` recipe in CLAUDE.md actually uses.
     #[tokio::test]
     async fn a_merge_true_sibling_change_writes_through_too() {
         use crate::librarian::augmentation_sidecar as sc;
@@ -1405,20 +1198,18 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+        call(&ctx, json!({"id": "art1", "prompt": "p"}))
             .await
             .unwrap();
         export_sidecar(&ctx, &sidecar, "art1");
         assert_eq!(sc::read(&sidecar).unwrap().entry_collection, None);
 
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             sc::read(&sidecar).unwrap().entry_collection.as_deref(),
@@ -1435,13 +1226,12 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "art1", "prompt": "p", "params": {"a": 1}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "art1", "prompt": "p", "params": {"a": 1}}),
+        )
+        .await
+        .unwrap();
         export_sidecar(&ctx, &sidecar, "art1");
 
         // A trailing comment no serializer emits. Without it this test would pass even for an
@@ -1452,13 +1242,12 @@ mod tests {
             + "# hand-edited, as the 2a8decc5 repair had to be\n";
         std::fs::write(&sidecar, &hand).unwrap();
 
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "art1", "merge": true, "params": {"a": 2}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"id": "art1", "merge": true, "params": {"a": 2}}),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&sidecar).unwrap(),
@@ -1486,8 +1275,7 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+        call(&ctx, json!({"id": "art1", "prompt": "p"}))
             .await
             .unwrap();
 
@@ -1518,8 +1306,7 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+        call(&ctx, json!({"id": "art1", "prompt": "p"}))
             .await
             .unwrap();
         export_sidecar(&ctx, &sidecar, "art1");
@@ -1533,13 +1320,12 @@ mod tests {
         committed.render_template = Some("the correct, human-authored template".into());
         sc::write(&sidecar, &committed).unwrap();
 
-        let err = ArtifactAugment
-            .call(
-                &ctx,
-                json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
-            )
-            .await
-            .expect_err("republishing an unnamed field over a disagreeing sidecar must refuse");
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
+        )
+        .await
+        .expect_err("republishing an unnamed field over a disagreeing sidecar must refuse");
 
         assert!(
             err.downcast_ref::<RecoverableError>().is_some(),
@@ -1573,8 +1359,7 @@ mod tests {
         let ctx = mk_ctx();
         let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+        call(&ctx, json!({"id": "art1", "prompt": "p"}))
             .await
             .unwrap();
         export_sidecar(&ctx, &sidecar, "art1");
@@ -1583,8 +1368,7 @@ mod tests {
         committed.render_template = Some("about to be replaced, deliberately".into());
         sc::write(&sidecar, &committed).unwrap();
 
-        ArtifactAugment
-            .call(&ctx, json!({"id": "art1", "prompt": "p2"}))
+        call(&ctx, json!({"id": "art1", "prompt": "p2"}))
             .await
             .expect("a replace call speaks for the whole shape and must not be refused");
 

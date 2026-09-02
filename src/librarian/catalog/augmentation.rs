@@ -337,7 +337,7 @@ pub fn update_entry(
             format!("update_entry: `{entry_collection}` is not this artifact's entry_collection"),
             match declared_collection {
                 Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
-                None => "This artifact has no entry_collection declared — set one via artifact_augment first.".to_string(),
+                None => "This artifact has no entry_collection declared — set one via doc(action=\"augment\") first.".to_string(),
             },
         ));
     }
@@ -609,7 +609,7 @@ pub fn append_entry(
             format!("append_entry: `{entry_collection}` is not this artifact's entry_collection"),
             match declared_collection {
                 Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
-                None => "This artifact has no entry_collection declared — set one via artifact_augment first.".to_string(),
+                None => "This artifact has no entry_collection declared — set one via doc(action=\"augment\") first.".to_string(),
             },
         ));
     }
@@ -3010,8 +3010,8 @@ mod tests {
             "expected a declare-the-ledger error, got: {text}"
         );
         // A hint that names an impossible call is worse than no hint. An earlier
-        // draft of this error prescribed `artifact_augment(merge=true, …)`, which
-        // refuses with "call artifact_augment first" exactly when no augmentation
+        // draft of this error prescribed `doc(action="augment", merge=true, …)`, which
+        // refuses with "call doc(action=\"augment\") first" exactly when no augmentation
         // exists — the state the error reported. Caught by running it, not by
         // re-reading it. Assert the hint names the remedy that works from THIS
         // state: the frontmatter declaration.
@@ -3024,9 +3024,9 @@ mod tests {
             // fails on the correct hint, which mentions augmentation only to say
             // none is needed. Fourth time in two days that a keyword check counted
             // a document's discussion of a token as a use of it.
-            !text.contains("artifact_augment("),
+            !text.contains("doc(action=\"augment\""),
             "the declaration is frontmatter, not an augmentation — a hint pointing at \
-             the catalog would recreate the portability defect HY-10 names: {text}"
+         the catalog would recreate the portability defect HY-10 names: {text}"
         );
     }
 

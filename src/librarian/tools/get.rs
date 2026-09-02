@@ -2306,27 +2306,25 @@ mod tests {
 
     #[tokio::test]
     async fn entry_filter_returns_matching_rows() {
-        use crate::librarian::tools::augment::ArtifactAugment;
-        use crate::librarian::tools::Tool;
+        use crate::librarian::tools::augment::call as augment_call;
         let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("roadmap")).unwrap();
         let ctx = mk_ctx(cat);
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "roadmap",
-                    "prompt": "maintain items",
-                    "params": { "items": [
-                        {"id": "R-1", "category": "hardware", "status": "open"},
-                        {"id": "R-2", "category": "software", "status": "open"},
-                        {"id": "R-3", "category": "hardware", "status": "done"}
-                    ]},
-                    "entry_collection": "items"
-                }),
-            )
-            .await
-            .unwrap();
+        augment_call(
+            &ctx,
+            json!({
+                "id": "roadmap",
+                "prompt": "maintain items",
+                "params": { "items": [
+                    {"id": "R-1", "category": "hardware", "status": "open"},
+                    {"id": "R-2", "category": "software", "status": "open"},
+                    {"id": "R-3", "category": "hardware", "status": "done"}
+                ]},
+                "entry_collection": "items"
+            }),
+        )
+        .await
+        .unwrap();
 
         let out = call(
             &ctx,
@@ -2348,26 +2346,24 @@ mod tests {
     }
     #[tokio::test]
     async fn entry_filter_warns_on_unknown_field() {
-        use crate::librarian::tools::augment::ArtifactAugment;
-        use crate::librarian::tools::Tool;
+        use crate::librarian::tools::augment::call as augment_call;
         let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("roadmap2")).unwrap();
         let ctx = mk_ctx(cat);
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "roadmap2",
-                    "prompt": "maintain items",
-                    "params": { "items": [
-                        {"id": "R-1", "category": "hardware", "status": "open"},
-                        {"id": "R-2", "category": "software", "status": "done"}
-                    ]},
-                    "entry_collection": "items"
-                }),
-            )
-            .await
-            .unwrap();
+        augment_call(
+            &ctx,
+            json!({
+                "id": "roadmap2",
+                "prompt": "maintain items",
+                "params": { "items": [
+                    {"id": "R-1", "category": "hardware", "status": "open"},
+                    {"id": "R-2", "category": "software", "status": "done"}
+                ]},
+                "entry_collection": "items"
+            }),
+        )
+        .await
+        .unwrap();
 
         // Typo'd field ("statuss") is present in no entry → silent empty result
         // plus a filter_warnings.unknown_fields entry (F-7).
@@ -2422,23 +2418,21 @@ mod tests {
     }
     #[tokio::test]
     async fn entry_filter_missing_collection_key_is_error() {
-        use crate::librarian::tools::augment::ArtifactAugment;
-        use crate::librarian::tools::Tool;
+        use crate::librarian::tools::augment::call as augment_call;
         let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("rm2")).unwrap();
         let ctx = mk_ctx(cat);
-        ArtifactAugment
-            .call(
-                &ctx,
-                json!({
-                    "id": "rm2",
-                    "prompt": "p",
-                    "params": { "items": [] },
-                    "entry_collection": "nonexistent"
-                }),
-            )
-            .await
-            .unwrap();
+        augment_call(
+            &ctx,
+            json!({
+                "id": "rm2",
+                "prompt": "p",
+                "params": { "items": [] },
+                "entry_collection": "nonexistent"
+            }),
+        )
+        .await
+        .unwrap();
         let err = call(
             &ctx,
             json!({

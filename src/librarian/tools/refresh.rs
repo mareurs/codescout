@@ -35,7 +35,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let aug = aug_row.ok_or_else(|| {
         RecoverableError::new(format!(
-            "no augmentation for artifact '{}' — call artifact_augment first",
+            "no augmentation for artifact '{}' — call doc(action=\"augment\") first",
             a.id
         ))
     })?;
@@ -215,7 +215,6 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
-    use crate::librarian::tools::Tool;
     use crate::librarian::workspace::Root;
     use tempfile::TempDir;
 
@@ -247,17 +246,16 @@ mod tests {
         .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
 
-        crate::librarian::tools::augment::ArtifactAugment
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "id": id,
-                    "prompt": "track",
-                    "append_mode": true,
-                }),
-            )
-            .await
-            .unwrap();
+        crate::librarian::tools::augment::call(
+            &ctx,
+            serde_json::json!({
+            "id": id,
+                "prompt": "track",
+                "append_mode": true,
+            }),
+        )
+        .await
+        .unwrap();
 
         let result = call(&ctx, serde_json::json!({"id": id})).await.unwrap();
         assert_eq!(result["append_mode"], serde_json::json!(true));

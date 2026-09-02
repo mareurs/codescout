@@ -432,7 +432,7 @@ fn a_documented_call_names_a_live_tool() {
 /// `IC-16`.
 ///
 /// So this pins the population from below, with a known-good citation that must resolve. If the
-/// extractor breaks, the corpus empties, or `artifact` loses its `action` parameter, this fails
+/// extractor breaks, the corpus empties, or `doc` loses its `action` parameter, this fails
 /// while its two siblings stay green.
 #[test]
 fn the_scan_is_not_reading_an_empty_corpus() {
@@ -440,7 +440,7 @@ fn the_scan_is_not_reading_an_empty_corpus() {
     assert!(
         surfaces.len() > 50,
         "present-tense surface list collapsed to {} files — the two siblings would pass \
-         vacuously",
+             vacuously",
         surfaces.len()
     );
 
@@ -453,39 +453,37 @@ fn the_scan_is_not_reading_an_empty_corpus() {
     assert!(
         tool_names().contains("activate_project"),
         "`activate_project` is declared as `const NAME` (src/tools/config/mod.rs); losing it \
-         means the extractor is back to reading only `fn name()`, and every const-declared \
-         tool would read as retired"
+             means the extractor is back to reading only `fn name()`, and every const-declared \
+             tool would read as retired"
     );
 
     let cites = anchored_cites();
     assert!(
         cites.len() > 200,
         "only {} anchored citations found across {} files — measured 313 on 2026-09-01, so a \
-         collapse to double digits means the regex or the walk is broken",
+             collapse to double digits means the regex or the walk is broken",
         cites.len(),
         surfaces.len()
     );
 
-    // A citation that must resolve: `artifact(action=…)` is the single most cited call in this
+    // A citation that must resolve: `doc(action=…)` is the single most cited call in this
     // repo's documentation, and `action` is its required discriminator.
-    let resolved = cites
-        .iter()
-        .any(|c| c.tool == "artifact" && c.param == "action");
+    let resolved = cites.iter().any(|c| c.tool == "doc" && c.param == "action");
     assert!(
         resolved,
-        "no `artifact(action=` citation resolved — the scan is running but reading the wrong \
-         thing"
+        "no `doc(action=` citation resolved — the scan is running but reading the wrong \
+             thing"
     );
 
     // And the schema side must actually contain it, or the parameter test accepts anything.
     let params: BTreeSet<String> = schemas
-        .get("artifact")
+        .get("doc")
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .collect();
     assert!(
         params.contains("action"),
-        "artifact's extracted schema has no `action` key — got {params:?}"
+        "doc's extracted schema has no `action` key — got {params:?}"
     );
 }

@@ -27,6 +27,34 @@ fn flatten_event_args(args: &Value) -> Result<Value> {
     Ok(Value::Object(flat))
 }
 
+/// `augment` arrives as `{id, merge?, augment: {prompt, params, …}}` so the
+/// augmentation's own fields never collide with the document's top-level
+/// fields (e.g. both would otherwise fight over `params`). `augment::Args` is
+/// flat and reads `id` + `merge` alongside the augmentation fields; lift the
+/// nested object and carry `id`/`merge` into it.
+fn flatten_augment_args(args: &Value) -> Result<Value> {
+    let id = args["id"].as_str().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "doc(action=\"augment\") requires 'id'",
+            "e.g. doc(action=\"augment\", id=\"<16-hex>\", augment={prompt: \"…\"})",
+        )
+    })?;
+    let mut flat = match args.get("augment") {
+        Some(Value::Object(m)) => m.clone(),
+        _ => {
+            return Err(RecoverableError::with_hint(
+                "doc(action=\"augment\") requires an `augment` object",
+                "augment={prompt: \"…\", params: {…}, …}",
+            ))
+        }
+    };
+    flat.insert("id".into(), json!(id));
+    if let Some(merge) = args.get("merge") {
+        flat.insert("merge".into(), merge.clone());
+    }
+    Ok(Value::Object(flat))
+}
+
 /// `event_list` says `id`; `timeline::Args` reads `artifact_id`. Copy, don't rename the
 /// module's field — internals keep their names.
 fn id_as_artifact_id(args: &Value) -> Value {
@@ -55,7 +83,10 @@ impl Tool for Artifact {
          append_entry atomically assigns the next id for any monotonic-ID ledger and, WITH entry_collection, appends the row; WITHOUT it the ledger is prose (`## PREFIX-N` body sections) and the call reserves the id, writing nothing — \
          use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...). \
          update_entry patches ONE existing entry in place; use it to change a row (e.g. flip a status) \
-         instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection."
+         instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection. \
+         augment attaches or replaces a persistent refresh prompt + params on any artifact: merge=false \
+         (default) overwrites the augmentation's fields — fields you omit silently reset — merge=true \
+         patches only what you pass."
     }
     fn description_cap(&self) -> usize {
         1_800
@@ -68,7 +99,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "event_create", "event_list", "augment"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -173,10 +204,20 @@ impl Tool for Artifact {
                 },
                 "augment": {
                     "type": "object",
-                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. Fields below are artifact_augment's — see that tool for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
+                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. action=\"augment\": attach or replace a persistent prompt + params on any artifact (merge=false, default) or patch only the fields you provide (merge=true — see the top-level `merge` property). Fields below are the augmentation's own — see that tool for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
                     "properties": {
-                        "prompt": { "type": "string" },
-                        "params": { "type": "object" },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Required when merge=false. Persistent instruction: what to maintain and how to format it."
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "The data params payload on the augmentation row. On merge=false (default — create/replace), fully replaces existing params. On merge=true, RFC 7396 merge-patched into existing params. NOT gather config — gather behavior is controlled by gather_from/format/max_tokens fields written into the params payload itself by callers that need them."
+                        },
+                        "params_path": {
+                            "type": "string",
+                            "description": "Filesystem path to a JSON file holding the params payload, read server-side (absolute path recommended). Mutually exclusive with params. Use when params are too large to pass inline (≳9 KB) — see get_guide(\"librarian\") § Augmentation Lifecycle."
+                        },
                         "render_template": { "type": "string" },
                         "params_schema": { "type": "object" },
                         "entry_collection": { "type": "string" },
@@ -185,6 +226,10 @@ impl Tool for Artifact {
                     },
                     "required": ["prompt"],
                     "additionalProperties": false
+                },
+                "merge": {
+                    "type": "boolean",
+                    "description": "augment: when true, patch only the fields you provide onto the existing augmentation: params is RFC 7396 merge-patched, any sibling field you pass is overlaid, omitted fields are preserved. prompt is not required. Requires an existing augmentation."
                 },
                 "patch": {
                     "type": "object",
@@ -294,7 +339,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list",
+                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment",
             )
         })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
@@ -317,8 +362,9 @@ impl Tool for Artifact {
             "update_entry" => super::update_entry::call(ctx, args).await,
             "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
             "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
+            "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment"
             ))),
         }
     }
@@ -459,7 +505,7 @@ mod tests {
 
     const PROBE_NO_SUCH_ID: &str = "0000000000000000";
 
-    const PROBE_ACTIONS: [&str; 14] = [
+    const PROBE_ACTIONS: [&str; 15] = [
         "find",
         "get",
         "create",
@@ -474,6 +520,7 @@ mod tests {
         "update_entry",
         "event_create",
         "event_list",
+        "augment",
     ];
 
     /// The minimum type-valid args each action needs to get *past* deserialisation.
@@ -536,6 +583,10 @@ mod tests {
                     "event".into(),
                     json!({"kind": "note", "payload": {"text": "probe"}}),
                 );
+            }
+            "augment" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("augment".into(), json!({"prompt": "probe"}));
             }
             "create" => {
                 m.insert("kind".into(), json!("bug"));
@@ -692,6 +743,122 @@ mod tests {
         assert!(
             re.hint.as_deref().unwrap().contains("event={kind:"),
             "{re:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn augment_round_trips_through_the_nested_object_and_merge_preserves_prompt() {
+        let ctx = mk_ctx();
+        let id = "bbbbbbbbbbbbbbbb";
+        seed_row(&ctx, id);
+        Artifact
+            .call(
+                &ctx,
+                json!({"action": "augment", "id": id, "augment": {"prompt": "keep me"}}),
+            )
+            .await
+            .expect("attach");
+        Artifact
+            .call(
+                &ctx,
+                json!({"action": "augment", "id": id, "merge": true,
+                               "augment": {"params": {"n": 1}}}),
+            )
+            .await
+            .expect("merge");
+        let cat = ctx.catalog.lock();
+        let aug = crate::librarian::catalog::augmentation::get(&cat, id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            aug.prompt, "keep me",
+            "merge=true must not touch the prompt"
+        );
+        let params: Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(params["n"], 1);
+    }
+
+    /// Inverted guard: pins the ABSENCE of a refuted intervention.
+    ///
+    /// Until 2026-08-18 five properties each restated the merge=false rule for
+    /// themselves — 882 characters, on a surface delivered with every request. hamsa
+    /// A-27 measured them and they buy nothing:
+    ///
+    /// | arm | statements of the rule | preservation cue | passed |
+    /// |---|---|---|---|
+    /// | base | 7 | yes | 10/10 |
+    /// | treatment (this cut) | 2 | yes | 10/10 |
+    /// | control-null | 0 | yes | 10/10 |
+    /// | control-positive | 0 + mandatory merge=false | yes | 0/10 |
+    /// | uncued control-null | 0 | **no** | 10/10 |
+    ///
+    /// The positive control is what makes that data rather than theatre: the same
+    /// fixture channel, stimulus, checker and model move 10/10 to 0/10, so the surface
+    /// demonstrably reaches the model and the ties are real. The uncued arm closes the
+    /// other hole — with zero statements AND no "change nothing else" cue, the model
+    /// still passed `merge=true` ten times out of ten. The behaviour is carried by the
+    /// parameter's own semantics, not by the prose.
+    ///
+    /// Re-adding any of it needs a NEW base arm (P-3), not an intuition that more
+    /// warning is safer. Note what is deliberately NOT cut: the tool description and
+    /// the `merge` property still state the rule once each, and `params`' RFC 7396
+    /// sentence is untouched — array replacement is a DIFFERENT rule, and it is the one
+    /// that actually caused data loss (an entry collection went 19 rows to 1 on
+    /// 2026-08-16). Cutting those two survivors is a different intervention needing its
+    /// own arm.
+    ///
+    /// The BEHAVIOUR remains pinned by `merge_true_patches_sibling_fields_preserving_rest`
+    /// (in `augment.rs`) — this guard is about the prose only.
+    ///
+    /// Ledger: `docs/trackers/prompt-hamsa-audit-log.md` A-27.
+    /// Scenario: `prompt-engineering/scenarios/augment-merge-restatement/`.
+    #[test]
+    fn augment_schema_does_not_restate_the_merge_rule_per_field() {
+        let schema = Artifact.input_schema();
+        let props = schema["properties"]["augment"]["properties"]
+            .as_object()
+            .unwrap();
+
+        for field in [
+            "render_template",
+            "params_schema",
+            "append_mode",
+            "history_cap",
+            "entry_collection",
+        ] {
+            let desc = props[field]["description"].as_str().unwrap_or_default();
+            assert!(
+                !desc.contains("On merge=false this field is overwritten"),
+                "`{field}` restates the merge=false rule again. A-27 measured five arms \
+                     and the rule text moves nothing (0 statements still scored 10/10 with \
+                     no cue); re-adding needs a new base arm, not an intuition."
+            );
+        }
+
+        // The two surviving statements are load-bearing as DOCUMENTATION even though
+        // they proved not load-bearing as ROUTING; an over-zealous later cut that
+        // removes them is a different intervention and must not ride on A-27.
+        assert!(
+            Artifact
+                .description()
+                .contains("fields you omit silently reset"),
+            "the tool description must still state the merge=false rule once"
+        );
+        assert!(
+            schema["properties"]["merge"]["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("omitted fields are preserved"),
+            "the `merge` property must still state the rule once"
+        );
+        // Rule B is a different rule and the one with a real incident behind it.
+        assert!(
+            props["params"]["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("RFC 7396"),
+            "`params` must keep its RFC 7396 sentence — array replacement is the rule \
+                 that actually caused data loss, and A-27 did not test it"
         );
     }
 

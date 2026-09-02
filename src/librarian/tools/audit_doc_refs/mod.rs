@@ -316,7 +316,7 @@ pub struct TrackerParams {
     pub parse_warnings: Vec<ParseWarning>,
 }
 
-use crate::librarian::tools::{RecoverableError, Tool, ToolContext};
+use crate::librarian::tools::{RecoverableError, ToolContext};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -815,10 +815,7 @@ async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "render_template": include_str!("./render_template.j2")
     });
     // Ignore error — render_template is cosmetic; tracker is usable without it
-    if let Err(e) = crate::librarian::tools::augment::ArtifactAugment
-        .call(ctx, augment_args)
-        .await
-    {
+    if let Err(e) = crate::librarian::tools::augment::call(ctx, augment_args).await {
         tracing::warn!("audit_doc_refs: failed to attach render_template: {e:#}");
     }
 
@@ -848,9 +845,7 @@ async fn write_tracker_params(
         "merge": true,
         "params": params_value,
     });
-    crate::librarian::tools::augment::ArtifactAugment
-        .call(ctx, augment_args)
-        .await?;
+    crate::librarian::tools::augment::call(ctx, augment_args).await?;
     Ok(())
 }
 

@@ -2486,7 +2486,7 @@ mod tests {
     }
 
     /// Name-prefix classifier for the librarian tool family (`doc`,
-    /// `artifact_augment`, `artifact_refresh`, `librarian`, `tracker_design`,
+    /// `artifact_refresh`, `librarian`, `tracker_design`,
     /// `workspace_state_at`, ...), used only to size the "core"
     /// (non-librarian) tool surface in `server_registers_all_tools` and
     /// `server_tool_count_is_l3_target`. NOT used for the description-cap
@@ -7351,8 +7351,9 @@ mod guide_hint_tests {
         // the deleted `artifact_event` tool in Task 4).
         assert!(server.is_write_call("doc", &json!({"action": "event_create"})));
         assert!(!server.is_write_call("doc", &json!({"action": "event_list"})));
-        // artifact_augment always writes (no read action).
-        assert!(server.is_write_call("artifact_augment", &json!({"id": "x"})));
+        // doc(action="augment") always writes (no read action) — folded from the
+        // deleted `artifact_augment` tool in Task 5.
+        assert!(server.is_write_call("doc", &json!({"action": "augment", "id": "x"})));
         // artifact_refresh gather/list_stale are read-only.
         assert!(!server.is_write_call("artifact_refresh", &json!({"action": "gather"})));
         assert!(!server.is_write_call("artifact_refresh", &json!({"action": "list_stale"})));

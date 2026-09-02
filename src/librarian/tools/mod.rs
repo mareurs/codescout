@@ -402,7 +402,6 @@ pub use temp_write_guard::TempGuardEnv;
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(artifact::Artifact),
-        Arc::new(augment::ArtifactAugment),
         Arc::new(artifact_refresh::ArtifactRefreshTool),
         Arc::new(librarian::Librarian),
     ]

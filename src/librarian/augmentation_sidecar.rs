@@ -179,7 +179,7 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
     Ok(())
 }
 
-/// Which shape fields the calling `artifact_augment` actually spoke for.
+/// Which shape fields the calling `doc(action="augment")` actually spoke for.
 ///
 /// The distinction matters because `merge=true` **preserves** every field the caller did not
 /// pass. A preserved field was not authored by this call, so the call carries no mandate to
@@ -207,14 +207,14 @@ pub struct WriteThrough {
 ///
 /// Writes only when the artifact declares a sidecar that already exists on disk, and only
 /// when the rendered shape actually differs. It never CREATES one — that stays
-/// `doctor(fix="export_augmentations")`'s job, so an `artifact_augment` call cannot quietly
+/// `doctor(fix="export_augmentations")`'s job, so a `doc(action="augment")` call cannot quietly
 /// begin committing new files into a repo that never asked for them.
 ///
 /// **Why this is needed at all.** Three write paths were each independently correct and
 /// composed into a one-way door: the export skips an artifact whose sidecar already exists
 /// (idempotent, by a pinned test), `reindex` attaches only when a row is *absent* (repair,
 /// never sync, so a live augmentation cannot be clobbered by a stale file), and
-/// `artifact_augment` did not touch the sidecar at all. After the first export, no path
+/// `doc(action="augment")` did not touch the sidecar at all. After the first export, no path
 /// could update one.
 ///
 /// The first live shape edit after the mechanism shipped hit that door within a day:

@@ -37,7 +37,7 @@ fn validate_rel_path(rel: &str) -> Result<()> {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// The augmentation an artifact is created with. Mirrors `artifact_augment`'s
+/// The augmentation an artifact is created with. Mirrors `doc(action="augment")`'s
 /// caller-controlled fields so "created atomically with its augmentation" is true
 /// rather than partly true.
 ///
@@ -433,7 +433,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         result["tracker_hint"] = json!(
             "Tracker created without augmentation. \
              Call librarian(tracker_design) to pick an archetype \
-             and attach a refresh prompt via artifact_augment."
+             and attach a refresh prompt via doc(action=\"augment\")."
         );
     }
     Ok(result)

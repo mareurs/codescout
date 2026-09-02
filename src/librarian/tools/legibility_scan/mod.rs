@@ -2,7 +2,7 @@
 //! reconciles the `docs/trackers/legibility-backlog.md` augmented artifact.
 //! Phase 2b of docs/superpowers/specs/2026-06-13-dzo-friction-probes-design.md.
 
-use crate::librarian::tools::{RecoverableError, Tool, ToolContext};
+use crate::librarian::tools::{RecoverableError, ToolContext};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -360,10 +360,7 @@ async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "params": serde_json::to_value(BacklogParams::default())?,
         "render_template": include_str!("./render_template.j2")
     });
-    if let Err(e) = crate::librarian::tools::augment::ArtifactAugment
-        .call(ctx, augment_args)
-        .await
-    {
+    if let Err(e) = crate::librarian::tools::augment::call(ctx, augment_args).await {
         tracing::warn!("legibility_scan: failed to attach render_template: {e:#}");
     }
     Ok((id, TRACKER_REL_PATH.to_string()))
@@ -389,9 +386,7 @@ const DEFAULT_VERDICTS: &str = "## Verdicts (Dzo-owned)\n\n_Per-key triage goes 
 async fn write_backlog(ctx: &ToolContext, id: &str, params: &BacklogParams) -> Result<()> {
     let params_value = serde_json::to_value(params)?;
     let augment_args = json!({ "id": id, "merge": true, "params": params_value.clone() });
-    crate::librarian::tools::augment::ArtifactAugment
-        .call(ctx, augment_args)
-        .await?;
+    crate::librarian::tools::augment::call(ctx, augment_args).await?;
     // F-8: project params onto the body's managed region (preserving the Dzo
     // verdicts prose). Best-effort — params is the source of truth, so a render
     // failure must warn, not fail the scan.

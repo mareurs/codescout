@@ -344,7 +344,7 @@ on a machine that still has them.
 
 **Export CREATES; it never refreshes.** It skips an artifact whose sidecar already
 exists — that is what makes it idempotent — so it is not the way to update one after a
-shape change. `artifact_augment` handles that itself: a call that changes `prompt`,
+shape change. `doc(action="augment")` handles that itself: a call that changes `prompt`,
 `params_schema`, `render_template`, `entry_collection`, `append_mode` or `history_cap`
 writes through to an existing sidecar, and a params-only merge leaves the file
 byte-identical. The catalog is authoritative and the sidecar is its committed
@@ -352,7 +352,7 @@ projection, so a shape change made locally is what gets published — read `git 
 `docs/augmentations/` before committing, as with any generated file.
 
 That wiring exists because its absence was measured rather than imagined. Export
-skipping, `reindex` attaching only when a row is *absent*, and `artifact_augment` not
+skipping, `reindex` attaching only when a row is *absent*, and `doc(action="augment")` not
 touching the file were each correct alone and composed into a **one-way door**: after
 the first export, no path could update a sidecar. The first live shape edit hit it
 within a day — widening a tracker's `status` enum reported `exported: 0` while the
@@ -383,7 +383,7 @@ not recoverable from prose.
 
 The check now splits by remedy. A declared sidecar that exists means run `reindex`. No
 sidecar means the shape survives only in some other machine's catalog — export it
-there and commit the result, or re-author with `artifact_augment(id=…, prompt=…, …)`.
+there and commit the result, or re-author with `doc(action="augment", id=…, augment={prompt: …, …})`.
 ## Entry-level standard — the shape INSIDE a tracker
 
 The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
@@ -771,8 +771,8 @@ artifact(action="get", id="<id>", heading="## Foo")
 ```
 
 **Filterable trackers** — augmented trackers that store structured rows in a params array
-can be queried at entry grain via `entry_filter`. Call `artifact_augment` with
-`entry_collection="<array-key>"` to enable it, then pass `entry_filter={…}` (same AST as
+can be queried at entry grain via `entry_filter`. Call `doc(action="augment")` with
+`augment={entry_collection: "<array-key>"}` to enable it, then pass `entry_filter={…}` (same AST as
 `filter`) to `artifact(action="get")`. Prose trackers need retrofit first.
 
 For deeper artifact / augmentation / event mechanics see

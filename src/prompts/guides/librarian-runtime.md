@@ -66,7 +66,7 @@ as a blockquote directive — read it as a standing instruction.
   markdown snippet `librarian(context)` injects under `[LIVE]`. Use
   for status tables, F-N rows — anything mechanical. Body stays prose.
 - `params_schema` — JSON Schema (draft-07+) validating `params` on
-  every `artifact_augment` call. Violations return as recoverable
+  every `doc(action="augment")` call. Violations return as recoverable
   errors before the write lands.
 
 Both fields are optional; legacy augmentations work unchanged.
@@ -104,7 +104,7 @@ markdown files only.
 Implications for augmented trackers (anything with `entry_collection` /
 filterable `params`):
 
-- **An augment produces no git diff *to the `.md` body*.** `artifact_augment`
+- **An augment produces no git diff *to the `.md` body*.** `doc(action="augment")`
   writes the catalog row and leaves the body untouched. `git status` no longer
   stays clean, though: a call that changes the *shape* writes through to the
   artifact's committed sidecar (`sidecar_write_through`, `augment.rs:248`), so

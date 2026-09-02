@@ -535,7 +535,7 @@ The archetype's `prompt_template` already leads reader-first — keep that order
 - **Early life:** loose schema with `additionalProperties: true`. Let the shape settle over 2-3 refreshes before locking down.
 - **Mature:** add `required`, `enum`, `pattern` constraints. Schema lock prevents drift across refreshes.
 - **Skip schema entirely** for `reflective` trackers — they don't have meaningful structured params.
-- **Validation triggers** on `artifact_augment` (initial seed) and every `artifact_augment(merge=true)` merge. Violations leave params untouched and return a recoverable error.
+- **Validation triggers** on `doc(action="augment")` (initial seed) and every `doc(action="augment", merge=true)` merge. Violations leave params untouched and return a recoverable error.
 
 ## Step 5 — Compose the render_template
 
@@ -583,7 +583,7 @@ One call. `artifact_create` — `kind=tracker`, `status=active`, `rel_path`
 `entry_collection` (Step 5b), `append_mode`, `history_cap`. An unknown key is **rejected, not
 ignored** — a typo fails loudly instead of vanishing.
 
-To change an augmentation afterwards use `artifact_augment(id=..., merge=true, ...)`.
+To change an augmentation afterwards use `doc(action="augment", id=..., merge=true, ...)`.
 **`merge=true` matters:** `merge=false` overwrites all seven fields, resetting everything you omit.
 "#;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {

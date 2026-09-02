@@ -122,11 +122,11 @@ mechanics that apply to all kinds.
 
 A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 **augmented artifact**: attach a `params` array + `render_template` (+ optional
-`entry_collection`) once via `artifact_augment`, then add rows with
+`entry_collection`) once via `doc(action="augment")`, then add rows with
 `artifact(action="append_entry")`, change one with
 `artifact(action="update_entry")`, and filter them with
 `artifact(action="get", entry_filter={…})`. Reach for a raw
-`artifact_augment(merge=true)` params patch only for a deliberate bulk rewrite —
+`doc(action="augment", merge=true)` params patch only for a deliberate bulk rewrite —
 it replaces the collection rather than merging into it. Merge semantics + the full-array rule
 are in *Augmentation Lifecycle* below.
 
@@ -138,18 +138,18 @@ hand-written, and a table row defines no citable token: `link_scan` binds `PREFI
 never be cited. Give each entry a heading; keep the table too if it reads well.
 `get_guide("tracker-conventions")` § *One entry format, never two* has the measurements.
 ## Augmentation Lifecycle
-<!-- serves: artifact_augment, artifact_refresh.gather, artifact_refresh.list_stale -->
+<!-- serves: doc.augment, artifact_refresh.gather, artifact_refresh.list_stale -->
 
 Augmentation attaches a persistent prompt to any artifact.
 
 **Attach or replace prompt:**
 ```
-artifact_augment(id="...", prompt="...", params={...})
+doc(action="augment", id="...", augment={prompt: "...", params: {...}})
 ```
 
 **Merge-patch (`merge=true`)** — patch only the fields you provide, preserve the rest:
 ```
-artifact_augment(id="...", merge=true, params={key: value})
+doc(action="augment", id="...", merge=true, augment={params: {key: value}})
 ```
 
 `merge=true` also overlays any sibling field you pass — `prompt`, `render_template`,
@@ -160,7 +160,7 @@ re-sending the rest; `merge=false` replaces all seven (omitted fields reset to N
 **Oversized params (≳9 KB)** — when `params` is too large to pass inline (a big
 findings/rows array), don't try to read it back into context to re-emit it: the result
 buffer caps inline reads, so it can't round-trip. Two server-side paths read it directly:
-- MCP: `artifact_augment(id="...", params_path="/abs/path.json", merge=true)` — reads the
+- MCP: `doc(action="augment", id="...", merge=true, augment={params_path: "/abs/path.json"})` — reads the
   file server-side; mutually exclusive with `params`.
 - CLI: `codescout artifact-augment <id> --params @<file> [--merge]` (also `--params -` for
   stdin) — same catalog, same validation.
@@ -357,7 +357,7 @@ main checkout's catalog instead of a wholesale fork:
   it writes one. `find`/`get` dedup shadow vs. main — where both exist for
   the same lineage, the shadow wins and is annotated `"overlay": true`.
 - **Fork-on-first-write:** the first mutating call (`append_entry`, `update`,
-  `doc(event_create)`, `artifact_augment`, `link`) against a main-root artifact
+  `doc(event_create)`, `doc(action="augment")`, `link`) against a main-root artifact
   from a worktree session forks it — seeds a shadow row at the worktree path,
   a `worktree_fork` event carrying the fork-time base params/frontmatter, and
   a `worktree_of` lineage link. Every write after that lands on the shadow.

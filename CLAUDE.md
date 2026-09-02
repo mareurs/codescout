@@ -153,8 +153,8 @@ Two rules here carry data-loss consequences and are the reason this section is n
 > then `artifact(action="move", …)`, never a bare `status:` edit plus `git mv`. `id =
 > sha256(abs_path)`, so a hand-move orphans the catalog row's events and augmentation.
 
-> ⚠ **Never hand-build a params array.** `artifact_augment(merge=true, params={observations:
-> [...everything...]})` **replaces** the collection rather than merging into it, and the catalog is
+> ⚠ **Never hand-build a params array.** `doc(action="augment", id=…, merge=true, augment={params:{observations:
+> [...everything...]}})` **replaces** the collection rather than merging into it, and the catalog is
 > not in git. That call took the T-N queue from 19 entries to 1 on 2026-08-16. `append_entry` /
 > `update_entry` exist so it is never needed.
 

@@ -316,10 +316,9 @@ impl crate::tools::Tool for LibrarianAdapter {
                 action,
                 Some("find" | "get" | "graph" | "state_at" | "event_list")
             ),
-            // Always attaches/replaces/merges an augmentation row.
-            "artifact_augment" => true,
-            // gather / list_stale are both read-only — the write-back is
-            // doc(update, commit_refresh=true), classified under "doc".
+            // Always attaches/replaces/merges an augmentation row — folded into
+            // `doc(action="augment")`, which the "doc" arm above already classifies
+            // as a write (augment is not in its read-action allowlist).
             "artifact_refresh" => false,
             "librarian" => match action {
                 // Unconditional reads.
@@ -1656,12 +1655,12 @@ mod tests {
             a.selector_key(&json!({"action": "append_entry", "id": "x"})),
             Some("doc.append_entry".to_string())
         );
-        // No action ⇒ the bare tool name. Tool-only shapes (e.g. artifact_augment,
-        // which takes no `action` param at all) must still be matchable by a
-        // declaration keyed on the tool name alone — see the CORRECTION in
-        // task-4-brief.md. Falling back to `?` here would make such a declaration
-        // unmatchable forever, which is a silent-absence failure, not the
-        // fail-safe-toward-delivery direction this feature requires.
+        // No action ⇒ the bare tool name. Tool-only shapes (a tool with no `action`
+        // param at all) must still be matchable by a declaration keyed on the tool
+        // name alone — see the CORRECTION in task-4-brief.md. Falling back to `?`
+        // here would make such a declaration unmatchable forever, which is a
+        // silent-absence failure, not the fail-safe-toward-delivery direction this
+        // feature requires.
         assert_eq!(
             a.selector_key(&json!({"id": "x"})),
             Some(a.name().to_string())

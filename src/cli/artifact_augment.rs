@@ -1,6 +1,5 @@
 //! `codescout artifact-augment <id>` — attach or merge augmentation params/prompt.
 
-use crate::librarian::tools::Tool;
 use anyhow::{Context, Result};
 use clap::Args;
 use serde_json::Value;
@@ -96,10 +95,10 @@ pub async fn run(args: AugmentArgs) -> Result<()> {
         tool_args.insert("history_cap".into(), Value::Number(cap.into()));
     }
 
-    // `augment::call` is a Tool-trait method, not a free function — instantiate
-    // the zero-sized ArtifactAugment struct and dispatch via the trait.
-    let tool = crate::librarian::tools::augment::ArtifactAugment;
-    let v = tool.call(&ctx, Value::Object(tool_args)).await?;
+    // `augment::call` is a free function (folded into `doc(action="augment")` by
+    // Task 5) — call it directly. Task 11 owns wiring the CLI's own subcommand
+    // surface for this; this is the minimal compile fix.
+    let v = crate::librarian::tools::augment::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }

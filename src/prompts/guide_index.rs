@@ -170,8 +170,8 @@ impl Shape {
     /// wildcard.
     ///
     /// A tool-only shape (`action: None`) matches any action of that tool, and
-    /// also a bare tool key with no action at all — Task 4's `selector_key`
-    /// returns e.g. `Some("artifact_augment")` for a call with no `action`
+    /// also a bare tool key with no action at all — `selector_key`
+    /// returns e.g. `Some("artifact_refresh")` for a call with no `action`
     /// field.
     ///
     /// The `path~` predicate reads the RESULT, not the selector: a shape
@@ -797,9 +797,9 @@ n body
         // Underscores and digits remain legal — Task 6's real declarations
         // depend on this.
         assert_eq!(
-            parse_shape("artifact_augment").unwrap(),
+            parse_shape("artifact_refresh").unwrap(),
             Shape {
-                tool: "artifact_augment".into(),
+                tool: "artifact_refresh".into(),
                 action: None,
                 path_contains: None,
             }
