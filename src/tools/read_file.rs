@@ -18,10 +18,10 @@ impl Tool for ReadFile {
     }
 
     fn description(&self) -> &str {
-        "Read a file. Large output → @file_* buffer. Format-aware: json_path \
-         (JSON), toml_key (TOML/YAML). Use read_markdown for .md. Source files: \
-         a line range overlapping a symbol redirects to symbols(include_body=true); \
-         pass force=true to bypass."
+        "Read a file. Large output → @file_* buffer. Markdown: heading map by default; \
+     heading=/headings= for a section, force=true for raw lines. Format-aware: \
+     json_path (JSON), toml_key (TOML/YAML). Source: a line range overlapping a \
+     symbol redirects to symbols(include_body=true); force=true bypasses."
     }
 
     fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
@@ -54,6 +54,8 @@ impl Tool for ReadFile {
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
                 "offset": { "type": "integer", "description": "Native-Read-style alias: 1-indexed start line (= start_line). Ignored when start_line/end_line are set." },
                 "limit": { "type": "integer", "description": "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted." },
+                "heading": { "type": "string", "description": "Markdown only: return one section by heading (e.g. \"## Auth\")." },
+                "headings": { "type": "array", "items": { "type": "string" }, "description": "Markdown only: return several sections. Mutually exclusive with heading." },
                 "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
                 "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." },
                 "force": { "type": "boolean", "description": "Skip source-symbol hint and read the raw line range. Line ranges only — an oversized whole-file read is summarised either way." }
@@ -89,6 +91,22 @@ impl Tool for ReadFile {
             })?;
         let path = strip_buffer_ref_quotes(raw_path);
 
+        // Markdown: heading-addressed reads live in `markdown::read`, which `read_markdown`
+        // used to wrap. Route there when the caller asked for headings, or the target is a
+        // markdown file or a buffer that came from one — unless `force=true`, which keeps
+        // its meaning of "raw line range, skip the smart path", or a format selector is
+        // present, which falls through to the typed-format error below rather than being
+        // silently ignored. `offset`/`limit` were already normalised above, so the markdown
+        // path sees `start_line`/`end_line`.
+        let wants_headings = input.get("heading").is_some() || input.get("headings").is_some();
+        let wants_format = input.get("json_path").is_some() || input.get("toml_key").is_some();
+        let force = input["force"].as_bool().unwrap_or(false);
+        if wants_headings
+            || (!force && !wants_format && crate::tools::markdown::is_markdown_target(path, ctx))
+        {
+            return crate::tools::markdown::read(input, ctx).await;
+        }
+
         // Buffer refs bypass the filesystem entirely.
         if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
             let mut res = read_from_buffer(path, &input, ctx)?;
@@ -118,15 +136,6 @@ impl Tool for ReadFile {
             project_root.as_deref(),
             &security,
         )?;
-
-        // Gate: redirect .md files to read_markdown
-        if resolved.extension().is_some_and(|e| e == "md") {
-            return Err(RecoverableError::with_hint(
-                "Use read_markdown for markdown files",
-                "read_markdown provides heading-based navigation, size-adaptive output, and buffer-ref slicing for .md files.",
-            )
-            .into());
-        }
 
         let start_line = optional_u64_param(&input, "start_line");
         let end_line = optional_u64_param(&input, "end_line");
@@ -179,6 +188,9 @@ impl Tool for ReadFile {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
+        if result.get("format").and_then(|f| f.as_str()) == Some("markdown") {
+            return crate::tools::markdown::format_read(result);
+        }
         Some(format_read_file(result))
     }
     fn json_path_hint(&self, val: &Value) -> String {
@@ -552,7 +564,7 @@ fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Resul
     if !matches!(file_type, crate::tools::file_summary::FileSummaryType::Json) {
         return Err(RecoverableError::with_hint(
             "json_path parameter is only supported for JSON files",
-            "For Markdown files use read_markdown, for TOML/YAML use toml_key",
+            "For Markdown files pass heading= or headings=, for TOML/YAML use toml_key",
         )
         .into());
     }
@@ -601,7 +613,7 @@ fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Resul
         }
         _ => Err(RecoverableError::with_hint(
             "toml_key parameter is only supported for TOML and YAML files",
-            "For Markdown files use read_markdown, for JSON use json_path",
+            "For Markdown files pass heading= or headings=, for JSON use json_path",
         )
         .into()),
     }
@@ -2211,6 +2223,135 @@ impl Config {
         let mut ctx = test_ctx().await;
         ctx.agent = Agent::new(Some(dir.to_path_buf())).await.unwrap();
         ctx
+    }
+
+    const MD_FIXTURE: &str = "\
+# Title
+
+## A
+line a1
+line a2
+line a3
+line a4
+line a5
+line a6
+line a7
+line a8
+line a9
+line a10
+
+## B
+line b1
+line b2
+line b3
+line b4
+line b5
+line b6
+line b7
+line b8
+line b9
+line b10
+";
+
+    #[tokio::test]
+    async fn read_file_on_markdown_returns_the_heading_map_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let out = ReadFile
+            .call(json!({"path": "notes.md"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(out["format"], "markdown");
+        assert!(out["headings"].is_array(), "{out}");
+    }
+
+    #[tokio::test]
+    async fn read_file_on_markdown_serves_heading_and_headings() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let one = ReadFile
+            .call(json!({"path": "notes.md", "heading": "## A"}), &ctx)
+            .await
+            .unwrap();
+        assert!(one["content"].as_str().unwrap().contains("## A"));
+        let two = ReadFile
+            .call(
+                json!({"path": "notes.md", "headings": ["## A", "## B"]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(two["sections"].as_array().map(|s| s.len()), Some(2));
+    }
+
+    #[tokio::test]
+    async fn read_file_on_markdown_honours_offset_and_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let out = ReadFile
+            .call(json!({"path": "notes.md", "offset": 5, "limit": 3}), &ctx)
+            .await
+            .unwrap();
+        let content = out["content"].as_str().unwrap();
+        assert_eq!(content.lines().count(), 3, "{content}");
+        assert!(
+            out.get("headings").is_none(),
+            "a line range must not return the heading map"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_force_on_markdown_is_a_raw_line_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let out = ReadFile
+            .call(
+                json!({"path": "notes.md", "start_line": 1, "end_line": 2, "force": true}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            out.get("format").is_none(),
+            "force skips the markdown path: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn heading_on_a_non_markdown_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "main.rs", "fn main() {}\n").await;
+        let err = ReadFile
+            .call(json!({"path": "main.rs", "heading": "## A"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("markdown"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn read_file_refuses_a_managed_ledger_and_names_doc() {
+        let text = "---\nid: '0123456789abcdef'\nentry_prefix: R\n---\n## R-1 — x\n";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs/trackers")).unwrap();
+        let ctx = ctx_with_file(dir.path(), "docs/trackers/x.md", text).await;
+        let err = ReadFile
+            .call(json!({"path": "docs/trackers/x.md"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("doc(action=\"get\""), "{err}");
+    }
+
+    /// Without this guard the markdown route would swallow `json_path` silently — a new
+    /// instance of the very class Task 7 closes for `offset`/`limit`.
+    #[tokio::test]
+    async fn json_path_on_markdown_is_refused_not_silently_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let err = ReadFile
+            .call(json!({"path": "notes.md", "json_path": "$.a"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("only supported for JSON"), "{err}");
     }
 
     /// Step 1 of the IL1 fix: a file-head read is the canonical "show me the

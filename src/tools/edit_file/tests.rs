@@ -1903,21 +1903,6 @@ async fn read_file_allows_non_source_files() {
 }
 
 #[tokio::test]
-async fn read_file_gates_markdown_files() {
-    let (dir, ctx) = project_ctx().await;
-    let md_file = dir.path().join("README.md");
-    std::fs::write(&md_file, "# Hello\n").unwrap();
-
-    let result = ReadFile
-        .call(json!({ "path": md_file.to_str().unwrap() }), &ctx)
-        .await;
-    assert!(
-        result.is_err(),
-        "read_file should gate .md files to read_markdown"
-    );
-}
-
-#[tokio::test]
 async fn edit_file_replace_all_on_markdown_passes_through() {
     // Regression for docs/issues/archive/2026-05-18-edit-file-replace-all-on-markdown-rejected.md
     // The .md gate must allow replace_all=true (file-wide find/replace), since

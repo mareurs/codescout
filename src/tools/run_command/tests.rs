@@ -145,12 +145,12 @@ fn build_buffered_onboarding_instructions_claude() {
         "Claude instructions must mention subagent"
     );
     assert!(
-        instructions.contains("read_markdown"),
-        "must tell how to read via read_markdown"
+        instructions.contains("read_file"),
+        "must tell how to read via read_file (Task 7: read_markdown was folded into it)"
     );
     // Must have numbered checklist
     assert!(
-        instructions.contains("1. read_markdown"),
+        instructions.contains("1. read_file"),
         "must have numbered phase checklist"
     );
     assert!(
@@ -176,12 +176,12 @@ fn build_buffered_onboarding_instructions_generic() {
         "generic instructions must NOT mention subagent"
     );
     assert!(
-        instructions.contains("read_markdown"),
-        "must tell how to read via read_markdown"
+        instructions.contains("read_file"),
+        "must tell how to read via read_file (Task 7: read_markdown was folded into it)"
     );
     // Must have numbered checklist
     assert!(
-        instructions.contains("1. read_markdown"),
+        instructions.contains("1. read_file"),
         "must have numbered phase checklist"
     );
 }
@@ -198,8 +198,9 @@ fn build_buffered_refresh_instructions_claude() {
     assert!(instructions.contains("v1"));
     assert!(instructions.contains("v2"));
     assert!(instructions.contains("subagent"));
-    assert!(instructions.contains("read_markdown"));
-    assert!(!instructions.contains("read_file"));
+    // Task 7: read_markdown was folded into read_file (heading-addressed by default).
+    assert!(!instructions.contains("read_markdown"));
+    assert!(instructions.contains("read_file"));
 }
 
 #[test]
@@ -209,8 +210,9 @@ fn build_buffered_refresh_instructions_generic() {
     assert!(instructions.contains(".codescout/tmp/onboarding-prompt.md"));
     assert!(instructions.contains("pre-versioning"));
     assert!(!instructions.contains("subagent"));
-    assert!(instructions.contains("read_markdown"));
-    assert!(!instructions.contains("read_file"));
+    // Task 7: read_markdown was folded into read_file (heading-addressed by default).
+    assert!(!instructions.contains("read_markdown"));
+    assert!(instructions.contains("read_file"));
 }
 
 #[test]
@@ -361,7 +363,8 @@ fn build_workspace_instructions_generic_is_sequential() {
 
     assert!(!instructions.contains("subagent"));
     assert!(instructions.contains("onboarding-project-backend.md"));
-    assert!(instructions.contains("read_markdown"));
+    // Task 7: read_markdown was folded into read_file (heading-addressed by default).
+    assert!(instructions.contains("read_file"));
 }
 
 use std::path::PathBuf;
@@ -693,15 +696,15 @@ async fn onboarding_call_content_writes_prompt_file() {
         &text[..text.len().min(200)]
     );
 
-    // Must contain read_markdown instructions
+    // Must contain read_file instructions (Task 7: read_markdown was folded into read_file).
     let instructions = parsed["instructions"].as_str().unwrap_or("");
     assert!(
-        instructions.contains("read_markdown"),
-        "response must contain read_markdown instructions"
+        instructions.contains("read_file"),
+        "response must contain read_file instructions"
     );
     assert!(
-        !instructions.contains("read_file"),
-        "response must NOT contain read_file instructions"
+        !instructions.contains("read_markdown"),
+        "response must NOT contain read_markdown instructions — that tool no longer exists"
     );
 
     // Must NOT contain output_id (@tool_ ref)
@@ -742,8 +745,9 @@ async fn onboarding_call_content_writes_markdown_file() {
     let sections = parsed["sections"].as_array().expect("must have sections");
     assert!(!sections.is_empty());
 
+    // Task 7: read_markdown was folded into read_file (heading-addressed by default).
     let instructions = parsed["instructions"].as_str().unwrap_or("");
-    assert!(instructions.contains("read_markdown"));
+    assert!(instructions.contains("read_file"));
 }
 
 #[tokio::test]
@@ -818,12 +822,13 @@ async fn onboarding_call_content_force_delivers_instructions() {
     );
     let instructions = parsed["instructions"].as_str().unwrap_or("");
     assert!(
-        instructions.contains("read_markdown") || instructions.contains("subagent"),
+        instructions.contains("read_file") || instructions.contains("subagent"),
         "instructions must guide the agent, got: {instructions:?}"
     );
+    // Task 7: read_markdown was folded into read_file (heading-addressed by default).
     assert!(
-        !instructions.contains("read_file"),
-        "instructions must NOT reference read_file, got: {instructions:?}"
+        !instructions.contains("read_markdown"),
+        "instructions must NOT reference read_markdown — that tool no longer exists, got: {instructions:?}"
     );
 }
 
@@ -867,10 +872,10 @@ async fn onboarding_call_content_returns_two_blocks() {
         "instructions must NOT contain raw prompt body (should be in file)"
     );
 
-    // instructions must reference read_markdown
+    // instructions must reference read_file (Task 7: read_markdown was folded into it).
     assert!(
-        instructions.contains("read_markdown"),
-        "instructions must reference read_markdown"
+        instructions.contains("read_file"),
+        "instructions must reference read_file"
     );
 }
 
@@ -1032,10 +1037,10 @@ async fn onboarding_call_content_returns_two_blocks_for_version_refresh() {
         "instructions must contain version info, got: {instructions:?}"
     );
 
-    // instructions must reference read_markdown
+    // instructions must reference read_file (Task 7: read_markdown was folded into it).
     assert!(
-        instructions.contains("read_markdown"),
-        "instructions must reference read_markdown, got: {instructions:?}"
+        instructions.contains("read_file"),
+        "instructions must reference read_file, got: {instructions:?}"
     );
 }
 
@@ -2508,7 +2513,7 @@ fn system_prompt_points_to_tool_guide_resource() {
 }
 
 #[test]
-fn system_prompt_draft_read_markdown_hint_mentions_file_ref_reuse() {
+fn system_prompt_draft_read_file_hint_mentions_file_ref_reuse() {
     let draft = build_system_prompt_draft(
         &["rust".to_string()],
         &["src/main.rs".to_string()],
@@ -2518,11 +2523,11 @@ fn system_prompt_draft_read_markdown_hint_mentions_file_ref_reuse() {
     );
     assert!(
         draft.contains("@file_ref") || draft.contains("@file_"),
-        "draft must teach @file_* reuse for read_markdown; got:\n{draft}"
+        "draft must teach @file_* reuse for read_file (heading-addressed); got:\n{draft}"
     );
     assert!(
         draft.contains("IRON LAW #6"),
-        "draft must cite IRON LAW #6 in the read_markdown guidance; got:\n{draft}"
+        "draft must cite IRON LAW #6 in the read_file guidance; got:\n{draft}"
     );
 }
 
@@ -3893,11 +3898,11 @@ async fn onboarding_call_content_workspace_writes_per_project_files() {
         "synthesis file must exist"
     );
 
-    // Instructions must mention read_markdown
+    // Instructions must mention read_file (Task 7: read_markdown was folded into it).
     let instructions = parsed["instructions"].as_str().unwrap_or("");
     assert!(
-        instructions.contains("read_markdown"),
-        "instructions must reference read_markdown"
+        instructions.contains("read_file"),
+        "instructions must reference read_file"
     );
 }
 

@@ -1,15 +1,17 @@
-# Markdown Tools: read_markdown & edit_markdown
+# Markdown Tools: read_file (heading-addressed) & edit_markdown
 
-Two dedicated tools for navigating and editing Markdown files using
-heading-based addressing. They replace the need to read raw line ranges
-or construct fragile string replacements against unstructured text.
+`read_file` is heading-addressed by default on markdown paths, and
+`edit_markdown` edits by heading too. Together they replace the need to
+read raw line ranges or construct fragile string replacements against
+unstructured text.
 
 ---
 
-## read_markdown
+## read_file — heading-addressed on markdown
 
 Navigate a Markdown file by heading. Without `heading`/`headings` params,
 returns a **heading map** — the document outline with line numbers.
+`force=true` bypasses heading routing entirely for a raw line range.
 
 ### Parameters
 
@@ -18,17 +20,17 @@ returns a **heading map** — the document outline with line numbers.
 | `path` | string | Markdown file path (relative to project root) |
 | `heading` | string | Single section to read (fuzzy matched) |
 | `headings` | string[] | Multiple sections in one call (mutually exclusive with `heading`) |
-| `start_line` / `end_line` | int | Raw line range fallback (1-indexed, inclusive) |
+| `start_line` / `end_line` | int | Raw line range (1-indexed, inclusive); pair with `force=true` to bypass heading routing |
 
 ### Usage
 
 ```
 // Step 1: get the heading map
-read_markdown("docs/guide.md")
+read_file("docs/guide.md")
 → heading map with line numbers
 
 // Step 2: read specific sections
-read_markdown("docs/guide.md", headings=["## Auth", "## Config"])
+read_file("docs/guide.md", headings=["## Auth", "## Config"])
 → both sections in one response
 ```
 

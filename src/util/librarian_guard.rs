@@ -203,7 +203,7 @@ fn guard_with_oracle(
         // caller has no way to learn that the body was never the problem.
         "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
          • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
-         Reads and BODY edits are allowed directly — read_markdown, and edit_markdown \
+         Reads and BODY edits are allowed directly — read_file, and edit_markdown \
          without its `frontmatter` param, both work on this file."
             .to_string()
     } else {
@@ -485,7 +485,7 @@ mod tests {
     }
 
     /// Wiring check at the guard's own entry point rather than the predicate, since
-    /// that is the function all three call sites (`read_markdown`, `edit_markdown`,
+    /// that is the function all three call sites (`read_file`, `edit_markdown`,
     /// `edit_file`) share.
     #[test]
     fn guard_fires_on_a_quoted_id_the_way_it_does_on_a_bare_one() {

@@ -21,7 +21,7 @@
 5. `call_graph(symbol="Name", direction="callers")` — transitive blast radius; `direction="callees"` for flow tracing
 6. `memory(action="recall", query="...")` — search memories by meaning
 
-7. `read_markdown("path/to/file.md")` — returns heading map + `@file_ref` for large files. **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): `read_markdown("@file_ref", heading="## Section")` or `start_line=/end_line=`.
+7. `read_file("path/to/file.md")` — heading-addressed by default, returns heading map + `@file_ref` for large files. **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): `read_file("@file_ref", heading="## Section")` or `start_line=/end_line=`.
 
 ## Retrieval Stack
 `semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`, then index this project with `cargo run --release --bin sync_project -- <path> <project_id>`. If a call returns `retrieval stack offline`, the stack isn't running.

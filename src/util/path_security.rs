@@ -2596,7 +2596,6 @@ mod tests {
             "read_file",
             "tree",
             "grep",
-            "read_markdown",
             "symbols",
             "onboarding",
             "workspace",

@@ -7,8 +7,7 @@ async fn read_markdown_empty_file_returns_small_tier() {
     let file = dir.path().join("empty.md");
     std::fs::write(&file, "").unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -25,17 +24,22 @@ async fn empty_file_returns_slim_shape() {
     std::fs::write(&path, "").unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
-        .await
-        .unwrap();
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap()}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.get("content").and_then(|v| v.as_str()), Some(""));
     assert_eq!(result.get("lines").and_then(|v| v.as_u64()), Some(0));
-    assert!(
-        result.get("format").is_none(),
-        "expected no `format` field, got: {result}"
+    // `format` is now stamped by the `read()` wrapper on every result (Task 7 —
+    // `read_file`'s `format_compact` uses it to pick the markdown renderer), so an
+    // empty file carries it too; only the shape-slimming fields stay absent.
+    assert_eq!(
+        result.get("format").and_then(|v| v.as_str()),
+        Some("markdown"),
+        "expected `format: markdown`, got: {result}"
     );
     assert!(
         result.get("heading_count").is_none(),
@@ -52,8 +56,7 @@ async fn read_markdown_large_no_headings_hint_pivots_to_line_ranges() {
     let content: String = (0..10_000).map(|i| format!("line {}\n", i)).collect();
     std::fs::write(&file, &content).unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -149,8 +152,7 @@ async fn read_markdown_accepts_file_path_alias() {
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "# Title\n\nbody\n").unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "file_path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "file_path": file.to_str().unwrap() }), &ctx)
         .await
         .expect("read_markdown should accept the file_path alias");
     assert!(out.to_string().contains("Title"), "got: {out}");
@@ -482,8 +484,7 @@ async fn read_markdown_small_returns_full_content_no_hint() {
     // `small_file_with_multiple_sections_gets_nav_hint`.
     std::fs::write(&file, synth_md(30, 0)).unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -514,8 +515,7 @@ async fn read_markdown_medium_returns_content_with_hint() {
     // 300 lines: > LINE_SOFT_CAP (150) but well under INLINE_BYTE_BUDGET.
     std::fs::write(&file, synth_md(300, 6)).unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -539,8 +539,7 @@ async fn read_markdown_large_returns_summary_no_content() {
     // 10_000 lines ≈ 100KB, comfortably above typical INLINE_BYTE_BUDGET.
     std::fs::write(&file, synth_md(10_000, 20)).unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -573,8 +572,7 @@ async fn read_markdown_large_includes_hint_referencing_file_id() {
     let file = dir.path().join("big.md");
     std::fs::write(&file, synth_md(10_000, 20)).unwrap();
 
-    let out = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let out = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
 
@@ -601,13 +599,12 @@ async fn heading_on_large_section_returns_ok_false_with_hint_and_section_map() {
     }
     std::fs::write(&file, &body).unwrap();
 
-    let err = super::ReadMarkdown
-        .call(
-            json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
+    let err = super::read(
+        json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
+        &ctx,
+    )
+    .await
+    .unwrap_err();
 
     let rec = err
         .downcast_ref::<crate::tools::RecoverableError>()
@@ -667,13 +664,12 @@ async fn heading_excerpt_handle_stays_the_section_after_the_file_changes() {
     }
     std::fs::write(&file, &body).unwrap();
 
-    let err = super::ReadMarkdown
-        .call(
-            json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
+    let err = super::read(
+        json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
+        &ctx,
+    )
+    .await
+    .unwrap_err();
     let rec = err
         .downcast_ref::<crate::tools::RecoverableError>()
         .expect("oversized heading must be RecoverableError");
@@ -735,13 +731,12 @@ async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
     }
     std::fs::write(&file, &body).unwrap();
 
-    let err = super::ReadMarkdown
-        .call(
-            json!({ "path": file.to_str().unwrap(), "heading": "## Big" }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
+    let err = super::read(
+        json!({ "path": file.to_str().unwrap(), "heading": "## Big" }),
+        &ctx,
+    )
+    .await
+    .unwrap_err();
     let rec = err
         .downcast_ref::<crate::tools::RecoverableError>()
         .expect("oversized heading must be RecoverableError");
@@ -787,15 +782,12 @@ async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
         .as_array()
         .expect("section_map array");
     let first_line = sm[0]["l"].as_u64().expect("section_map entry has l");
-    let probe = super::ReadMarkdown
-        .call(
-            json!({ "path": &file_id, "start_line": first_line, "end_line": first_line }),
-            &ctx,
-        )
-        .await
-        .unwrap_or_else(|e| {
-            panic!("section_map line {first_line} must be readable in {file_id}: {e}")
-        });
+    let probe = super::read(
+        json!({ "path": &file_id, "start_line": first_line, "end_line": first_line }),
+        &ctx,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("section_map line {first_line} must be readable in {file_id}: {e}"));
     assert!(
         probe["content"]
             .as_str()
@@ -1895,20 +1887,18 @@ async fn read_markdown_accepts_file_id_buffer_ref_for_line_range() {
     std::fs::write(&file, synth_md(10_000, 20)).unwrap();
 
     // First call: populate the buffer via the large tier.
-    let first = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let first = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     let file_id = first["file_id"].as_str().unwrap().to_string();
 
     // Second call: use the buffer ref for a line slice.
-    let slice = super::ReadMarkdown
-        .call(
-            json!({ "path": file_id, "start_line": 1, "end_line": 5 }),
-            &ctx,
-        )
-        .await
-        .unwrap();
+    let slice = super::read(
+        json!({ "path": file_id, "start_line": 1, "end_line": 5 }),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     let content = slice["content"].as_str().unwrap();
     assert!(content.lines().count() <= 5);
@@ -1921,14 +1911,12 @@ async fn buffer_ref_accepts_single_heading_nav() {
     let file = dir.path().join("big.md");
     std::fs::write(&file, synth_md(10_000, 20)).unwrap();
 
-    let first = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let first = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     let fid = first["file_id"].as_str().unwrap().to_string();
 
-    let second = super::ReadMarkdown
-        .call(json!({ "path": fid, "heading": "## Section 5" }), &ctx)
+    let second = super::read(json!({ "path": fid, "heading": "## Section 5" }), &ctx)
         .await
         .unwrap();
     assert!(
@@ -1947,22 +1935,20 @@ async fn buffer_ref_accepts_multi_heading_nav() {
     // triggers Tier-3 and returns a file_id.
     std::fs::write(&file, synth_md(10_000, 500)).unwrap();
 
-    let first = super::ReadMarkdown
-        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+    let first = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     let fid = first["file_id"].as_str().unwrap().to_string();
 
-    let second = super::ReadMarkdown
-        .call(
-            json!({
-                "path": fid,
-                "headings": ["## Section 3", "## Section 5"],
-            }),
-            &ctx,
-        )
-        .await
-        .unwrap();
+    let second = super::read(
+        json!({
+            "path": fid,
+            "headings": ["## Section 3", "## Section 5"],
+        }),
+        &ctx,
+    )
+    .await
+    .unwrap();
     let content = second["content"].as_str().expect("content present");
     assert!(content.contains("## Section 3") && content.contains("## Section 5"));
 }
@@ -1980,8 +1966,7 @@ async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
     std::fs::write(&path, &body).unwrap();
 
     let ctx = test_ctx().await;
-    let result = super::ReadMarkdown
-        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+    let result = super::read(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
         .await
         .unwrap();
 
@@ -2002,17 +1987,18 @@ async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
 #[tokio::test]
 async fn read_markdown_call_content_returns_text_map_not_json() {
     // Regression: small heading-map (ToC) results used to serialize as pretty
-    // JSON via the default Tool::call_content path because ReadMarkdown did not
-    // declare OutputForm::Text. The MAP renderer existed in format_compact but
-    // only fired on the buffered (large-byte) axis. Now both axes reach it, so
-    // a sub-threshold ToC comes through as the indented `# Heading  Ln` form.
+    // JSON via the default Tool::call_content path because ReadMarkdown (now
+    // folded into ReadFile) did not declare OutputForm::Text. The MAP renderer
+    // existed in format_compact but only fired on the buffered (large-byte)
+    // axis. Now both axes reach it, so a sub-threshold ToC comes through as
+    // the indented `# Heading  Ln` form.
     let body = synth_md(205, 41); // > HEADINGS_HARD_CAP, ~1.8 KB → small path, MAP shape
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("toc.md");
     std::fs::write(&path, &body).unwrap();
 
     let ctx = test_ctx().await;
-    let content = super::ReadMarkdown
+    let content = crate::tools::read_file::ReadFile
         .call_content(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
         .await
         .unwrap();
@@ -2041,16 +2027,15 @@ async fn line_range_past_eof_returns_recoverable_error() {
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let result = super::ReadMarkdown
-        .call(
-            serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "start_line": 9000,
-                "end_line": 9999,
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::read(
+        serde_json::json!({
+            "path": path.to_str().unwrap(),
+            "start_line": 9000,
+            "end_line": 9999,
+        }),
+        &ctx,
+    )
+    .await;
 
     let err = result.expect_err("expected RecoverableError for OOR slice");
     let rec = err
@@ -2158,16 +2143,14 @@ async fn bogus_heading_error_carries_headings_array() {
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(
-            serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "heading": "## Nonexistent",
-            }),
-            &ctx,
-        )
-        .await;
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({
+            "path": path.to_str().unwrap(),
+            "heading": "## Nonexistent",
+        }),
+        &ctx,
+    )
+    .await;
 
     // Now returns Ok({ok:false,...}) — not Err — so the MCP layer routes through
     // format_compact's ERROR branch and renders as clean text instead of JSON.
@@ -2187,11 +2170,12 @@ async fn small_file_with_multiple_sections_gets_nav_hint() {
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
-        .await
-        .unwrap();
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap()}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     let hint = result
         .get("hint")
@@ -2215,11 +2199,12 @@ async fn small_file_with_no_sections_has_no_nav_hint() {
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
-        .await
-        .unwrap();
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap()}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result.get("hint").is_none(),
@@ -2229,23 +2214,26 @@ async fn small_file_with_no_sections_has_no_nav_hint() {
 
 #[tokio::test]
 async fn tier3_map_shape_fields_are_canonical() {
-    // Spec MAP shape: {lines, headings:[{h,l}], file_id, hint}
-    // Forbidden: format, total_lines, total_bytes, heading_count,
+    // Spec MAP shape: {lines, headings:[{h,l}], file_id, hint, format}
+    // Forbidden: total_lines, total_bytes, heading_count,
     // heading_map, must_follow, sections_returned.
+    // `format` is EXPECTED (not forbidden) since Task 7: the `read()` wrapper stamps
+    // `"format": "markdown"` on every result so `read_file`'s `format_compact` can
+    // pick the markdown renderer without inspecting the shape.
     let body = synth_md(5000, 50); // forces Tier 3 via byte budget
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("big.md");
     std::fs::write(&path, &body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
-        .await
-        .unwrap();
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap()}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     for forbidden in [
-        "format",
         "total_lines",
         "total_bytes",
         "heading_count",
@@ -2278,14 +2266,12 @@ async fn tier3_map_shape_fields_are_canonical() {
 
 #[test]
 fn format_compact_content_passthrough_with_hint_footer() {
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "content": "# Hi\n\nbody\n",
         "lines": 3,
-        "hint": "3 lines, 2 sections — read_markdown(path, heading=\"## Section\") to focus",
+        "hint": "3 lines, 2 sections — read_file(path, heading=\"## Section\") to focus",
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
     assert!(out.contains("# Hi"), "missing body, got: {out}");
     assert!(out.contains("body"), "missing body, got: {out}");
     assert!(out.contains("2 sections"), "missing hint, got: {out}");
@@ -2293,24 +2279,20 @@ fn format_compact_content_passthrough_with_hint_footer() {
 
 #[test]
 fn format_compact_content_no_hint_when_absent() {
-    use crate::tools::Tool;
     let response = serde_json::json!({"content": "# Hi\n", "lines": 1});
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
     assert_eq!(out.trim(), "# Hi");
 }
 
 #[test]
 fn format_compact_content_with_breadcrumb_renders_section_header() {
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "content": "## Mid\n\nbody\n",
         "lines": 3,
         "breadcrumb": ["# Top", "## Mid"],
         "line_range": [10, 20],
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
     assert!(
         out.contains("§ ## Mid"),
         "missing section header, got: {out}"
@@ -2321,7 +2303,6 @@ fn format_compact_content_with_breadcrumb_renders_section_header() {
 
 #[test]
 fn format_compact_map_shape_renders_indented_headings() {
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "lines": 329,
         "headings": [
@@ -2332,8 +2313,7 @@ fn format_compact_map_shape_renders_indented_headings() {
         "file_id": "@file_xyz",
         "hint": "use \"@file_xyz\" — heading=\"## Section\" or start_line/end_line",
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
 
     assert!(out.contains("329 lines"), "missing line count, got: {out}");
     assert!(out.contains("@file_xyz"), "missing file_id, got: {out}");
@@ -2360,7 +2340,6 @@ fn format_compact_map_shape_renders_indented_headings() {
 fn format_compact_section_map_renders_same_as_headings() {
     // Heading-targeted oversized uses `section_map` instead of `headings`.
     // Same rendering rules apply.
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "lines": 200,
         "section_map": [
@@ -2370,8 +2349,7 @@ fn format_compact_section_map_renders_same_as_headings() {
         "file_id": "@file_abc",
         "hint": "use \"@file_abc\" — pick a sub-heading from `section_map` or start_line/end_line",
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
     assert!(
         out.contains("  ### Sub A  L100"),
         "section_map should render with indent, got: {out}"
@@ -2385,7 +2363,6 @@ fn format_compact_section_map_renders_same_as_headings() {
 
 #[test]
 fn format_compact_error_shape_renders_headings_with_error_prefix() {
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "ok": false,
         "error": "heading '## Foo' not found",
@@ -2395,8 +2372,7 @@ fn format_compact_error_shape_renders_headings_with_error_prefix() {
         ],
         "hint": "pick a heading from `headings` array or use start_line/end_line",
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
 
     assert!(
         out.starts_with("error:"),
@@ -2415,15 +2391,13 @@ fn format_compact_error_shape_renders_headings_with_error_prefix() {
 
 #[test]
 fn format_compact_error_without_headings_still_renders_error_prefix() {
-    use crate::tools::Tool;
     let response = serde_json::json!({
         "ok": false,
         "error": "start_line 9000 exceeds file length 3",
         "lines": 3,
         "hint": "valid range is 1..=3; ...",
     });
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let out = tool.format_compact(&response).unwrap_or_default();
+    let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
 
     assert!(out.starts_with("error:"));
     assert!(out.contains("exceeds file length"));
@@ -2438,7 +2412,6 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     // invoke format_compact on the response. This exercises the same rendering
     // path call_content uses when the response is buffered. Round 1 round 2
     // scored JSON only — this test closes the format_compact gap.
-    use crate::tools::Tool;
 
     let claude_md = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md");
     if !claude_md.exists() {
@@ -2448,14 +2421,12 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     }
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(
-            serde_json::json!({"path": claude_md.to_str().unwrap()}),
-            &ctx,
-        )
-        .await
-        .unwrap();
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": claude_md.to_str().unwrap()}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
     // The response shape must be MAP (CLAUDE.md exceeds line cap).
     assert!(
@@ -2464,8 +2435,7 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     );
     assert!(result.get("file_id").is_some(), "MAP requires file_id");
 
-    let rendered = tool
-        .format_compact(&result)
+    let rendered = crate::tools::markdown::read_markdown::format_read(&result)
         .expect("format_compact must return Some for MAP shape");
 
     // Structural invariants on the rendered text.
@@ -2498,7 +2468,6 @@ async fn format_compact_live_renders_heading_not_found_as_error_with_headings() 
     // Live verification of the ERROR branch: read a real file with a bogus
     // heading, then render the Ok({ok:false,...}) response through format_compact.
     // The call now returns Ok instead of Err — no envelope reconstruction needed.
-    use crate::tools::Tool;
 
     let body = "# A\n\n## B\n\n## C\n";
     let dir = tempfile::tempdir().unwrap();
@@ -2506,17 +2475,14 @@ async fn format_compact_live_renders_heading_not_found_as_error_with_headings() 
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let value = tool
-        .call(
-            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
-            &ctx,
-        )
-        .await
-        .unwrap();
+    let value = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
+        &ctx,
+    )
+    .await
+    .unwrap();
 
-    let rendered = tool
-        .format_compact(&value)
+    let rendered = crate::tools::markdown::read_markdown::format_read(&value)
         .expect("format_compact must return Some for ERROR shape");
 
     assert!(
@@ -2550,13 +2516,11 @@ async fn empty_file_with_heading_arg_returns_recoverable_error() {
     std::fs::write(&path, "").unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(
-            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Anything"}),
-            &ctx,
-        )
-        .await;
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Anything"}),
+        &ctx,
+    )
+    .await;
 
     let err = result.expect_err("expected RecoverableError for heading on empty file");
     let rec = err
@@ -2577,7 +2541,6 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
     // Regression: read_markdown(heading="## Missing") must return Ok({ok:false,...})
     // NOT Err(RecoverableError), so format_compact routes through the ERROR branch
     // and renders as clean text (not JSON).
-    use crate::tools::Tool;
 
     let body = "# A\n\nsome content\n\n## B\n\nmore content\n";
     let dir = tempfile::tempdir().unwrap();
@@ -2585,13 +2548,11 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
     std::fs::write(&path, body).unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(
-            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nope"}),
-            &ctx,
-        )
-        .await;
+    let result = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nope"}),
+        &ctx,
+    )
+    .await;
 
     // Must be Ok, not Err
     let value = result.expect("heading-not-found must return Ok, not Err");
@@ -2619,8 +2580,7 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
     );
 
     // format_compact must render as text (ERROR branch), not JSON
-    let rendered = tool
-        .format_compact(&value)
+    let rendered = crate::tools::markdown::read_markdown::format_read(&value)
         .expect("format_compact must return Some for ERROR shape");
 
     assert!(
@@ -2652,20 +2612,17 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
 async fn heading_not_found_error_uses_single_quotes_not_debug() {
     // The heading-not-found error must use the single-quote convention
     // (heading '<x>' not found), not Debug/`{:?}` double-quotes.
-    use crate::tools::Tool;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("q.md");
     std::fs::write(&path, "# A\n\n## B\n").unwrap();
 
     let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let value = tool
-        .call(
-            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Missing"}),
-            &ctx,
-        )
-        .await
-        .unwrap();
+    let value = crate::tools::markdown::read_markdown::read(
+        serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Missing"}),
+        &ctx,
+    )
+    .await
+    .unwrap();
     let err_msg = value["error"]
         .as_str()
         .expect("error field must be a string");
@@ -3501,8 +3458,7 @@ async fn read_markdown_file_not_found_names_the_root_it_searched() {
     let mut ctx = test_ctx().await;
     ctx.agent = agent;
 
-    let err = super::ReadMarkdown
-        .call(json!({ "path": "definitely-absent-doc.md" }), &ctx)
+    let err = super::read(json!({ "path": "definitely-absent-doc.md" }), &ctx)
         .await
         .expect_err("the file does not exist under this root");
     let msg = format!("{err:#}");

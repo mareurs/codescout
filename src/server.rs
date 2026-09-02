@@ -26,7 +26,7 @@ use crate::tools::{
     edit_file::EditFile,
     grep::Grep,
     library::Library,
-    markdown::{EditMarkdown, ReadMarkdown},
+    markdown::EditMarkdown,
     memory::Memory,
     progress,
     read_file::ReadFile,
@@ -327,7 +327,6 @@ impl CodeScoutServer {
             Arc::new(CreateFile),
             Arc::new(EditFile),
             Arc::new(EditMarkdown),
-            Arc::new(ReadMarkdown),
             // Workflow tools
             Arc::new(RunCommand),
             Arc::new(Onboarding),
@@ -2236,7 +2235,6 @@ mod tests {
             "create_file",
             "edit_file",
             "edit_markdown",
-            "read_markdown",
             "run_command",
             "onboarding",
             "approve_write",
@@ -2283,9 +2281,10 @@ mod tests {
             .filter(|t| !is_librarian_tool(t.name()))
             .count();
         // `peer` is opt-in (see peer_enabled_at_runtime) and not registered by
-        // `make_server()`'s default env, so the L3 target is 21 core tools
-        // regardless of platform.
-        let expected = 21;
+        // `make_server()`'s default env, so the L3 target is 20 core tools
+        // regardless of platform. Was 21 until `read_markdown` was folded into
+        // `read_file` (heading-addressed by default on markdown paths).
+        let expected = 20;
         assert_eq!(
             core_count,
             expected,
@@ -2816,7 +2815,8 @@ mod tests {
     /// Measured 2026-09-02: `read_markdown(file_path="docs/issues/_TEMPLATE.md")` with
     /// no `path` returned the whole document — `file_path` genuinely discharges the
     /// requirement `required: ["path"]` claims to hold alone. Five tools were affected
-    /// (read_file, create_file, edit_file, edit_markdown, read_markdown); `grep`
+    /// (read_file, create_file, edit_file, edit_markdown, read_markdown — the last since
+    /// folded into read_file); `grep`
     /// declares the same `file_path` alias but does not require `path`, so it is
     /// unaffected and correctly not flagged.
     ///
@@ -2860,12 +2860,12 @@ mod tests {
             // reworded, instead of a global sum no single tool's reword can move.
             //
             // Alias counting must NOT be gated on a top-level `required` array
-            // existing — five tools (read_file, create_file, edit_file,
-            // edit_markdown, read_markdown) express their path requirement
+            // existing — four tools (read_file, create_file, edit_file,
+            // edit_markdown) express their path requirement
             // entirely via `anyOf` and carry no top-level `required` at all, so
             // gating the count on `required` being present (as the offender scan
             // below correctly does, since an offender needs a `required` to name
-            // the key) would silently record 0 aliases for exactly those five
+            // the key) would silently record 0 aliases for exactly those four
             // tools and make their `EXPECTED_ALIAS_COUNTS_BY_TOOL` entries
             // unconditionally fail. Caught by re-running this test after adding
             // the table, 2026-09-02: read_file showed "expected 4, found 0".
@@ -2987,7 +2987,6 @@ mod tests {
         ("create_file", 3),
         ("edit_file", 3),
         ("edit_markdown", 3),
-        ("read_markdown", 3),
         ("call_graph", 3),
         ("edit_code", 3),
         ("references", 3),
@@ -3094,7 +3093,6 @@ mod tests {
             "create_file",
             "edit_file",
             "edit_markdown",
-            "read_markdown",
             "edit_code",
             "call_graph",
             "references",
@@ -5067,8 +5065,8 @@ mod tests {
         // contract. This gate is what enforces it: a tool emitting paths under a
         // key nobody added fails here instead of silently costing tokens forever.
         //
-        // Liveness guard: four of these five cases are vacuous *today* — `read_file`
-        // and `read_markdown` never echo a path key at all, `symbols` pre-relativizes
+        // Liveness guard: three of these four cases are vacuous *today* — `read_file`
+        // never echoes a path key at all, `symbols` pre-relativizes
         // inside the tool, and `tree` is masked by its own `common_path_prefix`. Only
         // `grep` can actually fail the negative assertion below right now. That is
         // fine — this gate is a forward-looking canary for keys added later — but a
@@ -5096,11 +5094,6 @@ mod tests {
                 "read_file",
                 serde_json::json!({ "path": "src/lib.rs" }),
                 "pub fn a",
-            ),
-            (
-                "read_markdown",
-                serde_json::json!({ "path": "notes.md" }),
-                "Notes",
             ),
             (
                 "symbols",
@@ -7095,7 +7088,7 @@ mod guide_hint_tests {
         // else must be untouched, so this cannot become a per-error tax.
         let (_dir, server) = make_server().await;
         let r = server
-            .call_tool_by_name("read_markdown", json!({"path": "does-not-exist.md"}))
+            .call_tool_by_name("read_file", json!({"path": "does-not-exist.md"}))
             .await
             .expect("dispatch ok");
         let text = all_text(&r);

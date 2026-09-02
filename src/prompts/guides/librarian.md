@@ -50,7 +50,7 @@ The file at `rel_path` must not exist — `artifact(action="find")` first to avo
 ## docs/trackers/ — Backing Store, Not a Docs Folder
 
 `docs/trackers/` is the librarian's backing store for tracker artifacts.
-**Never read files there directly with `read_markdown` or `read_file`.**
+**Never read files there directly with `read_file`.**
 The raw file lacks metadata that only the catalog holds: link graph, augmentation state,
 event history, cross-project relationships.
 
@@ -420,7 +420,7 @@ repairs a stale entry). Prefer `move` for relocation — `delete` is irreversibl
 
 | Mistake | Fix |
 |---------|-----|
-| `read_markdown("docs/trackers/foo.md")` | `artifact(action="find", semantic="foo")` then `artifact(action="get", id=...)` |
+| `read_file("docs/trackers/foo.md")` | `artifact(action="find", semantic="foo")` then `artifact(action="get", id=...)` |
 | `git mv docs/trackers/foo.md docs/archive/foo.md` | `artifact(action="move", id="<id>", new_rel_path="docs/archive/foo.md")` — bare git mv orphans the catalog record |
 | `artifact(action="update", patch={"rel_path":"..."})` | `artifact(action="move", id="<id>", new_rel_path="...")` — `rel_path` is not patchable via `update` |
 | `filter={"eq":{"field":"kind","value":"tracker"}}` | `filter={"kind":{"eq":"tracker"}}` — leaf is `{field:{op:value}}` not `{op:{field,value}}` |

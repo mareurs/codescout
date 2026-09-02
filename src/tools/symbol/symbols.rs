@@ -77,8 +77,8 @@ impl Tool for Symbols {
         // returning it there delivers *nothing at all*. `symbol-navigation` was authored
         // and never wired (BL-25), and this is the slot it costs nothing to occupy.
         //
-        // `progressive-disclosure` keeps six other triggers (grep, tree, read_file,
-        // run_command, read_markdown, semantic_search), so a session still receives it.
+        // `progressive-disclosure` keeps five other triggers (grep, tree, read_file,
+        // run_command, semantic_search), so a session still receives it.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         if result.get("overflow").is_some() || result.get("output_id").is_some() {

@@ -57,7 +57,7 @@ impl crate::util::librarian_guard::AugmentedArtifactOracle for CatalogAugmentati
         let id = crate::librarian::ids::artifact_id_from_abs(&abs);
         // Plain `lock()` is safe here despite `parking_lot::Mutex` being
         // non-reentrant: the guard is only ever called from the core markdown
-        // tools (`read_markdown`, `edit_markdown`, `edit_file`), none of which
+        // tools (`read_file`, `edit_markdown`, `edit_file`), none of which
         // hold the catalog lock — no librarian tool calls the guard.
         let cat = self.catalog.lock();
         matches!(

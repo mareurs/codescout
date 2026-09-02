@@ -11,7 +11,7 @@ Subagents inherit these rules. Pass them along.
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
    (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
    sed) is OK. Shell on source files is blocked.
-4. NEVER read_file markdown → read_markdown (heading-addressed).
+4. `read_file` on markdown → heading-addressed (force=true raw).
 5. NEVER edit_file markdown → edit_markdown (heading-addressed).
 6. Subagents see only what you brief them with. Name the guides they
    must fetch themselves, prior results, paths, symbols — at every

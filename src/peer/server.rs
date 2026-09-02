@@ -29,7 +29,6 @@ const PEER_EXPOSED_TOOLS: &[&str] = &[
     "grep",
     "semantic_search",
     "read_file",
-    "read_markdown",
     "get_guide",
 ];
 

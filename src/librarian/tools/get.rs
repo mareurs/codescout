@@ -1813,7 +1813,7 @@ mod tests {
     async fn heading_matches_by_short_id_prefix() {
         // Regression: SI-N style trackers write headings as
         // "## SI-23 — <long descriptive title>". Callers naturally address a
-        // section by its short id; that must fuzzy-match like read_markdown/
+        // section by its short id; that must fuzzy-match like read_file/
         // edit_markdown, not require the full heading text verbatim.
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();

@@ -1953,6 +1953,7 @@ mod tests {
         "insert_code",
         "rename_symbol",
         "search_pattern",
+        "read_markdown",
     ];
 
     /// `CLAUDE.md` is injected into every session as a `<system-reminder>` but is

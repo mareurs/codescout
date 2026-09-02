@@ -143,24 +143,24 @@ rest of the session via `grep PATTERN @cmd_xxx`, `tail -N @cmd_xxx`,
 `read_file(@cmd_xxx, start_line=N, end_line=M)`. Piping to a trimmer
 throws away the full output before it lands in the buffer.
 
-## Iron Law 4: markdown reads → `read_markdown`
+## Iron Law 4: markdown reads → `read_file` (heading-addressed)
 
-**Rule:** never `read_file` on `.md`. Use `read_markdown(path)` for
-the heading map, `read_markdown(path, heading="## Section")` for a
-single section, `read_markdown(path, headings=[...])` for multiple,
-`read_markdown(path, start_line=N, end_line=M)` for a line slice.
+**Rule:** `read_file` on a `.md` path is heading-addressed by default — no
+separate tool. Call `read_file(path)` for the heading map,
+`read_file(path, heading="## Section")` for a single section,
+`read_file(path, headings=[...])` for multiple, `read_file(path,
+start_line=N, end_line=M)` for a line slice, or `read_file(path,
+force=true, start_line=N, end_line=M)` for a raw line range that
+bypasses heading routing entirely.
 
-**Gate fires when** `read_file` is called on a `.md` path. Error
-includes:
-
-> Use read_markdown for markdown files
-> read_markdown provides heading-based editing for .md files.
+**Refused, not silently ignored:** `heading`/`headings` on a non-markdown
+path, and `json_path`/`toml_key` on a markdown path — each is an error
+naming the format mismatch, not a param dropped on the floor.
 
 **Why this matters:** markdown files are usually large and
-heading-structured. `read_markdown` returns a heading map for
-overview reads — most queries are answered with the map alone, no
-body read needed.
-
+heading-structured. The heading map answers most queries with no body
+read needed, built directly into `read_file` rather than requiring a
+second tool call to discover which one applies.
 ## Iron Law 5: markdown edits → `edit_markdown`
 
 **Rule:** never `edit_file` on `.md` for content edits. Use

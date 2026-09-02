@@ -406,7 +406,7 @@ A companion Claude Code plugin (`../claude-plugins/codescout-companion/`) is **a
 
 **Shell — both `run_command` and native `Bash` are permitted right now, deliberately.** An eval comparing the two is in flight, so `security.shell_command_mode` is a live arm and not a verdict; don't flip it as a drive-by, ask. Two things `Bash` does not get: the IL-3 unbounded-pipe block (it masked a non-zero `cargo test` exit here) and the dangerous-command `@ack_*` gate. `usage.db` records only MCP calls, so `Bash` work is invisible to `/analyze-usage` and `docs/trackers/tool-usage-patterns.md`. Background and remedy for the env divergence that makes `cargo test` fail from `Bash` → memory `gotchas`.
 
-Prefer codescout's MCP tools for source work regardless of what is permitted — `symbols`, `grep`, `edit_code`, `read_file`/`read_markdown` go through the LSP/AST index. That is a capability argument, not a permission one, and it survives whichever way the eval lands. Full hook inventory, cross-repo flow, and concurrent-multi-workspace rules → **`docs/architecture/companion-plugin.md`**.
+Prefer codescout's MCP tools for source work regardless of what is permitted — `symbols`, `grep`, `edit_code`, `read_file` go through the LSP/AST index. That is a capability argument, not a permission one, and it survives whichever way the eval lands. Full hook inventory, cross-repo flow, and concurrent-multi-workspace rules → **`docs/architecture/companion-plugin.md`**.
 ## Language-Specific LSP Issues
 
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,

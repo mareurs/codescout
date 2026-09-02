@@ -22,7 +22,7 @@ use serde_json::Value;
 ///
 /// **Scope of the corpus gate.** `src/server.rs`'s
 /// `no_absolute_project_paths_in_rendered_output` only covers the file-tool
-/// surface (`tree`, `grep`, `read_file`, `read_markdown`, `symbols`) — no
+/// surface (`tree`, `grep`, `read_file`, `symbols`) — no
 /// librarian tool is in its fixture set, so the seven keys librarian emits
 /// (`deleted_abs_path`, `main_path`, `new_abs_path`, `new_path`,
 /// `old_abs_path`, `stage_together`, `targets`) are exercised only by

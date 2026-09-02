@@ -1229,8 +1229,8 @@ impl Tool for EditMarkdown {
             "### Workflow: Editing a Markdown Document\n\n\
              | Step | Tool | Purpose |\n\
              |------|------|---------|\n\
-             | 1 | `read_markdown(path)` | Get heading map — see all sections |\n\
-             | 2 | `read_markdown(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
+             | 1 | `read_file(path)` | Get heading map — see all sections |\n\
+             | 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
              | 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
              | 3b | `edit_markdown(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
              | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
@@ -1242,7 +1242,7 @@ impl Tool for EditMarkdown {
              | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
              | `remove` | Deletes target section (heading + body). | Removing a section entirely. |\n\
              | `edit` | Surgical text replacement within the section via `old_string` / `new_string`. Surrounding body preserved. | Fixing a typo, updating a single line, scoped substring change. |\n\n\
-             **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_markdown(path, heading=\"...\")` on any non-trivial mutation."
+             **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_file(path, heading=\"...\")` on any non-trivial mutation."
         )
     }
 

@@ -259,6 +259,8 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.contains("LSP server disconnected") {
         return Some("lsp_disconnect");
     }
+    // read_markdown was folded into read_file on 2026-09-02; these branches classify
+    // HISTORICAL rows on backfill and are dead for new ones.
     // read_markdown's OWN errors — tool-scoped so an unrelated tool emitting
     // similar-looking text never mis-attributes. Distinct from
     // `il4_read_markdown_routing` below, which is read_file's redirect-TO-

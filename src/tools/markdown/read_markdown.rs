@@ -1,18 +1,16 @@
-//! ReadMarkdown tool — heading-based navigation for .md files.
+//! Heading-based markdown navigation, folded into `read_file` (formerly the standalone
+//! `read_markdown` tool). `read_file` routes `.md` reads and any `heading`/`headings`
+//! call here via `read()`.
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::super::{
-    normalize_line_nav_aliases, optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext,
-};
+use super::super::{optional_u64_param, RecoverableError, ToolContext};
 use crate::util::text::extract_lines;
-
-pub struct ReadMarkdown;
 
 /// Resolve the `path` argument to `(resolved_path, text)`: an `@file_` buffer
 /// ref loads from the output buffer; otherwise validate, stat, and read the
-/// `.md` file from disk. The only async phase of `ReadMarkdown::call`.
+/// `.md` file from disk. The only async phase of `markdown::read`.
 async fn resolve_markdown_source(
     path: &str,
     ctx: &ToolContext,
@@ -24,7 +22,7 @@ async fn resolve_markdown_source(
             .ok_or_else(|| {
                 RecoverableError::with_hint(
                     format!("buffer reference not found: '{}'", path),
-                    "Buffer refs expire when the session resets. Re-run read_markdown on the file to get a fresh ref.",
+                    "Buffer refs expire when the session resets. Re-run read_file on the file to get a fresh ref.",
                 )
             })?;
         let resolved = buf
@@ -36,8 +34,11 @@ async fn resolve_markdown_source(
         // Gate: .md files only
         if !path.ends_with(".md") && !path.ends_with(".markdown") {
             return Err(RecoverableError::with_hint(
-                "read_markdown only supports .md files",
-                "Use read_file for non-markdown files.",
+                format!(
+                    "heading/headings address markdown sections, and '{}' is not a markdown file",
+                    path
+                ),
+                "Drop heading/headings to read it as text, or pass a .md path.",
             )
             .into());
         }
@@ -127,7 +128,7 @@ fn read_markdown_multi_heading(
         let next_actions: Vec<String> = seen_headings
             .iter()
             .take(3)
-            .map(|h| format!("read_markdown({:?}, heading={})", file_id, h))
+            .map(|h| format!("read_file({:?}, heading={})", file_id, h))
             .collect();
         let err = crate::tools::RecoverableError::with_hint(
             format!(
@@ -149,8 +150,12 @@ fn read_markdown_multi_heading(
         }
     }
 
+    // `sections` carries each requested section's content individually (not just the
+    // joined `content` string) so a caller can tell which section produced what without
+    // re-splitting on its own delimiter guess.
     let mut result = json!({
         "content": content,
+        "sections": sections,
     });
 
     // Coverage hint
@@ -254,11 +259,11 @@ fn read_markdown_single_heading(
                 if let Some(h) = first.get("h").and_then(|v| v.as_str()) {
                     // `{:?}` on the heading too — an unquoted `heading=### Sub A`
                     // is not a call the caller can paste back.
-                    actions.push(format!("read_markdown({:?}, heading={:?})", file_id, h));
+                    actions.push(format!("read_file({:?}, heading={:?})", file_id, h));
                 }
             }
             actions.push(format!(
-                "read_markdown({:?}, start_line=1, end_line={})",
+                "read_file({:?}, start_line=1, end_line={})",
                 file_id,
                 100.min(section_lines)
             ));
@@ -322,7 +327,7 @@ fn read_markdown_line_range(
                 start, file_total_lines
             ),
             format!(
-                "valid range is 1..={}; use read_markdown(path, start_line=N, end_line=M) within bounds",
+                "valid range is 1..={}; use read_file(path, start_line=N, end_line=M) within bounds",
                 file_total_lines
             ),
         )
@@ -368,7 +373,7 @@ fn read_markdown_line_range(
             // reported. Phrasing `next` in the slice buffer's own 1-based frame
             // is off by `start - 1` and re-serves lines the caller has seen.
             result["next"] = json!(format!(
-                "read_markdown(\"{path}\", start_line={}, end_line={end})",
+                "read_file(\"{path}\", start_line={}, end_line={end})",
                 orig_end + 1
             ));
         }
@@ -400,13 +405,18 @@ fn read_markdown_default_tiers(
 
     let md_cov = crate::tools::read_file::markdown_coverage(text, resolved, ctx, None, None, None);
 
+    // `read_file`'s contract is "heading map by default" on markdown — every tier below
+    // carries this, not just the oversized one, so a caller can always see the section
+    // list without paying for a second round-trip. Small/medium tiers still return the
+    // full body too (cheaper than a follow-up read_file(heading=...) call for content
+    // that already fit inline); only the oversized tier omits content.
+    let headings_json: Vec<Value> = all_headings
+        .iter()
+        .map(|h| json!({"h": h.text, "l": h.line}))
+        .collect();
+
     // ── Tier 3: large — heading map + hint, no body ──────────────────
     if oversized || oversized_by_headings {
-        let headings_json: Vec<Value> = all_headings
-            .iter()
-            .map(|h| json!({"h": h.text, "l": h.line}))
-            .collect();
-
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), text.to_string());
@@ -432,17 +442,17 @@ fn read_markdown_default_tiers(
         return Ok(result);
     }
 
-    // ── Tier 2: medium — full content + soft hint ─────────────────────
+    // ── Tier 2: medium — full content + heading map + soft hint ───────
     if total_lines > crate::tools::LINE_SOFT_CAP {
         let heading_count = all_headings.len();
         let hint = if heading_count == 0 {
             format!(
-                "{} lines, no headings — read_markdown(path, start_line=N, end_line=M) to focus",
+                "{} lines, no headings — read_file(path, start_line=N, end_line=M) to focus",
                 total_lines
             )
         } else {
             format!(
-                "{} lines, {} sections — read_markdown(path, heading=\"## Section\") to focus",
+                "{} lines, {} sections — read_file(path, heading=\"## Section\") to focus",
                 total_lines, heading_count
             )
         };
@@ -450,6 +460,7 @@ fn read_markdown_default_tiers(
         let mut result = json!({
             "content": text,
             "lines": total_lines,
+            "headings": headings_json,
             "hint": hint,
         });
         if let Some(c) = md_cov {
@@ -458,10 +469,11 @@ fn read_markdown_default_tiers(
         return Ok(result);
     }
 
-    // ── Tier 1: small — full content only ─────────────────────────────
+    // ── Tier 1: small — full content + heading map ─────────────────────
     let mut result = json!({
         "content": text,
         "lines": total_lines,
+        "headings": headings_json,
     });
     if let Some(c) = md_cov {
         result["coverage"] = c;
@@ -469,206 +481,125 @@ fn read_markdown_default_tiers(
     let heading_count = all_headings.len();
     if heading_count >= 2 {
         result["hint"] = serde_json::json!(format!(
-            "{} lines, {} sections — read_markdown(path, heading=\"## Section\") to focus",
+            "{} lines, {} sections — read_file(path, heading=\"## Section\") to focus",
             total_lines, heading_count
         ));
     }
     Ok(result)
 }
 
-#[async_trait::async_trait]
-impl Tool for ReadMarkdown {
-    fn name(&self) -> &str {
-        "read_markdown"
+/// Heading-addressed markdown read. Reached through `read_file`, which routes here for
+/// `.md`/`.markdown` paths, `@file_` buffers that came from one, or any call carrying
+/// `heading`/`headings`. Results carry `"format": "markdown"` so `ReadFile::format_compact`
+/// can pick the markdown renderer.
+pub(crate) async fn read(input: Value, ctx: &ToolContext) -> Result<Value> {
+    let path = crate::tools::require_str_param_or_hint(
+        &input,
+        "path",
+        crate::fs::PATH_PARAM_ALIASES,
+        "read_file(path=\"docs/x.md\") — add heading=\"## Section\" to read one section.",
+    )?;
+
+    // Resolve path → (resolved PathBuf, text String): @file_ buffer ref or disk read.
+    let (resolved, text) = resolve_markdown_source(path, ctx).await?;
+
+    // Reject librarian-managed artifacts — use doc(action="get") instead.
+    // The resolved path lets the guard also catch AUGMENTED artifacts whose
+    // frontmatter carries no id: for those the file is only a snapshot of
+    // params held in the catalog, so a direct read returns stale state with
+    // no signal that it is stale.
+    crate::util::librarian_guard::guard_not_librarian_managed(
+        path,
+        &text,
+        Some(&resolved),
+        crate::util::librarian_guard::Access::Read,
+    )?;
+
+    // Extract params
+    let heading = input["heading"].as_str();
+    let headings_param = crate::tools::optional_array_param(&input, "headings");
+    let start_line = optional_u64_param(&input, "start_line");
+    let end_line = optional_u64_param(&input, "end_line");
+
+    // Mutual exclusivity checks
+    if heading.is_some() && headings_param.is_some() {
+        return Err(RecoverableError::with_hint(
+            "heading and headings are mutually exclusive",
+            "Use heading for a single section, or headings for multiple sections.",
+        )
+        .into());
     }
 
-    fn description(&self) -> &str {
-        "Read a Markdown file with heading-based navigation. Returns heading map by default, \
-         or targeted sections via heading/headings params."
+    let has_nav = heading.is_some() || headings_param.is_some();
+    let has_range = start_line.is_some() || end_line.is_some();
+
+    if has_nav && has_range {
+        return Err(RecoverableError::with_hint(
+            "navigation parameters are mutually exclusive with start_line/end_line",
+            "Use heading/headings OR start_line+end_line, not both",
+        )
+        .into());
     }
 
-    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
-        Some("progressive-disclosure")
+    if start_line.is_some() != end_line.is_some() {
+        return Err(RecoverableError::with_hint(
+            "both start_line and end_line are required",
+            "Provide both start_line and end_line for a line range, e.g. start_line=1, end_line=50",
+        )
+        .into());
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] }
-            ],
-            "properties": {
-                "path": { "type": "string", "description": "Markdown file path relative to project root" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["read_markdown"] == 3) parses it.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
-                "heading": { "type": "string", "description": "Markdown section by heading (e.g. \"## Auth\")." },
-                "headings": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "List of headings to read (returns multiple sections). Mutually exclusive with heading."
-                },
-                "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
-                "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." }
-            }
-        })
-    }
-
-    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        // Normalize native-`Read`-style offset/limit into start_line/end_line BEFORE any
-        // param is read, exactly as `ReadFile::call` does. Iron Law 4 redirects every `.md`
-        // read here, so an agent arriving with native-`Read` habits lands on this tool; until
-        // 2026-09-02 the aliases were dropped in silence and the whole heading map came back
-        // with no error and no `corrections` note.
-        // docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
-        let mut input = input;
-        normalize_line_nav_aliases(&mut input);
-
-        let path = crate::tools::require_str_param_or_hint(
-            &input,
-            "path",
-            crate::fs::PATH_PARAM_ALIASES,
-            "read_markdown(path=\"docs/x.md\") — add heading=\"## Section\" to read one section. 'file_path' is also accepted.",
-        )?;
-
-        // Resolve path → (resolved PathBuf, text String): @file_ buffer ref or disk read.
-        let (resolved, text) = resolve_markdown_source(path, ctx).await?;
-
-        // Reject librarian-managed artifacts — use doc(action="get") instead.
-        // The resolved path lets the guard also catch AUGMENTED artifacts whose
-        // frontmatter carries no id: for those the file is only a snapshot of
-        // params held in the catalog, so a direct read returns stale state with
-        // no signal that it is stale.
-        crate::util::librarian_guard::guard_not_librarian_managed(
-            path,
-            &text,
-            Some(&resolved),
-            crate::util::librarian_guard::Access::Read,
-        )?;
-
-        // Extract params
-        let heading = input["heading"].as_str();
-        let headings_param = crate::tools::optional_array_param(&input, "headings");
-        let start_line = optional_u64_param(&input, "start_line");
-        let end_line = optional_u64_param(&input, "end_line");
-
-        // Mutual exclusivity checks
-        if heading.is_some() && headings_param.is_some() {
-            return Err(RecoverableError::with_hint(
-                "heading and headings are mutually exclusive",
-                "Use heading for a single section, or headings for multiple sections.",
-            )
-            .into());
-        }
-
-        let has_nav = heading.is_some() || headings_param.is_some();
-        let has_range = start_line.is_some() || end_line.is_some();
-
-        if has_nav && has_range {
-            return Err(RecoverableError::with_hint(
-                "navigation parameters are mutually exclusive with start_line/end_line",
-                "Use heading/headings OR start_line+end_line, not both",
-            )
-            .into());
-        }
-
-        if start_line.is_some() != end_line.is_some() {
-            return Err(RecoverableError::with_hint(
-                "both start_line and end_line are required",
-                "Provide both start_line and end_line for a line range, e.g. start_line=1, end_line=50",
-            )
-            .into());
-        }
-
-        // ── Dispatch to the matching read strategy ────────────────────────
-        if let Some(headings_arr) = headings_param {
-            return read_markdown_multi_heading(&text, &resolved, ctx, &headings_arr);
-        }
-        if let Some(heading_query) = heading {
-            return read_markdown_single_heading(&text, &resolved, ctx, heading_query);
-        }
-        if let (Some(start), Some(end)) = (start_line, end_line) {
-            return read_markdown_line_range(path, &text, &resolved, ctx, start, end);
-        }
+    // ── Dispatch to the matching read strategy ────────────────────────
+    let res = if let Some(headings_arr) = headings_param {
+        read_markdown_multi_heading(&text, &resolved, ctx, &headings_arr)
+    } else if let Some(heading_query) = heading {
+        read_markdown_single_heading(&text, &resolved, ctx, heading_query)
+    } else if let (Some(start), Some(end)) = (start_line, end_line) {
+        read_markdown_line_range(path, &text, &resolved, ctx, start, end)
+    } else {
         read_markdown_default_tiers(&text, &resolved, ctx)
+    };
+
+    let mut res = res?;
+    if let Some(obj) = res.as_object_mut() {
+        obj.insert("format".into(), json!("markdown"));
     }
+    Ok(res)
+}
 
-    fn output_form(&self) -> OutputForm {
-        OutputForm::Text
+/// True when `read_file` should take the markdown path: a markdown extension, or an
+/// `@file_` buffer whose source was one.
+pub(crate) fn is_markdown_target(path: &str, ctx: &ToolContext) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".md") || lower.ends_with(".markdown") {
+        return true;
     }
+    if path.starts_with("@file_") {
+        return ctx
+            .output_buffer
+            .get(path)
+            .and_then(|b| b.source_path.clone())
+            .is_some_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")));
+    }
+    false
+}
 
-    fn format_compact(&self, result: &Value) -> Option<String> {
-        // ERROR branch — must run first so {ok:false, headings:[...]} doesn't fall through to MAP.
-        let is_error = result
-            .get("ok")
-            .and_then(|v| v.as_bool())
-            .map(|ok| !ok)
-            .unwrap_or(false);
-        if is_error {
-            let mut out = String::from("error: ");
-            if let Some(msg) = result.get("error").and_then(|v| v.as_str()) {
-                out.push_str(msg);
-            }
-            out.push_str("\n\n");
-            if let Some(headings) = result.get("headings").and_then(|v| v.as_array()) {
-                out.push_str("available headings:\n");
-                for entry in headings {
-                    let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
-                    let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let level = h.chars().take_while(|c| *c == '#').count().max(1);
-                    let indent = " ".repeat((level - 1) * 2);
-                    out.push_str(&format!("{indent}{h}  L{l}\n"));
-                }
-            }
-            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
-                out.push('\n');
-                out.push_str("next: ");
-                out.push_str(hint);
-            }
-            return Some(out);
+/// The former `ReadMarkdown::format_compact`, unchanged.
+pub(crate) fn format_read(result: &Value) -> Option<String> {
+    // ERROR branch — must run first so {ok:false, headings:[...]} doesn't fall through to MAP.
+    let is_error = result
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .map(|ok| !ok)
+        .unwrap_or(false);
+    if is_error {
+        let mut out = String::from("error: ");
+        if let Some(msg) = result.get("error").and_then(|v| v.as_str()) {
+            out.push_str(msg);
         }
-
-        // CONTENT branch — pass content through, with optional headers/footers.
-        if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
-            let mut out = String::new();
-            if let (Some(breadcrumb), Some(line_range)) = (
-                result.get("breadcrumb").and_then(|v| v.as_array()),
-                result.get("line_range").and_then(|v| v.as_array()),
-            ) {
-                if let (Some(last), Some(start), Some(end)) = (
-                    breadcrumb.last().and_then(|v| v.as_str()),
-                    line_range.first().and_then(|v| v.as_u64()),
-                    line_range.get(1).and_then(|v| v.as_u64()),
-                ) {
-                    out.push_str(&format!("§ {last}  L{start}-L{end}\n\n"));
-                }
-            }
-            out.push_str(content);
-            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-                out.push('\n');
-                out.push_str(hint);
-            }
-            return Some(out);
-        }
-
-        // MAP branch — indented heading tree + next cue.
-        let headings = result
-            .get("headings")
-            .or_else(|| result.get("section_map"))
-            .and_then(|v| v.as_array());
-        if let Some(headings) = headings {
-            let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
-            let file_id = result.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
-            let mut out = format!("{} lines  {}\n\n", lines, file_id);
+        out.push_str("\n\n");
+        if let Some(headings) = result.get("headings").and_then(|v| v.as_array()) {
+            out.push_str("available headings:\n");
             for entry in headings {
                 let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
                 let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -676,15 +607,65 @@ impl Tool for ReadMarkdown {
                 let indent = " ".repeat((level - 1) * 2);
                 out.push_str(&format!("{indent}{h}  L{l}\n"));
             }
-            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
-                out.push('\n');
-                out.push_str("next: ");
-                out.push_str(hint);
-            }
-            return Some(out);
         }
-
-        // Fallback for shapes added later: serialize JSON.
-        Some(result.to_string())
+        if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+            out.push('\n');
+            out.push_str("next: ");
+            out.push_str(hint);
+        }
+        return Some(out);
     }
+
+    // CONTENT branch — pass content through, with optional headers/footers.
+    if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+        let mut out = String::new();
+        if let (Some(breadcrumb), Some(line_range)) = (
+            result.get("breadcrumb").and_then(|v| v.as_array()),
+            result.get("line_range").and_then(|v| v.as_array()),
+        ) {
+            if let (Some(last), Some(start), Some(end)) = (
+                breadcrumb.last().and_then(|v| v.as_str()),
+                line_range.first().and_then(|v| v.as_u64()),
+                line_range.get(1).and_then(|v| v.as_u64()),
+            ) {
+                out.push_str(&format!("§ {last}  L{start}-L{end}\n\n"));
+            }
+        }
+        out.push_str(content);
+        if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+            out.push_str(hint);
+        }
+        return Some(out);
+    }
+
+    // MAP branch — indented heading tree + next cue.
+    let headings = result
+        .get("headings")
+        .or_else(|| result.get("section_map"))
+        .and_then(|v| v.as_array());
+    if let Some(headings) = headings {
+        let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+        let file_id = result.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
+        let mut out = format!("{} lines  {}\n\n", lines, file_id);
+        for entry in headings {
+            let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
+            let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
+            let level = h.chars().take_while(|c| *c == '#').count().max(1);
+            let indent = " ".repeat((level - 1) * 2);
+            out.push_str(&format!("{indent}{h}  L{l}\n"));
+        }
+        if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+            out.push('\n');
+            out.push_str("next: ");
+            out.push_str(hint);
+        }
+        return Some(out);
+    }
+
+    // Fallback for shapes added later: serialize JSON.
+    Some(result.to_string())
 }

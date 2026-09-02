@@ -285,9 +285,9 @@ pub(crate) fn build_system_prompt_draft(
                          You **MUST** `workspace(action=\"activate\")` back to the original project before completing your task.\n\n");
         draft.push_str(
             "**Markdown files** (memories, plans, docs): \
-             `read_markdown(\"path\")` — returns heading map + `@file_ref` for large files. \
+             `read_file(\"path\")` — heading-addressed by default, returns heading map + `@file_ref` for large files. \
              **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
-             `read_markdown(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
+             `read_file(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
         );
     } else {
         draft.push_str("## Navigation Strategy\n");
@@ -312,9 +312,9 @@ pub(crate) fn build_system_prompt_draft(
             "6. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
         );
         draft.push_str(
-            "7. `read_markdown(\"path/to/file.md\")` — returns heading map + `@file_ref` for large files. \
+            "7. `read_file(\"path/to/file.md\")` — heading-addressed by default, returns heading map + `@file_ref` for large files. \
              **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
-             `read_markdown(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
+             `read_file(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
         );
     }
 
@@ -555,19 +555,19 @@ pub(crate) fn build_buffered_onboarding_instructions(
         "\
 Read these phases in order — complete each before moving to the next:
 
-  1. read_markdown(\"{p}\", heading=\"## THE IRON LAW\")
-  2. read_markdown(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
-  3. read_markdown(\"{p}\", heading=\"## Phase 2: Explore the Code\")
+  1. read_file(\"{p}\", heading=\"## THE IRON LAW\")
+  2. read_file(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
+  3. read_file(\"{p}\", heading=\"## Phase 2: Explore the Code\")
      → Execute ALL exploration steps before continuing
-  4. read_markdown(\"{p}\", headings=[\"## Red Flags — STOP and Return to Phase 2\", \"## Common Rationalizations\"])
-  5. read_markdown(\"{p}\", heading=\"## Phase 3: Write the Memories (Single-Project Mode)\")
+  4. read_file(\"{p}\", headings=[\"## Red Flags — STOP and Return to Phase 2\", \"## Common Rationalizations\"])
+  5. read_file(\"{p}\", heading=\"## Phase 3: Write the Memories (Single-Project Mode)\")
      → Write all memories before continuing
-  6. read_markdown(\"{p}\", headings=[\"## After Everything Is Created\", \"## Gathered Project Data\", \"## Return Contract\"])
+  6. read_file(\"{p}\", headings=[\"## After Everything Is Created\", \"## Gathered Project Data\", \"## Return Contract\"])
 
 For workspace mode, read these after step 2 (before step 3):
-  read_markdown(\"{p}\", headings=[\"## Workspace Survey — Breadth-First\", \"## Workspace Deep Dives — Subagent Per-Project\"])
+  read_file(\"{p}\", headings=[\"## Workspace Survey — Breadth-First\", \"## Workspace Deep Dives — Subagent Per-Project\"])
 And after step 4 (before step 5):
-  read_markdown(\"{p}\", heading=\"## Workspace Memory Synthesis\")"
+  read_file(\"{p}\", heading=\"## Workspace Memory Synthesis\")"
     );
 
     if subagent_capable {
@@ -621,7 +621,7 @@ System prompt outdated ({stored_str} → v{current}) — a lightweight refresh i
 
 Spawn a general-purpose subagent with model=sonnet to regenerate the system prompt. \
 The subagent must:
-  read_markdown(\"{prompt_path}\")  — read the full refresh prompt (it's short)
+  read_file(\"{prompt_path}\")  — read the full refresh prompt (it's short)
 
 The subagent will re-read memories and regenerate system-prompt.md without \
 re-exploring the codebase.
@@ -634,7 +634,7 @@ When the subagent completes, continue with the user's original task."
 System prompt outdated ({stored_str} → v{current}) — a lightweight refresh is needed.
 
 Read the refresh prompt:
-  read_markdown(\"{prompt_path}\")
+  read_file(\"{prompt_path}\")
 
 Follow it to re-read memories and regenerate system-prompt.md."
         )
@@ -762,7 +762,7 @@ pub(crate) fn build_per_project_prompt(
          - `tree(\"{root}\")` — top-level structure\n\
          - `tree` on each subdirectory\n\
          - `read_file` on the build config\n\
-         - `read_markdown(\"README.md\")` if present\n\n",
+         - `read_file(\"README.md\")` if present\n\n",
         root = crate::util::fs::to_forward_slash(&project.relative_root)
     ));
     prompt.push_str(
@@ -779,7 +779,7 @@ pub(crate) fn build_per_project_prompt(
     );
     prompt.push_str(
         "### Step 4: Read Architecture Documentation\n\n\
-         - `read_markdown` on any docs found in the project\n\
+         - `read_file` on any docs found in the project\n\
          - Read completely — do not skim\n\n",
     );
     prompt.push_str(
@@ -914,7 +914,7 @@ pub(crate) fn build_synthesis_prompt(projects: &[(String, Vec<String>)]) -> Stri
     // Step 4: CLAUDE.md refresh
     prompt.push_str("---\n\n## Refresh CLAUDE.md\n\n");
     prompt.push_str(
-        "Read `read_markdown(\"CLAUDE.md\")` to see its heading structure.\n\n\
+        "Read `read_file(\"CLAUDE.md\")` to see its heading structure.\n\n\
          Compare each section with the memories you just wrote. For sections that\n\
          overlap with memory content, offer to replace the body with a memory reference:\n\
          `See codescout memory 'architecture' (Key Patterns section).`\n\n\
@@ -954,7 +954,7 @@ pub(crate) fn build_workspace_instructions(
 Onboarding required — this is a workspace with {} projects.
 
 Step 1: Read prerequisites from the main prompt:
-  read_markdown(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
+  read_file(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
 
 Step 2: Spawn {} subagents IN PARALLEL — one per project:",
             project_prompts.len(),
@@ -963,7 +963,7 @@ Step 2: Spawn {} subagents IN PARALLEL — one per project:",
 
         for (id, path) in project_prompts {
             instructions.push_str(&format!(
-                "\n  - {id}: read_markdown(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
             ));
         }
 
@@ -971,7 +971,7 @@ Step 2: Spawn {} subagents IN PARALLEL — one per project:",
             "\n\n\
 Step 3: Wait for ALL subagents to complete.\n\n\
 Step 4: Read the synthesis prompt and write workspace memories:\n\
-  read_markdown(\"{synthesis_path}\")\n\n\
+  read_file(\"{synthesis_path}\")\n\n\
 Follow the synthesis instructions to read back per-project memories,\n\
 write workspace-level memories, generate the system prompt, and\n\
 offer to refresh CLAUDE.md."
@@ -984,7 +984,7 @@ offer to refresh CLAUDE.md."
 Onboarding required — this is a workspace with {} projects.
 
 Step 1: Read prerequisites:
-  read_markdown(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
+  read_file(\"{p}\", headings=[\"## Phase 0: Embedding Model Selection\", \"## Phase 1: Semantic Index Check\"])
 
 Step 2: Explore each project one at a time:",
             project_prompts.len(),
@@ -992,14 +992,14 @@ Step 2: Explore each project one at a time:",
 
         for (id, path) in project_prompts {
             instructions.push_str(&format!(
-                "\n  - {id}: read_markdown(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
             ));
         }
 
         instructions.push_str(&format!(
             "\n\n\
 Step 3: Read the synthesis prompt and write workspace memories:\n\
-  read_markdown(\"{synthesis_path}\")"
+  read_file(\"{synthesis_path}\")"
         ));
 
         instructions
