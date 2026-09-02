@@ -93,6 +93,86 @@ fn first_declaration_line<'a>(section_text: &'a str, re: &Regex) -> Option<&'a s
     None
 }
 
+/// Scan for the first line matching `re`, then continue consuming its
+/// **paragraph** — the hard-wrapped continuation authors actually write.
+///
+/// [`first_declaration_line`]'s single-line capture is correct for a closed
+/// grammar like `**Valid:**` and wrong for free-text `**Rests on:**`. Measured
+/// 2026-09-02 over every entry section in `docs/**`: **145 of 208** `Rests on:`
+/// declarations are followed by a non-blank continuation line, and **25** carry
+/// their only resolvable target below line 1 — so line-anchoring was discarding
+/// a third of the targets authors had already written, and rendering the
+/// fragment as the whole field. Reading the paragraph moves the corpus from
+/// 47% to 59% resolvable. See
+/// `docs/issues/2026-09-02-parse-rests-on-truncates-at-line-one.md`.
+///
+/// **Only the declaring line is column-0 anchored.** Continuation lines are
+/// expected to be indented — that is the hanging-indent form this field's own
+/// design spec uses — so they are trimmed and joined with a single space.
+///
+/// Four stop conditions, each a real shape in this corpus:
+///
+/// - a **blank line** — ordinary paragraph end;
+/// - a **heading** — the section ended;
+/// - a **fence delimiter** — a worked example follows, and its contents are not
+///   the declaration (the same CAP-8 contamination rule [`FenceState`] exists
+///   for);
+/// - **the next bold field label** (`**Valid:**`, `**Status:**`). This one is
+///   load-bearing rather than defensive: entry sections in this project put
+///   those on lines *adjacent* to `**Rests on:**` with no blank between, so
+///   without it the validity class is swallowed into the rests-on value and
+///   [`parse_validity`] is silently asked about different text. Pinned by
+///   `rests_on_stops_at_the_next_bold_field`.
+///
+/// Deliberately NOT used by [`parse_validity`]: its grammar is closed
+/// (`invariant` / `dated <ISO>` / `conditional — <event>`) and its tests require
+/// a trailing em-dash after `dated` to be *rejected*, so consuming a paragraph
+/// there would change what parses.
+fn first_declaration_paragraph(section_text: &str, re: &Regex) -> Option<String> {
+    fn is_bold_field_label(line: &str) -> bool {
+        line.strip_prefix("**").is_some_and(|r| r.contains(":**"))
+    }
+
+    let mut fence = FenceState::new();
+    let mut parts: Vec<&str> = Vec::new();
+
+    for line in section_text.lines() {
+        let trimmed = line.trim_start();
+        let is_delim = fence.feed(trimmed);
+
+        if parts.is_empty() {
+            // Still hunting the declaring line — identical to
+            // `first_declaration_line`, including matching the UNTRIMMED line so
+            // an indented `**Rests on:**` stays prose-under-a-list-item.
+            if is_delim || fence.in_fence() {
+                continue;
+            }
+            if let Some(c) = re.captures(line) {
+                parts.push(c.get(1).unwrap().as_str());
+            }
+            continue;
+        }
+
+        if is_delim || trimmed.is_empty() || trimmed.starts_with('#') || is_bold_field_label(line) {
+            break;
+        }
+        parts.push(trimmed);
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+    Some(
+        parts
+            .iter()
+            .map(|s| s.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string(),
+    )
+}
+
 /// Truncate an entry section's text at the first NESTED entry definition inside it.
 ///
 /// `entry_sections` bounds a section at the next heading of the same-or-higher level,
@@ -219,8 +299,12 @@ pub fn resolve_validity(
 }
 
 /// The durable route to this Statement's proof, if it declares one.
+///
+/// Reads the declaration's whole **paragraph**, not just its first line — see
+/// [`first_declaration_paragraph`] for the stop conditions and the measurement
+/// that forced the change.
 pub fn parse_rests_on(section_text: &str) -> Option<String> {
-    first_declaration_line(section_text, rests_re()).map(|s| s.trim().to_string())
+    first_declaration_paragraph(section_text, rests_re())
 }
 
 #[cfg(test)]
@@ -517,6 +601,97 @@ mod tests {
             parse_rests_on("see the **Rests on:** field\n"),
             None,
             "mid-line mention is not a declaration"
+        );
+    }
+
+    /// The defect: `parse_rests_on` returned line 1 only, so a hard-wrapped
+    /// declaration was truncated mid-value and rendered as the whole field by
+    /// `context.rs:427`.
+    ///
+    /// **Load-bearing fixture shape:** the continuation here is *indented*, the
+    /// hanging-indent form this field's design spec uses
+    /// (`2026-08-20-entry-validity-and-attestation-design.md:534-535`). Column-0
+    /// strictness applies to the DECLARING line only. The corpus also contains
+    /// the *unindented* wrap — see
+    /// `rests_on_captures_the_real_corpus_declaration_that_was_being_truncated`,
+    /// which pins verbatim bytes; both shapes must parse, and testing only this
+    /// one would have missed the commoner of the two.
+    ///
+    /// Measured 2026-09-02: 145 of 208 declarations in `docs/**` are wrapped
+    /// like this, and 25 carry their only resolvable target below line 1.
+    #[test]
+    fn rests_on_captures_a_hard_wrapped_continuation() {
+        let text = "**Rests on:** `docs/RELEASE.md` § *Before cherry-pick: read\n  the live output* — and `src/librarian/mod.rs:215`\n";
+        assert_eq!(
+            parse_rests_on(text).as_deref(),
+            Some(
+                "`docs/RELEASE.md` § *Before cherry-pick: read the live output* — and `src/librarian/mod.rs:215`"
+            ),
+        );
+    }
+
+    /// The bytes the bug was filed on, verbatim from
+    /// `docs/trackers/bug-fix-session-log.md:5114-5116` (`W-57`).
+    ///
+    /// **Load-bearing, and it corrects the synthetic fixture above:** this
+    /// declaration wraps across three lines at **column 0**, not with a hanging
+    /// indent. The indented form is what the design spec shows; the unindented
+    /// form is what the corpus mostly contains. A continuation rule that
+    /// required indentation would pass every synthetic test here and still
+    /// truncate the real corpus, which is exactly the defect being fixed.
+    ///
+    /// Before the fix this returned everything up to `…of any` — cut mid-title,
+    /// mid-italic, and rendered as the whole field by `context.rs:427`.
+    ///
+    /// If `W-57` is ever edited, do not "repair" this fixture to match: copy the
+    /// text here into the test and keep it, or replace it with another verbatim
+    /// multi-line declaration. Its value is that it is real, not that it is
+    /// current.
+    #[test]
+    fn rests_on_captures_the_real_corpus_declaration_that_was_being_truncated() {
+        let text = "**Rests on:** `docs/RELEASE.md` § *Before cherry-pick: read the live output of any\n\
+                    tool-facing change (required)* and its two prior datapoints, which this extends\n\
+                    rather than establishes.\n\n\
+                    **Status:** validated\n";
+        assert_eq!(
+            parse_rests_on(text).as_deref(),
+            Some(
+                "`docs/RELEASE.md` § *Before cherry-pick: read the live output of any \
+                 tool-facing change (required)* and its two prior datapoints, which this extends \
+                 rather than establishes."
+            ),
+        );
+    }
+
+    /// The stop condition that matters most in this corpus: entry sections put
+    /// `**Rests on:**` and `**Valid:**` on ADJACENT lines with no blank between,
+    /// so a naive paragraph consumer swallows the validity class into the
+    /// rests-on value and silently changes what `parse_validity` is asked about.
+    #[test]
+    fn rests_on_stops_at_the_next_bold_field() {
+        let text = "**Rests on:** ADR 2026-07-10\n**Valid:** invariant\n**Status:** open\n";
+        assert_eq!(parse_rests_on(text).as_deref(), Some("ADR 2026-07-10"));
+        // And the sibling parser still sees its own field, unconsumed.
+        assert_eq!(
+            parse_validity(text).unwrap(),
+            Some(Validity::Invariant),
+            "a paragraph-consuming rests-on must not eat the Valid: line"
+        );
+    }
+
+    #[test]
+    fn rests_on_stops_at_a_blank_line_heading_or_fence() {
+        assert_eq!(
+            parse_rests_on("**Rests on:** one\n\nnot part of it\n").as_deref(),
+            Some("one"),
+        );
+        assert_eq!(
+            parse_rests_on("**Rests on:** two\n## A heading\n").as_deref(),
+            Some("two"),
+        );
+        assert_eq!(
+            parse_rests_on("**Rests on:** three\n```\nfenced\n```\n").as_deref(),
+            Some("three"),
         );
     }
 }
