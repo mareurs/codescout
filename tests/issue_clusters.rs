@@ -35,6 +35,60 @@ fn repo_root() -> PathBuf {
 
 const LEDGER: &str = "docs/trackers/issue-clusters.md";
 
+/// The per-class files. Since 2026-09-02 the ledger is an **Index file plus one file per
+/// class**: `docs/trackers/issue-clusters.md` keeps the preamble, conventions and Index
+/// table, and each `## IC-N — <title>` section lives in its own file here.
+///
+/// The split was a **pure relocation** — every section byte-identical to what it replaced.
+/// It exists because that one file was the repo's contention head: **16 distinct sessions,
+/// 53 commits in a day**, 3× the next file. Removing the stored count earlier the same day
+/// fixed the *gate* coupling and not the *file* coupling (19 commits from 9 sessions in the
+/// 2.5h after). Two sessions amending two classes now touch two files.
+/// See `docs/adrs/2026-09-02-isolate-what-is-cheap-own-what-is-shared.md`.
+const LEDGER_DIR: &str = "docs/trackers/issue-clusters";
+
+/// Index file + every class file, concatenated in a stable order.
+///
+/// **The parsers are unchanged by the split — only what they are pointed at moved.** That is
+/// deliberate: `the_ledger_parsers_agree_on_a_fixture` pins them against the Python mirror in
+/// `scripts/pre-commit-ledger-counts.py`, and rewriting a parser while the corpus moved under
+/// it would have needed that pinning re-established at the moment it was most needed.
+///
+/// Concatenation is sound because every parser here is **line-anchored** — `**Slug:**`,
+/// `**Members:**`, `| IC-N |` rows and `## IC-N —` headings are all recognised at line start,
+/// so none can straddle the join between two files. A parser matching across lines would need
+/// a per-file loop instead.
+fn ledger_text() -> String {
+    let mut parts = vec![std::fs::read_to_string(repo_root().join(LEDGER))
+        .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"))];
+    let dir = repo_root().join(LEDGER_DIR);
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "md"))
+        .collect();
+    // Sorted so the concatenation is deterministic: unordered read_dir would make any
+    // failure message depend on filesystem iteration order.
+    files.sort();
+    // LOAD-BEARING, and the reason it is an assert rather than a comment: if this directory
+    // were empty or misnamed, every count below would parse the Index alone and report a
+    // clean zero. `no_class_field_states_a_bare_n` is an ABSENCE assertion, so it is monotone
+    // under exactly that failure — it would pass, forever, on a corpus it never read. This
+    // asserts the population is non-empty, without which absence means nothing.
+    assert!(
+        !files.is_empty(),
+        "no class files under {} — every absence assertion below would pass vacuously",
+        dir.display()
+    );
+    for f in files {
+        parts.push(
+            std::fs::read_to_string(&f)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", f.display())),
+        );
+    }
+    parts.join("\n")
+}
+
 /// What is wrong with one bug file's class declaration, if anything.
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
@@ -64,9 +118,7 @@ fn backticked_cluster_slug(rest: &str) -> Option<String> {
 /// The ledger is the single source of truth: renaming a class there is what makes the
 /// gate accept the new name, so the two can never drift.
 fn valid_slugs() -> BTreeSet<String> {
-    let path = repo_root().join(LEDGER);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let text = ledger_text();
     text.lines()
         .filter_map(|l| l.strip_prefix("**Slug:**"))
         .filter_map(backticked_cluster_slug)
@@ -523,17 +575,13 @@ fn parse_bare_n_claims(text: &str, valid: &BTreeSet<String>) -> Vec<(String, Str
 
 /// [`parse_bare_n_claims`] over the live ledger.
 fn bare_n_claims(valid: &BTreeSet<String>) -> Vec<(String, String, usize)> {
-    let path = repo_root().join(LEDGER);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let text = ledger_text();
     parse_bare_n_claims(&text, valid)
 }
 
 /// [`parse_index_counts`] over the live ledger.
 fn declared_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
-    let path = repo_root().join(LEDGER);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let text = ledger_text();
     parse_index_counts(&text, valid)
 }
 
@@ -833,7 +881,7 @@ fn is_unbasised(body: &str) -> bool {
 /// nothing to find" stop being the same sentence.
 #[test]
 fn no_mechanism_status_is_a_bare_verdict() {
-    let text = std::fs::read_to_string(repo_root().join(LEDGER)).expect("read ledger");
+    let text = ledger_text();
     let bare: Vec<String> = mechanism_statuses(&text)
         .into_iter()
         .filter(|(_, body)| is_unbasised(body))
@@ -1222,8 +1270,7 @@ fn no_index_row_stores_a_count() {
 #[test]
 fn every_declared_class_has_an_index_row() {
     let valid = valid_slugs();
-    let text = std::fs::read_to_string(repo_root().join(LEDGER))
-        .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"));
+    let text = ledger_text();
     let rows = parse_index_rows(&text, &valid);
 
     let missing: Vec<&String> = valid.iter().filter(|s| !rows.contains(*s)).collect();
@@ -1242,6 +1289,59 @@ fn every_declared_class_has_an_index_row() {
         "only {} Index rows parsed — the table format moved, and `no_index_row_stores_a_count` \
          is now asserting emptiness over a table nobody can read, which it would pass",
         rows.len()
+    );
+}
+
+/// The split's own regression guard, and the reason the two-step filing flow is a MECHANISM
+/// rather than a note somebody has to remember.
+///
+/// `append_entry`'s `PendingSection` splices the new section into **the artifact's own file**
+/// (`src/librarian/tools/append_entry.rs`), and the artifact at `docs/trackers/issue-clusters.md`
+/// is now the Index. So filing a new class through the guarded path — which is the correct way
+/// to allocate the id, and the only way to get a `## IC-N — <title>` heading whose shape
+/// `link_scan` accepts as a definition — writes the section back into the file this split
+/// emptied. The parent would silently re-accrete class sections, one per new class, until it
+/// was a monolith again.
+///
+/// The flow is therefore: **append through the parent, then move the section to
+/// `docs/trackers/issue-clusters/IC-N-<slug>.md`.** This test is what makes step 2
+/// non-optional. Without it, step 2 is a policy aimed at whoever files the next class — and
+/// this project's own record is that a trigger the model must notice is not a mechanism
+/// (`skill-frictions:SKF-22`).
+///
+/// Deliberately NOT solved by declaring `entry_prefix: IC` in the per-class files: 23
+/// co-declarers would raise `link_scan`'s `prefix_conflicts` from its baseline of 2. That is
+/// the tempting repair, and the instrument already rejects it. The real closure is a
+/// target-file param on `append_entry`; filed separately.
+///
+/// Found by `codescout-dd` (sessionId `c45dd5ef`) reviewing the split before it landed — the
+/// one claim in the plan that broke, and neither of the two the plan defended.
+#[test]
+fn the_index_file_holds_no_class_sections() {
+    let text = std::fs::read_to_string(repo_root().join(LEDGER))
+        .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"));
+    let stray: Vec<&str> = text
+        .lines()
+        .filter(|l| {
+            // `## IC-N — <the class…>` in the template is not a class section: the token
+            // grammar is `[A-Z]{1,3}-\d+`, and `N` is not a digit. Requiring digits here is
+            // what keeps the template from tripping this gate.
+            l.strip_prefix("## IC-")
+                .and_then(|r| r.split_once(' '))
+                .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        })
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "{LEDGER} is the Index — class sections live in {LEDGER_DIR}/IC-N-<slug>.md.\n\
+         Found {} section(s) that should have been moved:\n  {}\n\n\
+         This is the expected state right after `append_entry` files a NEW class: the section \
+         is spliced into the parent artifact's own file. Move it to its own file (the section \
+         body verbatim, plus tracker frontmatter), leave the Index row behind, and commit both \
+         together. Do NOT fix this by declaring `entry_prefix: IC` in the class file — that \
+         raises link_scan's prefix_conflicts instead.",
+        stray.len(),
+        stray.join("\n  ")
     );
 }
 

@@ -1,0 +1,75 @@
+---
+kind: tracker
+status: active
+title: 'declaration is not execution — a surface declares a capability production never reaches'
+owners:
+- marius
+tags:
+- defect-classes
+- clusters
+- declared-not-wired
+topic: issue clusters and rule promotion
+---
+
+## IC-3 — declaration is not execution — a surface declares a capability production never reaches
+
+**Slug:** `cluster/declared-not-wired`
+**Claim:** A surface declares a capability that production never reaches. Every piece is individually correct — the selector, the matcher, the ledger entry, the schema — and no call site connects them, so the declaration reads as a shipped feature and tests pass in isolation.
+**Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` **+1: `the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer`** — a **fourth family**, and the one the existing three do not describe: the mechanism is wired, runs, and produces the correct value, which is then **discarded one frame later by the renderer**. `inject_notice` writes `_workspace_notice` into the response `Value`; `call_content` hands that `Value` to `self.format_compact(&val)`, and no `format_compact` reads the key — so the notice survives on the pretty-JSON branch and is dropped by the 18 tools that implement a compact form, which are exactly the read tools (`symbols`, `grep`, `tree`, `read_file`, `references`, `semantic_search`). Family 1 was *registered nowhere*; this one is registered, reached, and executed, and still reaches no observer. **The tell that separates it: `ListFunctions` had no caller, this has 18 callers and no reader.** Diagnosed live 2026-09-02 with a refused write as the control — `guard_worktree_write` gates on the same flag, so its refusal proved every precondition held while two reads stayed silent and one JSON-shaped read carried it. **Count not re-derived for the +1.**
+
+**Its test-suite half is why it survived a fix and two mutation kills**, and belongs to this class rather than to the bug: both regression tests drive `EchoTool`, whose output takes the pretty-JSON branch, so the suite exercises the one path the 18 do not. The mutations killed on the **decision** path and the **delivery** path is reached by no test at all. `tests/tool_reachability.rs` gates family 1 by asking *is this tool registered*; nothing asks *does this field reach the caller*, which is the same question one layer out and is what a fourth-family gate would have to check. — **`n=24`, 2026-09-02, re-derived** by anchored file count. The 24th is `docs/issues/archive/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md`: `usage.db`'s `outcome` column declares a three-value taxonomy and two SQL queries filter on `recoverable_error`, which production **never writes** — 0 rows in 57k calls, because `record_content` classifies `Err(RecoverableError)` as `"error"` before `route_tool_error` runs. The tests that pin the value call `classify_content_result` directly and never traverse that ordering. Everything from here on describes the population up to 23. Superseded figure, kept for its derivation: `n=23`, 2026-09-01, by query. Two movements the same day, opposite directions: 20 → 18 when the `IC-15` boundary was settled on the remedy test (two members that accept a caller's value and drop it moved there; see the Index), then 18 → 20 as two archive additions landed after the settlement — `docs/issues/archive/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md` and `docs/issues/archive/2026-09-01-graft-requires-two-params-the-schema-never-advertises.md`. The three-family split in **Mechanism status:** was measured over the 18 and does not yet place these two. Then 20 → 22: the blind second read moved `docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md` here from `IC-15` — no CLI flag exists, so nothing is accepted to be dropped, which is the settled discriminator and makes the file consistent with its structural twin `cli-doctor-exposes-no-fix-flag` — and a peer session filed `docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md` while the audit was running. Then 22 → 23: `docs/issues/archive/2026-09-01-heading-miss-discards-the-available-headings-hint.md`, filed 2026-09-01 (fixed and archived the same day at `a35a9c35`, patch-id `4f7f84946b904368bb2b5c01593c4a7ad3899be8` — and the fix found a **second** unwired site the file never named, the plural `headings=[…]` branch, which builds its own missing-member list and never calls the helper) — `RecoverableError::with_hint` builds an "Available headings" hint at `src/tools/file_summary/file_summary.rs:447-450` and `heading_miss_meta`'s absent arm never reads it, while its *ambiguous* sibling three lines above does. The filer first flagged the tag as contestable on in-code-vs-surface grounds, then settled it against this ledger's own discriminator — *what fix does the defect require?* The repair wires an existing in-code declaration to a live route (one line into `heading_miss_meta`'s absent arm); nothing new is declared at any surface. That is IC-3's remedy, so the tag holds. Description decided nothing; the remedy did.
+**Blind party:** the author of the declaration, specifically. They hold the mental model in which the wiring exists — writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served. A more careful version of the same author writes the same line.
+**Promotes to:** `OB-7` — *a declaration is well-formed, and nothing in production reaches it*, `docs/trackers/observer-blindness.md`, promoted 2026-09-01. `OB-5`'s *Known-open residual* is this class seen from the **reporting** side — a check whose `extend()` line is deleted still reports `0` because the enum still declares it — so the two are cited across rather than merged: `OB-5` is about a summary that cannot say what **ran**, `OB-7` about a capability nothing **reaches**. The residual is where they touch, not where they are the same, which is why this got its own row instead of folding in.
+**Mechanism status:** `partial` — decidable for one of three families, and deliberately **not** `designed` for the class. The members split by what disconnects the declaration — **20 of the 23.** The partition below was measured over **18**; four arrived after it (2026-09-01, named at the end of this field), of which two slot into families and two fit none of the three, so what follows is a partition of 20 with a named remainder rather than of the class. **Dead in production (10):** the code exists and only tests call it. The partition is measured — `grep` tags every hit with its enclosing symbol and test sites carry a `tests/` prefix, and call-site granularity is *required* rather than preferable, since `references` groups `src/librarian/adapter.rs:1451` under a production file while `grep` shows it is `tests/…`. But it decides for **by-name call sites only**. *Corrected 2026-09-01 from a dispatch-side probe — this sentence used to name `dyn Trait` and `Arc<dyn CodeEmbedder>` as the blind spot, and that is false*: a trait object must be **constructed**, and construction is by name (`Arc::new(Grep)`), as is delegation (`"register" => RegisterLibrary.call(…)`). Dispatch consumes a name; it does not erase one. The genuine false-positive surface is **macro-generated names and re-export-only aliases**, much smaller than "every trait object" — and the failure direction is still the dangerous one, since a false *dead-in-production* finding is a **deletion-authorising** result on a negative search. The zero-caller state is no longer unexercised: the same probe found the first true positive (`ListFunctions`/`ListDocs`), but `references` was unavailable on it, so the finding rests on the text instrument alone. See `cluster-promotion-session-log:F-1` and `OB-7` § *PROBED*. **Schema or doc declares what the code ignores (3):** a round-trip check is only a weak proxy here, because reading a field is not using it. **A matcher that can never match (7):** this entry's original phrasing, needing the set of values production emits at a call site, and it has no mechanism at all. Recording the class as `designed` on the strength of the first family is exactly the conflation `IC-9` was corrected for.
+
+**The four post-partition arrivals, assigned 2026-09-01 — two fit, two do not.** *Into `Dead in production`, taking it to 10:* `2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md` — both implemented the `Tool` trait, `src/server.rs` registered neither name, and their own test suite was the only caller (both deleted the same day; `symbols(name="ListFunctions")` now returns 0). *Into `A matcher that can never match`, taking it to 7:* `2026-09-01-git-apply-cached-stages-but-records-no-owner.md` — `apply` is listed among the seven verbs that may claim a staged pair, and `argv_paths()` returns the patch file rather than the staged path, so `names_path()` cannot match on any input. **The other two are left unassigned rather than forced into the nearest family**, because a wrong family is a wrong input to the mechanism question this field exists to answer: `2026-09-01-graft-requires-two-params-the-schema-never-advertises.md`, where the action is advertised and its two **required** params are not, so the declaration is reachable only through keys it does not publish — not dead code, not an unmatchable matcher, and not a declared-then-ignored field; and `2026-08-30-cli-artifact-drops-time-scope-and-extra.md`, where the capability is reachable from the MCP surface and unreachable from the CLI, which is a **surface-parity** shape it shares with `2026-08-30-cli-doctor-exposes-no-fix-flag.md` already inside the class (both kept in `IC-3` by the `IC-3`/`IC-15` boundary ruling: no flag exists at the boundary, so nothing is accepted to be dropped). Two members sharing one shape is what a fourth family would be built from; naming them is the input to that call, not the call.
+**Valid:** dated 2026-09-01
+
+`op-4-path-predicate-can-never-fire` and `triggered-operator-rules-route-nothing-in-production` are the pure form: three operator rules declare `binding: triggered` against tools that emit no `selector_key` in production, so `route()` is never called with anything that could match them. The routing mechanism exists and is unit-tested; the tests construct the selector the production path never produces.
+
+`cli-doctor-exposes-no-fix-flag` is the same shape at a different seam. `librarian(action="doctor", fix=…)` offers six repairs; `codescout doctor`'s clap struct offers none, so every repair is unreachable from the command line. Its own body names this as *"the third instance today of one mechanism: the CLI keeps its own clap structs and hand-marshals into the MCP tool's JSON"* — which makes it a member of both this class and a narrower CLI/MCP parity family. It is filed here because the *defect* is the unreachable capability; the hand-marshalling is the mechanism by which it became unreachable.
+
+The reason ordinary testing does not catch this class is structural rather than accidental: a unit test constructs its own inputs, so it exercises the matcher with a selector production never emits, and passes. The test is not weak; it is *scoped to the half that works*. Only a check that starts from the production emission side can see it — which is the same shape as `CLAUDE.md` § *Testing Discipline*'s "name the concrete caller that reaches it".
+
+**Falsified by** a member where the wiring existed and the declaration was merely wrong, which is an ordinary bug rather than this class.
+
+**The compiler is a blind party here, literally, and it explains the dead-in-production family's
+survival.** Rust's `dead_code` lint cannot fire on `pub` items in a **library** crate: it does
+not know the crate's consumers, so it must assume reachability. codescout is lib-plus-bin, so
+every `pub fn` under `src/` is exempt **by construction**, however many callers it has. That is
+this ledger's own structure appearing in a tool rather than a person — the party best placed to
+notice holds a parameter (the set of external consumers) that makes noticing impossible — and it
+is why nine members sat under `-D warnings` on every gate run for months without one warning.
+The remedy is not a stricter lint setting; it is a different question, asked from the caller
+side.
+
+**The `IC-15` boundary, raised before the archive tagging pass and settled during it — the rule
+matters more than the outcome.** Members here stated `IC-15`'s claim (*a parameter accepted at
+the boundary and silently dropped*) rather than this one's, because this entry files by
+**defect** — the unreachable capability — as its cli-doctor paragraph says, and under that rule
+every `IC-15` member is also one of these, which would have made `IC-15` a sub-family rather than
+a peer.
+
+**The remedy test settled it, as it did for `IC-1` vs `IC-2`, and it reduces to one question you
+can ask of a file: was a caller-supplied value accepted?** If **yes**, the code path *ran* and
+discarded the value; the remedy is to round-trip it or refuse it — `IC-15`. If **no**, the
+capability exists and no call site reaches it; the remedy is to find a caller — `IC-3`. Two
+different remedies, so two classes, and this entry's file-by-defect rule was what needed
+narrowing.
+
+Applied to the twenty, **exactly two moved**: `audit-doc-refs-scope-param-ignored` and
+`audit-doc-refs-fail-on-doc-mismatch`, where a caller passes `scope`, or `fail_on: med`, and the
+value is taken and dropped. `cli-doctor-exposes-no-fix-flag` **stays** — the flag does not exist
+at the boundary at all, so nothing is accepted to be dropped — and `audit-doc-refs-lsp-stubbed-off`
+stays for the same reason. `constitution-rule-malformed-glob-silent-fail-open` and
+`drift-detection-enabled-is-a-dead-config-key` were left here as **visibly undecided** rather
+than moved on a coin-flip; both are defensible either way and neither has been probed.
+
+Note what the discriminator is *not*: all of these read as *"declares X but does not do X"*, a
+sentence fitting at least four classes in this ledger. Matching on it is how `IC-9` acquired two
+misfits, and the **remedy**, never the description, is what separates them. One weak
+corroboration that the pass was claim-based rather than title-based: the moves were predicted to
+fall in the *schema-declares-what-code-ignores* family if titles had driven the classification,
+and they did — but only **2 of that family of 5**, which is the signature of a boundary gap
+rather than of systematic leakage. That is not an independent check and is not offered as one;
+classification and application were the same party throughout.

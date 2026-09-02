@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import sys
@@ -120,7 +121,14 @@ def main() -> int:
     args = ap.parse_args()
 
     root = pathlib.Path(G._git("rev-parse", "--show-toplevel").strip())
-    ledger = (root / G.LEDGER).read_text(encoding="utf-8")
+    # chdir before reading: since the 2026-09-02 split the ledger is an Index file plus one
+    # file per class, and `read_ledger` enumerates the class files with repo-relative paths.
+    # Reading `root / G.LEDGER` directly would silently return the Index ALONE — a clean,
+    # plausible, and badly wrong census, since every class record now lives elsewhere.
+    os.chdir(root)
+    ledger = G.read_ledger("worktree")
+    if ledger is None:  # pragma: no cover - the Index is tracked; absent means a broken tree
+        raise SystemExit(f"cannot read {G.LEDGER} from {root}")
 
     valid = G.valid_slugs(ledger)
     counts = G.actual_counts(valid, args.source)

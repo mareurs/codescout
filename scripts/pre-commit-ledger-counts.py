@@ -30,6 +30,16 @@ import subprocess
 import sys
 
 LEDGER = "docs/trackers/issue-clusters.md"
+# Since 2026-09-02 the ledger is an Index file PLUS one file per class. The split was a pure
+# relocation (every section byte-identical) and exists because that one file was the repo's
+# contention head -- 16 distinct sessions, 53 commits in a day. See
+# docs/adrs/2026-09-02-isolate-what-is-cheap-own-what-is-shared.md.
+#
+# This mirror stays byte-comparable with tests/issue_clusters.rs::ledger_text(), which
+# the_ledger_parsers_agree_on_a_fixture pins. The PARSERS are unchanged -- only what they are
+# pointed at moved. Safe because every parser here is line-anchored, so none can straddle the
+# join between two concatenated files.
+LEDGER_DIR = "docs/trackers/issue-clusters"
 
 
 def _git(*args: str) -> str:
@@ -37,6 +47,46 @@ def _git(*args: str) -> str:
     if r.returncode != 0:
         raise SystemExit(f"git {' '.join(args)} failed: {r.stderr.strip()}")
     return r.stdout
+
+
+def class_files(source: str) -> list:
+    """Every per-class file, read from the SAME source as the ledger text.
+
+    Source-matching is load-bearing and is the reason this is not a bare glob: the hook's
+    whole point is comparing what is STAGED against what is on disk, and a disk glob would
+    silently mix the two -- reporting a class file's worktree content against an index-sourced
+    ledger. `head` and `index` therefore go through git, and only `worktree` touches disk.
+
+    Tracked-only for the git sources, matching the rest of this hook: an untracked class file
+    is invisible here, so a local green defers rather than clears. That is the documented
+    posture (see the module header), not an oversight.
+    """
+    if source == "head":
+        out = _git("ls-tree", "-r", "--name-only", "HEAD", LEDGER_DIR)
+    elif source == "index":
+        out = _git("ls-files", LEDGER_DIR)
+    else:
+        d = pathlib.Path(LEDGER_DIR)
+        return sorted(str(p) for p in d.glob("*.md")) if d.is_dir() else []
+    return sorted(p for p in out.splitlines() if p.endswith(".md"))
+
+
+def read_ledger(source: str):
+    """Index file + every class file, concatenated -- the twin of ledger_text() in Rust.
+
+    Returns None only when the Index itself is absent from `source`, preserving the caller's
+    "nothing to check" path. A present Index with zero class files concatenates to just the
+    Index, which is the pre-split shape and stays correct rather than erroring.
+    """
+    head = read(LEDGER, source)
+    if head is None:
+        return None
+    parts = [head]
+    for path in class_files(source):
+        text = read(path, source)
+        if text is not None:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 _INDEX_BLOBS: dict[str, str] | None = None
@@ -408,7 +458,7 @@ def main() -> int:
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
-    ledger = read(LEDGER, source)
+    ledger = read_ledger(source)
     if ledger is None:
         # Not staged and not on disk: nothing to check. Silence is correct -- a commit that
         # touches neither the ledger nor a bug file must not be blocked by this hook.
@@ -472,7 +522,7 @@ def main() -> int:
     # Measured 2026-09-02: 7 of 22 classes already cite members this way -- a boundary, not a
     # universal convention -- but this is PROSPECTIVE, firing only on a class that gains a
     # member, so the other 15 are untouched until they do.
-    head_ledger = read(LEDGER, "head")
+    head_ledger = read_ledger("head")
     if head_ledger is None:
         return 0
     before = actual_counts(valid_slugs(head_ledger), "head")
