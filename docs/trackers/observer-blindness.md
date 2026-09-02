@@ -1414,14 +1414,28 @@ account of why: it demanded an observed RED of the implementer and never of its 
 generalisation is checkable and one command — **a needle is a claim that a string can appear, so
 grep for it** — and the repair is not done until the guard has been seen to fail.
 
-**Mechanism status:** `designed, not built` — `H-N` candidate. Trigger: a token leaving the tree.
-Query: `grep -rn '!.*contains.*<token>'`. Plus the repair-side check above, which is the cheaper
-half and covers a failure the trigger cannot.
+**Second instance, and the first found PROSPECTIVELY — which is the mode the class was designed
+for.** Measured 2026-09-02, within the hour of filing: `codescout-0a` ran `H-9`'s query
+pre-dispatch against a token Task 5 was about to delete, and found
+`src/librarian/catalog/augmentation.rs:3027` — `!text.contains("artifact_augment(")` — **before
+the code moved**. Same shape as `prompts/mod.rs:2603`, same day, different subsystem, and the
+guard it encodes is a real one: *do not prescribe a remedy that refuses in the situation it is
+prescribed for.*
 
-**Not promoted, and the population is honest about itself:** one instance of the deletion half, one
-of the repair half, both from the same work stream. Recorded now because the trigger is only cheap
-*before* the deletion lands, and the class is unfileable afterwards — the token is gone and nothing
-remembers it was ever there.
+That changes what the class is FOR. Discovered as a diagnosis after the fact, it is now usable as
+a **checklist item at dispatch time**, which is strictly cheaper — one grep, before the token is
+gone. The trigger fires on a token being *scheduled* for deletion, not only on its absence, and
+that matters because after the deletion the class is unfileable: the token is gone and nothing
+remembers it was there.
+
+**Mechanism status:** `designed, not built` — `H-N` candidate. Trigger: a token leaving the tree,
+or a plan scheduling one. Query: `grep -rnw '!.*contains.*<token>'`. Plus the repair-side check
+below, which is the cheaper half and covers a failure the trigger cannot.
+
+**Not promoted, and the population is honest about itself:** **two** instances of the deletion half
+(`prompts/mod.rs:2603` retrospective, `augmentation.rs:3027` prospective — different subsystems,
+same day) and one of the repair half, all from the same work stream. One work stream is not two
+subsystems in the sense the promotion bar means, whatever the file paths say.
 
 ## Template for new entries
 

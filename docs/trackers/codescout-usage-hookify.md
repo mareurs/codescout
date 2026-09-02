@@ -433,12 +433,16 @@ Session evidence, **corrected downward by `H-7` and stated with its unit**: this
 
 ### H-9 — When a token leaves the tree, grep the negative assertions that name it
 
-**Trigger:** a commit removes the last occurrence of an identifier, tool name, or emitted string.
+**Trigger: a commit removes the last occurrence of an identifier, tool name, or emitted string —
+OR a plan schedules one.** The plan-time form is the cheaper mode and the one that has actually
+paid: measured 2026-09-02, `codescout-0a` ran this query pre-dispatch against a token Task 5 was
+about to delete and found `src/librarian/catalog/augmentation.rs:3027` before the code moved. The
+token does not have to be gone, only **scheduled**.
 
-**Query, one command:**
+**Query — and it wants `-w`, measured:**
 
 ```
-grep -rn '!.*contains.*<token>' --include='*.rs' src/ tests/
+grep -rnw '!.*contains.*<token>' --include='*.rs' src/ tests/
 ```
 
 **Why a hook and not a habit.** A negative assertion naming a deleted token becomes vacuously
@@ -477,6 +481,32 @@ body), so widening trips one and narrowing the other. That is a property of *tha
 not of pairing — and noticing "here it works" is exactly how the superseded remedy was proposed the
 first time. Raised by `codescout-0a` before it could reach a fix.
 
+**Word boundaries are not a nicety — without them the hook gets ignored.** Measured on
+`artifact_augment` (2026-09-02, main checkout): **122 matches / 27 files** bare against **46 / 17**
+with `-w`. The 76-hit difference is entirely `artifact_augmentation`, the SQL table and its catalog
+module, which must **survive** the tool's deletion untouched. A rename-checking hook that reports
+the union will be ignored by its third user.
+
+**And a token can live in two namespaces at once**, which `-w` does not fix. `artifact` is
+simultaneously a tool name already renamed and a SQL table name that must not be, so
+`column_exists(conn, "artifact", "abs_path")` (`migrate_v6.rs:33`) is a word-boundary hit the hook
+must not act on. Namespace is not in the token.
+
+**The anti-mention anchor and the vacuity trap pull opposite ways — say so, because a fix for one
+creates the other.** `augmentation.rs:3027` deliberately anchors on the CALL SHAPE,
+`!text.contains("artifact_augment(")` with the paren, and its own comment says why: *"`!contains
+("augmentation")` fails on the correct hint, which mentions augmentation only to say none is
+needed. Fourth time in two days that a keyword check counted a document's discussion of a token as
+a use of it."* That paren is exactly what made the OTHER repair vacuous — `doc(action=
+"event_create")` closes the paren while the guide emits `doc(action="event_create", id=…` with a
+comma. **So: anchor tightly enough to exclude mentions, then grep the anchor to prove it can still
+match.** Neither half is optional, and the second is the one that gets skipped.
+
+**Measurement note, recorded because it is this month's own bug class:** `0a` measured 123/27 and
+47/17 from a worktree; this repo's main checkout gives 122/27 and 46/17. Both derive the same
+76-hit difference. The totals differ by one because the trees differ — see
+`docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`. Neither
+number is wrong; they answer questions about different trees, and a hook quoting one must say which.
+
 **Status:** proposed. Warn-first; the trigger is rare enough that a deny stage is unwarranted until
 a false-positive class is observed.
-
