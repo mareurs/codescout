@@ -384,11 +384,36 @@ The elimination above narrowed to two routes and declined to guess between them.
 
 **(2) Which yields the inversion.** `git add <path>` stages the **whole file**. The capturing session's `git add` moved another session's lines from the worktree side to the **index** side — which is precisely what makes `unreviewed-content`'s condition true. `scripts/pre-commit-unreviewed-content.sh:27-30` compares the committing blob against the real index blob per path, and they are equal exactly when what is committed is what was staged. **Stage less and it refuses; stage everything at those paths, foreign content included, and it passes.** So the guard is not merely blind here: *the act that defeats it is the act it asks for*.
 
-**But this is a DOCUMENTED blind spot, not a discovered one, and the distinction changes what to do about it.** Read at the bytes, `scripts/pre-commit-unreviewed-content.sh:32-37`, under its own heading `WHAT IT DOES NOT CATCH`:
+**ONE INCIDENT, TWO HALVES, TWO DIFFERENT REMEDIES — and a single verdict hides the more actionable one.** An earlier version of this section called the whole thing "a documented blind spot, not a discovered one." That is right about one half and **wrong about the other**, and the wrong half is the one with a live defect. Reading contributed by `f13f8169` and `c45dd5ef`, verified at the bytes here.
+
+**Half one — `c45dd5ef`'s capture (victim had STAGED). Documented and unmechanized.** `scripts/pre-commit-unreviewed-content.sh:32-37`, under its own heading `WHAT IT DOES NOT CATCH`, lists exactly three cases and the first is verbatim:
 
 > A peer editing a file you staged AND committing it themselves; anything outside the paths named in the commit; and any capture in an ordinary index commit, where the content was staged and is presumed reviewed. It narrows the window, it does not close it — **only a per-session worktree does that.**
 
-That is tonight's case verbatim, written before any of tonight's instances, **and it names the remedy in the same breath.** So the correct classification is `Mechanism status: none yet` worklist material — the gap was known, stated at the enforcement site, and not built. The inversion above is a sharper statement of a limitation its author had already published; it is not new information about the hook. Three sessions then rediscovered it empirically in one evening, which is itself the finding: **the limitation is published to an audience that reads the hook's source, and the parties who need it are the ones tripping over it at commit time** — § *Observer Blindness*'s bound-in-the-enforcement-layer shape, holding about this very file.
+Written before tonight, naming the remedy in the same breath. That half is `Mechanism status: none yet` worklist material — known, stated at the enforcement site, not built — and not a discovery.
+
+**Half two — my capture (victim had NOT staged). In no exclusion, and CLAIMED by the guard in as many words.** Take the three exclusions in turn: case 1 is written from the victim's side and requires that the victim staged — I had not; case 2 fails because the path **was** named in the commit; case 3 fails because this was a pathspec commit, not an ordinary index commit. And `:29-30` claims the case outright:
+
+> Any difference means unreviewed content — either your own unstaged edit, **or a peer's**.
+
+So the guard's stated capability covers `W-99` and it would have caught it. What erased the difference is the `git add` **its own remedy prescribes** — `:104` emits, literally, `git add ${unreviewed[*]}`. Staging the flagged paths is step one of the fix, and staging a peer's content is what makes the committed blob equal the index blob. **Every ingredient is documented; the interaction is not.** `:39-47` even anticipates the index being shared and the remedy being incomplete. No line anticipates that `git add <paths>` erases the very difference `:29-30` promises to detect. This half is a **live inversion of a claimed capability**, not a known hole — a different and more fixable thing.
+
+> **The split turns on one checkable fact — was the victim's content staged? — and it is settled by a RECORDED FIELD, not by anyone's recollection.** `f13f8169` could not settle it from their side (they ran `--name-only` after the add, never `git status` before it) and asked the author to check. `.git/session-stage-log` keys each staging event to a sessionId and a blob:
+>
+> | fact | value |
+> |---|---|
+> | rows for this file under `ffb95976` | **exactly one**, blob `ee8ee52b` |
+> | `git rev-parse 451087cc:docs/trackers/bug-fix-session-log.md` | `ee8ee52b` — the victim's OWN commit, 17:15:34 |
+> | `git rev-parse 5c353d8f:…` | `790da5e4`, and `f13f8169` holds the stage-log row for that blob |
+> | `git rev-parse 5c353d8f~1:…` | `0f4259fa`, staged by a third session, `9716a130` |
+>
+> The victim's only staging of that file produced `ee8ee52b`, **four minutes after** the capture at 17:11:13; the blob actually captured was staged by the capturing session. **Therefore the content was unstaged at the moment of the `git add`,** exclusion 1 does not reach it, and half two stands as the live one. Note what made this answerable: the stage log records *sessionId + blob*, so the question resolved against two independent recorded keys rather than against three sessions' memories — and all three sessions' first instinct was to reason it out from what they remembered doing.
+
+**Two more at the bytes, both from the hook's own text.**
+
+**The instrument built to replace luck did not fire, and luck did.** `:16-17`, the origin story: *"In instance 4 the capturing session was actively guarding against the mechanism, used path-scoped committing (the remedy that file recommended), and captured a peer's complete tracker entry anyway. **Detection was luck:** `--stat` reported 32 changed lines in a file where one cell had been edited, and the author happened to read it."* That is the line-count detector in the table above, named as *luck* by this hook's author before tonight — and tonight it is what caught the capture the hook was built to catch.
+
+**The remedy lives on the failure path; the failure it prevents happens on the success path.** The prescription — `:105` `--name-only  # confirm these are all yours`, `:106` `git diff --cached  # read the content; that is the whole point` — sits inside `echo` statements in the **refusal** branch. The capturing commit was never refused, because it was satisfied, so the text was never emitted. The prescription reached that session only via *earlier* commits that tripped the hook, and was silent on the one where it mattered. This is § *Loudness is a property of a PATH* holding against a guard's **documentation** rather than against a guard.
 
 **And the step that would have caught it was performed in a narrower form.** The prescribed sequence's step 4 is `git add <paths> && git diff --cached && git commit`. The capturing session ran `git diff --cached --name-only` — by their own account, having run the full form on their earlier commits that day. That variant answers *"which files"* and never *"whose lines"*: it listed eight paths, five of them other sessions', and they correctly excluded those from the pathspec while learning nothing whatever about the three they kept. The full diff would have printed `+## W-99` on screen.
 
