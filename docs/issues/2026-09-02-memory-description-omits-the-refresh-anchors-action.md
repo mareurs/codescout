@@ -172,6 +172,26 @@ patch-id `2ae27c8a135edae59191b0b840b90956bb97ca6d`. The SHA is positional and d
 `experiments` is rebased; the patch-id is a content hash of the diff and survives rebase
 and cherry-pick. Both recorded here once — there is no promotion path to check.
 
+> **CORRECTED 2026-09-02 — this file IS committed, at `62d7fa4b`. The block below is
+> superseded and kept for its reasoning.** It was true when written and was falsified
+> inside the hour by a peer session's `git commit -- <paths>`, which takes **worktree**
+> content for the paths it names and so swept this file and its sibling into a commit
+> about neither. Measured in a throwaway repo rather than assumed: stage a `v2`,
+> overwrite the worktree with `v3`, `git commit -- f.txt`, and `v3` is what lands while
+> `v2` survives only as an unreachable blob (`git fsck --unreachable`, prunable by `gc`).
+> Nothing was lost here — both fix records arrived byte-intact — and the authorship
+> record is wrong, which `CLAUDE.md` repairs by reporting rather than amending, because
+> on a shared tree the repair destroys work the defect only mislabels.
+>
+> Kept rather than deleted because the reasoning is the record, and because a bug file
+> tagged `cluster/doc-contradicted-by-code` carrying a paragraph **its own commit
+> falsified** is this class holding about itself. The mechanism is the class's exactly:
+> a true-when-written claim, decayed by a change nothing related it to, with no check
+> reading one against the other. The gate this file's fix ships closes the tool-surface
+> instance of that shape; it does not reach prose like this, and nothing does.
+>
+> ~~Superseded text follows.~~
+
 > **This FILE is not in that commit — only the code fix it describes is.** It was
 > untracked and carries `cluster/doc-contradicted-by-code`, so staging it moved that class
 > from 11 to 12 while `docs/trackers/issue-clusters.md`, which publishes the count, holds
