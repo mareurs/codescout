@@ -2466,6 +2466,12 @@ mod tests {
 
     /// The raised cap is a property of multi-action dispatchers, not a convenience.
     /// Pin the set so a third tool cannot raise its own cap without appearing here.
+    ///
+    /// Gated on `librarian` because `artifact` and `librarian` are only registered with the
+    /// feature on: under `--no-default-features` neither tool exists, so `raised` is empty and
+    /// the assert reads as a regression in the registry rather than as a build config in which
+    /// the two tools are correctly absent.
+    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn only_the_two_dispatchers_raise_the_description_cap() {
         let (_dir, server) = make_server().await;
