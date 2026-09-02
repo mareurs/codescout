@@ -268,6 +268,19 @@ symbol across sessions on a shared repo, name the branch.** On a checkout with l
 is not pedantry: it is the same shape as everything else on this page, a claim true inside a
 boundary and published without it.
 
+**And a LINE NUMBER is scoped harder than a symbol name.** A symbol survives until someone renames
+it; a line number dies to any insertion above it — including one in a different function, by a
+different session, in the same hour. So `path:line` across sessions needs the branch *and* is
+short-lived even with it. Prefer citing the symbol and letting `symbols` / `get_guide` find the
+line, which is what those tools are for.
+
+Measured twice in one conversation, on one file. `fn input_schema` sits at
+`src/tools/core/types.rs:714` on `experiments` and `:726` on `tool-collapse` — a delta of **exactly
+12**, verified in both trees, being the doc comment plus body one task added *above* it. The drift
+was produced by the very commit whose value was being described at the time, so neither citation was
+careless and both were right. That is the tell for this whole family: when two parties disagree
+about a fact and both verified it, the disagreement is about scope, not about the fact.
+
 **Three doubts raised in that run all confirmed, and they are recorded because confirmations are
 the denominator this page's recording-filter law asks for.** None is a catch; absorbing them as
 catches is what makes a population look self-correcting.
