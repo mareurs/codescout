@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 98
-entry_high_water_W: 95
+entry_high_water_W: 96
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -154,6 +154,7 @@ entry_high_water_W: 95
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-96 | 2026-09-02 | med | **`-z` and NUL-splitting travel together or neither travels.** Adding `-z` to a consumer that splits on *lines* turns a correct instrument into a wrong one, so *"harden it with `-z`"* is the specific regression to refuse when reviewing any path enumerator | A zero-byte file named `head.\naab0c4ef'"s` — newline plus both quote characters — appeared in the repo root minutes after two line-oriented hook parsers changed underneath this session (`689ceffb`). Both obvious moves were wrong. **The parser is fine:** `core.quotePath` defaults true, so `git diff --cached --raw` C-quotes the path onto ONE tab-delimited line and both hooks parse 2 rows for 2 staged files, field intact. **`-z` is the defect:** `git ls-files --others \| wc -l` → 2 (correct), `-z \| wc -l` → **1**, and `-z` + Python `.splitlines()` → the *right count* with *garbage rows*. No newline is needed to reach it — `core.quotePath` quotes any non-ASCII byte, so an em-dash in a bug-file slug counts correctly then cannot be opened (`git show :"…\342\200\224….md"` → rc=128). **Exposure today is 0** — nothing in `scripts/`, `tests/*.sh`, `.pre-commit-config.yaml` or `src/` pairs `-z` with a line splitter, and 0 tracked paths are C-quoted — so this is recorded as latent rather than live, with `_prime_index`'s `cat-file --batch` path left explicitly untested for want of a population. Subject expired mid-investigation: the file was gone ~6 min later and a `(none)` grep result was nearly read as a grep bug rather than a changed world; the finding survived only because it had already been reproduced in a throwaway repo the peers could not reach | validated |
 | W-95 | 2026-09-02 | high | **Before filing a bug against a tool this repo builds, compare the running binary's mtime to the commit time of the fix that would explain the finding** — `stat -c '%y' target/debug/codescout` against `git log -1 --format='%cd' <sha>`. Two commands, no build. `doctor` reported 5 files as `non_terminal_status_with_fix_anchor`; four were artifacts of a binary **141 seconds older than `36cb17ed`**, the commit that fixed exactly that misreading. The report was complete, self-consistent and reproducible on that binary — and wrong. Confirmed by rebuild: the same check now reports **0**, and the zero discriminates, because the fifth file's anchor genuinely is under `## Fix` and would still fire had its `unverified:` discharge (`dde26886`) not also worked. A mechanism, not a policy: the trigger is a category you already know you are in. |
 | W-94 | 2026-09-02 | high | **Get a claim checked by a peer whose SAMPLE differs** — different scope, different sample *time*, or different instrument; not a more careful reviewer, a differently-positioned one. Five errors in one ~5h session across seven co-located sessions, **none caught by its author**, two already committed: a stale compiler sample (`E0603` vs a peer's `E0425` on the same tree ~1min apart, no overlap), `F-97`, a committed-and-falsified count remedy, `F-98`, and a shared-blind-spot corroboration made **twice** — the second time 90 minutes after publishing the rule against it. Every correction came from the party who would have benefited from the error standing. The promotable form is **not** "get peer review" — that is a policy, and it failed against an author who had just written it down — but **state the scope and unit a claim was measured over**, so a reader can tell whether a second instrument is independent. |
 | W-93 | 2026-09-01 | high | A green fixture suite met real data and the correction was to the QUESTION, not the code — run the instrument against the corpus before believing its design, not merely before shipping it | `file-provenance.py` passed 34/34 fixtures, then answered its own motivating file with **fifteen** sessions, every one a genuine lifetime author. Not a bug: "who has ever written this?" is answerable and useless, while "this is dirty NOW and reds my build, is it mine?" is bounded by the path's last commit. No fixture could pose it — each had one write in an empty timeline, which is what a fixture author naturally writes. Three assertions in the same suite also passed VACUOUSLY, each differently: a marker matched its own fixture path name (`src/undated.rs`), a case was answered by an earlier section's write to the same path (`docs/new.md`), and a negative passed because its fixture source was out-of-tree and discarded before any logic ran | validated |
@@ -9769,6 +9770,56 @@ If the binary predates the fix, the finding is a **stale-instrument artifact**, 
 The 141-second margin is an accident of this session. The mechanism does not depend on it: any margin at all produces the same class of wrong report.
 
 **Rests on:** `F-97` (an instrument's result reported under another instrument's name) and `W-94` — this is the same family with the *time* axis rather than the scope axis, and unlike those it has a cheap standing check.
+
+## W-96 — `-z` and NUL-splitting travel together or neither travels — the hardening flag is the hazard
+
+**Valid:** dated 2026-09-02
+
+**Observed:** A zero-byte untracked file named `head.\naab0c4ef'"s` — a newline plus *both* quote
+characters, bytes `686561642e0a6161623063346566272273` — appeared in the repo root at 11:29:22,
+the signature of a `>` redirect firing at a target assembled from prose. Two hook scripts had just
+been changed underneath this session (`689ceffb`), and both parse staged paths line-oriented and
+tab-delimited. Filing against them was the obvious move.
+
+**It was wrong, and so was the obvious remedy.** Reproduced in a throwaway repo — never the shared
+index, which six sessions were using:
+
+- **The hooks are safe.** `core.quotePath` defaults to *true*, so git C-quotes such a path and
+  `git diff --cached --raw` emits it on ONE tab-delimited line. Both scripts' `awk -F'\t'` plus
+  `IFS=$'\t' read -r` parse **2 rows for 2 staged files, path intact**. The check can express the
+  failure it did not find — a broken parser yields 3 rows or a truncated field — so this is
+  evidence, not the silence a never-reached guard also produces.
+- **The hardening flag is the hazard.** On `git ls-files --others --exclude-standard`:
+  `| wc -l` → **2** (correct); `-z | wc -l` → **1** (wrong); `-z` piped to Python `.splitlines()` →
+  count **2**, the *right number* with the *wrong rows* (`head.` and `aab0c4ef'"s\0normal.txt\0`).
+  One `-z` input, two line-splitters, two different failures — one loud in the count, one silent in
+  the count and garbage in the contents. The un-hardened default is the safe one.
+- **No newline is required to reach this.** `core.quotePath` quotes any non-ASCII byte, so an
+  em-dash or an accent in a bug-file slug is enough: such a path is counted correctly and then
+  cannot be opened — `git show :"docs/issues/…\342\200\224….md"` → rc=128, `ambiguous argument`.
+
+**Exposure today is zero, and that is stated rather than implied.** Nothing in `scripts/`,
+`tests/*.sh`, `.pre-commit-config.yaml` or `src/` pairs `-z` with a line splitter, and
+`git ls-files | grep -c '^"'` is **0** tracked paths. Latent, not live. Deliberately *untested*:
+`_prime_index`'s `cat-file --batch` path (`scripts/pre-commit-ledger-counts.py:45`) — the empty
+population offered nothing to test it against, so it stays a thing to check, not a thing concluded.
+
+**The promotable rule:** `-z` and NUL-splitting travel together or neither travels. Adding `-z` to
+a consumer that splits on lines converts a correct instrument into a wrong one, which makes
+*"harden it with `-z`"* the specific regression to refuse in review of any path enumerator.
+
+**Counterfactual.** Both live moves were wrong without the repro: file a parser bug against
+`689ceffb`, whose parser is fine; or harden the enumerators with `-z`, which is the actual defect.
+Cost was one throwaway repo and no contact with the shared index.
+
+**And the subject expired mid-investigation** — the file was gone some six minutes later, cleaned
+up by whoever made it, and `git ls-files --others` correctly stopped reporting it. A grep of mine
+returned `(none)` and I nearly read that as a grep bug rather than a changed world. On a shared
+checkout a working-tree observation is a **sample, not a fact**; this finding survived only because
+it had already been reproduced somewhere the peers could not reach.
+
+This is `IC-6`'s no-escape half — a namespace whose tokens the enumerator cannot represent — with
+the twist that the documented hardening *inverts* the failure instead of removing it.
 
 ## Template for new entries
 
