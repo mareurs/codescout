@@ -321,6 +321,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
     // invisible (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     let mut total_embedded = 0usize;
+    // Fix (c) of docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+    // `None` until some target actually measures it, so "embeddings disabled"
+    // stays distinguishable from "measured, nothing missing". A count that
+    // reaches no observer is decoration, so it is surfaced in the response
+    // envelope below rather than only carried on `IndexReport`.
+    let mut total_vectorless: Option<usize> = None;
     // Embed failures are COLLECTED, not propagated. A bare `?` on the embed call
     // below escaped the `for abs_root in &targets` loop, so one transport error
     // meant every later target was never walked at all, the succeeded catalog
@@ -354,6 +360,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         total_updated += report.updated;
         total_removed += report.removed;
         total_unchanged += report.unchanged;
+        if let Some(n) = report.vectorless {
+            total_vectorless = Some(total_vectorless.unwrap_or(0) + n);
+        }
         all_unknown_ids.extend(report.unknown_ids);
 
         if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
@@ -466,6 +475,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "removed": total_removed,
         "unchanged": total_unchanged,
         "embedded": total_embedded,
+        "vectorless": total_vectorless,
+        "vectorless_note": match total_vectorless {
+            None => "not measured -- embeddings are disabled for this run".to_string(),
+            Some(0) => "every indexed artifact has a vector".to_string(),
+            Some(n) => format!(
+                "{n} artifact(s) under the indexed root(s) have NO searchable \
+                 representation, and no ORDINARY reindex will give them one: their \
+                 content is stamped as seen while unembedded, which is an ABSORBING \
+                 state. Escape it with librarian(action=\"reindex\", reembed=true). \
+                 docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md"
+            ),
+        },
         "embeddings_enabled": want_embeddings,
         "orphans_removed": orphan_removed,
         // Reported even when zero, and distinguishable from "nothing needed restoring" by
@@ -1155,6 +1176,118 @@ mod tests {
                 },
             ))
             .build()
+    }
+
+    /// **Fix (c) has to reach an OBSERVER, not merely exist on an `IndexReport`.**
+    /// A count nothing renders is exactly as informative as no count — which is
+    /// the state this replaces, where 53% of a corpus was invisible to semantic
+    /// search and no number anywhere said so.
+    ///
+    /// The absorbing state is INDUCED here by removing the chunk rows rather than
+    /// by racing the stamp/gate ordering, and that is deliberate: the bug file
+    /// records the ENTRY path as unestablished (`unverified: "The ENTRY path is
+    /// not established"`), while the resulting STATE — content stamped as seen, no
+    /// chunk rows, no requeue — is measured and exact. This asserts about the
+    /// half that is known.
+    ///
+    /// Both branches are covered, because `null` and a number are different
+    /// claims: a run with no embedder must say it did not measure, and must not
+    /// report `0`, which reads as a clean corpus.
+    #[tokio::test]
+    async fn a_reindex_reports_artifacts_it_can_never_embed() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        struct OkEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for OkEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+        fn rules() -> Vec<crate::librarian::classify::CompiledRule> {
+            crate::librarian::classify::load_rules("[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n")
+                .unwrap()
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("note.md"), "# Note\n\nbody\n").unwrap();
+
+        // No embedder — the run measured nothing, and must say that rather than 0.
+        let bare = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_rules(rules())
+            .build();
+        let v0 = call(&bare, json!({})).await.unwrap();
+        assert!(
+            v0["vectorless"].is_null(),
+            "a run with embeddings off measured nothing: {v0}"
+        );
+        assert!(v0["vectorless_note"]
+            .as_str()
+            .unwrap()
+            .contains("not measured"));
+
+        // With an embedder the artifact is queued, so its chunk rows exist.
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_rules(rules())
+            .with_embedding(Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(Arc::new(OkEmbedder)),
+            ))
+            .with_artifact_store(Arc::new(InMemoryArtifactStore::default()))
+            .build();
+        let v1 = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            v1["vectorless"].as_u64().unwrap(),
+            0,
+            "freshly queued and embedded: {v1}"
+        );
+        assert!(v1["vectorless_note"]
+            .as_str()
+            .unwrap()
+            .contains("every indexed artifact has a vector"));
+
+        // Induce the absorbing state: chunk rows gone, file content unchanged.
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn.execute("DELETE FROM artifact_chunk", []).unwrap();
+        }
+        let v2 = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            v2["unchanged"].as_u64().unwrap(),
+            1,
+            "the row is unchanged, which is exactly what traps it"
+        );
+        assert_eq!(
+            v2["embedded"].as_u64().unwrap(),
+            0,
+            "and nothing was re-queued"
+        );
+        assert_eq!(
+            v2["vectorless"].as_u64().unwrap(),
+            1,
+            "THE POINT: `unchanged: 1, embedded: 0` is also what a perfectly healthy \
+             no-op reindex reports. Only this field separates the two, and before it \
+             existed nothing did: {v2}"
+        );
+        assert!(
+            v2["vectorless_note"]
+                .as_str()
+                .unwrap()
+                .contains("reembed=true"),
+            "the note must name the ESCAPE, not only the condition: {}",
+            v2["vectorless_note"]
+        );
     }
 
     #[tokio::test]

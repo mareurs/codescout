@@ -16,6 +16,23 @@ pub struct IndexReport {
     pub unchanged: usize,
     pub removed: usize,
     pub embedded: usize,
+    /// Artifacts under the indexed root that want an embedding and have **no
+    /// chunk rows** — never queued for embedding, by any run. `None` means *not
+    /// measured* (embeddings are off), which is why this is not a bare `usize`:
+    /// `0` would otherwise read the same for a clean corpus and for a run that
+    /// never looked.
+    ///
+    /// Fix (c) of
+    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
+    /// The stamp/gate ordering in [`index_repo_sync`] can commit content as
+    /// "seen" while leaving it unembedded, and the resulting state is ABSORBING —
+    /// every later run computes `content_unchanged == true` and skips it. This
+    /// count is the only thing that makes a re-formed hole visible.
+    ///
+    /// It measures CHUNK ROWS rather than vectors on purpose; see the comment at
+    /// the query for why the vector table would false-alarm at 100% under an
+    /// external store, and for the neighbouring state it deliberately excludes.
+    pub vectorless: Option<usize>,
     pub unknown_ids: Vec<String>,
 }
 
@@ -383,6 +400,47 @@ pub fn index_repo_sync(
         }
     }
     report.removed = removed;
+
+    // FIX (c) of docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+    //
+    // 729 of codescout's 1373 artifacts were measured with no searchable
+    // representation of any kind — 53% of the corpus invisible to semantic
+    // search, with no error, no warning, and NO COUNT ANYWHERE reporting it.
+    // The stamp/gate ordering above (`:302` writes `file_sha256`, the branch
+    // seven lines later reads it) is what puts an artifact there; this is what
+    // makes the state observable, and it is the half that must ship whichever
+    // reorder lands, because a repair without it leaves the next occurrence as
+    // unreconstructable as this one was.
+    //
+    // `Option`, not a bare count, and the distinction is the whole point: `0`
+    // would read identically for "measured, no hole" and "embeddings are off so
+    // everything is vectorless and the number is noise". Same reasoning as
+    // `embedded` in reindex.rs, which exists because `unchanged: N` could not
+    // distinguish work-not-needed from work-skipped-by-mistake.
+    // `artifact_chunk`, NOT the vector table, and that choice is load-bearing.
+    // `embed_queue_items` writes an artifact's chunk rows as a side effect of
+    // QUEUEING it, so "has no chunk rows" means "was never queued" — which is the
+    // absorbing state's exact signature, and is true whichever backend the vector
+    // later lands in. Counting `artifact_vec_v2` instead would report EVERY
+    // artifact as vectorless whenever an external store is configured, because
+    // `index_repo` writes to `store.upsert` and leaves that table empty: a false
+    // alarm at 100%, which is worse than the silence it replaces.
+    //
+    // Deliberately NOT detected here: chunks present but the vector write failed.
+    // That is a different state — recoverable, non-absorbing — and `reindex`
+    // already reports it through `embed_errors` / `embed_note`.
+    if want_embeddings {
+        let vectorless: i64 = cat.conn.query_row(
+            "SELECT COUNT(*) FROM artifact a \
+             WHERE a.abs_path LIKE ?1 \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
+               )",
+            rusqlite::params![format!("{root_prefix}%")],
+            |r| r.get(0),
+        )?;
+        report.vectorless = Some(vectorless.max(0) as usize);
+    }
 
     Ok((report, embed_queue))
 }
@@ -914,6 +972,81 @@ kind = "memory"
         assert_eq!(
             without_slug, 0,
             "every row the walk touched must have a slug minted, not left for a manual backfill"
+        );
+    }
+
+    /// **The absorbing state, reproduced end to end and then COUNTED.**
+    ///
+    /// Run 1 indexes with embeddings OFF: `file_sha256` is stamped and no vector
+    /// is written. Run 2 turns embeddings ON — and the artifact is now
+    /// `content_unchanged`, so the unchanged-row early return skips the embed
+    /// (its branch is gated on `force_embed`, which every automatic caller passes
+    /// as `false`). Nothing errors, nothing warns, and no ordinary reindex will
+    /// ever give this artifact a vector.
+    ///
+    /// That is the trap in
+    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`,
+    /// entered through its first candidate path — a run with no embedder. Before
+    /// fix (c) the only difference between this catalog and a healthy one was
+    /// INVISIBLE: both report `unchanged: 1`, both report no error.
+    ///
+    /// LOAD-BEARING that run 1 asserts `None` and not `Some(0)`. A run with
+    /// embeddings off has measured nothing, and a bare `usize` would report `0` —
+    /// indistinguishable from a clean corpus, which is the exact confusion this
+    /// field exists to prevent.
+    #[test]
+    fn an_artifact_stamped_without_a_vector_is_counted_rather_than_silent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = load_rules("[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n").unwrap();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("note.md"), "# Note\n\nbody\n").unwrap();
+
+        // Run 1 — embeddings off. Stamps the content, writes no vector.
+        let (r1, q1) =
+            index_repo_sync(&cat, &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        assert_eq!(r1.added, 1);
+        assert!(q1.is_empty(), "embeddings off must queue nothing");
+        assert_eq!(
+            r1.vectorless, None,
+            "a run that did not want embeddings measured nothing, and must not report \
+             a number that reads as a clean corpus"
+        );
+
+        // Run 2 — embeddings on. The row is unchanged, so the early return skips
+        // the embed and the artifact is now permanently unembeddable.
+        let (r2, q2) =
+            index_repo_sync(&cat, &rules, tmp.path(), &ignore, true, false, false).unwrap();
+        assert_eq!(r2.unchanged, 1);
+        assert!(
+            q2.is_empty(),
+            "this IS the trap: unchanged content is not queued, so the artifact stays \
+             vectorless and nothing says so"
+        );
+        assert_eq!(
+            r2.vectorless,
+            Some(1),
+            "the hole must be counted — it is the only observable difference between \
+             this catalog and a healthy one"
+        );
+
+        // Run 3 — the documented escape hatch (`reembed=true` sets `force_embed`)
+        // queues the trapped artifact, which is what makes the count actionable
+        // rather than merely alarming.
+        let (r3, q3) =
+            index_repo_sync(&cat, &rules, tmp.path(), &ignore, true, false, true).unwrap();
+        assert!(
+            !q3.is_empty(),
+            "force_embed must queue the trapped artifact"
+        );
+        assert_eq!(
+            r3.vectorless,
+            Some(0),
+            "queueing IS the escape, and the count says so: `embed_queue_items` writes \
+             the chunk rows, so the artifact has left the absorbing state. Whether the \
+             vector then lands is a separate, RECOVERABLE failure that `reindex` \
+             reports through `embed_errors` — conflating the two would make a \
+             transient embedder outage look permanent."
         );
     }
 
