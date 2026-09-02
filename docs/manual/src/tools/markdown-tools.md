@@ -1,9 +1,16 @@
-# Markdown Tools: read_file (heading-addressed) & edit_markdown
+# Markdown Tools: read_file (heading-addressed) & edit_file (heading grammar)
 
 `read_file` is heading-addressed by default on markdown paths, and
-`edit_markdown` edits by heading too. Together they replace the need to
-read raw line ranges or construct fragile string replacements against
-unstructured text.
+`edit_file` edits by heading too, on the same paths. Together they replace
+the need to read raw line ranges or construct fragile string replacements
+against unstructured text.
+
+> `edit_markdown` was a standalone tool through v0.11+; it was folded into
+> `edit_file` (Task 8) — `heading`/`action`/`content`/`frontmatter` on
+> `edit_file` now trigger the same heading-addressed logic that
+> `edit_markdown` used to. Plain `old_string`/`new_string` text edits on
+> `.md` files go through `edit_file`'s ordinary text-edit path, exactly as
+> on any other file.
 
 ---
 
@@ -39,11 +46,13 @@ read it first so you know which headings exist before targeting one.
 
 ---
 
-## edit_markdown
+## edit_file — heading grammar
 
 Edit a Markdown document section by heading. Heading matching is **fuzzy** —
 `## Auth` matches `## Authentication` — so you don't need to quote headings
-exactly.
+exactly. This grammar activates automatically on a `.md`/`.markdown` path
+whenever `heading`, `action`, `frontmatter`, or a heading-addressed `edits[]`
+item is present in the call.
 
 ### Actions
 
@@ -72,20 +81,20 @@ exactly.
 
 ```
 // Replace a section body
-edit_markdown("docs/guide.md",
+edit_file("docs/guide.md",
   heading="## Configuration",
   action="replace",
   content="See project.toml for all options.\n")
 
 // Surgical fix inside a section
-edit_markdown("docs/guide.md",
+edit_file("docs/guide.md",
   heading="## Auth",
   action="edit",
   old_string="secret_key = \"\"",
   new_string="secret_key = \"<your-key>\"")
 
 // Batch: two edits in one atomic call
-edit_markdown("docs/guide.md",
+edit_file("docs/guide.md",
   edits=[
     { heading: "## Usage", action: "replace", content: "..." },
     { heading: "## License", action: "remove" }
@@ -96,7 +105,9 @@ edit_markdown("docs/guide.md",
 
 Pass an `edits` array instead of `heading`/`action` to apply multiple operations
 atomically. All edits are validated before any are applied — if one heading is
-missing, nothing changes.
+missing, nothing changes. A single `edits[]` call may not mix heading-addressed
+items (`heading`+`action`) with plain items (`old_string`+`new_string`) — pick
+one grammar per call.
 
 ---
 
@@ -114,14 +125,14 @@ sub-section). Pass `at` to disambiguate:
 
 ```text
 // Add a new H3 inside an existing H2 section
-edit_markdown("docs/guide.md",
+edit_file("docs/guide.md",
   heading="## Configuration",
   action="insert_after",
   content="\n### Environment Variables\n\n...\n",
   at="end-of-section")
 
 // Add a top-of-page note right under a wrapping H1
-edit_markdown("docs/guide.md",
+edit_file("docs/guide.md",
   heading="# Guide",
   action="insert_after",
   content="\n> Note: requires v0.5+.\n",
@@ -146,7 +157,7 @@ At least one of `set` / `delete` must be non-empty.
 
 ```text
 // Close a bug file: flip status, set closed date, drop a legacy field
-edit_markdown("docs/issues/2026-05-18-foo.md",
+edit_file("docs/issues/2026-05-18-foo.md",
   edits=[
     { heading: "## Fix", action: "replace", content: "Shipped in abc1234.\n" }
   ],
@@ -169,14 +180,15 @@ prepend one; `delete` is a no-op.
 - If the file starts with `---` but the closing delimiter is missing, the
   mutator refuses to guess and returns a "frontmatter is malformed" error.
 
-## Why Not edit_file?
+## Heading Grammar vs Plain Text Edits
 
-`edit_file` works on raw strings and requires exact whitespace/newline matching.
-For Markdown, heading-scoped edits are both safer and more resilient:
+`edit_file` on a `.md` path picks its grammar per call, based on which
+params are present — there is no separate tool to choose:
 
-| Scenario | edit_file | edit_markdown |
+| Scenario | Plain text edit (`old_string`/`new_string`) | Heading grammar (`heading`+`action`) |
 |---|---|---|
 | Replace a section body | Error-prone: must match surrounding blank lines exactly | `action=replace` — heading preserved automatically |
 | Edit text inside a section | Works, but edits anywhere in the file | `action=edit` scoped to one section |
 | Remove a section | Must know exact start/end lines | `action=remove` — no line numbers needed |
 | Multiple edits | Multiple calls, each can conflict | `edits=[]` batch — atomic |
+| One-line literal fix, no section ambiguity | Simplest — no `heading` needed | Also works, but adds no value here |

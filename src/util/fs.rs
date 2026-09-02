@@ -64,7 +64,7 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 /// Measured 2026-08-31 from `git ls-files`: **7** groups of tracked files in this repo share
 /// a stem, including `Cargo.toml`/`Cargo.lock`, five `.env.*` variants, and
 /// `src/prompts/source.md`/`source.rs` — the last a prompt surface with three consumers that
-/// must stay consistent, written through `edit_markdown` and `edit_code`, both of which route
+/// must stay consistent, written through `edit_file` and `edit_code`, both of which route
 /// here.
 /// `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
 ///
@@ -481,7 +481,7 @@ mod tests {
     /// with invented names would leave the test passing while it stopped describing anything.
     /// `source.md`/`source.rs` is the pair that sets the severity: `CLAUDE.md` § *Prompt
     /// Surface Consistency* makes `source.md` a load-bearing surface with three consumers that
-    /// must stay consistent, and `edit_markdown` and `edit_code` both route through
+    /// must stay consistent, and `edit_file` and `edit_code` both route through
     /// `atomic_write`. The extensionless group is here because it was **not** anticipated when
     /// the bug was filed; drop it and a fix that special-cases only dotted filenames still
     /// passes this test.

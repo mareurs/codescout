@@ -12,7 +12,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::LspManager;
-use codescout::tools::markdown::EditMarkdown;
+use codescout::tools::edit_file::EditFile;
 use codescout::tools::output_buffer::OutputBuffer;
 use codescout::tools::symbol::EditCode;
 use codescout::tools::{Tool, ToolContext};
@@ -656,7 +656,7 @@ even more
 ";
     let (dir, ctx) = project_with_files(&[("plan.md", plan)]).await;
 
-    let err = EditMarkdown
+    let err = EditFile
         .call(
             json!({
                 "path": "plan.md",
@@ -698,7 +698,7 @@ work
 ";
     let (dir, ctx) = project_with_files(&[("plan.md", plan)]).await;
 
-    EditMarkdown
+    EditFile
         .call(
             json!({
                 "path": "plan.md",

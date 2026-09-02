@@ -57,7 +57,7 @@ impl crate::util::librarian_guard::AugmentedArtifactOracle for CatalogAugmentati
         let id = crate::librarian::ids::artifact_id_from_abs(&abs);
         // Plain `lock()` is safe here despite `parking_lot::Mutex` being
         // non-reentrant: the guard is only ever called from the core markdown
-        // tools (`read_file`, `edit_markdown`, `edit_file`), none of which
+        // tools (`read_file`, `edit_file`), none of which
         // hold the catalog lock — no librarian tool calls the guard.
         let cat = self.catalog.lock();
         matches!(
@@ -108,7 +108,7 @@ impl crate::util::librarian_sync::CatalogFrontmatterSync for CatalogFrontmatterS
         let cat = self.catalog.lock();
 
         // NEVER create a row. A path the catalog does not know is ordinary markdown, and
-        // inventing an artifact for it would turn every `edit_markdown` on a stray `.md`
+        // inventing an artifact for it would turn every `edit_file` on a stray `.md`
         // into a catalog write. `false` here is the normal answer, not a failure.
         let Ok(Some(row)) = crate::librarian::catalog::artifact::get(&cat, &id) else {
             return false;
@@ -1819,7 +1819,7 @@ mod tests {
     }
 
     /// The one way this hook could do real damage: inventing an artifact for ordinary
-    /// markdown. `edit_markdown` runs on plenty of files the catalog has never heard of,
+    /// markdown. `edit_file` runs on plenty of files the catalog has never heard of,
     /// and every one of them reaches this code.
     #[test]
     fn sync_frontmatter_never_creates_a_row_for_an_uncatalogued_file() {
@@ -1846,7 +1846,7 @@ mod tests {
             crate::librarian::catalog::artifact::get(&catalog.lock(), &id)
                 .unwrap()
                 .is_none(),
-            "and must NOT have created one — turning every edit_markdown on a stray .md \
+            "and must NOT have created one — turning every edit_file on a stray .md \
              into a catalog write is the one unrecoverable failure available here"
         );
     }

@@ -1,7 +1,7 @@
 //! Keep a catalog row in step with a direct frontmatter write.
 //!
-//! `edit_markdown(path, frontmatter={set: {status: "fixed"}})` — the call
-//! `get_guide("tracker-conventions")` and `edit_markdown`'s own `long_docs` row 3d both
+//! `edit_file(path, frontmatter={set: {status: "fixed"}})` — the call
+//! `get_guide("tracker-conventions")` and `edit_file`'s own `long_docs` row 3d both
 //! recommend for flipping a bug's status — writes the file and never touches the catalog.
 //! The row keeps its pre-edit `status` indefinitely, so
 //! `doc(find, kind="bug", status=…)`, the triage query CLAUDE.md and the activation
@@ -18,7 +18,7 @@
 //!
 //! ## Why a hook rather than a call
 //!
-//! `edit_markdown` is a core tool; the catalog lives behind `#[cfg(feature = "librarian")]`.
+//! `edit_file` is a core tool; the catalog lives behind `#[cfg(feature = "librarian")]`.
 //! A direct call would compile here and fail CI's `--no-default-features` lane, which is the
 //! failure mode `CLAUDE.md` names explicitly. So this mirrors
 //! [`super::librarian_guard`]'s oracle: a trait, a process-wide slot the librarian runtime
@@ -30,7 +30,7 @@
 ///
 /// Implemented by the librarian runtime. **Must never create a row**: a path with no
 /// catalog entry is ordinary markdown, and inventing an artifact for it would turn every
-/// `edit_markdown` on a stray `.md` into a catalog write.
+/// `edit_file` on a stray `.md` into a catalog write.
 pub trait CatalogFrontmatterSync: Send + Sync {
     /// Re-read `abs_path`'s frontmatter and update the indexed columns of its existing
     /// row. Returns `true` if a row was found and updated, `false` if the path is not in

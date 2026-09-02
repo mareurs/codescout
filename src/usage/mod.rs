@@ -348,7 +348,7 @@ mod content_tests {
 
     /// `file_path` and `rel_path` are documented ALIASES of `path` on the tools that
     /// accept them (`read_file`, `edit_file`, `grep`, `create_file`, `read_markdown`,
-    /// `edit_markdown`, and `artifact`'s `rel_path`). Extracting only `path` means a call
+    /// and `artifact`'s `rel_path`). Extracting only `path` means a call
     /// that spelled it the other way records no target at all.
     ///
     /// Measured 2026-08-20 on this project's own `usage.db`: **51 error rows carried

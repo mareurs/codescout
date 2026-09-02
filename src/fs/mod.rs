@@ -262,15 +262,15 @@ pub(crate) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
 }
 
 /// Return a `RecoverableError` if the path looks like a markdown file,
-/// directing the caller to `edit_markdown` instead (reads go through `read_file`,
-/// which is heading-addressed by default on markdown paths).
+/// directing the caller to `edit_file`'s heading grammar instead (reads go through
+/// `read_file`, which is heading-addressed by default on markdown paths).
 pub(crate) fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
             return Err(RecoverableError::with_hint(
                 "symbol tools do not support markdown files",
-                "Use edit_markdown(path, heading, action, content) for section-level edits, \
-                 or edit_file for literal string replacements in markdown.",
+                "Use edit_file(path, heading, action, content) for section-level edits, \
+                 or plain old_string/new_string for literal string replacements in markdown.",
             )
             .into());
         }

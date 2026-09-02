@@ -1985,8 +1985,8 @@ async fn a_real_edit_file_write_under_dot_claude_delivers_op_4() {
     let ctx = rooted_ctx(&root).await;
 
     // Negative control, FIRST — see the doc comment on why the order is load-bearing.
-    // Not a `.md` file: IL-5 routes markdown to `edit_markdown`, and the refusal would
-    // fail this control for a reason unrelated to the predicate under test.
+    // Not a `.md` file: IL-5 routes markdown to `edit_file`'s heading grammar, and the
+    // refusal would fail this control for a reason unrelated to the predicate under test.
     let outside = root.join("notes.toml");
     std::fs::write(&outside, "alpha = 1\n").unwrap();
     let control = crate::tools::edit_file::EditFile

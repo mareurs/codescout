@@ -1,4 +1,4 @@
-//! Wiring proof for `open-issue-work-queue:BL-48`: `edit_markdown` must hand a
+//! Wiring proof for `open-issue-work-queue:BL-48`: `edit_file`'s markdown grammar must hand a
 //! frontmatter write to the catalog-sync hook, and must not bother it for a body edit.
 //!
 //! ## Why this lives in `tests/` and not beside the code
@@ -24,6 +24,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::LspManager;
+use codescout::tools::edit_file::EditFile;
 use codescout::tools::{Tool, ToolContext};
 use codescout::util::librarian_sync::{install_catalog_sync, CatalogFrontmatterSync};
 use serde_json::json;
@@ -91,7 +92,7 @@ async fn edit_markdown_syncs_the_catalog_on_a_frontmatter_write_and_not_on_a_bod
     )
     .unwrap();
 
-    codescout::tools::markdown::EditMarkdown
+    EditFile
         .call(
             json!({ "path": "bug.md", "frontmatter": { "set": { "status": "fixed" } } }),
             &ctx,
@@ -115,7 +116,7 @@ async fn edit_markdown_syncs_the_catalog_on_a_frontmatter_write_and_not_on_a_bod
     )
     .unwrap();
 
-    codescout::tools::markdown::EditMarkdown
+    EditFile
         .call(
             json!({
                 "path": "notes.md",

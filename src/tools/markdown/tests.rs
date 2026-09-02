@@ -126,22 +126,21 @@ async fn project_ctx() -> (tempfile::TempDir, crate::tools::ToolContext) {
 #[tokio::test]
 async fn edit_markdown_outside_project_returns_pending_ack() {
     let (_dir, ctx) = project_ctx().await;
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": "/var/outside_ce_md/notes.md",
-                "heading": "## Notes",
-                "action": "replace",
-                "content": "new body"
-            }),
-            &ctx,
-        )
-        .await
-        .expect("out-of-scope edit should return Ok(pending_ack)");
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": "/var/outside_ce_md/notes.md",
+            "heading": "## Notes",
+            "action": "replace",
+            "content": "new body"
+        }),
+        &ctx,
+    )
+    .await
+    .expect("out-of-scope edit should return Ok(pending_ack)");
     let handle = result["pending_ack"].as_str().expect("pending_ack handle");
     assert!(handle.starts_with("@ack_"), "got: {result}");
     let stored = ctx.output_buffer.get_pending_write(handle).unwrap();
-    assert_eq!(stored.tool_name, "edit_markdown");
+    assert_eq!(stored.tool_name, "edit_file");
     assert_eq!(stored.input["content"], json!("new body"));
 }
 
@@ -164,17 +163,16 @@ async fn edit_markdown_accepts_file_path_alias() {
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "# Title\n\nold body\n").unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "file_path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "replace",
-                "content": "new body"
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "file_path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "replace",
+            "content": "new body"
+        }),
+        &ctx,
+    )
+    .await;
     assert!(
         result.is_ok(),
         "edit_markdown via file_path alias: {result:?}"
@@ -202,18 +200,17 @@ async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_n
     let original = "# Title\n\nkeep this sentence\n";
     std::fs::write(&file, original).unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "edit",
-                "old_string": "keep this sentence",
-                "content": "replaced sentence",
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "edit",
+            "old_string": "keep this sentence",
+            "content": "replaced sentence",
+        }),
+        &ctx,
+    )
+    .await;
 
     let msg = format!("{result:?}");
     assert!(
@@ -243,17 +240,16 @@ async fn edit_action_without_any_replacement_key_is_refused() {
     let original = "# Title\n\nkeep this sentence\n";
     std::fs::write(&file, original).unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "edit",
-                "old_string": "keep this sentence",
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "edit",
+            "old_string": "keep this sentence",
+        }),
+        &ctx,
+    )
+    .await;
 
     let msg = format!("{result:?}");
     assert!(
@@ -282,18 +278,17 @@ async fn edit_action_with_explicit_empty_new_string_still_deletes() {
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "# Title\n\ndrop this. keep this.\n").unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "edit",
-                "old_string": "drop this. ",
-                "new_string": "",
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "edit",
+            "old_string": "drop this. ",
+            "new_string": "",
+        }),
+        &ctx,
+    )
+    .await;
     assert!(
         result.is_ok(),
         "explicit empty replacement must apply: {result:?}"
@@ -319,19 +314,18 @@ async fn edit_action_rejects_both_new_string_and_content() {
     let original = "# Title\n\nalpha\n";
     std::fs::write(&file, original).unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "edit",
-                "old_string": "alpha",
-                "new_string": "beta",
-                "content": "gamma",
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "edit",
+            "old_string": "alpha",
+            "new_string": "beta",
+            "content": "gamma",
+        }),
+        &ctx,
+    )
+    .await;
 
     let msg = format!("{result:?}");
     assert!(
@@ -373,17 +367,16 @@ async fn shrink_guard_blocks_a_line_truncation_that_keeps_the_bytes() {
          this proves nothing about lines"
     );
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "replace",
-                "content": truncated,
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "replace",
+            "content": truncated,
+        }),
+        &ctx,
+    )
+    .await;
 
     let msg = format!("{result:?}");
     assert!(
@@ -415,18 +408,17 @@ async fn shrink_guard_line_arm_yields_to_force() {
     let original = format!("# Title\n\n{}\n{}\n", fat.join("\n"), thin.join("\n"));
     std::fs::write(&file, &original).unwrap();
 
-    let result = super::edit_markdown::EditMarkdown
-        .call(
-            json!({
-                "path": file.to_str().unwrap(),
-                "heading": "# Title",
-                "action": "replace",
-                "content": fat.join("\n"),
-                "force": true,
-            }),
-            &ctx,
-        )
-        .await;
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "replace",
+            "content": fat.join("\n"),
+            "force": true,
+        }),
+        &ctx,
+    )
+    .await;
 
     assert!(result.is_ok(), "force must bypass the line arm: {result:?}");
     let after = std::fs::read_to_string(&file).unwrap();

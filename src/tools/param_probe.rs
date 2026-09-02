@@ -2,7 +2,7 @@
 //!
 //! **Why this lives under `src/tools/` rather than beside its first caller.** It was written in
 //! `src/librarian/tools/mod.rs`, which is `#[cfg(feature = "librarian")]`. Every consolidated tool
-//! outside that tree — `workspace`, `index`, `library`, `edit_markdown` — dispatches on a string
+//! outside that tree — `workspace`, `index`, `library`, `edit_file` — dispatches on a string
 //! `action` over a shared schema and is therefore exposed to `IC-15`, but none of them depends on
 //! the librarian feature. Reaching the probe from there would have meant gating a `workspace` test
 //! on `feature = "librarian"`, which makes the guard vanish from the lean lane
@@ -30,7 +30,8 @@
 //! `sweep` reads `desc.split(':').next()`, so a description written `For action='activate': …`
 //! yields the label `For action='activate'`, matches no action, and contributes nothing — the
 //! probe then reports success having checked zero keys. Measured 2026-09-02: `workspace`,
-//! `index`, `library` and `edit_markdown` all used that prose form, so wiring the probe to them
+//! `index`, `library` and `edit_markdown` (since folded into `edit_file`, Task 8) all used that
+//! prose form, so wiring the probe to them
 //! before relabelling would have been vacuous in the one direction `floor` cannot see per-key.
 //! `floor` catches the convention breaking wholesale; it cannot catch one key losing its label.
 //!

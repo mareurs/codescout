@@ -130,8 +130,8 @@ mod tests {
 
     #[tokio::test]
     async fn tool_guide_includes_markdown_editing_workflow() {
-        use crate::tools::markdown::EditMarkdown;
-        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EditMarkdown)];
+        use crate::tools::edit_file::EditFile;
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EditFile)];
         let p = ToolGuideProvider::new(tools);
         let bytes = p.read("doc://codescout-tool-guide").await.unwrap();
         match bytes {

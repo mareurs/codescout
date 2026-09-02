@@ -63,17 +63,17 @@ fn required_for(actions: &[&str]) -> String {
 /// the two cannot drift apart.
 const BODY_PARAM_HINT: &str = "Pass the code as body=\"...\" — for 'replace' the new \
      symbol body, for 'insert' the code to inject. `content` is accepted as an alias \
-     (that is edit_markdown's name for the same argument).";
+     (that is edit_file's name for the same argument).";
 
 /// Read the replacement code, accepting `content` as an alias for `body`.
 ///
-/// `edit_markdown` and `doc(update)` call this argument `content`, `edit_code`
+/// `edit_file`'s markdown grammar and `doc(update)` call this argument `content`, `edit_code`
 /// calls it `body`, and callers carry a whole call shape over from one to the other.
 /// The alias costs nothing and removes a round-trip from the find-then-edit path the
 /// Iron Laws prescribe. Canonical `body` wins if both are present, matching
 /// `require_str_param_or_hint`'s precedence.
 ///
-/// Unlike `edit_markdown`'s `action="edit"`, an absent value here is never silently
+/// Unlike `edit_file`'s `action="edit"`, an absent value here is never silently
 /// treated as empty — both call sites refuse. That asymmetry is deliberate: an empty
 /// replacement is meaningful for a scoped text swap and meaningless as a symbol body.
 /// docs/issues/archive/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
@@ -141,7 +141,7 @@ impl Tool for EditCode {
                     "description": format!(
                         "{} 'replace': the new symbol body. 'insert': the code to inject. \
                      Not read by 'rename' or 'remove'. Alias: `content` \
-                     (edit_markdown's name for the same argument) is accepted.",
+                     (edit_file's name for the same argument) is accepted.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
                 },

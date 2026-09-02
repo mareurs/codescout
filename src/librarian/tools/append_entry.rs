@@ -165,7 +165,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                      the branches merge — as one token with two definitions. If you \
                      cannot push right now (no network, no push access), do not write \
                      the entry by hand instead — a declared `entry_prefix` puts this \
-                     file off-limits to direct `edit_markdown`. Note the entry \
+                     file off-limits to direct `edit_file`. Note the entry \
                      somewhere worktree-local instead, and fold it into the ledger once \
                      these commits are pushed."
                         .to_string(),

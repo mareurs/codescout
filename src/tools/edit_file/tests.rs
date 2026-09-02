@@ -1933,9 +1933,11 @@ async fn edit_file_replace_all_on_markdown_passes_through() {
 }
 
 #[tokio::test]
-async fn edit_file_single_replace_on_markdown_still_gated() {
-    // Negation of the regression above: a single-occurrence edit (no replace_all)
-    // on .md must still route to edit_markdown.
+async fn edit_file_single_replace_on_markdown_no_longer_gated() {
+    // Since edit_markdown folded into edit_file (Task 8), plain old_string/new_string
+    // edits work uniformly regardless of extension and regardless of replace_all —
+    // only heading/action/frontmatter/heading-addressed edits[] trip the markdown
+    // redirect. This is the negation of the old gate this test used to assert.
     let (dir, ctx) = project_ctx().await;
     let md_file = dir.path().join("doc.md");
     std::fs::write(&md_file, "# Doc\n\nold-id\n").unwrap();
@@ -1951,9 +1953,97 @@ async fn edit_file_single_replace_on_markdown_still_gated() {
         )
         .await;
     assert!(
-        result.is_err(),
-        "edit_file without replace_all on .md should be gated: {:?}",
+        result.is_ok(),
+        "edit_file without replace_all on .md should no longer be gated: {:?}",
         result
+    );
+    let body = std::fs::read_to_string(&md_file).unwrap();
+    assert!(body.contains("new-id"), "edit should have applied: {body}");
+}
+/// The heading grammar is markdown-only, and this is the refusal that says so.
+///
+/// Added by the controller during Task 8 review: the fold introduced two new refusal
+/// branches in `EditFile::call` and shipped both with no test — their error strings
+/// appeared at exactly one site in the tree, the production one. That is the same shape as
+/// `docs/issues/2026-09-03-markdown-grammar-librarian-guard-has-zero-test-coverage.md`,
+/// filed from this very task: a branch nothing reaches is indistinguishable from a branch
+/// that does not work.
+///
+/// Asserts on `"markdown files only"` — a phrase this refusal OWNS. `"markdown"` alone
+/// would also match the librarian-guard hint and the retired `Use edit_markdown` gate, so
+/// it would keep passing if this branch were deleted and a different error surfaced.
+#[tokio::test]
+async fn heading_grammar_on_a_non_markdown_file_is_refused() {
+    let (dir, ctx) = project_ctx().await;
+    let rs_file = dir.path().join("m.rs");
+    std::fs::write(&rs_file, "fn a() {}\n").unwrap();
+
+    let err = EditFile
+        .call(
+            json!({
+                "path": rs_file.to_str().unwrap(),
+                "heading": "## A",
+                "action": "remove",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("heading grammar on a .rs file must be refused, not applied");
+
+    assert!(
+        err.to_string().contains("markdown files only"),
+        "the refusal must name the constraint it enforces, not merely fail: {err}"
+    );
+    // The file must be untouched. Without this, a refusal that fired AFTER a partial write
+    // would pass the assertion above — the error is evidence about the return value, never
+    // about the bytes on disk.
+    assert_eq!(
+        std::fs::read_to_string(&rs_file).unwrap(),
+        "fn a() {}\n",
+        "a refused call must not have written"
+    );
+}
+
+/// One grammar per batch. `edits[]` carries two incompatible item shapes — text items
+/// `{old_string, new_string}` and heading items `{heading, action}` — told apart by
+/// `heading` presence.
+///
+/// **`heading` presence is the only sound discriminator, and this test pins that.** A
+/// markdown item with `action: "edit"` legitimately carries `old_string`/`new_string` too,
+/// so a predicate keyed on `old_string` would classify a valid heading item as a text item
+/// and route the batch to the raw path — silently, since both shapes deserialize.
+#[tokio::test]
+async fn edit_file_refuses_a_batch_that_mixes_the_two_grammars() {
+    let (dir, ctx) = project_ctx().await;
+    let md_file = dir.path().join("n.md");
+    let before = "# T\n\n## A\nx\n";
+    std::fs::write(&md_file, before).unwrap();
+
+    let err = EditFile
+        .call(
+            json!({
+                "path": md_file.to_str().unwrap(),
+                "edits": [
+                    {"heading": "## A", "action": "replace", "content": "y"},
+                    {"old_string": "x", "new_string": "z"}
+                ],
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("a batch mixing both grammars must be refused, not partly applied");
+
+    assert!(
+        err.to_string().contains("mixes"),
+        "the refusal must name what is wrong with the batch: {err}"
+    );
+    // The atomicity claim, and the reason this refusal exists rather than a best-effort
+    // split: neither grammar may land. A batch that applied the heading item and then
+    // refused would leave the file in a state no caller asked for.
+    assert_eq!(
+        std::fs::read_to_string(&md_file).unwrap(),
+        before,
+        "a refused mixed batch must leave the file byte-identical"
     );
 }
 
@@ -2059,8 +2149,10 @@ async fn librarian_guard_fires_on_every_edit_file_write_path() {
 }
 
 #[tokio::test]
-async fn edit_file_batch_mixed_replace_all_on_markdown_still_gated() {
-    // Batch mode: gate must reject when any entry omits replace_all=true.
+async fn edit_file_batch_mixed_replace_all_on_markdown_no_longer_gated() {
+    // Since Task 8, batch text edits on .md are no longer gated on replace_all at
+    // all — only heading-addressed items trip the redirect. This is the negation
+    // of the old gate this test used to assert.
     let (dir, ctx) = project_ctx().await;
     let md_file = dir.path().join("doc.md");
     std::fs::write(&md_file, "alpha bravo\n").unwrap();
@@ -2078,10 +2170,12 @@ async fn edit_file_batch_mixed_replace_all_on_markdown_still_gated() {
         )
         .await;
     assert!(
-        result.is_err(),
-        "edit_file mixed batch (some replace_all=false) on .md should be gated: {:?}",
+        result.is_ok(),
+        "edit_file mixed batch (some replace_all=false) on .md should no longer be gated: {:?}",
         result
     );
+    let body = std::fs::read_to_string(&md_file).unwrap();
+    assert_eq!(body, "A B\n");
 }
 
 #[tokio::test]
@@ -4166,7 +4260,10 @@ async fn edit_file_passes_multiline_non_source() {
 }
 
 #[tokio::test]
-async fn edit_file_md_gate_blocks_non_insert() {
+async fn edit_file_md_gate_no_longer_blocks_non_insert() {
+    // Since Task 8, plain old_string/new_string on .md is no longer gated at all —
+    // only heading/action/frontmatter/heading-addressed edits[] trip the markdown
+    // redirect. This is the negation of the old gate this test used to assert.
     let (dir, ctx) = project_ctx().await;
     let md = dir.path().join("test.md");
     std::fs::write(&md, "# Title\ncontent\n").unwrap();
@@ -4182,11 +4279,15 @@ async fn edit_file_md_gate_blocks_non_insert() {
         )
         .await;
 
-    assert!(result.is_err(), "edit_file should gate .md files");
-    let err = result.unwrap_err();
     assert!(
-        err.to_string().contains("edit_markdown"),
-        "error should mention edit_markdown"
+        result.is_ok(),
+        "edit_file should no longer gate plain text edits on .md files: {:?}",
+        result
+    );
+    let body = std::fs::read_to_string(&md).unwrap();
+    assert!(
+        body.contains("new content"),
+        "edit should have applied: {body}"
     );
 }
 

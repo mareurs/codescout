@@ -236,7 +236,7 @@ mod tests {
             json!({ "path": ext.path().join("p").to_str().unwrap(), "content": "c" }),
             ext.path().to_path_buf(),
         );
-        let err = maybe_replay_ack(&ctx, json!({ "path": handle }), "edit_markdown")
+        let err = maybe_replay_ack(&ctx, json!({ "path": handle }), "edit_file")
             .await
             .unwrap_err()
             .to_string();

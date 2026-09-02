@@ -93,10 +93,16 @@ fn collect_rs(dir: &std::path::Path, out: &mut Vec<(PathBuf, String)>) {
 ///
 /// Measured 2026-09-01: `src/mcp_resources/tool_guide.rs` constructs `Arc::new(EditMarkdown)`
 /// and `Arc::new(SymbolAt)` inside exactly such a module, putting both types into the
-/// reachable set on the strength of test code. Both are genuinely registered today, so
-/// nothing was misreported — but the path is live, and it is the half of the scan that had
+/// reachable set on the strength of test code. Both were genuinely registered on that date,
+/// so nothing was misreported — but the path is live, and it is the half of the scan that had
 /// no discipline on it. `reachable_tool_types` guards its `.call(` side with the
 /// load-bearing `=>`; its `Arc::new(` side had no counterpart at all.
+///
+/// **`EditMarkdown` no longer exists** — Task 8 of the tool-surface collapse folded it into
+/// `edit_file`, and that call site now constructs `EditFile`. The measurement is kept in its
+/// 2026-09-01 tense rather than rewritten, because it is evidence about the SCAN, not about
+/// either type: the hazard it demonstrates is that a `#[cfg(test)]` block can confer
+/// reachability, and that is unchanged by which tool happens to sit in the example.
 ///
 /// **Both error directions are acceptable here and one is loud**, which is why brace
 /// matching suffices without a Rust parser. Over-deleting (a `{` inside a string or comment
@@ -404,13 +410,13 @@ fn the_inline_test_strip_is_not_filtering_an_empty_set() {
     let path = repo_root().join("src/mcp_resources/tool_guide.rs");
     let raw = std::fs::read_to_string(&path).expect("tool_guide.rs must exist");
     assert!(
-        raw.contains("#[cfg(test)]") && raw.contains("Arc::new(EditMarkdown)"),
+        raw.contains("#[cfg(test)]") && raw.contains("Arc::new(EditFile)"),
         "expected an inline #[cfg(test)] module constructing a real tool. If this moved, \
          find another occurrence rather than deleting the test — its job is to prove the \
          strip has something to strip."
     );
     assert!(
-        !strip_cfg_test_modules(&raw).contains("Arc::new(EditMarkdown)"),
+        !strip_cfg_test_modules(&raw).contains("Arc::new(EditFile)"),
         "the strip left a test-module construction behind"
     );
 }

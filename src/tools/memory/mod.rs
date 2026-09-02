@@ -152,7 +152,7 @@ fn shrink_guard_error(topic: &str, r: &crate::memory::ShrinkReport) -> Recoverab
         "memory(action=\"write\") REPLACES the topic wholesale — it does not append. \
          To add or change one section, read the topic first and write the whole document \
          back with your edit folded in, or edit the file under .codescout/memories/ with \
-         edit_markdown. If the shrinkage is intentional (a deliberate rewrite or prune), \
+         edit_file. If the shrinkage is intentional (a deliberate rewrite or prune), \
          re-call with force=true.",
     )
     .with_extra(

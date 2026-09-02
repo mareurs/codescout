@@ -93,8 +93,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     // The file's own `id:` now asserts an identity this move just invalidated.
     // Repair it here, in the same call, because nothing downstream can: every
-    // write path into a managed artifact refuses one (`edit_markdown` and
-    // `edit_file` both guard on the frontmatter id; `doc(update)`'s `extra`
+    // write path into a managed artifact refuses one (`edit_file`'s markdown and raw
+    // routes both guard on the frontmatter id; `doc(update)`'s `extra`
     // writes custom keys but never `id`), so a later repair pass has no route to
     // the file. BL-23.
     let content = repair_frontmatter_id(&new_full, &new_id)?;
@@ -183,7 +183,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// `frontmatter::rewrite_frontmatter_normalizing` would *insert* a block rather than
 /// skip — stamping an `id:` is exactly what subjects a file to the librarian guard, so
 /// archiving a prose tracker like `docs/trackers/skill-frictions.md` would quietly make
-/// `edit_markdown` refuse the workflow CLAUDE.md documents for it.
+/// `edit_file` refuse the workflow CLAUDE.md documents for it.
 ///
 /// A file carrying a value that is *not* a catalog id — `id: ADR-{NUMBER}` in a template,
 /// a hand-written slug — is the **same harm reached by a different route**, and the gate
@@ -414,8 +414,8 @@ mod tests {
     /// A move mints a new id, and the file's own `id:` keeps asserting the old one —
     /// which resolves to nothing. This has to be repaired **here**, in the same call
     /// as the graft, because by the time anyone notices, no write path can reach the
-    /// file: `edit_markdown` and `edit_file` both refuse a librarian-managed artifact,
-    /// and `doc(update)`'s `extra` writes custom keys but never `id`.
+    /// file: `edit_file`'s markdown and raw routes both refuse a librarian-managed
+    /// artifact, and `doc(update)`'s `extra` writes custom keys but never `id`.
     ///
     /// The `file_sha256` assertion is the load-bearing one. It fails if the rewrite
     /// happens after the hash is taken — the catalog would then record a digest of a
@@ -476,7 +476,7 @@ mod tests {
     /// so applying it unconditionally would stamp an `id:` onto files that never had
     /// one — and a stamped id is exactly what subjects a file to the librarian guard
     /// (BL-33). Archiving `docs/trackers/skill-frictions.md` would silently make it
-    /// unreachable by `edit_markdown`, the workflow CLAUDE.md documents for it.
+    /// unreachable by `edit_file`, the workflow CLAUDE.md documents for it.
     ///
     /// A file with no `id:` is not asserting anything false. Only a wrong id is repaired.
     #[tokio::test]

@@ -637,7 +637,6 @@ pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
     match tool_name {
         "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
-        | "edit_markdown"
             if !config.file_write_enabled =>
         {
             // State the cause when it is known. The hedged single message this
@@ -2540,7 +2539,7 @@ mod tests {
             ..PathSecurityConfig::default()
         };
         assert!(config.write_block.is_none(), "Default must not invent one");
-        let err = check_tool_access("edit_markdown", &config)
+        let err = check_tool_access("edit_file", &config)
             .expect_err("writes are off, this must refuse")
             .to_string();
         assert!(

@@ -368,10 +368,14 @@ impl Tool for EditFile {
     }
 
     fn description(&self) -> &str {
-        "Exact string replacement in a file. Whitespace-sensitive. \
-             Use insert: \"prepend\"/\"append\" for file boundaries. \
-             On a whitespace-only mismatch, retries a unique re-indented match in \
-             brace-style languages (exact-only for Python/YAML); 0 or 2+ matches error."
+        "Edit a file. Text: exact old_string/new_string (whitespace-sensitive; re-indent retry \
+             in brace languages), insert prepend/append, replace_all, or edits[] applied \
+             atomically. Markdown: heading-addressed section edits, edits[] of heading items, \
+             frontmatter {set, delete} — one atomic write."
+    }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(crate::tools::markdown::LONG_DOCS)
     }
 
     fn input_schema(&self) -> Value {
@@ -395,19 +399,57 @@ impl Tool for EditFile {
                 "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
                 "insert": { "type": "string", "enum": ["prepend", "append"], "description": "Insert at file start/end (old_string not required)." },
+                "heading": { "type": "string", "description": "Markdown only: target section heading (fuzzy matched). Required unless using edits[] batch mode." },
+                "occurrence": { "type": "integer", "minimum": 1, "description": "Markdown only: 1-indexed selector when `heading` matches several sections." },
+                "action": {
+                    "type": "string",
+                    "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
+                    "description": "Markdown only: operation to perform on the heading-addressed section. 'replace' OVERWRITES the entire body (heading preserved) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before'/'insert_after' add a sibling section (target body preserved). 'remove' deletes the target section. 'edit' performs scoped text replacement within the target section."
+                },
+                "content": { "type": "string", "description": "Markdown only: new content for replace/insert actions (body only — heading preserved on replace)." },
+                "at": {
+                    "type": "string",
+                    "enum": ["end-of-section", "after-heading-line"],
+                    "description": "Markdown only, for action='insert_after': where to insert. 'end-of-section' (default) or 'after-heading-line'."
+                },
+                "include_subsections": { "type": "boolean", "default": false, "description": "Markdown only, for action='replace': opt in to consuming nested sub-headings." },
+                "force": { "type": "boolean", "default": false, "description": "Markdown only: bypass the body-shrink guard. Required when the write would cut the file by >50% in bytes or lines." },
+                "frontmatter": {
+                    "type": "object",
+                    "description": "Markdown only: mutate the YAML frontmatter block at the start of the file. Flat keys only. Combinable atomically with `edits` or `heading`+`action` in the same call. Example: `{set: {status: \"fixed\"}, delete: [\"legacy_field\"]}`.",
+                    "properties": {
+                        "set": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "Key → value pairs to set. Existing keys are updated in place; new keys are appended."
+                        },
+                        "delete": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Keys to remove from the block. Missing keys are silently ignored (idempotent)."
+                        }
+                    }
+                },
                 "edits": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "old_string": { "type": "string" },
-                            "new_string": { "type": "string" },
-                            "replace_all": { "type": "boolean" }
+                            "old_string": { "type": "string", "description": "Text grammar: exact text to find." },
+                            "new_string": { "type": "string", "description": "Text grammar: replacement text." },
+                            "replace_all": { "type": "boolean" },
+                            "heading": { "type": "string", "description": "Markdown grammar: target section heading." },
+                            "occurrence": { "type": "integer", "minimum": 1 },
+                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"] },
+                            "content": { "type": "string" },
+                            "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
+                            "include_subsections": { "type": "boolean" }
                         },
-                        "required": ["old_string", "new_string"]
+                        "description": "Either the text grammar (old_string+new_string) or the markdown grammar (heading+action) — not mixed within one edits[] call."
                     },
-                    "description": "Batch mode: array of edit operations applied atomically. Top-level new_string not used."
+                    "description": "Batch mode: array of edit operations applied atomically. Top-level new_string not used. Every item must use the same grammar (text or markdown)."
                 }
+
             }
         })
     }
@@ -423,35 +465,39 @@ impl Tool for EditFile {
         )?;
         let new_string = input["new_string"].as_str().unwrap_or("");
 
-        // Gate: redirect .md files to edit_markdown (except prepend/append
-        // boundary inserts, and replace_all global swaps). The replace_all
-        // exception covers the "rename an ID / date / brand across the
-        // whole file" case where edit_markdown's heading-scoped editor
-        // adds friction without adding safety. Single non-replace_all
-        // edits and mixed-batch edits stay routed to edit_markdown.
-        if path.ends_with(".md") || path.ends_with(".markdown") {
-            let insert_mode = input["insert"].as_str();
-            let single_replace_all = input["replace_all"].as_bool().unwrap_or(false);
-            let batch_all_replace_all = input["edits"].as_array().and_then(|edits| {
-                if edits.is_empty() {
-                    None
-                } else {
-                    Some(
-                        edits
-                            .iter()
-                            .all(|e| e["replace_all"].as_bool().unwrap_or(false)),
-                    )
-                }
-            });
-            let allowed = matches!(insert_mode, Some("prepend") | Some("append"))
-                || single_replace_all
-                || batch_all_replace_all.unwrap_or(false);
-            if !allowed {
-                return Err(super::RecoverableError::with_hint(
-                    "Use edit_markdown for markdown files",
-                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace) — but NOT on a librarian-managed artifact (docs/trackers, bug files with an `id:` in frontmatter), which every edit_file path refuses: use doc(action=\"update\", id=..., patch={body_edits: [...]}) for those.",
-                ).into());
-            }
+        // Gate: route heading-addressed / frontmatter markdown grammar to
+        // markdown::edit. Plain old_string/new_string, insert, and replace_all
+        // all stay on this path regardless of extension — only `heading`,
+        // `action`, `frontmatter`, or a heading-addressed `edits[]` item
+        // trips the redirect, and only on a .md/.markdown path.
+        let is_md = path.ends_with(".md") || path.ends_with(".markdown");
+        let edits_arr = input["edits"].as_array();
+        let heading_items = edits_arr
+            .map(|e| e.iter().filter(|x| x.get("heading").is_some()).count())
+            .unwrap_or(0);
+        let plain_items = edits_arr
+            .map(|e| e.len().saturating_sub(heading_items))
+            .unwrap_or(0);
+        let heading_grammar = input["heading"].is_string()
+            || input["action"].is_string()
+            || input["frontmatter"].is_object()
+            || heading_items > 0;
+        if heading_grammar && !is_md {
+            return Err(super::RecoverableError::with_hint(
+                "heading, action, frontmatter and heading-addressed edits[] apply to markdown files only",
+                "For non-markdown files use old_string/new_string, insert, or replace_all.",
+            )
+            .into());
+        }
+        if heading_items > 0 && plain_items > 0 {
+            return Err(super::RecoverableError::with_hint(
+                "edits[] mixes heading-addressed items with old_string/new_string items",
+                "Send one grammar per call: every item with `heading`+`action`, or every item with `old_string`+`new_string`.",
+            )
+            .into());
+        }
+        if heading_grammar {
+            return crate::tools::markdown::edit(input, ctx).await;
         }
 
         // Batch mode — edits array takes precedence over single old_string.

@@ -203,7 +203,7 @@ fn guard_with_oracle(
         // caller has no way to learn that the body was never the problem.
         "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
          • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
-         Reads and BODY edits are allowed directly — read_file, and edit_markdown \
+         Reads and BODY edits are allowed directly — read_file, and edit_file \
          without its `frontmatter` param, both work on this file."
             .to_string()
     } else {
@@ -485,8 +485,7 @@ mod tests {
     }
 
     /// Wiring check at the guard's own entry point rather than the predicate, since
-    /// that is the function all three call sites (`read_file`, `edit_markdown`,
-    /// `edit_file`) share.
+    /// that is the function both call sites (`read_file`, `edit_file`) share.
     #[test]
     fn guard_fires_on_a_quoted_id_the_way_it_does_on_a_bare_one() {
         let quoted = "---\nid: '9a892c2a5976e296'\nkind: tracker\n---\n";
@@ -545,7 +544,7 @@ mod tests {
 
     /// The other side, and the reason the predicate is **augmentation** rather than
     /// catalog membership: `docs/RELEASE.md`, `CONTRIBUTING.md` and every ADR are
-    /// catalog rows, and CLAUDE.md documents `edit_markdown(...)` as the way to
+    /// catalog rows, and CLAUDE.md documents `edit_file(...)` as the way to
     /// append to `docs/trackers/skill-frictions.md` — itself a catalog row with no
     /// frontmatter id. Guarding by membership would refuse all of them. Guarding by
     /// augmentation refuses none.
@@ -735,7 +734,7 @@ mod tests {
     /// Mutations this kills:
     /// - dropping the `access != FrontmatterWrite` early return → the two permit rows fail
     /// - widening it to permit `FrontmatterWrite` too → the refuse row fails, and BL-48
-    ///   drift becomes reachable through `edit_markdown(frontmatter=…)`
+    ///   drift becomes reachable through `edit_file(frontmatter=…)`
     /// - narrowing the early return to `stamped` without the `&& !augmented && !ledger`
     ///   guard → caught by `an_augmented_artifact_is_guarded_even_with_no_frontmatter_id`
     ///   and `a_declared_ledger_is_guarded_with_no_id_and_no_augmentation`, both of which
@@ -834,7 +833,7 @@ mod tests {
             "the hint must name the route that DOES reach the catalog: {hint}"
         );
         assert!(
-            hint.contains("edit_markdown"),
+            hint.contains("edit_file"),
             "and it must name the tool the caller may still use for the body, or the \
              narrowing is invisible to them: {hint}"
         );

@@ -15,7 +15,7 @@ impl Tool for ApproveWrite {
     fn description(&self) -> &str {
         "Grant write access to a directory outside the project root for this session. \
          Session-scoped — cleared on server restart. Call before edit_file, create_file, \
-         edit_code, or edit_markdown on paths outside the project. Protected paths (e.g. ~/.ssh) \
+         or edit_code on paths outside the project. Protected paths (e.g. ~/.ssh) \
          cannot be approved."
     }
 

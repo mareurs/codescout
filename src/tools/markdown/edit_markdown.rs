@@ -1,11 +1,12 @@
-//! EditMarkdown tool — heading-addressed section editing.
+//! Markdown editing implementation — heading-addressed section editing, reached
+//! through `edit_file`'s markdown grammar (see `edit_file::call`).
 
 use std::ops::Range;
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::super::{parse_bool_param, RecoverableError, Tool, ToolContext};
+use super::super::{parse_bool_param, RecoverableError, ToolContext};
 use super::frontmatter;
 
 // ── edit_markdown ────────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ fn find_lost_surface_markers(old_body: &str, new_content: &str) -> Vec<String> {
 ///
 /// Test-only thin wrapper that delegates to `perform_section_edit_ext` with
 /// `at=None` and `force=false`, preserving the historical 4-arg signature
-/// for the test suite. Production code (`EditMarkdown::call`) calls
+/// for the test suite. Production code (`edit_file::call`, via `markdown::edit`) calls
 /// `perform_section_edit_ext` directly so the `at` parameter and the F-7
 /// surface-marker-preservation gate's `force` override thread through.
 ///
@@ -601,7 +602,7 @@ pub(crate) fn detect_overlaps(edits: &[PlannedEdit]) -> anyhow::Result<()> {
                         "edits[{}] and edits[{}] rewrite overlapping regions (bytes {:?} and {:?})",
                         edits[i].edit_index, edits[j].edit_index, edits[i].span, edits[j].span
                     ),
-                    "Split into separate edit_markdown calls, or target disjoint regions.",
+                    "Split into separate edit_file calls, or target disjoint regions.",
                 )
                 .into());
             }
@@ -897,7 +898,7 @@ pub(crate) fn perform_scoped_edit<'q, Q: Into<crate::tools::file_summary::Headin
 }
 
 // ---------------------------------------------------------------------------
-// EditMarkdown tool
+// Markdown edit implementation
 // ---------------------------------------------------------------------------
 
 /// Apply a JSON-shaped frontmatter mutation request to a markdown source.
@@ -1205,332 +1206,225 @@ pub(crate) fn diagnose_scoped_miss(
         .with_extra("scoped_miss_tier", json!("visible_drift"))
     }
 }
+pub(crate) const LONG_DOCS: &str =
+    "### Workflow: Editing a Markdown Document\n\n\
+     | Step | Tool | Purpose |\n\
+     |------|------|---------|\n\
+     | 1 | `read_file(path)` | Get heading map — see all sections |\n\
+     | 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
+     | 3a | `edit_file(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
+     | 3b | `edit_file(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
+     | 3c | `edit_file(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
+     | 3d | `edit_file(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |\n\n\
+     ### Action semantics — pick the right verb\n\n\
+     | Action | Effect on target section | Use when |\n\
+     |---|---|---|\n\
+     | `replace` | **OVERWRITES the entire body** (from line after the heading until next sibling heading). Heading preserved; subsections refused unless `include_subsections=true`. | The whole section body should be rewritten from scratch (e.g. refreshing a stale memory table). |\n\
+     | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
+     | `remove` | Deletes target section (heading + body). | Removing a section entirely. |\n\
+     | `edit` | Surgical text replacement within the section via `old_string` / `new_string`. Surrounding body preserved. | Fixing a typo, updating a single line, scoped substring change. |\n\n\
+     **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_file(path, heading=\"...\")` on any non-trivial mutation.";
 
-pub struct EditMarkdown;
+/// Heading-addressed markdown edit. Reached through `edit_file`, which has already run
+/// `guard_worktree_write` and `maybe_replay_ack` and decided the call is markdown grammar.
+pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
+    let path = crate::tools::require_str_param_or_hint(
+        &input,
+        "path",
+        crate::fs::PATH_PARAM_ALIASES,
+        "edit_file(path=\"docs/x.md\", heading=\"## Section\", action=\"replace\", content=\"...\"). path is required on every call.",
+    )?;
 
-#[async_trait::async_trait]
-impl Tool for EditMarkdown {
-    fn name(&self) -> &str {
-        "edit_markdown"
-    }
+    let resolved =
+        match crate::tools::resolve_write_or_capture(ctx, "edit_file", &input, path).await? {
+            crate::tools::WriteOutcome::Write(p) => p,
+            crate::tools::WriteOutcome::Pending(env) => return Ok(env),
+        };
 
-    fn is_write(&self, _input: &Value) -> bool {
+    let file_content = std::fs::read_to_string(&resolved)?;
+
+    // Reject librarian-managed artifacts — use doc(action="update") instead.
+    // Passing the resolved path also catches augmented artifacts with no
+    // frontmatter id, where a direct write desynchronises file from params.
+    //
+    // `access` is what the caller's own arguments already say: `frontmatter` present
+    // means this call mutates catalog-indexed keys, absent means it is body-only.
+    // That distinction is the whole reason a merely-STAMPED file no longer refuses
+    // an ordinary prose edit — the drift BL-48 describes is a frontmatter drift, and
+    // this is the one call site that can prove it is not doing one.
+    // docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    let access = if input["frontmatter"].is_object() {
+        crate::util::librarian_guard::Access::FrontmatterWrite
+    } else {
+        crate::util::librarian_guard::Access::BodyWrite
+    };
+    crate::util::librarian_guard::guard_not_librarian_managed(
+        path,
+        &file_content,
+        Some(&resolved),
+        access,
+    )?;
+
+    // Working buffer — frontmatter mutation (if requested) lands here first,
+    // then body edits run on the result. One atomic_write at the end keeps
+    // mixed frontmatter+body edits transactional.
+    let mut new_content = file_content.clone();
+
+    // ── Frontmatter mutation (optional) ──────────────────────────
+    let frontmatter_changed = if input["frontmatter"].is_object() {
+        new_content = apply_frontmatter_mutation(&new_content, &input["frontmatter"])?;
         true
-    }
+    } else {
+        false
+    };
 
-    fn description(&self) -> &str {
-        "Edit a Markdown document by heading. Supports batch mode via edits array. \
-             Optional `frontmatter: {set, delete}` \
-             mutates the YAML frontmatter block atomically alongside any body edits."
-    }
+    // ── Body edit mode detection ─────────────────────────────────
+    let has_edits = input["edits"].is_array();
+    let has_heading = input["heading"].is_string();
+    let has_action = input["action"].is_string();
 
-    fn long_docs(&self) -> Option<&str> {
-        Some(
-            "### Workflow: Editing a Markdown Document\n\n\
-             | Step | Tool | Purpose |\n\
-             |------|------|---------|\n\
-             | 1 | `read_file(path)` | Get heading map — see all sections |\n\
-             | 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
-             | 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
-             | 3b | `edit_markdown(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
-             | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
-             | 3d | `edit_markdown(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |\n\n\
-             ### Action semantics — pick the right verb\n\n\
-             | Action | Effect on target section | Use when |\n\
-             |---|---|---|\n\
-             | `replace` | **OVERWRITES the entire body** (from line after the heading until next sibling heading). Heading preserved; subsections refused unless `include_subsections=true`. | The whole section body should be rewritten from scratch (e.g. refreshing a stale memory table). |\n\
-             | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
-             | `remove` | Deletes target section (heading + body). | Removing a section entirely. |\n\
-             | `edit` | Surgical text replacement within the section via `old_string` / `new_string`. Surrounding body preserved. | Fixing a typo, updating a single line, scoped substring change. |\n\n\
-             **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_file(path, heading=\"...\")` on any non-trivial mutation."
+    if has_edits && (has_heading || has_action) {
+        return Err(RecoverableError::with_hint(
+            "edits array is mutually exclusive with top-level heading/action",
+            "Use either edits=[] for batch mode, or heading+action for single edit.",
         )
+        .into());
     }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] }
-            ],
-            "properties": {
-                "path": { "type": "string", "description": "Markdown file path" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["edit_markdown"] == 3) parses it.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
-                "heading": { "type": "string", "description": "Target section heading (fuzzy matched). Required unless using edits[] batch mode." },
-                "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when `heading` matches several sections. Two byte-identical headings admit no distinguishing query, so this is the only way to reach either one; omit it and several exact matches are an ambiguity error naming their line numbers." },
-                "action": {
-                    "type": "string",
-                    "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
-                    "description": "Operation to perform. 'replace' OVERWRITES the entire body of the named section (heading preserved; body from the line after the heading until the next sibling heading is destroyed) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before' / 'insert_after' add a new sibling section before/after the target (target body preserved). 'remove' deletes the target section (heading + body). 'edit' performs scoped text replacement within the target section. Required unless using edits[] batch mode."
-                },
-                "content": { "type": "string", "description": "New content for replace/insert actions (body only — heading preserved on replace). For 'replace', this REPLACES the entire existing section body — read the section first if unsure." },
-                "at": {
-                    "type": "string",
-                    "enum": ["end-of-section", "after-heading-line"],
-                    "description": "For action='insert_after': where to insert. 'end-of-section' (default) places content at the end of the heading's section, after any nested sub-sections — useful for adding new H3/H4 to an existing section. 'after-heading-line' places content immediately after the heading line itself — useful when a top-level H1 wraps the whole doc and 'end-of-section' would mean EOF. Ignored by other actions."
-                },
-                "old_string": { "type": "string", "description": "For action='edit': exact text to find within section" },
-                "new_string": { "type": "string", "description": "For action='edit': replacement text" },
-                "replace_all": { "type": "boolean", "default": false, "description": "For action='edit': replace all occurrences" },
-                "include_subsections": { "type": "boolean", "default": false, "description": "For action='replace': opt in to consuming nested sub-headings (deeper levels). Default refuses to wipe children — see BUG-043." },
-                "force": { "type": "boolean", "default": false, "description": "Bypass the body-shrink guard. Required when the write would cut the file by >50% in bytes or lines. Use only when the shrinkage is intentional." },
-                "frontmatter": {
-                    "type": "object",
-                    "description": "Mutate the YAML frontmatter block at the start of the file. Flat keys only (one-key-per-line; scalar / string / inline-array values). Combinable atomically with `edits` or `heading`+`action` in the same call. Example: `{set: {status: \"fixed\", closed: \"2026-05-17\"}, delete: [\"legacy_field\"]}`. At least one of `set` / `delete` must be non-empty.",
-                    "properties": {
-                        "set": {
-                            "type": "object",
-                            "additionalProperties": true,
-                            "description": "Key → value pairs to set. Existing keys are updated in place (order preserved); new keys are appended at the end of the block. Values may be strings, numbers, booleans, null, or arrays of those."
-                        },
-                        "delete": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Keys to remove from the block. Missing keys are silently ignored (idempotent)."
-                        }
-                    }
-                },
-                "edits": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["heading", "action"],
-                        "properties": {
-                            "heading": { "type": "string" },
-                            "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when this entry's `heading` matches several sections." },
-                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"], "description": "Per-edit operation; semantics exactly as top-level `action` above." },
-                            "content": { "type": "string", "description": "Per-edit content; as top-level `content` above." },
-                            "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
-                            "old_string": { "type": "string" },
-                            "new_string": { "type": "string" },
-                            "replace_all": { "type": "boolean" },
-                            "include_subsections": { "type": "boolean" }
-                        }
-                    },
-                    "description": "Batch mode: array of edit operations applied atomically. Mutually exclusive with top-level heading/action."
-                }
-            }
-        })
+    let has_body_edit = has_edits || has_heading || has_action;
+    if !frontmatter_changed && !has_body_edit {
+        return Err(RecoverableError::with_hint(
+            "no operation specified",
+            "Pass `frontmatter: {set:{...}, delete:[...]}`, `edits=[...]`, or `heading`+`action`.",
+        )
+        .into());
     }
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        crate::tools::guard_worktree_write(ctx).await?;
-        let input = crate::tools::maybe_replay_ack(ctx, input, "edit_markdown").await?;
-        let path = crate::tools::require_str_param_or_hint(
+    if has_edits {
+        // ── Batch mode ───────────────────────────────────────────
+        // Every edit resolves its heading against `snapshot` (the buffer as it
+        // stood right after frontmatter mutation, before any body edit) rather
+        // than a running mutated buffer — this is what makes the batch
+        // order-independent. See `plan_batch`.
+        let edits = input["edits"].as_array().unwrap();
+        let snapshot = new_content.clone();
+        let planned = plan_batch(&snapshot, edits, input["force"].as_bool().unwrap_or(false))?;
+        new_content = apply_planned_edits(&snapshot, planned);
+    } else if has_body_edit {
+        // ── Single edit mode ─────────────────────────────────────
+        let heading = crate::tools::require_str_param_or_hint(
             &input,
-            "path",
-            crate::fs::PATH_PARAM_ALIASES,
-            "edit_markdown(path=\"docs/x.md\", heading=\"## Section\", action=\"replace\", content=\"...\"). path is required on every call — there is no implicit current file.",
+            "heading",
+            &[],
+            "Name the section to edit, e.g. heading=\"## Section\". For multiple edits use edits=[{heading, action, content}].",
+        )?;
+        // 1-indexed selector among identical headings — the only way to reach
+        // either of two byte-identical ones. See `HeadingQuery`.
+        let query = crate::tools::file_summary::HeadingQuery::new(
+            heading,
+            input["occurrence"].as_u64().map(|n| n as usize),
+        );
+        let action = crate::tools::require_str_param_or_hint(
+            &input,
+            "action",
+            &[],
+            "Set action to one of: replace | insert_before | insert_after | remove | edit. E.g. action=\"replace\", content=\"...\".",
         )?;
 
-        // Gate: .md files only
-        if !path.ends_with(".md") && !path.ends_with(".markdown") {
-            return Err(RecoverableError::with_hint(
-                "edit_markdown only supports .md files",
-                "Use edit_file for non-markdown files.",
-            )
-            .into());
-        }
-
-        let resolved =
-            match crate::tools::resolve_write_or_capture(ctx, "edit_markdown", &input, path).await?
-            {
-                crate::tools::WriteOutcome::Write(p) => p,
-                crate::tools::WriteOutcome::Pending(env) => return Ok(env),
-            };
-
-        let file_content = std::fs::read_to_string(&resolved)?;
-
-        // Reject librarian-managed artifacts — use doc(action="update") instead.
-        // Passing the resolved path also catches augmented artifacts with no
-        // frontmatter id, where a direct write desynchronises file from params.
-        //
-        // `access` is what the caller's own arguments already say: `frontmatter` present
-        // means this call mutates catalog-indexed keys, absent means it is body-only.
-        // That distinction is the whole reason a merely-STAMPED file no longer refuses
-        // an ordinary prose edit — the drift BL-48 describes is a frontmatter drift, and
-        // this is the one call site that can prove it is not doing one.
-        // docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
-        let access = if input["frontmatter"].is_object() {
-            crate::util::librarian_guard::Access::FrontmatterWrite
+        new_content = if action == "edit" {
+            let old_string = crate::tools::require_str_param(&input, "old_string")?;
+            let new_string = require_new_string(&input, "")?;
+            let replace_all_val = parse_bool_param(&input["replace_all"]);
+            perform_scoped_edit(&new_content, query, old_string, new_string, replace_all_val)
+                .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
         } else {
-            crate::util::librarian_guard::Access::BodyWrite
-        };
-        crate::util::librarian_guard::guard_not_librarian_managed(
-            path,
-            &file_content,
-            Some(&resolved),
-            access,
-        )?;
-
-        // Working buffer — frontmatter mutation (if requested) lands here first,
-        // then body edits run on the result. One atomic_write at the end keeps
-        // mixed frontmatter+body edits transactional.
-        let mut new_content = file_content.clone();
-
-        // ── Frontmatter mutation (optional) ──────────────────────────
-        let frontmatter_changed = if input["frontmatter"].is_object() {
-            new_content = apply_frontmatter_mutation(&new_content, &input["frontmatter"])?;
-            true
-        } else {
-            false
-        };
-
-        // ── Body edit mode detection ─────────────────────────────────
-        let has_edits = input["edits"].is_array();
-        let has_heading = input["heading"].is_string();
-        let has_action = input["action"].is_string();
-
-        if has_edits && (has_heading || has_action) {
-            return Err(RecoverableError::with_hint(
-                "edits array is mutually exclusive with top-level heading/action",
-                "Use either edits=[] for batch mode, or heading+action for single edit.",
-            )
-            .into());
-        }
-
-        let has_body_edit = has_edits || has_heading || has_action;
-        if !frontmatter_changed && !has_body_edit {
-            return Err(RecoverableError::with_hint(
-                "no operation specified",
-                "Pass `frontmatter: {set:{...}, delete:[...]}`, `edits=[...]`, or `heading`+`action`.",
-            )
-            .into());
-        }
-
-        if has_edits {
-            // ── Batch mode ───────────────────────────────────────────
-            // Every edit resolves its heading against `snapshot` (the buffer as it
-            // stood right after frontmatter mutation, before any body edit) rather
-            // than a running mutated buffer — this is what makes the batch
-            // order-independent. See `plan_batch`.
-            let edits = input["edits"].as_array().unwrap();
-            let snapshot = new_content.clone();
-            let planned = plan_batch(&snapshot, edits, input["force"].as_bool().unwrap_or(false))?;
-            new_content = apply_planned_edits(&snapshot, planned);
-        } else if has_body_edit {
-            // ── Single edit mode ─────────────────────────────────────
-            let heading = crate::tools::require_str_param_or_hint(
-                &input,
-                "heading",
-                &[],
-                "Name the section to edit, e.g. heading=\"## Section\". For multiple edits use edits=[{heading, action, content}].",
-            )?;
-            // 1-indexed selector among identical headings — the only way to reach
-            // either of two byte-identical ones. See `HeadingQuery`.
-            let query = crate::tools::file_summary::HeadingQuery::new(
-                heading,
-                input["occurrence"].as_u64().map(|n| n as usize),
-            );
-            let action = crate::tools::require_str_param_or_hint(
-                &input,
-                "action",
-                &[],
-                "Set action to one of: replace | insert_before | insert_after | remove | edit. E.g. action=\"replace\", content=\"...\".",
-            )?;
-
-            new_content = if action == "edit" {
-                let old_string = crate::tools::require_str_param(&input, "old_string")?;
-                let new_string = require_new_string(&input, "")?;
-                let replace_all_val = parse_bool_param(&input["replace_all"]);
-                perform_scoped_edit(&new_content, query, old_string, new_string, replace_all_val)
-                    .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
-            } else {
-                let content = input["content"].as_str();
-                if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
-                    if let Ok(victims) = find_consumed_subsections(&new_content, query) {
-                        if !victims.is_empty() {
-                            return Err(subsection_guard_error(None, heading, &victims).into());
-                        }
+            let content = input["content"].as_str();
+            if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
+                if let Ok(victims) = find_consumed_subsections(&new_content, query) {
+                    if !victims.is_empty() {
+                        return Err(subsection_guard_error(None, heading, &victims).into());
                     }
                 }
-                perform_section_edit_ext(
-                    &new_content,
-                    query,
-                    action,
-                    content,
-                    input["at"].as_str(),
-                    input["force"].as_bool().unwrap_or(false),
-                )
-                .map_err(|e| {
-                    RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
-                })?
-            };
-        }
-
-        // ── Body-shrink guard ──────────────────────────────────────
-        // Refuse a write that cuts the file by >50% in EITHER bytes or lines,
-        // unless the caller passed `force: true`. The predicate, the 200-byte
-        // floor and the reason there are two dimensions all live in
-        // crate::util::shrink_guard, shared with doc(update) and
-        // memory(write) — three private copies is how the line-truncation gap
-        // survived being fixed once.
-        let force = input["force"].as_bool().unwrap_or(false);
-        if !force {
-            if let Some(report) = crate::util::shrink_guard::check(&file_content, &new_content) {
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "body-shrink guard: write to {} {}",
-                        resolved.display(),
-                        report.describe()
-                    ),
-                    "Use action='edit' with old_string/new_string for surgical mutation, or pass force=true if the shrinkage is intentional.",
-                )
-                .into());
             }
-        }
-
-        crate::util::fs::atomic_write(&resolved, &new_content)?;
-
-        // A frontmatter write can move catalog-INDEXED columns (status, title, tags,
-        // time_scope), and nothing else brings the row back into step: the guard above
-        // deliberately lets a plain catalogued file through, so this is the population
-        // whose row can silently contradict its own file. See `librarian_sync` and
-        // `open-issue-work-queue:BL-48`.
-        //
-        // Gated on `frontmatter_changed` because a body-only edit cannot move an indexed
-        // column, and a catalog write per body edit would be pure cost.
-        //
-        // Return value deliberately dropped: `false` means "no librarian, or not an
-        // artifact", both ordinary. The file write has already landed, so a failed sync
-        // must not turn a successful edit into an error.
-        if frontmatter_changed {
-            crate::util::librarian_sync::sync_after_frontmatter_write(&resolved);
-        }
-
-        if let Ok(mut cov) = ctx.section_coverage.lock() {
-            cov.update_mtime(&resolved);
-        }
-
-        ctx.agent
-            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved)
-            .await;
-        ctx.lsp.notify_file_changed(&resolved).await;
-        ctx.agent
-            .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved)
-            .await;
-        ctx.agent
-            .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone())
-            .await;
-
-        // Coverage hint: warn about unread sections.
-        let all_headings = crate::tools::file_summary::parse_all_headings(&new_content);
-        if !all_headings.is_empty() {
-            let heading_texts: Vec<String> = all_headings.iter().map(|h| h.text.clone()).collect();
-            if let Ok(mut cov) = ctx.section_coverage.lock() {
-                if let Some(hint) = cov.unread_hint(&resolved, &heading_texts) {
-                    return Ok(json!({"status": "ok", "hint": hint}));
-                }
-            }
-        }
-
-        Ok(json!("ok"))
+            perform_section_edit_ext(
+                &new_content,
+                query,
+                action,
+                content,
+                input["at"].as_str(),
+                input["force"].as_bool().unwrap_or(false),
+            )
+            .map_err(|e| {
+                RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
+            })?
+        };
     }
+
+    // ── Body-shrink guard ──────────────────────────────────────
+    // Refuse a write that cuts the file by >50% in EITHER bytes or lines,
+    // unless the caller passed `force: true`. The predicate, the 200-byte
+    // floor and the reason there are two dimensions all live in
+    // crate::util::shrink_guard, shared with doc(update) and
+    // memory(write) — three private copies is how the line-truncation gap
+    // survived being fixed once.
+    let force = input["force"].as_bool().unwrap_or(false);
+    if !force {
+        if let Some(report) = crate::util::shrink_guard::check(&file_content, &new_content) {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "body-shrink guard: write to {} {}",
+                    resolved.display(),
+                    report.describe()
+                ),
+                "Use action='edit' with old_string/new_string for surgical mutation, or pass force=true if the shrinkage is intentional.",
+            )
+            .into());
+        }
+    }
+
+    crate::util::fs::atomic_write(&resolved, &new_content)?;
+
+    // A frontmatter write can move catalog-INDEXED columns (status, title, tags,
+    // time_scope), and nothing else brings the row back into step: the guard above
+    // deliberately lets a plain catalogued file through, so this is the population
+    // whose row can silently contradict its own file. See `librarian_sync` and
+    // `open-issue-work-queue:BL-48`.
+    //
+    // Gated on `frontmatter_changed` because a body-only edit cannot move an indexed
+    // column, and a catalog write per body edit would be pure cost.
+    //
+    // Return value deliberately dropped: `false` means "no librarian, or not an
+    // artifact", both ordinary. The file write has already landed, so a failed sync
+    // must not turn a successful edit into an error.
+    if frontmatter_changed {
+        crate::util::librarian_sync::sync_after_frontmatter_write(&resolved);
+    }
+
+    if let Ok(mut cov) = ctx.section_coverage.lock() {
+        cov.update_mtime(&resolved);
+    }
+
+    ctx.agent
+        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved)
+        .await;
+    ctx.lsp.notify_file_changed(&resolved).await;
+    ctx.agent
+        .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved)
+        .await;
+    ctx.agent
+        .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone())
+        .await;
+
+    // Coverage hint: warn about unread sections.
+    let all_headings = crate::tools::file_summary::parse_all_headings(&new_content);
+    if !all_headings.is_empty() {
+        let heading_texts: Vec<String> = all_headings.iter().map(|h| h.text.clone()).collect();
+        if let Ok(mut cov) = ctx.section_coverage.lock() {
+            if let Some(hint) = cov.unread_hint(&resolved, &heading_texts) {
+                return Ok(json!({"status": "ok", "hint": hint}));
+            }
+        }
+    }
+
+    Ok(json!("ok"))
 }

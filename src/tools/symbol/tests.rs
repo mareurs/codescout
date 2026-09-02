@@ -7417,7 +7417,7 @@ async fn edit_code_advertises_every_conditionally_required_param() {
 /// The two sibling-vocabulary aliases, asserted without needing a live LSP edit.
 ///
 /// `symbols` — the tool Iron Law 1 routes discovery through — calls the symbol
-/// address `name_path`, while `edit_code` calls it `symbol`; `edit_markdown` and
+/// address `name_path`, while `edit_code` calls it `symbol`; `edit_file`'s markdown grammar and
 /// `doc(update)` call the payload `content`, while `edit_code` calls it `body`.
 /// Callers copy a whole call shape from one tool to the next, so each mismatch cost a
 /// refused call on the prescribed find-then-edit path.

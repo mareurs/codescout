@@ -161,34 +161,44 @@ naming the format mismatch, not a param dropped on the floor.
 heading-structured. The heading map answers most queries with no body
 read needed, built directly into `read_file` rather than requiring a
 second tool call to discover which one applies.
-## Iron Law 5: markdown edits → `edit_markdown`
+## Iron Law 5: markdown section edits → `edit_file`'s heading grammar
 
-**Rule:** never `edit_file` on `.md` for content edits. Use
-`edit_markdown(action="replace|insert_before|insert_after|remove|
+**Rule:** for whole-section or heading-scoped markdown edits, pass
+`heading`/`action`/`content` to `edit_file` — do not try to fake
+section addressing with `old_string`/`new_string` line hunting. Use
+`edit_file(path, action="replace|insert_before|insert_after|remove|
 edit", heading="...", content="...")`.
 
-**Gate fires when** `edit_file` is called on a `.md` path with a
-content edit. Same gate as Iron Law 4.
+**Gate fires when** `heading`, `action`, `frontmatter`, or a
+heading-addressed `edits[]` item is passed on a non-`.md`/`.markdown`
+path — this grammar is markdown-only, so `edit_file` refuses it
+elsewhere rather than silently ignoring it. On a `.md`/`.markdown`
+path, passing any of those routes the call into the heading grammar
+automatically; there is no separate tool to call.
 
-**Exceptions:** `edit_file` is still allowed on `.md` with:
-- `insert: "prepend"` / `insert: "append"` (file boundaries — no
-  heading addressing needed)
-- `replace_all: true` (file-wide text substitution)
+**Plain text edits on `.md` files need no special handling:**
+`old_string`/`new_string`, `insert: "prepend"`/`"append"`, batch
+`edits[]` of plain items, and `replace_all: true` all go through
+`edit_file`'s ordinary text-edit path on markdown files exactly as on
+any other file. A batch call may not mix the two `edits[]` grammars —
+heading-addressed items (`heading`+`action`) and plain items
+(`old_string`+`new_string`) — in the same call.
 
-**Neither exception applies to a librarian-managed artifact** — anything
-under `docs/trackers/`, or any file whose frontmatter carries an `id:`.
-*Every* `edit_file` write path refuses those, not only the ones this gate
-blocks: a direct write bypasses the catalog, so no `field_patch` event is
-recorded, the body-shrink guard never runs, and `updated_at` goes stale.
-Use `artifact(action="update", id=…, patch={body_edits: […]})` — its
-entries mirror `edit_markdown`'s batch shape.
+**A managed artifact is refused regardless of which grammar or write
+path is used** — anything under `docs/trackers/`, or any file whose
+frontmatter carries an `id:`. *Every* `edit_file` write path refuses
+those: a direct write bypasses the catalog, so no `field_patch` event
+is recorded, the body-shrink guard never runs, and `updated_at` goes
+stale. Use `artifact(action="update", id=…, patch={body_edits: […]})`
+— its entries mirror `edit_file`'s heading-addressed batch shape.
 
-**Batch mode:** `edit_markdown` supports a top-level `edits: [...]`
-array applied atomically. Use for multi-section edits in one call.
+**Batch mode:** `edit_file`'s `edits: [...]` array is applied
+atomically for either grammar. Use for multi-section edits in one
+call.
 
-**Frontmatter:** `edit_markdown` supports a top-level
-`frontmatter: {set, delete}` for YAML frontmatter mutations
-combined with body edits in the same call.
+**Frontmatter:** `edit_file` accepts a top-level `frontmatter: {set,
+delete}` for YAML frontmatter mutations, combinable atomically with
+body edits (`edits` or `heading`+`action`) in the same call.
 
 ## Iron Law 6: subagent dispatch — parent briefs
 

@@ -22,9 +22,9 @@ output feeds the next.
 |------|------|---------|
 | 1 | `read_file(path)` | Get heading map — see all sections |
 | 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |
-| 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |
-| 3b | `edit_markdown(path, action="edit", heading, old_string, new_string)` | Surgical: string replacement scoped to a section |
-| 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |
+| 3a | `edit_file(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |
+| 3b | `edit_file(path, action="edit", heading, old_string, new_string)` | Surgical: string replacement scoped to a section |
+| 3c | `edit_file(path, edits=[...])` | Batch: multiple edits across sections, atomic |
 
 **Tips:**
 - Start with the heading map (step 1) — don't jump straight to editing.

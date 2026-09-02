@@ -25,7 +25,7 @@ pub mod output_buffer;
 /// The `IC-15` action-labelled schema-key probe, shared by every consolidated tool.
 ///
 /// Deliberately NOT under `src/librarian/`, which is `#[cfg(feature = "librarian")]`: the tools
-/// that need it most (`workspace`, `index`, `library`, `edit_markdown`) do not depend on that
+/// that need it most (`workspace`, `index`, `library`, `edit_file`) do not depend on that
 /// feature, and gating their guard on it would delete the guard from the lean lane silently.
 #[cfg(test)]
 pub(crate) mod param_probe;

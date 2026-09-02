@@ -35,7 +35,7 @@ struct UpdatePatch {
     body: Option<String>,
     /// Surgical body edits — array of edit-markdown-shaped entries
     /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, occurrence?, include_subsections?}`.
-    /// Applied atomically (all-or-nothing). Mirrors edit_markdown's batch-mode `edits` array.
+    /// Applied atomically (all-or-nothing). Mirrors edit_file's heading-addressed batch-mode `edits` array.
     /// Mutually exclusive with `body`.
     #[serde(default)]
     body_edits: Option<Vec<serde_json::Value>>,
@@ -228,9 +228,9 @@ fn try_preserving_frontmatter_patch(doc: &str, patch: &UpdatePatch) -> Option<St
 }
 
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
-/// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
+/// Mirrors the batch semantics of `edit_file`'s heading-addressed `edits=[...]`. Used by
 /// `doc(update, patch={body_edits: [...]})` to provide surgical body
-/// mutation on librarian-managed files — `edit_markdown` itself refuses to
+/// mutation on librarian-managed files — `edit_file`'s markdown grammar itself refuses to
 /// touch them (see `librarian_guard::guard_not_librarian_managed`).
 ///
 /// `consumed` collects the headings that an opted-in
@@ -613,7 +613,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         full.display(),
                         report.describe()
                     ),
-                    "Use patch={body_edits:[{heading, action, content?|old_string+new_string?, ...}]} for surgical per-section edits (mirrors edit_markdown's batch shape). \
+                    "Use patch={body_edits:[{heading, action, content?|old_string+new_string?, ...}]} for surgical per-section edits (mirrors edit_file's heading-addressed batch shape). \
                      A write that loses LINES while keeping bytes is usually a truncated read fed back in — rebuild the body from the file or from git, never from a `get` response, whose body is capped at 500 lines. \
                      If the shrinkage is intentional (e.g. archiving stale sections, full rewrite), re-call with force=true.",
                 ));
@@ -1961,7 +1961,8 @@ text
     }
 
     /// `apply_body_edits` is a THIRD independent read site for `new_string` —
-    /// separate from `edit_markdown`'s single-edit and `plan_batch` paths, not a
+    /// separate from `edit_markdown`'s (now `edit_file`'s heading-addressed grammar)
+    /// single-edit and `plan_batch` paths, not a
     /// wrapper around either. It carried the same `unwrap_or("")` default, so
     /// `doc(update, patch={body_edits: [...]})` could delete a tracker or bug
     /// section and report success. Trackers are the artifacts least likely to have
@@ -1988,7 +1989,7 @@ text
         assert!(
             msg.contains("body_edits[0]"),
             "the error must locate the entry using THIS path's prefix, not \
-             edit_markdown's `edits[0]`; got: {msg}"
+             edit_file's heading-addressed `edits[0]`; got: {msg}"
         );
     }
 
@@ -2060,10 +2061,10 @@ text
     }
 
     /// A librarian-managed artifact's ONLY edit surface is `body_edits`, and it shares the
-    /// one heading resolver with `edit_markdown` -- so before `occurrence` existed, two
-    /// byte-identical headings made both sections permanently uneditable through every
-    /// available path. `edit_markdown` refuses managed files, `edit_file` refuses them on
-    /// every path, and the error's own hint named `edit_file` parameters that do not exist.
+    /// one heading resolver with `edit_file`'s markdown grammar -- so before `occurrence`
+    /// existed, two byte-identical headings made both sections permanently uneditable through
+    /// every available path. `edit_file` refuses managed files on every path — both its
+    /// markdown and raw routes — and the error's own hint named parameters that do not exist.
     /// See `docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
     #[test]
     fn body_edits_occurrence_reaches_the_second_of_two_identical_headings() {
@@ -2683,7 +2684,7 @@ text
     #[tokio::test]
     async fn body_edits_preamble_sentinel_edits_a_guarded_artifacts_preamble() {
         // The bug this pins: text before an artifact's first heading has no section
-        // to name, and `edit_markdown` is refused outright on a guarded (here:
+        // to name, and `edit_file`'s markdown grammar is refused outright on a guarded (here:
         // augmented) file — so a preamble correction had no write surface at all.
         // `heading: "^"` is the reserved sentinel for that region.
         let tmp = TempDir::new().unwrap();

@@ -497,7 +497,20 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 
 **Slug:** `cluster/unclassified`
 
-**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02); +1: `doc-tool-refs-counts-call-param-pairs-as-documents` (2026-09-02). Both derivations below — **on continuation lines, which `scripts/pre-commit-ledger-counts.py` does not read.** Its `members_fields` keys on the single line beginning `**Members:**`, so a member named only in the prose beneath satisfies nothing; put the stem up here and the reasoning down there.
+**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02); +1: `doc-tool-refs-counts-call-param-pairs-as-documents` (2026-09-02); +1: `markdown-grammar-librarian-guard-has-zero-test-coverage` (2026-09-03). All derivations below — **on continuation lines, which `scripts/pre-commit-ledger-counts.py` does not read.** Its `members_fields` keys on the single line beginning `**Members:**`, so a member named only in the prose beneath satisfies nothing; put the stem up here and the reasoning down there.
+
+`markdown-grammar-librarian-guard-has-zero-test-coverage` — the guard on `edit_file`'s
+markdown-grammar write path can be **deleted outright** with zero failures in either lane,
+while the identical deletion at the raw-text call site reds immediately. Looked at `IC-16`
+(`assertion-that-cannot-fail`) first and it is the closest: this is coverage that is absent
+rather than vacuous, and `IC-16` claims an assertion **exists** with no failing input. There
+is no assertion here at all, so the class's own shape does not hold. `IC-14`
+(`guard-narrower-than-its-name`) fails for the opposite reason to the entry above: the guard
+itself is correctly scoped and fires in production — what is missing is a test, so nothing
+about the guard's *coverage* is narrow. `IC-3` (`declared-not-wired`) was the third look and
+is the nearest miss: the guard IS wired, it is the **test suite** that never reaches its
+`Err` branch. Filed under the hatch rather than stretching `IC-3` from unreached-code to
+unreached-branch, which would blur the one distinction that makes it diagnosable.
 
 `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` —
 looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12

@@ -2,7 +2,7 @@
 //! surface that replaces a whole file.
 //!
 //! Three surfaces overwrite documents wholesale — `doc(update)` with a
-//! `body`, `edit_markdown`, and `memory(write)` — and until 2026-08-29 each
+//! `body`, `edit_file`'s markdown grammar, and `memory(write)` — and until 2026-08-29 each
 //! carried its own copy of the same byte-ratio test and its own
 //! `SHRINK_GUARD_MIN_BYTES = 200`. Three copies is how the gap below survived
 //! being fixed once.

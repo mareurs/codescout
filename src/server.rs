@@ -26,7 +26,6 @@ use crate::tools::{
     edit_file::EditFile,
     grep::Grep,
     library::Library,
-    markdown::EditMarkdown,
     memory::Memory,
     progress,
     read_file::ReadFile,
@@ -326,7 +325,6 @@ impl CodeScoutServer {
             Arc::new(Grep),
             Arc::new(CreateFile),
             Arc::new(EditFile),
-            Arc::new(EditMarkdown),
             // Workflow tools
             Arc::new(RunCommand),
             Arc::new(Onboarding),
@@ -2234,7 +2232,6 @@ mod tests {
             "grep",
             "create_file",
             "edit_file",
-            "edit_markdown",
             "run_command",
             "onboarding",
             "approve_write",
@@ -2281,10 +2278,11 @@ mod tests {
             .filter(|t| !is_librarian_tool(t.name()))
             .count();
         // `peer` is opt-in (see peer_enabled_at_runtime) and not registered by
-        // `make_server()`'s default env, so the L3 target is 20 core tools
+        // `make_server()`'s default env, so the L3 target is 19 core tools
         // regardless of platform. Was 21 until `read_markdown` was folded into
-        // `read_file` (heading-addressed by default on markdown paths).
-        let expected = 20;
+        // `read_file` (heading-addressed by default on markdown paths), then 20
+        // until `edit_markdown` was folded into `edit_file` (Task 8) the same way.
+        let expected = 19;
         assert_eq!(
             core_count,
             expected,
@@ -2537,16 +2535,16 @@ mod tests {
             "workspace" | "library" | "edit_code" | "index" | "memory" | "doc" | "librarian" => {
                 ActionContract::Inventory
             }
-            // `edit_markdown` (5 actions) describes by theme on purpose: an
-            // inventory would not fit the surface budget, and the client already
-            // receives the `action` enum itself in the schema. The thematic arm is
-            // an escape hatch, so the test asserts against it in the opposite
-            // direction rather than treating it as an exemption. `doc` used to sit
-            // here too (Task 6 folded `artifact_refresh` in as `gather` /
-            // `list_stale` and rewrote the description to name all 17 actions,
-            // which moved it to Inventory — an enumerating description under a
-            // Thematic contract fails the gate by design).
-            "edit_markdown" => ActionContract::Thematic,
+            // `edit_file` (5 markdown actions, folded in from `edit_markdown`) describes
+            // by theme on purpose: an inventory would not fit the surface budget, and the
+            // client already receives the `action` enum itself in the schema. The
+            // thematic arm is an escape hatch, so the test asserts against it in the
+            // opposite direction rather than treating it as an exemption. `doc` used to
+            // sit here too (Task 6 folded `artifact_refresh` in as `gather` /
+            // `list_stale` and rewrote the description to name all 17 actions, which
+            // moved it to Inventory — an enumerating description under a Thematic
+            // contract fails the gate by design).
+            "edit_file" => ActionContract::Thematic,
             _ => return None,
         })
     }
@@ -2559,8 +2557,8 @@ mod tests {
     /// gate would certify an inventory that never named it. The reference probe in the
     /// bug report used Python's `in` and inherits exactly this hole.
     ///
-    /// Case-SENSITIVE for the mirror reason: `edit_markdown`'s description opens "Edit a
-    /// Markdown document", where `Edit` is the English verb and not the `edit` action.
+    /// Case-SENSITIVE for the mirror reason: `edit_file`'s description opens "Edit a
+    /// file", where `Edit` is the English verb and not the `edit` action.
     /// Folding case would let ordinary prose discharge an inventory's obligation.
     fn names_action(haystack: &str, token: &str) -> bool {
         let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
@@ -2719,8 +2717,8 @@ mod tests {
     /// default only is one the model cannot choose to use. Measured 2026-09-02: 12 such
     /// params across 7 tools; this test listed them and each was described in the same
     /// change. Scope: walks `properties` at the schema root only — nested item schemas
-    /// (e.g. `edit_file.edits.items.properties.*`, `edit_markdown.edits.items.*`,
-    /// `doc.augment.properties.*`) are invisible to it and are not asserted here.
+    /// (e.g. `edit_file.edits.items.properties.*`, `doc.augment.properties.*`) are
+    /// invisible to it and are not asserted here.
     #[tokio::test]
     async fn every_property_has_a_description() {
         let (_dir, server) = make_server().await;
@@ -2815,8 +2813,8 @@ mod tests {
     /// Measured 2026-09-02: `read_markdown(file_path="docs/issues/_TEMPLATE.md")` with
     /// no `path` returned the whole document — `file_path` genuinely discharges the
     /// requirement `required: ["path"]` claims to hold alone. Five tools were affected
-    /// (read_file, create_file, edit_file, edit_markdown, read_markdown — the last since
-    /// folded into read_file); `grep`
+    /// (read_file, create_file, edit_file, edit_markdown, read_markdown — the last two
+    /// since folded into edit_file and read_file respectively); `grep`
     /// declares the same `file_path` alias but does not require `path`, so it is
     /// unaffected and correctly not flagged.
     ///
@@ -2860,14 +2858,13 @@ mod tests {
             // reworded, instead of a global sum no single tool's reword can move.
             //
             // Alias counting must NOT be gated on a top-level `required` array
-            // existing — four tools (read_file, create_file, edit_file,
-            // edit_markdown) express their path requirement
-            // entirely via `anyOf` and carry no top-level `required` at all, so
-            // gating the count on `required` being present (as the offender scan
-            // below correctly does, since an offender needs a `required` to name
-            // the key) would silently record 0 aliases for exactly those four
-            // tools and make their `EXPECTED_ALIAS_COUNTS_BY_TOOL` entries
-            // unconditionally fail. Caught by re-running this test after adding
+            // existing — three tools (read_file, create_file, edit_file) express
+            // their path requirement entirely via `anyOf` and carry no top-level
+            // `required` at all, so gating the count on `required` being present
+            // (as the offender scan below correctly does, since an offender needs
+            // a `required` to name the key) would silently record 0 aliases for
+            // exactly those tools and make their `EXPECTED_ALIAS_COUNTS_BY_TOOL`
+            // entries unconditionally fail. Caught by re-running this test after adding
             // the table, 2026-09-02: read_file showed "expected 4, found 0".
             let aliases = parse_declared_aliases(props);
             alias_counts_by_tool.insert(t.name(), aliases.len());
@@ -2986,7 +2983,6 @@ mod tests {
         ("read_file", 4),
         ("create_file", 3),
         ("edit_file", 3),
-        ("edit_markdown", 3),
         ("call_graph", 3),
         ("edit_code", 3),
         ("references", 3),
@@ -3092,7 +3088,6 @@ mod tests {
             "read_file",
             "create_file",
             "edit_file",
-            "edit_markdown",
             "edit_code",
             "call_graph",
             "references",
@@ -3378,7 +3373,19 @@ mod tests {
     /// about this constant. It is `CLAUDE.md` § *Testing Discipline*'s loudness law
     /// at lane granularity: an alarm nothing reaches is exactly as informative as no
     /// alarm, and here the unreached lane is the one that would have spoken.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_644;
+    ///
+    /// Ratcheted DOWN to 55_421 on 2026-09-03 by Task 8, which folded `edit_markdown`
+    /// into `edit_file`: **22 tools -> 21**, and the sum fell 57_644 -> 55_421. The
+    /// saving is smaller than the deleted tool because the fold MOVES a schema rather
+    /// than deleting one — `edit_markdown` contributed 4_953, and `edit_file` grew
+    /// 1_588 -> 4_323 absorbing its eight markdown params. The 2_223 that actually
+    /// went is the duplicated envelope: one `description`, one set of four path
+    /// aliases, one `anyOf` required-branch block, one tool-name entry.
+    ///
+    /// Set to the exact measured total, per the rule above — the 2_223 of headroom
+    /// this pass created is removed rather than banked, because headroom is precisely
+    /// what stops the ratchet biting on the next added byte.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_421;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -6447,7 +6454,6 @@ mod tests {
         assert!(server.is_write_call("edit_code", &json!({"action": "insert"})));
         assert!(server.is_write_call("edit_code", &json!({"action": "remove"})));
         assert!(server.is_write_call("edit_code", &json!({"action": "rename"})));
-        assert!(server.is_write_call("edit_markdown", &json!({})));
         assert!(server.is_write_call("index", &json!({"action": "build"})));
         assert!(!server.is_write_call("index", &json!({"action": "status"})));
         assert!(server.is_write_call("onboarding", &json!({})));

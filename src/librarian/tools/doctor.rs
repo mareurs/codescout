@@ -2141,8 +2141,8 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// the row — and before `ec9e63d0` the file kept asserting the id it was moved
 /// away from, which resolves to nothing. Measured 2026-08-16: **all 78** unique
 /// `^id:` values in `docs/issues/archive/` were stale, and none could be repaired
-/// through any write tool (each carries a 16-hex id, so `edit_markdown` and
-/// `edit_file` refuse it, and `doc(update)`'s `extra` cannot write `id`).
+/// through any write tool (each carries a 16-hex id, so `edit_file`'s markdown and raw
+/// routes both refuse it, and `doc(update)`'s `extra` cannot write `id`).
 /// That is why the repair lives here.
 ///
 /// **Two findings, not one, because the causes differ and so do the remedies.**
@@ -2164,7 +2164,7 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// deliberate:
 /// - **No `id:` at all** is not a false assertion, and stamping one would newly
 ///   subject the file to the librarian guard — `docs/trackers/skill-frictions.md`
-///   would stop accepting the `edit_markdown` workflow CLAUDE.md documents.
+///   would stop accepting the `edit_file` workflow CLAUDE.md documents.
 /// - **A missing file** is [`check_missing_file`]'s finding. Reporting it here too
 ///   would inflate the count on precisely the rows a repair cannot help.
 /// - **Unparseable frontmatter** is left alone rather than guessed at.
@@ -5982,7 +5982,7 @@ mod tests {
     /// else, so `confirm=true` would splice a template's `id: ADR-{NUMBER}` to a 16-hex
     /// id — destroying the placeholder that makes it a template, and (because a 16-hex
     /// `id:` is one of the three things `librarian_guard` keys on) making every copy of
-    /// it guard-refused for `edit_markdown`.
+    /// it guard-refused for `edit_file`.
     ///
     /// That is the **same harm** the existing no-`id:` abstention prevents, and its
     /// stated reason covers this case verbatim: stamping an id newly subjects the file to

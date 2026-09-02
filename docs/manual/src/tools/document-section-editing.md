@@ -11,10 +11,10 @@ Seven features built on a shared heading-parsing foundation:
 
 | Feature | Tool | Purpose |
 |---------|------|---------|
-| `edit_markdown` | New tool | Replace, insert, or remove entire sections by heading (shipped as `edit_section`; renamed in v0.11) |
+| `heading` + `action` | `edit_file` params | Replace, insert, or remove entire sections by heading |
 | `headings=[]` | `read_file` param | Read multiple sections in one call |
-| `heading=` | `edit_markdown` param | Scope string matching to a section |
-| `edits=[]` | `edit_markdown` param | Atomic batch edits, optionally heading-scoped |
+| `heading=` | `edit_file` param | Scope string matching to a section |
+| `edits=[]` | `edit_file` param | Atomic batch edits, optionally heading-scoped |
 | ~~`mode="complete"`~~ | retired | Full-file inline delivery; no such parameter exists today |
 | Fuzzy heading matching | All heading params | Strips formatting, prefix/substring fallback |
 | Section coverage | Automatic | Tracks which sections you've read, hints on writes |
@@ -25,21 +25,24 @@ Seven features built on a shared heading-parsing foundation:
 |------|------|---------|
 | 1 | `read_file(path)` | Get heading map — see all sections |
 | 2 | `read_file(path, headings=[...])` | Read target sections (one call) |
-| 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace, insert, remove |
-| 3b | `edit_markdown(path, action="edit", heading, old_string, new_string)` | Surgical: scoped string replacement |
-| 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits, atomic |
+| 3a | `edit_file(path, heading, action, content)` | Whole-section: replace, insert, remove |
+| 3b | `edit_file(path, action="edit", heading, old_string, new_string)` | Surgical: scoped string replacement |
+| 3c | `edit_file(path, edits=[...])` | Batch: multiple edits, atomic |
 
 ---
 
-## `edit_markdown`
+## `edit_file` — Heading Grammar
 
 **Purpose:** Whole-section operations on markdown files — replace content, insert
 new sections, or remove existing ones. Addresses sections by heading, not line
 numbers.
 
-> The tool was renamed from `edit_section` to `edit_markdown` in v0.11.
-> `read_markdown` was later folded into `read_file` (heading-addressed by
-> default on markdown paths) — `edit_markdown`'s behavior is unchanged.
+> This grammar shipped as the standalone `edit_section` tool, was renamed to
+> `edit_markdown` in v0.11, and was folded into `edit_file` (Task 8) —
+> `heading`/`action`/`content` on `edit_file` now triggers the same logic that
+> `edit_markdown` used to. `read_markdown` was separately folded into
+> `read_file` (heading-addressed by default on markdown paths). Behavior is
+> unchanged across both folds; only the callable tool name is.
 
 **Parameters:**
 
@@ -179,7 +182,7 @@ have its own `heading` scope.
 
 ## Fuzzy Heading Matching
 
-All heading parameters (`heading=` on `read_file` and `edit_markdown`)
+All heading parameters (`heading=` on `read_file` and `edit_file`)
 use a 4-tier matching strategy:
 
 1. **Exact match** — `## Auth` matches `## Auth`
@@ -209,11 +212,11 @@ Coverage resets when the file is modified on disk (mtime-based invalidation).
 
 | You want to… | Use |
 |--------------|-----|
-| Replace an entire section's content | `edit_markdown(action="replace")` |
-| Add a new section | `edit_markdown(action="insert_before"/"insert_after")` |
-| Delete a section | `edit_markdown(action="remove")` |
-| Fix a typo in a section | `edit_markdown(action="edit", heading=, old_string=, new_string=)` |
-| Toggle multiple checkboxes | `edit_markdown(edits=[...])` with per-edit `heading` |
+| Replace an entire section's content | `edit_file(action="replace")` |
+| Add a new section | `edit_file(action="insert_before"/"insert_after")` |
+| Delete a section | `edit_file(action="remove")` |
+| Fix a typo in a section | `edit_file(action="edit", heading=, old_string=, new_string=)` |
+| Toggle multiple checkboxes | `edit_file(edits=[...])` with per-edit `heading` |
 | Read specific sections | `read_file(headings=[...])` |
 | Read a whole markdown file | no single call — `read_file(path)` for the map, then `headings=[...]`. There is no whole-file mode. |
 | See what sections exist | `read_file(path)` — returns heading map |
