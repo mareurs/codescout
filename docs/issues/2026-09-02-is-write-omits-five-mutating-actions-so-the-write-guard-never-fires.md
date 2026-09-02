@@ -1,7 +1,7 @@
 ---
 id: '328021e820100805'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: is_write omits five mutating actions, so the cross-process write guard never fires for them'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -10,11 +10,12 @@ tags:
 - write-guard
 - shared-checkout
 - append-entry
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related: []
 severity: high
+unverified: archive move held — a committed spec cites this artifact id in a sentence the fix falsified; re-point and archive after routing it to that spec's owner
 ---
 
 # BUG: `is_write` names five mutating actions it does not match, so the cross-process write guard never fires for them
@@ -119,31 +120,70 @@ tool names in this same match arm. The arm has now drifted twice.
 
 ## Fix
 
-**Not yet applied.** The correct fix is to make the enumeration exhaustive
-*by construction*, not to add five names — the arm has drifted twice already
-and a per-action patch ships the same defect a third time.
+**Fixed on `experiments` at `354ffac4`** (`354ffac4ad11628d02c73ad4d86e191b26af1177`),
+patch-id `d4e6237ea3526776bc5b4441abd4677632624c0b`. The SHA is positional and
+dies when `experiments` is rebased; the patch-id is a content hash of the diff
+and survives rebase and cherry-pick.
 
-Options, in preference order:
+Option 1 above, applied at **both grains**:
 
-1. Invert the `artifact` arm: match the **read** actions
-   (`find | get | graph | state_at`) and default writes to `true`. A new
-   mutating action is then guarded on the day it is added, and a new *read*
-   that forgets to opt out is merely over-serialised — the safe direction.
-   Same inversion for the `librarian` arm.
-2. Move `is_write` next to the dispatcher (`artifact.rs`) so the two lists are
-   adjacent and drift is visible in one diff.
+- `artifact` matches the reads (`find | get | graph | state_at`) and defaults
+  every other action to a write, so `graft`, `append_entry` and `update_entry`
+  are guarded, as is any action added later.
+- The adapter's final `_ => false` arm became `_ => true`. That arm was the same
+  defect one level up: every librarian tool is wrapped by a blanket map over
+  `lib_all_tools()`, so a tool added later would have arrived unguarded.
 
-Note the `librarian` arm's existing entries are genuinely conditional
-(`audit_doc_refs` on `emit_tracker`, `link_scan` on `write == true` — polarity
-inverted from `legibility_scan`), so an inversion there must preserve those.
+**A sixth mutating action, found by reproducing rather than by reading this
+file.** `librarian(audit_log)` is not in the table above and writes twice over:
+`prune_before_ms` + `confirm=true` reaches `prune_before()` → `DELETE FROM
+catalog_audit` (`src/librarian/catalog/audit/mod.rs:411`), and `export=true`
+appends to the committed shard (`audit/shard.rs:445`). Two independent
+enumerations of one small set — the code's and this report's — and both came up
+short. That is the argument for inverting rather than for adding six names.
 
+**Not a blanket default-to-write, and the exception is load-bearing.** `doctor`
+and `audit_log` are full-catalog scans in their common form. Guarding them
+unconditionally would hold the write lock for the length of a diagnostic and
+block every other session's writes behind it — trading this bug for an
+availability one. Each keeps a read-default arm keyed on its own
+schema-documented repair opt-in, over-approximated: `doctor` guards on `fix`
+being present at all, so the dry run that *decides* whether to write is guarded
+too.
+
+That exception was not planned — it was surfaced by
+`is_write_call_classifies_librarian_surface`, which pins bare `doctor` as a read
+and went red on the first attempt. It was right, and it now passes unchanged.
 ## Tests added
 
-None yet. The regression test must assert the **complement**: for every action
-in the `artifact` schema enum, `is_write` returns `true` unless the action is in
-an explicit read allowlist. A test that enumerates writes cannot catch the next
-omission — see Evidence.
+`is_write_classifies_every_action_outside_a_declared_read_set_as_a_write`
+(`src/server.rs`), the complement test this section asked for. It derives its
+population from each tool's own `action` enum rather than from a list, so:
 
+- a **new action** in the schema is asserted to be a write with no edit to the
+  test, and passes only because `is_write` now defaults that way;
+- a **new read opt-out** in `is_write` that nobody declares in the test turns it
+  red — the safe direction;
+- a **stale or misspelled** read-set entry is reported as dead rather than
+  silently exempting nothing.
+
+It also pins both polarities of all five conditional arms, which a bare-action
+probe structurally cannot reach, and asserts the population is non-empty under
+the `librarian` feature so a registration change cannot make it vacuously green.
+**It is inert on the lean lane** (`--no-default-features` advertises no
+librarian tools) and must not be credited with coverage there.
+
+**Mutation-verified per SITE, not per feature** (`CLAUDE.md` § *Testing
+Discipline*):
+
+| mutation | result |
+|---|---|
+| `artifact` arm reverted to the write enumeration | names all three of `graft`, `append_entry`, `update_entry` |
+| `librarian` `_ => true` reverted to `_ => false` | names `reindex` **and** `merge_worktree` |
+
+Neither mutation is caught by the other's assertion, and the second names a
+member the pre-existing `is_write_call_classifies_librarian_surface` misses
+entirely — that test catches only `reindex`. The two are not redundant.
 ## Workarounds
 
 On a shared checkout, avoid concurrent `append_entry` / `update_entry` /
@@ -153,12 +193,32 @@ sessions do issue the same id.
 
 ## Resume
 
-Read `src/librarian/adapter.rs:272-305` and `src/librarian/tools/artifact.rs:35`
-(the schema enum) side by side. Invert the `artifact` arm to a read-allowlist,
-then write the complement test described in *Tests added* — it should red
-before the inversion and green after. Confirm `graft`'s delete path
-(`src/librarian/tools/graft.rs`) is covered.
+**Fixed, deliberately NOT archived.** Gate green on both lanes at the fix commit
+— lean 3476 passed / 0 failed (29 suites), default 5189 passed / 0 failed (31
+suites), clippy `--workspace --all-targets --features local-embed -D warnings`
+exit 0. The archive trigger is met; the move is held for a stated reason rather
+than forgotten.
 
+**Why the move is held.** `artifact(action="move")` re-keys the artifact
+(`id = sha256(abs_path)`), and `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md:349`
+cites this id — in a sentence that the fix has already falsified, calling it
+*"that predicate's open hole"*. Archiving would turn one stale-but-true citation
+into a dangling one **and** require editing another work stream's committed
+design doc, where the repair is a judgement about their reasoning rather than a
+mechanical repoint. Holding the move keeps the id valid and their citation
+intact. Route the falsified sentence to that spec's owner; archive after.
+
+This is a `fixed`-but-unarchived record with its blocker in prose — the exact
+shape `docs/issues/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md`
+is about, from the opposite direction. The status is honest here because it
+understates nothing: `fixed` is true, and what is owed is the move, not the fix.
+
+One thing deliberately **not** done: `graft`'s delete path
+(`src/librarian/tools/graft.rs`) was not separately covered. It needs no new
+coverage for *this* defect — `graft` is guarded by the same inversion as its
+siblings and the regression test names it — but no test exercises the delete
+itself under concurrency, so that is an untested path rather than a closed one.
+Recorded here rather than left implied.
 ## References
 
 - `src/librarian/adapter.rs:272-305`, `src/server.rs:537-541`, `src/server.rs:651`
@@ -166,4 +226,3 @@ before the inversion and green after. Confirm `graft`'s delete path
 - `src/librarian/tools/doctor.rs:999`
 - `docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md` — prior drift of this arm
 - Count query: `SELECT COUNT(*) FROM tool_calls WHERE tool_name='artifact' AND json_extract(input_json,'$.action') IN ('append_entry','update_entry','graft')` against `.codescout/usage.db`
-
