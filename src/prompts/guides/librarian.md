@@ -392,8 +392,16 @@ that in one call. The response reports both ends:
 
 ```
 {"id": "<new>", "previous_id": "<old>", "id_changed": true,
- "history_grafted": {"events": 3, "links": 1, ...}, "moved": true}
+ "history_grafted": {"events": 3, "links": 1, ...},
+ "stage_together": ["<old>", "<new>"], "stage_hint": "...", "moved": true}
 ```
+
+**`stage_together` names both halves, and staging both is not optional.** At the catalog
+layer the move is atomic; on disk it is a tracked *deletion* plus an untracked *addition*,
+so `git add -u` and `git commit -a` — defined over paths that already have an index entry
+— take only the deletion and commit an archive that silently un-happened. `git add --
+<old> <new>`, then confirm `git status --short` shows one `R` rename line. `stage_hint`
+carries the same instruction in the response.
 
 Two consequences worth planning for:
 

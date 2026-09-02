@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 102
-entry_high_water_W: 99
+entry_high_water_F: 104
+entry_high_water_W: 100
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,8 @@ entry_high_water_W: 99
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-104 | 2026-09-02 | med | delivery-path | promoted-to-bug-tracker | **The notice I fixed, verified and shipped is injected into the response and then discarded by 18 compact renderers.** `inject_notice` writes `_workspace_notice` into the `Value`; `call_content` hands that `Value` to `self.format_compact(&val)`, and no `format_compact` reads the key — so it survives only on the pretty-JSON branch. It reaches `artifact`; it does not reach `symbols`, `grep`, `tree`, `read_file`, `references`, `semantic_search`. **Both regression tests drive `EchoTool`, which takes the pretty-JSON branch**, so they exercise the one path production read tools do not; the two mutations I ran killed on the **decision** path (`notice_once`, `workspace_override`) and nothing reaches the **delivery** path. Found by a `/mcp` reconnect that recreated the original conditions, with a **refused write as the control** — the guard gates on the same flag, so its refusal proved every precondition held while two reads stayed silent. Three plausible causes were checked and died at the bytes first (stale binary, worktrees gone, peer activation). The live production check I had reported as satisfying `codescout-0a`'s standing ask is what hid it: every response I read the string in was `artifact`, the one shape where it works |
+| F-103 | 2026-09-02 | med | docs-drift | fixed-verified | **The guide section a tool's caller actually receives is routable by `serves:`, so "the docs" is not one surface.** `489715ef` added `stage_together`/`stage_hint` to `artifact(action="move")` and documented the staging step in `tracker-conventions` § *Bug files* — but the section marked `<!-- serves: artifact.move, artifact.delete -->` in `src/prompts/guides/librarian.md` still printed the pre-fix response example, and `stage_together` appeared nowhere in that file. So the surface designed to teach a move caller taught the old shape. Surfaced **not by review**: the live probe run for `W-100` auto-injected the stale section into the same tool result as a response carrying the two fields it omits — drift and refutation arrived together. *Loudness is a property of a PATH* one layer up: the fix went on a path the caller does not traverse. Owed by anyone changing a response shape — grep `serves: <tool>.<action>` across `src/prompts/guides/`, a check nothing currently runs. Fixed in the same session |
 | F-102 | 2026-09-02 | high | test-discipline | open | **Five assertions in one feature satisfied by text that survives deleting the thing they name — and the fifth was committed by the fix for the fourth.** `len()==2` where a constant, `h.level` and 0-indexing all pass; a `contains` on the token where replacing the rendered line list with an empty string stays green; a `contains` on *push* satisfied by the hint's explanatory sentence rather than by its remedy; a `contains` on `'7'` satisfied by the token `R-147` itself; and `len()==2` again, its message reading *leaving exactly the two `##` definitions*, equally satisfied by `[6,7]` — precisely what the mutation it guards against produces. Instance 5 sits in the diff written to fix instance 4, in the merge blocker's own evidence test, written by an implementer whose dispatch said *treat this as a class — fix any other assertion satisfiable by text that survives deleting the thing it names*; their report says **no fifth instance to report**. `OB-1` under controlled conditions: the author was not merely aware of the class, they were **holding an instruction to sweep for it, in the file they were sweeping**. Every catch came from a reviewer asking *what else satisfies this string?* — a different question, not a more careful reading of the same one, which is why care is the wrong instrument. Instance 5 shipped at `5eea9301`, parked with a ruling |
 | F-101 | 2026-09-02 | med | measurement | open | **When you catch yourself explaining why a measurement is impractical, check whether the obstacle IS the result.** A `/mcp` reconnect drops you into the cleared-slot state a filed bug named as unowned; two calls closed it. Unpinned `symbols` returned home's answer, then a write was refused for the slot *still* being cleared — so **the read path has a silent home default that never sets the slot**, which is why worktree reads are silently wrong rather than blocked. Two confident wrong answers were drafted first: (1) "cleared slot auto-activates home", off the `project-activation-bootstrap` injection, which `get_guide("workspace-state")` says is re-sent on **every** reconnect regardless of project — the most legible signal was about the reconnect and nothing else; (2) "the probes interfere, the state is one-shot" — **wrong for the same reason the real answer is right**, and I had already written the table arguing it. Neither reached a peer or a commit only because the next tool call landed before the writeup did |
 | F-100 | 2026-09-02 | high | measurement | open | **A window is a fact about the query, never about the thing — re-run once with it REMOVED, not widened.** Four instances in one evening across four sessions, each returning a clean, self-consistent, *wrong* answer. `cut -c1-150` hid **+1,508 chars** of hand-authored prose and nearly published a wrong correction *of* a peer; a `git grep` window stopped two files short of its own falsifier; a `grep` over stdout hid an argparse exit-2 written to **stderr** and cost **three** debugging rounds on code that worked — written by someone who had already messaged two peers about instance 1. The remedy is one command (drop the `cut`, drop `--include`, `2>&1`), not "be careful with filters", which is the remedy that failed four times, twice inside a correction of itself |
@@ -158,6 +160,7 @@ entry_high_water_W: 99
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
 | W-99 | 2026-09-02 | med | **A safety measure adopted by REASONING about a mechanism, rather than by reading it, is a hypothesis — and `git commit -- <paths>` is the one that fails.** A pathspec commit ignores the index — true, and where the reasoning stops — and reads the **working tree** at those paths, which is the half that matters on a shared checkout: it commits whatever a concurrent session wrote to the same file since you last looked. Staging is what satisfies the `unreviewed-content` hook; the pathspec is not | The hook refused a commit from a session that had reasoned about index safety explicitly across several windows and reached the wrong form **by** that reasoning — care was the instrument, and care is what failed. **Not an averted capture:** all 34 deleted lines were verified mine, so the refused commit would in fact have been clean. What was prevented is the *belief* persisting, and it emits no symptom until the one time a peer has touched the same file. The situation was real — 7 paths staged, 6 the peer's — so only the remedy was wrong, which is why nothing about the situation could have flagged it | validated |
 | W-98 | 2026-09-02 | high | **A question about METHOD is a request to re-measure, not to re-explain — and when you re-derive, change the INSTRUMENT, not the care.** A challenge to a conclusion invites defence, and defending is often right; a challenge to the method cannot be answered by re-asserting the conclusion at all, because a sound conclusion drawn by an unsound method is indistinguishable from an unsound one at the point of publication. A more careful application of the same instrument reproduces the same blind spot — this is `W-94`'s *check it against a sample that differs* applied reflexively, when no peer is available | Two applications in one session, **one of which changed the answer**. (1) *Both owed citations closed, verified* rested on an unpinned `grep` returning zero; re-run **pinned** it returned zero again — sound, but the pinned run is the only reason that could be said, so the honest write-up was *the claim stands; the method that produced it did not deserve to be trusted*. (2) Measuring fix-SHA decay, `git cat-file -e` over 123 archived citations returned **0 dead** — which reads as *SHAs never die here*, and would have made a merge-vs-rebase decision look stakeless. `cat-file -e` tests object EXISTENCE; an orphan survives in the object store until `git gc` prunes it. Re-measured by **reachability** against `experiments` and `master`: **1 orphan**. Nothing in the first output marked it as answering a different question, it was self-consistent, and it pointed the same direction as the truth — which is exactly what would have made it durable | validated |
 | W-97 | 2026-09-02 | med | **When a change removes a surface, sweep its references and sort each into POINTER (go consult this) or RECORD (this once happened). Repair the pointers; leave the records** — deleting a record to satisfy a sweep falsifies the evidence the surface ever existed. Paired with a mechanical twin that needs no judgement: `grep -ohE 'scripts/[a-z_-]+\.(py\|sh)' <touched files> \| sort -u`, then stat each | Measured on the `n`-column removal: **14** surviving references, **13 records, 1 pointer** — a linter flagging all 14 would be right once and destructive thirteen times. The live pointer was a section banner in `tests/issue_clusters.rs` (`6070ae75`); a second, found independently by `codescout-0d` (`005dd9e6`), was **itself the remedy for a stale claim** — a fix outliving its own surface with nothing pointing backwards from the removal commit. The path check caught a dangling pointer **inside the commit fixing dangling pointers** (`probe-cluster-express.py`, no such file) under a minute after writing it, by a maximally-primed author: priming did not help, the mechanism did. Denominator published — `0d` ran the same check over its own 6 files + `docs/conventions/*.md`, **10 paths, 9 resolve, 1 known fixture, no defect** — because a check mentioned only when it fires has none | validated |
@@ -10304,6 +10307,100 @@ external question, which is the only part of this that is reliably available.
 **Valid:** dated 2026-09-02
 
 **Rests on:** the hook's own refusal text, and `docs/conventions/shared-checkout-commit-sequence.md`.
+
+## F-103 — the guide section served to `artifact.move` documented the pre-fix response shape
+
+**Observed:** `489715ef` added `stage_together` / `stage_hint` to `artifact(action="move")` and documented the staging step in `get_guide("tracker-conventions")` § *Bug files*. But the guide section actually **served to a caller of that tool** is `src/prompts/guides/librarian.md` § *Archiving / Moving Trackers*, marked `<!-- serves: artifact.move, artifact.delete -->`, and it still printed the pre-`489715ef` response example — neither field, no staging instruction. `stage_together` appeared nowhere in that file.
+
+**Cost:** an agent calling `move` receives that section on its first call and learns the old response shape from the surface designed to teach it. Bounded in practice only because the response itself now carries `stage_hint`, which is the mechanism half of the same fix.
+
+**How it surfaced — not by review.** The live probe run for the paired win auto-injected that very section back into this session alongside a response containing the two fields it omits. The drift and its refutation arrived in the same tool result, and the entry would not exist without that adjacency.
+
+**Mechanism, not carelessness.** `serves:` markers make guide sections routable per tool, so "the docs" is not one surface. I updated the section a human reading about bug files would find and missed the one the machine delivers on the call — this project's *loudness is a property of a PATH*, one layer up: the fix went on a path the caller does not traverse. Anyone changing a tool's response shape owes a grep of `serves: <tool>.<action>` across `src/prompts/guides/`, which is a check nothing currently runs.
+
+**Fixed** in the same session, same section: response example updated to carry both fields, plus a paragraph stating that staging both halves is not optional.
+
+- **Severity:** med
+- **Status:** fixed-verified
+
+**Valid:** dated 2026-09-02
+
+## W-100 — a live call after the rebuild verified the half the unit test is blind to
+
+**Pattern:** after a rebuild, verify a shipped tool change with one live call instead of trusting the unit test that gated it.
+
+**What the test could not establish.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly, so it observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content`. The test proved `stage_together` exists, is ordered deletion-first, and that `stage_hint` names the command; it proved **nothing** about whether the new `PATH_KEYS` entry actually relativizes at runtime. One live `artifact(action="move")` on the rebuilt binary returned both entries project-relative, which is exactly the half the test is structurally blind to.
+
+**Counterfactual, concrete rather than rhetorical.** A `stage_together` holding absolute paths would have passed the unit suite *and* the corpus gate. `src/tools/core/path_strip.rs`'s own header states that `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys "are exercised only by synthetic-`Value` unit tests". Nothing in the suite covers end-to-end relativization of a librarian key. The defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path` / `new_abs_path` in the same response — visible to every caller, invisible to every test.
+
+**Provenance established positively, not by mtime inference.** Server pid 190206, exe `target/release/codescout` with no ` (deleted)` suffix, started 20:08:10; binary built 20:06:36; `489715ef` committed 17:11:17 with `git merge-base --is-ancestor 489715ef HEAD` true. This is the same check `docs/issues/archive/2026-09-02-a-finished-bug-record-has-no-queryable-way-to-say-so.md`'s `unverified:` was held open for earlier the same day — applied here to this session's own fix rather than to someone else's, which is the harder direction to remember.
+
+**Cost:** three calls — create a throwaway `kind=plan` artifact, move it, delete it. Deliberately not `kind=bug`, which would have perturbed `tests/issue_clusters.rs`' every-open-bug-declares-a-class gate. Both paths confirmed absent afterwards; the only working-tree change left was the guide repair from F-103.
+
+- **Status:** validated
+
+**Valid:** dated 2026-09-02
+
+## F-104 — the notice I fixed, verified and shipped is dropped by 18 renderers — my tests drive the one fixture that keeps it
+
+**Valid:** dated 2026-09-02
+
+**Severity:** med — the fix shipped and works; what does not reach the caller is its output, on
+the majority of read tools. No wrong answer was produced, and a defect I had declared verified
+was live for four hours.
+
+**Status:** promoted-to-bug-tracker —
+`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
+
+**Observed.** A post-rebuild `/mcp` reconnect put this session back in the exact state
+`7a3aee93` addresses: slot cleared, one linked worktree present. Two unpinned reads (`tree`,
+`symbols`) carried **no** `_workspace_notice`. Under the code I had just shipped, both should
+have.
+
+**The scout did not stop at the first plausible cause, and three of them were wrong.** Each was
+checkable and each died at the bytes: *the binary predates the fix* (built 20:06:36, fix at
+16:58, zero code files changed since, servers started 20:07 on the live exe — `W-95` satisfied);
+*the worktrees are gone* (`git worktree list` shows `tool-collapse` registered); *a peer
+activated and the shared server carries the flag* (killed by the control below).
+
+**The control is what made the reads diagnostic.** `create_file` was **refused** —
+*"worktrees detected but `workspace(action='activate')` has not been called"* — seconds after
+the silent reads. `guard_worktree_write` gates on the same `is_project_chosen_this_session()`
+flag as the notice, so its refusal proves every precondition held. Two reads got nothing while
+a write proved the condition true, which is the same probe shape that closed `F-101`, reused
+deliberately.
+
+**The discriminator turned out to be the RESPONSE SHAPE, not the condition.** `artifact(action=
+"find")` in the same session seconds later carried the notice. `inject_notice` writes
+`_workspace_notice` into the response `Value`; `call_content` then hands that `Value` to
+`self.format_compact(&val)`, and no `format_compact` reads the key. **18 tools implement one.**
+The notice survives only on the pretty-JSON branch.
+
+**Why this is worth an entry rather than a line in the bug file: my own tests cannot see it, and
+they are the tests I mutation-tested.** Both regression tests drive `EchoTool`, whose output
+takes the pretty-JSON branch. So they exercise the branch production read tools do *not* take.
+The two mutations I ran were against the production path of the **decision** — `notice_once`,
+`workspace_override` — and both killed. Neither touched the **delivery** path, because no test
+reaches it. A mutation run answers a question about the line you mutate; I had proved the notice
+is *computed* and inferred that it is *delivered*.
+
+**And the live check I was proudest of is what hid it.** Production verification — the string in
+a real response, not the code path — was `codescout-0a`'s standing ask and I reported it
+satisfied. It was: every response I read it in was `artifact`, the one shape where it works. A
+correct method, run on an unrepresentative sample, returning a true result that licensed a false
+generalisation. `codescout-0a` had already warned the method answers a narrower question than it
+looks like it answers; they meant main-checkout-vs-worktree, and it is narrower on a second axis
+neither of us named.
+
+**Rests on:** `OB-15` (a silenced mechanism and an absent one produce identical observations —
+this is that class holding against the very fix that produced the entry, and the reason it
+survived a fix, two mutation kills and a live check); CLAUDE.md § *Testing Discipline*
+(*loudness is a property of a PATH*, and *mutate the production path* — where "the production
+path" has to mean the delivery path too, not only the decision).
+
+**Promote-when:** a second instance of a framework-injected response field that a per-tool
+renderer drops. `inject_hint` sits on the identical code path with the identical exposure and
+was not checked here.
 
 ## Template for new entries
 
