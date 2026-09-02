@@ -482,7 +482,20 @@ def main() -> int:
         "This is deliberately NOT `did the line change` -- a trailing space would satisfy that,\n"
         "and the count gate it replaces could not be satisfied by accident.\n\n"
         "If the class gained a member by RETAG rather than by a new file, changing the line is\n"
-        "enough and this passes.",
+        "enough and this passes.\n\n"
+        "BOTH SIDES OF THIS ARE NAMED ABOVE, and that is deliberate -- the corpus side is your\n"
+        "bug file, the ledger side is the `**Members:**` line, and they must land in ONE commit\n"
+        "or the gate is red in one direction or the other. If the ledger is contended right now:\n"
+        "  - It is a WAIT, not a re-derivation. The edit is a one-line append carrying no number,\n"
+        "    so no peer's commit can invalidate it between your writing it and your committing\n"
+        "    it. That was not true of the count this replaced.\n"
+        "  - A peer mid-archive-move does NOT cause this. This check reads the INDEX\n"
+        "    (`git show :path`), never the worktree, so a file deleted from the worktree but\n"
+        "    still tracked is read normally. If you are here, a class really did gain a member.\n"
+        "  - If you genuinely cannot land both, leaving your bug file UNSTAGED is a legal state\n"
+        "    and the gate will pass -- `git ls-files` is the population, so an untracked file is\n"
+        "    invisible to it. Said out loud because it is lossy: the evidence stays off the\n"
+        "    corpus until you stage it, and nothing will remind you.",
         file=sys.stderr,
     )
     _emit_sequence_tail()
