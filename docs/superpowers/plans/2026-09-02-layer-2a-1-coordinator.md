@@ -200,8 +200,8 @@ mod tests {
     }
 
     /// The primary block carries exactly one `_guide_hint` field, so a second
-    /// hint has nowhere to go. First claimant wins; later hints are dropped
-    /// rather than overwriting.
+    /// hint has nowhere to go. First non-`None` hint wins; a claimant
+    /// carrying `hint: None` does not suppress a later engine's.
     #[test]
     fn only_the_first_hint_survives() {
         let v = json!({});

@@ -20,6 +20,8 @@
   cargo clippy --workspace --all-targets --features local-embed -- -D warnings
   cargo test --workspace --no-default-features ; cargo test --workspace
   ```
+- **On `cargo fmt` and this shared checkout — the obvious scoping does not work.** Six other sessions hold uncommitted edits here, and bare `cargo fmt` is a *write* across every crate root in the workspace, so it will reformat their in-flight files. The natural remedy is wrong: **`cargo fmt -- <your file>` scopes nothing.** Verified 2026-09-02 with `cargo fmt -v`, cargo-fmt emits a single invocation — `rustfmt --edition 2021 <your file> --check <build.rs> <both libs> <main.rs> <24 test roots>` — appending the full crate-root list *after* your path. It is a whole-workspace format plus one redundant argument. Two forms are safe: `cargo fmt --check` (read-only, writes nothing) and `rustfmt --edition 2021 <your files>` invoked **directly**, which bypasses cargo's target enumeration. Name the form you ran in your report.
+
 - **Task 1 must be byte-identical.** Any pre-existing test whose expectation needs editing is evidence the refactor was not faithful — stop rather than adjust the test.
 - **A worktree exists at `.worktrees/tool-collapse`.** Use `git -C /home/marius/work/claude/codescout` for every git mutation; bare `git commit` is hook-blocked.
 - **Shared checkout.** Never `git add -A`. Stage by pathspec → `git diff --cached --name-only` → `git diff --cached` → commit by pathspec.

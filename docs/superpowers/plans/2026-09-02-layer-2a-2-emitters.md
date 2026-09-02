@@ -20,6 +20,10 @@
   cargo test --workspace --no-default-features ; cargo test --workspace
   ```
   Read the exit codes; do not let a red lean lane short-circuit the default lane, which is what rebuilds `target/debug/codescout` for the next session.
+
+  **On `cargo fmt` and this shared checkout — the obvious scoping does not work.** Six other sessions hold uncommitted edits here, and bare `cargo fmt` is a *write* across every crate root in the workspace, so it will reformat their in-flight files. The natural remedy is wrong: **`cargo fmt -- <your file>` scopes nothing.** Verified 2026-09-02 with `cargo fmt -v`, cargo-fmt emits a single invocation — `rustfmt --edition 2021 <your file> --check <build.rs> <both libs> <main.rs> <24 test roots>` — appending the full crate-root list *after* your path. It is a whole-workspace format plus one redundant argument.
+
+  Two forms are actually safe. `cargo fmt --check` in any arrangement is read-only and writes nothing. `rustfmt --edition 2021 <your files>`, invoked **directly**, bypasses cargo's target enumeration and touches only what you name. Use the direct `rustfmt` call when you need to write, and name the form you ran in your report — a substituted instrument reported under the mandated one's name is invisible exactly when it is benign.
 - **Byte-identical is the whole point of the 2a sequence.** No response's bytes may change. In this plan that is trivially true — no production call site is touched — and the tests you write are what makes it checkable in Plan 3.
 - **A worktree exists at `.worktrees/tool-collapse`.** Bare `git commit` is blocked by a hook. Use `git -C /home/marius/work/claude/codescout commit ...`.
 - **Shared checkout, several concurrent sessions.** Never `git add -A`. Stage by pathspec, then `git diff --cached --name-only` (the index is shared), then `git diff --cached` and read it, then commit by pathspec. A pre-commit hook refuses a pathspec commit carrying unstaged content.
