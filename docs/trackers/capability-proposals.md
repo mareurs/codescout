@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 11
+entry_high_water_CAP: 12
 entry_prefix: CAP
 expects_augmentation: docs/augmentations/docs-trackers-capability-proposals.yaml
 ---
@@ -53,8 +53,9 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-10 | 2026-08-20 | open — 1 of 4 decisions settled | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 | CAP-11 | 2026-08-26 | proposed | small–medium | Reconcile memory files against memory points — a doctor check, because only doctor can see both projects |
+| CAP-12 | 2026-09-02 | proposed | small — **measure first** | Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom |
 
-**Open: 9 of 11** — all but CAP-5 and CAP-7. Derived 2026-09-02 by reading each entry's own
+**Open: 10 of 12** — all but CAP-5 and CAP-7. Derived 2026-09-02 by reading each entry's own
 `**Status:**` line, not by counting rows above; the two counts agree, which is the check.
 ## CAP-1 — Session artifact-touch ledger
 
@@ -1574,6 +1575,103 @@ three real sweeps, or only noisily? Twelve colliding files in one day is a lot o
 every one fires. Replay the day's rows against a candidate rule (first-touch only? only
 when the other session's edit is unstaged? only at `git commit`?) and count true positives
 against total fires before writing any code. The base arm is a query.
+
+## CAP-12 — Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom
+
+**Status:** proposed · **Opened:** 2026-09-02
+
+**Valid:** conditional — until the other 8 candidate Resume sections are read and the rate is known
+
+**The ask.** A document that accumulates review passes by *appending* leaves its oldest
+navigational section — the one that says "start here / do this next" — at the **bottom**, below
+every later correction. Nothing marks which of the two is current. Proposed: a `doctor` check
+that reports a `Resume` section older than the artifact's newest dated content.
+
+**Two measured instances, one day apart, in opposite orientations.**
+
+- `docs/trackers/run-command-pipeline.md` § *Resume* read *"write `run_pipeline_inner` per
+  strategy A"* while § *Architectural review*, appended **above** it, rejected Strategy A
+  outright. **Harmful** — the file's entry point routed an implementer to discarded work.
+  Repaired `89b07961`; see `design-backlog-session-log:F-3`.
+- `docs/trackers/capability-proposals.md` CAP-7 § *Resume* reads *"**Next: check 1**"* while its
+  status block, **above** it, shows check 1 shipped at `b34bf10e`. **Harmless** — a top-down
+  reader hits the fresh block first. Deliberately left stale; repairing it would have been
+  cosmetic.
+
+Same defect, opposite harm, and the discriminator is **position relative to the fresh
+content**, not staleness itself. Any check that fires on both reports one real problem and one
+non-problem.
+
+### Substrate check (2026-09-02)
+
+**`doctor` is the right home and has room.** 30 checks, enum + `ALL` generated from one
+`declare_checks!` list (`src/librarian/tools/doctor.rs:172-203`) so adding one is a single
+arm. Violations carry `check`/`artifact_id`/`path`/`detail` (`:207-226`).
+
+**Nearest siblings by shape** — both compare two representations of one thing and differ only
+in which way round they subtract: `scan_snapshot_drift` (`:3214-3271`) and
+`scan_params_behind_body` (`:3889`). Their doc comments already state that pairing explicitly.
+Neither is a template for *this*, because both subtract **id sets**; this needs an ordering on
+**time**.
+
+**Nearest sibling by mechanism:** `scan_dated_stale` (`:2895`) — it dates a section and
+compares. It works because `**Valid:** dated YYYY-MM-DD` is a **declared** field with a pinned
+grammar. And `scan_archived_fix_sha_unresolvable` (`:4732`) proves `doctor` can reach `git2`.
+
+**What is genuinely missing: there is no way to date a prose section.** Measured across
+`docs/**/*.md` — **507** files carry a `Resume` section and **0** of them declare a date. Every
+existing date-aware check reads a declared field; none infers one. So the check cannot be built
+on today's substrate without first choosing how a section gets a date.
+
+**And the population is not 507.** `## Resume` is line **158 of `docs/issues/_TEMPLATE.md`**, so
+**497** of those are bug files instantiating a template — short documents where the section is a
+form field, not a navigational instruction that can strand a reader. The real candidate set is
+**10**: nine trackers (one archived) and one plan —
+
+    trackers/run-command-pipeline.md          trackers/capability-proposals.md
+    trackers/open-issue-work-queue.md         trackers/gate-contract-consolidation.md
+    trackers/release-promotion-session-log.md trackers/local-onnx-embedding-session-log.md
+    trackers/resume-embedding-transport-stages-1-3.md
+    trackers/bistriceanu/agent-behavior-analysis.md
+    trackers/archive/output-form-text-compaction.md
+    superpowers/plans/2026-05-09-bug-tracker-template.md
+
+A check firing on all 507 would be **98% template noise**, which is the failure mode
+`abs_path_outside_managed_roots` already had to cap for.
+
+### The rate is unknown, and saying "2 of 10" would be the error this repo keeps paying for
+
+Two of the ten are confirmed stale. **That is not a 20% rate.** I examined exactly two, and I
+examined them *because I was working on them* — a population selected so that every member
+found was one I had a reason to be reading. The other eight are unmeasured. Publishing "2 of
+10" would repeat `design-backlog-session-log:F-5` precisely: a sample chosen by availability,
+reported as though chosen by relevance.
+
+### First decision — measure before designing
+
+**Read the other eight Resume sections and judge each against its own file's newest dated
+content.** Cheap: ten files, one section each. It decides the entry, and the two candidate
+outcomes call for *different artifacts*, not different sizes of the same one:
+
+- **Low rate (0–2 more).** The answer is a **convention**, not a check — "a `Resume` carries
+  `**Valid:** dated YYYY-MM-DD`" in `get_guide("tracker-conventions")`, which also supplies the
+  declared field the check would have needed. Close this entry as `rejected`, reason kept.
+- **High rate (5+).** Then design, and the design must answer the harm question first, because
+  the two measured instances differ on it: fire only when the stale section sits **below** the
+  fresher content, or fire on staleness alone and accept that CAP-7-shaped harmless cases are
+  reported too.
+
+**Do not build the check to find out.** The measurement is an afternoon of reading; the check is
+a new public wire-vocabulary string that this repo's own `declare_checks!` doc comment treats as
+an API commitment.
+
+### Rests on
+
+`src/librarian/tools/doctor.rs:172-203` (`declare_checks!`), `:207-226` (`Violation`), `:2895`
+(`scan_dated_stale`), `:3214-3271` (`scan_snapshot_drift`), `:3889`
+(`scan_params_behind_body`), `:4732` (`scan_archived_fix_sha_unresolvable`, the `git2` proof);
+`docs/issues/_TEMPLATE.md:158`; corpus counts measured 2026-09-02 over `docs/**/*.md`;
+`design-backlog-session-log:F-3` and `design-backlog-session-log:F-5`.
 
 ## CAP-N — <title>
 

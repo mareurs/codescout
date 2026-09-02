@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 5
+entry_high_water_F: 6
 entry_high_water_W: 1
 ---
 
@@ -83,6 +83,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-3 | 2026-09-01 | high | stale-substrate | fixed-verified | the pipeline tracker's Resume routes an implementer to the strategy its own review rejected |
 | F-4 | 2026-09-01 | med | methodological | fixed-verified | a design cost was illustrated with a use case the source never claimed, and no caller can reach |
 | F-5 | 2026-09-01 | high | measurement | fixed-verified | two systems agreed and both were the wrong sample — a correct ruling was one message from retraction |
+| F-6 | 2026-09-02 | low | measurement | wontfix-false-alarm | the ledger-count hook's "skip" was correct — the name is broader than its `files:` scope (**denominator, not a catch**) |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -91,6 +92,55 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 
 ---
 
+
+## Open tasks
+
+Deliberately **not** a ledger — no prefix, no ids, nothing to cite. These are this work
+stream's remaining actions, worked in order. Opened 2026-09-02.
+
+**The list is shorter than the session's running summary implied, and that is the first
+finding.** Two of the four items carried forward were not tasks: one dissolved on inspection
+and one is a watch condition. Both are recorded below rather than deleted, because "we checked
+and there was nothing" is the observation this ledger's own § *Testing Discipline* says goes
+unrecorded by default.
+
+- [x] **T1 — Ledger-count hook "skip": DISSOLVED, not a defect.** Done 2026-09-02 →
+  `design-backlog-session-log:F-6`. `.pre-commit-config.yaml:141` scopes the hook to
+  `issue-clusters.md` and bug files; every commit this session touched other tracker files, so
+  `Skipped` was correct on all six. Recorded as a **denominator, not a catch** — the doubt was
+  instrumented and the mechanism was sound.
+
+- [x] **T2 — `F-3`'s class filed as `capability-proposals:CAP-12`.** Done 2026-09-02. The
+  substrate check changed the proposal's direction: the corpus is **507** files with a `Resume`
+  section but **497** are bug files instantiating `docs/issues/_TEMPLATE.md:158`, so the real
+  candidate set is **10** and a naive check would be 98% template noise. **0 of 507** declare a
+  date, and every date-aware `doctor` check reads a *declared* field — so the check cannot be
+  built on today's substrate at all. Entry's first decision is therefore **measure the other
+  eight, do not build**, with an explicit note that "2 of 10" is not a rate: both were found
+  while being worked on, which is `design-backlog-session-log:F-5`'s selection error.
+
+- [ ] **T3 — `run-command-pipeline.md`: the surfaces that do not need a human.** #2
+  (exclusivity), #4 (pipefail semantics — shell half already settled by R1), #5 (output shape)
+  and #8 (`format_compact` display) are marked *decidable as written*. Draft rulings for
+  approval; do not self-approve. #1 already leans `stages` XOR `command`, re-founded on
+  `src/tools/run_command/mod.rs:211`.
+
+- [ ] **T4 — #6 and the source-gate bug should be ruled once, together.** #6 is the per-stage
+  dangerous-command gate; `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
+  is the same question already filed against a shipped surface — and fired **twice on this
+  session's own commands**. One ruling covers both.
+
+- [ ] **T5 — #7 (Strategy C vs A/B) needs the user.** Unblocked by R1; its only remaining real
+  cost is that per-stage timeout becomes impossible. Not draftable — it is a product call about
+  whether that cost is acceptable, and § *Resume* step 2 says to rule it knowingly.
+
+- [ ] **T6 — #9 (`exec_one_stage` extraction) is a prerequisite under every strategy.** Verified
+  absent (`symbols(name="exec_one_stage")` → 0 matches). Real code, gated on T5.
+
+**Watch, not a task — `W-1`'s Promote-when.** Its criterion is a *third* instance of
+report-don't-attribute changing another session's action. Two exist. Manufacturing a third is
+not available, and turning a waiting-criterion into a task is how a Promote-when gets harvested
+early.
 ## Promotion status
 
 **Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,
@@ -671,6 +721,56 @@ can see something the owner cannot.
 `src/tools/core/types.rs`, read 2026-09-01; `src/server.rs:3431`;
 `.pre-commit-config.yaml:71-76`; commits `39f64a5b` (3 files, excludes `adapter.rs`) and
 `61441b3d` (includes `get.rs`); socket enumerations at ~19:00 and ~19:45.
+
+## F-6 — the ledger-count hook's "skip" was correct — the name is broader than its files: scope
+
+**Valid:** dated 2026-09-02
+
+**Category:** measurement · **Severity:** low · **Status:** wontfix-false-alarm
+
+**This entry is a DENOMINATOR, not a catch.** It records a doubt that was instrumented and
+came back clean. It is here because `CLAUDE.md` § *Testing Discipline* names this exact
+population as structurally unrecorded — *"a reader who doubts a figure and re-counts it
+produces nothing"* — so a ledger holding only `F-1`…`F-5` overstates the hit rate of its own
+author's suspicions. Five catches and one clean check is a different claim from five catches.
+
+**Observed.** Every commit this session printed
+`refuse a commit whose ledger counts disagree with its staged corpus...(no files to check)Skipped`.
+I flagged it as suspicious **three times** across five commits — most pointedly on the commit
+that *created* a ledger with two index tables and six entries, where a ledger-count check
+seemed exactly applicable. Each time I deferred it, latterly on the grounds that a peer held
+`scripts/pre-commit-ledger-counts.py`.
+
+**Got — correct behaviour, and one line explains it.** `.pre-commit-config.yaml:141`:
+
+    files: ^(docs/trackers/issue-clusters\.md|docs/issues/.*\.md)$
+
+The hook is scoped to `issue-clusters.md` and bug files. Every commit this session made touched
+`design-backlog-session-log.md`, `run-command-pipeline.md` or `capability-proposals.md` — none
+matches. `Skipped` is the correct output, and would have been on all six.
+
+**Root cause of the false alarm: the name is broader than the scope.** *"refuse a commit whose
+ledger counts disagree with its staged corpus"* describes a general ledger invariant. The
+implementation is a **cluster-ledger** check — bug files' `cluster/<slug>` tags against
+`issue-clusters.md`'s counts. Reading the name, a `Skipped` on a commit containing a ledger
+looks like the check failing to fire. Reading the `files:` line, it is the check declining work
+it never claimed. Nothing is broken; the label just underdetermines the scope, which is enough
+to buy three mentions of an agent's attention and a standing item on a task list.
+
+**What it cost, stated because "nothing was wrong" is not the same as "it was free."** Three
+reports to the user, each carrying a small false signal of an unresolved defect; one entry on a
+carried-forward open list across two sessions of summary; and a deferral justified by peer
+ownership of a file that turned out to be irrelevant — I never needed to read the script at
+all, only its registration. The whole question was answerable from `.pre-commit-config.yaml`
+at any point, including the first time I raised it.
+
+**Fix idea (optional, cosmetic).** Rename to something naming the scope — *"refuse a bug-file
+commit whose cluster counts disagree with issue-clusters.md"*. Not filed as a bug: the
+mechanism is correct, and a hook name is not a contract. Recorded here so the next reader who
+sees `Skipped` on a tracker commit spends zero attention on it.
+
+**Rests on:** `.pre-commit-config.yaml:136-142`, read 2026-09-02; the `Skipped` line in the
+pre-commit output of `89b07961`, `31b34960`, `187bb192`, `8047f552` and `1df40eb1`.
 
 ## Template for new entries
 
