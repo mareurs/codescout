@@ -118,6 +118,35 @@ defect" to "bad run":
 `stdout` absent — from a block that sets all four. The `stderr` is the wine Cygwin
 FAST_CWD warning, which is expected on every `bash.exe` here and is a red herring.
 
+
+### 2026-09-02 — two more datapoints, and the first measurement separating this from the MSVC lanes
+
+Status unchanged: already `open`, correctly. What is new is job-grain data across four consecutive
+`experiments` runs, read from `gh run view <id> --json jobs` rather than the run-level conclusion:
+
+| run | sha | wine | the three MSVC lanes |
+|---|---|---|---|
+| 33570342471 | `a82026d7` | fail | all fail |
+| 33574961971 | `6d89a69b` | fail | all fail |
+| 33577436407 | `2d04c6ad` | **success** | all fail |
+| 33600281053 | `62d7fa4b` | success | all pass |
+
+**Two of four for this lane — and `2d04c6ad` is the row that earns its keep.** The wine lane passed
+while all three `windows-latest` MSVC lanes failed, so the two populations move independently. Until
+today the split between this file and
+`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` rested on the *reasoning* that
+wine-under-load and MSVC wall-clock are different mechanisms; it now rests on an observation where
+one fired and the other did not. Cross-referenced from that file's Evidence section.
+
+**Not a fix and not evidence of one.** Nothing in these lanes changed across the four runs. The
+2026-09-02 green is the same output a repaired lane would produce, which is precisely why it settles
+nothing — the load conditions this file names as the trigger are a property of the runner, not of
+the commit.
+
+**No failure log was read from these runs.** The claim is *this lane still fails intermittently*,
+not *it fails on the three tests § Symptom names*. Whether the same three tests are involved is
+unverified here, and confirming it would strengthen or split this file — which is the more useful
+next step than another pass/fail tally.
 ## Hypotheses tried
 
 1. **A real Windows defect in the peer's new size-signal feature.** *Test:* run both tests

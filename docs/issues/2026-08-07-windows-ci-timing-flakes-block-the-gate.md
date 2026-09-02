@@ -1,7 +1,7 @@
 ---
 id: e817931ef9d51dd0
 kind: bug
-status: zombie
+status: open
 title: 'BUG: two Windows CI tests flake on wall-clock/race assumptions — one is skip-listed on wine but gates on MSVC'
 tags:
 - cluster/repro-env-diverges-from-gate-env
@@ -203,6 +203,39 @@ The reason for the skip is now recorded in `.github/workflows/ci.yml` next to th
 an explicit instruction not to make the test self-skip on a missing `py`: a probe-gated early
 return would pass vacuously on `windows-latest` if the probe ever misfired, silently disarming the
 MSVC-CRT quote-mangling regression guard — the only place the test has value.
+
+### Re-confirmed live 2026-09-02 — `zombie` → `open`, measured at job grain
+
+The `zombie` status asked *"has this come back?"*. It has. Four consecutive `experiments` runs,
+read from `gh run view <id> --json jobs` rather than from the run-level conclusion — a red run
+says nothing about **which** job failed, and this file's whole subject is which:
+
+| run | sha | win/no-features | win/default | win/local-embed | wine |
+|---|---|---|---|---|---|
+| 33570342471 | `a82026d7` | fail | fail | fail | fail |
+| 33574961971 | `6d89a69b` | fail | fail | fail | fail |
+| 33577436407 | `2d04c6ad` | fail | fail | fail | **success** |
+| 33600281053 | `62d7fa4b` | success | success | success | success |
+
+**Three of four runs, all three MSVC lanes together.** They fail and recover as a unit, which is
+what a shared wall-clock assumption looks like and is consistent with this file's root cause.
+
+**The wine lane decoupled on `2d04c6ad`** — passed while all three MSVC lanes failed. That is the
+evidence that `05b157e0c38b765a` is a *separate* fault rather than the same one seen through a
+different toolchain, and it is why these stay two bug files. Recorded here because the pair had no
+measurement separating them before today; the split was assumed.
+
+**The 2026-09-02 green run is not evidence of a fix, and the status change says so.** Nothing in
+these lanes changed between `2d04c6ad` and `62d7fa4b` — same code, different dice. A passing flaky
+test gives exactly the output a fixed one gives, which is why `open` is the honest status and why a
+future reader meeting a green run should not read it as lapsed. **The predictive error is worth
+keeping too:** on the strength of three consecutive failures this was forecast to fail again, and
+all four lanes passed. A base rate is not a forecast.
+
+**Not re-diagnosed — only re-observed.** No failure log from these four runs was read; the claim
+here is *the lanes still fail intermittently*, not *they fail for the reason § Root cause states*.
+Re-establishing the mechanism needs the actual assertion output from a failing run, and that is the
+next step rather than something this pass did.
 ## Hypotheses tried
 
 1. **Hypothesis:** the failures were caused by the day's code changes (audit_doc_refs gitignore
