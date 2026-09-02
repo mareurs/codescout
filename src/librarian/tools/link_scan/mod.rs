@@ -273,6 +273,37 @@ fn attribute_entry_edge(
     out
 }
 
+/// The `rests-on` edge a Statement's `**Rests on:**` declaration names, if it names
+/// one the resolver can reach.
+///
+/// Deliberately **not** line-attributed, which is the whole difference from
+/// [`attribute_entry_edge`]. That function has to infer which entry a prose citation
+/// belongs to by position, and pays 12.1% attribution error for it. A `**Rests on:**`
+/// declaration is parsed *out of one section's own text*, so the owning entry is
+/// given rather than inferred, and no heuristic is involved.
+///
+/// The self-reference rule is the same one `attribute_entry_edge` applies: an entry
+/// resting on a sibling in its own ledger is a real edge; an entry resting on itself,
+/// or on a `dst_ref` naming no entry at all inside its own artifact, is not.
+fn rests_on_edge(
+    section: &extract::EntrySection,
+    c: &extract::Citation,
+    src_id: &str,
+    dst_id: &str,
+    id_to_slug: &BTreeMap<String, String>,
+) -> Option<(String, String, String)> {
+    let src_slug = id_to_slug.get(src_id)?;
+    let dst_ref = entry_dst_ref(c, dst_id, id_to_slug)?;
+    if src_id == dst_id {
+        match dst_ref.rsplit_once(':').map(|(_, local)| local) {
+            // Intra-ledger, a different entry: a real edge.
+            Some(local) if local != section.id.as_str() => {}
+            _ => return None,
+        }
+    }
+    Some((src_slug.clone(), section.id.clone(), dst_ref))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: Args = serde_json::from_value(args).map_err(|e| {
         RecoverableError::with_hint(
@@ -447,7 +478,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Entry-grain edges: (src_slug, src_local, dst_ref). A set because one entry citing
     // one target twice is ONE edge, and because a stable order makes the emitted sample
     // diffable across runs.
-    let mut desired_entry: BTreeSet<(String, String, String)> = BTreeSet::new();
+    let mut desired_entry: BTreeSet<(String, String, String, String)> = BTreeSet::new();
+    // Layer 3c: counted separately from `edges_attributed`, which is a CITATION count
+    // over prose. This is an EDGE count over declarations — different unit, different
+    // denominator, so summing them would be meaningless.
+    let mut rests_on_derived = 0usize;
     // Citations that resolved to an edge but sit outside every entry section — a
     // preamble, a trailing `## Summary` that defines nothing, or (the bulk of them, 1397
     // of 1719 measured on this corpus) a document that is not a ledger at all and
@@ -543,7 +578,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         // `outside_any_entry` over the resolved citations. The edge count
                         // is `derived`, below.
                         edges_attributed += 1;
-                        desired_entry.extend(triples);
+                        desired_entry.extend(
+                            triples
+                                .into_iter()
+                                .map(|(s, l, d)| (s, l, d, diff::CITES_REL.to_string())),
+                        );
                     }
                     desired.insert((row.id.clone(), dst_id));
                 }
@@ -564,7 +603,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         edges_outside_any_entry += 1;
                     } else {
                         edges_attributed += 1;
-                        desired_entry.extend(triples);
+                        desired_entry.extend(
+                            triples
+                                .into_iter()
+                                .map(|(s, l, d)| (s, l, d, diff::CITES_REL.to_string())),
+                        );
                     }
                 }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
@@ -631,6 +674,51 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 None => {} // suppressed noise / foreign-jurisdiction links
             }
         }
+
+        // ---- Layer 3c: `**Rests on:**` -> rel="rests-on" -------------------
+        //
+        // A second derivation over the SAME sections, resolved through the SAME
+        // `resolve::resolve`. Only `Outcome::Edge` becomes a row; Ambiguous,
+        // Dangling, CrossRepo and MalformedQualifier stay reported by the loop
+        // above and are never guessed here either.
+        //
+        // Tokens come from `extract::extract` run over the declaration's own text
+        // rather than a local regex, so there is exactly ONE tokenizer over the
+        // `PREFIX-N` namespace. A second one would drift from this one on every
+        // qualifier or escaping rule added later — the defect class this repo
+        // tracks as IC-6 (`addressing-without-an-escape-hatch`), 27 instances.
+        // The line numbers `extract` reports are relative to the declaration and
+        // are unused: the owning entry is given, not inferred.
+        for section in sections {
+            let declared = crate::librarian::statements::declared_section_text(section, sections);
+            let Some(value) = crate::librarian::statements::parse_rests_on(&declared) else {
+                continue;
+            };
+            for rc in &extract::extract(&value).citations {
+                // BOTH `Edge` and `SelfCite`, mirroring the prose path above.
+                //
+                // The spec's § Resolution and materialization says "only `Edge`
+                // becomes a row … `SelfCite` stays reported". That sentence predates
+                // `2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize`:
+                // `SelfCite` is a FILE-grain verdict, correct there and wrong at entry
+                // grain, where F-1 and F-2 are two nodes. Following the spec literally
+                // here dropped every intra-ledger declaration — and intra-ledger is the
+                // common shape for `**Rests on:**`, since an entry most often rests on
+                // a sibling in its own ledger. Caught by
+                // `a_rests_on_declaration_naming_a_sibling_records_a_rests_on_edge`.
+                //
+                // The true self-reference is refused inside `rests_on_edge`, not here.
+                let dst = match resolve::resolve(rc, &row.id, &rel_dir, &index, &corpus) {
+                    Some(resolve::Outcome::Edge { dst_id })
+                    | Some(resolve::Outcome::SelfCite { dst_id }) => dst_id,
+                    _ => continue,
+                };
+                if let Some((s, l, d)) = rests_on_edge(section, rc, &row.id, &dst, &id_to_slug) {
+                    rests_on_derived += 1;
+                    desired_entry.insert((s, l, d, diff::RESTS_ON_REL.to_string()));
+                }
+            }
+        }
     }
 
     // ---- diff (and apply, in write mode) ----
@@ -653,7 +741,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // stale row behind. Scoped to the slugs of the artifacts THIS pass extracted, never
     // a bare `origin='scan'` sweep — see `entry_cite::prune_scan_rows`.
     let mut entry_report = entry_cite::MaterializeReport {
-        derived: desired_entry.len(),
+        // Cites-grain ONLY. `desired_entry` now carries two rels, and `derived` is
+        // documented in the response as `attributed` deduplicated — a claim about
+        // prose citations. Counting `desired_entry.len()` here would fold rests-on
+        // edges into a number whose stated denominator is citations, which is the
+        // "a count arrives with its unit or not at all" rule.
+        derived: desired_entry
+            .iter()
+            .filter(|(_, _, _, rel)| rel == diff::CITES_REL)
+            .count(),
         ..Default::default()
     };
     let mut entry_pruned = 0usize;
@@ -665,14 +761,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let now = chrono::Utc::now().timestamp_millis();
         let tx = cat.conn.unchecked_transaction()?;
         entry_pruned = entry_cite::prune_scan_rows(&tx, &scanned_slugs)?;
-        for (src_slug, src_local, dst_ref) in &desired_entry {
+        for (src_slug, src_local, dst_ref, rel) in &desired_entry {
             let wrote = entry_cite::insert_with(
                 &tx,
                 &entry_cite::EntryCiteRow {
                     src_slug: src_slug.clone(),
                     src_local: src_local.clone(),
                     dst_ref: dst_ref.clone(),
-                    rel: diff::CITES_REL.to_string(),
+                    rel: rel.clone(),
                     origin: entry_cite::ORIGIN_SCAN.to_string(),
                     created_at: now,
                 },
@@ -683,7 +779,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // `statement-validity-session-log:F-5` names.
             entry_report.written += wrote;
         }
-        entry_report.skipped_existing = entry_report.derived - entry_report.written;
+        // Over BOTH rels, matching the insert loop above. Deliberately not
+        // `entry_report.derived - written`: `derived` is cites-only by design (see
+        // its construction), so that subtraction underflows the moment a single
+        // rests-on edge is written. usize subtraction panics rather than wrapping,
+        // which is the safe failure, but it is still a panic on real data.
+        entry_report.skipped_existing = desired_entry.len() - entry_report.written;
         tx.commit()?;
     }
 
@@ -726,6 +827,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "written": entry_report.written,
                 "skipped_existing": entry_report.skipped_existing,
                 "pruned": entry_pruned,
+                // Layer 3c. A separate unit: edges derived from `**Rests on:**`
+                // DECLARATIONS, not from prose citations, so it shares no
+                // denominator with the four above and must not be summed with them.
+                // `written`/`skipped_existing` cover both rels together, because the
+                // insert loop does.
+                "rests_on_derived": rests_on_derived,
             },
             "edges_desired": desired.len(),
             "edges_unchanged": d.unchanged,
@@ -1197,6 +1304,211 @@ mod tests {
             e["derived"],
             json!(1),
             "F-2 → F-1 is one entry edge: {out:#?}"
+        );
+    }
+
+    /// Layer 3c. A `**Rests on:**` declaration naming a resolvable target becomes an
+    /// `entry_cite` row with `rel="rests-on"`.
+    #[tokio::test]
+    async fn a_rests_on_declaration_naming_a_sibling_records_a_rests_on_edge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — the decision that is rested on\n\
+             \n\
+             body\n\
+             \n\
+             ## F-2 — the entry that rests on it\n\
+             \n\
+             **Rests on:** F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            e["rests_on_derived"],
+            json!(1),
+            "F-2 rests on F-1: {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(1),
+            "and the SAME line also yields a cites edge, because a `**Rests on:** F-1` \
+             line is prose that contains `F-1`. That is intended, not double-counting: \
+             the two rels are two rows between one pair (see \
+             `a_rests_on_edge_coexists_with_a_cites_edge_between_the_same_pair`), and \
+             the exposure tap the spec designs fires on `max(reads, rests-on \
+             in-degree)` rather than a sum. Asserted here so that if the derivation is \
+             ever narrowed to suppress the cites half, it is a deliberate change: \
+             {out:#?}"
+        );
+    }
+
+    /// **The property the whole Layer 3c design rests on.** `entry_cite`'s primary key
+    /// is `(src_slug, src_local, dst_ref, rel)`, so a `rests-on` edge and a `cites`
+    /// edge between the *same pair* are two rows, not one.
+    ///
+    /// Asserted through `written` in write mode rather than by reading the table,
+    /// because `written` counts rows the DB actually accepted: if `rel` were absent
+    /// from the PK the second insert would be a no-op and this reads 1.
+    ///
+    /// **Load-bearing fixture detail:** F-2 both declares `**Rests on:** F-1` *and*
+    /// mentions `F-1` in prose. Drop either line and the test still passes while no
+    /// longer testing coexistence at all.
+    #[tokio::test]
+    async fn a_rests_on_edge_coexists_with_a_cites_edge_between_the_same_pair() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — the decision that is rested on\n\
+             \n\
+             body\n\
+             \n\
+             ## F-2 — the entry that rests on it\n\
+             \n\
+             **Rests on:** F-1\n\
+             \n\
+             and the prose also cites F-1 directly\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": true })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(e["derived"], json!(1), "one cites edge: {out:#?}");
+        assert_eq!(
+            e["rests_on_derived"],
+            json!(1),
+            "one rests-on edge: {out:#?}"
+        );
+        assert_eq!(
+            e["written"],
+            json!(2),
+            "BOTH rows must land. A 1 here means `rel` stopped discriminating in the \
+             primary key and one edge silently replaced the other: {out:#?}"
+        );
+        assert_eq!(
+            e["skipped_existing"],
+            json!(0),
+            "nothing was skipped, so `written` is the whole population: {out:#?}"
+        );
+    }
+
+    /// The self-reference rule, same as the prose path: an entry resting on *itself*
+    /// is not an edge. Distinct from resting on a sibling, which
+    /// `a_rests_on_declaration_naming_a_sibling_records_a_rests_on_edge` covers.
+    #[tokio::test]
+    async fn a_rests_on_declaration_naming_its_own_entry_records_no_edge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — the entry that names itself\n\
+             \n\
+             **Rests on:** F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        assert_eq!(
+            out["counts"]["entry_edges"]["rests_on_derived"],
+            json!(0),
+            "a self-reference is not an edge: {out:#?}"
+        );
+    }
+
+    /// Prose that merely *mentions* the field is not a declaration, and a declaration
+    /// naming nothing resolvable stays prose — `Outcome::Edge` is the only outcome that
+    /// becomes a row.
+    ///
+    /// Both halves matter and fail in opposite directions: the first would over-report
+    /// (any sentence about `Rests on:` becomes an edge), the second would guess at a
+    /// target the resolver refused.
+    #[tokio::test]
+    async fn a_mentioned_or_unresolvable_rests_on_records_no_edge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — the entry\n\
+             \n\
+             see the **Rests on:** field for how this works\n\
+             \n\
+             ## F-2 — another entry\n\
+             \n\
+             **Rests on:** ZZZ-999 which nothing defines\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        assert_eq!(
+            out["counts"]["entry_edges"]["rests_on_derived"],
+            json!(0),
+            "neither a mention nor an unresolvable target is an edge: {out:#?}"
         );
     }
 

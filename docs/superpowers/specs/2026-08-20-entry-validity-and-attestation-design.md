@@ -794,6 +794,27 @@ pub enum Outcome {
 }
 ```
 
+> ⚠ **`SelfCite` corrected 2026-09-02, when 3c was implemented.** The paragraph below
+> is right about `Ambiguous`, `Dangling` and `CrossRepo` and **wrong about `SelfCite`**
+> — and it was already wrong when 3b shipped. `SelfCite` is a **file-grain** verdict,
+> correct there because an artifact citing itself is a self-loop, and wrong at entry
+> grain where `F-1` and `F-2` are two distinct nodes. The shipped 3b materializer takes
+> both `Edge` and `SelfCite`; see
+> `docs/issues/archive/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`,
+> whose finding is that following the file-grain verdict discarded *every* intra-ledger
+> entry edge while 4389 tests stayed green.
+>
+> **It cost real time on 3c**, which is why it is corrected here rather than annotated:
+> the implementation followed this sentence literally and every intra-ledger
+> `**Rests on:**` declaration silently produced no edge. Intra-ledger is the *common*
+> shape for this field — an entry most often rests on a sibling in its own ledger — so
+> the spec-faithful implementation derived close to nothing. Caught by a test, not by
+> review.
+>
+> The true self-reference — an entry resting on *itself*, or on a `dst_ref` naming no
+> entry inside its own artifact — is still refused, at assembly time rather than at
+> resolution time.
+
 **Only `Edge` becomes a row.** `Ambiguous`, `Dangling`, `CrossRepo` and `SelfCite` stay
 reported and are never guessed, preserving the existing tie-break in
 `DefinerRef { artifact_id, active }` (`resolve.rs:15-21`) where archived definers lose

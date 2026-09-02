@@ -17,6 +17,19 @@ use crate::librarian::catalog::{links, links::LinkRow, Catalog};
 /// The scanner-owned rel. Never hand-write it; never scan-write anything else.
 pub const CITES_REL: &str = "cites";
 
+/// The `**Rests on:**` relation, entry grain only.
+///
+/// Coexists with a `cites` edge between the same pair rather than replacing it:
+/// `entry_cite`'s primary key is `(src_slug, src_local, dst_ref, rel)`, so `rel`
+/// discriminates. That property is what the whole Layer 3c design rests on and it
+/// is asserted directly by
+/// `a_rests_on_edge_coexists_with_a_cites_edge_between_the_same_pair`.
+///
+/// **File grain deliberately does not get this rel.** `**Rests on:**` is declared by
+/// an entry and is a claim about that entry's proof; projecting it up to the artifact
+/// would assert that the whole file rests on the target.
+pub const RESTS_ON_REL: &str = "rests-on";
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct LinkDiff {
     pub to_add: Vec<(String, String)>,
