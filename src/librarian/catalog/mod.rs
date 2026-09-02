@@ -7,6 +7,7 @@ use crate::librarian::workspace::WorkspaceConfig;
 pub mod artifact;
 pub(crate) mod audit;
 pub mod augmentation;
+pub mod chunk;
 pub mod commits;
 pub mod entry_cite;
 pub mod event_edges;
