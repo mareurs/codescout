@@ -2,7 +2,7 @@
 """Refuse a commit whose issue-cluster Index counts disagree with the corpus it STAGES.
 
 Why this exists as a hook rather than only as `tests/issue_clusters.rs`:
-`every_index_count_matches_the_corpus` reads the WORKING TREE, so it certifies the state on
+`no_index_row_stores_a_count` reads the WORKING TREE, so it certifies the state on
 disk. A partial commit ships a state that never existed on disk, and no re-run of that test
 can address it — running the gate before committing answers a different question than the
 commit poses, and answers it green. Measured 2026-09-01 (`cluster-promotion-session-log:F-7`,
@@ -85,6 +85,9 @@ def read(path: str, source: str) -> str | None:
     the fallback for anything unprimed, so a slip in the batch parser costs speed, never
     correctness.
     """
+    if source == "head":
+        r = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
     if source == "index":
         if _INDEX_BLOBS is not None and path in _INDEX_BLOBS:
             return _INDEX_BLOBS[path]
@@ -311,6 +314,38 @@ def _emit_sequence_tail() -> None:
     except OSError:
         pass
 
+def members_fields(ledger: str, valid: set[str]) -> dict[str, str]:
+    """slug -> its `**Members:**` line, keyed by the `**Slug:**` its own section declares."""
+    out: dict[str, str] = {}
+    cur: str | None = None
+    for line in ledger.splitlines():
+        if line.startswith("## IC-"):
+            cur = None
+        elif line.startswith("**Slug:**"):
+            cur = backticked_cluster_slug(line[len("**Slug:**"):])
+        elif line.startswith("**Members:**") and cur is not None and cur in valid:
+            out[cur] = line
+    return out
+
+
+def added_member_stems(source: str) -> dict[str, set[str]]:
+    """slug -> dateless stems of bug files carrying it now that did not carry it at HEAD."""
+    out: dict[str, set[str]] = {}
+    for rel in bug_files():
+        now = read(rel, source)
+        if now is None:
+            continue
+        was = read(rel, "head")
+        now_tags = set(cluster_tags(frontmatter(now) or ""))
+        was_tags = set(cluster_tags(frontmatter(was) or "")) if was is not None else set()
+        stem = pathlib.Path(rel).stem
+        if len(stem) > 11 and stem[4] == "-" and stem[7] == "-" and stem[10] == "-":
+            stem = stem[11:]
+        for slug in now_tags - was_tags:
+            out.setdefault(slug, set()).add(stem)
+    return out
+
+
 def main() -> int:
     source = "index"
     as_json = False
@@ -363,48 +398,91 @@ def main() -> int:
         ))
         return 0
 
-    drift = [
-        f"cluster/{slug} — Index table says {n}, staged corpus has {actual.get(slug, 0)}"
+    # CHECK 1 -- no STORED count. Mirrors `no_index_row_stores_a_count` and
+    # `no_class_field_states_a_bare_n`. Counts are derived
+    # (`scripts/probe-cluster-census.py`); storing them in a file 22 classes share made every
+    # bug filer edit it, and a peer's commit staled yours between deriving and committing.
+    stored = [
+        f"cluster/{slug} -- the Index row stores a count ({n})"
         for slug, n in sorted(declared.items())
-        if actual.get(slug, 0) != n
     ] + [
-        f"cluster/{slug} — **{field}:** states a bare n={n}, staged corpus has {actual.get(slug, 0)}"
-        for slug, field, n in claimed
-        if actual.get(slug, 0) != n
+        f"cluster/{slug} -- **{field}:** stores a bare n={n}" for slug, field, n in claimed
     ]
-    if not drift:
+    if stored:
+        print(
+            "this commit stores a DERIVED count in the clusters ledger:\n  "
+            + "\n  ".join(stored)
+            + "\n\n"
+            "Counts are no longer stored. Derive them:\n"
+            "  python3 scripts/probe-cluster-census.py\n\n"
+            "If you meant to QUOTE a figure -- which the house style encourages, with its\n"
+            "derivation -- wrap it in backticks. A backticked `n=N` is a quotation and is\n"
+            "deliberately not checked. If you meant to state today's count, cite the probe\n"
+            "instead, so the sentence cannot decay.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 2 -- a class that GAINS a member must say something about it.
+    #
+    # This replaces the forcing function check 1 used to be, and the replacement is the point.
+    # The old count gate made a ledger edit MANDATORY, and that is why per-member derivations
+    # exist at all: authors wrote them while satisfying the refusal. Measured on `1b92a7de` --
+    # one bug filing added 1,508 characters of hand-authored, non-derivable prose across the
+    # three lines it had to touch for the number. Remove the number and nothing asks; a
+    # `**Members:**` with 22 members and no derivations reads identically to one with full
+    # derivations, to every query. Raised by codescout-17 (sessionId 9716a130), which measured
+    # its own commit rather than accepting the premise it was handed.
+    #
+    # "Did the line change?" was the first form and is REJECTED: a trailing space satisfies it.
+    # That is `cluster/assertion-satisfiable-by-accident`, and it would be a real regression --
+    # the count gate was not satisfiable by accident, because the number had to equal a derived
+    # value. So the assertion is that the field NAMES the new member, in the ledger's own
+    # `+1: `<dateless-slug>`` shape. Whitespace cannot satisfy that, and a filer who names it
+    # differently gets a refusal saying which stem was looked for, recoverable by reading.
+    # Measured 2026-09-02: 7 of 22 classes already cite members this way -- a boundary, not a
+    # universal convention -- but this is PROSPECTIVE, firing only on a class that gains a
+    # member, so the other 15 are untouched until they do.
+    head_ledger = read(LEDGER, "head")
+    if head_ledger is None:
+        return 0
+    before = actual_counts(valid_slugs(head_ledger), "head")
+
+    gained = sorted(s for s, n in actual.items() if n > before.get(s, 0))
+    if not gained:
+        return 0
+
+    members = members_fields(ledger, valid)
+    head_members = members_fields(head_ledger, valid)
+    new_stems = added_member_stems(source)
+
+    undocumented = []
+    for slug in gained:
+        line = members.get(slug, "")
+        changed = line != head_members.get(slug, "")
+        stems = new_stems.get(slug, set())
+        if changed and (not stems or any(st in line for st in stems)):
+            continue
+        undocumented.append((slug, sorted(stems)))
+    if not undocumented:
         return 0
 
     print(
-        "a published count disagrees with the corpus THIS COMMIT STAGES:\n  "
-        + "\n  ".join(drift)
+        "a class gained a member and its `**Members:**` does not name it:\n  "
+        + "\n  ".join(
+            f"cluster/{slug} -- expected the field to change and to contain one of: "
+            + (", ".join(f"`{x}`" for x in stems) or "(any change)")
+            for slug, stems in undocumented
+        )
         + "\n\n"
-        "This reads the INDEX, so it is about what you are SHIPPING, not what is on disk.\n"
-        "`cargo test --test issue_clusters` can be green at the same moment — it reads the\n"
-        "working tree, and a partial commit ships a state that never existed there.\n\n"
-        "Three surfaces are checked and they drift independently: the Index table's `n` cell,\n"
-        "and each entry's `**Members:**` and `**Promotes to:**` bare `n=`. A row can be right\n"
-        "while the sentences restating it are stale — four such drifts were repaired by hand on\n"
-        "2026-09-01, and the damage was in `**Promotes to:**`, which REASONS from the count.\n\n"
-        "If a bare n= is flagged, there are exactly two possibilities and they need opposite\n"
-        "fixes. EITHER the count moved and this judgement needs re-deriving, OR this is a\n"
-        "historical quote that lost its backticks. A backticked `n=N` quotes what a line used to\n"
-        "say and is deliberately NOT checked, because the ledger preserves superseded figures\n"
-        "with their derivation. Decide which before editing: `correcting` a true historical\n"
-        "figure makes it false, and nothing downstream will catch that.\n\n"
-        "NOT CHECKED AT ALL: counts written as prose numerals (`the 18 members`, `n is 8 rather\n"
-        "than 7`). Two such drifts were swept by hand at 0c5bab41 and this cannot see them.\n\n"
-        "Most likely: you staged the ledger and not the bug files whose tags it counts.\n"
-        "  git status --short docs/issues     # what is not staged\n"
-        "  git add <the bug file(s)>          # then re-commit\n\n"
-        "If the count is genuinely wrong, re-derive rather than adjust by the delta -- and note\n"
-        "the pattern is ANCHORED. An unanchored `git grep -l 'cluster/<slug>'` also counts files\n"
-        "that merely NAME the class in prose, which inflates any class a bug file was retagged\n"
-        "out of, since that file's prose records the class it left:\n"
-        "  git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' "
-        "-- 'docs/issues/*.md' | wc -l\n"
-        "and move the `**Members:**` and `**Promotes to:**` fields of BOTH classes in the\n"
-        "same pass — a count and the judgement reading it move independently.",
+        "The count used to force this edit. It no longer exists, so this asks for the half that\n"
+        "was always the valuable one: WHY this instance belongs to this class. The ledger's own\n"
+        "shape is `+1: `<slug-without-the-date>`` followed by the derivation.\n\n"
+        "This is deliberately NOT `did the line change` -- a trailing space would satisfy that,\n"
+        "and the count gate it replaces could not be satisfied by accident.\n\n"
+        "If the class gained a member by RETAG rather than by a new file, changing the line is\n"
+        "enough and this passes.",
         file=sys.stderr,
     )
     _emit_sequence_tail()

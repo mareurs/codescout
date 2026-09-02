@@ -134,7 +134,7 @@ repos:
       # break nor can repair it. But "the next commit will catch it" is the natural reading and
       # it is wrong; the honest claim is "the next IN-SCOPE commit will".
       - id: ledger-counts
-        name: refuse a commit whose ledger counts disagree with its staged corpus
+        name: refuse a stored count, or a class gaining a member it does not name
         entry: scripts/pre-commit-ledger-counts.py
         language: system
         pass_filenames: false

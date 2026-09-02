@@ -372,6 +372,33 @@ fn parse_index_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, 
     out
 }
 
+/// Which slugs have an Index row at all — the count-free twin of [`parse_index_counts`].
+///
+/// [`every_declared_class_has_an_index_row`] used to prove row presence *via* a parseable count,
+/// which stopped being possible when the `n` column was removed on 2026-09-02. Presence and
+/// storedness are now separate questions asked by separate parsers: this one answers "is the
+/// table still being read", [`parse_index_counts`] answers "did a count come back", and
+/// [`no_index_row_stores_a_count`] wants that second answer to be empty. One parser cannot
+/// serve both, because the emptiness that is a PASS for one is the failure mode of the other.
+fn parse_index_rows(text: &str, valid: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for line in text.lines() {
+        if !line.starts_with("| IC-") {
+            continue;
+        }
+        for cell in line.split('|').map(str::trim) {
+            let Some(inner) = cell.strip_prefix('`').and_then(|c| c.strip_suffix('`')) else {
+                continue;
+            };
+            if valid.contains(inner) {
+                out.insert(inner.to_owned());
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// Every **bare** `n=<N>` in a field's tail; an `n=` inside any backtick span is skipped.
 ///
 /// **The backtick is the escape, and it is now the ONLY signal separating a live claim from a
@@ -898,85 +925,67 @@ fn the_mechanism_basis_scan_discriminates() {
     ));
 }
 
-/// Every **bare** `n=` in a class's judgement fields equals that class's real membership.
+/// No class field states a live bare `n=` — the ledger stores no derived count.
 ///
-/// **Read the name literally, and note what it does NOT say.** It is not "every prose count":
-/// counts written as numerals are invisible to this gate *by construction*, not by tuning. Of
-/// the four fields swept by hand at `0c5bab41`, a bare-`n=` gate catches **two** — `IC-14` wrote
-/// *"n is 8 rather than 7"* and `IC-3` wrote *"The 18 members"*, and both appear in that commit's
-/// removed lines, so the miss is measured rather than hypothetical. The strict alternative was
-/// sized and is dead: **85** disagreeing bare integers, dominated by legitimate subsystem tallies
-/// (`(3)`), transitions (`20 -> 18`) and spread figures (`4 doc surfaces / 4 subsystems`).
+/// Renamed from `every_bare_n_in_a_class_field_matches_the_corpus` on 2026-09-02, when the
+/// assertion inverted. Records elsewhere citing the old name are narrating events that happened
+/// under it and are correct as written; this note is the disambiguator that lets the old name
+/// still be grepped to its successor.
 ///
-/// Naming it for what it covers is not pedantry here — a gate whose coverage is narrower than its
-/// name is `IC-14`, defined in the very ledger this gate polices.
+/// **This is the inversion of a gate, not its deletion.** It used to assert that every bare
+/// `n=` *equalled* the corpus. The counts are exactly derivable
+/// (`scripts/probe-cluster-census.py`), and storing a derived value in a file 22 classes share
+/// made every bug filer edit it: three surfaces carried the number, and a peer's commit staled
+/// yours between deriving it and committing it. Measured 2026-09-01 — three separate
+/// re-derivations invalidated inside one session, so no amount of care held them.
 ///
-/// The sibling of [`every_index_count_matches_the_corpus`], and not redundant with it: that one
-/// gates the Index cell, this gates the numbers a reader acts on. They drift independently and
-/// did — the cells were gated from 14:27 on 2026-09-01 while four judgement fields went on
-/// reasoning from superseded counts for hours, one still claiming a member a blind second read
-/// had already moved to another class. A gated cell beside an ungated restatement is worse than
-/// neither, because the green tick reads as covering both.
+/// A backticked `` `n=N` `` is untouched and still means what it always meant: a QUOTATION of a
+/// superseded figure, preserved with its derivation. The migration wrapped every live claim in
+/// backticks rather than deleting it, so no sentence lost its history — only its obligation to
+/// stay current.
 ///
-/// Backtested at `bdf22938` against the corpus **as derived at that commit**: a bare-`n=` gate
-/// flags 9 — the three real defects (`IC-10` Promotes-to 2 vs 3, `IC-11` Members 5 vs 6, `IC-11`
-/// Promotes-to 4 vs 6) and six legitimate history quotes that `89697a15` has since backticked.
-/// Post-migration it flags exactly the three.
+/// **Why this absence assertion is not vacuous.** It is monotone under parser failure by
+/// construction: a `bare_n_values` that matches nothing yields an empty list and passes green
+/// forever. What stands against that is [`the_bare_n_claim_parser_discriminates`], which runs
+/// over a fixture with known answers and proves the parser still finds a bare `n=` that IS
+/// there. The pairing is the coverage; neither half is worth anything alone, and the fixture
+/// half must never be weakened to the live ledger — a corpus with no bare `n=` in it cannot
+/// discriminate a working parser from a broken one.
+///
+/// **What replaced the forcing function this gate used to be.** The count is what made a ledger
+/// edit *mandatory*: an author wrote the per-member derivation while satisfying the refusal.
+/// Measured on `1b92a7de` — one bug filing added **1,508 characters** of hand-authored,
+/// non-derivable prose across the three lines it had to touch for the number. Removing the
+/// number alone would have removed the reason anyone writes that, and nothing would report the
+/// thinning: a `**Members:**` with 22 members and no derivations reads identically to one with
+/// full derivations, to every query. `scripts/pre-commit-ledger-counts.py` now asks for the
+/// prose instead — a commit that adds a member to a class must change that class's
+/// `**Members:**` line. Found by `codescout-17` (sessionId `9716a130`), which measured its own
+/// commit rather than accepting the premise it was handed.
+///
+/// Mutation that must kill this: reintroduce a bare `n=` into any `**Members:**` or
+/// `**Promotes to:**` field.
 #[test]
-fn every_bare_n_in_a_class_field_matches_the_corpus() {
+fn no_class_field_states_a_bare_n() {
     let valid = valid_slugs();
-    let actual = actual_counts(&valid);
 
-    let drift: Vec<String> = bare_n_claims(&valid)
+    let stored: Vec<String> = bare_n_claims(&valid)
         .into_iter()
-        .filter(|(slug, _, n)| actual.get(slug).copied().unwrap_or(0) != *n)
-        .map(|(slug, field, n)| {
-            format!(
-                "cluster/{slug} — **{field}:** states a bare n={n}, corpus has {}",
-                actual.get(&slug).copied().unwrap_or(0)
-            )
-        })
+        .map(|(slug, field, n)| format!("cluster/{slug} — **{field}:** stores a bare n={n}"))
         .collect();
 
     assert!(
-        drift.is_empty(),
-        "a bare `n=` disagrees with the corpus it describes:\n  {}\n\n\
-         EITHER the count moved and this judgement needs re-deriving, OR this is a historical \
-         quote that lost its backticks. A backticked `` `n=N` `` is a quotation of what a line \
-         used to say and is deliberately NOT checked — the ledger preserves superseded figures \
-         with their derivation rather than overwriting them. Decide which before editing the \
-         number: \"correcting\" a true historical figure makes it false.\n\n\
-         Re-derive rather than adjust by the delta, and note the pattern is ANCHORED — an \
-         unanchored `git grep -l 'cluster/<slug>'` also counts files that merely NAME the class \
-         in prose, which inflates any class a bug file has been retagged out of:\n    \
-         git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' -- 'docs/issues/*.md' | wc -l\n\n\
-         NOT CHECKED AT ALL: counts written as prose numerals (\"the 18 members\", \"n is 8 \
-         rather than 7\"). Two such drifts were swept by hand at `0c5bab41` and this gate cannot \
-         see them — check them by eye in the same pass.",
-        drift.join("\n  ")
-    );
-}
-
-/// Every declared class states at least one bare `n=` — the vacuity guard for the test above.
-///
-/// [`every_bare_n_in_a_class_field_matches_the_corpus`] is monotone under parser failure: a
-/// parser that matches nothing yields an empty drift list and passes. Measured by deliberate
-/// break, the same property [`every_declared_class_has_an_index_row`] exists for one layer up.
-#[test]
-fn every_declared_class_states_a_bare_n() {
-    let valid = valid_slugs();
-    let claimed: BTreeSet<String> = bare_n_claims(&valid)
-        .into_iter()
-        .map(|(slug, _, _)| slug)
-        .collect();
-    let missing: Vec<&String> = valid.iter().filter(|s| !claimed.contains(*s)).collect();
-    assert!(
-        missing.is_empty(),
-        "declared classes with no bare `n=` in any judgement field: {missing:?}\n\
-         Either the entry lost its count, or `parse_bare_n_claims` stopped matching — which \
-         would make the gate above pass vacuously.\n\
-         The template placeholder is NOT in this set: its heading declares `cluster/<slug>`, \
-         which `valid_slugs` rejects."
+        stored.is_empty(),
+        "these class fields store a derived count:\n  {}\n\n\
+         The ledger no longer stores counts — derive them with \
+         `python3 scripts/probe-cluster-census.py`. A stored count in a file 22 classes share \
+         made every bug filer edit it, and a peer's commit staled yours between deriving it and \
+         committing it.\n\n\
+         If you meant to QUOTE a figure — which the house style encourages, with its derivation \
+         — wrap it in backticks. A backticked count is a quotation and is deliberately not \
+         checked. If you meant to state today's count, don't: cite the probe instead, so the \
+         sentence cannot decay.",
+        stored.join("\n  ")
     );
 }
 
@@ -1127,72 +1136,94 @@ fn the_hook_script_agrees_with_this_gate() {
     }
 }
 
+/// The Index table stores no count — every row is title, slug, verdict, mechanism, and nothing
+/// derived.
+///
+/// Renamed from `every_index_count_matches_the_corpus` on 2026-09-02, when the assertion
+/// inverted. Records elsewhere citing the old name narrate events that happened under it and are
+/// correct as written; this note is the disambiguator that lets the old name be grepped to its
+/// successor.
+///
+/// The `n` column was a stored copy of a value derived twice already —
+/// [`actual_counts`] here and `actual_counts` in `scripts/pre-commit-ledger-counts.py`. Storing
+/// it made every bug filer edit a file 22 classes share, and it went stale by **concurrency**
+/// rather than neglect: measured 2026-09-01, three separate hand re-derivations were invalidated
+/// inside one session by peers filing bugs into the same checkout, so the sweep's own result was
+/// falsified by the next commit and no amount of care held it.
+///
+/// **What did NOT move out of the row, and why the distinction is the whole design.** Subsystem
+/// spread, the promotion verdict and mechanism status are *adjudications* — no query derives
+/// them, so they stay. The row used to mix a derived counter with a human verdict, which is
+/// exactly why bumping the counter forced a write to the verdict's file.
+///
+/// **Vacuity.** This is an absence assertion and is monotone under parser failure — a
+/// [`parse_index_counts`] that matched nothing would pass it green forever. What stands against
+/// that is [`the_index_row_parser_discriminates`], which feeds a fixture with known answers and
+/// proves the parser still finds a count that IS there. Its sibling
+/// [`every_declared_class_has_an_index_row`] separately proves the rows are still being parsed
+/// at all, over a count-free parser, so a table that stopped matching cannot hide here.
+///
+/// Live counts: `python3 scripts/probe-cluster-census.py`.
+///
+/// Mutation that must kill this: re-add an `n` cell to any Index row.
 #[test]
-fn every_index_count_matches_the_corpus() {
+fn no_index_row_stores_a_count() {
     let valid = valid_slugs();
-    let declared = declared_counts(&valid);
-    let actual = actual_counts(&valid);
+    let stored = declared_counts(&valid);
 
-    let mut drift = Vec::new();
-    for (slug, n) in &declared {
-        let got = actual.get(slug).copied().unwrap_or(0);
-        if got != *n {
-            drift.push(format!("cluster/{slug} — table says {n}, corpus has {got}"));
-        }
-    }
+    let rows: Vec<String> = stored
+        .iter()
+        .map(|(slug, n)| format!("cluster/{slug} — Index row stores {n}"))
+        .collect();
 
     assert!(
-        drift.is_empty(),
-        "the Index table's `n` column disagrees with the corpus:\n  {}\n\n\
-         Re-derive rather than adjust by the delta — per slug:\n    \
-         git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' -- 'docs/issues/*.md' | wc -l\n\n\
-         `git grep -l` counts FILES. `grep -o | sort | uniq -c` counts OCCURRENCES and \
-         double-counts any bug file that also names its own slug in prose, which is why every \
-         `n` in that table is a file count. If a file moved between classes, re-derive every \
-         judgement quoting either count in the same pass — the `**Members:**` line and the \
-         `**Promotes to:**` field of BOTH classes, since a count and the judgement that reads \
-         it move independently.",
-        drift.join("\n  ")
+        rows.is_empty(),
+        "the Index table stores derived counts:\n  {}\n\n\
+         The `n` column was removed on 2026-09-02. It was a stored copy of a value derived twice \
+         already, and storing it made every bug filer edit a file 22 classes share — a peer's \
+         commit staled your number between deriving it and committing it.\n\n\
+         Read live counts with `python3 scripts/probe-cluster-census.py`. The row carries what \
+         no query can derive: spread, verdict, mechanism status.",
+        rows.join("\n  ")
     );
 }
 
-/// The count check must actually compare something.
+/// Every declared class has an Index row — the emptiness guard for [`no_index_row_stores_a_count`].
 ///
-/// If [`parse_index_counts`] matched nothing — a renamed column, a reformatted table, a slug cell
-/// that stopped being backticked — every comparison in [`every_index_count_matches_the_corpus`]
-/// is skipped and it passes green forever. That is zero coverage wearing a passing test's
-/// clothes, the shape this very ledger tracks as `IC-16`, so it is guarded rather than assumed.
-/// The per-slug half also catches the narrower case: one row whose count cell stopped parsing.
+/// If [`parse_index_rows`] matched nothing — a renamed column, a reformatted table, a slug cell
+/// that stopped being backticked — [`no_index_row_stores_a_count`] would pass green forever on
+/// an empty map. That is zero coverage wearing a passing test's clothes, the shape this ledger
+/// tracks as `IC-16`, so it is guarded rather than assumed.
+///
+/// **The guard survived the 2026-09-02 inversion by changing which parser it uses, and that is
+/// worth reading.** It used to prove presence *via* a parseable count, so removing the `n`
+/// column reddened it — correctly. That red is what made the migration fail loud instead of
+/// silently converting a real gate into a vacuous one: the count could not be deleted by
+/// deleting cells, because this test refuses a table it can no longer read. It now runs over
+/// [`parse_index_rows`], which reads the slug cell and no number.
 ///
 /// **Measured, not argued.** Stripping the backticks off every slug cell — a one-line `sed` —
-/// leaves [`every_index_count_matches_the_corpus`] *passing* and reds only this test, which then
-/// names all 17 classes. Its sibling is monotone under parser failure by construction: an empty
-/// map means an empty loop means no assertion. This test is the whole of what stands between
-/// that and a gate that is green forever for the wrong reason.
+/// leaves the sibling passing and reds only this test, which then names every class.
 ///
 /// **The count gate sees TRACKED files only, so a local green defers rather than clears.**
 /// [`tracked_all_bug_files`] shells out to `git ls-files`, so a bug file that exists but has not
-/// been `git add`ed is invisible to the count while its ledger row may already have been updated
-/// — the pair agrees, the test passes, and the disagreement surfaces at CI once the file is
-/// staged. That is deliberate and matches the module header's reason for gating on tracked files
-/// only (an untracked file is a peer's in-flight work, and gating on it lets one session red
-/// another's build). Reported from the receiving end by a peer session on 2026-09-01, who hit
-/// exactly this: green locally while their new bug file was untracked, red once staged. The
-/// failure text cannot say this, so it is said here.
+/// been `git add`ed is invisible while the ledger may already describe it — the pair agrees, the
+/// test passes, and the disagreement surfaces at CI once the file is staged. That is deliberate:
+/// an untracked file is a peer's in-flight work, and gating on it lets one session red another's
+/// build. Reported from the receiving end by a peer session on 2026-09-01, who hit exactly this.
+/// The failure text cannot say this, so it is said here.
 #[test]
 fn every_declared_class_has_an_index_row() {
     let valid = valid_slugs();
-    let declared = declared_counts(&valid);
+    let text = std::fs::read_to_string(repo_root().join(LEDGER))
+        .unwrap_or_else(|e| panic!("cannot read {LEDGER}: {e}"));
+    let rows = parse_index_rows(&text, &valid);
 
-    let missing: Vec<&String> = valid
-        .iter()
-        .filter(|s| !declared.contains_key(*s))
-        .collect();
+    let missing: Vec<&String> = valid.iter().filter(|s| !rows.contains(*s)).collect();
     assert!(
         missing.is_empty(),
         "these classes declare a `**Slug:**` but have no parseable Index row: {missing:?}\n\
-         Their counts are checked by nothing. Either the row is absent, or its `n` is not a bare \
-         integer in the column immediately after the slug.\n\n\
+         Either the row is absent, or its slug cell stopped being backticked.\n\n\
          On a SHARED CHECKOUT there is a third possibility, and it is not your defect: a peer \
          session is mid-write. An entry section and its Index row are two writes, so slugs that \
          are theirs and in flight appear here until the second one lands. This message cannot \
@@ -1200,10 +1231,10 @@ fn every_declared_class_has_an_index_row() {
          twice in one afternoon by a peer who worked it out unaided."
     );
     assert!(
-        declared.len() > 10,
-        "only {} Index rows parsed — the table format moved and the count gate is now comparing \
-         almost nothing",
-        declared.len()
+        rows.len() > 10,
+        "only {} Index rows parsed — the table format moved, and `no_index_row_stores_a_count` \
+         is now asserting emptiness over a table nobody can read, which it would pass",
+        rows.len()
     );
 }
 
