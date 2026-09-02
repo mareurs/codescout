@@ -48,6 +48,6 @@ place readers already look.
   (daemon-free lite default plus opt-in server), the `peer` tool,
   `librarian(action="legibility_scan")`, Windows/EDR support.
 - **2026-05-18 to 2026-05-24**: ripgrep-style text output, the goal-tracker
-  archetype, `codescout artifact*` CLI subcommands,
+  archetype, `codescout doc` CLI subcommands,
   `librarian(action="audit_doc_refs")`, the `edit_file` frontmatter/`at`
   additions.

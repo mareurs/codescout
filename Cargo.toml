@@ -260,6 +260,6 @@ path = "tests/audit_doc_refs.rs"
 required-features = ["librarian"]
 
 [[test]]
-name = "cli_artifact"
-path = "tests/cli_artifact.rs"
+name = "cli_doc"
+path = "tests/cli_doc.rs"
 required-features = ["librarian"]

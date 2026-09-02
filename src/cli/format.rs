@@ -30,7 +30,7 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
     if v.is_string() && v.as_str() == Some("ok") {
         return Shape::WriteAck;
     }
-    // artifact_event(list) returns a bare JSON array — disambiguate by
+    // doc(action="event_list") returns a bare JSON array — disambiguate by
     // checking first item for event-shaped keys.
     if let Some(arr) = v.as_array() {
         if let Some(first) = arr.first() {
@@ -40,7 +40,7 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
         }
     }
     if let Some(obj) = v.as_object() {
-        // artifact_refresh(list_stale) returns {count, threshold_hours, items, next_step}.
+        // doc(action="list_stale") returns {count, threshold_hours, items, next_step}.
         // Match on `threshold_hours` + `items` before the generic FindResult
         // check below (FindResult uses `items` + `total`).
         if obj.contains_key("threshold_hours") && obj.contains_key("items") {
@@ -304,7 +304,7 @@ fn write_state_summary<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> R
 }
 
 fn write_event_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
-    // The librarian `artifact_event(action="list")` tool returns a bare JSON
+    // The librarian `doc(action="event_list")` tool returns a bare JSON
     // array of event rows. Accept either a top-level array or an object with
     // an `items` array (defensive, in case the envelope shape evolves).
     let items: &Vec<Value> = if let Some(arr) = value.as_array() {
@@ -348,7 +348,7 @@ fn write_event_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Resu
 }
 
 fn write_stale_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
-    // The librarian `artifact_refresh(action="list_stale")` tool returns
+    // The librarian `doc(action="list_stale")` tool returns
     // `{count, threshold_hours, items, next_step}` where each item carries
     // `{id, kind, title, abs_path, last_refreshed_at, refresh_count, age_hours}`.
     // Accept either the canonical envelope or a bare-array shape so the
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn pretty_stale_list_renders_header_and_rows() {
-        // Real envelope shape from `artifact_refresh::call(action=list_stale)`:
+        // Real envelope shape from `doc::call(action="list_stale")`:
         // `{count, threshold_hours, items, next_step}` with per-item keys
         // `{id, kind, title, abs_path, last_refreshed_at, refresh_count, age_hours}`.
         let v = json!({
@@ -498,6 +498,11 @@ mod tests {
                     "age_hours": 999
                 }
             ],
+            // INERT fixture value: `write_stale_list` prints whatever `next_step` string it
+            // is handed and never parses it, so this text pins nothing about the runtime.
+            // The real string now lives at `src/librarian/tools/refresh_stale.rs:91` and
+            // reads `Call doc(action="gather", id=...) on each item`. Left as the stale
+            // literal deliberately — do not "fix" it believing it is a contract.
             "next_step": "Call artifact_refresh(id) on each item …"
         });
         let mut buf = Vec::new();

@@ -1,4 +1,4 @@
-//! CLI dispatch layer for `codescout artifact*` subcommands.
+//! CLI dispatch layer for `codescout doc …` subcommands.
 //!
 //! Each verb translates clap-parsed args into a `serde_json::Value` shaped
 //! like the corresponding librarian-mcp tool's input, calls the tool, and
@@ -7,19 +7,19 @@
 pub mod format;
 
 #[cfg(feature = "librarian")]
-pub mod artifact;
-#[cfg(feature = "librarian")]
-pub mod artifact_augment;
-#[cfg(feature = "librarian")]
-pub mod artifact_event;
-#[cfg(feature = "librarian")]
-pub mod artifact_refresh;
-#[cfg(feature = "librarian")]
 pub mod audit_doc_refs;
 #[cfg(feature = "librarian")]
 pub mod backfill_chunks;
 #[cfg(feature = "librarian")]
 pub mod constitution_check;
+#[cfg(feature = "librarian")]
+pub mod doc;
+#[cfg(feature = "librarian")]
+pub mod doc_augment;
+#[cfg(feature = "librarian")]
+pub mod doc_event;
+#[cfg(feature = "librarian")]
+pub mod doc_refresh;
 
 #[cfg(feature = "librarian")]
 pub mod doctor;

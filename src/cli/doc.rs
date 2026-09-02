@@ -1,4 +1,4 @@
-//! `codescout artifact <verb>` — find/get/graph/state-at/create/update/move/link.
+//! `codescout doc <verb>` — find/get/graph/state-at/create/update/move/link/event/augment/refresh.
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Subcommand};
@@ -25,6 +25,18 @@ pub enum Verb {
     Move(MoveArgs),
     /// Add a typed edge between two artifacts.
     Link(LinkArgs),
+    /// Event log: `doc event list|create`.
+    Event {
+        #[command(subcommand)]
+        verb: super::doc_event::Verb,
+    },
+    /// Attach or merge an augmentation.
+    Augment(super::doc_augment::AugmentArgs),
+    /// Refresh lifecycle: `doc refresh gather|list-stale`.
+    Refresh {
+        #[command(subcommand)]
+        verb: super::doc_refresh::Verb,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -120,6 +132,9 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
         Verb::Update(args) => run_update(args).await,
         Verb::Move(args) => run_move(args).await,
         Verb::Link(args) => run_link(args).await,
+        Verb::Event { verb } => super::doc_event::dispatch(verb).await,
+        Verb::Augment(args) => super::doc_augment::run(args).await,
+        Verb::Refresh { verb } => super::doc_refresh::dispatch(verb).await,
     }
 }
 
@@ -317,7 +332,7 @@ pub(crate) async fn run_state_at(args: StateAtArgs) -> Result<()> {
     let output = common.output();
     let ctx = open_ctx(&common).await?;
     let mut tool_args = serde_json::Map::new();
-    tool_args.insert("artifact_id".into(), Value::String(args.id.clone()));
+    tool_args.insert("id".into(), Value::String(args.id.clone()));
     if let Some(c) = &args.commit {
         tool_args.insert("commit".into(), Value::String(c.clone()));
     }

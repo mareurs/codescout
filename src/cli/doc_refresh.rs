@@ -1,4 +1,4 @@
-//! `codescout artifact-refresh <verb>` — gather / list-stale.
+//! `codescout doc refresh <verb>` — gather / list-stale.
 //!
 //! Both verbs are read-only: `list-stale` scans for augmented artifacts
 //! whose last refresh is older than a threshold; `gather` collects the

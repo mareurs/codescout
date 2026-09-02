@@ -54,7 +54,7 @@
   - [artifact (action="move")](concepts/artifact-move.md)
   - [Audit Doc Refs](concepts/audit-doc-refs.md)
   - [Goal-Tracker Archetype](concepts/goal-tracker.md)
-  - [Artifact CLI](concepts/artifact-cli.md)
+  - [Artifact CLI (codescout doc)](concepts/artifact-cli.md)
   - [tracker_design](concepts/tracker-design.md)
   - [workspace_state_at](concepts/workspace-state-at.md)
   - [Augmentation: Templates & Schemas](concepts/augmentation-render-template.md)

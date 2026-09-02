@@ -1,4 +1,4 @@
-//! `codescout artifact-augment <id>` — attach or merge augmentation params/prompt.
+//! `codescout doc augment <id>` — attach or merge augmentation params/prompt.
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -113,10 +113,18 @@ async fn run_with_ctx(
     // `augment::call` itself: two OTHER in-crate callers (`audit_doc_refs`,
     // `legibility_scan`) also call `augment::call` directly, from inside their own
     // `librarian.<action>`-stamped call, and a stamp inside `augment::call` would
-    // clobber that outer verb with `artifact_augment` — a regression for both.
-    // Task 11 owns wiring the CLI's own subcommand surface for this; this is the
-    // minimal compile fix plus its audit-verb regression (F2, 2026-09-02 fix round).
-    if let Err(e) = ctx.catalog.lock().set_audit_verb("artifact_augment") {
+    // clobber that outer verb — a regression for both.
+    //
+    // The verb is `doc.augment`, matching `Artifact::call`'s `format!("doc.{action}")`
+    // exactly. It read `artifact_augment` between Task 5 and Task 11, which split the
+    // audit trail by ORIGIN: one operation recorded as `doc.augment` from MCP and
+    // `artifact_augment` from the CLI, so a query for either name silently missed the
+    // other half. Task 5's fix round deferred this to Task 11 by name; this is that.
+    //
+    // Historical rows keep the old string and must not be rewritten — `src/usage/db.rs`
+    // classifies pre-collapse audit rows carrying `artifact_augment`, and those describe
+    // events that really happened under that name.
+    if let Err(e) = ctx.catalog.lock().set_audit_verb("doc.augment") {
         tracing::warn!("audit verb stamp failed: {e}");
     }
     crate::librarian::tools::augment::call(ctx, Value::Object(tool_args)).await
@@ -148,18 +156,25 @@ mod tests {
         }
     }
 
-    // F2: `artifact_augment.rs`'s `run` calls `augment::call` directly, bypassing
-    // the `doc` dispatcher (`Artifact::call` in `artifact.rs`) that normally
+    // F2: `doc_augment.rs`'s `run` calls `augment::call` directly, bypassing
+    // the `doc` dispatcher (`Artifact::call` in `doc.rs`) that normally
     // stamps `doc.<action>` into `audit_ctx`. Without an explicit stamp on this
     // path, a CLI-driven augmentation write is recorded with a NULL verb —
     // indistinguishable in the audit trail from a call whose stamping failed
     // outright. This asserts the CLI path stamps its own verb.
+    //
+    // The exact VALUE is load-bearing, not incidental: it must equal what
+    // `Artifact::call` stamps for the same action (`format!("doc.{action}")`).
+    // A merely non-null verb — which is what this test asserted, and was named
+    // for, until Task 11 — satisfies the name while leaving the audit trail split
+    // by ORIGIN, one operation under two names. Assert equality with the MCP
+    // path's value, not non-nullness.
     #[tokio::test]
-    async fn cli_path_stamps_a_non_null_audit_verb() {
+    async fn cli_path_stamps_the_same_audit_verb_as_the_mcp_path() {
         let ctx = mk_ctx();
         // Target artifact need not exist for the stamp to land — `augment::call`
         // stamps unconditionally at dispatch, mirroring `dispatch_stamps_the_audit_verb`
-        // in `artifact.rs`, so a lookup failure below the stamp doesn't hide the bug.
+        // in `doc.rs`, so a lookup failure below the stamp doesn't hide the bug.
         let _ = run_with_ctx(&ctx, args("nonexistent", Some("prompt text"), false)).await;
         let verb: Option<String> = ctx
             .catalog
@@ -167,6 +182,6 @@ mod tests {
             .conn
             .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(verb.as_deref(), Some("artifact_augment"));
+        assert_eq!(verb.as_deref(), Some("doc.augment"));
     }
 }

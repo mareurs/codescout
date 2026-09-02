@@ -1,9 +1,9 @@
-# Artifact CLI
+# Artifact CLI (`codescout doc`)
 
 > **Status:** experimental — see [Experimental Features](../experimental/index.md).
 
 For shell scripts, git hooks, and CI jobs that cannot speak MCP, the
-`codescout` binary exposes the artifact catalog as subcommands. Names mirror
+`codescout` binary exposes the artifact catalog under `codescout doc`. Names mirror
 the MCP tool names 1:1, so any MCP example translates trivially.
 
 Each subcommand defaults to a **pretty table** for human reading; add
@@ -25,7 +25,7 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 
 ## Subcommands
 
-### `codescout artifact ...` — CRUD and queries
+### `codescout doc ...` — CRUD and queries
 
 | Subcommand | Mirrors MCP action | Purpose |
 |---|---|---|
@@ -38,21 +38,21 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 | `graph <id>` | `doc(action="graph")` | BFS neighbourhood as ASCII tree |
 | `state-at <id>` | `doc(action="state_at")` | Time-travel snapshot at commit or timestamp |
 
-### `codescout artifact-event ...` — append-only event log
+### `codescout doc event ...` — append-only event log
 
 | Subcommand | Mirrors MCP action |
 |---|---|
 | `create` | `doc(action="event_create")` |
 | `list` | `doc(action="event_list")` |
 
-### `codescout artifact-refresh ...` — augmentation lifecycle
+### `codescout doc refresh ...` — augmentation lifecycle
 
 | Subcommand | Mirrors MCP action |
 |---|---|
 | `gather <id>` | `doc(action="gather")` |
 | `list-stale` | `doc(action="list_stale")` |
 
-### `codescout artifact-augment <id>` — attach or patch augmentation
+### `codescout doc augment <id>` — attach or patch augmentation
 
 Mirrors the `doc(action="augment")` MCP tool. Accepts `--prompt`, `--params`
 (JSON), and `--merge` for params-only RFC 7396 merge-patch.
@@ -61,16 +61,16 @@ Mirrors the `doc(action="augment")` MCP tool. Accepts `--prompt`, `--params`
 
 ```bash
 # Pretty table (default)
-codescout artifact find --kind tracker --status active
+codescout doc find --kind tracker --status active
 
 # Machine-readable JSON
-codescout artifact find --kind tracker --status active --json | jq '.[] | .id'
+codescout doc find --kind tracker --status active --json | jq '.[] | .id'
 
 # Body of one artifact
-codescout artifact get abc123 --full
+codescout doc get abc123 --full
 
 # Just the "Findings" section
-codescout artifact get abc123 --heading "## Findings"
+codescout doc get abc123 --heading "## Findings"
 ```
 
 ## Stdin support
@@ -79,7 +79,7 @@ For subcommands that take a body or augmentation params, pass `-` to read
 from stdin:
 
 ```bash
-echo "# New spec\n\nDraft body." | codescout artifact create \
+echo "# New spec\n\nDraft body." | codescout doc create \
     --kind spec --title "Retrieval rewrite" --body -
 ```
 

@@ -1,4 +1,4 @@
-//! `codescout artifact-event <verb>` — create / list.
+//! `codescout doc event <verb>` — create / list.
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -17,7 +17,7 @@ pub enum Verb {
 #[derive(Debug, Args)]
 pub struct ListArgs {
     /// Artifact id to list events for.
-    #[arg(long = "artifact-id")]
+    #[arg(long = "id")]
     pub artifact_id: String,
     /// Comma-separated event kinds (note, reviewed, status_change, …).
     #[arg(long)]
@@ -74,7 +74,7 @@ async fn run_list(args: ListArgs) -> Result<()> {
 #[derive(Debug, Args)]
 pub struct CreateArgs {
     /// Artifact id this event is anchored to.
-    #[arg(long = "artifact-id")]
+    #[arg(long = "id")]
     pub artifact_id: String,
     /// Event kind (note, reviewed, status_change, field_patch, superseded_by, external_signal, intent, verdict).
     #[arg(long)]

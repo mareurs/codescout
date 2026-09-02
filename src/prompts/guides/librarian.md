@@ -162,7 +162,7 @@ findings/rows array), don't try to read it back into context to re-emit it: the 
 buffer caps inline reads, so it can't round-trip. Two server-side paths read it directly:
 - MCP: `doc(action="augment", id="...", merge=true, augment={params_path: "/abs/path.json"})` — reads the
   file server-side; mutually exclusive with `params`.
-- CLI: `codescout artifact-augment <id> --params @<file> [--merge]` (also `--params -` for
+- CLI: `codescout doc augment <id> --params @<file> [--merge]` (also `--params -` for
   stdin) — same catalog, same validation.
 `apply_merge_patch` replaces arrays wholesale, so the file must hold the full array under
 its key — a bare-array patch under `merge` is a silent no-op.

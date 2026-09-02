@@ -171,30 +171,20 @@ enum Commands {
     /// binary at build time. JSON output for use by the bench harness.
     Version,
 
-    /// Read and mutate artifacts (find, get, graph, state-at, create, …).
+    /// Read and mutate artifacts (find, get, graph, state-at, create, event,
+    /// augment, refresh, …).
     #[cfg(feature = "librarian")]
-    Artifact {
+    Doc {
+        // Boxed: `Verb` folds 11 subcommands (find/get/graph/state-at/create/
+        // update/move/link/event/augment/refresh) into one enum, so it is now
+        // the largest variant in `Commands` by a wide margin — clippy's
+        // large_enum_variant fired at 344 bytes after Task 11's collapse
+        // merged four smaller CLI enums into this one. Boxing keeps the enum
+        // size down to whatever the next-largest variant needs instead of
+        // sizing every `Commands` match on this one branch's payload.
         #[command(subcommand)]
-        verb: codescout::cli::artifact::Verb,
+        verb: Box<codescout::cli::doc::Verb>,
     },
-
-    /// Read and write artifact events (list, create).
-    #[cfg(feature = "librarian")]
-    ArtifactEvent {
-        #[command(subcommand)]
-        verb: codescout::cli::artifact_event::Verb,
-    },
-
-    /// Read and trigger artifact augmentation refreshes.
-    #[cfg(feature = "librarian")]
-    ArtifactRefresh {
-        #[command(subcommand)]
-        verb: codescout::cli::artifact_refresh::Verb,
-    },
-
-    /// Attach or merge augmentation (prompt + params) on an artifact.
-    #[cfg(feature = "librarian")]
-    ArtifactAugment(codescout::cli::artifact_augment::AugmentArgs),
 
     /// Audit markdown files for stale code references (file paths, symbols,
     /// line refs, link targets, module paths). Surfaces broken references
@@ -444,20 +434,8 @@ async fn main() -> Result<()> {
             codescout::dashboard::serve(root, host, port, !no_open).await?;
         }
         #[cfg(feature = "librarian")]
-        Commands::Artifact { verb } => {
-            codescout::cli::artifact::dispatch(verb).await?;
-        }
-        #[cfg(feature = "librarian")]
-        Commands::ArtifactEvent { verb } => {
-            codescout::cli::artifact_event::dispatch(verb).await?;
-        }
-        #[cfg(feature = "librarian")]
-        Commands::ArtifactRefresh { verb } => {
-            codescout::cli::artifact_refresh::dispatch(verb).await?;
-        }
-        #[cfg(feature = "librarian")]
-        Commands::ArtifactAugment(args) => {
-            codescout::cli::artifact_augment::run(args).await?;
+        Commands::Doc { verb } => {
+            codescout::cli::doc::dispatch(*verb).await?;
         }
         #[cfg(feature = "librarian")]
         Commands::AuditDocRefs(args) => {

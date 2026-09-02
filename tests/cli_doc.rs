@@ -1,4 +1,4 @@
-//! Integration smoke tests for `codescout artifact*` CLI verbs.
+//! Integration smoke tests for `codescout doc <verb>` CLI subcommands.
 //!
 //! Each test isolates state via tempdir + env overrides so they can run in
 //! parallel without stepping on each other.
@@ -36,10 +36,10 @@ fn run_cmd(tmp: &TempDir) -> Command {
 }
 
 #[test]
-fn artifact_find_on_empty_catalog_returns_empty_items_json() {
+fn doc_find_on_empty_catalog_returns_empty_items_json() {
     let tmp = TempDir::new().unwrap();
     let assert = run_cmd(&tmp)
-        .args(["artifact", "find", "--json"])
+        .args(["doc", "find", "--json"])
         .assert()
         .success();
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -51,27 +51,27 @@ fn artifact_find_on_empty_catalog_returns_empty_items_json() {
 }
 
 #[test]
-fn artifact_find_bad_filter_reports_error() {
+fn doc_find_bad_filter_reports_error() {
     let tmp = TempDir::new().unwrap();
     run_cmd(&tmp)
-        .args(["artifact", "find", "--filter", "{not-json"])
+        .args(["doc", "find", "--filter", "{not-json"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("--filter is not valid JSON"));
 }
 
 #[test]
-fn artifact_find_semantic_without_embedder_reports_hint() {
+fn doc_find_semantic_without_embedder_reports_hint() {
     let tmp = TempDir::new().unwrap();
     run_cmd(&tmp)
-        .args(["artifact", "find", "--semantic", "anything"])
+        .args(["doc", "find", "--semantic", "anything"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("LIBRARIAN_EMBED_MODEL"));
 }
 
 #[test]
-fn artifact_get_missing_id_errors_and_names_both_recovery_paths() {
+fn doc_get_missing_id_errors_and_names_both_recovery_paths() {
     let tmp = TempDir::new().unwrap();
     // An unknown id is an ERROR, not an Ok(null). A null could not be told from an
     // artifact that exists with an empty body, so the CLI printed "no such thing"
@@ -81,7 +81,7 @@ fn artifact_get_missing_id_errors_and_names_both_recovery_paths() {
     // null return as the contract, so it went red when 9a71357e fixed the tool.
     // That is the CLI-side half of the same fix, not a separate regression.
     let assert = run_cmd(&tmp)
-        .args(["artifact", "get", "definitely-not-a-real-id", "--json"])
+        .args(["doc", "get", "definitely-not-a-real-id", "--json"])
         .assert()
         .failure();
     let err = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
@@ -104,12 +104,12 @@ fn artifact_get_missing_id_errors_and_names_both_recovery_paths() {
 }
 
 #[test]
-fn artifact_graph_missing_id_runs() {
+fn doc_graph_missing_id_runs() {
     let tmp = TempDir::new().unwrap();
     // Tool emits a graph with a single seed node and no edges for an unknown id —
     // it doesn't error. Smoke confirms clap + dispatch + JSON shape.
     let assert = run_cmd(&tmp)
-        .args(["artifact", "graph", "definitely-not-a-real-id", "--json"])
+        .args(["doc", "graph", "definitely-not-a-real-id", "--json"])
         .assert()
         .success();
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -120,35 +120,33 @@ fn artifact_graph_missing_id_runs() {
 }
 
 #[test]
-fn artifact_state_at_requires_commit_or_timestamp() {
+fn doc_state_at_requires_commit_or_timestamp() {
     let tmp = TempDir::new().unwrap();
     run_cmd(&tmp)
-        .args(["artifact", "state-at", "x", "--json"])
+        .args(["doc", "state-at", "x", "--json"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("--commit").or(predicate::str::contains("--timestamp")));
 }
 
+/// Clap's own error text for a subcommand this collapse removed. Verified
+/// live 2026-09-02 by running the built binary rather than trusting the
+/// snippet in the plan/brief — `codescout artifact find --json` prints:
+///   error: unrecognized subcommand 'artifact'
+/// on this clap version. Paired with a positive test (below and throughout
+/// this file) that the replacement wiring works — an absence assertion alone
+/// is monotone under removal of the WHOLE binary, not just the old verb.
 #[test]
-fn artifact_event_list_empty_catalog_runs() {
-    let tmp = TempDir::new().unwrap();
-    // Behavior depends on the tool — accept either "error: artifact not found" or success/empty.
-    // We only assert it doesn't hang and exits with some status.
-    let _ = run_cmd(&tmp)
-        .args(["artifact-event", "list", "--artifact-id", "x", "--json"])
-        .assert();
-}
-
-#[test]
-fn artifact_refresh_list_stale_empty_catalog_succeeds() {
+fn the_old_artifact_subcommand_is_gone() {
     let tmp = TempDir::new().unwrap();
     run_cmd(&tmp)
-        .args(["artifact-refresh", "list-stale", "--json"])
+        .args(["artifact", "find", "--json"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
-/// Parse the `id` field out of an `artifact create` JSON envelope. The tool
+/// Parse the `id` field out of a `doc create` JSON envelope. The tool
 /// returns `{"id":"...","abs_path":"...","tracker_hint":...?}` — adjust this
 /// helper if the envelope shape changes.
 fn extract_created_id(stdout: &str) -> String {
@@ -162,7 +160,7 @@ fn extract_created_id(stdout: &str) -> String {
 }
 
 #[test]
-fn artifact_create_then_get_round_trip() {
+fn doc_create_then_get_round_trip() {
     let tmp = TempDir::new().unwrap();
     let work = tmp.path().join("project");
     std::fs::create_dir_all(work.join("docs")).unwrap();
@@ -170,7 +168,7 @@ fn artifact_create_then_get_round_trip() {
     let create = run_cmd(&tmp)
         .current_dir(&work)
         .args([
-            "artifact",
+            "doc",
             "create",
             "--kind",
             "spec",
@@ -189,14 +187,14 @@ fn artifact_create_then_get_round_trip() {
 
     run_cmd(&tmp)
         .current_dir(&work)
-        .args(["artifact", "get", &id, "--json"])
+        .args(["doc", "get", &id, "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Test Spec"));
 }
 
 #[test]
-fn artifact_update_status_archived_then_find_excludes() {
+fn doc_update_status_archived_then_find_excludes() {
     let tmp = TempDir::new().unwrap();
     let work = tmp.path().join("project");
     std::fs::create_dir_all(work.join("docs")).unwrap();
@@ -204,7 +202,7 @@ fn artifact_update_status_archived_then_find_excludes() {
     let create = run_cmd(&tmp)
         .current_dir(&work)
         .args([
-            "artifact",
+            "doc",
             "create",
             "--kind",
             "spec",
@@ -222,13 +220,13 @@ fn artifact_update_status_archived_then_find_excludes() {
 
     run_cmd(&tmp)
         .current_dir(&work)
-        .args(["artifact", "update", &id, "--status", "archived", "--json"])
+        .args(["doc", "update", &id, "--status", "archived", "--json"])
         .assert()
         .success();
 
     let find = run_cmd(&tmp)
         .current_dir(&work)
-        .args(["artifact", "find", "--kind", "spec", "--json"])
+        .args(["doc", "find", "--kind", "spec", "--json"])
         .assert()
         .success();
     let find_out = String::from_utf8(find.get_output().stdout.clone()).unwrap();
@@ -239,7 +237,7 @@ fn artifact_update_status_archived_then_find_excludes() {
 }
 
 #[test]
-fn artifact_link_then_graph_shows_edge() {
+fn doc_link_then_graph_shows_edge() {
     let tmp = TempDir::new().unwrap();
     let work = tmp.path().join("project");
     std::fs::create_dir_all(work.join("docs")).unwrap();
@@ -247,7 +245,7 @@ fn artifact_link_then_graph_shows_edge() {
     let create_a = run_cmd(&tmp)
         .current_dir(&work)
         .args([
-            "artifact",
+            "doc",
             "create",
             "--kind",
             "spec",
@@ -267,7 +265,7 @@ fn artifact_link_then_graph_shows_edge() {
     let create_b = run_cmd(&tmp)
         .current_dir(&work)
         .args([
-            "artifact",
+            "doc",
             "create",
             "--kind",
             "spec",
@@ -287,7 +285,7 @@ fn artifact_link_then_graph_shows_edge() {
     run_cmd(&tmp)
         .current_dir(&work)
         .args([
-            "artifact",
+            "doc",
             "link",
             "--src",
             &a_id,
@@ -302,12 +300,194 @@ fn artifact_link_then_graph_shows_edge() {
 
     let graph = run_cmd(&tmp)
         .current_dir(&work)
-        .args(["artifact", "graph", &a_id, "--depth", "1", "--json"])
+        .args(["doc", "graph", &a_id, "--depth", "1", "--json"])
         .assert()
         .success();
     let graph_out = String::from_utf8(graph.get_output().stdout.clone()).unwrap();
     assert!(
         graph_out.contains(&b_id),
         "graph should mention B's id; got: {graph_out}"
+    );
+}
+
+// --- `doc event <verb>` --------------------------------------------------
+
+#[test]
+fn doc_event_list_empty_catalog_runs() {
+    let tmp = TempDir::new().unwrap();
+    // Behavior depends on the tool — accept either "error: artifact not found" or success/empty.
+    // We only assert it doesn't hang and exits with some status.
+    let _ = run_cmd(&tmp)
+        .args(["doc", "event", "list", "--id", "x", "--json"])
+        .assert();
+}
+
+/// Observable-effect test for the `doc event create` / `doc event list`
+/// pair — IC-15 means a wrong internal JSON key (e.g. sending `id` where
+/// `event_create::Args`/`timeline::Args` require `artifact_id`, which these
+/// two functions require because the CLI calls them directly and bypasses
+/// `Artifact::call`'s key-translation layer) would be silently swallowed
+/// rather than rejected, so exit-status alone proves nothing about wiring.
+/// This asserts the created event's payload marker round-trips through list.
+#[test]
+fn doc_event_create_then_list_shows_the_event() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "doc",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "Event Target",
+            "--rel-path",
+            "docs/evt.md",
+            "--body",
+            "body",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let id = extract_created_id(&String::from_utf8(create.get_output().stdout.clone()).unwrap());
+
+    run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "doc",
+            "event",
+            "create",
+            "--id",
+            &id,
+            "--kind",
+            "note",
+            "--payload",
+            r#"{"text":"cli-doc-marker"}"#,
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let list = run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["doc", "event", "list", "--id", &id, "--json"])
+        .assert()
+        .success();
+    let list_out = String::from_utf8(list.get_output().stdout.clone()).unwrap();
+    assert!(
+        list_out.contains("cli-doc-marker"),
+        "listed events must include the note just created; got: {list_out}"
+    );
+}
+
+// --- `doc refresh <verb>` -------------------------------------------------
+
+#[test]
+fn doc_refresh_list_stale_empty_catalog_succeeds() {
+    let tmp = TempDir::new().unwrap();
+    run_cmd(&tmp)
+        .args(["doc", "refresh", "list-stale", "--json"])
+        .assert()
+        .success();
+}
+
+/// Observable-effect test for `doc refresh gather` — confirms the CLI's
+/// `{"id": ...}` shape (built directly, `refresh::call` has no `action`
+/// discriminant) actually resolves the artifact rather than silently
+/// gathering nothing for an unrecognized key.
+#[test]
+fn doc_refresh_gather_on_augmented_artifact_returns_its_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "doc",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "Gather Target",
+            "--rel-path",
+            "docs/gather.md",
+            "--body",
+            "body",
+            "--augment-prompt",
+            "gather-marker-prompt",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let id = extract_created_id(&String::from_utf8(create.get_output().stdout.clone()).unwrap());
+
+    let gather = run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["doc", "refresh", "gather", &id, "--json"])
+        .assert()
+        .success();
+    let gather_out = String::from_utf8(gather.get_output().stdout.clone()).unwrap();
+    assert!(
+        gather_out.contains("gather-marker-prompt") || gather_out.contains(&id),
+        "gather output should reflect the target artifact's augmentation; got: {gather_out}"
+    );
+}
+
+// --- `doc augment <id>` ---------------------------------------------------
+
+/// Observable-effect test for `doc augment` — confirms the prompt reaches
+/// the catalog by round-tripping through `doc get`, not just checking exit
+/// status (which a dropped/mis-keyed field would not disturb; see IC-15).
+#[test]
+fn doc_augment_then_get_shows_the_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "doc",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "Augment Target",
+            "--rel-path",
+            "docs/augment.md",
+            "--body",
+            "body",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let id = extract_created_id(&String::from_utf8(create.get_output().stdout.clone()).unwrap());
+
+    run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "doc",
+            "augment",
+            &id,
+            "--prompt",
+            "cli-doc-augment-marker",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let get = run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["doc", "get", &id, "--json"])
+        .assert()
+        .success();
+    let get_out = String::from_utf8(get.get_output().stdout.clone()).unwrap();
+    assert!(
+        get_out.contains("cli-doc-augment-marker"),
+        "the augmentation prompt must be readable back via `doc get`; got: {get_out}"
     );
 }

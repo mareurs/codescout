@@ -105,7 +105,7 @@ git rebase master
 #    docs/issues/:
 #    - if the file's status is fixed/mitigated/wontfix,
 #      archive it now via the catalog (NOT git mv — id = sha256(abs_path)):
-#        mcp call codescout artifact '{"action":"move","id":"<id>",
+#        mcp call codescout doc '{"action":"move","id":"<id>",
 #          "new_rel_path":"docs/issues/archive/<date>-<slug>.md"}'
 #    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
 #    Commit separately: docs: archive verified bug files for <date>
