@@ -139,15 +139,49 @@ Tier 2's recipe.
 
 ## Resume
 
-**Still unowned and untested by anyone:** whether a *cleared* slot makes a READ return a clean
-zero. Tier 2 tested a wrong slot; Tier 3 tested a correct-but-not-intended slot; nobody has tested
-an empty one on a read path. That is the experiment this file is waiting on, and it is the one that
-would close the causal question rather than the shape.
+**CLOSED 2026-09-02 — the experiment this file named as unowned has been run, and the answer is a
+third behaviour neither hypothesis predicted.**
 
-Practical form until then: **pass `workspace="<abs worktree path>"` on every codescout call from a
+Run from the state that produces it: immediately after a `/mcp` reconnect, before any `activate`.
+
+| step | call | result |
+|---|---|---|
+| 1 | unpinned `symbols(name="duplicate_definitions")` — 7× in `.worktrees/entry-id-collision`, **0×** at `experiments` HEAD | returned **home's answer**, no error, no zero |
+| 2 | a write (`edit_markdown` on this file) | **refused** — *"worktrees detected but `workspace(action='activate')` has not been called"* |
+
+Step 2 is what makes step 1 mean something: it proves the slot was **still cleared after the read
+ran**. So the read resolved against the home project **and did not activate it**.
+
+**The answer: the read path has a silent home default that does not set the slot.** Not a fallback
+to a previous activation, not a zero, not an error — an implicit default, invisible in the
+response, leaving the very state whose absence the write path refuses over. The asymmetry is now
+fully characterised: **the write path requires an explicit slot; the read path has a default that
+never creates one.** That is why a worktree read is silently wrong rather than loudly blocked, and
+it is a stronger statement than *"reads lack the guard"* — there is nothing for a guard to check,
+because the read is behaving as designed.
+
+**Two wrong conclusions were drafted before this one, and both are worth recording because they
+were confident and cheap to hold.**
+
+1. *"A cleared slot silently auto-activates home."* Drafted off the `project-activation-bootstrap`
+   guide arriving with the read, which reads exactly like *"you just activated a project"*.
+   Falsified by `get_guide("workspace-state")`: **server construction re-arms the session-opening
+   topic alone on any non-empty reloaded ledger, so that guide is re-sent on every `/mcp` reconnect
+   regardless of project.** The tell is not a tell.
+2. *"The two probes interfere, so the state is one-shot per reconnect."* Falsified by step 2
+   succeeding as a probe after step 1 had run. They do **not** interfere — precisely because the
+   read does not touch the slot, which is the finding itself. The obstacle assumed to be blocking
+   the experiment was the answer to it.
+
+**Remaining, and it is a design question rather than an unknown:** whether the read path *should*
+have a silent default at all in a worktree-bearing checkout, or should refuse like the write path.
+Per `docs/adrs/2026-08-27-negative-results-name-their-scope.md` the minimum is that it name the
+tree it answered from — and Tier 3 above shows the dangerous case is a **populated** answer, which
+that ADR does not currently cover.
+
+Practical form, unchanged: **pass `workspace="<abs worktree path>"` on every codescout call from a
 worktree, and treat any zero *or plausible near-miss* from an unpinned call as unverified rather
 than as evidence.** Pin `cargo` to the worktree manifest too.
-
 ## References
 
 - `codescout-0a` (sessionId `2cb44cd3`) — Tier 1, reported at subagent-observed strength at its own

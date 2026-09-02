@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 100
+entry_high_water_F: 101
 entry_high_water_W: 97
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 97
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-101 | 2026-09-02 | med | measurement | open | **When you catch yourself explaining why a measurement is impractical, check whether the obstacle IS the result.** A `/mcp` reconnect drops you into the cleared-slot state a filed bug named as unowned; two calls closed it. Unpinned `symbols` returned home's answer, then a write was refused for the slot *still* being cleared — so **the read path has a silent home default that never sets the slot**, which is why worktree reads are silently wrong rather than blocked. Two confident wrong answers were drafted first: (1) "cleared slot auto-activates home", off the `project-activation-bootstrap` injection, which `get_guide("workspace-state")` says is re-sent on **every** reconnect regardless of project — the most legible signal was about the reconnect and nothing else; (2) "the probes interfere, the state is one-shot" — **wrong for the same reason the real answer is right**, and I had already written the table arguing it. Neither reached a peer or a commit only because the next tool call landed before the writeup did |
 | F-100 | 2026-09-02 | high | measurement | open | **A window is a fact about the query, never about the thing — re-run once with it REMOVED, not widened.** Four instances in one evening across four sessions, each returning a clean, self-consistent, *wrong* answer. `cut -c1-150` hid **+1,508 chars** of hand-authored prose and nearly published a wrong correction *of* a peer; a `git grep` window stopped two files short of its own falsifier; a `grep` over stdout hid an argparse exit-2 written to **stderr** and cost **three** debugging rounds on code that worked — written by someone who had already messaged two peers about instance 1. The remedy is one command (drop the `cut`, drop `--include`, `2>&1`), not "be careful with filters", which is the remedy that failed four times, twice inside a correction of itself |
 | F-98 | 2026-09-02 | high | epistemic | fixed-verified | `8343d6ca` retracted a falsified remedy from a bug file, correctly scoped "bug file only, no counts moved" — and the same claim stood in `docs/trackers/issue-clusters.md:1139`, IC-17's `**Members:**`, labelled **verified**, written by the same session at `cd6bb36c`. **The correct scoping is what preserved the falsehood**: nothing relates a bug file to a ledger field quoting it — no edge, no diff hunk, no check. Worse than the unsafe instruction beside it: `:872` is advice that misfires, `:1139` was false and labelled verified. Found by `codescout-05` reading past the line I had *accurately* told it not to amend — an accurate but incomplete correction carries enough authority to stop the next person looking. Fixed `fea2e1ce`. |
 | F-97 | 2026-09-02 | med | measurement | fixed-verified | Ran `cargo check --workspace --all-targets` (which does not lint at all), got exit 0, and published "all green" under the project gate's name — while `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` was red, exit 101, 10 errors. Had seen the seven `dead_code` warnings and described them as "expected"; `-D warnings` promotes each to an error. Quoted the gate's four commands in my own first message of the session and ran none of them for four hours. **A green from an instrument chosen for its speed is a fact about that instrument.** Caught by `codescout-26`, which held the failing code. |
@@ -10103,6 +10104,54 @@ a place in `docs/conventions/`. Two instances (this one, `0d`'s) are not a rule 
 correction above is an argument for waiting, since the version that would have been promoted five
 minutes ago carried a false claim about which half needs a reader.
 
+
+## F-101 — The obstacle I was documenting was the answer — two wrong conclusions in five minutes
+
+**Valid:** dated 2026-09-02
+
+**Observed:** a `/mcp` reconnect puts the session in a state a filed bug named as **unowned and
+untested** — the cleared activation slot. Probing it there closed the question in two calls. Along
+the way I drafted **two** confident wrong answers in under five minutes, each falsified by the next
+observation rather than by doubt.
+
+**The result.** Unpinned `symbols` with a cleared slot returned **home's answer** (no error, no
+zero); a write immediately after was **refused** for the slot still being cleared. So the read
+resolved against home *and did not activate it*: **the read path has a silent home default that
+never sets the slot.** The write path requires an explicit slot; the read path has a default that
+never creates one. That is why a worktree read is silently wrong rather than loudly blocked — there
+is nothing for a guard to check, because the read is behaving as designed.
+
+**Wrong answer 1: "a cleared slot silently auto-activates home."** Drafted off the
+`project-activation-bootstrap` guide arriving with the read, which reads exactly like *"you just
+activated a project"*. Falsified by the guide that arrived one call later:
+`get_guide("workspace-state")` states that **server construction re-arms the session-opening topic
+alone on any non-empty reloaded ledger, so that body is re-sent on every `/mcp` reconnect
+regardless of project.** The most legible signal in the response was evidence of the reconnect and
+of nothing else.
+
+**Wrong answer 2, and it is the instructive one: "the two probes interfere, so the state is
+one-shot per reconnect."** I had already written the table explaining why the experiment was hard —
+read tells you nothing, write destroys the condition — and it was wrong for the same reason the
+real answer is right. **The probes do not interfere, precisely because the read does not touch the
+slot.** The obstacle I was documenting *was the answer*. Had I stopped at "this is hard and needs
+two reconnects", the file would carry a plausible, well-argued reason not to run the experiment
+that was one call from completing.
+
+**The transferable shape: when you catch yourself explaining why a measurement is impractical,
+check whether the obstacle is the result.** A mechanism that blocks the probe is a fact about the
+system, and it is usually the same fact the probe was after. That is cheaper than the two-reconnect
+protocol I was about to prescribe, and it needs noticing rather than tooling — so it is filed
+`open` with no mechanism, honestly.
+
+**Cost, and why `med` rather than `low`:** neither wrong answer reached a peer or a commit, because
+the next tool call landed before the writeup did. That is luck, not method — both were fully drafted
+and one was in an `edit_markdown` payload that only failed because the *write path* refused for an
+unrelated reason. The friction is that the refutation arrived by accident of ordering.
+
+**Rests on** `F-100` (a window is a fact about the query) — same family, different axis: that one is
+an instrument excluding evidence, this one is an instrument's *most legible output* being about
+something else entirely. And `W-95`: the running binary here predates HEAD by **29 seconds**,
+checked first, and was irrelevant only because the intervening commit touched zero code files.
 
 ## Template for new entries
 
