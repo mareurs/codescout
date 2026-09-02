@@ -377,8 +377,8 @@ def main() -> int:
             # corpus-driven agreement check leaves that branch untested however green it is.
             print(json.dumps(cluster_tags(frontmatter(sys.stdin.read()) or "")))
             return 0
-    if source not in ("index", "worktree"):
-        raise SystemExit(f"--source must be index|worktree, got {source!r}")
+    if source not in ("index", "worktree", "head"):
+        raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
     ledger = read(LEDGER, source)
     if ledger is None:

@@ -9926,6 +9926,37 @@ those two are about a *stale* sample and this is about a *truncated* one — and
 "get peer review", which is a policy that failed against an author who had just written it down,
 this one is a command.
 
+### Amendment, same day — three more, and the last is the entry failing at itself
+
+Two **offered** by `codescout-00`/`cc` (sessionId `953b5e77`) and recorded as offered rather than
+absorbed as catches, since counting a volunteered datapoint as a catch is what makes a population
+look self-correcting: (5) a compound `run_command` where one clause named a source file, so the
+guard refused the **whole string** and its `git reset` silently never ran — caught by checking
+`git status` rather than the exit code; (6) it read the stage log, saw its own sessionId on all
+ten rows, and a later failed commit **rewrote those rows to `(unrecorded)` underneath it**, so a
+correct reading expired with no signal.
+
+**(7) is mine and it is why this amendment exists.** Forty minutes after writing the entry above —
+whose fourth instance *is* an argparse `choices` list rejecting `head` on stderr — I found the
+identical defect in the sibling file: `scripts/pre-commit-ledger-counts.py` used `"head"`
+internally and rejected it at the door (`--source must be index|worktree`). I had fixed **the
+instance and not the class**, and it cost a confusing `exit=1` against `HEAD` that read as my own
+new gate having a false positive.
+
+So the remedy above is insufficient as written. *"Re-run once with the window removed"* finds the
+instance in front of you and says nothing about the identical window in the file next door. The
+repair is CLAUDE.md § *Testing Discipline*'s **per-SITE** rule arriving from the measurement side:
+having found one, grep the sibling implementations for the same construct before closing. Here
+that was one command — `grep -n 'choices=\|not in ("' scripts/*.py` — and it returns both.
+
+**A second thing agreement does not establish**, from `cc`, which falsified a claim this session's
+own shipped code was implicitly making. `probe-cluster-census.py` reports when its three sources
+disagree, so silence read as *"trustworthy"*. It is not: a **coupled change split across the commit
+boundary** leaves `HEAD` internally inconsistent, and all three sources then agree on a number that
+is wrong — measured, a ~90-minute window where a budget raise had landed and the bytes justifying
+it had not. Agreement is evidence about the **trees**, never about the change. The probe now says
+so in the silent case, which is the only case where a reader forms the belief.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

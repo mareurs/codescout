@@ -187,6 +187,17 @@ def main() -> int:
     )
     for r in unadjudicated:
         print(f"  {r['id']:<7} n={r['n']:<3} {r['slug']}")
+    if not divergence:
+        print(
+            "\nAll three sources agree on every count — which establishes LESS than it reads.\n"
+            "  It rules out one failure (a count measured over a tree that exists at no commit)\n"
+            "  and not the other: a COUPLED CHANGE SPLIT ACROSS THE COMMIT BOUNDARY leaves HEAD\n"
+            "  internally inconsistent, and all three sources then agree on a number that is\n"
+            "  wrong. Reported by codescout-00/cc (sessionId 953b5e77) from a live 90-minute\n"
+            "  window: a budget raise landed while the bytes justifying it stayed uncommitted.\n"
+            "  Agreement is evidence about the TREES, never about the change."
+        )
+
     if divergence:
         print(
             f"\n{len(divergence)} class(es) count DIFFERENTLY under another source — this tree "
