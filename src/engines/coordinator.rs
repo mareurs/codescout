@@ -16,12 +16,6 @@ use serde_json::Value;
 /// `content_topic` is resolved by the caller rather than by asking the tool,
 /// for two reasons: the coordinator must not depend on the `Tool` trait, and
 /// a default trait method cannot coerce `&self` to `&dyn Tool` anyway.
-#[expect(
-    dead_code,
-    reason = "threaded through by run_post_in for Plan 2's emitters to read; no \
-              emitter exists yet, and the synthetic ones this task tests \
-              against ignore it, so no field is read under any build"
-)]
 pub(crate) struct PostCtx<'a> {
     pub selector: Option<&'a str>,
     pub value: &'a Value,
@@ -53,11 +47,16 @@ pub(crate) struct Emission {
 }
 
 impl Emission {
-    #[expect(
-        dead_code,
-        reason = "no caller exists yet in any build; the Step 6 mutation check \
-                  exercises the equivalent guard by hand-editing run_post_in, and \
-                  Plan 2's emitters are the intended callers"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "used by emitters::tests to assert on an Emission's emptiness now \
+                    that Plan 2 wired the emitters; run_post_in itself never calls it \
+                    — it checks claimed-and-empty through Emitted::Claimed's own match \
+                    arm, not this method — so it stays a test-only helper until some \
+                    future caller reads it in production"
+        )
     )]
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
@@ -276,6 +275,28 @@ mod tests {
         let engines = [
             decl("guides", Corpus::CompiledGuides, claims_a_block),
             decl("rules", Corpus::OperatorLedger, claims_second),
+        ];
+        let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
+        assert_eq!(out.hint.map(|(t, _)| t), Some("first".to_string()));
+    }
+
+    /// FIRST NON-`None` HINT WINS, not "first claimant wins" — the two are
+    /// indistinguishable when every claimant carries a hint, which is why
+    /// `only_the_first_hint_survives` above cannot pin the actual rule. Here
+    /// the first claimant (`claims_nothing`, a different corpus so it does
+    /// not block the second engine from running) carries no hint at all, so
+    /// only the SECOND engine's hint can produce a `Some` below. A
+    /// `claimed.len() == 1` gate — stop after the first successful claim,
+    /// regardless of its hint — would break the loop before the second
+    /// engine ever runs, leaving `out.hint` at `None` and failing this
+    /// assertion; verified by hand-mutating `run_post_in` to that gate and
+    /// confirming this is the test that reds.
+    #[test]
+    fn a_hintless_claim_does_not_block_a_later_hint() {
+        let v = json!({});
+        let engines = [
+            decl("rules", Corpus::OperatorLedger, claims_nothing),
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
         ];
         let out = run_post_in(&engines, &ctx(&v), &mut GuideLedger::default());
         assert_eq!(out.hint.map(|(t, _)| t), Some("first".to_string()));

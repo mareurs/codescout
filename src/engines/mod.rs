@@ -48,6 +48,7 @@
 //! participates in nothing, which is where `craft-skills` sits today.
 
 pub mod coordinator;
+pub mod emitters;
 
 use crate::prompts::SESSION_OPENING_GUIDE;
 
@@ -170,22 +171,22 @@ fn owns_nothing(_key: &str) -> bool {
 /// Every engine known to this process.
 pub static ENGINES: &[EngineDecl] = &[
     EngineDecl {
-        id: "guide-sections",
-        key: RetrievalKey::CallShape,
-        corpus: Corpus::CompiledGuides,
-        mode: Mode::Both,
-        writes_at: &["tools::core::guide_emit", "tools::guide"],
-        owns_key: owns_guide_key,
-        emit_post: None,
-    },
-    EngineDecl {
         id: "session-opener",
         key: RetrievalKey::SessionPhase,
         corpus: Corpus::CompiledGuides,
         mode: Mode::Push,
         writes_at: &["tools::core::types"],
         owns_key: owns_session_opener_key,
-        emit_post: None,
+        emit_post: Some(crate::engines::emitters::emit_session_opener),
+    },
+    EngineDecl {
+        id: "guide-sections",
+        key: RetrievalKey::CallShape,
+        corpus: Corpus::CompiledGuides,
+        mode: Mode::Both,
+        writes_at: &["tools::core::guide_emit", "tools::guide"],
+        owns_key: owns_guide_key,
+        emit_post: Some(crate::engines::emitters::emit_guide_sections),
     },
     EngineDecl {
         id: "operator-rules",
@@ -194,7 +195,7 @@ pub static ENGINES: &[EngineDecl] = &[
         mode: Mode::Push,
         writes_at: &["tools::core::types"],
         owns_key: owns_operator_key,
-        emit_post: None,
+        emit_post: Some(crate::engines::emitters::emit_operator_rules),
     },
     EngineDecl {
         id: "craft-skills",
@@ -313,6 +314,29 @@ mod tests {
             .collect();
         assert!(owners.contains(&"session-opener"), "got {owners:?}");
         assert!(owners.contains(&"guide-sections"), "got {owners:?}");
+    }
+
+    /// Registry order IS delivery precedence, and the two must not drift.
+    ///
+    /// The session opener precedes guide-sections because the pre-refactor
+    /// `if/else` in `call_content` tried it first — deliberately, so a
+    /// one-shot `artifact` call receives the 2.5 KB opener rather than 18 KB
+    /// of librarian guide (`types.rs:968`). Both draw `Corpus::CompiledGuides`,
+    /// so under `run_post_in` the earlier one claims and the later never runs.
+    /// Swapping these two rows silently inverts that trade with no other test
+    /// failing, which is why the order is pinned here rather than commented.
+    #[test]
+    fn registry_order_is_delivery_precedence() {
+        let ids: Vec<&str> = ENGINES.iter().map(|e| e.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "session-opener",
+                "guide-sections",
+                "operator-rules",
+                "craft-skills"
+            ]
+        );
     }
 
     /// `craft-skills` ships and is counted by no ledger and no budget. The
