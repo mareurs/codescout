@@ -360,7 +360,7 @@ list into the phases that own them. What remains is genuinely open:
 > 1. **The refusal site, not the prompt surface, was the load-bearing gap.** Phase 5(a)
 >    was written as "broader `server_instructions` prose", and the keystone's per-property
 >    description was judged to make it mere refinement. It was not: bug
->    `d5566f4c24ceb601` (2026-09-01) cost a live SDD run precisely because the read-only
+>    `b0fc1038336f31e1` (2026-09-01) cost a live SDD run precisely because the read-only
 >    refusal offered only the process-wide remedy and never named the parameter this plan
 >    shipped, tested and advertised on 23 tools. `check_tool_access`
 >    (`src/util/path_security.rs`) now offers `workspace='<abs path>'` **before**

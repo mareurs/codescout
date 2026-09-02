@@ -2147,7 +2147,7 @@ async fn memory_read_with_unknown_project_id_says_no_such_project_not_no_topics(
 /// `resolve_memory_dirs` that refuses everything; asserting only the routing passes against
 /// one that ignores the key. Neither half alone discriminates.
 ///
-/// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+/// docs/issues/archive/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
 #[tokio::test]
 async fn memory_refuses_the_project_key_and_still_routes_project_id() {
     use crate::agent::Agent;

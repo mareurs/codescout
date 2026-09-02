@@ -2557,7 +2557,7 @@ mod tests {
     /// tool that is absent must not be a failure.
     ///
     /// docs/issues/2026-09-02-index-description-omits-the-verify-action.md
-    /// docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+    /// docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
     #[tokio::test]
     async fn tool_descriptions_name_every_action_they_claim_to_enumerate() {
         let (_dir, server) = make_server().await;
@@ -3043,7 +3043,7 @@ mod tests {
     /// far from its tool, or written as `tool(param=…)`, is not covered — the call-form is a
     /// larger population and is left to a later pass rather than smuggled in untested here.
     ///
-    /// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+    /// docs/issues/archive/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
     #[tokio::test]
     async fn prompt_surfaces_name_only_params_their_tools_advertise() {
         use std::collections::HashMap;

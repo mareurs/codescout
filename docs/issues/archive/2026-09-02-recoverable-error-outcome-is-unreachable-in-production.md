@@ -1,5 +1,5 @@
 ---
-id: '60b006d8acef1ff9'
+id: 572cdbd226139268
 kind: bug
 status: fixed
 title: 'BUG: recoverable_error is never written to usage.db — 0 rows in 57k calls, and two queries filter on it'

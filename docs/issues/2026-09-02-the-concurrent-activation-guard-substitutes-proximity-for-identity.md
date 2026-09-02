@@ -65,7 +65,7 @@ imply it, and a fast linear session is a systematic false positive rather than n
 There is a second, worse consequence of the same gap. The warning is attached to the
 response of the call that *performed* the switch, so it reaches the **switcher** — while
 the party harmed is whoever gets resolved against the wrong workspace afterwards, who
-receives nothing. In `docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
+receives nothing. In `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
 the subagent did the activating and the controller paid, discovering it only via a refused
 write minutes later.
 
@@ -123,7 +123,7 @@ be surfaced to the party whose subsequent call resolves against a root it did no
 rather than to the party who moved it.
 
 That is the same substrate as Fix 2 of
-`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`.
+`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`.
 Build once, for the class, not twice per instance.
 
 ## Tests added
@@ -147,6 +147,6 @@ which today encodes the proxy rather than the intent.
 ## References
 - `docs/plans/2026-05-30-per-request-workspace-pinning.md` § Phase 5(c) — the item whose
   verification surfaced this
-- `docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
+- `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
   — same missing field, Fix 2
 - Cluster: `IC-17` — a shared resource carries no owner

@@ -1,5 +1,5 @@
 ---
-id: d5566f4c24ceb601
+id: b0fc1038336f31e1
 kind: bug
 status: mitigated
 title: Workspace activation is process-wide, so a subagent's read-only activate disables the controller's writes
@@ -88,6 +88,19 @@ Two candidates, not mutually exclusive:
 Deliberately **not** proposed: per-agent activation state. That is a much larger change and
 the per-call parameter already covers the need.
 
+## Fix provenance
+
+- **SHA:** `7a52e621` (`experiments`) — candidate 1: the read-only refusal now offers the
+  per-call `workspace=` pin before re-activation, plus its ordering test in
+  `src/util/path_security.rs`.
+- **patch-id:** `630a6acd0541130ce0c32d3bf706b9c8b6b8d149` — content hash of the diff;
+  survives rebase and cherry-pick.
+
+**Candidate 1 only, which is why the status is `mitigated` and not `fixed`.** Candidate 2 —
+recording *who* activated, so the refusal can name the activating agent instead of
+"something else sharing this process" — is not built. The shared resource remains
+unattributable; what changed is that the caller is offered a non-destructive route first.
+That residual is the `IC-17` remedy shape and is left to the cluster, not to this record.
 ## Tests added
 
 Regression test `read_only_refusal_offers_the_per_call_pin_before_reactivation`

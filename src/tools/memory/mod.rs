@@ -449,7 +449,7 @@ impl MemoryReadDirs {
 /// spelling instead of ignored. The schema advertises one name and the runtime
 /// honours exactly that one.
 ///
-/// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+/// docs/issues/archive/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
 ///
 /// `.primary` is the write target; `.secondary` is the other layout's directory
 /// for the same project when the two differ. See [`MemoryReadDirs`].

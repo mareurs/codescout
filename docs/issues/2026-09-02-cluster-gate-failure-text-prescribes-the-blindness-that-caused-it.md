@@ -6,7 +6,7 @@ severity: medium
 owner: marius
 related:
   - docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md
-  - docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+  - docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
 tags:
   - cluster/hint-composed-without-the-request
 kind: bug
@@ -102,7 +102,7 @@ ledger edit is blocked — contended cell, another session mid-flight, a `git ad
 to make — has no legal move and no text telling them why.
 
 *Measured 2026-09-02, live:* this session filed
-`docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`, a genuine 12th
+`docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`, a genuine 12th
 `cluster/doc-contradicted-by-code` member. `git add` alone reds **two** tests —
 `every_index_count_matches_the_corpus` on `issue-clusters.md:270` and
 `every_bare_n_in_a_class_field_matches_the_corpus` on the `**Members:**` bare `n` at `:872`. Both
@@ -321,7 +321,7 @@ paired cell bump described in § *Root cause* defect 2.
 
 - `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
   corpus-derivation half; same mechanism, different artifact, different fix.
-- `docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the live blocked
+- `docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the live blocked
   pair measured in § *Evidence*.
 - `docs/trackers/issue-clusters.md` `IC-22`, and `IC-11`'s `**Members:**` field at `:872`, which
   documents this blindness catching an earlier author.

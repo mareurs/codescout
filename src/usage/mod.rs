@@ -167,7 +167,7 @@ impl UsageRecorder {
 ///
 /// [`RecoverableError`]: crate::tools::RecoverableError
 ///
-/// docs/issues/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
+/// docs/issues/archive/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
 fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool, Option<String>) {
     match result {
         Err(e) => {
@@ -696,7 +696,7 @@ mod content_tests {
     /// queries filtering on the dead value and returning empty without saying
     /// so.
     ///
-    /// docs/issues/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
+    /// docs/issues/archive/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
     #[tokio::test]
     async fn record_content_distinguishes_a_recoverable_error_from_a_hard_one() {
         use serde_json::json;

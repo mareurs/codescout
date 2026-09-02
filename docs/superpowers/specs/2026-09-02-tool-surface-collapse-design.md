@@ -222,7 +222,7 @@ Description: names all 17 actions, under the 1,800-char cap now expressed as
 - `builders.rs`: system-prompt draft loses `read_markdown` / `edit_markdown`.
 - `mod.rs:203`: the activation banner's `project:` sentence corrected while the file is open
   — `project_id` for `semantic_search` and `memory`; `symbols` dropped from the list
-  (`docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md`).
+  (`docs/issues/archive/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md`).
 - `ONBOARDING_VERSION` bumped.
 - Guides: ten files. Every `<!-- serves: artifact.X -->` becomes `doc.X` (the `serves:` gate
   checks the action against the enum, so the five new actions are valid targets). Prose

@@ -1417,7 +1417,7 @@ mod tests {
         // used to read `contains("project: \"<id>\"")` and was satisfied BY THE DEFECT:
         // the sentence named `project` on `symbols`, which advertises no such param and
         // silently ignored it, for three months.
-        // docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+        // docs/issues/archive/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
         assert!(block.contains("project_id: \"<id>\""));
         assert!(
             !block.contains("` in `symbols`"),

@@ -426,7 +426,7 @@ Codified so the Index column means the same thing across sessions.
 `docs/plans/` by `Status:` line plus git first→last commit date, and reported
 `docs/plans/2026-05-30-per-request-workspace-pinning.md` (`status: draft`, opened 94 days
 prior) as a stalled design whose bug had "re-surfaced today" as
-`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`.
+`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`.
 I called that pairing "the notable one".
 
 **Got.** Both halves are false, and the scout that found it took two reads.
@@ -481,7 +481,7 @@ commit each and no implementation in `src/`.
 
 **Rests on:** `get_guide("tracker-conventions")` § *Status vocabulary* (tracker surface);
 `docs/trackers/resume-workspace-pinning-phase-4b-5.md` § *Shipped, so nobody re-does it*;
-`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
+`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
 §§ *Evidence*, *Fix*.
 
 ## F-2 — a grep-derived tool count was scoped to the regex's shape, not to the registry

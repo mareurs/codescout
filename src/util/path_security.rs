@@ -2461,7 +2461,7 @@ mod tests {
         );
     }
 
-    /// Fix 1 of `docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`,
+    /// Fix 1 of `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`,
     /// and Phase 5(a) of the per-request-pinning plan: the refusal must offer the
     /// per-call `workspace=` pin BEFORE re-activation.
     ///

@@ -6,7 +6,7 @@ severity: medium
 owner: marius
 related:
   - docs/issues/2026-09-02-index-description-omits-the-verify-action.md
-  - docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
+  - docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md
 tags:
   - cluster/selector-narrower-than-its-population
 kind: bug
@@ -271,7 +271,7 @@ on it, because the anchor it would key on is the thing that does not exist yet.
 ## References
 
 - `docs/issues/2026-09-02-index-description-omits-the-verify-action.md`,
-  `docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the two
+  `docs/issues/archive/2026-09-02-memory-description-omits-the-refresh-anchors-action.md` — the two
   measured instances, both flipped at `8fb5f638`.
 - `docs/issues/archive/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md` — same family
   (a status no query reaches), same venue, already archived.
