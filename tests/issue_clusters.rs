@@ -721,23 +721,61 @@ fn mechanism_statuses(text: &str) -> Vec<(String, String)> {
 
 /// A field is *unbasised* when it asserts a state and gives no way to check it.
 ///
-/// The test is deliberately crude — length after stripping the state word — because the
-/// precise version is not available. A first attempt classified by "does it contain a path or
-/// a SHA" and would have failed `IC-6` (which cites `edit_markdown` and `artifact(get)` by
-/// name) and `IC-18` (which cites "the ADR above"). Those are real citations in forms no regex
-/// enumerates, so the gate does not try: it asks only that the field say *something* beyond a
-/// bare verdict.
+/// **Length of what REMAINS after the verdict is stripped — the third formulation tonight,
+/// and each earlier one was refuted by a measurement rather than a preference.**
+///
+/// 1. *Does it contain a path or a SHA* — rejected before shipping: it over-reported 14 of
+///    22 and would have failed `IC-6` (which cites `edit_markdown` and `artifact(get)` by
+///    name) and `IC-18` (which cites "the ADR above"). Real citations in forms no regex
+///    enumerates.
+/// 2. *Exact match against `"none yet" | "partial" | "designed" | "shipped" | "none"`* —
+///    shipped, then caught by `codescout-3e54`: a word list is monotone under RENAMING, so a
+///    bare `no mechanism yet` or `unbuilt` passes silently, and re-wording the ledger's own
+///    `none yet` would have disarmed the gate rather than failed it.
+/// 3. *Length of the whole field, threshold 40* — refuted by this file's own fixture, whose
+///    `` `partial` — `src/thing.rs` does it. `` is a real basis in 35 characters.
+///
+/// **Why stripping first is what makes the word list safe here.** `VERDICTS` is used to
+/// LOCATE a prefix, never to decide. An unknown verdict word simply is not stripped, the
+/// remainder is then the whole field, and the length test still applies — so a novel bare
+/// verdict is caught (`unbuilt` → 7) while a long field passes. The failure mode degrades
+/// toward flagging rather than toward silence, which is the direction formulation 2 got
+/// backwards.
+///
+/// **Threshold derived, not chosen.** Measured over all 22 `**Mechanism status:**` fields on
+/// 2026-09-02: shortest remainder **67** characters (`IC-15`), next 119, longest 5835, none
+/// under 20. Nearest cases either side of 20 are the fixture's 25 and a bare
+/// `no mechanism yet` at 16 — so the margin is thin on the fixture side deliberately, that
+/// fixture being minimal on purpose to prove the parser, and 47 characters on the corpus side.
+///
+/// **What it still cannot catch:** a LONG field that is nonetheless all verdict. Each
+/// formulation dominated the last; none is complete.
 fn is_unbasised(body: &str) -> bool {
-    let stripped = body
+    const VERDICTS: [&str; 6] = [
+        "none yet", "not yet", "partial", "designed", "shipped", "none",
+    ];
+    let mut s = body.trim().trim_start_matches(['*', '`']).trim().to_owned();
+    let low = s.to_ascii_lowercase();
+    // Longest first: "none yet" must win over "none".
+    let mut by_len = VERDICTS;
+    by_len.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    for v in by_len {
+        if low.starts_with(v) {
+            s = s[v.len()..].to_owned();
+            break;
+        }
+    }
+    // Tolerate a parenthetical qualifier, e.g. `shipped (partial)`.
+    if let Some(rest) = s.trim_start().strip_prefix('(') {
+        if let Some((_, after)) = rest.split_once(')') {
+            s = after.to_owned();
+        }
+    }
+    let remainder = s
         .trim()
-        .trim_end_matches('.')
-        .trim_matches('`')
-        .trim()
-        .to_ascii_lowercase();
-    matches!(
-        stripped.as_str(),
-        "none yet" | "partial" | "designed" | "shipped" | "none"
-    )
+        .trim_start_matches(['*', '`', '.', '—', '–', '-'])
+        .trim();
+    remainder.chars().count() < 20
 }
 
 /// No `**Mechanism status:**` may be a bare verdict with no basis.
@@ -829,6 +867,35 @@ fn the_mechanism_basis_scan_discriminates() {
     );
     assert!(is_unbasised(&found[0].1));
     assert!(!is_unbasised(&found[1].1));
+
+    // The synonyms formulation 2 let through. None of these is in `VERDICTS`, so nothing is
+    // stripped and the whole string is measured — which is the graceful-degradation property.
+    for bare in [
+        "no mechanism yet",
+        "nothing yet.",
+        "unbuilt",
+        "not built yet",
+        "TBD",
+    ] {
+        assert!(
+            is_unbasised(bare),
+            "a bare verdict must be caught whatever its wording; the word-list version passed \
+             {bare:?} silently, which is how a rename would have disarmed this gate"
+        );
+    }
+
+    // And the other direction: a terse but REAL basis must survive. 25 characters of
+    // remainder, which is the nearest passing case to the threshold and the reason the
+    // whole-field length formulation was withdrawn.
+    assert!(!is_unbasised("`partial` — `src/thing.rs` does it."));
+    // A parenthetical qualifier must not be mistaken for the basis.
+    assert!(
+        is_unbasised("`shipped (partial)`"),
+        "`(partial)` qualifies the verdict; it is not a way to check it"
+    );
+    assert!(!is_unbasised(
+        "`shipped (partial)` — `scripts/build-windows.sh` prints the pinned wine version"
+    ));
 }
 
 /// Every **bare** `n=` in a class's judgement fields equals that class's real membership.
