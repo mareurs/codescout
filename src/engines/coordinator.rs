@@ -44,11 +44,26 @@ pub(crate) struct PostCtx<'a> {
     /// computing `overflowing` from the buffering decision instead is a
     /// silent byte diff with no dedicated detector.
     ///
-    /// Both references above name an **expression**, not a line. This doc
-    /// carried three `types.rs:<line>` citations until Plan 3, and the commit
-    /// that wired the coordinator invalidated all three — one of them
-    /// (`:1162`) pointing past a file that is now 1112 lines long. A line
-    /// number is a claim about a revision; the expression survives the edit.
+    /// Both references above name a **construct** — a field in a named
+    /// struct literal, a binding in a named function — rather than a line.
+    /// This doc carried three `types.rs:<line>` citations until Plan 3, and
+    /// the commit that wired the coordinator invalidated all three, one of
+    /// them (`:1162`) pointing past a file that is now 1112 lines long.
+    ///
+    /// **Quoting the expression text is not the fix, and the same refactor
+    /// proved it.** Ten sites across five files cite the opener's old trigger
+    /// as `!emitted.contains(SESSION_OPENING_GUIDE)` — verbatim, in
+    /// backticks, no line numbers — and every one rotted, because Plan 3
+    /// rewrote the expression itself to `ledger.contains(topic)` and moved it
+    /// to `emitters::emit_session_opener`. A quoted expression is a claim
+    /// about a revision exactly as a line number is; it merely fails later
+    /// and less visibly, since a stale quote still reads as precise.
+    ///
+    /// What survives a move is the **named item** (`emit_session_opener`) or
+    /// the **property** ("the opener fires when its topic is absent from the
+    /// ledger"). Prefer those; the `let primary = …` quote below is kept only
+    /// because the two gates must be distinguished *as written*, and it is
+    /// the weakest reference on this page.
     pub overflowing: bool,
 }
 

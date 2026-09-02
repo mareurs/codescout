@@ -17,8 +17,9 @@
 //! `experiments` is rebased after every ship, and a `HEAD`-relative claim is
 //! the most volatile form there is), so the two copies never diverged in the
 //! first place. The p50 guide total was *unchanged* across the cut at 11,872
-//! bytes, which is consistent with faithfulness and is **not** a proof of it: `a_p50_session_stays_under_the_committed_guide_byte_ceiling`
-//! runs every call through `call_tool_checked`, which stamps the opener's
+//! bytes, which is consistent with faithfulness and is **not** a proof of it.
+//! `a_p50_session_stays_under_the_committed_guide_byte_ceiling` runs every
+//! call through `call_tool_checked`, which stamps the opener's
 //! ledger key first — so `emit_session_opener` declines on all six shapes —
 //! and its `shape_total` sums only blocks containing
 //! `<!-- auto-injected get_guide(`, so operator-rule bytes count zero. That
