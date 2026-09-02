@@ -11,7 +11,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-02-foreign-index-refusal-names-a-cause-no-route-produces.md
 severity: medium
-unverified: fix and regression tests are green in the working tree but NOT yet committed, so no fix SHA or patch-id is recorded and the file is not archived. Both are owed at commit time.
 ---
 
 # BUG: a transiently-empty index permanently destroys stage-log ownership, so your own paths read as foreign
@@ -117,6 +116,11 @@ whatever pruning keeps the file bounded, and keep the claiming rule exactly as i
    among several.
 
 ## Fix
+
+Fixed on `experiments` at `5e522fa4`, patch-id
+`d5e178bd1b0c2ea6449d77ec75770d5d68a8bd07`. (The SHA is positional and dies when
+`experiments` is rebased; the patch-id is a content hash of the diff and survives rebase and
+cherry-pick. Cite the pair.)
 
 Implemented 2026-09-02. The write loop still emits one row per currently-staged pair; a
 second pass now **carries forward** prior rows whose `(blob, path)` is absent from that set,
