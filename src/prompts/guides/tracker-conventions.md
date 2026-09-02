@@ -458,6 +458,29 @@ letters, a hyphen, digits, and **nothing else**.
   nothing repairs it at merge, because the renumber only covers params rows. If a
   worktree session must record something, write it to a worktree-local file and fold
   it into the ledger from the main checkout after the merge.
+- **Not while the ledger's own commits are unpushed.** `append_entry` also refuses
+  when the ledger *file* has commits in `@{upstream}..HEAD`, because the committed
+  high-water mark below is the allocator's durable input: a second clone that has
+  not seen your commits reads the pushed mark and issues the number you already
+  took. The check is **per file, not per branch** — a branch tens of commits ahead
+  of its remote is normal here, and a branch-wide check would refuse every ledger
+  permanently. Push the ledger's commits and retry, or note the entry somewhere
+  worktree-local and fold it in afterwards. **The unblock is per-push, not per-fix**
+  — committing the entry re-arms the guard against the next one, so the tension is
+  with *commit-early* discipline rather than with batching: file N entries and commit
+  once, fine; file one, commit, file another, refused. The remedy is never to
+  re-check the entry or the ledger; push, or batch and push once. (Measured
+  end-to-end 2026-09-02: 7 of 37 declared ledgers refusing at 133 commits ahead, one
+  push cleared all 7, one commit re-armed one within ten minutes — derivation in
+  `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.)
+  Two things this refusal is **not**: it
+  does not prevent the collision — a peer at origin collides with your unpushed
+  entries whether or not you are refused, and what it converts is an *invisible*
+  divergence into a pushed one — and it is one-directional, because `@{upstream}`
+  is a remote-tracking ref that stays stale until someone fetches, so a peer who
+  allocates and pushes while you have not fetched still collides undetected. It
+  covers prose ledgers only; a ledger declaring an `entry_collection` takes the
+  params path and is unguarded.
 
 **Where the counter lives.** A ledger carries its own high-water mark in committed
 frontmatter, one key per namespace, written by the allocator:
@@ -476,6 +499,24 @@ and because the resolver binds a token to its sole **active** definer, every
 historical citation silently re-points to the new entry with no dangling or ambiguous
 count moving. Compaction is safe because a body edit preserves the frontmatter block
 byte for byte; a hand-rewritten file does not.
+
+**When two hosts allocate anyway.** The mark is committed, so two clones that have
+diverged each hold a valid one and each issues the same next id; the merge then
+lands two `## PREFIX-N` sections in one file, and every citation of that token
+binds to whichever heading comes **first** in file order — silently, with no
+dangling or ambiguous count moving, because the extractor de-duplicates and the
+second definition is discarded before any consumer sees it.
+`librarian(action="doctor")` reports this as `entry_defined_twice`, naming the
+token and every line that defines it. It is a **detector, not a guard**: the state
+it finds is already merged. It excludes a sub-heading that repeats its own entry's
+token — `### A-28` nested inside `## A-28` is one entry with sub-sections, not a
+collision — because a real cross-host merge lands both headings at the *same*
+level, the allocator taking the level from the ledger's existing entries. Nothing
+repairs it automatically, and the commonest cause is not the only one: a hand-edit
+or a bad cherry-pick reach the same shape, so establish which definition is stale
+before renumbering anything. Like the refusal above, it reads `## PREFIX-N`
+headings only — a params ledger whose entries live as index-table rows is covered
+by neither.
 
 ### Entry headings — the definition rule
 
