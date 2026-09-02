@@ -85,7 +85,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "foreign": r.foreign,
             "files": r.files,
             "through_seq": r.through_seq,
-            "dir": format!("{}/", host::AUDIT_DIR),
+            "dir": format!("{}/", host::audit_dir_display()),
             // Ruling 19 (task-6 round-3 review): a session in a linked worktree
             // writes into the MAIN checkout's working tree (attribution needs the
             // real git root), which is correct but invisible to that session's own
@@ -307,7 +307,7 @@ mod tests {
     /// file, bypassing `shard::export` — this fixture is testing the READER,
     /// so it must not depend on the writer to build its input.
     fn write_foreign_shard(tmp_root: &std::path::Path, n: i64) {
-        let dir = tmp_root.join(host::AUDIT_DIR);
+        let dir = host::audit_dir(tmp_root);
         std::fs::create_dir_all(&dir).unwrap();
         let at_ms = 1_788_220_800_000; // 2026-09-01T00:00:00Z
         let name = host::shard_file_name("otherbox-99ffee", at_ms);
@@ -516,7 +516,7 @@ mod tests {
         // inserted one above — both are now attributable and exported.
         assert_eq!(out["exported"], 2);
         assert!(out["note"].as_str().unwrap().contains("REPLICA"), "{out}");
-        let dir = tmp.path().join(host::AUDIT_DIR);
+        let dir = host::audit_dir(tmp.path());
         let mut wrote_a_file = false;
         if let Ok(entries) = std::fs::read_dir(&dir) {
             wrote_a_file = entries.count() > 0;
@@ -635,7 +635,7 @@ mod tests {
     #[tokio::test]
     async fn an_unreadable_shard_file_is_counted_not_silently_dropped() {
         let (ctx, tmp) = mk_ctx();
-        let dir = tmp.path().join(host::AUDIT_DIR);
+        let dir = host::audit_dir(tmp.path());
         std::fs::create_dir_all(&dir).unwrap();
         let at_ms = 1_788_220_800_000;
         let name = host::shard_file_name("otherbox-99ffee", at_ms);

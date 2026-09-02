@@ -14,7 +14,7 @@
 //! widened, once `unfulfilled_lint_expectations` confirmed each had a live
 //! non-test caller; none remain in this file today.
 
-use super::host::{self, AUDIT_DIR};
+use super::host::{self};
 use crate::librarian::catalog::gc;
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
@@ -122,7 +122,7 @@ pub(crate) struct ExportReport {
     pub files: Vec<String>,
     pub through_seq: i64,
     /// Absolute path of the directory `export` wrote into (or would write
-    /// into, on a no-op call) — `repo_root.join(AUDIT_DIR)`. Ruling 19
+    /// into, on a no-op call) — `host::audit_dir(repo_root)`. Ruling 19
     /// (task-6 round-3 review): a session running from a linked worktree
     /// resolves `repo_root` to the MAIN checkout (see `project_root()`), so
     /// the write lands OUTSIDE the tree that session's own `git status`
@@ -452,7 +452,7 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // (in this set). See `GAPS_KEY`'s doc comment for why a scalar cursor
     // alone cannot make this distinction.
     let gaps_start = open_gaps(conn, repo_root)?;
-    let dir = repo_root.join(AUDIT_DIR);
+    let dir = host::audit_dir(repo_root);
 
     let mut stmt = conn.prepare(
         "SELECT seq, at_ms, tbl, op, row_id, actor, verb, payload
@@ -713,7 +713,7 @@ pub(crate) struct ShardRead {
     pub hosts: BTreeMap<String, (i64, i64)>,
     /// Files whose lines were parsed into `rows`/`hosts`. Task 4 deferred
     /// decision 3: this does NOT sum with `files_skipped_by_window` +
-    /// `unreadable_files` to the on-disk file count in `AUDIT_DIR` —
+    /// `unreadable_files` to the on-disk file count in the audit directory —
     /// `self_host`'s own shard file is excluded before any of these three
     /// counters is touched, so the delta between the sum and the directory
     /// listing is exactly one file (this host's own) on any host that has
@@ -759,7 +759,7 @@ pub(crate) fn read_shards(
     f: &super::AuditFilter,
     self_host: &str,
 ) -> Result<ShardRead> {
-    let dir = repo_root.join(AUDIT_DIR);
+    let dir = host::audit_dir(repo_root);
     let mut out = ShardRead::default();
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Ok(out); // never exported, or a fresh clone: an empty read.
@@ -873,7 +873,7 @@ mod tests {
         // or a test that never calls export at all, leaves it absent. That is
         // a valid "nothing exported yet" state, not an error, so tolerate it
         // here rather than forcing export to create the directory unconditionally.
-        let entries = match std::fs::read_dir(dir.join(super::super::host::AUDIT_DIR)) {
+        let entries = match std::fs::read_dir(super::super::host::audit_dir(dir)) {
             Ok(rd) => rd,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return out,
             Err(e) => panic!("reading audit dir: {e}"),
@@ -1064,7 +1064,7 @@ mod tests {
             )
             .unwrap();
         export(&cat.conn, tmp.path()).unwrap();
-        let dir = tmp.path().join(super::super::host::AUDIT_DIR);
+        let dir = super::super::host::audit_dir(tmp.path());
         let mut names: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
@@ -1144,7 +1144,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         seed(&cat, tmp.path(), "a1");
-        let audit_dir = tmp.path().join(AUDIT_DIR);
+        let audit_dir = host::audit_dir(tmp.path());
         std::fs::create_dir_all(&audit_dir).unwrap();
         std::fs::set_permissions(&audit_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
@@ -1925,7 +1925,7 @@ mod tests {
     }
 
     fn write_shard(root: &std::path::Path, name: &str, lines: &[&str]) {
-        let dir = root.join(super::super::host::AUDIT_DIR);
+        let dir = super::super::host::audit_dir(root);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(name), lines.join("\n")).unwrap();
     }
@@ -2234,7 +2234,7 @@ mod tests {
         // `read_to_string` failure as a permissions problem, without depending
         // on this test running as non-root.
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join(super::super::host::AUDIT_DIR);
+        let dir = super::super::host::audit_dir(tmp.path());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::create_dir(dir.join("otherbox-99ffee-202609.jsonl")).unwrap();
         let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();

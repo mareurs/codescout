@@ -23,7 +23,25 @@ use crate::librarian::catalog::gc;
 use anyhow::Result;
 use rusqlite::Connection;
 
-pub(crate) const AUDIT_DIR: &str = ".codescout/audit";
+/// The committed audit-shard directory, as SEPARATE path components.
+///
+/// Two entries and not one string, because `".codescout/audit"` was one string until
+/// 2026-09-02 and that cost every Windows lane. `Path::join` treats its argument as a
+/// single opaque component, so on Windows the joined result was
+/// `C:\…\.tmpXXXX\.codescout/audit` — backslashes throughout, one forward slash — and
+/// `create_dir_all`, which walks ancestors by splitting on the platform separator, never
+/// created `.codescout` and returned `ERROR_PATH_NOT_FOUND`. 21 tests red on every
+/// `windows-latest` lane, 2 on `windows-gnu`, Linux and macOS entirely green.
+/// See `docs/issues/2026-09-02-audit-dir-literal-breaks-every-windows-lane.md`.
+///
+/// **Do not collapse these back into one literal**, and note the Linux-side reason the
+/// obvious guard does not work: on Unix `join(".codescout/audit")` DOES split into two
+/// components, so asserting the built path's component count passes on the platform
+/// everyone develops on and catches nothing. The invariant that survives that is the one
+/// asserted by `audit_dir_parts_carry_no_separator` — that no *part* contains a separator
+/// — which is checkable everywhere precisely because it is about the input rather than
+/// the result.
+pub(crate) const AUDIT_DIR_PARTS: [&str; 2] = [".codescout", "audit"];
 pub(crate) const HOST_META_KEY: &str = "audit_host_id";
 
 /// Sources tried in order, first non-empty wins. No `gethostname` crate: the
@@ -38,6 +56,24 @@ fn candidate_name() -> String {
         }
     }
     std::fs::read_to_string("/etc/hostname").unwrap_or_default()
+}
+
+/// The audit-shard directory under `repo_root`, joined one component at a time.
+pub(crate) fn audit_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
+    AUDIT_DIR_PARTS
+        .iter()
+        .fold(repo_root.to_path_buf(), |acc, part| acc.join(part))
+}
+
+/// The same directory as a display string, always `/`-separated.
+///
+/// For JSON payloads, log lines and `.gitattributes` patterns — where the POSIX form is
+/// the correct rendering on every platform and is what a reader will paste. Derived from
+/// [`AUDIT_DIR_PARTS`] rather than written out again, so the two cannot drift: the old
+/// code carried the literal twice, and a fix applied to only the joined copy would have
+/// left the displayed one correct-looking and unrelated.
+pub(crate) fn audit_dir_display() -> String {
+    AUDIT_DIR_PARTS.join("/")
 }
 
 /// Lowercase, `[a-z0-9-]` only, collapsed and trimmed, capped at 24 chars.
@@ -300,5 +336,70 @@ mod tests {
         assert!(parse_shard_file_name("../etc/passwd-202609.jsonl").is_none());
         assert!(parse_shard_file_name("ARCH-202609.jsonl").is_none());
         assert!(parse_shard_file_name("arch_a3f9c2-202609.jsonl").is_none());
+    }
+
+    /// No part of the audit directory may contain a path separator.
+    ///
+    /// **This is the assertion that runs where the bug could not be seen.** The defect it
+    /// guards — `AUDIT_DIR = ".codescout/audit"` joined onto a root, then handed to
+    /// `create_dir_all` — was invisible on Linux and macOS and red on all four Windows
+    /// lanes (21 tests on `windows-latest`, 2 on `windows-gnu`), because `Path::join`
+    /// treats its argument as ONE component and `create_dir_all` walks ancestors by
+    /// splitting on the platform separator. On Windows that left `.codescout` uncreated
+    /// and returned `ERROR_PATH_NOT_FOUND`.
+    ///
+    /// **Why it asserts on the PARTS and not on the built path.** The obvious test —
+    /// "`audit_dir(root)` has two components below `root`" — passes on Unix whether the
+    /// parts are split or not, because `/` IS the Unix separator and `join` normalises it
+    /// away. That test would be green on every developer machine and on three of CI's
+    /// lanes while the defect sat there, which is precisely the shape that produced the
+    /// bug. Asserting on the input is what makes it checkable everywhere.
+    ///
+    /// Mutation caught: collapsing `AUDIT_DIR_PARTS` back to a single
+    /// `[".codescout/audit"]`, on any platform.
+    /// See `docs/issues/2026-09-02-audit-dir-literal-breaks-every-windows-lane.md`.
+    #[test]
+    fn audit_dir_parts_carry_no_separator() {
+        for part in AUDIT_DIR_PARTS {
+            assert!(
+                !part.contains('/') && !part.contains('\\'),
+                "AUDIT_DIR_PARTS entry {part:?} contains a path separator. Path::join takes \
+                 it as ONE component, so create_dir_all never creates the parent and every \
+                 Windows lane reds with ERROR_PATH_NOT_FOUND while Linux stays green. Split \
+                 it into separate entries instead."
+            );
+            assert!(
+                !part.is_empty(),
+                "an empty part would silently vanish from the joined path"
+            );
+        }
+    }
+
+    /// The joined path and the displayed string must describe the same directory.
+    ///
+    /// They were two independent literals before 2026-09-02, which is how a fix could have
+    /// landed on one and left the other reading correctly about a different place. Now the
+    /// display form is derived, and this pins that it stays derived rather than re-forked.
+    #[test]
+    fn the_display_form_and_the_joined_path_agree() {
+        let root = std::path::Path::new("/tmp/x");
+        let joined = audit_dir(root);
+        let tail: Vec<String> = joined
+            .strip_prefix(root)
+            .expect("audit_dir must build under the root it was given")
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(
+            tail,
+            vec![".codescout".to_string(), "audit".to_string()],
+            "the joined path must descend exactly two real components below the root"
+        );
+        assert_eq!(
+            audit_dir_display(),
+            tail.join("/"),
+            "the display string must be the same components, POSIX-rendered"
+        );
     }
 }
