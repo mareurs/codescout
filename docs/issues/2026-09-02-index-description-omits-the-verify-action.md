@@ -48,19 +48,31 @@ SELECT count(*) FROM tool_calls WHERE tool_name='index' AND input_json LIKE '%ve
 > file's author, who reports the dump actually used was an unnamed scratchpad script. The
 > working form is below; it reuses that script's `fetch_tools` transport, so it reads the same
 > wire the budget probe does rather than introducing a second handshake.
+>
+> **Amended the same day, second order.** The replacement snippet first published here tested
+> `v not in t["description"]` — a **substring** match, which silently discharges an action
+> whose name is a substring of any other word. Two live false negatives:
+> `edit_markdown`'s `edit` is satisfied by *"batch mode via **edit**s array"*, and `artifact`'s
+> `update` by *"**update**_entry"*. Found by `codescout-0a` while building the real gate. The
+> snippet below is the word-boundary form. **Both real findings are unaffected** — `index`
+> and `memory` are byte-identical under either test — but a reproduction that under-reports is
+> the defect this section exists to correct, so it is corrected rather than footnoted.
 
 `git rev-parse --short HEAD` → `09c68634`.
 
 ```
 python3 - <<'PY'
-import importlib.util
+import importlib.util, re
 spec = importlib.util.spec_from_file_location("pts", "scripts/probe_tool_surface.py")
 pts = importlib.util.module_from_spec(spec); spec.loader.exec_module(pts)
 for t in pts.fetch_tools("target/debug/codescout"):
     enum = (t.get("inputSchema", {}).get("properties", {}).get("action", {}) or {}).get("enum", [])
     if not enum:
         continue
-    missing = [v for v in enum if v not in t["description"]]
+    # word-boundary and case-SENSITIVE on purpose: substring matching discharges an action
+    # whose name is a fragment of another word, and case folding would let a description's
+    # opening "Edit a Markdown document" satisfy an `edit` action.
+    missing = [v for v in enum if not re.search(r"\b" + re.escape(v) + r"\b", t["description"])]
     if missing:
         print(t["name"], "missing", missing)
 PY
@@ -69,8 +81,8 @@ PY
 Reports, over all 26 tools:
 
 ```
-artifact       missing ['find', 'get', 'create', 'move', 'delete', 'graft', 'link', 'graph', 'state_at']
-edit_markdown  missing ['replace', 'insert_before', 'insert_after', 'remove']
+artifact       missing ['find', 'get', 'create', 'update', 'move', 'delete', 'graft', 'link', 'graph', 'state_at']
+edit_markdown  missing ['replace', 'insert_before', 'insert_after', 'remove', 'edit']
 index          missing ['verify']
 memory         missing ['refresh_anchors']
 ```
@@ -80,13 +92,34 @@ enumerating, so neither claims to be an action inventory — they are exactly th
 positives § *Fix* below predicts the gate must exclude, and their appearance here is the
 crude check behaving as predicted rather than a defect.
 
+**Do not build the real gate on this heuristic.** It is adequate for a one-off reproduction and
+wrong as a permanent selector: "does this description enumerate?" has no reliable marker, so it
+conscripts a description that says *"Actions:"* in passing and exempts one that enumerates without
+it. The exclusions must be **declared per tool**, not sniffed — and the thematic arm asserted in the
+*opposite* direction, so a thematic description that grows to name every action is forced to
+re-declare rather than silently staying exempt.
+
 `memory` is a **second real instance**, filed separately as
-`docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`. It is why
-§ *Fix*'s sentence *"`index` fails today, the other three pass"* is false: the enumerating
-population is five tools, not four, and two of the five fail. See that file's § *Why this
-went unfiled* — the omission was in this file's § *Evidence* comparison, so the second
-instance was unreachable by reading this record and only a re-run over the whole surface
-could find it.
+`docs/issues/2026-09-02-memory-description-omits-the-refresh-anchors-action.md`. It is why the
+plan this file originally carried stated a false premise — *"`index` fails today, the other three
+pass"* — counting a four-tool population.
+
+**The corrected figure first published here — "five" — was wrong in the same direction, and the
+derived one is 8.** Over all 26 tools: **10 carry an `action` enum, 8 of them inventories and 2
+thematic (`artifact`, `edit_markdown`), and 2 of the 8 fail** (`index`, `memory`). The "five" was
+the four this file had looked at plus the one the sibling added; like the four, it was a count of
+the tools someone had examined rather than a derivation over the surface.
+
+A third author then caught a fourth error in a *different* direction — the original plan exempted
+`librarian` as thematic, when it is an **inventory** naming all 10 of its actions in 1,621
+characters, the largest description on the surface. Both are now recorded in § *Two claims in the
+plan above were wrong*; read the population from there, not from this section's output listing,
+which is evidence rather than a specification.
+
+Three statements of one population by three authors, wrong in three directions, **each one
+narrowing the resulting work and none producing an error**. That is the argument for a gate that
+**derives** its population — any tool with an `action` enum and no declared contract fails — and it
+is what shipped at `655c0b6f`.
 ## Environment
 
 Not environment-dependent.
@@ -128,6 +161,11 @@ Of the tools whose description enumerates actions, `workspace` names 3/3, `libra
    **Verdict:** rejected.
 
 ## Fix
+
+**Fixed on `experiments` at `655c0b6f`** (`655c0b6f6794be223f85fbad8360cd3002cc13d3`),
+patch-id `2ae27c8a135edae59191b0b840b90956bb97ca6d`. The SHA is positional and dies when
+`experiments` is rebased; the patch-id is a content hash of the diff and survives rebase
+and cherry-pick. Both recorded here once — there is no promotion path to check.
 
 **Implemented 2026-09-02**, together with the sibling `memory` bug and the shared gate.
 
