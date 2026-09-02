@@ -104,6 +104,74 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        // SIBLING of the worktree guard above, deliberately NOT nested inside the
+        // `current_project` block: this refusal does not depend on a current project
+        // (the majority of callers, and every test built on `mk_ctx()`, have none), so
+        // nesting it there would make it unreachable outside a workspace project. The
+        // row is fetched again here rather than reused, which is the cost of being a
+        // sibling rather than nested inside the block that already fetched one.
+        //
+        // Sited BEFORE resolve_write_target as defense-in-depth, matching the
+        // worktree guard's placement above — NOT because this guard can reach that
+        // hazard today. `resolve_write_target` forks only when `current_project` and
+        // `main_root` are both `Some`, the row exists, and `is_main_checkout_artifact`
+        // is true; the worktree guard above already refuses on exactly that
+        // condition set (`is_main_checkout_artifact` itself returns `false` when
+        // `main_root` is `None`). So every call that reaches this point has already
+        // been proven, by the guard above, to hit `resolve_write_target`'s early
+        // return with no side effect — reordering this guard is unobservable, not
+        // merely untested. Kept here in case that identity ever stops holding (e.g.
+        // the worktree guard becomes conditional), not because it is load-bearing now.
+        //
+        // PARTIAL BY CONSTRUCTION, and labelled so. This does not prevent the
+        // collision — a peer at origin allocates from origin's mark and collides
+        // with these unpushed entries whether or not this caller is refused. What
+        // it converts is an invisible divergence into a pushed one, which is why
+        // the hint names pushing rather than the refusal.
+        //
+        // `ledger_has_unpushed_commits` allows (returns `false`) when `row.abs_path`
+        // does not exist on disk — `git2::Repository::discover()` errs for a
+        // nonexistent path even inside a valid repo, and every failure path in the
+        // helper allows by design (Task 3). A catalog row surviving its file's
+        // deletion is a pre-existing, separately-tracked condition (a stale catalog
+        // row), not one this guard is positioned to detect; treating a missing file
+        // as a hard failure here would trade a real capability (allocation still
+        // working against a momentarily-stale catalog) for no safety, since a
+        // deleted file cannot itself collide.
+        // docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
+        // Scoped to a LEDGER. This guard sits in front of `allocate_entry_id`, which
+        // is the layer that actually decides whether `a.id` declares an
+        // `entry_prefix` (`augmentation.rs:975-995`) — so without a check here, a
+        // non-ledger artifact with unrelated unpushed commits on its own file is
+        // refused with "this ledger has commits..." and a "push, then allocate"
+        // remedy that does not unblock the call: push, retry, and
+        // `allocate_entry_id` refuses again with "does not declare an
+        // entry_prefix". Reading `row.abs_path` here (rather than adding a third
+        // `artifact::get`) is the same file access `ledger_has_unpushed_commits`
+        // already needs the path for.
+        if let Some(row) = artifact::get(&cat, &a.id)? {
+            let text = std::fs::read_to_string(&row.abs_path).unwrap_or_default();
+            let is_ledger =
+                !crate::util::librarian_guard::declared_entry_prefixes(&text).is_empty();
+            if is_ledger && ledger_has_unpushed_commits(std::path::Path::new(&row.abs_path)) {
+                return Err(RecoverableError::with_hint(
+                    "append_entry: this ledger has commits that are not on its upstream \
+                     branch, so its `entry_high_water_` mark is ahead of what any other \
+                     host can see"
+                        .to_string(),
+                    "Push this ledger's commits, then allocate. Another clone reads its \
+                     own committed high-water mark, so until yours is pushed both hosts \
+                     resolve the same next id and the collision is only visible after \
+                     the branches merge — as one token with two definitions. If you \
+                     cannot push right now (no network, no push access), do not write \
+                     the entry by hand instead — a declared `entry_prefix` puts this \
+                     file off-limits to direct `edit_markdown`. Note the entry \
+                     somewhere worktree-local instead, and fold it into the ledger once \
+                     these commits are pushed."
+                        .to_string(),
+                ));
+            }
+        }
         // All three or none. A partial trio is an incomplete intent, and the two
         // halves fail differently: without `anchor_heading` the server would have to
         // GUESS placement, and this project's input-handling law is that a write
@@ -281,6 +349,83 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         out["undefined_in_body"] = json!(note);
     }
     Ok(out)
+}
+
+/// Does this ledger's own file carry commits in `@{upstream}..HEAD`?
+///
+/// PER-FILE, not per-branch, and that is the whole design. Measured on codescout
+/// 2026-09-02: HEAD was 34 commits ahead of `origin/experiments` — the normal state
+/// on a branch that is pushed rarely — while 2 of 3 ledgers had zero unpushed
+/// commits touching them. A branch-wide check refuses every ledger permanently and
+/// gets disabled within a day.
+///
+/// EVERY FAILURE PATH ALLOWS. No repository, no configured upstream, an unreadable
+/// ref, and — notably — a `abs_path` that does not exist on disk: `git2::Repository::
+/// discover()` errs for a nonexistent path even inside a valid repo, so a ledger
+/// absent at call time silently allows. Each of these returns `false`. A repo with
+/// no remote has no second host, so refusing there is a false positive with no
+/// recoverable reading, and this guard is partial by construction — degrading it to
+/// a hard failure trades a real capability for no safety.
+fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
+    let Ok(repo) = git2::Repository::discover(abs_path) else {
+        return false;
+    };
+    let Ok(head) = repo.head() else { return false };
+    let Some(shorthand) = head.shorthand() else {
+        return false;
+    };
+    let Ok(branch) = repo.find_branch(shorthand, git2::BranchType::Local) else {
+        return false;
+    };
+    let Ok(upstream) = branch.upstream() else {
+        return false;
+    };
+    let (Some(head_oid), Some(up_oid)) = (head.target(), upstream.get().target()) else {
+        return false;
+    };
+    if head_oid == up_oid {
+        return false;
+    }
+
+    let Ok(workdir) = repo.workdir().ok_or(()) else {
+        return false;
+    };
+    let Ok(rel) = abs_path.strip_prefix(workdir) else {
+        return false;
+    };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+
+    let mut walk = match repo.revwalk() {
+        Ok(w) => w,
+        Err(_) => return false,
+    };
+    if walk.push(head_oid).is_err() || walk.hide(up_oid).is_err() {
+        return false;
+    }
+    for oid in walk.flatten() {
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        let Ok(tree) = commit.tree() else { continue };
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+            continue;
+        };
+        let touched = diff.deltas().any(|d| {
+            d.new_file()
+                .path()
+                .map(|p| p.to_string_lossy() == rel)
+                .unwrap_or(false)
+                || d.old_file()
+                    .path()
+                    .map(|p| p.to_string_lossy() == rel)
+                    .unwrap_or(false)
+        });
+        if touched {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1217,5 +1362,265 @@ mod tests {
             n_lineage_links, 0,
             "guard must refuse before resolve_write_target inserts a worktree_of lineage link"
         );
+    }
+
+    fn commit_all(repo: &git2::Repository, msg: &str) {
+        let mut idx = repo.index().unwrap();
+        idx.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@e").unwrap();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .into_iter()
+            .collect();
+        let refs: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &refs)
+            .unwrap();
+    }
+
+    fn commit_path(root: &std::path::Path, rel: &str, msg: &str) {
+        let repo = git2::Repository::open(root).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new(rel)).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@e").unwrap();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .into_iter()
+            .collect();
+        let refs: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &refs)
+            .unwrap();
+    }
+
+    /// Bare origin + a clone whose branch tracks it, both holding `ledger.md`, `other.md`,
+    /// and a nested `docs/trackers/ledger.md`. TWO repos is the load-bearing detail: with
+    /// one, the per-file and per-branch implementations are indistinguishable and both
+    /// pass. The NESTED ledger is equally load-bearing: with only a top-level `ledger.md`,
+    /// a ledger's basename and its repo-relative path are the same string, so an
+    /// implementation that keys off `file_name()` instead of the real repo-relative path
+    /// is indistinguishable from the correct one. A real ledger always lives under
+    /// `docs/trackers/*.md` or similar, never at the repo root.
+    fn repo_with_upstream() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin.git");
+        git2::Repository::init_bare(&origin).unwrap();
+
+        let work = tmp.path().join("work");
+        let repo = git2::Repository::init(&work).unwrap();
+        std::fs::write(work.join("ledger.md"), "base").unwrap();
+        std::fs::write(work.join("other.md"), "base").unwrap();
+        std::fs::create_dir_all(work.join("docs/trackers")).unwrap();
+        std::fs::write(work.join("docs/trackers/ledger.md"), "base").unwrap();
+        commit_all(&repo, "base");
+
+        repo.remote("origin", origin.to_str().unwrap()).unwrap();
+        let head = repo.head().unwrap();
+        let branch_name = head.shorthand().unwrap().to_string();
+        repo.find_remote("origin")
+            .unwrap()
+            .push(
+                &[&format!(
+                    "refs/heads/{branch_name}:refs/heads/{branch_name}"
+                )],
+                None,
+            )
+            .unwrap();
+        let mut branch = repo
+            .find_branch(&branch_name, git2::BranchType::Local)
+            .unwrap();
+        branch
+            .set_upstream(Some(&format!("origin/{branch_name}")))
+            .unwrap();
+        (tmp, work)
+    }
+
+    /// A repo with NO configured upstream must ALLOW. A repo with no remote has no
+    /// second host, so refusing there is a pure false positive with no recoverable
+    /// reading. This is spec § Error handling, and it is the arm most likely to be
+    /// dropped as an edge case — it is the common case for a fresh clone.
+    #[test]
+    fn no_upstream_reports_no_unpushed_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let led = tmp.path().join("ledger.md");
+        std::fs::write(&led, "x").unwrap();
+        commit_all(&repo, "first");
+        assert!(!ledger_has_unpushed_commits(&led));
+    }
+
+    /// A path outside any git repository must ALLOW, not panic.
+    #[test]
+    fn non_git_root_reports_no_unpushed_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let led = tmp.path().join("ledger.md");
+        std::fs::write(&led, "x").unwrap();
+        assert!(!ledger_has_unpushed_commits(&led));
+    }
+
+    /// THE DISCRIMINATION THAT MATTERS. A branch-wide check passes a refusal-only
+    /// test; measured on codescout 2026-09-02, HEAD was 34 commits ahead of
+    /// origin/experiments while 2 of 3 ledgers had ZERO unpushed commits touching
+    /// them. Only a per-file check separates these two assertions, so removing
+    /// either one makes the pair satisfiable by an unusable implementation.
+    ///
+    /// The NESTED-vs-top-level assertions additionally kill an implementation that
+    /// derives `rel` from `abs_path.file_name()` instead of the real repo-relative
+    /// path: with two files sharing the basename `ledger.md` (one at the root, one
+    /// under `docs/trackers/`), a basename-keyed implementation cannot tell an
+    /// unpushed commit on one from an unpushed commit on the other, and would
+    /// falsely refuse the nested ledger for a commit that never touched it.
+    #[test]
+    fn unpushed_is_per_file_not_per_branch() {
+        let (tmp, origin_clone) = repo_with_upstream();
+        let ledger = origin_clone.join("ledger.md");
+        let other = origin_clone.join("other.md");
+        let nested = origin_clone.join("docs/trackers/ledger.md");
+        std::fs::write(&other, "changed").unwrap();
+        commit_path(&origin_clone, "other.md", "touch other");
+
+        assert!(
+            !ledger_has_unpushed_commits(&ledger),
+            "an unpushed commit on ANOTHER file must not block this ledger"
+        );
+        assert!(
+            !ledger_has_unpushed_commits(&nested),
+            "an unpushed commit on an unrelated file must not block the nested ledger either"
+        );
+
+        std::fs::write(&ledger, "changed").unwrap();
+        commit_path(&origin_clone, "ledger.md", "touch ledger");
+        assert!(
+            ledger_has_unpushed_commits(&ledger),
+            "an unpushed commit on THIS ledger must be reported"
+        );
+        assert!(
+                !ledger_has_unpushed_commits(&nested),
+                "a commit on the top-level ledger.md must not falsely mark the same-named nested ledger unpushed"
+            );
+
+        std::fs::write(&nested, "changed").unwrap();
+        commit_path(
+            &origin_clone,
+            "docs/trackers/ledger.md",
+            "touch nested ledger",
+        );
+        assert!(
+            ledger_has_unpushed_commits(&nested),
+            "an unpushed commit on THIS nested ledger must be reported"
+        );
+        let _ = tmp;
+    }
+
+    /// Refusal names the PUSH remedy, not the refusal. The guard does not prevent
+    /// the collision — a peer at origin collides with these unpushed entries whether
+    /// or not this caller is refused. What it converts is an INVISIBLE divergence into
+    /// a pushed one, so the hint is the entire value and the assertion is on the hint.
+    #[tokio::test]
+    async fn allocation_is_refused_while_the_ledger_has_unpushed_commits() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n# L\n\n## R-1 — a\n").unwrap();
+        commit_path(&work, "ledger.md", "add ledger");
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b"
+            }),
+        )
+        .await
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Push this ledger's commits, then allocate."),
+            "hint must name the actual remedy sentence, not just any occurrence of \
+             the word \"push\" (the explanatory second sentence also contains it): {msg}"
+        );
+        let _ = tmp;
+    }
+
+    /// The guard checks LEDGER-ness, not merely "unpushed commits touch this
+    /// file". Before this fix a non-ledger artifact (no `entry_prefix` in
+    /// frontmatter) with unpushed commits on its own file was refused with "this
+    /// ledger has commits..." and a "push, then allocate" remedy that would not
+    /// actually unblock the call — the real refusal, from `allocate_entry_id`,
+    /// is "does not declare an entry_prefix", and no amount of pushing fixes
+    /// that. LOAD-BEARING DETAIL: `plain.md` has NO `entry_prefix` at all, so
+    /// `declared_entry_prefixes` returns empty and this guard must be a no-op —
+    /// only the later, correctly-named refusal may fire.
+    #[tokio::test]
+    async fn unpushed_commits_on_a_non_ledger_file_are_not_refused_by_the_ledger_guard() {
+        let (tmp, work) = repo_with_upstream();
+        let plain = work.join("plain.md");
+        std::fs::write(&plain, "# Not a ledger\n\nno entry_prefix here\n").unwrap();
+        commit_path(&work, "plain.md", "add non-ledger file");
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "plain", &plain);
+
+        let err = call(&ctx, json!({"id": "plain", "id_prefix": "R", "entry": {}}))
+            .await
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            !msg.contains("this ledger has commits"),
+            "a non-ledger file's unpushed commits must not trip the ledger guard: {msg}"
+        );
+        assert!(
+            msg.contains("does not declare an entry_prefix"),
+            "the call must fall through to the REAL refusal (allocate_entry_id's), not \
+             be silently swallowed by the guard skip: {msg}"
+        );
+        let _ = tmp;
+    }
+
+    /// The allow side, built from the SAME fixture machinery as the refusal test
+    /// above, so the machinery is proven live rather than the guard being proven
+    /// merely unreached. `repo_with_upstream`'s base commit is already pushed to
+    /// `origin`, and the working-tree edit below is left UNCOMMITTED — the guard
+    /// walks `@{upstream}..HEAD`, so with HEAD still equal to upstream there is no
+    /// unpushed commit on this file (or any file) regardless of what the working
+    /// tree holds, and allocation must proceed normally.
+    ///
+    /// `other.md` is committed but left UNPUSHED, so the repository as a whole DOES
+    /// have unpushed commits — only not on the ledger. This is the distinguishing
+    /// case between a per-file and a per-branch implementation at the `call()`
+    /// wiring site (the property itself is already covered at the helper's own
+    /// site by `unpushed_is_per_file_not_per_branch`): a branch-wide check would
+    /// wrongly refuse this call.
+    #[tokio::test]
+    async fn allocation_proceeds_when_the_ledger_has_no_unpushed_commits() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n## L\n\n## R-1 — a\n").unwrap();
+        std::fs::write(work.join("other.md"), "changed").unwrap();
+        commit_path(&work, "other.md", "touch other.md, left unpushed");
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "R-2");
+        let _ = tmp;
     }
 }

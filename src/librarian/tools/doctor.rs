@@ -184,6 +184,7 @@ declare_checks! {
     EntryCitedFromOutsideButUndeclared => "entry_cited_from_outside_but_undeclared",
     EntryConditionalPastDue => "entry_conditional_past_due",
     EntryDatedStale => "entry_dated_stale",
+    EntryDefinedTwice => "entry_defined_twice",
     EntryWithoutDefinition => "entry_without_definition",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
@@ -309,6 +310,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // questions of the same body (does it carry the row / can anything cite the
     // entry) and are allowed to disagree. See `scan_undefined_entries`.
     all_violations.extend(scan_undefined_entries(&cat.conn)?);
+    // One ledger defining a token twice — what a cross-host merge produces. Sits
+    // beside scan_undefined_entries because the two ask opposite questions of the
+    // same bodies (never defined / defined twice). See `scan_entry_defined_twice`.
+    all_violations.extend(scan_entry_defined_twice(&cat.conn)?);
     // Starts from the citation graph rather than a known ledger's claimed entries — the
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
     // `scan_cited_prefix_with_no_definer`. Scoped like the entry-validity family (Ruling
@@ -446,6 +451,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "frontmatter_id_is_not_a_catalog_id",
         "ledger_defines_nothing",
         "entry_without_definition",
+        "entry_defined_twice",
         "terminal_status_with_caveat",
     ];
     let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
@@ -681,7 +687,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         hint_parts.push(format!(
             "{total_scoped} row-grain finding(s) (frontmatter_id_mismatch / \
              frontmatter_id_is_not_a_catalog_id / ledger_defines_nothing / \
-             entry_without_definition / terminal_status_with_caveat) across {n_projects} other \
+             entry_without_definition / entry_defined_twice / terminal_status_with_caveat) across \
+             {n_projects} other \
              project root(s) were scoped OUT of this report — see \
              catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
              scoped: fix=reseat_worktree takes no root and reseats every unregistered row in the \
@@ -2715,6 +2722,153 @@ fn entry_indegree(
     }
 
     Ok(deg)
+}
+
+/// Tokens this text defines more than once, with every defining line, sorted
+/// by token.
+///
+/// Built on `entry_sections`, not `headings::parse` plus a local regex.
+/// `entry_sections` (`link_scan/extract.rs:67-121`) already shares `def_re` and
+/// the frontmatter-exclusion filter with `extract()`, and — unlike the
+/// `DocExtract.definitions` this function must NOT read — does not dedupe:
+/// `extract.rs:399` and `:440` both guard one `seen_defs` set on that path,
+/// discarding a same-file duplicate before it reaches any consumer, which would
+/// make this check's positive case unrepresentable. `entry_sections` emits one
+/// `EntrySection` per matching heading with no such guard, so it is safe to
+/// build a duplicate-detector on top of it. `bug-fix-session-log:F-99`.
+///
+/// A sub-heading that repeats its OWN entry's token is not a second definition
+/// of it — `## A-28 — x` followed by nested `### A-28 — sub` is one entry with
+/// a documenting sub-section, the shape every ledger in this repo that grew
+/// past a one-line entry actually uses (`docs/trackers/prompt-hamsa-audit-log.md`
+/// nests `### A-28` five times under its own `## A-28`). By the letter of
+/// `get_guide("tracker-conventions")` § *Entry headings* that sub-heading still
+/// "defines" — level is not the discriminator there, and `entry_sections` and
+/// `def_re` are unchanged — but promoting every such nest to "defined N times"
+/// makes this check fire on 3 of 3 real ledgers on day one, none of them a
+/// collision. So this function alone drops a definition that is strictly
+/// DEEPER than, and lies inside the line span of, an earlier definition of the
+/// SAME token: `EntrySection::level` plus `heading_line`/`end_line` bound the
+/// nest with no new data. A genuine cross-host merge does not produce this
+/// shape — both clones allocate from the ledger's existing entries and so land
+/// at the SAME heading level (`outcome.heading_level`, `append_entry.rs:203`)
+/// — so the case this check exists to catch survives the filter untouched.
+fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
+    use crate::librarian::tools::link_scan::extract::entry_sections;
+    use std::collections::BTreeMap;
+
+    let mut by_id: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for section in entry_sections(text) {
+        // `section.id` is only ever produced by `def_re`'s `[A-Z]{1,3}-\d+` capture,
+        // so it always contains a dash — `.next()` on a non-empty split is never
+        // `None`, and there is no dashless case for an `else` arm to guard.
+        let prefix = section.id.split('-').next().unwrap();
+        if !prefixes.iter().any(|p| p == prefix) {
+            continue;
+        }
+        by_id.entry(section.id.clone()).or_default().push(section);
+    }
+
+    let mut out = Vec::new();
+    for (id, mut sections) in by_id {
+        sections.sort_by_key(|s| s.heading_line);
+        // `kept_spans` holds every SURVIVING (non-nested) definition seen so far
+        // for this token, as (level, end_line). A candidate is nested — and so
+        // not a redefinition — only when it is strictly deeper than some earlier
+        // survivor AND its heading line still falls inside that survivor's span;
+        // a same-level duplicate never matches this, however close the lines are.
+        let mut kept_spans: Vec<(usize, u32)> = Vec::new();
+        let mut kept_lines: Vec<u32> = Vec::new();
+        for section in &sections {
+            let nested = kept_spans.iter().any(|&(level, end_line)| {
+                section.level > level && section.heading_line <= end_line
+            });
+            if !nested {
+                kept_spans.push((section.level, section.end_line));
+                kept_lines.push(section.heading_line);
+            }
+        }
+        if kept_lines.len() > 1 {
+            out.push((id, kept_lines));
+        }
+    }
+    out
+}
+
+/// `entry_defined_twice`: one ledger defines the same `PREFIX-N` token twice.
+///
+/// This is what a cross-host merge produces. Two clones read their own committed
+/// `entry_high_water_<PREFIX>`, allocate the same id, and the merge lands two
+/// `## PREFIX-N — <title>` headings in one file, at the SAME heading level —
+/// `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+/// It is not the only cause a same-level duplicate can have (a hand-edited
+/// ledger or a bad cherry-pick reach the same shape), so the detail below
+/// describes what the state IS rather than asserting the merge as certain.
+/// `duplicate_definitions` already excludes the shape that is NOT a collision:
+/// a sub-heading nested inside its own entry, at a strictly deeper level and
+/// within that entry's span (`## A-28` documented by nested `### A-28`), which
+/// is the shape every real ledger in this repo that grew past a one-line entry
+/// actually uses.
+///
+/// Unreachable at two independent layers before this check, which is why neither
+/// `link_scan` nor `scan_undefined_entries` reports it: the extractor de-duplicates
+/// definitions at parse time, and `resolve.rs`'s `EntryToken` arm short-circuits to
+/// `SelfCite` whenever a definer shares the citing artifact's id — the commonest
+/// citation shape inside a ledger.
+///
+/// Scope is ONE artifact. A token defined in both a live ledger and its archive
+/// companion is the compaction ladder working; cross-artifact duplication is
+/// `link_scan`'s `ambiguous` and `prefix_conflicts`.
+///
+/// Read-only; there is no `fix=`. Renumbering rewrites a citable token, which
+/// silently re-points every existing citation — a separate decision.
+fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         WHERE a.missing_since IS NULL ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path) in rows {
+        let Ok(text) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let prefixes = crate::util::librarian_guard::declared_entry_prefixes(&text);
+        if prefixes.is_empty() {
+            continue;
+        }
+        for (token, lines) in duplicate_definitions(&text, &prefixes) {
+            let lines_str = lines
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(Violation::new(
+                "entry_defined_twice",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "`{token}` is defined {} times in this ledger, at lines {lines_str}. \
+                         Every citation of `{token}` binds the EARLIER of these definitions — \
+                         `extract()`'s `seen_defs` keeps the first heading in file order and \
+                     discards the rest — whichever one the citer actually meant, and \
+                     nothing else reports this state. The commonest cause is a cross-host \
+                     merge: two clones each allocated `{token}` from their own committed \
+                     `entry_high_water_` mark before either saw the other's commit. If \
+                     that is what happened here, give the LATER entry a fresh id; never a \
+                     suffix (`{token}b` is not a valid token and can be neither defined nor \
+                     cited), and re-point citations that meant it. If it was not a merge — \
+                     a hand-edit or a bad cherry-pick reach the same shape — resolve \
+                     whichever definition is stale before renumbering anything.",
+                    lines.len()
+                ),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// Cross-file citations below which a Statement is not worth anyone's attention.
@@ -13296,6 +13450,232 @@ root = "work/elsewhere/ghost"
             scoped.get(&root_b_key),
             Some(&json!(1)),
             "root B must be its OWN key, not merged into root A's: {scoped:#?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_definitions_finds_a_token_defined_twice() {
+        let body = "# L\n\n## R-147 — first\n\ntext\n\n## R-147 — second\n";
+        let got = duplicate_definitions(body, &["R".to_string()]);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "R-147");
+        assert_eq!(
+            got[0].1,
+            vec![3, 7],
+            "1-indexed defining lines, not a constant/level/0-indexed stand-in: {got:?}"
+        );
+    }
+
+    /// The negative direction. Without it the function could return every token
+    /// it sees and still pass the test above — an existence assertion is monotone
+    /// under widening.
+    #[test]
+    fn duplicate_definitions_is_silent_on_a_clean_ledger() {
+        let body = "# L\n\n## R-147 — first\n\n## R-148 — second\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// A `### A-28` sub-heading NESTED inside its own `## A-28` entry is not a
+    /// second definition — it is the shape every ledger in this repo that grew
+    /// past a one-line entry actually uses (`docs/trackers/prompt-hamsa-audit-log.md`
+    /// nests five `### A-28` sub-headings under one `## A-28`). LOAD-BEARING
+    /// DETAIL: the `###` is strictly DEEPER than the `##` AND its line falls
+    /// inside the `##` entry's span (before the next `##`-or-shallower heading)
+    /// — flatten either half (make it `## A-28` again, or move it past the next
+    /// `##` sibling) and this becomes a real duplicate, which the paired test
+    /// below confirms still fires.
+    #[test]
+    fn duplicate_definitions_is_silent_on_a_nested_sub_heading_of_the_same_token() {
+        let body = "# L\n\n## A-28 — x\n\nprose\n\n### A-28 — sub\n\nmore prose\n";
+        assert!(
+            duplicate_definitions(body, &["A".to_string()]).is_empty(),
+            "a sub-heading documenting its own entry must not count as a redefinition"
+        );
+    }
+
+    /// The paired positive: two definitions at the SAME level are never "nested",
+    /// however close their lines are, so the filter added for the test above must
+    /// not swallow this — the shape a real cross-host merge actually produces,
+    /// since both clones allocate from the ledger's existing heading level
+    /// (`outcome.heading_level`, `append_entry.rs`).
+    #[test]
+    fn duplicate_definitions_still_fires_on_a_same_level_duplicate_beside_a_nested_one() {
+        let body = "# L\n\n## A-28 — x\n\n### A-28 — sub\n\n## A-28 — y\n";
+        let got = duplicate_definitions(body, &["A".to_string()]);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "A-28");
+        assert_eq!(
+            got[0].1.len(),
+            2,
+            "the nested ### must be dropped, leaving exactly the two ## definitions: {got:?}"
+        );
+    }
+
+    /// A prefix the ledger does not declare is not this ledger's namespace.
+    #[test]
+    fn duplicate_definitions_ignores_an_undeclared_prefix() {
+        let body = "# L\n\n## T-1 — a\n\n## T-1 — b\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// `## A-9 Addendum` has no dash separator, so it defines nothing —
+    /// two of them are two sections ABOUT A-9, not a duplicate definition.
+    #[test]
+    fn duplicate_definitions_needs_the_dash_separator() {
+        let body = "# L\n\n## R-9 Addendum\n\n## R-9 Addendum\n";
+        assert!(duplicate_definitions(body, &["R".to_string()]).is_empty());
+    }
+
+    /// `entry_sections` excludes headings inside YAML frontmatter — a heading-shaped
+    /// line there is a comment, not a definition (`entry_sections_do_not_define_a_heading_shaped_line_inside_frontmatter`
+    /// pins the same fact one layer down). Building on `entry_sections` rather than
+    /// raw `headings::parse` is what makes this hold; a version built on
+    /// `headings::parse` plus a local regex would report a false duplicate here.
+    #[test]
+    fn duplicate_definitions_ignores_a_heading_shaped_line_inside_frontmatter() {
+        let body = "\
+---
+kind: tracker
+## R-1 — hidden inside frontmatter, must not define
+entry_prefix: R
+---
+## R-1 — real
+body
+";
+        assert!(
+            duplicate_definitions(body, &["R".to_string()]).is_empty(),
+            "the frontmatter comment must not count as a second definition"
+        );
+    }
+
+    /// Two distinct duplicated tokens, sorted by token in the result — the brief's
+    /// explicit ordering contract. Without a second token, `.take(1)` after the
+    /// filter (or any other single-result shortcut) would still pass every other
+    /// test in this module.
+    #[test]
+    fn duplicate_definitions_reports_multiple_tokens_sorted_by_token() {
+        let body = "\
+# L
+
+## T-1 — a
+
+## T-1 — b
+
+## R-1 — c
+
+## R-1 — d
+";
+        let got = duplicate_definitions(body, &["R".to_string(), "T".to_string()]);
+        let ids: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["R-1", "T-1"], "sorted by token: {got:?}");
+    }
+
+    /// A ledger with two `## R-147 — …` headings, seeded once inside the active
+    /// project root and once outside it (a sibling project). The FIXTURE'S
+    /// LOAD-BEARING DETAIL is the repeated token with different titles: the
+    /// collision a cross-host merge produces is two entries that were each
+    /// written independently, not a copy.
+    ///
+    /// Two-sided by construction, per Ruling 17: an absence assertion alone
+    /// ("the foreign ledger is not reported") is monotone under an undispatched
+    /// check, which would also produce silence. Asserting `found.len() == 1`
+    /// AND that the survivor is the in-project row is what fails if scoping is
+    /// absent (2 violations), fails if the check stops dispatching (0), and
+    /// fails if it reports the wrong one.
+    #[tokio::test]
+    async fn entry_defined_twice_fires_on_a_duplicated_token_scoped_to_the_active_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+        let dup_body =
+            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — first\n\ntext\n\n## R-147 — second\n";
+        seed_ledger(
+            &cat,
+            "bbbbbbbbbbbbbbbb",
+            &active_root.join("docs/ledger.md"),
+            dup_body,
+        );
+        seed_ledger(
+            &cat,
+            "cccccccccccccccc",
+            &sibling_root.join("docs/ledger.md"),
+            dup_body,
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+        let found = violations_named(&out, "entry_defined_twice");
+        assert_eq!(
+            found.len(),
+            1,
+            "the sibling-root duplicate must be scoped out and the in-project one kept: {out:#?}"
+        );
+        assert_eq!(
+            found[0]["artifact_id"].as_str().unwrap(),
+            "bbbbbbbbbbbbbbbb",
+            "the survivor must be the ACTIVE project's row: {found:#?}"
+        );
+        assert!(
+            found[0]["path"]
+                .as_str()
+                .unwrap()
+                .contains("active-project"),
+            "path must name the in-project file, not the sibling's: {found:#?}"
+        );
+        let detail = found[0]["detail"].as_str().unwrap();
+        assert!(detail.contains("R-147"), "{detail}");
+        // Pin the RENDERED line list as `duplicate_definitions` actually joins it
+        // (`lines_str`, doctor.rs), not `detail.contains('7') && detail.contains("11")`
+        // — that pair is trivially satisfied by the token `R-147` alone (it contains
+        // both a '7' and, read across the dash, no "11", but a body with three or
+        // more definitions could satisfy '7'/"11" from digits in unrelated line
+        // numbers without `lines_str` ever being rendered correctly). The literal
+        // "at lines 7, 11" can only be produced by the real 1-indexed heading lines
+        // of this fixture's two `## R-147` headings, joined in order.
+        assert!(
+            detail.contains("at lines 7, 11"),
+            "the rendered, comma-joined 1-indexed defining lines must reach the \
+             message verbatim: {detail}"
+        );
+    }
+
+    /// The negative direction, and the one that makes the test above discriminating.
+    #[tokio::test]
+    async fn entry_defined_twice_is_silent_on_a_clean_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "ledger",
+            &tmp.path().join("ledger.md"),
+            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — one\n\n## R-148 — two\n",
+        );
+        let ctx = ctx_rooted_at(cat, tmp.path());
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            violations_named(&out, "entry_defined_twice").is_empty(),
+            "{out:#?}"
+        );
+    }
+
+    /// Spec success criterion 2. A non-ledger with two identical definition headings
+    /// declares no `entry_prefix`, so it owns no namespace and defines nothing.
+    /// 24 of 27 trackers under docs/trackers/ are in this category.
+    #[tokio::test]
+    async fn entry_defined_twice_is_silent_on_a_non_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "notaledger",
+            &tmp.path().join("notaledger.md"),
+            "---\nkind: doc\n---\n\n# Design\n\n## R-147 — quoted\n\n## R-147 — quoted again\n",
+        );
+        let ctx = ctx_rooted_at(cat, tmp.path());
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            violations_named(&out, "entry_defined_twice").is_empty(),
+            "{out:#?}"
         );
     }
 }
