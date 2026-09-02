@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/capped-result-presented-as-complete
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 related: []
@@ -175,7 +175,8 @@ class, asserting a different property of it.
 
 ## Fix
 
-Implemented 2026-09-02 — **(1) completeness**, which subsumes (2).
+Implemented 2026-09-02, on `experiments` at `b1299608`, patch-id
+`2b03ace7c75e1e9bed9dc40a419767aa70f73fbd` — **(1) completeness**, which subsumes (2).
 
 `focus_single_symbol` (`src/tools/symbol/symbols.rs`) now recovers the true span from the
 AST when the LSP hands it a degenerate `end == start` range, before `line_span` is computed:
