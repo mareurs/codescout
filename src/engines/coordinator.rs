@@ -21,9 +21,23 @@ pub(crate) struct PostCtx<'a> {
     pub value: &'a Value,
     /// `Tool::relevant_guide_topic(value)`.
     pub content_topic: Option<&'a str>,
-    /// The primary block will overflow into a `@tool_*` buffer, or the tool
-    /// pre-buffered and returned an `output_id`. Precomputed because deciding
+    /// Whether the progressive-disclosure gate fires:
+    /// `exceeds_inline_limit(&json) || output_id.is_some()`, exactly as
+    /// computed at `call_content`'s `"progressive-disclosure"` topic check
+    /// (`src/tools/core/types.rs:1075-1082`). Precomputed because deciding
     /// it requires the serialised JSON, which the coordinator does not hold.
+    ///
+    /// **Not** the same condition as the separate buffering decision
+    /// (`exceeds_inline_limit(&json) && !self.force_inline()`,
+    /// `types.rs:1162`) — that one carries a `force_inline` term, this gate
+    /// does not. A `force_inline` tool whose JSON exceeds the inline limit
+    /// is never buffered, but this field must still be `true` for it,
+    /// because the disjunction above never consults `force_inline` either.
+    /// Latent today (the only `force_inline` tool, `get_guide`, declares no
+    /// `relevant_guide_topic`, so `emit_guide_sections` never reaches the
+    /// check this field feeds) — computing `overflowing` from the buffering
+    /// decision instead of from `types.rs:1075` is the silent byte diff Plan
+    /// 3 has no other detector for.
     pub overflowing: bool,
 }
 
@@ -285,12 +299,23 @@ mod tests {
     /// `only_the_first_hint_survives` above cannot pin the actual rule. Here
     /// the first claimant (`claims_nothing`, a different corpus so it does
     /// not block the second engine from running) carries no hint at all, so
-    /// only the SECOND engine's hint can produce a `Some` below. A
-    /// `claimed.len() == 1` gate — stop after the first successful claim,
-    /// regardless of its hint — would break the loop before the second
-    /// engine ever runs, leaving `out.hint` at `None` and failing this
-    /// assertion; verified by hand-mutating `run_post_in` to that gate and
-    /// confirming this is the test that reds.
+    /// only the SECOND engine's hint can produce a `Some` below.
+    ///
+    /// The isolating mutation is at the assignment gate itself
+    /// (`coordinator.rs`'s `run_post_in`): changing `if out.hint.is_none()`
+    /// to `if claimed.len() == 1` — NOT breaking the loop, just changing
+    /// which claim's hint is allowed to land. Both conditions agree on every
+    /// *other* test in this module (each has at most one claim whose hint
+    /// matters, so "first claim" and "hint not yet set" coincide), which is
+    /// exactly why this mutation is isolating: verified by hand-mutating
+    /// `run_post_in` to that gate and re-running this module's tests —
+    /// `a_hintless_claim_does_not_block_a_later_hint` reds (`out.hint` comes
+    /// back `None` instead of `Some("first")`) while `only_the_first_hint_survives`
+    /// and `engines_in_different_corpora_both_emit_in_registry_order` both
+    /// still pass. (An earlier report of this mutation described inserting a
+    /// loop-`break` on `claimed.len() == 1` instead — that is a different,
+    /// blunter mutation that also reds `engines_in_different_corpora_both_emit_in_registry_order`,
+    /// so it proved nothing about this test's unique contribution.)
     #[test]
     fn a_hintless_claim_does_not_block_a_later_hint() {
         let v = json!({});

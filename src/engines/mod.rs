@@ -41,11 +41,18 @@
 //!
 //! # What this module is NOT
 //!
-//! It does not yet *drive* delivery — `call_content` still fans out by hand.
-//! That is Layer 2. Registering an engine here therefore does not wire it up;
-//! it declares what already exists so the next layer has something to iterate.
-//! [`Mode::Unmanaged`] is the honest state for an engine that ships and
-//! participates in nothing, which is where `craft-skills` sits today.
+//! It does not yet *drive* delivery in production — `call_content` still
+//! fans out by hand, running its own inlined copy of each engine's logic
+//! rather than calling through `emit_post`. Making it call through is
+//! `docs/superpowers/plans/2026-09-02-layer-2a-3-wiring-and-one-budget.md`
+//! (Plan 3). Three of the four rows below now carry a wired `emit_post` —
+//! `run_post_in` can call through it, and the tests do — but that is
+//! **necessary, not sufficient**: `run_post`, the only thing that would call
+//! `run_post_in` against this live registry, itself has no caller yet, so
+//! none of it runs in production until Plan 3 lands. [`Mode::Unmanaged`] is
+//! the honest state for an engine that ships and participates in nothing,
+//! which is where `craft-skills` sits today — the other three now
+//! participate in the registry, but not yet in production.
 
 pub mod coordinator;
 pub mod emitters;
@@ -325,6 +332,12 @@ mod tests {
     /// so under `run_post_in` the earlier one claims and the later never runs.
     /// Swapping these two rows silently inverts that trade with no other test
     /// failing, which is why the order is pinned here rather than commented.
+    ///
+    /// The `emit_post` assertion below is a second, independent property:
+    /// order alone says nothing about wiring. Reverting any of the first
+    /// three rows' `emit_post` to `None` leaves `ids` exactly as it was — the
+    /// same four strings in the same order — so only this second assertion
+    /// would catch it.
     #[test]
     fn registry_order_is_delivery_precedence() {
         let ids: Vec<&str> = ENGINES.iter().map(|e| e.id).collect();
@@ -336,6 +349,10 @@ mod tests {
                 "operator-rules",
                 "craft-skills"
             ]
+        );
+        assert!(
+            ENGINES.iter().take(3).all(|e| e.emit_post.is_some()),
+            "the first three engines must be wired, or Plan 3 has nothing to call"
         );
     }
 

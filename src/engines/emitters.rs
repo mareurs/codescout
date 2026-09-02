@@ -1,5 +1,17 @@
-//! The post-phase body of each registered engine, moved out of
-//! `Tool::call_content` unchanged.
+//! The post-phase body of each registered engine — copied out of the
+//! inlined logic that still lives, unchanged, in `Tool::call_content`
+//! (`src/tools/core/types.rs`).
+//!
+//! **Not live in production yet.** `call_content` runs its own copy of this
+//! logic directly; nothing on any production path calls these functions —
+//! only `ENGINES`' `emit_post` pointers (reachable via `run_post_in`, which
+//! itself has no live caller outside `cfg(test)` today) and this file's own
+//! tests do. The two copies **must stay byte-identical** until
+//! `docs/superpowers/plans/2026-09-02-layer-2a-3-wiring-and-one-budget.md`
+//! (Plan 3) deletes `call_content`'s inlined branch and calls `run_post` in
+//! its place. Until then, a fix applied to one side and not the other is a
+//! silent behavior fork nothing here can catch, because these functions are
+//! not on the path production actually runs.
 //!
 //! Each function answers one question — *"does my trigger fire on this call,
 //! and if so what do I ship?"* — and answers nothing about ordering. Ordering
@@ -124,10 +136,34 @@ mod tests {
     fn the_opener_declines_once_its_topic_is_stamped() {
         let mut ledger = GuideLedger::default();
         let v = json!({});
-        assert!(matches!(
-            emit_session_opener(&ctx(&v, Some("t.a")), &mut ledger),
-            Emitted::Claimed(_)
-        ));
+        let topic = crate::prompts::SESSION_OPENING_GUIDE;
+
+        let Emitted::Claimed(first) = emit_session_opener(&ctx(&v, Some("t.a")), &mut ledger)
+        else {
+            panic!("the opener must claim on its first call");
+        };
+        let (hint_topic, shape) = first.hint.expect("the opener must produce a hint");
+        assert_eq!(
+            hint_topic, topic,
+            "the hint must name the opener's own bare topic, not a section key"
+        );
+        assert!(
+            matches!(shape, GuideDeliveryShape::Whole),
+            "the opener always delivers Whole, never a section shape"
+        );
+        assert_eq!(first.blocks.len(), 1, "got {} block(s)", first.blocks.len());
+        let got_text = first.blocks[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .expect("the opener's block must be text content");
+        let want_text = guide_block(topic)
+            .and_then(|b| b.as_text().map(|t| t.text.clone()))
+            .expect("the opener's own topic must be registered and text-shaped");
+        assert_eq!(
+            got_text, want_text,
+            "the opener's block must be exactly guide_block(topic)'s bytes"
+        );
+
         assert!(matches!(
             emit_session_opener(&ctx(&v, Some("t.a")), &mut ledger),
             Emitted::Declined
@@ -178,6 +214,15 @@ mod tests {
             panic!("a named content topic must claim");
         };
         assert!(!e.is_empty(), "the overflow path must deliver the topic");
+        let (hint_topic, shape) = e.hint.expect("the overflow path must hint its own topic");
+        assert_eq!(
+            hint_topic, "progressive-disclosure",
+            "the hint must name the topic actually delivered, not the tool's content topic"
+        );
+        assert!(
+            matches!(shape, GuideDeliveryShape::Whole),
+            "progressive-disclosure is a non-declaring topic, so its shape is always Whole"
+        );
     }
 
     #[test]
@@ -200,6 +245,14 @@ mod tests {
             panic!("a selector-bearing call must claim")
         };
         assert_eq!(first.blocks.len(), 1, "OP-3 must route on memory.write");
+        let text = first.blocks[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .expect("the rule block must be text content");
+        assert!(
+            text.starts_with("<!-- operator-rule OP-3"),
+            "the wrapper comment must survive byte-for-byte for Plan 3; got {text:?}"
+        );
         assert!(first.hint.is_none(), "the rule corpus owns no _guide_hint");
 
         let Emitted::Claimed(second) =
