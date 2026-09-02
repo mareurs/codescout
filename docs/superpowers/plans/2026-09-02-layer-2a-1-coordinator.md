@@ -246,7 +246,7 @@ Prepend to `src/engines/coordinator.rs`, above the test module:
 //! `Tool` trait. Each engine's body lives in [`super::emitters`].
 
 use super::{Corpus, EngineDecl, ENGINES};
-use crate::tools::core::guide_emit::GuideDeliveryShape;
+use crate::tools::guide_emit::GuideDeliveryShape;
 use crate::tools::guide_ledger::GuideLedger;
 use rmcp::model::Content;
 use serde_json::Value;

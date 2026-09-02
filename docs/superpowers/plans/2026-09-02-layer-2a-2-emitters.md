@@ -92,6 +92,10 @@ GUIDE_INDEX.topic_declaring(sel: Option<&str>, result: &Value) -> Option<&'stati
 - Consumes: `PostCtx`, `Emission`, `Emitted` from Plan 1.
 - Produces: `emit_session_opener`, `emit_guide_sections`, `emit_operator_rules`, each `fn(&PostCtx<'_>, &mut GuideLedger) -> Emitted`. Plan 3 relies on `ENGINES` being wired with all three and on the registry order below.
 
+> **Controller ruling — execute Step 4 before Step 3.** The steps below are written test-first, but wiring `emit_post: Some(emitters::…)` and `pub mod emitters;` into `src/engines/mod.rs` *before* `emitters.rs` exists leaves the whole crate non-compiling for every session sharing this checkout. Write `src/engines/emitters.rs` complete first (Step 4): an untracked `.rs` file that no `mod` declaration references is not compiled at all, so it costs peers nothing. Then do Step 3's reorder-and-wire as one edit. Step 1's order test still fails for the right reason — it is an *assertion* failure on `ENGINES`' contents, not a compile error — so nothing about the TDD cycle is lost. Measured cost of getting this wrong on 2026-09-02: two peer sessions independently diagnosed a red tree that was not theirs.
+
+> **Controller ruling — Plan 1's dead-code suppressions are `#[expect]`, not `#[allow]`, and they are self-cleaning.** Plan 1 shipped `#[expect(dead_code, reason=…)]` and `#[cfg_attr(not(test), expect(dead_code, reason=…))]` on seven items in `coordinator.rs` and `mod.rs`. Wiring the emitters makes several of them live — `Emitted::Declined` and `Emitted::Claimed` become constructed, `PostCtx`'s fields become read — at which point the compiler raises `unfulfilled_lint_expectations`, which `-D warnings` promotes to an error. **That is the mechanism working, not a regression.** When clippy names an unfulfilled expectation, **delete that attribute**. Never widen it, never convert it to `#[allow]`, and never re-add it: the whole point is that the suppression cannot outlive the condition that justified it. Expect to remove some here and the rest in Plan 3.
+
 - [ ] **Step 1: Write the failing order test**
 
 Add to `src/engines/mod.rs`'s test module:
@@ -150,7 +154,7 @@ Create `src/engines/emitters.rs`:
 //! and corpus exclusivity belong to [`super::coordinator`].
 
 use super::coordinator::{Emission, Emitted, PostCtx};
-use crate::tools::core::guide_emit::{guide_block, guide_blocks_for, GuideDeliveryShape};
+use crate::tools::guide_emit::{guide_block, guide_blocks_for, GuideDeliveryShape};
 use crate::tools::guide_ledger::GuideLedger;
 use rmcp::model::Content;
 

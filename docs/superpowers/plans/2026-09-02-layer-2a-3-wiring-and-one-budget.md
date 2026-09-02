@@ -71,6 +71,8 @@ Write the number down. It is the byte-identical check for Step 6 and the input t
 
 In `src/tools/core/types.rs`, delete the whole `let (guide_hint, guide_content): (Option<(String, GuideDeliveryShape)>, Vec<Content>) = { … };` block **and** the whole `let op_content: Vec<Content> = if selector.is_some() { … } else { … };` block, and put this in their place:
 
+> **Delete the `emitted.tick()` call at `types.rs:939` along with the block that contains it — do not preserve it.** It sits inside the block you are deleting, and `run_post_in` now performs the tick itself, first, before any engine. Keeping it would run the tick twice per call. `tick()` is idempotent (the second call finds nothing expired and returns 0), so this is a duplicated line rather than a correctness hazard — which is exactly why it is easy to leave behind: nothing fails if you do. Flagged by the Plan 1 task review as a cross-task item.
+
 ```rust
         // The post-phase fan-out. Ordering, corpus exclusivity and the
         // anonymous-tier idle re-arm all live in the coordinator now; what
@@ -122,12 +124,20 @@ to:
 
 `guide_hint` keeps its name and type (`Option<(String, GuideDeliveryShape)>`), so both `inject_hint` call sites in the primary-block assembly are untouched.
 
-- [ ] **Step 4: Fix the imports**
+- [ ] **Step 4: Fix the imports, and remove the two-step's dead-code allow**
 
 `src/tools/core/types.rs:15` imports `guide_block, guide_blocks_for, inject_hint, GuideDeliveryShape` from `guide_emit`. After Step 3, `guide_block` and `guide_blocks_for` are no longer called here — they moved to `src/engines/emitters.rs`. Remove exactly those two from the import list; keep `inject_hint` and `GuideDeliveryShape`.
 
-Run: `cargo build 2>&1 | grep -E "^(error|warning: unused)" | head -20`
-Expected: no unused-import warnings, no errors.
+**Then remove every remaining `#[expect(dead_code, reason=…)]` and `#[cfg_attr(not(test), expect(dead_code, reason=…))]` in `src/engines/coordinator.rs` and on `EngineDecl::emit_post` in `src/engines/mod.rs`.** Plan 1 added them because it ships the coordinator deliberately unreachable and the gate runs `-D warnings`; **this commit is the one that makes it reachable, so this commit is where the last of them come out.**
+
+They are `#[expect]` rather than `#[allow]` on purpose, and the difference is the whole safeguard: once an item is used, the expectation goes *unfulfilled* and the compiler raises `unfulfilled_lint_expectations`, which `-D warnings` turns into an error. So the compiler will name each one for you — **you do not have to find them, and you must not silence them.** Delete the attribute; never widen it, never convert it to `#[allow]`.
+
+An `#[allow]` that outlives its two-step becomes a module nothing reaches — the `ListFunctions`/`ListDocs` defect CLAUDE.md records, where a full test suite passed for months over code no agent could call. `#[expect]` is what makes that unrepresentable here rather than merely discouraged.
+
+If an expectation is still *fulfilled* after this task — the compiler stays quiet about it — that attribute is telling you something true: an item you believed this task wires is still unreachable. Report it as a finding about the wiring. Do not delete an attribute the compiler has not complained about just to finish the list.
+
+Run: `cargo build 2>&1` and check for unused-import warnings or errors.
+Expected: none.
 
 - [ ] **Step 5: Run the injection test suites**
 
