@@ -283,6 +283,84 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     Ok(out)
 }
 
+/// Does this ledger's own file carry commits in `@{upstream}..HEAD`?
+///
+/// PER-FILE, not per-branch, and that is the whole design. Measured on codescout
+/// 2026-09-02: HEAD was 34 commits ahead of `origin/experiments` — the normal state
+/// on a branch that is pushed rarely — while 2 of 3 ledgers had zero unpushed
+/// commits touching them. A branch-wide check refuses every ledger permanently and
+/// gets disabled within a day.
+///
+/// EVERY FAILURE PATH ALLOWS. No repository, no configured upstream, an unreadable
+/// ref: each returns `false`. A repo with no remote has no second host, so refusing
+/// there is a false positive with no recoverable reading, and this guard is partial
+/// by construction — degrading it to a hard failure trades a real capability for no
+/// safety.
+// Not yet called from `call()` — Task 4 wires this into `append_entry`'s refusal
+// path. Tests below exercise it directly.
+#[allow(dead_code)]
+fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
+    let Ok(repo) = git2::Repository::discover(abs_path) else {
+        return false;
+    };
+    let Ok(head) = repo.head() else { return false };
+    let Some(shorthand) = head.shorthand() else {
+        return false;
+    };
+    let Ok(branch) = repo.find_branch(shorthand, git2::BranchType::Local) else {
+        return false;
+    };
+    let Ok(upstream) = branch.upstream() else {
+        return false;
+    };
+    let (Some(head_oid), Some(up_oid)) = (head.target(), upstream.get().target()) else {
+        return false;
+    };
+    if head_oid == up_oid {
+        return false;
+    }
+
+    let Ok(workdir) = repo.workdir().ok_or(()) else {
+        return false;
+    };
+    let Ok(rel) = abs_path.strip_prefix(workdir) else {
+        return false;
+    };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+
+    let mut walk = match repo.revwalk() {
+        Ok(w) => w,
+        Err(_) => return false,
+    };
+    if walk.push(head_oid).is_err() || walk.hide(up_oid).is_err() {
+        return false;
+    }
+    for oid in walk.flatten() {
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        let Ok(tree) = commit.tree() else { continue };
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+            continue;
+        };
+        let touched = diff.deltas().any(|d| {
+            d.new_file()
+                .path()
+                .map(|p| p.to_string_lossy() == rel)
+                .unwrap_or(false)
+                || d.old_file()
+                    .path()
+                    .map(|p| p.to_string_lossy() == rel)
+                    .unwrap_or(false)
+        });
+        if touched {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1217,5 +1295,113 @@ mod tests {
             n_lineage_links, 0,
             "guard must refuse before resolve_write_target inserts a worktree_of lineage link"
         );
+    }
+
+    fn commit_all(repo: &git2::Repository, msg: &str) {
+        let mut idx = repo.index().unwrap();
+        idx.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@e").unwrap();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .into_iter()
+            .collect();
+        let refs: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &refs)
+            .unwrap();
+    }
+
+    fn commit_path(root: &std::path::Path, _rel: &str, msg: &str) {
+        let repo = git2::Repository::open(root).unwrap();
+        commit_all(&repo, msg);
+    }
+
+    /// Bare origin + a clone whose branch tracks it, both holding `ledger.md` and
+    /// `other.md`. TWO repos is the load-bearing detail: with one, the per-file and
+    /// per-branch implementations are indistinguishable and both pass.
+    fn repo_with_upstream() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin.git");
+        git2::Repository::init_bare(&origin).unwrap();
+
+        let work = tmp.path().join("work");
+        let repo = git2::Repository::init(&work).unwrap();
+        std::fs::write(work.join("ledger.md"), "base").unwrap();
+        std::fs::write(work.join("other.md"), "base").unwrap();
+        commit_all(&repo, "base");
+
+        repo.remote("origin", origin.to_str().unwrap()).unwrap();
+        let head = repo.head().unwrap();
+        let branch_name = head.shorthand().unwrap().to_string();
+        repo.find_remote("origin")
+            .unwrap()
+            .push(
+                &[&format!(
+                    "refs/heads/{branch_name}:refs/heads/{branch_name}"
+                )],
+                None,
+            )
+            .unwrap();
+        let mut branch = repo
+            .find_branch(&branch_name, git2::BranchType::Local)
+            .unwrap();
+        branch
+            .set_upstream(Some(&format!("origin/{branch_name}")))
+            .unwrap();
+        (tmp, work)
+    }
+
+    /// A repo with NO configured upstream must ALLOW. A repo with no remote has no
+    /// second host, so refusing there is a pure false positive with no recoverable
+    /// reading. This is spec § Error handling, and it is the arm most likely to be
+    /// dropped as an edge case — it is the common case for a fresh clone.
+    #[test]
+    fn no_upstream_reports_no_unpushed_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let led = tmp.path().join("ledger.md");
+        std::fs::write(&led, "x").unwrap();
+        commit_all(&repo, "first");
+        assert!(!ledger_has_unpushed_commits(&led));
+    }
+
+    /// A path outside any git repository must ALLOW, not panic.
+    #[test]
+    fn non_git_root_reports_no_unpushed_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let led = tmp.path().join("ledger.md");
+        std::fs::write(&led, "x").unwrap();
+        assert!(!ledger_has_unpushed_commits(&led));
+    }
+
+    /// THE DISCRIMINATION THAT MATTERS. A branch-wide check passes a refusal-only
+    /// test; measured on codescout 2026-09-02, HEAD was 34 commits ahead of
+    /// origin/experiments while 2 of 3 ledgers had ZERO unpushed commits touching
+    /// them. Only a per-file check separates these two assertions, so removing
+    /// either one makes the pair satisfiable by an unusable implementation.
+    #[test]
+    fn unpushed_is_per_file_not_per_branch() {
+        let (tmp, origin_clone) = repo_with_upstream();
+        let ledger = origin_clone.join("ledger.md");
+        let other = origin_clone.join("other.md");
+        std::fs::write(&other, "changed").unwrap();
+        commit_path(&origin_clone, "other.md", "touch other");
+
+        assert!(
+            !ledger_has_unpushed_commits(&ledger),
+            "an unpushed commit on ANOTHER file must not block this ledger"
+        );
+
+        std::fs::write(&ledger, "changed").unwrap();
+        commit_path(&origin_clone, "ledger.md", "touch ledger");
+        assert!(
+            ledger_has_unpushed_commits(&ledger),
+            "an unpushed commit on THIS ledger must be reported"
+        );
+        let _ = tmp;
     }
 }
