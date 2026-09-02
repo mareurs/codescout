@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 99
+entry_high_water_F: 100
 entry_high_water_W: 96
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 96
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-100 | 2026-09-02 | high | measurement | open | **A window is a fact about the query, never about the thing — re-run once with it REMOVED, not widened.** Four instances in one evening across four sessions, each returning a clean, self-consistent, *wrong* answer. `cut -c1-150` hid **+1,508 chars** of hand-authored prose and nearly published a wrong correction *of* a peer; a `git grep` window stopped two files short of its own falsifier; a `grep` over stdout hid an argparse exit-2 written to **stderr** and cost **three** debugging rounds on code that worked — written by someone who had already messaged two peers about instance 1. The remedy is one command (drop the `cut`, drop `--include`, `2>&1`), not "be careful with filters", which is the remedy that failed four times, twice inside a correction of itself |
 | F-98 | 2026-09-02 | high | epistemic | fixed-verified | `8343d6ca` retracted a falsified remedy from a bug file, correctly scoped "bug file only, no counts moved" — and the same claim stood in `docs/trackers/issue-clusters.md:1139`, IC-17's `**Members:**`, labelled **verified**, written by the same session at `cd6bb36c`. **The correct scoping is what preserved the falsehood**: nothing relates a bug file to a ledger field quoting it — no edge, no diff hunk, no check. Worse than the unsafe instruction beside it: `:872` is advice that misfires, `:1139` was false and labelled verified. Found by `codescout-05` reading past the line I had *accurately* told it not to amend — an accurate but incomplete correction carries enough authority to stop the next person looking. Fixed `fea2e1ce`. |
 | F-97 | 2026-09-02 | med | measurement | fixed-verified | Ran `cargo check --workspace --all-targets` (which does not lint at all), got exit 0, and published "all green" under the project gate's name — while `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` was red, exit 101, 10 errors. Had seen the seven `dead_code` warnings and described them as "expected"; `-D warnings` promotes each to an error. Quoted the gate's four commands in my own first message of the session and ran none of them for four hours. **A green from an instrument chosen for its speed is a fact about that instrument.** Caught by `codescout-26`, which held the failing code. |
 | F-96 | 2026-09-02 | med | epistemic | fixed-verified | I published `core.hooksPath points at scripts/` as the reason a hook edit is instantly live here. Wrong twice. **The variable is unset** at every scope — this repo's *healthy* state, asserted by `tests/hook_config.rs`, and a *set* value once disabled every hook here for a day, so a reader acting on my sentence reproduces an archived bug. A peer caught that. **But the conclusion survived their correction and was independently false:** pre-commit clears unstaged changes before hooks (`staged_files_only.py:108`), so a `language: system` entry runs the **index** copy of its own script — measured, 3 cases. The exposure moment is `git add`, not the editor save. Both halves of the refutation were already filed in this repo, held one each by two sessions who agreed with each other instead of composing them. **A correction is a fresh claim — check the part of the original it leaves standing.** Second law: an `## Environment` block is the least-audited claim in a bug file, and the one downstream files copy |
@@ -9876,6 +9877,54 @@ implementer builds Component A on `DocExtract.definitions`, the seeded two-headi
 produces one definition, and the task fails at test time with a symptom (`expected 1 finding,
 got 0`) that points at the fixture. Recovery cost is a task cycle plus a redesign of the
 check's data source — the part the spec now states outright.
+
+## F-100 — A window is a fact about the query — re-run once with it removed, never widened
+
+**Valid:** dated 2026-09-02
+
+**Observed:** Four instances in one evening, across four sessions, of an instrument whose
+**window silently excluded the refuting evidence** — each returning a clean, self-consistent,
+*wrong* answer rather than an error. Severity `high`: one was three debugging rounds, one was a
+correction of a peer that would have been published wrong, and none was caught by suspicion.
+
+| session | instrument | window | what it hid |
+|---|---|---|---|
+| this one | `git show \| cut -c1-150` | columns | **+1,508 chars** of hand-authored prose past col 150 |
+| `codescout-17` | a `git grep` scan | files | the dedup that falsified its own spec's mechanism |
+| `codescout-e4` | `grep` with no `--include` | file types | (avoided — it deliberately dropped the filter) |
+| this one | `grep` over stdout | **streams** | an argparse exit-2 written to stderr |
+
+**The fourth is the sharpest and it happened AFTER I had written to two peers about the first.**
+`probe-cluster-census.py --source=head` kept printing nothing. I verified the fixture; verified the
+counts genuinely diverged (`worktree=2`, `head=1`); read the code and found it correct; discovered
+my test harness was `cp`ing the new probe in and then running `git checkout -- .` over it; fixed
+that — **still silent**. The actual cause: `head` was absent from argparse's `choices`, so every
+run exited 2 with the message on **stderr**, which every one of my `grep` filters discarded. The
+detector worked the whole time. Three rounds spent debugging working code, by someone who had
+just published the rule.
+
+**Why "be careful with filters" is not the remedy.** It is the remedy that failed four times in
+one evening, twice inside a correction of itself. The window is chosen *for* a good reason — a
+150-column cut makes a diff readable, a `grep` makes a monitor selective — and the cost is paid
+by an observation the chooser has no reason to expect. `codescout-17` put it best and it is worth
+quoting rather than paraphrasing: **a window is a fact about the query, never about the thing.**
+
+**The mechanism, which is cheap and needs noticing nothing.** When an instrument returns a result
+you are about to act on, re-run it **once with the window removed** — no `cut`, no `--include`,
+`2>&1` instead of `2>/dev/null`. Not "widen it": *remove* it, because a wider window is another
+window. That is one command, and it is the step that caught all three of tonight's diagnosed
+instances; none was caught by doubting the answer.
+
+**Its own denominator, published rather than absorbed.** The re-run *confirmed* on the sweep
+transform (22 index cells, 31 bare `n=`, no cross-class contamination) — a case where the window
+was fine. Recording only the catches would make the population look self-correcting, which is
+CLAUDE.md § *Testing Discipline*'s recording-filter law, and is the same law as the entry itself
+one level up: **this entry is an instrument whose window would exclude its own negative cases.**
+
+**Rests on** `W-94` (a peer whose sample differs) and `W-95` (the binary's mtime). Same family —
+those two are about a *stale* sample and this is about a *truncated* one — and unlike `W-94`'s
+"get peer review", which is a policy that failed against an author who had just written it down,
+this one is a command.
 
 ## Template for new entries
 
