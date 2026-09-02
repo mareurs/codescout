@@ -238,6 +238,22 @@ if omitted.
 `done`, `in-progress`, etc. are NOT special-cased — they appear as
 active. The frontmatter status drives librarian visibility.
 
+**`draft` means the opposite thing on a plan, and one catalog column holds both.** The
+row above defines it for **trackers**: *scoped / watching, not yet active*. In
+`docs/plans/` this repo uses it to mean *shipped, deliberately unarchived because a named
+residual is still open* — a plan says so in its own text (*"this plan stays active (do NOT
+ARCHIVE) while 4b is open"*) and the residual lives in a companion `resume-*` tracker.
+Both surfaces are catalogued with the same `status` column, so `artifact(action="find")`
+returns them side by side with nothing marking which vocabulary a row speaks.
+
+Measured 2026-09-01: a triage pass sorting on `status` reported
+`docs/plans/2026-05-30-per-request-workspace-pinning.md` as a design stalled for 94 days.
+Its phases 0–3 and 4a had shipped and were verified at the bytes on 2026-08-28. The
+disambiguator existed — a `resume-*` tracker naming the plan — but the pointer runs one
+way only, tracker → plan, so the plan is the row a query returns and the tracker is the row
+that would have corrected it. **Before reading a `draft` as "not started", check whether a
+`resume-*` tracker names it.**
+
 **Archiving a tracker:** preferred path is in-place archival via the
 catalog:
 
@@ -281,6 +297,13 @@ inherited from `docs/issues/_TEMPLATE.md` rather than a navigational instruction
 routing an implementer to a strategy its own file had rejected, one pointing at a peer
 session whose process no longer exists. Five authors had invented the marker
 independently; none had written it down.
+
+**The device generalises past `Resume`, though only that scope was measured.** Any section a
+later one falsifies has the same problem: sections carry no dependency edges, so the falsifying
+edit produces no diff hunk, no broken link and no check naming the section it retired — and the
+retired section keeps reading as settled prose. Same repair, applied where you notice it: a
+banner naming what superseded it. Recorded as `observer-blindness:OB-12`, whose blind party is
+the author adding the new section, since nothing in the act of appending points backwards.
 ## Declaring an augmentation
 
 If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name

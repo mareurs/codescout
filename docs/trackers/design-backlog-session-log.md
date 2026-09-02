@@ -226,6 +226,26 @@ early.
   documents. The peer is mid-fix (`issue-clusters.md` is `MM`); not broadcast, per the measured
   lesson that the fifth instance of this class was closed by its own author unprompted and the
   entire cost was the misrouting around it.
+
+- [x] **T11 — Tracker updates (scope 1+3, user-chosen).** Done 2026-09-02.
+  `codescout-companion:tracker-hygiene` precondition gate run and **passed** —
+  `augmentation_declared_but_absent: 0`, `memories.missing_count: 0`, `edges_missing: 1` — so
+  the detectors would have described the corpus rather than the machine. **No sweep was run and
+  `next-sweep-due` was NOT bumped:** the ledger says 2026-09-24, the last sweep was 2026-08-25,
+  and writing a sweep entry for work that never ran the detectors would push the real sweep a
+  month out on a false claim. `prefix_conflicts: 2` (F/W across six declaring ledgers) is the
+  documented per-work-stream namespacing, not drift.
+
+  Three updates applied: **`observer-blindness:OB-12`** — the class behind `F-3`/`F-4`/`F-7`/`F-8`
+  and `capability-proposals:CAP-12`, filed after checking the ledger's own admission test and its
+  four neighbours (`I-N`, `R-N`, `H-N`, `DC-N`); it is not `DC-N` because the trigger is a
+  **sibling edit**, not time. **The `draft` ambiguity** from `F-1` added to
+  `get_guide("tracker-conventions")` § *Tracker artifacts*, next to the Status table that defines
+  the tracker sense. **One sentence generalising the currency marker** past `## Resume`, marked
+  as generalisation rather than measurement, since only the Resume scope was measured.
+
+  **Verify-open: nothing owed.** Every entry here is 0–1 days old against a >14-day cadence; the
+  single `open` entry (`F-8`) is correctly open, its residual being T6.
 ## Promotion status
 
 **Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,

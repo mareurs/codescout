@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 11
+entry_high_water_OB: 12
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed case has no mechanism and none is proposed |
 | OB-11 | 2026-09-01 | a session-keyed ledger answers for a party the protocol never named — a subagent's FIRST fetch reports as a repeat, and its auto-inject is suppressed as already-delivered | the codescout MCP server: `agent_id` rides harness `SubagentStart`/`Stop` events and no MCP tool call ever carries it | wrong instrument — the guide text told the parent to make it *worse* | **partial** — wording fixed at 3 sites, note pinned negatively, companion hook overrides the brief; the **keying** is unfixable from inside this repo |
 | OB-10 | 2026-09-01 | a mutual-exclusion resource is invisible to the session HOLDING it — the holder's own workflow succeeds and clears the condition as a side effect of finishing | the holder, a population of one against everyone else | wrong instrument | **none yet** — owner field on the resource is the candidate; enumeration is 1 verified / 4 unverified |
 | OB-9 | 2026-09-01 | plausibility is a filter with a resolution limit — a near-miss number fits inside it; 4 instances, 4 caught by re-derivation, 0 by reading | the reader | wrong instrument | **partial** — remedy shipped under `OB-1`; this row adds its scope condition |
@@ -1287,6 +1288,81 @@ re-examined* — only the boundary).
 **Instances:** `docs/issues/archive/2026-09-01-subagent-told-to-skip-guides-it-never-received.md` (this repo, archived 2026-09-01). Cross-repo, prose-only and deliberately not an edge: `claude-plugins`'s `codescout-companion/docs/issues/archive/2026-08-26-subagent-guide-fetch-starves-parent.md` and `…/2026-08-27-guide-ledger-bracket-is-inert-within-its-own-session.md`.
 
 **Status:** open — 1 session (2026-09-01), user-reported. The sibling direction was independently filed in `claude-plugins` across three earlier sessions; that is corroboration of the keying defect, not a second instance of this row.
+
+## OB-12 — a section that falsifies a sibling emits no signal, and the falsifying author is the blind party
+
+**Valid:** invariant
+
+**Rests on:** `design-backlog-session-log:F-3`, `design-backlog-session-log:F-4`,
+`design-backlog-session-log:F-7`, `design-backlog-session-log:F-8`; `capability-proposals:CAP-12`
+(measured corpus and the rejected detector); the currency-marker convention shipped 2026-09-02
+into `get_guide("tracker-conventions")` § *A `## Resume` states its own currency*.
+
+**Class:** a document's sections carry **no dependency edges**, so a section that falsifies a
+sibling emits **no signal anywhere** — not in the diff, not in a link check, not in the
+falsified section itself, which continues to read as settled prose.
+
+**Blind party: the author adding the new section, specifically.** They are facing forward —
+composing the alternative, the correction, the newer measurement. The sections their new one
+refutes were written earlier, are internally coherent, and read as finished. Nothing in the act
+of appending points backwards. In the recorded corpus the falsifying section was **written by
+the same review, in the same pass**: `run-command-pipeline.md`'s Concern 1 introduced Strategy C
+and thereby retired claims in Concerns 2 and 3 that Concerns 2 and 3 went on stating for 106
+days. **A review that introduces a new alternative does not automatically re-audit its own
+earlier concerns against it.**
+
+**Who can see it:** the first party whose *task* forces two sections into contact — an
+implementer following the older one's instruction, who then reads the newer one and finds it
+contradicted. Not a more careful reader: a differently-tasked one. That is why every instance
+below was found while *acting on* the document and none by reviewing it.
+
+**Plausible-answer property:** the stale section is well-formed. No dangling reference, no
+broken link, no error — a true-sounding instruction whose premise a sibling quietly removed.
+`run-command-pipeline.md` § *Resume* said *"write `run_pipeline_inner` per strategy A"* while
+its own review rejected Strategy A; `capability-proposals.md` CAP-7 § *Resume* says *"Next:
+check 1"* above a status block listing check 1's commit and patch-id.
+
+**Vigilance: wrong instrument, twice over.** "Re-read the whole document when you add a
+section" is unenforceable and nobody does it at 1,500 lines. And the party it addresses is
+the one who just finished writing the *new* section — the moment of least attention to the old
+ones. Measured: three of the falsified claims survived a full session of a reader who was
+*actively ruling on that very document*, and were caught only when each became the next
+concrete task.
+
+**Mechanism status: partial.** The **currency marker** shipped 2026-09-02 —
+`get_guide("tracker-conventions")` § *A `## Resume` states its own currency*: a section either
+dates its heading or opens with a banner naming what superseded it and where the current state
+lives. Measured over the corpus that motivated it: **0 of 5 sections carrying a marker were
+misleading; 3 of 3 without one were stale.** What it does **not** cover is the case in this
+row's own name — it fires when the author *notices*, and the blind party is defined by not
+noticing. `capability-proposals:CAP-12` proposed a `doctor` check and was **rejected on
+measurement**: the discriminator is the marker, not age, so an age-keyed check flags every
+correctly-dated section and catches nothing the marker misses. **No mechanism detects the
+un-noticed case, and none is proposed here** — recording the gap rather than inventing a
+remedy for it.
+
+**Membership test — three clauses.** A section is in this class when (1) a **later** section of
+the same document removes a premise the earlier one states or relies on, (2) the earlier
+section remains **internally coherent** and carries no marker of its supersession, and (3) the
+falsifying edit produced **no artifact** naming the earlier section — no cross-reference, no
+diff hunk touching it, no check. Clause 3 is what makes it this ledger's business rather than
+`claim-decay.md`'s: `DC-N` is about **time** making a claim false, and here the trigger is a
+**sibling edit**, which is an event with an author and a timestamp that simply points nowhere.
+
+**Not `R-N`, and not `I-N`.** `reconnaissance-patterns` records what a scout hit or missed —
+scouting is how all five instances were caught and is the *detection* story, not the class.
+`test-escape-hardening` (`I-N`) is a natural consumer if the un-noticed case ever gets a
+mechanism; it has none yet, so there is nothing to hand it.
+
+**Instances (5, two documents):**
+
+| instance | falsifying section | falsified claim |
+|---|---|---|
+| `F-3` | Architectural review (appended above § *Resume*) | § *Resume* routed to Strategy A, which the review rejected |
+| `F-4` | Concern 1 introducing Strategy C | *"per-stage cancellation impossible"* — carried as a cost with no reachable caller |
+| `F-7` | Concern 1 introducing Strategy C | *"per-stage timeout impossible"* — true of Rust, false of the capability |
+| `F-8` | Concern 1 introducing Strategy C | Concern 2's *"before `pipeline=` goes anywhere"* prerequisite, which C dissolves |
+| `CAP-12` corpus | CAP-7's status block | CAP-7 § *Resume*'s *"Next: check 1"*, already shipped at `b34bf10e` |
 
 ## Template for new entries
 
