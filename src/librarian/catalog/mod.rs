@@ -244,6 +244,47 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         "INSERT OR IGNORE INTO schema_version (version) VALUES (10)",
         [],
     )?;
+    // v11: chunk-grain artifact embeddings.
+    //
+    // `artifact_vec` needs no schema change — its `id` is already TEXT PRIMARY KEY
+    // and nothing requires it to DENOTE an artifact. v11 adds the side table and a
+    // second vec table; a later task backfills v2 and swaps. Keeping both alive is
+    // what avoids a dark window over ~90,500 embeds.
+    //
+    // `chunk_id` is an OPAQUE uuid, deliberately not derived from artifact_id:
+    // `id = sha256(abs_path)`, so archiving re-keys an artifact, and a derived
+    // chunk id would make every archive move an O(chunks) loop through
+    // `gc::migrate_vec_id` (which exists only because vec0 rejects UPDATE ... SET id).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS artifact_chunk (
+           chunk_id     TEXT PRIMARY KEY,
+           artifact_id  TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+           chunk_ix     INTEGER NOT NULL,
+           start_line   INTEGER NOT NULL,
+           end_line     INTEGER NOT NULL,
+           entry_token  TEXT,
+           content      TEXT NOT NULL,
+           content_hash TEXT NOT NULL,
+           UNIQUE (artifact_id, chunk_ix)
+         )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_chunk_artifact
+           ON artifact_chunk(artifact_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS artifact_vec_v2 USING vec0(
+           id        TEXT PRIMARY KEY,
+           embedding FLOAT[768]
+         )",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (11)",
+        [],
+    )?;
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and
@@ -531,7 +572,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, 11);
     }
 
     #[test]
@@ -566,7 +607,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, 11);
     }
 
     #[test]
@@ -591,6 +632,68 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert!(ver >= 10);
+    }
+    #[test]
+    fn v11_creates_the_chunk_table_and_stamps_the_version() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 11);
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn v11_is_idempotent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        apply_migrations_in_txn(&cat.conn, None).unwrap();
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 11, "re-running must not advance or duplicate");
+    }
+
+    #[test]
+    fn deleting_an_artifact_cascades_its_chunk_rows() {
+        use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+
+        fn art(
+            id: &str,
+            kind: &str,
+            status: &str,
+        ) -> crate::librarian::catalog::artifact::ArtifactRow {
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/{id}.md"))
+                .with_kind(kind)
+                .with_status(status)
+                .with_file_sha256("x")
+                .build()
+        }
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_chunk
+                   (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+                 VALUES ('c1','a',0,1,9,NULL,'body','h')",
+                [],
+            )
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='a'", [])
+            .unwrap();
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "FK cascade must remove the chunk rows");
     }
 
     #[test]
