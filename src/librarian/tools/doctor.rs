@@ -179,6 +179,9 @@ declare_checks! {
     BackslashInAbsPath => "backslash_in_abs_path",
     BackslashInGitRoot => "backslash_in_git_root",
     CitedPrefixWithNoDefiner => "cited_prefix_with_no_definer",
+    ClaimHeldByDeadSession => "claim_held_by_dead_session",
+    ClaimHeldByLiveSession => "claim_held_by_live_session",
+    ClaimUnresolvableHere => "claim_unresolvable_here",
     DeclaredRootMissing => "declared_root_missing",
     DotdotSegmentInAbsPath => "dotdot_segment_in_abs_path",
     EntryCitedFromOutsideButUndeclared => "entry_cited_from_outside_but_undeclared",
@@ -417,6 +420,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // scan below it, so a "nothing declared" finding may be about the parse and not the
     // file. Ordered here so the two readings sit together in the report.
     all_violations.extend(scan_unterminated_fence(ctx, &cat.conn)?);
+
+    // The reader half of `status: taken`. Without this line the check compiles, its own
+    // tests pass, and `librarian(action="doctor")` never calls it — which is exactly the
+    // failure mode the status exists to make visible.
+    if let Some(home) = crate::platform::home_dir() {
+        all_violations.extend(scan_claim_liveness(
+            ctx,
+            &cat.conn,
+            &crate::librarian::session_registry::default_profile_dirs(&home),
+            &crate::librarian::session_registry::RealProcProbe,
+        )?);
+    }
 
     // Ruling 17 for the row-grain checks that carry no per-row state, applied as one
     // filter over the finished list rather than five scoping blocks.
@@ -5483,6 +5498,158 @@ fn scan_unterminated_fence(
                  around it."
             ),
         ));
+    }
+    Ok(out)
+}
+
+/// `claim_held_by_live_session` / `claim_held_by_dead_session` / `claim_unresolvable_here`:
+/// resolves a `status: taken` bug file's `claimed_by` sessionId against this machine's
+/// session registries.
+///
+/// **The check that makes `taken` more than an assertion.** A record claiming a live owner
+/// with nothing re-checking it is `issue-clusters:IC-8`, and it fails in the costly
+/// direction: it tells a reader to stay off work nobody is doing.
+///
+/// **Three outcomes, all reported, only two of them defects.** `claim_held_by_live_session`
+/// is INFORMATIONAL and says so in its first word — it exists to carry the paste-ready
+/// `to:` address, which is how a reader asks the holder rather than guessing.
+/// `claim_held_by_dead_session`'s remedy is a demotion to `investigating` — *not* `open`,
+/// because work probably happened and the body records it. `claim_unresolvable_here` is a
+/// separate check rather than a flavour of dead: it needs a different fix, and on any
+/// second machine EVERY foreign claim lands there, so reporting those as dead would be a
+/// confident wrong answer at scale. Per
+/// `docs/adrs/2026-08-27-negative-results-name-their-scope.md` it names the directories it
+/// searched.
+///
+/// Reports only; there is no `fix=`. Releasing a claim is a judgement about whether the
+/// work stands, which this check cannot make.
+///
+/// Registry dirs and the process probe are **parameters**, not ambient lookups, so tests
+/// need no real sessions.
+fn scan_claim_liveness(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+    profile_dirs: &[std::path::PathBuf],
+    probe: &dyn crate::librarian::session_registry::ProcProbe,
+) -> Result<Vec<Violation>> {
+    use crate::librarian::session_registry::{ClaimLiveness, DeadReason, SessionRegistry};
+
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path FROM artifact \
+         WHERE kind = 'bug' AND status = 'taken' \
+         ORDER BY abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let registry = SessionRegistry::load(profile_dirs);
+    let searched = profile_dirs
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut out = Vec::new();
+    for (id, abs_path) in &rows {
+        let path = Path::new(abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let claimed_by = match crate::librarian::frontmatter::parse(&content) {
+            Ok((Some(fm), _)) => fm.extra.get("claimed_by").and_then(|v| match v {
+                Value::String(s) => Some(s.trim().to_string()),
+                Value::Null => None,
+                other => Some(other.to_string()),
+            }),
+            _ => None,
+        }
+        .filter(|s| !s.is_empty());
+
+        let Some(sid) = claimed_by else {
+            out.push(Violation::new(
+                "claim_unresolvable_here",
+                Some(id.clone()),
+                abs_path.clone(),
+                "status is `taken` but no `claimed_by:` is set, so the claim names nobody and \
+                 nothing can check it. Either add the claiming session's id, or demote to \
+                 `investigating`. See get_guide(\"tracker-conventions\") § Bug files."
+                    .to_string(),
+            ));
+            continue;
+        };
+
+        match registry.resolve(&sid, probe) {
+            ClaimLiveness::Live {
+                pid,
+                name,
+                cwd,
+                address,
+                ..
+            } => {
+                let who = name.unwrap_or_else(|| "unnamed".to_string());
+                let where_ = cwd.unwrap_or_else(|| "unknown cwd".to_string());
+                out.push(Violation::new(
+                    "claim_held_by_live_session",
+                    Some(id.clone()),
+                    abs_path.clone(),
+                    format!(
+                        "informational, not a defect: session `{sid}` (pid {pid}, currently \
+                         named `{who}`, working in {where_}) holds this bug and is running. \
+                         Ask before starting — SendMessage(to: \"{address}\"). Use the id, not \
+                         the name: a name is re-minted by compaction, resume, or a restart \
+                         under another profile."
+                    ),
+                ));
+            }
+            ClaimLiveness::Dead { pid, name, reason } => {
+                let why = match reason {
+                    DeadReason::SocketAbsent => "its messaging socket is gone",
+                    DeadReason::ProcessGone => "no such process is running",
+                    DeadReason::PidReused => {
+                        "a process with that pid exists but started at a different time, so the \
+                         pid was recycled onto a stale row"
+                    }
+                };
+                let who = name.unwrap_or_else(|| "unnamed".to_string());
+                out.push(Violation::new(
+                    "claim_held_by_dead_session",
+                    Some(id.clone()),
+                    abs_path.clone(),
+                    format!(
+                        "status is `taken`, claimed by session `{sid}` (pid {pid}, last known as \
+                         `{who}`), but {why} — so the claim is unbacked and every triage query \
+                         hands this out as work in progress. Demote to `investigating` (NOT \
+                         `open`: work probably happened and the body records it) and clear \
+                         `claimed_by`. This is a worklist, not a verdict — the session may have \
+                         concluded without updating the record."
+                    ),
+                ));
+            }
+            ClaimLiveness::UnresolvableHere { .. } => {
+                out.push(Violation::new(
+                    "claim_unresolvable_here",
+                    Some(id.clone()),
+                    abs_path.clone(),
+                    format!(
+                        "status is `taken`, claimed by session `{sid}`, which appears in none of \
+                         the session registries on this machine ({searched}). This is NOT \
+                         evidence the claim is dead — a claim made on another host is \
+                         unresolvable here by construction. Check on the claiming machine, or \
+                         demote to `investigating` if the work has been abandoned."
+                    ),
+                ));
+            }
+        }
     }
     Ok(out)
 }
@@ -13726,6 +13893,230 @@ body
         assert!(
             violations_named(&out, "entry_defined_twice").is_empty(),
             "{out:#?}"
+        );
+    }
+
+    // ---- claim_liveness ---------------------------------------------------------------
+
+    /// Seeds one profile dir holding one session row; returns the dir to pass in.
+    fn seed_session(
+        root: &std::path::Path,
+        session_id: &str,
+        pid: i64,
+        proc_start: &str,
+    ) -> std::path::PathBuf {
+        let dir = root.join(".claude").join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{pid}.json")),
+            format!(
+                r#"{{"pid":{pid},"sessionId":"{session_id}","cwd":"/repo",
+                     "procStart":"{proc_start}","messagingSocketPath":"/sock/{pid}.sock",
+                     "name":"codescout-zz"}}"#
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// `live_pid: None` means nothing is running and no socket exists.
+    struct TestProbe {
+        live_pid: Option<i64>,
+        starttime: String,
+    }
+    impl crate::librarian::session_registry::ProcProbe for TestProbe {
+        fn starttime(&self, pid: i64) -> Option<String> {
+            (Some(pid) == self.live_pid).then(|| self.starttime.clone())
+        }
+        fn socket_exists(&self, _path: &str) -> bool {
+            self.live_pid.is_some()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_live_claim_is_reported_informationally_with_a_pasteable_address() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "held",
+            "taken",
+            "claimed_by: sid-live\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-live", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: Some(4242),
+            starttime: "555".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_held_by_live_session");
+        assert!(
+            v[0].detail.contains("uds:/sock/4242.sock"),
+            "must carry the paste-ready address: {}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.to_lowercase().starts_with("informational"),
+            "a non-defect row must announce itself as one: {}",
+            v[0].detail
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dead_claim_names_investigating_as_the_remedy() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "stale",
+            "taken",
+            "claimed_by: sid-dead\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-dead", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "555".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_held_by_dead_session");
+        assert!(
+            v[0].detail.contains("investigating"),
+            "the remedy must name `investigating`, not `open`: {}",
+            v[0].detail
+        );
+    }
+
+    /// The third bucket must not collapse into the second — they need different fixes,
+    /// and on another machine EVERY foreign claim is unresolvable rather than dead.
+    #[tokio::test]
+    async fn an_unresolvable_claim_is_its_own_check_and_names_the_scope() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "foreign",
+            "taken",
+            "claimed_by: sid-elsewhere\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-somebody-else", 1, "1");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(
+            v[0].check, "claim_unresolvable_here",
+            "must NOT be reported as a dead claim"
+        );
+        assert!(
+            v[0].detail.contains(".claude"),
+            "a negative result must name the scope searched: {}",
+            v[0].detail
+        );
+    }
+
+    #[tokio::test]
+    async fn a_taken_bug_with_no_claimed_by_is_reported() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &root, "unclaimed", "taken", "", "body\n");
+        let sessions = seed_session(&root, "sid-x", 1, "1");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_unresolvable_here");
+    }
+
+    #[tokio::test]
+    async fn non_taken_statuses_are_not_examined() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &root, "a", "open", "", "body\n");
+        seed_live_bug(
+            &cat,
+            &root,
+            "b",
+            "investigating",
+            "claimed_by: sid-dead\n",
+            "body\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "c",
+            "fixed",
+            "claimed_by: sid-dead\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-other", 1, "1");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert!(v.is_empty(), "only `taken` is in scope: {v:#?}");
+    }
+
+    /// Guards the registration line, which no test above can observe. Deterministic on
+    /// any machine: a sessionId this shape appears in no registry anywhere, so the
+    /// unresolvable bucket is reached without depending on local sessions.
+    #[tokio::test]
+    async fn call_wires_scan_claim_liveness() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "e2e-claim",
+            "taken",
+            "claimed_by: sid-0000-no-such-session-anywhere\n",
+            "body\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["claim_unresolvable_here"],
+            json!(1),
+            "call() must reach scan_claim_liveness; an unregistered check is silent: {out:#?}"
         );
     }
 }
