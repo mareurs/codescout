@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 102
-entry_high_water_W: 98
+entry_high_water_W: 99
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -10212,6 +10212,16 @@ independent reviewer. Instance 5 shipped: it is in `experiments` at `5eea9301`, 
 rather than fixed, because the process allows one fix wave after a final review and it arrived in that
 wave's re-review. So the class's realised cost on this branch is one imprecise assertion in main.
 
+**A sibling datapoint, contributed 2026-09-02 by session `f13f8169` at `codescout-17`'s request — and deliberately NOT counted as a sixth.** 17 offered it as *"the same law from the other side"* and added *"I would rather the count be right than mine"*, so the useful thing is the boundary, not the increment.
+
+The case: fixing `worktree_read_notice` (`7a3aee93`) produced two tests, and mutating the production path once per **site** showed one of them green for the wrong reason. Re-adding the `notice_once` gate killed the repeat assertion — and left the *pinned-silence* test **green vacuously**, because the restored one-shot makes its pinned call silent through a path that has nothing to do with the pin. A single mutation run would have reported the pair as covered.
+
+**Why it is not instance 6.** F-102's five are assertions whose **satisfiable set is textually wider than their stated intent** — `contains('7')` matched by `R-147`. Nothing textual is wrong with the pinned test's assertion: it is exact, and it means what it says. It goes vacuous because a *sibling mutation* removes the mechanism it silently depends on. Same consequence — a guard satisfied by a mechanism that never runs — reached by a different route, so folding it in would blur the shape this entry names precisely.
+
+**What it adds instead is a remedy F-102 does not have.** The pinned test opens with a **fixture check** asserting the same context *does* emit while unpinned, which converts silence-as-evidence into silence-as-contrast: an absence assertion that cannot pass against a context emitting nothing for any reason. That is a construction the author can apply to their own test, where this entry's candidate mechanisms are both aimed at reviewers or linters. Whether it generalises is untested — one instance.
+
+It also supplies a second, independent argument for **mutate per SITE, not per feature**: here the two sites are the two polarities of one behaviour rather than two call sites of one law, and the kill/survive table is what made the vacuity visible at all. `codescout-0a`, reviewing it, called the pairing *"a sharper instance than the one CLAUDE.md currently cites"* — recorded as a second party's read, not adopted as a verdict; promoting it over the shipped example is a decision for whoever next edits that section.
+
 ## W-98 — a question about METHOD is a request to re-measure, not to re-explain — and change the instrument, not the care
 
 **Valid:** dated 2026-09-02
@@ -10269,6 +10279,30 @@ re-measure* — not the virtue.
 a fact about the query, never about the thing*). This is their reflexive case: the party best placed
 to notice is the author, and the author is exactly the party who cannot — so the trigger has to be an
 external question, which is the only part of this that is reliably available.
+
+## W-99 — The pathspec commit I adopted AS the safety measure was the unsafe form
+
+**Observed:** 2026-09-02, amending the artifact chunk-grain plan on a shared checkout while a peer held six staged paths in the index.
+
+**Pattern:** The `unreviewed-content` pre-commit hook, which refuses `git commit -- <paths>` when those paths carry unstaged content, and prints both the correct sequence and the bug file recording four measured captures.
+
+**Counterfactual:** **Not an averted capture, and saying so is the whole value of the entry.** I read all 34 deleted lines before committing and every one was mine, so the refused commit would in fact have been clean. What the hook prevented was the *belief* persisting. I had adopted `git commit -- <path>` **deliberately**, across several sessions, as the safe form to use while a peer's index was hot — reasoning that a pathspec commit ignores the index, which is true, and stopping there. It reads the **working tree** at those paths, which is the half that matters on a shared checkout: it commits whatever a concurrent session wrote to the same file since I last looked. The belief emits no symptom, because it commits correctly every time until the one time a peer has touched the same file. So the counterfactual is "it survives until it captures something", not "it captured something today" — which is a weaker claim than a win usually makes, and the accurate one.
+
+**Confirming data points:**
+1. The hook fired on a session that had reasoned about index safety **explicitly and at length**, and had reached the wrong form by that reasoning. Care was the instrument here, and it is the instrument that failed — the belief was not a lapse, it was a conclusion.
+2. The refusal text names four measured captures already recorded, so the defect class has instances that do not depend on my particular wrong reasoning.
+3. The situation the belief was adopted for was real, not imagined: `git diff --cached --name-only` showed 7 paths, 6 of them the peer's. Only the remedy was wrong, which is why nothing about the situation could have flagged it.
+4. Staging, then reading `git diff --cached -U0` scoped to my path, reconciled to exactly 34 deletions (32 checkbox rewrites + 2 lines of a stale `**Files:**` block) — the arithmetic is what made "this content is mine" checkable rather than asserted. The hook's prescribed sequence is what produces that artifact; the pathspec form produces nothing to check.
+
+**Impact:** med
+
+**Promote-when:** a second session is recorded adopting a pathspec commit *as its safety measure*. That would make this a convergent wrong conclusion rather than one session's, and convergence is the threshold at which the refusal text stops being sufficient — a hook teaches the party who trips it, and a belief several sessions reach independently wants a line where sessions read before acting rather than after being refused.
+
+**Status:** validated
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** the hook's own refusal text, and `docs/conventions/shared-checkout-commit-sequence.md`.
 
 ## Template for new entries
 
