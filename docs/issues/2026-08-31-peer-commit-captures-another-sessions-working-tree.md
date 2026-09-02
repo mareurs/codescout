@@ -428,7 +428,19 @@ That is worth stating as a rule rather than an anecdote, because `--name-only` l
 **Captured from:** session `63083c9e`.
 **Route:** `git add -- <two own doc paths>`, then a **bare `git commit`** with no pathspec. In the interval, `63083c9e` staged four files into the shared index; all six were committed.
 
-**Volume, with its unit:** `git show 21258b4b --stat` reports 6 files, 227 insertions and 42 deletions = **269 changed lines**, of which **201 across 4 of 6 files** belong to `63083c9e` — `docs/PROBES.md` (2), `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md` (88), `src/engines/emitters.rs` (17), `src/server.rs` (94). Confirmed independently against `.git/session-stage-log`, where those four paths carry `63083c9e` rows with `route=named`. *(`c45dd5ef` reported this as "201 of 227"; 227 is the insertion count alone. The pair is 201/269 changed lines, or 201/227 insertions — both defensible, neither interchangeable, which is § *a count must arrive with its unit* in miniature.)*
+**Volume, with its unit — and this number was got wrong TWICE, in sequence, by both parties.** Derived with `git show --numstat --format='' 21258b4b`, summed by hand:
+
+| population | insertions | deletions | changed |
+|---|---|---|---|
+| whole commit | 227 | 42 | **269** |
+| `63083c9e`'s four files | **163** | 38 | **201** |
+| `c45dd5ef`'s two files | 64 | 4 | 68 |
+
+The four foreign paths are `docs/PROBES.md`, `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md`, `src/engines/emitters.rs`, `src/server.rs` — confirmed independently against `.git/session-stage-log`, where each carries a `63083c9e` row with `route=named`. So there are exactly **two** defensible pairings: **201 of 269 changed lines**, or **163 of 227 insertions**.
+
+**The reported figure was neither, twice.** `c45dd5ef` first wrote *"201 of 227"*, having taken the numerator from `--stat`'s column (changed lines) and the denominator from the same command's summary footer (insertions) — two different quantities printed adjacent on one screen. This file then "corrected" it to *"201/269 changed lines, or 201/227 insertions — both defensible"*, which **carries the identical error forward**: 201 is a changed-line subtotal (163+38) and cannot pair with an insertion total. The insertion-only numerator is 163.
+
+That is § *Testing Discipline*'s count law arriving in precisely the shape it warns about — *"one population yielded four defensible numbers inside an hour, each the right answer to a different question, and near enough to each other that no reader would have queried any of them."* Three plausible pairings here, two of them answers to a stated question, and **the mixed one survived being explicitly caught and rewritten by a second party who was at that moment thinking about units.** Knowing the law is not the instrument; deriving is. `--numstat` prints the two columns separately and makes the mixing unrepresentable; `--stat` prints the two units adjacent and invites it.
 
 ### Why this is a THIRD route and not Instance 7 again
 
