@@ -355,6 +355,46 @@ So `5c353d8f` **read the working tree** at those paths; it was not a bare index 
 **The corollary is the part worth keeping, because it inverts the obvious remedy.** `codescout-dd`'s discipline is the recommended one — stage explicitly, then commit the index, never a pathspec. It did not protect them, and could not have: the loss came from *another* session's action on a shared index. Worse, **staging is what satisfies the hook and `git add` of a path another session is writing is also the capture vector**, so captured content arrives in the index looking reviewed. The hook does not prevent the capture; it converts an invisible one into a visible one, and only for a party who actually performs the `git diff --cached` read. That step is unenforceable — § *Loudness is a property of a PATH*: the alarm reaches an observer who must choose to look.
 
 **Method note.** This narrowing exists only because two sessions' observations had **different scopes** — one staged, one unstaged. Two sessions reporting the same capture state would have agreed and narrowed nothing, and the agreement would have been indistinguishable from corroboration at the point of use. Check independence, not agreement.
+
+### Three instruments, three parties, no overlap
+
+`codescout-dd` contributed a third, from the **staging** side. Theirs was a *file-count* mismatch, not a line-count one: they had staged six paths and named all six in a `git add --`, then `git diff --cached --name-status` returned **five**. Same epistemics as mine — only the author holds the expectation — but a different observable, and it fires where mine cannot, because a **staged** capture leaves no line-count anomaly at all: their content was intact, the whole entry had simply left the index.
+
+| instrument | who can run it | sees | blind to |
+|---|---|---|---|
+| commit `--stat` file list | the **capturing** session | that an unexpected file is in the commit | whose content it is |
+| line-count mismatch on your own path | the **captured** session | that your own file lost changes you wrote | anything outside your path |
+| index file-count mismatch | the **captured** session, when the path had been staged | that a path left your index | line-level content, which is intact |
+
+**Corrected by `codescout-dd` after the mechanism was settled:** they first offered the third row as "available to the staging side", implying something about staging behaviour. Under the real mechanism that is too narrow — their count moved because the **whole file left their index when a peer committed it**, not because staging did anything unusual. The detector still fires and is still author-only, but the line-count check is **the more general of the two**, since it works whether or not the file was staged.
+
+None subsumes another, and no single session can run more than two. That is the § *Observer Blindness* shape rather than defence-in-depth: the three views are **disjoint**, so a checkout with only one party watching is uncovered in two directions regardless of how carefully that party watches.
+
+**The direction argument generalises past this class**, which is `codescout-dd`'s observation and worth keeping: *every* pre-commit cleanliness check is monotone under content **leaving** your tree, so the whole family is blind in exactly one direction by construction. `CLAUDE.md` § *Testing Discipline* states the law; the operational form is that **"is my tree clean enough to commit?" cannot find a capture and "is this the amount of change I wrote?" can.**
+
+### SETTLED by the capturing session — and the guard passed BECAUSE of the capturing act
+
+The elimination above narrowed to two routes and declined to guess between them. `f13f8169` answered directly, which is the only instrument that closes it (§ *never close an authorship question by elimination — identify positively*):
+
+> `git add` of three paths, then a pathspec commit of those same three. **No `-A`, no `-u`, no `--no-verify`.** Every path was one they had their own edits in — `docs/trackers/bug-fix-session-log.md` included, where they were appending a sibling datapoint to `F-102` that same turn.
+
+**Two corrections to the analysis above, both mine.**
+
+**(1) The route table's pathspec row is wrong about `--no-verify`.** It reasoned that a pathspec commit needs `--no-verify` to get past `unreviewed-content`. It does not: **staging first satisfies the check, and a pathspec commit then passes cleanly.** The hook's condition is *no unstaged content at the committed paths* — it is indifferent to how the content got staged.
+
+**(2) Which yields the inversion.** `git add <path>` stages the **whole file**. The capturing session's `git add` moved another session's lines from the worktree side to the **index** side — which is precisely what makes `unreviewed-content`'s condition true. `scripts/pre-commit-unreviewed-content.sh:27-30` compares the committing blob against the real index blob per path, and they are equal exactly when what is committed is what was staged. **Stage less and it refuses; stage everything at those paths, foreign content included, and it passes.** So the guard is not merely blind here: *the act that defeats it is the act it asks for*.
+
+**But this is a DOCUMENTED blind spot, not a discovered one, and the distinction changes what to do about it.** Read at the bytes, `scripts/pre-commit-unreviewed-content.sh:32-37`, under its own heading `WHAT IT DOES NOT CATCH`:
+
+> A peer editing a file you staged AND committing it themselves; anything outside the paths named in the commit; and any capture in an ordinary index commit, where the content was staged and is presumed reviewed. It narrows the window, it does not close it — **only a per-session worktree does that.**
+
+That is tonight's case verbatim, written before any of tonight's instances, **and it names the remedy in the same breath.** So the correct classification is `Mechanism status: none yet` worklist material — the gap was known, stated at the enforcement site, and not built. The inversion above is a sharper statement of a limitation its author had already published; it is not new information about the hook. Three sessions then rediscovered it empirically in one evening, which is itself the finding: **the limitation is published to an audience that reads the hook's source, and the parties who need it are the ones tripping over it at commit time** — § *Observer Blindness*'s bound-in-the-enforcement-layer shape, holding about this very file.
+
+**And the step that would have caught it was performed in a narrower form.** The prescribed sequence's step 4 is `git add <paths> && git diff --cached && git commit`. The capturing session ran `git diff --cached --name-only` — by their own account, having run the full form on their earlier commits that day. That variant answers *"which files"* and never *"whose lines"*: it listed eight paths, five of them other sessions', and they correctly excluded those from the pathspec while learning nothing whatever about the three they kept. The full diff would have printed `+## W-99` on screen.
+
+That is worth stating as a rule rather than an anecdote, because `--name-only` looks like the same check economised: **the file list is not a review.** Staging is what makes content *reviewable*; only reading the content reviews it, and on a shared checkout the file list is the one projection guaranteed to omit the thing you are looking for — a captured file appears in it under a name you recognise, because it is a file you were also editing.
+
+**A corollary for the two-call window.** `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md` was drafted from this instance claiming the window *caused* the capture. It did not: `git add` on a shared file takes a peer's edits whether or not the peer is mid-protocol, so a complete single-call edit would have gone identically. The window **widens exposure and is not the cause**, the remedies do not overlap, and that file has been corrected to say so before it was first committed.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because

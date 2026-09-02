@@ -1121,9 +1121,24 @@ Temporarily restore `.into_iter().next()` on the chunk list. Run `cargo test --l
 > assertion firing (wanted), a compile error from a peer's in-flight edit, and an unrelated panic.
 > The green baseline discriminates the compile error, the named panic discriminates the third, and
 > the empty `git diff` proves no residue was left behind. A single red would have been worthless
-> here. The mutation window was announced to the one peer sharing this tree beforehand, so a red
-> observed inside it would have had an author rather than being the anonymous kind recorded in
-> `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`.
+> here.
+>
+> **CORRECTION, same session.** This annotation first read *"the mutation window was announced to
+> the one peer sharing this tree beforehand, so a red observed inside it would have had an
+> author."* **That was false, and the way it was false is the useful part.** The announcement was
+> sent, and `SendMessage` returned `{"success": true, …  → codescout-20}` — which reads as
+> delivered. It was **held for the recipient user's approval** and never reached that session; the
+> `[Cross-session delivery notice]` saying so arrived **asynchronously, after this text was
+> committed**. So the red *would* have been the anonymous kind recorded in
+> `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and the
+> author believed otherwise on the strength of a success return.
+>
+> The practice is still right — announce before mutating a shared tree — but **treat the send as
+> unconfirmed until a reply arrives.** A `success` return means *accepted for delivery*, not
+> *delivered*, and there is no synchronous signal that distinguishes them. This is why
+> `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Instance 5* is
+> titled "an announce channel that was used and did not help" — that instance recorded the
+> symptom; this one names the mechanism.
 
 - [x] **Step 6: Gate and commit**
 
