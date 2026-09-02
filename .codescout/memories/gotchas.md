@@ -185,6 +185,27 @@ somebody already suspects, which is the state this whole section exists because 
 *(Re-measured 15:4x, after the 15:35 build: **10 servers — 9 stale, 1 current — plus 3 stale
 muxes**, against 10 servers + 2 muxes at 15:2x. Consistent with the floor claim; the mux count
 moved because muxes are use-coupled, the server count did not because they are not.)*
+
+*(Re-measured 2026-09-02 20:13:44, after a 20:06:36 release build: **17 servers — 11
+stale, 6 current — and 3 muxes, 0 stale.** All four numbers taken in ONE sweep rather
+than assembled from two readings, for the reason the last paragraph gives.*
+
+*THE MUX HALF IS NOW DEMONSTRATED RATHER THAN DESCRIBED. 2026-09-01 15:4x found 3 of 3
+muxes STALE; a day later the same population size is 3 of 3 FRESH. Same count, opposite
+state — that is what use-coupled recycling looks like from outside, and no single
+reading could have shown it. The server half held across a day boundary rather than
+merely across ninety minutes: 10 → 17 total, 9 → 11 stale.*
+
+*THE AUTHOR'S OWN SERVER WAS FRESH THIS TIME, which sharpens the paragraph above rather
+than contradicting it: an explicit `/mcp` had just run. The rebuild is not what moves a
+session out of the stale population — the reconnect is. "I just rebuilt" is not the
+escape; "I just reconnected" is, and only for the session that ran it.*
+
+*AND THE WINDOW MOVED UNDER THE INSTRUMENT, in miniature. A first reading five minutes
+earlier returned 12 stale servers with no denominator captured. Re-running only to fetch
+the denominator would have spliced two windows into one apparent observation, so the
+whole sweep was retaken instead — and the stale count had already moved 12 → 11 by then.
+Read every figure in this section as an instant, never a level.)*
 ## RemoteEmbedder Dimensions
 
 `RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call
