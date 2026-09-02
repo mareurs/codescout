@@ -51,7 +51,20 @@ def main():
                 continue
             # Pre-change the tool returns artifacts, not chunks: a path match with
             # no line range cannot prove the ENTRY was found, so it is not a hit.
+            #
+            # Read BOTH shapes. The baseline run scored against a top-level
+            # `start_line`, which is where this harness expected the field; Task 10
+            # shipped it under `matched` alongside `end_line`, `entry_token` and a
+            # snippet. Reading only one shape makes the scorer blind rather than
+            # conservative -- measured 2026-09-02, every case returned rank None
+            # while the rank-1 hit for AE-1 was the correct file with
+            # `matched.start_line: 7793`. `search_live` does not cover this: the
+            # search path was alive, the FIELD was missing. Accepting both means a
+            # future shape change moves the number for a real reason, not because
+            # the scorer was re-pointed.
             line = r.get("start_line")
+            if line is None:
+                line = (r.get("matched") or {}).get("start_line")
             if line is not None and entry_at(path, line) == c["expect_entry"]:
                 rank = i
                 break

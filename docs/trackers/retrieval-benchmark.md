@@ -208,6 +208,49 @@ relative — known gap.
 ### 2026-09-02 — artifact-path baseline
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
+
+### 2026-09-02 — artifact-path after chunk-grain (Tasks 2–11): **still 0/12, for a different reason**
+
+`hits@5 **0/12**, MRR **0.0**, `search_live: true`` — numerically identical to the baseline
+above, and **not** the same result. The baseline scored 0 because no hit carried a line
+range at all. This run scores 0 because the range it now carries is in the **wrong
+coordinate space**.
+
+| | baseline | after |
+|---|---|---|
+| hits@5 | 0/12 | 0/12 |
+| MRR | 0.0 | 0.0 |
+| `search_live` | true | true |
+| cause | no `start_line` on any hit | `matched.start_line` is body-relative, published as a file line |
+
+**Config, because a run without it is not comparable to anything.** Host `ripper`, model
+`CodeRankEmbed` (`LIBRARIAN_EMBED_MODEL`), backend **Qdrant** (the `server-stack` release
+default; `CODESCOUT_ARTIFACT_BACKEND` unset), tree `experiments` at `488192e8`, suite
+`scripts/tc-suites/artifact-entries.json`, result
+`~/.claude/jobs/ffb95976/tmp/artifact-bench-after.json`.
+
+**Two instrument facts this run established, both of which changed the number's meaning:**
+
+1. **`--bin` must be the RELEASE binary.** The harness defaults to `target/debug/codescout`,
+   which is a lean build: no `server-stack`, so `ArtifactBackend::resolve` returns
+   sqlite-vec, whose `artifact_vec_v2` is empty on this machine. The debug binary returns
+   `count: 0` with `hints: {}` and exit 0 — no error, no hint, indistinguishable from "the
+   corpus does not cover this query". Every future run of this suite must pass
+   `--bin target/release/codescout` or it measures the wrong process.
+2. **The scorer read the wrong field, and its positive control could not tell.** It looked
+   for a top-level `start_line`; Task 10 ships the range under `matched`. `search_live`
+   proves the search path is alive, not that the scored FIELD exists — so a 0/12 from a
+   field-name mismatch is indistinguishable from a retrieval finding. Fixed to accept both
+   shapes, and the fix did **not** move the number, which is what makes the remaining 0/12
+   a real result rather than a repaired one.
+
+**What the 0/12 actually says.** Retrieval is working: `AE-1` ranks the correct artifact
+**#1**. Its reported span is `7793`, the expected entry `W-81` begins at file line `7808`,
+and the artifact's frontmatter closes at line `15` — the offset is exactly the frontmatter
+length, so the published range lands inside the *previous* entry. Filed as
+`docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+The suite cannot score above 0 until that is fixed, and it should be re-run immediately
+afterwards — this is the first run where a non-zero number is even reachable.
 ### 2026-08-30 — D2 resolved: prefix removed, boost 3.0→5.0 — and the precedence list below was missing a layer
 
 **Changed, in `~/.claude/settings.json` § `env`:**
