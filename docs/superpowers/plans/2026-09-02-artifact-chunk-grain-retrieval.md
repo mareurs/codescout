@@ -1,0 +1,1715 @@
+# Artifact Chunk-Grain Retrieval Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make `artifact(find, semantic=…)` return the *entry* that matched — file, line range, matched text and citable `PREFIX-N` token — instead of ranking whole artifacts by their preamble.
+
+**Architecture:** Re-key `artifact_vec` from artifact ids to opaque chunk ids (no `vec0` schema change — the column is already `TEXT PRIMARY KEY`), add an `artifact_chunk` side table holding line ranges and entry tokens, and port the shape `code_chunk`/`code_vec` already uses for 33,032 markdown chunks in the same process. One new parameter, `max_per_artifact`, serves both consumers: `context` passes 1 (artifact grain, behaviour preserved), `find` passes 3 (chunk grain, no ledger monopolises a page).
+
+**Tech Stack:** Rust, `rusqlite` 0.39 (bundled SQLite + `sqlite-vec`), `uuid` 1.20 (v4), `codescout-embed` chunker, `pulldown-cmark`.
+
+**Spec:** `docs/superpowers/specs/2026-09-02-artifact-chunk-grain-retrieval-design.md` (committed `47ac0937`, patch-id `e4a55730ced544ba355c5b4281722ca132e05b14`)
+
+**Bug:** `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (artifact `7a37f1179d2f0e21`)
+
+## Global Constraints
+
+- **The chunk budget does NOT change.** It stays `512` tokens / 2,048 chars. `chunk_size_for_model` returns a *ceiling*, not a target; `AST_CHUNK_TARGET = 3000` and the benchmark-backed `STACK_CHUNK_TARGET = 1200` are the project's deliberate window. A task that raises it is wrong — see the spec's § *Retraction*.
+- **Next schema version is 11.** `schema_version` is already at 10 (`src/librarian/catalog/mod.rs:244`). Migrations are additive and idempotent inside `apply_migrations_in_txn` (`mod.rs:131`), using `CREATE TABLE IF NOT EXISTS` then `INSERT OR IGNORE INTO schema_version (version) VALUES (11)`.
+- **Gate before every commit**, in this order, the two test lanes chained with `;` **never** `&&`:
+  ```
+  cargo fmt
+  cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+  cargo test --workspace --no-default-features ; cargo test --workspace
+  ```
+- **Git on this repo has 3 worktrees.** Bare `git commit` is blocked by a guard. Always `git -C /home/marius/work/claude/codescout commit …`.
+- **Never `git add -A`/`-u`/`.`** — this checkout is shared with other live sessions. Stage by explicit path only; a pre-commit hook refuses an index carrying another session's paths.
+- **Iron Laws:** use `symbols`/`edit_code` for Rust, `read_markdown`/`edit_markdown` for markdown, never an unbounded `run_command` pipe.
+- **Any bug noticed goes in `docs/issues/`** the moment it is noticed, with exactly one `cluster/<slug>` tag written through the catalog (`artifact(action="update", …, patch={tags:[…]})`), never a raw frontmatter edit.
+
+## Entry condition — NOT a task in this plan
+
+**P1 — the vector-coverage hole.** 1,406 of 4,525 catalogued artifacts have a vector (31.1%); within codescout, the repo *with* a configured embedder, 717 of 1,357 have none (52.8%). The cause is **not established**. The pattern fits `docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md` (reindex does not re-embed unchanged content without `force`, so runs where the embedder was unavailable leave permanent holes), but that is a hypothesis, not a reproduction.
+
+This is deliberately not a task here: a no-placeholder TDD task cannot be written for an investigation whose answer is unknown. It has its own bug file and must be diagnosed **before Task 11 ships**, because a backfill that reproduces the hole delivers chunk-grain retrieval that is dark over half this repo.
+
+Tasks 1–10 and 12 do not depend on it.
+
+---
+
+
+## Deferred — named so nobody reads its absence as coverage
+
+**Qdrant parity is NOT in this plan.** Every task above changes the sqlite-vec
+backend. `src/librarian/artifact_store.rs:216` is the Qdrant write path and is
+left untouched, so on a Qdrant-backed catalog `artifact(find, semantic=)` keeps
+its present artifact-grain, first-chunk-only behaviour.
+
+This matches the spec's open question 4, which records the decision as
+undecided rather than made. It is written here because a plan that silently
+covers one of two backends looks complete: the tests pass, the gate is green,
+and the second backend fails only in production on a machine nobody is testing
+on.
+
+**Before shipping, establish which backend this deployment actually uses** —
+and if it is Qdrant, this plan does not apply to it yet.
+## File Structure
+
+| File | Responsibility |
+|---|---|
+| `crates/codescout-embed/src/chunker.rs` | **Modify.** Add heading-depth parameter to `split_markdown`. |
+| `src/librarian/entry_token.rs` | **Create.** Pure parsing: which `PREFIX-N` entry encloses a line. Fenced-code aware. |
+| `src/librarian/catalog/mod.rs` | **Modify.** Schema v11 in `apply_migrations_in_txn`. |
+| `src/librarian/catalog/chunk.rs` | **Create.** `artifact_chunk` CRUD, chunk-id allocation, per-artifact replace. |
+| `src/librarian/indexer.rs` | **Modify.** Emit every chunk; write chunk rows; backfill runner. |
+| `src/librarian/catalog/gc.rs` | **Modify.** Vector cascade fans out over an artifact's chunks. |
+| `src/librarian/catalog/find.rs` | **Modify.** `semantic_find` gains `max_per_artifact`; hits carry chunk fields. |
+| `src/librarian/tools/context.rs` | **Modify.** Pass `max_per_artifact = 1`. |
+| `src/librarian/tools/artifact.rs` | **Modify.** Chunk-grain result shape for `find(semantic=)`. |
+| `scripts/tc-suites/artifact-entries.json` | **Create.** 12 artifact-retrieval test cases with entry-token ground truth. |
+| `scripts/run-artifact-bench.py` | **Create.** Scores the suite against the live artifact path. |
+
+---
+
+## Task 1: Artifact-TC benchmark suite and BASELINE capture
+
+Runs first, before any behaviour changes, because a before/after comparison needs the "before" measured on the unmodified implementation. `scripts/run-tc-benchmark.py`'s 25-TC suite scores `bench_<model>_code_chunks` only — the path being changed has no instrument today.
+
+**Files:**
+- Create: `scripts/tc-suites/artifact-entries.json`
+- Create: `scripts/run-artifact-bench.py`
+- Modify: `docs/trackers/retrieval-benchmark.md` (via `artifact` tools — it is augmented, do NOT edit the file directly)
+
+**Interfaces:**
+- Produces: `scripts/run-artifact-bench.py --suite <path> --out <json>` writing `{"suite": str, "n": int, "hits_at_5": int, "mrr": float, "cases": [{"id","query","expect_entry","expect_path","rank"}]}`
+
+- [ ] **Step 1: Write the suite file with 12 cases**
+
+Ground truth is an entry token plus its defining file. Pick queries whose answer is unambiguous and lives **after** the first heading — that is the property under test.
+
+```json
+{
+  "suite": "artifact-entries",
+  "derived": "2026-09-02, entries verified present by `grep -n '## W-81' docs/trackers/bug-fix-session-log.md`",
+  "cases": [
+    {"id": "AE-1", "query": "choosing where a gate lives by how fast it reports",
+     "expect_entry": "W-81", "expect_path": "docs/trackers/bug-fix-session-log.md"},
+    {"id": "AE-2", "query": "the parameter your own context supplies for free",
+     "expect_entry": "OB-1", "expect_path": "docs/trackers/observer-blindness.md"},
+    {"id": "AE-3", "query": "no Git for Windows means no commands at all",
+     "expect_entry": "WIN-36", "expect_path": "docs/trackers/windows-platform-support.md"},
+    {"id": "AE-4", "query": "augmented tracker params are a citation surface",
+     "expect_entry": "SD-11", "expect_path": "docs/trackers/structural-debt-refactor.md"}
+  ]
+}
+```
+
+**Before writing the remaining 8 cases, verify each entry exists and sits after the first heading:**
+
+```bash
+for e in W-81 OB-1 WIN-36 SD-11; do
+  grep -rn "^#\{2,4\} $e —" docs/trackers/ | head -1
+done
+```
+
+Add 8 more the same way, spread across at least 4 distinct files, at least 2 of them `docs/issues/` bug files. A case whose entry is in the first chunk is inert for this suite — annotate any you keep as inert so nobody credits it with coverage.
+
+- [ ] **Step 2: Write the scorer**
+
+```python
+#!/usr/bin/env python3
+"""Score artifact-path retrieval against known entry tokens.
+
+Distinct from run-tc-benchmark.py, which scores bench_<model>_code_chunks.
+This one exercises artifact(find, semantic=) — the path with no instrument.
+"""
+import argparse, json, re, subprocess, sys
+
+ENTRY = re.compile(r'^#{2,4}\s+([A-Z]{1,3}-\d+)\s+[—–-]\s')
+
+def entry_at(path, line):
+    """The PREFIX-N entry enclosing 1-indexed `line`, or None."""
+    tok = None
+    with open(path, encoding="utf-8") as fh:
+        for i, text in enumerate(fh, 1):
+            if i > line:
+                break
+            m = ENTRY.match(text)
+            if m:
+                tok = m.group(1)
+    return tok
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--suite", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--bin", default="target/debug/codescout")
+    args = ap.parse_args()
+
+    suite = json.load(open(args.suite))
+    cases, hits, rr = [], 0, 0.0
+    for c in suite["cases"]:
+        proc = subprocess.run(
+            [args.bin, "artifact", "find", "--semantic", c["query"], "--limit", "5", "--json"],
+            capture_output=True, text=True)
+        results = json.loads(proc.stdout or "{}").get("items", [])
+        rank = None
+        for i, r in enumerate(results, 1):
+            path = r.get("rel_path") or r.get("abs_path", "")
+            if not path.endswith(c["expect_path"]):
+                continue
+            # Pre-change the tool returns artifacts, not chunks: a path match with
+            # no line range cannot prove the ENTRY was found, so it is not a hit.
+            line = r.get("start_line")
+            if line is not None and entry_at(path, line) == c["expect_entry"]:
+                rank = i
+                break
+        if rank:
+            hits += 1
+            rr += 1.0 / rank
+        cases.append({**c, "rank": rank})
+
+    out = {"suite": suite["suite"], "n": len(cases),
+           "hits_at_5": hits, "mrr": round(rr / max(len(cases), 1), 4), "cases": cases}
+    json.dump(out, open(args.out, "w"), indent=2)
+    print(f"{out['suite']}: hits@5 {hits}/{len(cases)}  MRR {out['mrr']}")
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+- [ ] **Step 3: Run it against the CURRENT implementation to capture the baseline**
+
+```bash
+cargo build
+python3 scripts/run-artifact-bench.py \
+  --suite scripts/tc-suites/artifact-entries.json \
+  --out /tmp/claude-1000/artifact-bench-baseline.json
+```
+
+**Expected: `hits@5 0/12`, `MRR 0.0`.** Today's results carry no `start_line`, so no case can score. A non-zero baseline means the scorer's hit condition is wrong — fix the scorer, not the expectation.
+
+- [ ] **Step 4: Record the baseline in the benchmark tracker**
+
+The tracker is augmented — write through the catalog, never the file:
+
+```
+artifact(action="find", filter={"rel_path": {"contains": "retrieval-benchmark"}})
+artifact(action="update", id="<id>", patch={body_edits: [{
+  heading: "## History", action: "insert_after", at: "after-heading-line",
+  content: "\n### 2026-09-02 — artifact-path baseline\n\nFirst instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. Suite: `scripts/tc-suites/artifact-entries.json`.\n"}]})
+```
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add scripts/tc-suites/artifact-entries.json scripts/run-artifact-bench.py docs/trackers/retrieval-benchmark.md
+git -C /home/marius/work/claude/codescout commit -m "test(bench): artifact-path retrieval suite, and its 0/12 baseline"
+```
+
+---
+
+## Task 2: `split_markdown` heading-depth parameter
+
+`chunk_markdown` breaks on heading levels 1–6; `split_markdown` on 1–3 only (`chunker.rs:93`). 64 of this corpus's 1,482 defined entries sit at `####`. Do **not** change `split_markdown`'s default — its chunk ids encode `start_line`, so re-chunking would invalidate all 33,032 code-index chunks.
+
+**Files:**
+- Modify: `crates/codescout-embed/src/chunker.rs:83-121`
+- Test: same file, `#[cfg(test)] mod tests`
+
+**Interfaces:**
+- Produces: `pub fn split_markdown_with_depth(source: &str, chunk_size: usize, chunk_overlap: usize, max_heading_depth: usize) -> Vec<RawChunk>`
+- Produces: `pub fn split_markdown(source, chunk_size, chunk_overlap) -> Vec<RawChunk>` — unchanged signature, delegates with `max_heading_depth = 3`
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn split_markdown_default_depth_ignores_h4() {
+    // LOAD-BEARING: `#### D` must NOT start a chunk at the default depth.
+    // The code index's chunk_ids encode start_line, so changing this default
+    // silently invalidates 33,032 existing chunks.
+    let src = "# A\n\ntext\n\n#### D\n\nmore\n";
+    let chunks = split_markdown(src, 10_000, 0);
+    assert_eq!(chunks.len(), 1, "h4 must not split at default depth");
+}
+
+#[test]
+fn split_markdown_with_depth_6_splits_on_h4() {
+    let src = "# A\n\ntext\n\n#### D\n\nmore\n";
+    let chunks = split_markdown_with_depth(src, 10_000, 0, 6);
+    assert_eq!(chunks.len(), 2, "h4 must split at depth 6");
+    assert!(chunks[1].content.starts_with("#### D"));
+    assert_eq!(chunks[1].start_line, 5, "line numbers stay 1-indexed and file-relative");
+}
+
+#[test]
+fn split_markdown_with_depth_3_equals_the_default() {
+    let src = "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz\n\n#### D\n\nw\n";
+    let a = split_markdown(src, 10_000, 0);
+    let b = split_markdown_with_depth(src, 10_000, 0, 3);
+    assert_eq!(a.len(), b.len());
+    for (x, y) in a.iter().zip(b.iter()) {
+        assert_eq!(x.content, y.content);
+        assert_eq!((x.start_line, x.end_line), (y.start_line, y.end_line));
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test -p codescout-embed split_markdown_with_depth`
+Expected: FAIL — `cannot find function split_markdown_with_depth`
+
+- [ ] **Step 3: Implement**
+
+Replace the body of `split_markdown` at `chunker.rs:83`:
+
+```rust
+/// Split markdown by heading boundaries, then apply character limits.
+///
+/// Heading levels 1..=3 start a new section. For a caller that needs deeper
+/// headings to split — the librarian's entry ledgers define entries at `####` —
+/// use [`split_markdown_with_depth`]. The default is 3 and MUST stay 3: the
+/// code index's `chunk_id` encodes `start_line`, so widening it here silently
+/// invalidates every existing code chunk.
+pub fn split_markdown(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawChunk> {
+    split_markdown_with_depth(source, chunk_size, chunk_overlap, 3)
+}
+
+/// [`split_markdown`], with the heading depth that starts a new section made
+/// explicit. `max_heading_depth` is clamped to 1..=6.
+pub fn split_markdown_with_depth(
+    source: &str,
+    chunk_size: usize,
+    chunk_overlap: usize,
+    max_heading_depth: usize,
+) -> Vec<RawChunk> {
+    if source.is_empty() {
+        return vec![];
+    }
+    let depth = max_heading_depth.clamp(1, 6);
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut sections: Vec<(usize, usize)> = vec![];
+    let mut section_start = 0;
+
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 && heading_level(line).is_some_and(|l| l <= depth) {
+            sections.push((section_start, i));
+            section_start = i;
+        }
+    }
+    sections.push((section_start, lines.len()));
+
+    let mut chunks = vec![];
+    for (start, end) in sections {
+        let section_text = lines[start..end].join("\n");
+        if section_text.len() <= chunk_size {
+            chunks.push(RawChunk {
+                content: section_text,
+                start_line: start + 1,
+                end_line: end,
+                metadata: None,
+            });
+        } else {
+            let sub_chunks = split(&section_text, chunk_size, chunk_overlap);
+            for mut sc in sub_chunks {
+                sc.start_line += start;
+                sc.end_line += start;
+                chunks.push(sc);
+            }
+        }
+    }
+    chunks
+}
+
+/// ATX heading level of `line` (1..=6), or `None` when it is not a heading.
+/// Requires the space after the hashes, so `#hashtag` is not a heading.
+fn heading_level(line: &str) -> Option<usize> {
+    let stripped = line.trim_start_matches('#');
+    let hashes = line.len() - stripped.len();
+    (1..=6).contains(&hashes).then_some(hashes).filter(|_| stripped.starts_with(' '))
+}
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test -p codescout-embed split_markdown`
+Expected: PASS, including the four pre-existing `chunk_markdown_*` tests.
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add crates/codescout-embed/src/chunker.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(embed): split_markdown_with_depth, default 3 unchanged"
+```
+
+---
+
+## Task 3: Entry-token extraction
+
+A chunk hit must name a **citable** entry (`bug-fix-session-log:W-81`), which is the unit this project's conventions run on. The token grammar is fixed by the resolver: `[A-Z]{1,3}-\d+`, defined only by a heading of the form `## <ID> — <title>` (token, whitespace, dash, whitespace, text). A table row defines nothing, and a heading inside a fenced code block is an example, not a definition.
+
+**Files:**
+- Create: `src/librarian/entry_token.rs`
+- Modify: `src/librarian/mod.rs` (add `pub mod entry_token;`)
+
+**Interfaces:**
+- Produces: `pub fn entry_tokens_by_line(source: &str) -> Vec<Option<String>>` — one entry per **1-indexed line**, index 0 unused, each holding the token of the innermost entry heading at or above that line.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_heading_defines_the_token_for_every_line_below_it() {
+        let src = "# Log\n\npreamble\n\n## W-81 — a title\n\nbody\n\n## F-3 — another\n\nmore\n";
+        let by_line = entry_tokens_by_line(src);
+        assert_eq!(by_line[3], None, "preamble is outside every entry");
+        assert_eq!(by_line[5].as_deref(), Some("W-81"), "the heading line itself");
+        assert_eq!(by_line[7].as_deref(), Some("W-81"), "body below it");
+        assert_eq!(by_line[11].as_deref(), Some("F-3"), "next entry takes over");
+    }
+
+    #[test]
+    fn only_the_dash_form_defines_an_entry() {
+        // Mirrors get_guide("tracker-conventions") § Entry headings exactly.
+        let src = "## R-91\n\na\n\n### A-9 Addendum\n\nb\n\n| R-5 | row |\n\nc\n";
+        let by_line = entry_tokens_by_line(src);
+        assert_eq!(by_line[3], None, "no title, no dash -> defines nothing");
+        assert_eq!(by_line[7], None, "no dash -> a section ABOUT A-9");
+        assert_eq!(by_line[11], None, "a table row never defines");
+    }
+
+    #[test]
+    fn a_heading_inside_a_fenced_block_is_an_example_not_a_definition() {
+        // LOAD-BEARING: docs teaching the syntax quote real-looking headings.
+        // Counting one would make every guide a ledger. This is the IC-6
+        // "parsers over a namespace owe an escape" case; the fence IS the escape.
+        let src = "# Guide\n\n```\n## W-99 — not real\n```\n\nafter\n";
+        let by_line = entry_tokens_by_line(src);
+        assert_eq!(by_line[4], None, "inside the fence");
+        assert_eq!(by_line[7], None, "and it must not leak past the fence");
+    }
+
+    #[test]
+    fn h4_entries_are_recognised() {
+        // 64 of 1,482 entries in this corpus are defined at ####.
+        let src = "# T\n\n#### BL-71 — deep\n\nbody\n";
+        assert_eq!(entry_tokens_by_line(src)[5].as_deref(), Some("BL-71"));
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib entry_token`
+Expected: FAIL — `unresolved module` / `cannot find function entry_tokens_by_line`
+
+- [ ] **Step 3: Implement**
+
+```rust
+//! Which ledger entry (`W-81`, `BL-71`) encloses a given line of a tracker.
+//!
+//! The grammar is the citation resolver's, not a new one: a token is
+//! `[A-Z]{1,3}-\d+`, and it is DEFINED only by a heading shaped
+//! `## <ID> — <title>` — token, whitespace, dash (— – -), whitespace, text.
+//! A heading with no title defines nothing; a table row defines nothing. See
+//! `get_guide("tracker-conventions")` § Entry headings.
+//!
+//! Fenced code blocks are skipped. Documentation that teaches this syntax
+//! quotes real-looking headings, and counting one would make every guide a
+//! ledger — the fence is the escape this parser owes its namespace.
+
+/// The entry token in scope at each 1-indexed line. Index 0 is unused padding
+/// so callers can index by line number directly.
+pub fn entry_tokens_by_line(source: &str) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = vec![None];
+    let mut current: Option<String> = None;
+    let mut fence: Option<usize> = None;
+
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let ticks = trimmed.chars().take_while(|c| *c == '`').count();
+        if ticks >= 3 {
+            match fence {
+                // A closing fence must be at least as long as the opener, so a
+                // ``` inside a ```` block does not close it.
+                Some(open) if ticks >= open => fence = None,
+                Some(_) => {}
+                None => fence = Some(ticks),
+            }
+            out.push(current.clone());
+            continue;
+        }
+        if fence.is_none() {
+            if let Some(tok) = heading_defines_entry(line) {
+                current = Some(tok);
+            }
+        }
+        out.push(current.clone());
+    }
+    out
+}
+
+/// The token this line DEFINES, if it is an entry-defining heading.
+fn heading_defines_entry(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("##")?;
+    let rest = rest.trim_start_matches('#');
+    let rest = rest.strip_prefix(' ')?;
+    let (token, tail) = rest.split_once(char::is_whitespace)?;
+
+    let (alpha, digits) = token.split_once('-')?;
+    if alpha.is_empty() || alpha.len() > 3 || !alpha.chars().all(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    // A dash with text after it is what separates a definition from a mention.
+    let tail = tail.trim_start();
+    let tail = tail
+        .strip_prefix('—')
+        .or_else(|| tail.strip_prefix('–'))
+        .or_else(|| tail.strip_prefix('-'))?;
+    (!tail.trim().is_empty()).then(|| token.to_string())
+}
+```
+
+Add to `src/librarian/mod.rs`:
+
+```rust
+pub mod entry_token;
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib entry_token`
+Expected: PASS, 4 tests.
+
+- [ ] **Step 5: Verify against the real corpus (not just fixtures)**
+
+```bash
+cargo run --quiet --bin codescout -- --version >/dev/null
+```
+
+Then, in a scratch test, assert the parser finds **1,482** defined entries across `docs/trackers` and `docs/issues` — the number the spec derived. A different number means the parser and the spec's population disagree; reconcile before continuing, and state which is right.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/entry_token.rs src/librarian/mod.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(librarian): entry_tokens_by_line — fence-aware, definition-rule exact"
+```
+
+---
+
+## Task 4: Schema v11 — `artifact_chunk` and `artifact_vec_v2`
+
+**Files:**
+- Modify: `src/librarian/catalog/mod.rs:244` (immediately after the v10 stamp, inside `apply_migrations_in_txn`)
+- Test: `src/librarian/catalog/mod.rs` `#[cfg(test)] mod tests`
+
+**Interfaces:**
+- Produces: tables `artifact_chunk` and `artifact_vec_v2`; `schema_version` max becomes 11.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn v11_creates_the_chunk_table_and_stamps_the_version() {
+    let cat = Catalog::open_in_memory().unwrap();
+    let v: i64 = cat.conn
+        .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(v, 11);
+    let n: i64 = cat.conn
+        .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn v11_is_idempotent() {
+    let cat = Catalog::open_in_memory().unwrap();
+    apply_migrations_in_txn(&cat.conn, None).unwrap();
+    let v: i64 = cat.conn
+        .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(v, 11, "re-running must not advance or duplicate");
+}
+
+#[test]
+fn deleting_an_artifact_cascades_its_chunk_rows() {
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+    cat.conn.execute(
+        "INSERT INTO artifact_chunk
+           (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+         VALUES ('c1','a',0,1,9,NULL,'body','h')", []).unwrap();
+    cat.conn.execute("DELETE FROM artifact WHERE id='a'", []).unwrap();
+    let n: i64 = cat.conn
+        .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "FK cascade must remove the chunk rows");
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib v11_creates_the_chunk_table`
+Expected: FAIL — `assertion failed: left == right` (10 vs 11), then `no such table: artifact_chunk`
+
+- [ ] **Step 3: Implement**
+
+Insert directly after the `VALUES (10)` stamp in `apply_migrations_in_txn`:
+
+```rust
+// v11: chunk-grain artifact embeddings.
+//
+// `artifact_vec` needs no schema change — its `id` is already TEXT PRIMARY KEY
+// and nothing requires it to DENOTE an artifact. v11 adds the side table and a
+// second vec table; Task 11 backfills v2 and swaps. Keeping both alive is what
+// avoids a dark window over ~90,500 embeds.
+//
+// `chunk_id` is an OPAQUE uuid, deliberately not derived from artifact_id:
+// `id = sha256(abs_path)`, so archiving re-keys an artifact, and a derived
+// chunk id would make every archive move an O(chunks) loop through
+// `gc::migrate_vec_id` (which exists only because vec0 rejects UPDATE ... SET id).
+conn.execute(
+    "CREATE TABLE IF NOT EXISTS artifact_chunk (
+       chunk_id     TEXT PRIMARY KEY,
+       artifact_id  TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+       chunk_ix     INTEGER NOT NULL,
+       start_line   INTEGER NOT NULL,
+       end_line     INTEGER NOT NULL,
+       entry_token  TEXT,
+       content      TEXT NOT NULL,
+       content_hash TEXT NOT NULL,
+       UNIQUE (artifact_id, chunk_ix)
+     )",
+    [],
+)?;
+conn.execute(
+    "CREATE INDEX IF NOT EXISTS idx_artifact_chunk_artifact
+       ON artifact_chunk(artifact_id)",
+    [],
+)?;
+conn.execute(
+    "CREATE VIRTUAL TABLE IF NOT EXISTS artifact_vec_v2 USING vec0(
+       id        TEXT PRIMARY KEY,
+       embedding FLOAT[768]
+     )",
+    [],
+)?;
+conn.execute(
+    "INSERT OR IGNORE INTO schema_version (version) VALUES (11)",
+    [],
+)?;
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib v11`
+Expected: PASS, 3 tests. Also run the full catalog module: `cargo test --lib librarian::catalog`
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/catalog/mod.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(catalog): schema v11 — artifact_chunk + artifact_vec_v2"
+```
+
+---
+
+## Task 5: `artifact_chunk` write path
+
+**Files:**
+- Create: `src/librarian/catalog/chunk.rs`
+- Modify: `src/librarian/catalog/mod.rs` (add `pub mod chunk;`)
+
+**Interfaces:**
+- Consumes: `entry_token::entry_tokens_by_line` (Task 3), `split_markdown_with_depth` (Task 2)
+- Produces:
+  ```rust
+  pub struct ChunkRow {
+      pub chunk_id: String,
+      pub artifact_id: String,
+      pub chunk_ix: usize,
+      pub start_line: usize,
+      pub end_line: usize,
+      pub entry_token: Option<String>,
+      pub content: String,
+      pub content_hash: String,
+  }
+  pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<ChunkRow>;
+  pub fn replace_chunks(cat: &Catalog, artifact_id: &str, rows: &[ChunkRow]) -> Result<Vec<ChunkRow>>;
+  pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>>;
+  ```
+  `replace_chunks` returns the rows **as stored** — chunk ids for unchanged `(artifact_id, chunk_ix, content_hash)` triples are preserved, so a re-index does not churn vectors.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn build_chunks_carries_line_ranges_and_entry_tokens() {
+    let body = "# Log\n\npreamble\n\n## W-81 — a title\n\nbody text\n";
+    let rows = build_chunks("a", body, 2048);
+    assert!(rows.len() >= 2, "preamble and entry are separate chunks");
+    assert_eq!(rows[0].entry_token, None, "the preamble is inside no entry");
+    let w = rows.iter().find(|r| r.entry_token.as_deref() == Some("W-81")).unwrap();
+    assert!(w.start_line <= 5 && w.end_line >= 7, "range brackets the entry");
+}
+
+#[test]
+fn replace_chunks_preserves_ids_for_unchanged_chunks() {
+    // This is what stops a re-index re-embedding an untouched 766 KB tracker.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let first = build_chunks("a", "# T\n\nx\n\n## W-1 — t\n\ny\n", 2048);
+    let stored1 = replace_chunks(&cat, "a", &first).unwrap();
+    let stored2 = replace_chunks(&cat, "a", &first).unwrap();
+    assert_eq!(
+        stored1.iter().map(|r| &r.chunk_id).collect::<Vec<_>>(),
+        stored2.iter().map(|r| &r.chunk_id).collect::<Vec<_>>(),
+        "identical content must keep identical chunk ids"
+    );
+}
+
+#[test]
+fn replace_chunks_drops_chunks_that_no_longer_exist() {
+    // Absence assertion — pair it with the positive leg below, or a
+    // replace that deletes EVERYTHING also passes.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let long = build_chunks("a", "# T\n\n## A-1 — x\n\na\n\n## A-2 — y\n\nb\n", 2048);
+    replace_chunks(&cat, "a", &long).unwrap();
+    let short = build_chunks("a", "# T\n\n## A-1 — x\n\na\n", 2048);
+    replace_chunks(&cat, "a", &short).unwrap();
+    let stored = chunks_for(&cat, "a").unwrap();
+    assert_eq!(stored.len(), short.len(), "shrunk body drops the trailing chunks");
+    assert!(
+        stored.iter().any(|r| r.entry_token.as_deref() == Some("A-1")),
+        "and KEEPS the surviving one — without this the test passes on total deletion"
+    );
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib catalog::chunk`
+Expected: FAIL — `unresolved module`
+
+- [ ] **Step 3: Implement**
+
+```rust
+//! `artifact_chunk` rows: the line-anchored, entry-tagged pieces an artifact is
+//! embedded as. One row per chunk; `artifact_vec_v2` is keyed by `chunk_id`.
+
+use anyhow::Result;
+use sha2::{Digest, Sha256};
+
+use crate::librarian::catalog::Catalog;
+use crate::librarian::entry_token::entry_tokens_by_line;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkRow {
+    pub chunk_id: String,
+    pub artifact_id: String,
+    pub chunk_ix: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub entry_token: Option<String>,
+    pub content: String,
+    pub content_hash: String,
+}
+
+/// Chunk `body` at the librarian's grain: heading depth 6, so `####`-defined
+/// entries start their own chunk. `chunk_size` is the CHARACTER budget and
+/// stays 2,048 (512 tokens) — see the plan's Global Constraints before
+/// touching it.
+pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<ChunkRow> {
+    let tokens = entry_tokens_by_line(body);
+    codescout_embed::chunker::split_markdown_with_depth(body, chunk_size, 0, 6)
+        .into_iter()
+        .enumerate()
+        .map(|(ix, raw)| {
+            let mut hasher = Sha256::new();
+            hasher.update(raw.content.as_bytes());
+            ChunkRow {
+                // Placeholder — replace_chunks assigns or preserves the real id.
+                chunk_id: String::new(),
+                artifact_id: artifact_id.to_string(),
+                chunk_ix: ix,
+                entry_token: tokens.get(raw.start_line).cloned().flatten(),
+                start_line: raw.start_line,
+                end_line: raw.end_line,
+                content: raw.content,
+                content_hash: format!("{:x}", hasher.finalize()),
+            }
+        })
+        .collect()
+}
+
+/// Replace an artifact's chunk rows, preserving `chunk_id` wherever
+/// `(chunk_ix, content_hash)` is unchanged so untouched chunks keep their
+/// vectors. Returns the rows as stored.
+pub fn replace_chunks(
+    cat: &Catalog,
+    artifact_id: &str,
+    rows: &[ChunkRow],
+) -> Result<Vec<ChunkRow>> {
+    let existing = chunks_for(cat, artifact_id)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let reuse = existing
+            .iter()
+            .find(|e| e.chunk_ix == row.chunk_ix && e.content_hash == row.content_hash)
+            .map(|e| e.chunk_id.clone());
+        let mut stored = row.clone();
+        stored.chunk_id = reuse.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        out.push(stored);
+    }
+
+    cat.conn
+        .execute("DELETE FROM artifact_chunk WHERE artifact_id = ?1", [artifact_id])?;
+    let mut stmt = cat.conn.prepare(
+        "INSERT INTO artifact_chunk
+           (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?;
+    for r in &out {
+        stmt.execute(rusqlite::params![
+            r.chunk_id, r.artifact_id, r.chunk_ix as i64, r.start_line as i64,
+            r.end_line as i64, r.entry_token, r.content, r.content_hash
+        ])?;
+    }
+    Ok(out)
+}
+
+/// An artifact's chunk rows, ordered by `chunk_ix`.
+pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
+    let mut stmt = cat.conn.prepare(
+        "SELECT chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
+                content, content_hash
+           FROM artifact_chunk WHERE artifact_id = ?1 ORDER BY chunk_ix",
+    )?;
+    let rows = stmt
+        .query_map([artifact_id], |r| {
+            Ok(ChunkRow {
+                chunk_id: r.get(0)?,
+                artifact_id: r.get(1)?,
+                chunk_ix: r.get::<_, i64>(2)? as usize,
+                start_line: r.get::<_, i64>(3)? as usize,
+                end_line: r.get::<_, i64>(4)? as usize,
+                entry_token: r.get(5)?,
+                content: r.get(6)?,
+                content_hash: r.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+```
+
+Add `pub mod chunk;` to `src/librarian/catalog/mod.rs`.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib catalog::chunk`
+Expected: PASS, 3 tests.
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/catalog/chunk.rs src/librarian/catalog/mod.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(catalog): artifact_chunk write path, id-preserving on re-index"
+```
+
+---
+
+## Task 6: Indexer emits every chunk
+
+**Files:**
+- Modify: `src/librarian/indexer.rs:54-75` (`embed_queue_item`), `:249-253` and `:284-288` (the two enqueue sites), `:22` (`EmbedQueueItem`)
+- Test: `src/librarian/indexer.rs` `#[cfg(test)] mod tests`
+
+**Interfaces:**
+- Consumes: `catalog::chunk::{build_chunks, replace_chunks, ChunkRow}` (Task 5)
+- Produces: `pub type EmbedQueueItem = (String, Option<String>, String);` **unchanged shape**, but element 0 is now a `chunk_id` rather than an artifact id, and there are N per artifact.
+- Produces: `fn embed_queue_items(cat: &Catalog, id: &str, title: Option<String>, body: &str) -> Result<Vec<EmbedQueueItem>>`
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn embed_queue_items_emits_every_chunk_not_just_the_first() {
+    // The regression test for this whole plan. Mutating the implementation back
+    // to `.next()` must fail HERE.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
+    let items = embed_queue_items(&cat, "a", Some("Log".into()), body).unwrap();
+    assert!(items.len() >= 3, "preamble + two entries, got {}", items.len());
+    let texts: Vec<&str> = items.iter().map(|(_, _, t)| t.as_str()).collect();
+    assert!(texts.iter().any(|t| t.contains("alpha")), "W-1's body must be embedded");
+    assert!(texts.iter().any(|t| t.contains("beta")), "W-2's body must be embedded");
+}
+
+#[test]
+fn embed_queue_items_keys_on_chunk_ids_that_exist_in_artifact_chunk() {
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let items = embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nx\n").unwrap();
+    for (chunk_id, _, _) in &items {
+        let n: i64 = cat.conn
+            .query_row("SELECT COUNT(*) FROM artifact_chunk WHERE chunk_id = ?1",
+                       [chunk_id], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "every queued id must be a real chunk row");
+    }
+}
+
+#[test]
+fn a_whitespace_only_section_is_dropped_without_dropping_the_batch() {
+    // The embedder's guard bails the WHOLE batch on one empty input
+    // (archive/2026-05-17-reindex-embedding-dim-mismatch.md). With N chunks the
+    // filter has to be per-chunk, or one blank section aborts a full reindex.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let body = "# T\n\n## W-1 — real\n\ncontent\n\n##    \n\n\n\n## W-2 — also real\n\nmore\n";
+    let items = embed_queue_items(&cat, "a", None, body).unwrap();
+    assert!(!items.is_empty(), "the real chunks survive");
+    assert!(items.iter().all(|(_, _, t)| !t.trim().is_empty()),
+            "no empty text may reach the embedder");
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib indexer::tests::embed_queue_items`
+Expected: FAIL — `cannot find function embed_queue_items`
+
+- [ ] **Step 3: Implement**
+
+Replace `embed_queue_item` (`indexer.rs:54-75`) with:
+
+```rust
+/// Build the embed-queue entries for `body`: ONE PER CHUNK, keyed by chunk id.
+///
+/// Writes the artifact's `artifact_chunk` rows as a side effect, because the
+/// chunk ids the queue is keyed on are assigned there — the queue and the rows
+/// cannot be built independently without the two disagreeing.
+///
+/// Empty/whitespace-only chunks are filtered PER CHUNK, not per artifact: the
+/// embedder's guard bails the WHOLE batch on a single empty input (see
+/// `docs/issues/archive/2026-05-17-reindex-embedding-dim-mismatch.md`), and
+/// with N chunks per artifact one blank section would otherwise abort an entire
+/// bulk reindex.
+///
+/// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
+/// path and the forced-re-embed path through the unchanged-row early return.
+/// Keeping it in one place is what stops those two from drifting apart.
+fn embed_queue_items(
+    cat: &Catalog,
+    id: &str,
+    title: Option<String>,
+    body: &str,
+) -> Result<Vec<EmbedQueueItem>> {
+    // 2048 chars = 512 tokens. Do NOT swap this for chunk_size_for_model:
+    // that returns a CEILING (2048 tokens for CodeRankEmbed), and this project
+    // deliberately chunks below it for ranking sharpness. See
+    // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
+    const CHUNK_CHARS: usize = 512 * 4;
+
+    let built = crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS);
+    let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
+    Ok(stored
+        .into_iter()
+        .filter(|r| !r.content.trim().is_empty())
+        .map(|r| {
+            // Give a MID-entry chunk its entry's identity. `## W-81 — Choose a
+            // gate's surface` may be thousands of characters upstream, so a
+            // chunk from the middle of a five-chunk entry would otherwise embed
+            // with no idea what it belongs to. Skipped when the chunk already
+            // opens with its own heading, which is the common case.
+            let text = match &r.entry_token {
+                Some(tok) if !r.content.trim_start().starts_with("#") => {
+                    format!("{tok}\n\n{}", r.content)
+                }
+                _ => r.content,
+            };
+            (r.chunk_id, title.clone(), text)
+        })
+        .collect())
+}
+```
+
+Update **both** enqueue sites. At `indexer.rs:249-253`:
+
+```rust
+            if want_embeddings && force_embed {
+                embed_queue.extend(embed_queue_items(cat, &id, title.clone(), body)?);
+            }
+```
+
+At `indexer.rs:284-288`:
+
+```rust
+        if want_embeddings && (!content_unchanged || force_embed) {
+            embed_queue.extend(embed_queue_items(cat, &id, title.clone(), body)?);
+        }
+```
+
+Update the type alias doc at `indexer.rs:22`:
+
+```rust
+/// Items queued for embedding: `(chunk_id, title, chunk_text)`. One per CHUNK,
+/// not per artifact — `chunk_id` keys `artifact_vec_v2`.
+pub type EmbedQueueItem = (String, Option<String>, String);
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib indexer`
+Expected: PASS. Existing indexer tests that count `artifact_vec` rows will still pass — nothing writes to `artifact_vec_v2` until Task 7.
+
+- [ ] **Step 5: Mutation check — this is the plan's central guard**
+
+Temporarily restore `.into_iter().next()` on the chunk list. Run `cargo test --lib indexer`.
+**Expected: `embed_queue_items_emits_every_chunk_not_just_the_first` FAILS.** If it passes, the test is not discriminating — fix the test before reverting the mutation.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/indexer.rs
+git -C /home/marius/work/claude/codescout commit -m "fix(librarian): embed every chunk, not only the first — the core defect"
+```
+
+---
+
+## Task 7: Write vectors to `artifact_vec_v2`, and fan out the delete cascade
+
+**Files:**
+- Modify: `src/librarian/indexer.rs:479-560` (`write_embeddings`, `write_embeddings_with`)
+- Modify: `src/librarian/catalog/gc.rs:406-440` (`migrate_vec_id`), `:482`
+- Test: both files' test modules
+
+**Interfaces:**
+- Consumes: `EmbedQueueItem` keyed by chunk id (Task 6)
+- Produces: `pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()>` — writes to `artifact_vec_v2`, same dim guard as `write_embeddings_with`
+- Produces: `pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize>`
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn deleting_an_artifact_removes_all_its_chunk_vectors_not_only_the_first() {
+    // Mutation target: `WHERE chunk_ix = 0`. The FK cascade empties
+    // artifact_chunk, so the vector delete must read it FIRST.
+    let cat = Catalog::open_in_memory().unwrap();
+    artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+    let rows = chunk::build_chunks("a", "# T\n\n## W-1 — x\n\na\n\n## W-2 — y\n\nb\n", 2048);
+    let stored = chunk::replace_chunks(&cat, "a", &rows).unwrap();
+    assert!(stored.len() >= 3, "fixture must have >1 chunk or this proves nothing");
+    let vecs: Vec<(String, Vec<f32>)> =
+        stored.iter().map(|r| (r.chunk_id.clone(), vec![0.5f32; 768])).collect();
+    write_embeddings_v2(&cat, &vecs).unwrap();
+
+    delete_chunk_vectors(&cat, "a").unwrap();
+    let n: i64 = cat.conn
+        .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "every chunk vector must go, not just chunk_ix 0");
+}
+
+#[test]
+fn write_embeddings_v2_still_refuses_a_dim_mismatch() {
+    let cat = Catalog::open_in_memory().unwrap();
+    write_embeddings_v2(&cat, &[("c1".into(), vec![0.1f32; 768])]).unwrap();
+    let err = write_embeddings_v2(&cat, &[("c2".into(), vec![0.1f32; 384])]).unwrap_err();
+    assert!(err.to_string().contains("dim"), "got: {err}");
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib deleting_an_artifact_removes_all_its_chunk_vectors`
+Expected: FAIL — `cannot find function write_embeddings_v2`
+
+- [ ] **Step 3: Implement**
+
+Add next to `write_embeddings_with` in `indexer.rs`:
+
+```rust
+/// Write pre-computed chunk vectors into `artifact_vec_v2`.
+///
+/// Mirrors [`write_embeddings_with`]'s dim guard: a mismatch against existing
+/// rows is a loud, safe stop rather than a silent partial write.
+pub fn write_embeddings_v2(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+    if embeddings.is_empty() {
+        return Ok(());
+    }
+    let batch_dim = embeddings[0].1.len();
+    if batch_dim == 0 {
+        anyhow::bail!("embedding dim is 0 — embedder produced an empty vector");
+    }
+    let existing_dim: Option<i64> = cat
+        .conn
+        .query_row("SELECT length(embedding) FROM artifact_vec_v2 LIMIT 1", [], |r| r.get(0))
+        .optional()?;
+    if let Some(bytes) = existing_dim {
+        let stored = (bytes / 4) as usize;
+        if stored != batch_dim {
+            anyhow::bail!(
+                "embedding dim mismatch: artifact_vec_v2 holds {stored}, batch has {batch_dim}"
+            );
+        }
+    }
+    let mut del = cat.conn.prepare("DELETE FROM artifact_vec_v2 WHERE id = ?1")?;
+    let mut ins = cat
+        .conn
+        .prepare("INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)")?;
+    for (chunk_id, vec) in embeddings {
+        let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+        del.execute([chunk_id])?;
+        ins.execute(rusqlite::params![chunk_id, blob])?;
+    }
+    Ok(())
+}
+
+/// Delete every chunk vector belonging to `artifact_id`.
+///
+/// MUST run BEFORE the artifact row is deleted: `artifact_chunk` has
+/// `ON DELETE CASCADE`, so once the artifact is gone the chunk ids that name
+/// these vectors are gone too and the vectors are unreachable orphans. vec0
+/// has no FK, so nothing else would ever collect them.
+pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
+    let ids: Vec<String> = {
+        let mut stmt = cat
+            .conn
+            .prepare("SELECT chunk_id FROM artifact_chunk WHERE artifact_id = ?1")?;
+        stmt.query_map([artifact_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?
+    };
+    let mut del = cat.conn.prepare("DELETE FROM artifact_vec_v2 WHERE id = ?1")?;
+    for id in &ids {
+        del.execute([id])?;
+    }
+    Ok(ids.len())
+}
+```
+
+In `gc.rs`, call `delete_chunk_vectors(cat, id)?` immediately before every `DELETE FROM artifact WHERE id = …`, at the site already commented *"artifact_vec: no FK, DELETE-trigger only — handled explicitly"* (`gc.rs:482`).
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib librarian::indexer ; cargo test --lib librarian::catalog::gc`
+Expected: PASS.
+
+- [ ] **Step 5: Mutation check**
+
+Change `delete_chunk_vectors`'s query to `... WHERE artifact_id = ?1 AND chunk_ix = 0`.
+**Expected: `deleting_an_artifact_removes_all_its_chunk_vectors_not_only_the_first` FAILS.** Revert.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/indexer.rs src/librarian/catalog/gc.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(librarian): artifact_vec_v2 writes + per-artifact chunk-vector cascade"
+```
+
+---
+
+## Task 8: `semantic_find` returns chunk hits, capped per artifact
+
+**Files:**
+- Modify: `src/librarian/catalog/find.rs:242-245` (`SemanticHit`), `:257-265` (`SemanticPage`), `:283-357` (`semantic_find`)
+- Modify: `src/librarian/artifact_store.rs:228-252` (`knn` reads `artifact_vec_v2`)
+- Test: `src/librarian/catalog/find.rs` test module
+
+**Interfaces:**
+- Consumes: `chunk::chunks_for` (Task 5)
+- Produces:
+  ```rust
+  pub struct ChunkHit { pub chunk_id: String, pub chunk_ix: usize,
+                        pub start_line: usize, pub end_line: usize,
+                        pub entry_token: Option<String>, pub content: String }
+  pub struct SemanticHit { pub row: ArtifactRow, pub distance: f32, pub chunk: Option<ChunkHit> }
+  ```
+  `SemanticPage` gains `pub cap_suppressed: usize`.
+  `semantic_find(..., max_per_artifact: usize, ...)` — a new parameter placed after `filter`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[tokio::test]
+async fn a_hit_names_the_chunk_that_matched_not_the_preamble() {
+    // The whole point of the plan, at the retrieval layer.
+    let (cat, store) = fixture_with_two_entry_artifact().await;
+    let page = semantic_find(&store, &cat, None, &query_vec_for("beta"), None, 3, 10, 0, 0)
+        .await.unwrap();
+    let hit = &page.hits[0];
+    let chunk = hit.chunk.as_ref().expect("chunk-grain hit");
+    assert_eq!(chunk.entry_token.as_deref(), Some("W-2"));
+    assert!(chunk.start_line > 1, "must not be the preamble chunk");
+    assert!(chunk.content.contains("beta"));
+}
+
+#[tokio::test]
+async fn max_per_artifact_caps_without_emptying_the_page() {
+    // Absence assertion — a cap that drops EVERYTHING also satisfies "no more
+    // than 3". All three clauses are required.
+    let (cat, store) = fixture_with_one_big_and_one_small_artifact().await;
+    let page = semantic_find(&store, &cat, None, &q(), None, 3, 10, 0, 0).await.unwrap();
+    let from_big = page.hits.iter().filter(|h| h.row.id == "big").count();
+    assert_eq!(from_big, 3, "capped at 3");
+    assert!(page.cap_suppressed > 0, "and it reports what it suppressed");
+    assert!(page.hits.iter().any(|h| h.row.id == "small"),
+            "a lower-ranked chunk from another artifact must still make the page — \
+             without this clause a cap that drops everything passes");
+}
+
+#[tokio::test]
+async fn max_per_artifact_one_yields_distinct_artifacts() {
+    // context.rs's contract. Assert DISTINCTNESS: a count of N is satisfied by
+    // N chunks of one ledger, which is the regression this prevents.
+    let (cat, store) = fixture_with_one_big_and_one_small_artifact().await;
+    let page = semantic_find(&store, &cat, None, &q(), None, 1, 10, 0, 0).await.unwrap();
+    let mut ids: Vec<&str> = page.hits.iter().map(|h| h.row.id.as_str()).collect();
+    let before = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), before, "every hit must be a distinct artifact");
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib catalog::find::tests::a_hit_names_the_chunk`
+Expected: FAIL — `this function takes 8 arguments but 9 were supplied`
+
+- [ ] **Step 3: Implement**
+
+In `artifact_store.rs`, point `knn`'s SQL at the new table:
+
+```rust
+        let mut stmt = cat.conn.prepare(
+            "SELECT id, distance FROM artifact_vec_v2 WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2",
+        )?;
+```
+
+In `find.rs`, extend the types and the loop. The candidate ids returned by `knn` are now **chunk ids**, so map them to artifact ids before hydrating:
+
+```rust
+/// The chunk that matched, when the store is chunk-keyed.
+#[derive(Debug, Clone)]
+pub struct ChunkHit {
+    pub chunk_id: String,
+    pub chunk_ix: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub entry_token: Option<String>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticHit {
+    pub row: ArtifactRow,
+    pub distance: f32,
+    pub chunk: Option<ChunkHit>,
+}
+```
+
+Inside the loop, replace the `by_id` construction and the hit-building block:
+
+```rust
+        // knn returns CHUNK ids. Resolve each to its artifact so the catalog
+        // filter — which is artifact-level — still applies, and keep the
+        // chunk alongside so the hit can name the entry that matched.
+        let chunk_rows = {
+            let cat = catalog.lock();
+            crate::librarian::catalog::chunk::rows_by_chunk_ids(
+                &cat,
+                &candidates.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            )?
+        };
+
+        // KNN order is the ranking; preserve it, and apply the per-artifact cap
+        // in that order so the cap keeps each artifact's BEST chunks.
+        let mut seen_per_artifact: std::collections::HashMap<String, usize> = HashMap::new();
+        let mut ordered: Vec<(ChunkHit, String, f32)> = Vec::new();
+        let mut cap_suppressed = 0usize;
+        for (chunk_id, distance) in &candidates {
+            let Some(row) = chunk_rows.get(chunk_id) else { continue };
+            let n = seen_per_artifact.entry(row.artifact_id.clone()).or_insert(0);
+            if *n >= max_per_artifact {
+                cap_suppressed += 1;
+                continue;
+            }
+            *n += 1;
+            ordered.push((
+                ChunkHit {
+                    chunk_id: row.chunk_id.clone(),
+                    chunk_ix: row.chunk_ix,
+                    start_line: row.start_line,
+                    end_line: row.end_line,
+                    entry_token: row.entry_token.clone(),
+                    content: row.content.clone(),
+                },
+                row.artifact_id.clone(),
+                *distance,
+            ));
+        }
+
+        let candidate_ids: Vec<String> = {
+            let mut ids: Vec<String> = ordered.iter().map(|(_, a, _)| a.clone()).collect();
+            ids.dedup();
+            ids
+        };
+```
+
+Hydrate + filter on `candidate_ids` exactly as before, then build hits by walking `ordered` and keeping those whose artifact survived the filter. `target` counts **surviving hits after the cap**, not raw candidates.
+
+Add to `chunk.rs`:
+
+```rust
+/// Chunk rows for a set of chunk ids, keyed by `chunk_id`. Ids with no row are
+/// simply absent — a vector whose chunk row is gone is stale, not an error.
+pub fn rows_by_chunk_ids(
+    cat: &Catalog,
+    chunk_ids: &[String],
+) -> Result<std::collections::HashMap<String, ChunkRow>> {
+    if chunk_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let placeholders = std::iter::repeat_n("?", chunk_ids.len()).collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
+                content, content_hash
+           FROM artifact_chunk WHERE chunk_id IN ({placeholders})"
+    );
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(chunk_ids.iter()), |r| {
+            Ok(ChunkRow {
+                chunk_id: r.get(0)?, artifact_id: r.get(1)?,
+                chunk_ix: r.get::<_, i64>(2)? as usize,
+                start_line: r.get::<_, i64>(3)? as usize,
+                end_line: r.get::<_, i64>(4)? as usize,
+                entry_token: r.get(5)?, content: r.get(6)?, content_hash: r.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows.into_iter().map(|r| (r.chunk_id.clone(), r)).collect())
+}
+```
+
+Add `cap_suppressed: usize` to `SemanticPage` with this doc:
+
+```rust
+    /// Hits dropped by `max_per_artifact`. Distinct from `exhausted`: the page
+    /// is full and relevant, but one artifact had more to say than it was
+    /// allowed. A caller that cannot see this cannot tell a capped page from a
+    /// corpus that simply had nothing else — the same silent-partial defect
+    /// this whole change exists to fix, one level up.
+    pub cap_suppressed: usize,
+```
+
+Raise the widening constants — with a cap, candidates collapse before counting:
+
+```rust
+    let mut k = (target * 5 * max_per_artifact.max(1)).max(200);
+    const K_CAP: usize = 8000;
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib catalog::find`
+Expected: PASS, including the pre-existing `semantic_find` tests (update their call sites to pass `max_per_artifact`).
+
+- [ ] **Step 5: Mutation check**
+
+Replace the cap check with `if false {`.
+**Expected: `max_per_artifact_caps_without_emptying_the_page` AND `max_per_artifact_one_yields_distinct_artifacts` both FAIL.** Revert.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/catalog/find.rs src/librarian/catalog/chunk.rs src/librarian/artifact_store.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(librarian): chunk-grain semantic_find with max_per_artifact"
+```
+
+---
+
+## Task 9: `librarian(context)` keeps artifact grain
+
+**Files:**
+- Modify: `src/librarian/tools/context.rs:679-695`
+- Test: `src/librarian/tools/context.rs` test module
+
+**Interfaces:**
+- Consumes: `semantic_find(..., max_per_artifact, ...)` (Task 8)
+
+- [ ] **Step 1: Write the failing test**
+
+```rust
+#[tokio::test]
+async fn context_candidates_are_distinct_artifacts_after_the_chunk_change() {
+    // context ranks by the link graph and only needs ids. Before the cap
+    // existed, 51 chunk hits could be 8 artifacts — a bundle that packed 50
+    // candidates would pack 8, with candidates_capped still reporting "capped".
+    let ctx = fixture_with_one_ledger_of_many_chunks().await;
+    let out = run_context(&ctx, json!({"topic": "gate latency", "scope": "project"})).await;
+    let ids = out["candidate_ids"].as_array().unwrap();
+    let mut seen: Vec<&str> = ids.iter().map(|v| v.as_str().unwrap()).collect();
+    let before = seen.len();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), before, "context must never receive two chunks of one artifact");
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cargo test --lib context_candidates_are_distinct_artifacts`
+Expected: FAIL — duplicate ids, because `semantic_find` now returns chunk hits.
+
+- [ ] **Step 3: Implement**
+
+At `context.rs:679`, pass the cap:
+
+```rust
+            let page = crate::librarian::catalog::find::semantic_find(
+                store.as_ref(),
+                &ctx.catalog,
+                project_id.as_deref(),
+                &vec,
+                scoped_filter.as_ref(),
+                // 1 = artifact grain. context() ranks by the link graph and needs
+                // 50 DISTINCT artifacts; a chunk-grain page would silently hand it
+                // 8 artifacts wearing 51 hits, with candidates_capped still true.
+                1,
+                51,
+                0,
+                cutoff_ms,
+            )
+            .await?;
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cargo test --lib librarian::tools::context`
+Expected: PASS.
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/tools/context.rs
+git -C /home/marius/work/claude/codescout commit -m "fix(librarian): context() pins artifact grain with max_per_artifact=1"
+```
+
+---
+
+## Task 10: `artifact(find, semantic=)` result shape
+
+**Files:**
+- Modify: `src/librarian/tools/artifact.rs` (the `find` response builder and the `semantic` param description)
+- Test: `src/librarian/tools/artifact.rs` test module
+
+**Interfaces:**
+- Consumes: `SemanticHit.chunk`, `SemanticPage.cap_suppressed` (Task 8)
+- Produces: each `items[]` entry gains `matched: {start_line, end_line, entry_token, snippet}` when the hit is chunk-grain; response gains `hints.cap_suppressed` when non-zero.
+
+- [ ] **Step 1: Write the failing test**
+
+```rust
+#[tokio::test]
+async fn semantic_find_results_carry_the_matched_span_and_entry() {
+    let ctx = fixture_with_two_entry_artifact().await;
+    let out = run_artifact(&ctx, json!({"action": "find", "semantic": "beta", "limit": 3})).await;
+    let m = &out["items"][0]["matched"];
+    assert!(m["start_line"].as_u64().unwrap() > 1, "not the preamble");
+    assert_eq!(m["entry_token"], "W-2");
+    assert!(m["snippet"].as_str().unwrap().len() <= 480, "snippet is bounded");
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `cargo test --lib semantic_find_results_carry_the_matched_span`
+Expected: FAIL — `matched` is null.
+
+- [ ] **Step 3: Implement**
+
+In the `find` response builder, when `hit.chunk` is `Some`:
+
+```rust
+        // Bounded snippet, not the whole chunk: a 2 KB chunk x 10 hits is a
+        // 20 KB response. The caller reads the full span with
+        // artifact(get, id=…, start_line=…, end_line=…), which is why the range
+        // travels alongside. See docs/PROGRESSIVE_DISCLOSURE.md.
+        const SNIPPET_CHARS: usize = 480;
+        if let Some(chunk) = &hit.chunk {
+            let snippet: String = chunk.content.chars().take(SNIPPET_CHARS).collect();
+            item["matched"] = json!({
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "entry_token": chunk.entry_token,
+                "snippet": snippet,
+            });
+        }
+```
+
+And after the items loop:
+
+```rust
+    if page.cap_suppressed > 0 {
+        hints["cap_suppressed"] = json!(page.cap_suppressed);
+        hints["cap_hint"] = json!(
+            "further chunks from artifacts already in this page were suppressed; \
+             read a full artifact with artifact(action=\"get\", id=…)"
+        );
+    }
+```
+
+Update the `semantic` param description in the tool schema:
+
+```rust
+                    "description": "find: natural-language query for semantic search (requires embedder). Hits are CHUNK-grain: each item carries `matched` with the line range, the enclosing entry token (e.g. `W-81`) and a bounded snippet."
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `cargo test --lib librarian::tools::artifact`
+Expected: PASS.
+
+- [ ] **Step 5: Check the prompt-surface gates**
+
+Run: `cargo test --lib prompt_surfaces_reference_only_real_tools ; cargo test --lib tool_surface_char_budget`
+The description grew — if the budget test fails, **raising `TOOL_SURFACE_CHAR_BUDGET` is allowed** (it is a ratchet, not a ceiling). Add a dated log entry stating what bought the bytes.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/tools/artifact.rs src/server.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(librarian): semantic find returns matched span, entry token and snippet"
+```
+
+---
+
+## Task 11: Backfill and swap
+
+**BLOCKED ON P1.** Do not run the swap on a real catalog until the vector-coverage hole is diagnosed — a backfill that inherits it ships retrieval that is dark over half this repo.
+
+**Files:**
+- Modify: `src/librarian/indexer.rs` (add the backfill runner near `write_embeddings` at `:479`)
+- Test: `src/librarian/indexer.rs` test module
+
+**Interfaces:**
+- Produces: `pub async fn backfill_chunk_vectors(cat: &Catalog, svc: &EmbeddingService, batch: usize) -> Result<BackfillReport>` where `BackfillReport { embedded: usize, skipped_empty: usize, artifacts: usize }`
+- Produces: `pub fn swap_artifact_vec(cat: &Catalog) -> Result<()>`
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn the_swap_replaces_the_table_and_recreates_the_trigger() {
+    // migrate_v6.rs:202 records the trap: "DROP TABLE implicitly drops the
+    // artifact_vec_cascade_delete trigger". A swap that forgets it leaves the
+    // catalog silently accumulating orphan vectors.
+    let cat = Catalog::open_in_memory().unwrap();
+    swap_artifact_vec(&cat).unwrap();
+    let n: i64 = cat.conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='artifact_vec_cascade_delete'",
+        [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 1, "the cascade trigger must survive the swap");
+    let v2: i64 = cat.conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name='artifact_vec_v2'", [], |r| r.get(0)).unwrap();
+    assert_eq!(v2, 0, "v2 is renamed away, not left as a second table");
+}
+
+#[test]
+fn the_swap_is_re_runnable() {
+    // The catalog is machine-local and gitignored, so every checkout pays this
+    // migration independently and an interrupted run must be resumable.
+    let cat = Catalog::open_in_memory().unwrap();
+    swap_artifact_vec(&cat).unwrap();
+    swap_artifact_vec(&cat).unwrap();
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test --lib the_swap_replaces_the_table`
+Expected: FAIL — `cannot find function swap_artifact_vec`
+
+- [ ] **Step 3: Implement**
+
+```rust
+/// Replace `artifact_vec` with the chunk-keyed `artifact_vec_v2`.
+///
+/// Re-runnable: a catalog already swapped has no `artifact_vec_v2` and returns
+/// early. Reuses the DROP+CREATE shape at `indexer.rs:640`, and re-creates the
+/// cascade trigger — `migrate_v6.rs:202` records that DROP TABLE takes the
+/// trigger with it, which is silent and leaves orphan vectors behind.
+pub fn swap_artifact_vec(cat: &Catalog) -> Result<()> {
+    let has_v2: i64 = cat.conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name = 'artifact_vec_v2'",
+        [], |r| r.get(0))?;
+    if has_v2 == 0 {
+        return Ok(());
+    }
+    cat.conn.execute_batch(
+        "BEGIN;
+         DROP TABLE IF EXISTS artifact_vec;
+         ALTER TABLE artifact_vec_v2 RENAME TO artifact_vec;
+         CREATE TRIGGER IF NOT EXISTS artifact_vec_cascade_delete
+         AFTER DELETE ON artifact
+         BEGIN
+           DELETE FROM artifact_vec WHERE id = OLD.id;
+         END;
+         COMMIT;",
+    )?;
+    Ok(())
+}
+```
+
+For the backfill runner, walk artifacts in `updated_at` order, call `embed_queue_items`, embed in batches of `batch` (default 100, matching `indexer.rs:652`), and `write_embeddings_v2`. **Do not** route through the unchanged-content early return at `indexer.rs:284` — that is the mechanism P1 most likely instantiates. Record progress in `catalog_meta` (added in v10) under key `chunk_backfill_cursor` so an interrupted run resumes.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test --lib librarian::indexer`
+Expected: PASS.
+
+- [ ] **Step 5: Dry run on a COPY, never the live catalog**
+
+```bash
+cp ~/.local/share/librarian/catalog.db /tmp/claude-1000/catalog-backfill-test.db
+LIBRARIAN_CATALOG=/tmp/claude-1000/catalog-backfill-test.db \
+  cargo run --release --bin codescout -- librarian backfill-chunks --batch 100
+sqlite3 /tmp/claude-1000/catalog-backfill-test.db \
+  "SELECT COUNT(*) FROM artifact_chunk;"
+```
+
+Expected: on the order of 90,500 rows corpus-wide (~26,530 for codescout alone). A number near 4,500 means only one chunk per artifact was written — stop and re-check Task 6.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add src/librarian/indexer.rs
+git -C /home/marius/work/claude/codescout commit -m "feat(librarian): resumable chunk backfill and transactional vec swap"
+```
+
+---
+
+## Task 12: Re-run the benchmark, record the delta, close the bug
+
+**Files:**
+- Modify: `docs/trackers/retrieval-benchmark.md` (via `artifact` tools — augmented)
+- Modify: `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (via `artifact` tools — stamped `id:`, guarded)
+
+- [ ] **Step 1: Re-run the suite**
+
+```bash
+python3 scripts/run-artifact-bench.py \
+  --suite scripts/tc-suites/artifact-entries.json \
+  --out /tmp/claude-1000/artifact-bench-after.json
+```
+
+- [ ] **Step 2: Compare against the baseline**
+
+```bash
+python3 -c "
+import json
+b=json.load(open('/tmp/claude-1000/artifact-bench-baseline.json'))
+a=json.load(open('/tmp/claude-1000/artifact-bench-after.json'))
+print(f\"hits@5 {b['hits_at_5']}/{b['n']} -> {a['hits_at_5']}/{a['n']}\")
+print(f\"MRR    {b['mrr']} -> {a['mrr']}\")
+for x,y in zip(b['cases'],a['cases']):
+    if x['rank']!=y['rank']: print(f\"  {x['id']}: {x['rank']} -> {y['rank']}\")
+"
+```
+
+**Report whatever it says.** A result below 8/12 is a finding, not a failure to hide — record it and investigate before claiming the change improved retrieval. The point of building the instrument was to be able to be wrong.
+
+- [ ] **Step 3: Record the run in the benchmark tracker**
+
+Same `artifact(action="update", patch={body_edits: […]})` form as Task 1 Step 4. Include the host, the model (`CodeRankEmbed`), the `baseline_sha`, and both numbers — the tracker's own § *Why this tracker exists* says a run without its config is not comparable to anything.
+
+- [ ] **Step 4: Close the bug file**
+
+```
+artifact(action="update", id="7a37f1179d2f0e21", patch={
+  status: "fixed",
+  body_edits: [{heading: "## Tests added", action: "replace", content: "\n- `split_markdown_default_depth_ignores_h4` / `split_markdown_with_depth_6_splits_on_h4` / `split_markdown_with_depth_3_equals_the_default` (Task 2)\n- `entry_tokens_by_line` × 4, including the fenced-block case (Task 3)\n- `v11_creates_the_chunk_table_and_stamps_the_version`, `v11_is_idempotent`, `deleting_an_artifact_cascades_its_chunk_rows` (Task 4)\n- `replace_chunks_preserves_ids_for_unchanged_chunks`, `replace_chunks_drops_chunks_that_no_longer_exist` (Task 5)\n- **`embed_queue_items_emits_every_chunk_not_just_the_first`** — the core regression guard; killed by restoring `.next()`\n- `a_whitespace_only_section_is_dropped_without_dropping_the_batch` (Task 6)\n- `deleting_an_artifact_removes_all_its_chunk_vectors_not_only_the_first` — killed by `AND chunk_ix = 0` (Task 7)\n- `a_hit_names_the_chunk_that_matched_not_the_preamble`, `max_per_artifact_caps_without_emptying_the_page`, `max_per_artifact_one_yields_distinct_artifacts` — the last two killed together by `if false` on the cap (Task 8)\n- `context_candidates_are_distinct_artifacts_after_the_chunk_change` (Task 9)\n- `the_swap_replaces_the_table_and_recreates_the_trigger`, `the_swap_is_re_runnable` (Task 11)\n\nThree mutations were run and each killed a DIFFERENT test, per the once-per-site law.\n"}]
+})
+```
+
+Record in `## Tests added` the actual test names from Tasks 2–11 and the three mutations that killed them. Fill `closed:` with today's date. Cite the fix by **SHA and patch-id** — `git show <sha> | git patch-id --stable` — because `experiments` is rebased after every ship and the SHA alone does not survive it.
+
+- [ ] **Step 5: Archive through the catalog**
+
+```
+artifact(action="move", id="7a37f1179d2f0e21",
+         new_rel_path="docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md")
+```
+
+Read `id_changed` / the new id from the response — the old id stops resolving immediately. Then re-point every citation of the old path **and** the old 16-hex id in the same commit, and verify with a scoped `audit_doc_refs` (0 high findings as the gate). The spec at `docs/superpowers/specs/2026-09-02-artifact-chunk-grain-retrieval-design.md` cites both and will need updating.
+
+- [ ] **Step 6: Update the cluster count**
+
+The bug carries `cluster/capped-result-presented-as-complete`. Archiving does not change membership, but confirm the count surfaces in `docs/trackers/issue-clusters.md` still agree with the corpus:
+
+```bash
+cargo test --test issue_clusters
+```
+
+Expected: 18 passed.
+
+- [ ] **Step 7: Gate and commit**
+
+```bash
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features ; cargo test --workspace
+git -C /home/marius/work/claude/codescout add docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md docs/trackers/retrieval-benchmark.md docs/superpowers/specs/2026-09-02-artifact-chunk-grain-retrieval-design.md
+git -C /home/marius/work/claude/codescout commit -m "docs(issues): chunk-grain retrieval shipped — measured delta, bug archived"
+```
