@@ -292,10 +292,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// gets disabled within a day.
 ///
 /// EVERY FAILURE PATH ALLOWS. No repository, no configured upstream, an unreadable
-/// ref: each returns `false`. A repo with no remote has no second host, so refusing
-/// there is a false positive with no recoverable reading, and this guard is partial
-/// by construction — degrading it to a hard failure trades a real capability for no
-/// safety.
+/// ref, and — notably — a `abs_path` that does not exist on disk: `git2::Repository::
+/// discover()` errs for a nonexistent path even inside a valid repo, so a ledger
+/// absent at call time silently allows. Each of these returns `false`. A repo with
+/// no remote has no second host, so refusing there is a false positive with no
+/// recoverable reading, and this guard is partial by construction — degrading it to
+/// a hard failure trades a real capability for no safety.
 // Not yet called from `call()` — Task 4 wires this into `append_entry`'s refusal
 // path. Tests below exercise it directly.
 #[allow(dead_code)]
@@ -1315,14 +1317,32 @@ mod tests {
             .unwrap();
     }
 
-    fn commit_path(root: &std::path::Path, _rel: &str, msg: &str) {
+    fn commit_path(root: &std::path::Path, rel: &str, msg: &str) {
         let repo = git2::Repository::open(root).unwrap();
-        commit_all(&repo, msg);
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new(rel)).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@e").unwrap();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .into_iter()
+            .collect();
+        let refs: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &refs)
+            .unwrap();
     }
 
-    /// Bare origin + a clone whose branch tracks it, both holding `ledger.md` and
-    /// `other.md`. TWO repos is the load-bearing detail: with one, the per-file and
-    /// per-branch implementations are indistinguishable and both pass.
+    /// Bare origin + a clone whose branch tracks it, both holding `ledger.md`, `other.md`,
+    /// and a nested `docs/trackers/ledger.md`. TWO repos is the load-bearing detail: with
+    /// one, the per-file and per-branch implementations are indistinguishable and both
+    /// pass. The NESTED ledger is equally load-bearing: with only a top-level `ledger.md`,
+    /// a ledger's basename and its repo-relative path are the same string, so an
+    /// implementation that keys off `file_name()` instead of the real repo-relative path
+    /// is indistinguishable from the correct one. A real ledger always lives under
+    /// `docs/trackers/*.md` or similar, never at the repo root.
     fn repo_with_upstream() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let origin = tmp.path().join("origin.git");
@@ -1332,6 +1352,8 @@ mod tests {
         let repo = git2::Repository::init(&work).unwrap();
         std::fs::write(work.join("ledger.md"), "base").unwrap();
         std::fs::write(work.join("other.md"), "base").unwrap();
+        std::fs::create_dir_all(work.join("docs/trackers")).unwrap();
+        std::fs::write(work.join("docs/trackers/ledger.md"), "base").unwrap();
         commit_all(&repo, "base");
 
         repo.remote("origin", origin.to_str().unwrap()).unwrap();
@@ -1383,11 +1405,19 @@ mod tests {
     /// origin/experiments while 2 of 3 ledgers had ZERO unpushed commits touching
     /// them. Only a per-file check separates these two assertions, so removing
     /// either one makes the pair satisfiable by an unusable implementation.
+    ///
+    /// The NESTED-vs-top-level assertions additionally kill an implementation that
+    /// derives `rel` from `abs_path.file_name()` instead of the real repo-relative
+    /// path: with two files sharing the basename `ledger.md` (one at the root, one
+    /// under `docs/trackers/`), a basename-keyed implementation cannot tell an
+    /// unpushed commit on one from an unpushed commit on the other, and would
+    /// falsely refuse the nested ledger for a commit that never touched it.
     #[test]
     fn unpushed_is_per_file_not_per_branch() {
         let (tmp, origin_clone) = repo_with_upstream();
         let ledger = origin_clone.join("ledger.md");
         let other = origin_clone.join("other.md");
+        let nested = origin_clone.join("docs/trackers/ledger.md");
         std::fs::write(&other, "changed").unwrap();
         commit_path(&origin_clone, "other.md", "touch other");
 
@@ -1395,12 +1425,31 @@ mod tests {
             !ledger_has_unpushed_commits(&ledger),
             "an unpushed commit on ANOTHER file must not block this ledger"
         );
+        assert!(
+            !ledger_has_unpushed_commits(&nested),
+            "an unpushed commit on an unrelated file must not block the nested ledger either"
+        );
 
         std::fs::write(&ledger, "changed").unwrap();
         commit_path(&origin_clone, "ledger.md", "touch ledger");
         assert!(
             ledger_has_unpushed_commits(&ledger),
             "an unpushed commit on THIS ledger must be reported"
+        );
+        assert!(
+                !ledger_has_unpushed_commits(&nested),
+                "a commit on the top-level ledger.md must not falsely mark the same-named nested ledger unpushed"
+            );
+
+        std::fs::write(&nested, "changed").unwrap();
+        commit_path(
+            &origin_clone,
+            "docs/trackers/ledger.md",
+            "touch nested ledger",
+        );
+        assert!(
+            ledger_has_unpushed_commits(&nested),
+            "an unpushed commit on THIS nested ledger must be reported"
         );
         let _ = tmp;
     }
