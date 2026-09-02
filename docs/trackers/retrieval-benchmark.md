@@ -204,6 +204,10 @@ relative — known gap.
   comparing tails matters.
 
 ## History
+
+### 2026-09-02 — artifact-path baseline
+
+First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 ### 2026-08-30 — D2 resolved: prefix removed, boost 3.0→5.0 — and the precedence list below was missing a layer
 
 **Changed, in `~/.claude/settings.json` § `env`:**

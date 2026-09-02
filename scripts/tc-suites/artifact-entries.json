@@ -1,0 +1,30 @@
+{
+  "suite": "artifact-entries",
+  "derived": "2026-09-02, entries verified present by `grep -nP \"^#{2,4}\\\\s+<TOKEN>\\\\s+[\\u2014\\u2013-]\" <file>`; each target line sits after the file's first heading.",
+  "cases": [
+    {"id": "AE-1", "query": "choosing where a gate lives by how fast it reports",
+     "expect_entry": "W-81", "expect_path": "docs/trackers/bug-fix-session-log.md"},
+    {"id": "AE-2", "query": "the parameter your own context supplies for free",
+     "expect_entry": "OB-1", "expect_path": "docs/trackers/observer-blindness.md"},
+    {"id": "AE-3", "query": "no Git for Windows means no commands at all",
+     "expect_entry": "WIN-36", "expect_path": "docs/trackers/windows-platform-support.md"},
+    {"id": "AE-4", "query": "augmented tracker params are a citation surface",
+     "expect_entry": "SD-11", "expect_path": "docs/trackers/structural-debt-refactor.md"},
+    {"id": "AE-5", "query": "a coverage ratio agreeing across two measurement scopes is a boundary someone already drew, not fresh drift",
+     "expect_entry": "R-170", "expect_path": "docs/trackers/reconnaissance-patterns.md"},
+    {"id": "AE-6", "query": "a skill's own trigger condition was stated out loud and still went uninvoked",
+     "expect_entry": "SKF-22", "expect_path": "docs/trackers/skill-frictions.md"},
+    {"id": "AE-7", "query": "a reconciliation cadence returns a small reassuring number that is an artifact of the predicates chosen, not the corpus",
+     "expect_entry": "HY-25", "expect_path": "docs/trackers/tracker-hygiene-log.md"},
+    {"id": "AE-8", "query": "a dangling-citation gate is prefix-gated so a wholly broken namespace still reads as healthy",
+     "expect_entry": "BL-41", "expect_path": "docs/trackers/open-issue-work-queue.md"},
+    {"id": "AE-9", "query": "an assertion with no input that could ever make it fail is zero coverage wearing a passing test's clothes",
+     "expect_entry": "IC-16", "expect_path": "docs/trackers/issue-clusters.md"},
+    {"id": "AE-10", "query": "extracting a clean tree at HEAD to tell whether a failing test is yours or pre-existing",
+     "expect_entry": "W-27", "expect_path": "docs/trackers/prompt-surface-measurement-session-log.md"},
+    {"id": "AE-11", "query": "augmentation lives only in the catalog database and reindex cannot rebuild it",
+     "expect_entry": "E-1", "expect_path": "docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md"},
+    {"id": "AE-12", "query": "per-project configuration is not what actually differentiates the failing case",
+     "expect_entry": "E-3", "expect_path": "docs/issues/archive/2026-08-23-subagent-activate-mutates-parent-active-project.md"}
+  ]
+}
