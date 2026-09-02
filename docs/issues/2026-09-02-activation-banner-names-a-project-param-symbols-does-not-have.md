@@ -1,13 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/accepted-parameter-silently-dropped
+closed: 2026-09-02
 opened: 2026-09-02
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - cluster/accepted-parameter-silently-dropped
-kind: bug
+severity: medium
 ---
 
 # BUG: the activation banner tells agents to pass `project:` to `symbols`, which has no such param and drops it silently
@@ -104,22 +104,81 @@ the same sentence names.
 
 ## Fix
 
-Plan, not implemented. Two halves:
+**Fixed on `experiments` at `2fc064f7`**
+(`2fc064f71c0af239570323b8673c8a54596cd740`), patch-id
+`67a3401033bd4e57f470586d30b65acc644a5af2`. The SHA is positional and dies when
+`experiments` is rebased; the patch-id survives rebase and cherry-pick.
 
-1. **Correct the sentence** at `src/prompts/mod.rs:203` to what the tools accept —
-   `project_id` for `semantic_search` and `memory`; and either drop `symbols` from the list
-   or give `symbols` a `project_id` param (it has `scope`, which is a different axis:
-   project/libraries/all). The `workspace` pin is the documented cross-project mechanism for
-   every pinnable tool and may be the better thing to advertise here.
-2. **Gate it.** Extend `prompt_surfaces_reference_only_real_tools` — or add a sibling — to
-   parse `tool(param=` / ``param: "…"` in `tool`` pairs and assert each param exists in that
-   tool's advertised `input_schema()`. Tool names alone passed this sentence for three months.
+Both halves this section prescribed, plus a third the fix forced.
 
+**1. The sentence.** Now names only what the tools accept, and gives `symbols`
+its real mechanism — `path` — rather than a phantom one, noting that its `scope`
+is a different axis (project/libraries/all). The `workspace` pin was considered
+as this section suggested and not used: it takes an absolute path and is the
+cross-*root* mechanism, where this sentence is about sub-projects of one
+workspace.
+
+**2. The gate.** `prompt_surfaces_name_only_params_their_tools_advertise`, a
+sibling rather than an extension — see *Tests added*. It also scans a **fourth
+surface** this file did not identify: the sentence is emitted from
+`build_project_status_segments`, which is not `SERVER_INSTRUCTIONS`, the
+onboarding prompt, or the draft. So `prompt_surfaces_reference_only_real_tools`
+could not have caught it *at any grain* — the diagnosis in *Root cause*, that
+tool names alone are too coarse, is true but is the second reason, not the first.
+
+**3. The alias had to go, and had to become a refusal.** Correcting the prose
+left `memory` honouring a `project` key its schema never advertised — the
+mirror of this bug, and unreachable to any agent reading the tool list. It is
+removed. It is a **RecoverableError naming `project_id`**, not a deletion:
+deleting the `or_else` outright would have restored the original 2026-06-09
+defect in its harder direction — `project` silently dropped, the write misrouted
+to the focused project, a scoped-looking result that is not scoped. No live
+caller used it; every `memory(project=` hit in the tree is inside an **archived**
+bug file recording the original incident.
+
+**A side effect worth its own line: the tool-surface ratchet was LOWERED**
+56_547 → 56_497, the first payback in its log. The alias's description spent 50
+characters explaining itself (*"key is project_id; project accepted as an
+alias"*), and removing the alias removed the sentence. Old budget minus 50 is
+the new measured total exactly, so the whole headroom is attributable. The
+general form: **the cheapest bytes in a surface budget are in a description that
+is long because the tool is wrong.**
 ## Tests added
 
-None yet. Owed: the gate in *Fix* step 2, plus a `symbols` test asserting an unknown
-`project` key produces a `corrections` note or an error rather than silence.
+`prompt_surfaces_name_only_params_their_tools_advertise` (`src/server.rs`),
+plus a rewritten `memory_refuses_the_project_key_and_still_routes_project_id`
+and a repaired assertion in `build_with_workspace_appends_project_table`.
 
+**A sibling, not an extension of `prompt_surfaces_reference_only_real_tools`.**
+That test's two-way allowlist tripwire is tuned to token-vs-registry drift;
+folding a param check into it would have made one failure message answer two
+different questions. The new one reads `` `param: …` `` declarations and
+attributes them to backticked tool names in the same sentence, then checks each
+against that tool's advertised `input_schema()` properties.
+
+**Scope, stated so nobody credits it with more.** `tool(param=…)` call-form is
+*not* covered — a larger population, left to a later pass rather than smuggled
+in untested. And it asserts `checked > 0`, so a rewording that removes the
+pattern entirely fails loudly instead of going vacuously green.
+
+**The repaired assertion is the more instructive one.**
+`build_with_workspace_appends_project_table` asserted
+`block.contains("project: \"<id>\"")` — **satisfied by the defect**, for three
+months, in the same test file that renders the sentence. A substring check that
+both the right and wrong spellings satisfy is not a guard; it is a guard-shaped
+line. It now asserts the corrected spelling *and* that `symbols` is not named as
+taking one.
+
+**Mutation-verified, per site:**
+
+| mutation | result |
+|---|---|
+| original sentence restored | gate names all three: `symbols`, `semantic_search`, `memory` |
+| alias restored (`or_else`) | refusal test fails — the call succeeds where it must not |
+| alias deleted with no refusal (the *dangerous* alternative) | refusal test fails on the silent-drop path |
+
+The third is the one worth keeping: it is the mutation that a naive fix would
+have shipped, and the test catches it.
 ## Workarounds
 
 Use `workspace="<abs path>"` (the pin every pinnable tool advertises) or
