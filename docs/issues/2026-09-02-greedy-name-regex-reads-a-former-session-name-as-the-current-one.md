@@ -125,6 +125,22 @@ need it: it needs only that scratchpads greatly outnumber live sessions, and 90 
 against at most 21 live sessions machine-wide holds under any correction the residual could
 produce.
 
+**The slack in that upper bound has since been measured: 7.** Enumerating structurally by
+`readlink /proc/<pid>/exe` rather than by process name gives 28 live claude binaries, 21 of them
+socket-bound, so **7** live sessions carry no socket machine-wide. At most 7 of the 81 can
+therefore be live-but-socketless, putting the true orphan count at **≥ 74** — the claim clears
+the residual with room to spare.
+
+That number was itself wrong the first two times it was taken, and the reason is a second defect
+in the same script: a peer derived it as **2** via `pgrep -x claude`, and the `comm` filter misses
+every session whose binary is version-pinned. Filed separately as
+`docs/issues/2026-09-02-comm-filter-misses-version-pinned-claude-processes.md`
+(`cluster/selector-narrower-than-its-population`). Noted here because it is the same lesson this
+file is about arriving one layer up: **a value read by pattern-matching a name the schema never
+promised**. There it was `"name":` matched by position in a line; here it is `claude` matched
+against `comm`. Both return a plausible number rather than an error, and the second one
+undercounted the blast radius of the first.
+
 The same reasoning is why this section reports a derivation rather than a value. A reader who
 re-runs it later gets a different 90 and a different 9, and should.
 
