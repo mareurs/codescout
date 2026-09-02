@@ -10627,6 +10627,20 @@ reader-end twin of CLAUDE.md's publisher-end rule, *ship its derivation rather t
 so a reader re-checks it instead of re-deriving it under a counting rule of their own choosing.*
 Both sessions spent the evening being the reader that rule describes.
 
+**One case in the table above is NOT an instance of that sentence, and the boundary is recorded
+because the two sit one paragraph apart.** The `2` → `7` residual looks like a third example and
+is a different mechanism. The claim under test was the peer's — *81 orphans, residual
+unquantified* — and its scope was socket-derived; the check reached for a **fresh** instrument
+(`pgrep -x claude`) that happened to be independently narrow. Nothing was consumed from the
+claim: the blind spot was **imported**, not inherited.
+
+That matters because the remedies differ. Inherited scope: do not take your scope from the
+claim. Imported narrowness: enumerate by what the kernel records structurally, never by the name
+a process carries — which is `cluster/selector-narrower-than-its-population` and is the whole
+content of `ee08d2a4`. Folding the second under the first subsumes the sharper, actionable
+lesson into the vaguer one. **Do not extend this passage to cover all three** — the peer caught
+exactly that extension in a message of mine and it read as a strengthening.
+
 **Counterfactual.** Without independent re-derivation: `81` orphaned scratchpads would have
 shipped with a residual understated by 5; a "the guide fix reduced the broken-citation count"
 claim would have been published while the count had in fact risen; and `prefix_conflicts` would
