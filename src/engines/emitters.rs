@@ -25,10 +25,12 @@
 //! sees engine 7's bytes. Its `shape_total` used to sum only blocks
 //! containing `<!-- auto-injected get_guide(`, so operator-rule bytes counted
 //! zero; that filter is gone, and the widened total (12,116 B against a
-//! `CEILING` of 13,300) is now capable of seeing operator-rule bytes, though
-//! this fixture's shapes trigger none. The blindness the filter left, and the
-//! fix, are both filed and *measured*, not merely suspected:
-//! `docs/issues/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md`.
+//! `CEILING` of 12,244 — corrected 2026-09-02, fix round 1, from an initial
+//! 13,300 that was never derived) is now capable of seeing operator-rule
+//! bytes, though this fixture's shapes trigger none. The blindness the filter
+//! left, and the fix, are both filed and *measured*, not merely suspected:
+//! `docs/issues/archive/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md`
+//! (archived — the guard landed and is verified live).
 //!
 //! Each function answers one question — *"does my trigger fire on this call,
 //! and if so what do I ship?"* — and answers nothing about ordering. Ordering

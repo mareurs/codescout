@@ -375,6 +375,20 @@ them; two such files already existed.
 explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision, not a
 gate one.
 
+**A minimal Slug/Members pair exists for `cluster/unclassified` itself, precisely so the escape
+hatch does not fall outside its own growth-documentation gate below.** No count, no promotion
+field — that would reopen exactly the gate the sentence above disclaims — but a new member still
+needs `**Members:**` to name it, the same as any IC-N slug, or the tag is untaggable the moment
+CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it. Added 2026-09-02 when a first
+real member arrived and no field existed to receive it.
+
+**Slug:** `cluster/unclassified`
+
+**Members:** `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02) —
+looked at IC-5 (`repro-env-diverges-from-gate-env`), IC-12
+(`transient-shared-state-lies-to-readers`) and IC-20 (`floor-published-under-the-name-of-a-total`);
+none fit without forcing the claim, so filed under the sanctioned escape hatch instead.
+
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
 read-side window the git hooks introduced; `IC-16` is the vacuous-assertion family the `IC-9`

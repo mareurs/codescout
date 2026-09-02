@@ -8499,10 +8499,17 @@ mod guide_hint_tests {
         // DERIVED, not chosen: measured at 12,116 B on 2026-09-02 by summing every
         // block after the primary across the p50 session's six shapes (see
         // `shape_total` below) — up from the guide-only 11,872 B this replaces.
-        // Set to that figure plus ~10% headroom so ordinary corpus edits do not
-        // red the gate while a new emitter or a doubled section does. Re-derive
-        // rather than raise if it fires — the number is a fact about the corpus,
-        // and raising it to fit is how a ceiling stops being one.
+        // Set to that figure plus 128 B — the same margin this gate has operated
+        // with since the ceiling it replaces (12,000 against an 11,872 B guide-only
+        // measurement) — rather than the ~10% originally proposed, which would have
+        // made this gate ~9.25x looser on the only axis it has ever caught anything
+        // on. Raising this ceiling is a spec amendment, not a fix: when it fires,
+        // the remedy is compressing a guide section that no longer fits, not
+        // widening the number to match it. Precedent, not hypothetical: a verbose
+        // draft once failed this test at 12,308 B against a 12,000 B ceiling with
+        // margin 0, and the section was compressed by -70 B rather than the ceiling
+        // raised — `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+        // Under a 13,300 ceiling that same draft would have passed silently.
         //
         // POPULATION — what the 244 B of widening is, and is not, stated here
         // because a bound whose scope lives elsewhere gets read as covering
@@ -8524,6 +8531,31 @@ mod guide_hint_tests {
         //     covers only two of the three wired engines, `guide-sections` and
         //     (structurally) `operator-rules` — never write "every managed
         //     emitter" of this ceiling without that caveat.
+        //   * 12,116 B IS A FLOOR of what "emission ceiling" claims, not a
+        //     total — the fixture's warmed ledger is what makes the opener
+        //     decline above. `session-opener` and `guide-sections` share
+        //     `Corpus::CompiledGuides`, and `run_post_in` enforces corpus
+        //     exclusivity (`continue`s on an already-claimed corpus before
+        //     calling `emit`), so on a real, unwarmed first call the opener
+        //     claims and DISPLACES `guide-sections`' first-call bytes rather
+        //     than adding to them. The reviewer's conservation model — not a
+        //     measurement taken here, no real session has been run — puts a
+        //     real p50 session at roughly 15,351 B: the opener's
+        //     `project-activation-bootstrap` guide (~3,235 B wrapped) replaces
+        //     `create`'s first-call section, and `librarian.md:11`'s
+        //     `serves: artifact.get, artifact.create` means the next `get`
+        //     call then draws that same 2,785 B intact, so the model
+        //     conserves rather than estimates. ~15,351 B is roughly 2,051 B
+        //     above this 12,244 B ceiling. Re-deriving CEILING against an
+        //     unwarmed session is a spec amendment, not something this
+        //     comment does.
+        //   * Even that estimate under-counts: `guide_blocks` is `skip(1)`,
+        //     so guidance injected INSIDE the primary block is invisible to
+        //     this whole budget. `_guide_hint` adds ~920 B across this
+        //     fixture's six calls (161 B of text, 184 B pretty-printed as a
+        //     JSON field, on 5 of 6 calls); `_workspace_notice` is 0 B here
+        //     (a bare tempdir has no linked worktrees) but ~600 B/call in a
+        //     real repo with worktrees and no explicit activation.
         //   * It IS `post_process`'s once-per-activation onboarding hints — the
         //     `[codescout] paths are relative to …` banner and the
         //     `## Project Status (details)` block, 244 B in this fixture, both
@@ -8540,7 +8572,7 @@ mod guide_hint_tests {
         //     blocks arrive through this same return value and are counted
         //     automatically — no change needed here, which is the point of
         //     counting blocks rather than markers.
-        const CEILING: usize = 13_300;
+        const CEILING: usize = 12_244;
 
         let (_dir, server) = make_server().await;
 

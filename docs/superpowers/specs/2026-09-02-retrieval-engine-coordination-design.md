@@ -181,11 +181,17 @@ Sharpening it: `GG-4` recorded engine 1 at **11,946 B against 12,000 — 54 B of
 prose and against nothing else. Any triggered operator rule, and every skill body, landed in
 the same window carrying no accounting whatsoever.
 
-**Resolution, 2026-09-02 (Plan 3 Task 2).** `shape_total` no longer filters on the guide
-marker — it sums every block in the call's `Content` array after the primary, renamed to
+**Resolution, 2026-09-02 (Plan 3 Task 2), ceiling corrected 2026-09-02 (fix round 1).**
+`shape_total` no longer filters on the guide marker — it sums every block in the call's
+`Content` array after the primary, renamed to
 `a_p50_session_stays_under_the_committed_emission_byte_ceiling`. Measured at 12,116 B (up from
-the guide-only 11,872 B), against a re-derived `CEILING = 13_300`. What that buys, precisely,
-because a partial fix stated as a full one is the failure mode this section itself records:
+the guide-only 11,872 B), against a re-derived `CEILING = 12_244` — 12,116 plus the 128 B of
+margin the prior ceiling operated with, not the ~10% (13,300 B) originally proposed, which
+would have made the gate ~9.25x looser on the only axis it has ever caught anything on. See
+§ *Measurements this spec rests on* for the full derivation, including that 12,116 B is
+itself a floor of a real p50 session's total (≈15,351 B, by a conservation model). What the
+fix buys, precisely, because a partial fix stated as a full one is the failure mode this
+section itself records:
 
 - **`operator triggered`** is now structurally counted — a triggered rule's
   `<!-- operator-rule OP-N …` block is no longer filtered out. **Not exercised by the p50
@@ -555,7 +561,7 @@ design consequence, and it is available now.
    > `SIZE_CEILING`'s rule count would have passed, and been cited afterwards as proof the
    > budgets were unified.
    >
-   > **Done, 2026-09-02, Plan 3 Task 2 — for two of the two.** `shape_total` in
+   > **Done, 2026-09-02, Plan 3 Task 2 — for one of the two.** `shape_total` in
    > `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (renamed from
    > `..._guide_byte_ceiling`) no longer filters on the guide marker, so `operator triggered`
    > is now structurally counted (not exercised by the p50 fixture's shapes today, but no
@@ -663,15 +669,29 @@ session:
 - **Inherited, dated 2026-08-27, re-derive before use:** guide corpus 106,755 B / 67 `##`
   sections; `librarian` 20,545 B; `tracker-conventions` 35,492 B; the p50 draw of 11,946 B
   against the 12,000 B ceiling (`GG-4`).
-- **One budget, derived 2026-09-02.** The p50 session's total managed emission is
-  12,116 B across six shapes, counting every block after the primary rather than only those
-  carrying the `<!-- auto-injected get_guide(` marker. Ceiling set to 13,300 B. Covers
-  `guide-sections` (exercised by this fixture) and `operator-rules` (structurally counted,
-  but this fixture's shapes trigger none — a corpus fact, not a filter gap); **does not**
-  cover `session-opener` (`call_tool_checked` stamps its ledger key before every call, so it
-  always declines) or `craft-skills`, whose bodies never travel through an MCP response. The
-  widened total also absorbs 244 B from `post_process`'s pre-existing, once-per-activation
-  onboarding hints (the path-relative-to banner and `## Project Status (details)`), which
-  predate and sit outside the six-engine family — real bytes a session's first call receives,
-  not a managed emitter. Re-derive with
+- **One budget, derived 2026-09-02, corrected 2026-09-02 (Task 2 fix round 1).** The p50
+  session's total managed emission is 12,116 B across six shapes, counting every block after
+  the primary rather than only those carrying the `<!-- auto-injected get_guide(` marker.
+  Ceiling set to **12,244 B** — 12,116 plus 128 B, the margin the prior 12,000 B ceiling
+  operated with against its 11,872 B guide-only measurement, not the originally-proposed
+  ~10% headroom (13,300 B), which would have made the gate ~9.25x looser on the only axis it
+  has ever caught anything on (an archived 12,308 B draft that failed the old ceiling with
+  margin 0 would pass a 13,300 B ceiling silently). Covers `guide-sections` (exercised by
+  this fixture) and `operator-rules` (structurally counted, but this fixture's shapes trigger
+  none — a corpus fact, not a filter gap); **does not** cover `session-opener`
+  (`call_tool_checked` stamps its ledger key before every call, so it always declines) or
+  `craft-skills`, whose bodies never travel through an MCP response. The widened total also
+  absorbs 244 B from `post_process`'s pre-existing, once-per-activation onboarding hints (the
+  path-relative-to banner and `## Project Status (details)`), which predate and sit outside
+  the six-engine family — real bytes a session's first call receives, not a managed emitter.
+  **12,116 B is a FLOOR of what this budget's name claims, not a total.** `session-opener`
+  and `guide-sections` share one corpus (`Corpus::CompiledGuides`), and corpus exclusivity
+  means a real, unwarmed first call has the opener claim and DISPLACE that call's section
+  bytes rather than add to them — the fixture only reads 0 B for the opener because its
+  ledger key is warmed before every call. A conservation model — not a measurement taken
+  here, no real session has been run — puts a real p50 session at ≈15,351 B: the opener's
+  `project-activation-bootstrap` guide (~3,235 B wrapped) replaces `create`'s first-call
+  section, and `librarian.md:11`'s `serves: artifact.get, artifact.create` means the
+  following `get` call then draws that same 2,785 B intact, so nothing is double-counted or
+  estimated away. ≈15,351 B is ≈2,051 B **above** the 12,244 B ceiling. Re-derive with
   `cargo test --lib a_p50_session_stays_under -- --nocapture`.

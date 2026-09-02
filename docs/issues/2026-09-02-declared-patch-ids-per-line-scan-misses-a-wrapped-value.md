@@ -58,7 +58,9 @@ docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.
   (`d5af3d3ceff1d08c`), fixed at `74b9cc67`, patch-id
   <value on the following line>
 
-docs/issues/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md
+docs/issues/archive/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md
+  (archived 2026-09-02, fix round 1 — path updated here to the archived location; the line
+  quoted below is exactly as it read at the time this reproduction was captured)
   Implemented and verified, **not landed**: branch `p50-absorption-demo`, `13ee893b`, patch-id
   <value on the following line>
 

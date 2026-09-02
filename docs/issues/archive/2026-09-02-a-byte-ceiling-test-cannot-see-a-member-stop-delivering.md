@@ -1,15 +1,15 @@
 ---
-id: e688e8f39825e228
+id: 3d9226f7e01e5500
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a byte-ceiling test cannot see a member stop delivering, and neither remedy that suggests itself works'
 tags:
 - cluster/assertion-that-cannot-fail
-closed: null
+closed: 2026-09-02
 opened: 2026-09-02
 owner: marius
 severity: low
-unverified: 'fix is implemented and mutation-verified on branch p50-absorption-demo (13ee893b) but NOT landed — src/server.rs carries a third party''s uncommitted instrumentation inside the same function. Also: the landed fix matches a STRING, so a reword of the injector''s marker would silently disarm it; the typed GuideDeliveryShape::Preamble is unreachable from the test''s vantage.'
+unverified: the landed fix matches a STRING, so a reword of the injector's marker would silently disarm it; the typed GuideDeliveryShape::Preamble is unreachable from the test's vantage.
 ---
 
 # BUG: a byte-ceiling test cannot see a member stop delivering, and neither remedy that suggests itself works
@@ -128,24 +128,33 @@ the scope variant deserves its own class, this file is its first member and the 
 
 ## Fix
 
-Implemented and verified, **not landed**: branch `p50-absorption-demo`, `13ee893b`, patch-id
-`95fd1e5230f052448d99346801c659993d1941b9`.
+Landed 2026-09-02 inside `21258b4b` — a foreign-message commit: the fix rode in on another
+session's `git commit -F <msg> -- <pathspec>` sweep, whose message and `Session-Id:` belong to
+that session, not this one. Cite it by the **scoped** patch-id
+`a4559f6a12f67766832b1d8f71e24b402e1e731a`
+(`git diff 21258b4b^ 21258b4b -- docs/PROBES.md docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md src/engines/emitters.rs src/server.rs | git patch-id --stable`),
+covering only this task's four files — **not** the whole-commit patch-id, which bundles two of
+that session's unrelated files and is not a hash of this work. Original provenance, adopted
+verbatim: branch `p50-absorption-demo`, `13ee893b`, patch-id
+`95fd1e5230f052448d99346801c659993d1941b9`. Both patch-ids re-verified independently at
+archive time (2026-09-02, fix round 1) and match the values above.
 
-Assert that no emitted guide block carries the no-section-matched marker. Cause-naming rather
+Asserts that no emitted guide block carries the no-section-matched marker. Cause-naming rather
 than magnitude-guessing, and it needs no per-shape labels, no call-site edits and no ordering
-assumption — all three of which the rejected shapes required.
+assumption — all three of which the rejected shapes required. Live at
+`src/server.rs`, inside `shape_total`'s closure (search
+`"no section declares this call's shape"`).
 
-**Held because `src/server.rs` carries a third party's uncommitted
-`eprintln!("P50_TOTAL_BEFORE={total}")` inside this very function** — someone is instrumenting
-the aggregate with an aggregate-only instrument. Verified not the `tool-collapse` session's (1
-occurrence in the main checkout, 0 in that worktree). Landing would conflict with work in
-flight; the branch is offered to whoever holds that line.
+**The third party's uncommitted `P50_TOTAL_BEFORE` instrumentation that blocked landing is
+gone** — `src/server.rs` no longer carries it (verified by grep at archive time). The guard
+landed cleanly once the conflicting line cleared.
 
-**The fix's own weakness is annotated at the fix**: it matches a **string**, so a reword of the
-marker leaves it passing and no longer discriminating. The robust form is one layer down —
-`GuideDeliveryShape::Preamble`, which `guide_blocks_for` already returns — but it is unreachable
-from this test's vantage, which sees only emitted `Content` through `call_tool_checked`.
-
+**The fix's own weakness is still true and still annotated at the fix**: it matches a
+**string**, so a reword of the marker leaves it passing and no longer discriminating. The
+robust form is one layer down — `GuideDeliveryShape::Preamble`, which `guide_blocks_for`
+already returns — but it is unreachable from this test's vantage, which sees only emitted
+`Content` through `call_tool_checked`. This is the open residual; see `unverified:` in
+frontmatter and § *Resume*.
 ## Tests added
 
 The fix *is* the test. Derivation, re-runnable: **A** unmutated → GREEN, **B**
@@ -158,13 +167,14 @@ delivered and this test would keep passing, which is what it exists to prevent.
 
 ## Resume
 
-Land `13ee893b` once `src/server.rs` is free in the main checkout — check
-`git status --short src/server.rs` and the presence of `P50_TOTAL_BEFORE` first. Re-run the
-A/B/C derivation after any rebase rather than trusting the pre-rebase run.
+**Landed 2026-09-02** — nothing left to resume on the landing question; see § *Fix* for the
+commit and both patch-ids.
 
-If the shape enum becomes reachable from the test's vantage, replace the string match with
-`GuideDeliveryShape::Preamble` and delete the annotation about its brittleness.
-
+What remains open: the fix matches a string, not the typed `GuideDeliveryShape::Preamble`. If
+the shape enum becomes reachable from the test's vantage, replace the string match with
+`GuideDeliveryShape::Preamble` and delete the annotation about its brittleness — until then,
+a reword of the injector's marker (`src/tools/core/guide_emit.rs`) silently disarms this guard
+with no test failure to announce it.
 ## References
 
 - `CLAUDE.md` § *Testing Discipline* — the law, added `0d2ab2b1`, sharpened `621d7dff`.
@@ -174,4 +184,3 @@ If the shape enum becomes reachable from the test's vantage, replace the string 
 - `src/tools/core/guide_emit.rs` — `guide_blocks_for`'s unmatched branch, which emits the marker.
 - Class named by the `tool-collapse` session from a symptom in its own gate; the located
   instance, both falsifications and the marker fix derived here.
-

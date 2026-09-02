@@ -156,9 +156,9 @@ This is the axis the monotone law does not cover. That one asks which *direction
 blind to; this one asks what *scope* it is computed over. A per-member claim checked against an
 aggregate is vacuous for every member, and it reads as coverage rather than as a gap.
 
-`a_p50_session_stays_under_the_committed_guide_byte_ceiling` (`src/server.rs`) sums guide bytes
-across six tool shapes and asserts `total <= CEILING` and `total > 0`. Measured 2026-09-02, per
-shape:
+`a_p50_session_stays_under_the_committed_emission_byte_ceiling` (`src/server.rs`) asserts
+`total <= CEILING` and `total > 0` over six tool shapes. Guide bytes alone, measured
+2026-09-02 per shape:
 
 | shape | bytes |
 |---|---|
@@ -169,9 +169,15 @@ shape:
 | `find` | 2233 |
 | `move` | 2018 |
 
-Total 11,872 against `CEILING = 12_000`. `total > 0` is a sum of six non-negative addends, so it
-fails only if **all six** are zero — insensitive to five of them by construction. That much is a
-proof rather than a measurement.
+Guide bytes total **11,872**. The test itself was renamed and widened 2026-09-02 (Plan 3
+Task 2) from `a_p50_session_stays_under_the_committed_guide_byte_ceiling`, which is the name
+this section originally measured: `shape_total` now sums every block after the primary, not
+only guide-marked ones, so the asserted total also folds in a fixed 244 B of `post_process`'s
+onboarding hints present in this fixture — `total = 12,116` against `CEILING = 12_244` (see
+`docs/PROBES.md` and the spec's § *Measurements this spec rests on* for the current
+mechanism and why 12,116 B is itself a floor of a real session's total). `total > 0` is a sum
+of six non-negative addends, so it fails only if **all six** are zero — insensitive to five of
+them by construction. That much is a proof rather than a measurement.
 
 **Both aggregates are blind in the same direction, which is worse than one blind spot.** A section
 ceasing to be delivered *reduces* the total, so it makes `total <= CEILING` **more** comfortable.
