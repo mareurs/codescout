@@ -85,6 +85,22 @@ premise that every addition falsifies.
   because that change is monotone too. **And annotate an inert fixture as inert**, so nobody credits
   it with coverage it does not provide: one direction guards against silent **removal**, the other
   against silent **credit**, and false coverage is the one that stops the next person looking.
+- **An assertion computed over a POPULATION cannot verify a claim about a MEMBER, and the laws
+  above will not catch it** — they are about the *direction* an assertion is blind to; this is about
+  the **scope** it is computed over. A per-member claim checked against an aggregate is vacuous for
+  every member and reads as coverage. **Two aggregates can be worse than one** when both are
+  satisfied in the same wrong direction: a byte-ceiling test paired `total <= CEILING` with
+  `total > 0` over six contributors, so content silently vanishing made the first *more* comfortable
+  and was absorbed by the second. **And the per-member fix is not automatically the remedy** — a
+  per-member assertion is only as good as the member's ability to reach the failing value, which a
+  deliberate fallback floor can make unreachable; `bytes > 0` per shape was still green because a
+  shape whose section is gone receives a 491-byte fallback rather than nothing. So **demand an
+  observed RED, never an assertion's existence** — that is the only acceptance bar separating
+  reachable from unreachable without knowing the system's floors in advance. And where a system
+  already names its own failure state, **assert on the name, not on a proxy for it**: the
+  discriminator is usually already in the output, unused, while both parties reach for a number.
+  (Two remedies falsified before the third worked, measured 2026-09-02 →
+  [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md).)
 ## Bug Tracking
 
 **Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.

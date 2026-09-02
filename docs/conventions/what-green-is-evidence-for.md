@@ -148,6 +148,113 @@ looking, where silent removal does not. Worked example: the `output_id` probe in
 fixture line as changing no outcome today and explicitly not to be cited as overflow coverage.
 Promoted from `reconnaissance-patterns:R-161`.
 
+## Scope, not direction — the p50 byte-ceiling run
+
+**Law:** an assertion computed over a population cannot verify a claim about a member.
+
+This is the axis the monotone law does not cover. That one asks which *direction* an assertion is
+blind to; this one asks what *scope* it is computed over. A per-member claim checked against an
+aggregate is vacuous for every member, and it reads as coverage rather than as a gap.
+
+`a_p50_session_stays_under_the_committed_guide_byte_ceiling` (`src/server.rs`) sums guide bytes
+across six tool shapes and asserts `total <= CEILING` and `total > 0`. Measured 2026-09-02, per
+shape:
+
+| shape | bytes |
+|---|---|
+| `create` | 2785 |
+| `get` | 0 — legitimate; `create` already delivered its section and the ledger dedups per session |
+| `update` | 3193 |
+| `append_entry` | 1643 |
+| `find` | 2233 |
+| `move` | 2018 |
+
+Total 11,872 against `CEILING = 12_000`. `total > 0` is a sum of six non-negative addends, so it
+fails only if **all six** are zero — insensitive to five of them by construction. That much is a
+proof rather than a measurement.
+
+**Both aggregates are blind in the same direction, which is worse than one blind spot.** A section
+ceasing to be delivered *reduces* the total, so it makes `total <= CEILING` **more** comfortable.
+The pair's failure modes agree, so content vanishing moves both the safe way.
+
+**The test already computed the discriminating value and dropped it.** `shape_total` returned
+`bytes`; all six call sites discarded the return, silently, because `usize` is not `#[must_use]`.
+The author had even written the predicate in prose — *"`get` is the ONE shape expected to report 0 B
+here … Any OTHER shape reporting 0 B is suspicious, not normal."* A guard that would have worked was
+sitting in the function, unreferenced. (The adjacent mode *was* closed deliberately: every call goes
+through `call_tool_checked` rather than `call_tool`, because a silently-failed call reports 0 B and
+is character-identical to legitimate dedup.)
+
+### Two remedies falsified, and that is the reusable part
+
+Mutation used throughout: rename `serves: artifact.append_entry` in `src/prompts/guides/librarian.md`
+so that shape's section no longer matches — a realistic serves-drift, not a synthetic break.
+
+| remedy | result |
+|---|---|
+| `total > 0` (the existing assertion) | **GREEN** — absorbed |
+| `bytes > 0` per shape, exempting `get` | **GREEN** |
+| assert no block carries the declared failure marker | **RED**, naming serves-drift |
+
+The second is the one worth knowing, because it is what the law's own diagnosis implies and two
+readers agreed on it independently. It fails for a reason neither could reason to: a shape whose
+section is gone does **not** report 0 B. It receives a 491-byte fallback whose own marker reads
+`no section declares this call's shape`. Every shape therefore has a floor above zero, and **no
+non-emptiness assertion at any grain can discriminate** — not the aggregate, not the per-member one.
+Under mutation `append_entry` reads 491, not 0.
+
+Hence two rules that generalise past this test:
+
+- **A per-member assertion is only as good as the member's ability to reach the failing value.** A
+  deliberate, self-describing fallback floor makes that value unreachable, so the assertion is
+  vacuous for a second and independent reason.
+- **Demand an observed RED, never an assertion's existence.** That acceptance bar is immune to the
+  trap by construction, because it separates reachable from unreachable without anyone needing to
+  know the system's floors in advance. It is what saved the sibling instance below: the same
+  underspecified *"a per-tool expectation replacing the global sum"* was read as an exact-count
+  table (which discriminates, 3 ≠ 0) rather than as `found > 0` (which would not have). The sound
+  reading was chosen, not specified.
+
+### What worked — cause-naming over magnitude-guessing
+
+The injector announces the condition in the block it emits — `src/tools/core/guide_emit.rs:182`
+writes `preamble — no section declares this call's shape` — so the discriminator was in the output
+all along while both readers reached for a number. **Where a system already names its own failure
+state, assert on the name rather than on a proxy for it.** It also needs no per-shape labels, no
+call-site edits and no ordering assumption — all three of which the rejected shapes required.
+
+**Annotating this fix's own weakness, per the fixture law above: it matches a STRING.** A reword of
+that marker leaves the assertion passing and no longer discriminating, and no assertion can catch
+that because the change is monotone. The robust form exists one layer down —
+`GuideDeliveryShape::Preamble` (`src/tools/core/guide_emit.rs:41`) is the typed signal
+`guide_blocks_for` already returns — but it is not reachable from this test's vantage, which sees
+only the emitted `Content` blocks through `call_tool_checked`. So the string is the best available
+discriminator here and the weakest link in the fix; a future change that surfaces the shape enum to
+the test should replace it.
+
+Derivation, reproducible by anyone who wants to disbelieve it, run in an isolated worktree with its
+own `target/` so no shared build lock was involved:
+
+```text
+A. unmutated + marker guard                  -> GREEN
+B. `serves: artifact.append_entry` renamed   -> RED, naming serves-drift as the cause
+C. reverted                                  -> GREEN
+```
+
+Held on branch `p50-absorption-demo` (`13ee893b`, patch-id
+`95fd1e5230f052448d99346801c659993d1941b9`) rather than landed: `src/server.rs` carried another
+session's uncommitted instrumentation inside that same function at the time — an aggregate-only
+`eprintln!` of `total`, which is the blindness this fix removes.
+
+**Provenance, because the parts came from different sessions.** The class was named by a peer session
+from a symptom in its own gate (`total_aliases_found`, a global accumulator summed across 26 tools,
+fixed separately with both demonstration steps observed RED). The instance here, the two falsified
+remedies and the marker fix were derived in this run. A candidate offered first —
+`tool_surface_under_budget` — was **not** an instance: it asserts a population claim against a
+population accumulator, which is honest, and per-tool is separately covered by
+`every_tool_description_under_cap`. That correction is kept because a class shown once is an
+incident, and a mis-assigned member is a different error from a short count.
+
 ## Related
 
 - The laws themselves: [`CLAUDE.md`](../../CLAUDE.md) § *Testing Discipline*.
