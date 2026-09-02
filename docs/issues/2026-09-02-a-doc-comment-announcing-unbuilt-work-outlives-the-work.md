@@ -9,6 +9,7 @@ tags:
 - doctor
 - statement-validity
 - forward-reference
+unverified: 'The INSTANCE is corrected at 4aba4c3d; the CLASS is not, which is why status stays open. src/agent/mod.rs:687 carries the same forward-reference shape today (re-verified 2026-09-02), and the candidate mechanism — gate that a forward reference names the symbol it waits on and that the symbol does NOT resolve — is deliberately not built: a new gate over a 3-item population, below this repo''s bar. Nothing establishes that a second instance would be caught.'
 ---
 
 # BUG: a doc comment announcing unbuilt work outlives the work, and sends the next reader to rebuild it
@@ -90,7 +91,7 @@ The two survivors are the interesting half:
   self-enforcing by accident.** `synthesize` returns `params.clone()`, so every `correct_status`
   rubric fails at T2, and the test carries `#[ignore = "… after API key set + synthesize() wired"]`.
   Shipping the synthesizer makes a test change state. The comment is wired to a check.
-- `src/agent/mod.rs:672` — *"Level-2 sub-project pinning within a pinned workspace is not yet
+- `src/agent/mod.rs:687` — *"Level-2 sub-project pinning within a pinned workspace is not yet
   wired"*. **Still true, and protected by nothing.** `with_project_at` pins at workspace granularity;
   the day someone adds level-2 pinning, this sentence rots exactly as `doctor.rs`'s did, silently.
 
@@ -126,7 +127,7 @@ names `scan_cited_but_undeclared` as shipped, and records that it read "not-yet-
 2026-09-02 and that a reader proposed rebuilding it. Kept as a dated retraction rather than a clean
 rewrite, so the next reader learns the sentence has a history.
 
-**The class is not fixed.** `src/agent/mod.rs:672` carries the same shape today.
+**The class is not fixed.** `src/agent/mod.rs:687` carries the same shape today — *"Level-2 sub-project pinning within a pinned workspace is not yet wired (read tools pin at workspace granularity)."* (Re-verified 2026-09-02. This citation read `:672` until then; the file shifted underneath it, which is the `path:line` decay the `**Rests on:**` convention exists to route around — the shape survived, the coordinate did not.)
 
 **Candidate mechanism, in this repo's preferred order** — *make the correct path end in a safe
 state*: require a forward reference to name the symbol it waits on, and gate that the symbol does
@@ -171,6 +172,5 @@ instance, and it is predictable **by name and by file**, which is more than most
 - CLAUDE.md § *Observer Blindness* — the standing rule that caught this before code was written.
 - **Not an `OB-N`.** The observer-blindness ledger's bar is a class with a named blind party *and* a
   candidate mechanism; the blind party is nameable here, but at one stale instance this is an
-  instance, and that ledger says instances are bug files. It promotes if `agent/mod.rs:672` rots the
+  instance, and that ledger says instances are bug files. It promotes if `agent/mod.rs:687` rots the
   same way, which § *Resume* makes checkable.
-
