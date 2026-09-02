@@ -108,6 +108,26 @@ them belonging to no live session** — so the sessionId's trace outlives its pr
 margin. Against that, pid `4052913`'s registry row is absent from every one of the three
 profiles, and its socket is gone.
 
+**How the live count was derived, because the obvious cross-check is not independent.** Session
+`f13f8169-93a1-4392-95d1-8774d296e0c0` flagged that a live-session count taken from
+`~/.claude*/sessions/` shares a substrate with the socket enumeration and so corroborates only
+partially, by this repo's rule that *two instruments returning the same number is evidence only if
+their scopes differ*. Correct, and it applies to the first derivation of the 81 above. A
+registry-free instrument does exist and was run: liveness from `/proc/<pid>`, project attribution
+from `readlink /proc/<pid>/cwd`, population from `/tmp` — **no `sessions/*.json` read on that
+path**. It returns 9 live for this project, agreeing with the registry-derived 9.
+
+**The residual, which neither instrument closes:** both start from
+`/run/user/<uid>/cc-socks/*.sock`, so a live session with no bound socket is invisible to both and
+would be miscounted as an orphan. That biases the orphan figure **upward**, i.e. in the direction
+that flatters the claim — so read **81 as an upper bound**, not a measurement. The claim does not
+need it: it needs only that scratchpads greatly outnumber live sessions, and 90 directories
+against at most 21 live sessions machine-wide holds under any correction the residual could
+produce.
+
+The same reasoning is why this section reports a derivation rather than a value. A reader who
+re-runs it later gets a different 90 and a different 9, and should.
+
 So a routing decision made from a **name** cannot be audited afterwards *even in principle*: the
 only record of what the instrument displayed is deleted by the event that ends the session. A
 decision made from a **sessionId** can be.
