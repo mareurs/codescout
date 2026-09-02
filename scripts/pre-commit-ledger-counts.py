@@ -328,20 +328,48 @@ def members_fields(ledger: str, valid: set[str]) -> dict[str, str]:
     return out
 
 
+def _stem(rel: str) -> str:
+    """The dateless slug -- a bug file's identity ACROSS a rename.
+
+    `docs/issues/X.md` and `docs/issues/archive/X.md` are the same record; only the path moved.
+    Keying membership on the path makes every archive move -- which this repo mandates for every
+    verified fix -- read as a brand-new member, so the gate refuses the archive flow. Measured
+    2026-09-02 against a peer's live archive commit, minutes after shipping.
+    """
+    stem = pathlib.Path(rel).stem
+    if len(stem) > 11 and stem[4] == "-" and stem[7] == "-" and stem[10] == "-":
+        stem = stem[11:]
+    return stem
+
+
+def bug_files_at(source: str) -> list[str]:
+    """The bug-file population of ONE tree. `head` lists HEAD's own paths, not the index's."""
+    if source != "head":
+        return bug_files()
+    return [
+        p
+        for p in _git("ls-tree", "-r", "--name-only", "HEAD", "docs/issues").splitlines()
+        if p.endswith(".md") and not p.endswith("_TEMPLATE.md")
+    ]
+
+
+def tags_by_stem(source: str) -> dict[str, set[str]]:
+    """stem -> cluster tags, over the population of the named tree."""
+    out: dict[str, set[str]] = {}
+    for rel in bug_files_at(source):
+        content = read(rel, source)
+        if content is None:
+            continue
+        out.setdefault(_stem(rel), set()).update(cluster_tags(frontmatter(content) or ""))
+    return out
+
+
 def added_member_stems(source: str) -> dict[str, set[str]]:
     """slug -> dateless stems of bug files carrying it now that did not carry it at HEAD."""
+    now, was = tags_by_stem(source), tags_by_stem("head")
     out: dict[str, set[str]] = {}
-    for rel in bug_files():
-        now = read(rel, source)
-        if now is None:
-            continue
-        was = read(rel, "head")
-        now_tags = set(cluster_tags(frontmatter(now) or ""))
-        was_tags = set(cluster_tags(frontmatter(was) or "")) if was is not None else set()
-        stem = pathlib.Path(rel).stem
-        if len(stem) > 11 and stem[4] == "-" and stem[7] == "-" and stem[10] == "-":
-            stem = stem[11:]
-        for slug in now_tags - was_tags:
+    for stem, tags in now.items():
+        for slug in tags - was.get(stem, set()):
             out.setdefault(slug, set()).add(stem)
     return out
 
@@ -449,13 +477,16 @@ def main() -> int:
         return 0
     before = actual_counts(valid_slugs(head_ledger), "head")
 
-    gained = sorted(s for s, n in actual.items() if n > before.get(s, 0))
+    # Derived from stem identity, NOT from `actual` vs `before` counts: a count comparison
+    # cannot tell an archive move (path changed, stem unchanged) from a new member, because the
+    # index population and HEAD's population are different path sets.
+    new_stems = added_member_stems(source)
+    gained = sorted(new_stems)
     if not gained:
         return 0
 
     members = members_fields(ledger, valid)
     head_members = members_fields(head_ledger, valid)
-    new_stems = added_member_stems(source)
 
     undocumented = []
     for slug in gained:
