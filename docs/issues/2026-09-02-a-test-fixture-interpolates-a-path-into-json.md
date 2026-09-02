@@ -36,7 +36,7 @@ environment-controlled text — a path, a tempdir name — can be satisfied by c
 ## Symptom (Effect)
 
 The last 2 of the 21 Windows failures, surviving after
-`docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md` cleared
+`docs/issues/archive/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md` cleared
 the other 19 (run `33574961971`, `windows-latest / default`):
 
 ```

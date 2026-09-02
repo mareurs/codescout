@@ -1,5 +1,5 @@
 ---
-id: d5788071fe38e536
+id: 70c56ad57f38311a
 kind: bug
 status: fixed
 title: LockFileEx needs GENERIC_READ/WRITE, and an append-only handle has neither — 21 tests red on every windows lane

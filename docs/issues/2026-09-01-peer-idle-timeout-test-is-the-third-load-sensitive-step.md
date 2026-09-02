@@ -106,7 +106,7 @@ measured contention signal in at least one instance.
 isolation re-run had already been launched before a peer pointed out this file existed. The
 file was **unreadable by `read_markdown`** — it is a tool-created bug file and therefore
 stamped, so the librarian guard refused it, which is
-`docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md` firing on
+`docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md` firing on
 the corpus's newest file. Reaching it needed `artifact(action="find")` then
 `artifact(action="get")`. Worth knowing if a future session looks for this record by path and
 concludes it is absent.

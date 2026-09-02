@@ -27,7 +27,7 @@ use crate::tools::RecoverableError;
 /// `ledger` is deliberately left refusing everything in this change: narrowing it is a
 /// separate question about `PREFIX-N` allocation, and mixing the two would make neither
 /// reviewable.
-/// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+/// docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     /// A read. Cannot desynchronise anything, so only a stale-snapshot file refuses it.
@@ -159,7 +159,7 @@ fn guard_with_oracle(
     // `ledger` keeps refusing every access on purpose. Narrowing it is a separate
     // question about who may advance a `PREFIX-N` counter, and answering both in one
     // change would make neither reviewable.
-    // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    // docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
     let stamped_only = stamped && !augmented && !ledger;
     if stamped_only && access != Access::FrontmatterWrite {
         return Ok(());
@@ -560,7 +560,7 @@ mod tests {
     /// `id:`, so the premise holds. What this test therefore does NOT cover is the
     /// file that carries one because `artifact(action="create")` put it there — see
     /// `a_stamped_refusal_names_the_stamp_as_its_reason` below and
-    /// `docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
+    /// `docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
     #[test]
     fn a_catalogued_but_unaugmented_file_stays_directly_editable() {
         struct NothingIsAugmented;
@@ -665,7 +665,7 @@ mod tests {
     ///
     /// Mutation this kills: restoring `""` on the `stamped` arm, or moving the
     /// `stamped` text onto a shared fallback the other arms also reach.
-    /// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    /// docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
     #[test]
     fn a_stamped_refusal_names_the_stamp_as_its_reason() {
         struct NothingIsAugmented;
@@ -741,7 +741,7 @@ mod tests {
     ///   and `a_declared_ledger_is_guarded_with_no_id_and_no_augmentation`, both of which
     ///   now pass `Access::Read` for exactly that reason.
     ///
-    /// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    /// docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
     #[test]
     fn a_stamped_only_file_refuses_frontmatter_writes_and_permits_reads_and_body_edits() {
         struct NothingIsAugmented;

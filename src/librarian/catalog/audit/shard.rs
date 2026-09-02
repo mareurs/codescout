@@ -636,7 +636,7 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
                 // Invisible on Unix, where `flock(2)` ignores the descriptor's access
                 // mode entirely: this cost 21 tests on every `windows-latest` lane while
                 // Linux and macOS stayed green. Do not "simplify" it away.
-                // docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md
+                // docs/issues/archive/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md
                 .read(true)
                 .append(true)
                 .open(&path)

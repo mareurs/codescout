@@ -356,7 +356,7 @@ deleted as redundant. Same rigour here.
 ## References
 
 - `docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md` — Change 1.
-- `docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md` — the
+- `docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md` — the
   shipped hint fix; its `## Tests added` is the mutation-table standard this spec adopts.
 - `docs/trackers/issue-clusters.md` § IC-22, IC-6, IC-21.
 - `src/librarian/tools/get.rs:536`, `src/tools/core/types.rs:1453`.

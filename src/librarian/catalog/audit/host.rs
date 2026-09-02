@@ -37,7 +37,7 @@ use rusqlite::Connection;
 /// `LockFileEx` refusing an append-only handle in `shard.rs`; the mixed path is tolerated
 /// by Windows here, and the failure happens after `create_dir_all` and after the file
 /// opens. Kept because it is correct, not because it fixed anything.
-/// See `docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
+/// See `docs/issues/archive/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
 ///
 /// **Do not collapse these back into one literal**, and note the Linux-side reason the
 /// obvious guard does not work: on Unix `join(".codescout/audit")` DOES split into two
@@ -351,7 +351,7 @@ mod tests {
     /// tests, same names, same lines. The real cause was `LockFileEx` refusing an
     /// append-only handle in `shard.rs`. So this test guards a property worth having and
     /// **guards no known defect**; do not credit it with coverage of the Windows lanes.
-    /// See `docs/issues/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
+    /// See `docs/issues/archive/2026-09-02-lockfileex-refuses-an-append-only-handle-on-windows.md`.
     ///
     /// **Why it asserts on the PARTS and not on the built path.** The obvious test —
     /// "`audit_dir(root)` has two components below `root`" — passes on Unix whether the

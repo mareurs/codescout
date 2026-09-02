@@ -205,7 +205,7 @@ pub fn adapters_for(ctx: Arc<LibToolContext>) -> Vec<Arc<dyn crate::tools::Tool>
 /// Scoped to the librarian adapter rather than changed inside `default_json_path_hint`:
 /// that heuristic is right for `find`, `graph`, `state_at`, `link_scan` and the rest, and
 /// one action's shape is not a reason to move a rule the others depend on.
-/// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+/// docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
 fn scoped_body_hint(val: &Value) -> Option<String> {
     let scoped = val.get("body_meta").is_some_and(Value::is_object);
     (scoped && val.get("body").is_some()).then(|| "$.body".to_string())
@@ -342,7 +342,7 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// envelope. Decision extracted to [`scoped_body_hint`] so a test can reach it without
     /// building an adapter — the same shape `format_compact` uses for
     /// `librarian_compact_summary`.
-    /// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+    /// docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
     fn json_path_hint(&self, val: &Value) -> String {
         scoped_body_hint(val).unwrap_or_else(|| crate::tools::default_json_path_hint(val))
     }
@@ -820,7 +820,7 @@ mod tests {
     ///
     /// Mutations this kills: dropping the `body_meta` check → row 2 fails; dropping the
     /// `body` check → row 3 fails; returning `Some` unconditionally → rows 2 and 4 fail.
-    /// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+    /// docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
     #[test]
     fn a_scoped_read_is_hinted_at_its_body_and_a_full_read_is_not() {
         for (label, payload, expect) in [

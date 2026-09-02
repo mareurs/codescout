@@ -353,7 +353,7 @@ correct behaviour and not a defect.
 What survives is a real, small defect: on a buffered heading-scoped `get`, the envelope's
 `hint` names `json_path="$.preview.headings[*]"` — the heading map — when the caller passed
 `heading=` and wants `$.body`. Following the hint costs a wasted call. Filed:
-`docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`.
+`docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`.
 
 **3 — "IL-3 granularity": MISATTRIBUTED, and the correction was itself corrected.** Two
 distinct gates fired four times this session, and the original entry blamed one label for
@@ -372,7 +372,7 @@ message is authoritative about its predicate and says nothing about its evaluati
 
 **4 — Read-refusal on managed ledgers: UNDERSTATED. This is the session's most valuable
 finding, and the original wording would have buried it.** Filed high-severity as
-`docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
+`docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
 
 `artifact(action="create")` writes `id: '<16-hex>'` into frontmatter; `librarian_guard`'s
 `stamped` predicate (`src/util/librarian_guard.rs:95`) reads that as "the librarian owns this

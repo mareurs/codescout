@@ -1347,7 +1347,7 @@ impl Tool for EditMarkdown {
         // That distinction is the whole reason a merely-STAMPED file no longer refuses
         // an ordinary prose edit — the drift BL-48 describes is a frontmatter drift, and
         // this is the one call site that can prove it is not doing one.
-        // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+        // docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
         let access = if input["frontmatter"].is_object() {
             crate::util::librarian_guard::Access::FrontmatterWrite
         } else {

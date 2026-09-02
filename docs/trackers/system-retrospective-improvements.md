@@ -206,7 +206,7 @@ no caller can reach.
 
 **Status:** open — **HIGH**, and the first of this batch to work.
 **Valid:** dated 2026-09-01
-**Bug:** `docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`
+**Bug:** `docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`
 
 **Why:** `artifact(action="create")` writes `id: '<16-hex>'` into frontmatter;
 `librarian_guard`'s `stamped` arm (`src/util/librarian_guard.rs:95`) reads that as "the
@@ -366,7 +366,7 @@ correctly and still deliver everything if the keys do not match real call names.
 
 **Status:** open — small.
 **Valid:** dated 2026-09-01
-**Bug:** `docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`
+**Bug:** `docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`
 
 **Why:** when a heading-scoped `get` overflows, the envelope's `hint` names
 `json_path="$.preview.headings[*]"` — the heading map — though the caller passed `heading=`
