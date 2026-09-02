@@ -458,6 +458,18 @@ fn parse_index_rows(text: &str, valid: &BTreeSet<String>) -> BTreeSet<String> {
     out
 }
 
+/// Slugs in `valid` with no matching row in `rows`, except the sanctioned `unclassified`
+/// escape hatch — see [`every_declared_class_has_an_index_row`]'s doc comment for why it is
+/// exempt. Pulled out of that test so [`missing_index_rows_exempts_only_unclassified`] can run
+/// the SAME filter the live gate runs, rather than a second copy that could drift from it.
+fn missing_index_rows(valid: &BTreeSet<String>, rows: &BTreeSet<String>) -> Vec<String> {
+    valid
+        .iter()
+        .filter(|s| s.as_str() != "unclassified" && !rows.contains(*s))
+        .cloned()
+        .collect()
+}
+
 /// Every **bare** `n=<N>` in a field's tail; an `n=` inside any backtick span is skipped.
 ///
 /// **The backtick is the escape, and it is now the ONLY signal separating a live claim from a
@@ -1267,27 +1279,35 @@ fn no_index_row_stores_a_count() {
 /// an untracked file is a peer's in-flight work, and gating on it lets one session red another's
 /// build. Reported from the receiving end by a peer session on 2026-09-01, who hit exactly this.
 /// The failure text cannot say this, so it is said here.
+///
+/// **One sanctioned exception: `unclassified`.** Added 2026-09-02 (fix round 1, Plan 3 Task 2)
+/// with a `**Slug:**`/`**Members:**` pair, so CHECK 2 (`scripts/pre-commit-ledger-counts.py`)
+/// can track growth of the escape hatch the same way it tracks an `IC-N` class. It is not an
+/// `IC-N` class, though: no numbered id, no promotion field, and — by the ledger's own stated
+/// design ("a taxonomy decision, not a gate one", `docs/trackers/issue-clusters.md` § *Index*)
+/// — deliberately no Index row. [`missing_index_rows`] excludes exactly this one slug;
+/// [`missing_index_rows_exempts_only_unclassified`] proves the exclusion is that narrow.
 #[test]
 fn every_declared_class_has_an_index_row() {
     let valid = valid_slugs();
     let text = ledger_text();
     let rows = parse_index_rows(&text, &valid);
 
-    let missing: Vec<&String> = valid.iter().filter(|s| !rows.contains(*s)).collect();
+    let missing = missing_index_rows(&valid, &rows);
     assert!(
         missing.is_empty(),
         "these classes declare a `**Slug:**` but have no parseable Index row: {missing:?}\n\
-         Either the row is absent, or its slug cell stopped being backticked.\n\n\
-         On a SHARED CHECKOUT there is a third possibility, and it is not your defect: a peer \
-         session is mid-write. An entry section and its Index row are two writes, so slugs that \
-         are theirs and in flight appear here until the second one lands. This message cannot \
-         tell the cases apart — `git diff HEAD -- docs/trackers/issue-clusters.md` can. Reported \
-         twice in one afternoon by a peer who worked it out unaided."
+             Either the row is absent, or its slug cell stopped being backticked.\n\n\
+             On a SHARED CHECKOUT there is a third possibility, and it is not your defect: a peer \
+             session is mid-write. An entry section and its Index row are two writes, so slugs that \
+             are theirs and in flight appear here until the second one lands. This message cannot \
+             tell the cases apart — `git diff HEAD -- docs/trackers/issue-clusters.md` can. Reported \
+             twice in one afternoon by a peer who worked it out unaided."
     );
     assert!(
         rows.len() > 10,
         "only {} Index rows parsed — the table format moved, and `no_index_row_stores_a_count` \
-         is now asserting emptiness over a table nobody can read, which it would pass",
+             is now asserting emptiness over a table nobody can read, which it would pass",
         rows.len()
     );
 }
@@ -1382,6 +1402,27 @@ fn the_index_row_parser_discriminates() {
         "only `| IC-` lines are rows; prose naming a slug must not define a count"
     );
     assert_eq!(got.len(), 2);
+}
+
+/// The `unclassified` exemption in [`missing_index_rows`] is narrow: it excuses exactly that
+/// one slug, not "any slug missing a row." A real class missing its Index row must still be
+/// reported — otherwise a typo'd or deleted IC-N row would silently stop being caught, which
+/// is the exact defect [`every_declared_class_has_an_index_row`] exists to guard against.
+#[test]
+fn missing_index_rows_exempts_only_unclassified() {
+    let valid: BTreeSet<String> = ["unclassified", "some-real-class"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let rows: BTreeSet<String> = BTreeSet::new(); // neither slug has a row
+
+    let missing = missing_index_rows(&valid, &rows);
+    assert_eq!(
+        missing,
+        vec!["some-real-class".to_owned()],
+        "`unclassified` must be exempt (it has no IC-N row by design); `some-real-class` \
+             must still be reported missing, or the guard has gone vacuous"
+    );
 }
 
 /// The count scan must actually reach the archive.
