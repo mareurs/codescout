@@ -200,6 +200,27 @@ this file currently carries four sessions' staged edits, so a whole-column rewri
 collide mid-repair. Whoever takes it should do it when the file is uncontended, and
 delete this subsection in the same commit.
 
+> **This file is the INDEX. It is a pointer, not a place to write.**
+>
+> Since 2026-09-02 each class record lives in its own file, `docs/trackers/issue-clusters/IC-N-<slug>.md`.
+> An Index row is a one-line locator; the `**Members:**` derivation, the `**Promotes to:**`
+> reasoning and the `**Mechanism status:**` all belong in the class file. Writing a derivation
+> into an Index cell instead re-creates, one cell at a time, the exact coupling the split
+> removed — **16 distinct sessions and 53 commits on this one file in a day**, 3× the next
+> file in the repo.
+>
+> **Filing a NEW class is two steps, and the second is gated.** `append_entry` splices the new
+> section into the parent artifact's own file — this one — because that is where the id and the
+> citable `## IC-N — <title>` heading are allocated. So: append here, then move the section to
+> its class file and leave the Index row behind, in one commit.
+> `tests/issue_clusters.rs::the_index_file_holds_no_class_sections` reds until you do, and names
+> the fix. It is a gate rather than a note because a step the next filer has to remember is a
+> policy, not a mechanism.
+>
+> Erosion guard suggested by `codescout-0a` (sessionId `2cb44cd3`) on reviewing the split:
+> the failure it names — a full derivation appended into a trunk cell — is the one the test
+> above cannot see, because it is not a section.
+
 ## Index
 
 > Hand-maintained reading surface. The `## IC-N — <title>` headings are what define the tokens
