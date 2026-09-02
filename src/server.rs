@@ -3351,7 +3351,13 @@ mod tests {
     /// tools' `anyOf` path-alias branches added, Fix 6's own trims applied): actual
     /// total was 59_338, already over the stale 57_497 figure — this line raises the
     /// budget to match rather than trims further, since nothing here was padding.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 59_338;
+    ///
+    /// Ratcheted DOWN 2026-09-02, fix round on Task 7 (folding `read_markdown` into
+    /// `read_file` deleted a whole tool's `desc`+`schema` from the sum): re-measured
+    /// via `cargo test --lib tool_surface_report_lengths -- --nocapture`, actual
+    /// total 57_406 across 22 tools. Set to the exact measured total, not padded,
+    /// per the rule above.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_406;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

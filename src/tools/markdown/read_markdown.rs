@@ -31,8 +31,13 @@ async fn resolve_markdown_source(
             .unwrap_or_else(|| std::path::PathBuf::from(path));
         Ok((resolved, buf.stdout.clone()))
     } else {
-        // Gate: .md files only
-        if !path.ends_with(".md") && !path.ends_with(".markdown") {
+        // Gate: .md files only. Case-insensitive to match `is_markdown_target`'s own
+        // lowercasing — `read_file` dispatches here whenever that function says "this
+        // is markdown", so a gate that disagrees with the dispatcher it serves refuses
+        // every uppercase-extension file the caller was just routed to (e.g.
+        // `README.MD`), with a hint that tells them to do exactly what they did.
+        let lower = path.to_ascii_lowercase();
+        if !lower.ends_with(".md") && !lower.ends_with(".markdown") {
             return Err(RecoverableError::with_hint(
                 format!(
                     "heading/headings address markdown sections, and '{}' is not a markdown file",

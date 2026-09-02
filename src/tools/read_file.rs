@@ -159,6 +159,21 @@ impl Tool for ReadFile {
 
         let text = read_file_text(path, &resolved)?;
 
+        // Guard at the shared read, not at the markdown route: `force=true` and
+        // `json_path`/`toml_key` both fall through to this raw path *specifically to
+        // skip* the markdown dispatch above, and `markdown::read`'s own guard call
+        // (read_markdown.rs) never runs for them. A guard that only fires on one of
+        // two paths to the same bytes is the shape that produced
+        // docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
+        // for writes; this is that defect's read twin; `force=true` on a
+        // librarian-managed ledger returned its frontmatter with no warning.
+        crate::util::librarian_guard::guard_not_librarian_managed(
+            path,
+            &text,
+            Some(&resolved),
+            crate::util::librarian_guard::Access::Read,
+        )?;
+
         if let Some(jp) = input["json_path"].as_str() {
             return read_json_path_nav(&text, &resolved, jp);
         }
@@ -2273,7 +2288,17 @@ line b10
             .call(json!({"path": "notes.md", "heading": "## A"}), &ctx)
             .await
             .unwrap();
-        assert!(one["content"].as_str().unwrap().contains("## A"));
+        let one_content = one["content"].as_str().unwrap();
+        // The whole-file default tier ALSO contains "## A" (it contains everything),
+        // so that assertion alone is monotone under widening — a mutation that killed
+        // the single-heading dispatch branch and fell through to the full file passed
+        // it silently. Assert the heading-scoped read actually scoped: it must exclude
+        // the sibling section.
+        assert!(one_content.contains("## A"), "{one}");
+        assert!(
+            !one_content.contains("## B"),
+            "heading=\"## A\" leaked the sibling section, so this did not scope: {one}"
+        );
         let two = ReadFile
             .call(
                 json!({"path": "notes.md", "headings": ["## A", "## B"]}),
@@ -2341,6 +2366,84 @@ line b10
         assert!(err.to_string().contains("doc(action=\"get\""), "{err}");
     }
 
+    // F1: `force=true` used to route around the markdown dispatch above — and with it,
+    // the librarian guard that dispatch calls — landing on the raw line-range path with
+    // no guard of its own. Regression for
+    // docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md's
+    // read twin: a managed ledger's frontmatter came back verbatim under `force=true`.
+    #[tokio::test]
+    async fn read_file_force_true_on_a_managed_ledger_is_still_refused() {
+        let text = "---\nid: '0123456789abcdef'\nentry_prefix: R\n---\n## R-1 — x\n";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs/trackers")).unwrap();
+        let ctx = ctx_with_file(dir.path(), "docs/trackers/x.md", text).await;
+        let err = ReadFile
+            .call(
+                json!({
+                    "path": "docs/trackers/x.md",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "force": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("doc(action=\"get\""), "{err}");
+    }
+
+    // F2: `is_markdown_target` lowercases before comparing the extension, but
+    // `resolve_markdown_source`'s own gate didn't — so `read_file` routed an uppercase
+    // `.MD` path INTO the markdown dispatch, which then refused it as "not a markdown
+    // file". Regression for that mismatch.
+    #[tokio::test]
+    async fn read_file_on_uppercase_md_extension_is_read_as_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "NOTES.MD", MD_FIXTURE).await;
+        let out = ReadFile
+            .call(json!({"path": "NOTES.MD"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(out["format"], "markdown", "{out}");
+    }
+
+    // M1a: `is_markdown_target`'s `@file_` branch (read_markdown.rs's
+    // `is_markdown_target`) is the path Iron Law 6 tells agents to use for a second,
+    // heading-scoped read of a large markdown file already buffered by a first read
+    // (`read_file("@file_ref", heading="## Section")`). Nothing exercised it.
+    // M1a: `is_markdown_target`'s `@file_` branch (read_markdown.rs's
+    // `is_markdown_target`) is the path Iron Law 6 tells agents to use for a second,
+    // heading-scoped read of a large markdown file already buffered by a first read
+    // (`read_file("@file_ref", heading="## Section")`). Nothing exercised it. No
+    // `heading`/`headings` param here on purpose — those alone force the markdown
+    // dispatch regardless of `is_markdown_target`'s answer, which would make this
+    // test pass even with the `@file_` branch dead.
+    // M1a: `is_markdown_target`'s `@file_` branch (read_markdown.rs's
+    // `is_markdown_target`) is the path Iron Law 6 tells agents to use for a second,
+    // heading-scoped read of a large markdown file already buffered by a first read
+    // (`read_file("@file_ref", heading="## Section")`). Nothing exercised it. No
+    // `heading`/`headings` param here on purpose — those alone force the markdown
+    // dispatch regardless of `is_markdown_target`'s answer, which would make this
+    // test pass even with the `@file_` branch dead.
+    #[tokio::test]
+    async fn read_file_on_a_markdown_backed_file_buffer_dispatches_to_markdown_read() {
+        let dir = tempfile::tempdir().unwrap();
+        // `store_file` stats `source_path` on every `get()` for mtime-based
+        // auto-refresh (output_buffer.rs), so the path must exist on disk or the
+        // entry is evicted before `is_markdown_target` ever sees it.
+        let file_path = dir.path().join("notes.md");
+        std::fs::write(&file_path, MD_FIXTURE).unwrap();
+        let ctx = test_ctx().await;
+        let buf_id = ctx
+            .output_buffer
+            .store_file(file_path.to_string_lossy().into_owned(), MD_FIXTURE.into());
+        let out = ReadFile.call(json!({"path": buf_id}), &ctx).await.unwrap();
+        assert_eq!(
+            out["format"], "markdown",
+            "@file_ ref backed by a .md source_path should dispatch to markdown::read: {out}"
+        );
+    }
+
     /// Without this guard the markdown route would swallow `json_path` silently — a new
     /// instance of the very class Task 7 closes for `offset`/`limit`.
     #[tokio::test]
@@ -2352,6 +2455,21 @@ line b10
             .await
             .unwrap_err();
         assert!(err.to_string().contains("only supported for JSON"), "{err}");
+    }
+
+    /// M1b: sibling of `json_path_on_markdown_is_refused_not_silently_ignored` for the
+    /// `toml_key` half of `wants_format` — same guard, untested until now. Without it
+    /// the markdown route would swallow `toml_key` silently on a `.md` file instead of
+    /// falling through to the typed-format error.
+    #[tokio::test]
+    async fn toml_key_on_markdown_is_refused_not_silently_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "notes.md", MD_FIXTURE).await;
+        let err = ReadFile
+            .call(json!({"path": "notes.md", "toml_key": "a"}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("only supported for TOML"), "{err}");
     }
 
     /// Step 1 of the IL1 fix: a file-head read is the canonical "show me the

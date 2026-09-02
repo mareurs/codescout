@@ -115,12 +115,40 @@ Query and two rows under *Symptom*. Both rows have `error_msg` NULL.
 Implemented 2026-09-02, on `experiments` at `567f3479`, patch-id
 `7a30d0b5dda01cc1ecc11fdd86acc0c881a9b839`.
 
+Fixed as a side effect of Task 7 (tool-surface collapse), commit `87216a54`
+(`feat(tool-collapse): fold read_markdown into read_file (Task 7)`), patch-id
+`8f383d6fb8c7c5852040fa8ca8c1254443fbbb58`.
+
 1. **Hoisted** `normalize_line_nav_aliases` from `read_file.rs` (private) into
    `src/tools/core/params.rs` as `pub fn`, beside `optional_u64_param`, which it calls.
    `read_file.rs` now imports it; behaviour there is unchanged.
 2. **Called** at the top of `ReadMarkdown::call`, before `require_str_param_or_hint` and
    before the heading/headings fork — the same position `ReadFile::call` uses, so the two
    tools normalise at the same point rather than at two points that happen to agree today.
+
+Not the plan below — a structural fix instead of the planned hoist. Task 7 deleted the
+standalone `ReadMarkdown` tool and folded its dispatch into `ReadFile::call`, which
+reaches `crate::tools::markdown::read` (the renamed `read_markdown.rs` entry point) only
+as an internal call from inside `ReadFile::call` — never as a second, independently-entered
+tool. `normalize_line_nav_aliases(&mut input)` already ran first in `ReadFile::call`
+(`src/tools/read_file.rs:71`, comment at `:65-68`), *before* the markdown-vs-typed-format
+dispatch branch (`:99-...`), so once there was only one entry point, `offset`/`limit` were
+already normalised to `start_line`/`end_line` by the time the markdown path saw the input —
+with no separate call needed. The planned hoist into `src/tools/core/params.rs` plus a call
+from `ReadMarkdown::call` (steps below, kept for record) targets a tool struct that no
+longer exists post-fold.
+
+~~Plan, not implemented:~~
+
+1. ~~Hoist `normalize_line_nav_aliases` out of `read_file.rs` into `src/tools/core/params.rs`
+   (where the alias-aware helper family already lives) and call it at the top of
+   `ReadMarkdown::call`, before the heading/headings fork.~~ Superseded: there is no
+   `ReadMarkdown::call` after Task 7; the fold made a second call site unnecessary.
+2. Decide whether to **advertise** `offset`/`limit` on the markdown path as `read_file`
+   already does for the line-range path. Resolved implicitly: `read_file`'s schema already
+   advertises `offset`/`limit` (`src/tools/read_file.rs:53-54`) and that schema now covers
+   the markdown-routed calls too, since it is the same tool. No separate advertisement or
+   budget decision was needed.
 
 **Step 2's open question is decided: honoured, NOT advertised.** Three reasons, in order of
 weight:
@@ -145,6 +173,12 @@ answer.
 `src/tools/markdown/tests.rs`, two cases. RED observed first, then green; the full
 `tools::markdown` module is 220 passing.
 
+`read_file_on_markdown_honours_offset_and_limit` (`src/tools/read_file.rs:2345`, added in
+`87216a54`): `read_file(path="notes.md", offset=5, limit=3)` on a markdown fixture asserts
+the returned `content` is the 3-line slice, not the whole heading map — added as a
+content-scoped assertion (not containment-only) precisely because the containment-only form
+is monotone under widening, per the note already on this file at time of filing.
+
 - `read_markdown_honours_offset_and_limit_like_read_file` — `offset=4, limit=2` must return
   lines 4..=5.
 - `read_markdown_explicit_start_line_wins_over_the_aliases` — precedence matches `read_file`.
@@ -166,15 +200,21 @@ than quietly counted as coverage: it was inert at the moment it was written.
 The five existing `normalize_line_nav_aliases_*` unit tests stay in `read_file.rs` and now
 exercise the hoisted `pub fn`. They were **not** moved to `src/tools/core/tests.rs`, which a
 peer held at the time; keeping them where they are costs nothing and avoided the collision.
+
+Also newly covers the adjacent untested edges found in the same fix round (F1-F3, M1a-M1b
+of the Task 7 review): `read_file_force_true_on_a_managed_ledger_is_still_refused`,
+`read_file_on_uppercase_md_extension_is_read_as_markdown`,
+`read_file_on_a_markdown_backed_file_buffer_dispatches_to_markdown_read`,
+`toml_key_on_markdown_is_refused_not_silently_ignored`, and the strengthened
+`read_file_on_markdown_serves_heading_and_headings` (added exclusion assertion, was
+containment-only).
 ## Workarounds
 
 Pass `start_line` / `end_line`. They work today.
 
 ## Resume
 
-Implement step 1 of *Fix*; run `cargo test --lib read_markdown` and the two new tests; then
-decide step 2 against the surface budget.
-
+Closed. Nothing to resume — see *Fix* and *Tests added* above.
 ## References
 
 - `docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md` — the
