@@ -235,6 +235,14 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
     // `get_guide` — pull channels, read when the topic is live — not pushed at every
     // session that happens to contain one file of that language.
 
+    // TRIGGER for `prompts.trim_note_names` (`src/tools/core/cap_probe.rs`): this is the
+    // ONLY droppable persistent segment — every other one is `Anchor` or `Substitutable`,
+    // and `fit_dynamic_block` draws `trim_note`'s labels from neither. So `labels.len()`
+    // is at most 1 today, `MAX_NAMED_DROPS` (3) can never bind, and the `+2 more` branch
+    // is unreachable from `build_server_instructions`. ADDING A SECOND DROPPABLE
+    // PERSISTENT SEGMENT HERE MAKES THAT CAP LIVE, and makes the probe row citable via
+    // `the_trim_note_caps_the_names_it_lists`. That row is Deferred on reachability, not
+    // on missing evidence — the test already exists.
     if let Some(prompt) = &status.system_prompt {
         segs.push(StatusSegment {
             text: format!("\n\n## Custom Instructions\n\n{prompt}\n"),
