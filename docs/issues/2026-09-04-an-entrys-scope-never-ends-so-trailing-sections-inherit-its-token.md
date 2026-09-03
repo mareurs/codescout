@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: "BUG: an entry's scope has no terminator, so every section after the last entry inherits its token"
 tags:
   - cluster/addressing-without-an-escape-hatch
@@ -110,7 +110,7 @@ from a scope more than one non-entry heading back" is checkable, but whether a
 judgement changes the number. Deriving it before deciding the fix would be deriving
 it under a rule the fix might not adopt.
 
-## Fix
+## Fix — original assessment, SUPERSEDED (kept: it was wrong in a way worth seeing)
 
 Unresolved, and the choice is a real one:
 
@@ -127,9 +127,37 @@ lands, `heading_defines_entry` already parses the level (it strips `##` then fur
 `#`) and currently discards it — the information needed is present and thrown away,
 the same as the title text.
 
+## Fix
+
+**Fixed `919da0cb`, patch-id `78e942346e50ad13`.** An entry's scope now ends at the
+next heading whose level is *at or above* its own — ordinary markdown sectioning.
+
+**The superseded Fix section above had it backwards and was re-derived before writing.** It
+proposed "terminate only at a heading of the same level" as the safer option; that
+would let an `#` H1 run straight through a `##` entry. The correct rule is
+`level <= entry_level`, which was the option this file called risky. The risk it
+named — `###` groupers between `####` entries — is not a counter-example but the
+rule working: a `### Group` genuinely does end a `#### T-5` entry.
+
+Blast radius measured BEFORE the change, over the whole corpus: **6,983 lines
+across 90 of 1,446 files** change owner, every one of them from a wrong entry to
+`None`. Entry headings exist at `##` (1,082), `###` (545) and `####` (64), which is
+why the terminator has to be level-aware rather than a constant.
+
+Four guards added, including the fence case: a guide quoting `## History` must not
+END a real entry any more than a quoted `## W-1 — x` may start one — the same escape
+IC-6 already owed on the defining side.
+
 ## Tests added
 
-None yet. The guard is a fixture with a non-entry heading after an entry, asserting
+Added in `919da0cb`: `a_non_entry_heading_at_the_same_level_ends_the_entry` (the
+GF-8 shape reproduced), `a_deeper_heading_inside_an_entry_does_not_end_it`,
+`a_shallower_heading_ends_a_deeper_entry`, and
+`a_heading_inside_a_fence_neither_starts_nor_ends_an_entry`.
+
+The original note stands unchanged, because it is the reason none of this was
+caught earlier: the guard is a fixture with a non-entry heading after an entry,
+asserting
 the chunk starting at that heading carries `entry_token: None`. Every current test in
 `entry_token.rs` seeds a body whose entries run to the end, so the terminating case
 is not merely untested — it is **unrepresentable in the existing fixtures**, which is
