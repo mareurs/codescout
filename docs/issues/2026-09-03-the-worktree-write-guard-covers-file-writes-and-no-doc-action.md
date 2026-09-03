@@ -11,6 +11,7 @@ closed: null
 opened: 2026-09-03
 owner: marius
 related:
+- docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
 - docs/trackers/bug-fix-session-log.md
 severity: medium
 ---
@@ -194,6 +195,25 @@ population the gate was measured against.
 - CLAUDE.md § *Session Intelligence Trackers* — `id = sha256(abs_path)`, and why
   a hand-move orphans a catalog row's events and augmentation. Same arithmetic
   makes a wrong-tree write mint a wrong id.
+
+### The nearest sibling, and why this is not a duplicate of it
+
+`docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md`
+(`93caba562c06a258`, **fixed** 2026-09-02) carries the same `IC-14` tag and is the
+closest thing in the corpus. It is a different defect and that fix does not reach
+this one:
+
+| | `93caba562c06a258` | this |
+|---|---|---|
+| guard | `LibrarianAdapter::is_write` → cross-process write lock (mutex + `.codescout/write.lock`) | `guard_worktree_write` → activation gate |
+| mechanism | the guard IS reached from the librarian; its **action enumeration** omitted five | the guard is **never reached** from the librarian, at any action |
+| repair | add the five names to the arm | choose a resolution rule, then wire it |
+
+Worth recording that this sibling was surfaced by `doc(action="find", semantic=…)`
+ranked 2 for a query describing the mechanism, not by any grep I ran while
+writing the file above — the two share almost no vocabulary (`is_write` /
+`guard_worktree_write`, `write.lock` / `activate`). It is the clearest case this
+session of chunk-grain retrieval doing work a keyword search could not.
 
 ### Cluster adjudication
 
