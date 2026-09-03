@@ -169,7 +169,30 @@ any `destructiveHint`/`readOnlyHint`/`idempotentHint` in `src/`.
 
 ## SM-2 — Wire `write_ack` to destructive `doc` actions, retiring the pinned-prose floor
 
-**Status:** open
+**Status:** done (narrow scope) 2026-09-03 — `19c0fc09` on `experiments`, patch-id
+`4e648b64f6a378e58b0731ab1383bdc1ef804e63`.
+
+**Shipped:** `doc(delete)` and `doc(graft)` are dry runs by default, returning what would
+be destroyed, and require `force=true` to apply. Not `write_ack` — see below; the existing
+ack machinery is path-keyed and grants a session write root on replay, which is the wrong
+mechanism for an id-keyed confirmation. The `librarian(doctor, fix=…)` dry-run convention
+fits and costs nothing new.
+
+**Both tests assert the EFFECT, never the flag** — a gate reporting `dry_run: true` and
+destroying anyway satisfies a flag-only assertion, so the load-bearing checks are that the
+file is still on disk and the row still resolves.
+
+**What the preview reports is the point.** `delete`'s cascade takes the augmentation,
+events, links and observations, and those are **catalog-only**: `reindex` rebuilds the row
+from the file and git restores the file, but nothing rebuilds an augmentation's params or
+an event log. The file is recoverable and the history is not, and nothing in an id shows
+that. `graft`'s two ids read symmetrically while only one survives, so the preview names
+the row that disappears.
+
+Budget 56_276 → 56_476 (+200) for the `force` description — the discoverability half,
+without which a caller gets a dry run and no explanation.
+
+**Left undone deliberately:** the frequent write actions. See the frequency table above.
 
 `src/tools/core/write_ack.rs` **exists** (verified 2026-09-03) and already powers the
 `@ack_*` gate for dangerous shell commands and out-of-scope writes. The research names the
