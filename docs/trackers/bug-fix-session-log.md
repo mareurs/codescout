@@ -10709,6 +10709,40 @@ after the file is replaced, so a rebuild upgrades no running process. Invariant.
 while N peer servers held the old image" — at which point the remedy is a
 version/build-id handshake the server reports on connect, not a habit.
 
+
+**AMENDED 2026-09-03 18:45 — the prediction was REFUTED, and the probe's
+predicate is narrower than the claim I hung on it. Both corrections are worth
+more than the original entry.**
+
+**1. Nothing reverted.** 18 hours later, with 11 servers still on a deleted
+image, the migration's dry-run reports **0 artifacts to shift** and **70
+already file-relative** — up from 47, so 23 artifacts were newly chunked in
+that window and every one of them landed file-relative. Coverage grew from 55
+to 121 artifacts holding chunk rows. The predicted reversion did not occur even
+once. Published as a **denominator**, per § *Testing Discipline*: a
+re-derivation that comes back clean is a fact about the population, and
+absorbing it silently is what makes a corpus look self-correcting.
+
+**2. Why it did not occur is not established.** Either the stale servers never
+ran a reindex — it is an explicit call, not something a session does by
+existing — or they had been replaced. I cannot separate those from here, and
+the entry should not imply I can.
+
+**3. The probe answers a narrower question than the entry asked it.**
+`(deleted)` in `/proc/<pid>/exe` means *the process predates the CURRENT
+binary*, not *the process predates the fix*. Those coincided at 00:44 because
+the build was two minutes old, which is the only reason the original reading
+held. At 18:45, after a later rebuild, a server started at 01:00 — carrying
+`36afd405` perfectly well — also reports `(deleted)`. So the 11 counted here
+are **not** 11 pre-fix servers, and the 14 counted at 00:44 were only pre-fix
+because of the timing. A probe whose predicate is *"older than the newest
+build"* cannot answer *"older than a specific change"*; to do that it would
+have to compare a build-id the server reports, which is the mechanism the
+**Promote-when** already names. The instrument was narrower than its name, which
+is the defect class this ledger records about other people's guards.
+
+**Status:** open — mechanism real, blast radius unmeasured, probe superseded by
+the build-id handshake it already proposed.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

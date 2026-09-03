@@ -39,8 +39,22 @@ def main():
     any_results = False
     for c in suite["cases"]:
         proc = subprocess.run(
-            [args.bin, "artifact", "find", "--semantic", c["query"], "--limit", "5", "--json"],
+            # `doc`, not `artifact`: the subcommand was renamed and this line was
+            # the only thing still calling the old name. A renamed subcommand
+            # exits 2 with "unrecognized subcommand" on STDERR and prints nothing
+            # to stdout, so `proc.stdout or "{}"` below turns it into an empty
+            # item list -- i.e. a clean `hits@5 0/12` that reads as a retrieval
+            # verdict. Caught 2026-09-03 only by the `any_results` guard at the
+            # bottom; the returncode check just below now catches it at case 1
+            # with the real error instead of at case 12 with a summary.
+            [args.bin, "doc", "find", "--semantic", c["query"], "--limit", "5", "--json"],
             capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise SystemExit(
+                "FATAL: `%s doc find` exited %d on case %s. This is a harness or\n"
+                "binary problem, not a retrieval result -- do NOT record a score.\n"
+                "stderr: %s" % (args.bin, proc.returncode, c.get("id", "?"),
+                                (proc.stderr or "").strip()[:400]))
         results = json.loads(proc.stdout or "{}").get("items", [])
         if results:
             any_results = True
