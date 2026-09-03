@@ -122,6 +122,11 @@ Build verification after each edit batch. Model ran the same piped pattern 7 tim
 **Why it keeps happening:** `npm run build` produces verbose output; piping to grep is a strong developer instinct. The rule exists but has no concrete build example to anchor it.  
 **Prompt gap:** Iron Law #3 needs a before/after build example: `npm run build 2>&1 | grep` ✗ → `run_command("npm run build")` then `grep "error TS" @cmd_id` ✓.
 
+### T-33 — native `Read` on an `@tool_*` codescout buffer handle
+**Session:** 75bf7137 (codescout self, 2026-09-03)
+
+`doc(action="find")` returned a large result as `@tool_69062af3` with a `read_file("@tool_69062af3", ...)` hint. Called native `Read("@tool_69062af3")` instead — errored `File does not exist`, because `@tool_*`/`@file_*` handles are codescout-MCP-internal buffer refs, resolvable only by codescout's own `read_file`/`run_command`, never the native `Read` tool.  
+**Verdict:** wrong-tool.
 ### T-006 — `cat file | head -50` to read source (#123)
 **Session:** c5daabbe (eduplanner-ui, 2026-05-03)
 

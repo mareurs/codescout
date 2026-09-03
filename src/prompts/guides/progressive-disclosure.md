@@ -100,6 +100,11 @@ never rewritten.
 - **Treating `output_id` as a filename.** It's an opaque handle;
   `read_file("@tool_xyz")` works, filesystem paths derived from it
   do not.
+- **Passing the handle to a non-codescout reader** (the harness's own
+  file-read tool, `cat`, `bash Read`). `@cmd_*`/`@tool_*`/`@file_*`/`@ack_*`
+  buffers live only in codescout's server process — they resolve exclusively
+  through codescout's own `read_file`, `run_command`, or `grep`. Any other
+  tool reports the handle as a missing file, because it is not one.
 - **Piping unbounded `run_command` output to log-trimmers** (`cargo
   test 2>&1 | grep FAILED`). Server-side enforcement blocks this.
   Run bare, then `grep FAILED @cmd_id` against the buffer.
