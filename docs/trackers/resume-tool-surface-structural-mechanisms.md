@@ -433,10 +433,9 @@ pre-registered eval result, not a snapshot. Re-derive the headroom before quotin
 
 ## SM-4 — Run the A/B nobody has run: enum-dispatched `doc` vs split per-action tools
 
-**Status:** **PRE-REGISTERED 2026-09-03, not yet run.** Everything below was written
-before any arm existed. Committed first, deliberately — `prompt-hamsa-audit-log:A-28`
-records its own rule as *"committed to codescout's hamsa ledger … BEFORE this arm ran"*,
-and that ordering is the only thing separating a pre-registration from a rationalisation.
+**Status:** **BUILT AND PROBED 2026-09-03 — the power probe FIRED and the matrix was NOT
+run.** The pre-registration below was committed at `1f8af4ac` before any arm existed; this
+outcome block was appended after. See § *Outcome* at the end.
 
 No published benchmark varies tool **shape** holding operations constant. We are unusually
 well positioned: the `prompt-engineering` repo is an eval harness that puts codescout's own
@@ -628,6 +627,74 @@ list to stay complete):
 `prompt-surface-compaction-session-log:W-2`'s cost arithmetic, whose `Promote-when` this
 discharges; the 2026-09-02 tool-surface collapse as the change under evaluation.
 
+
+### Outcome — 2026-09-03: no power, matrix not run, and one voided result on the way
+
+**Built:** `prompt-engineering:scenarios/tool-shape/` — `fixtures/gen_fixtures.py` (derives
+both surfaces from one live capture at `e5307ba2` and refuses to write on drift),
+`stub_server.py` (one stdio MCP server, arms differ only in `MCP_STUB_TOOLS`),
+`check_append_shape.py` (arm-agnostic, scores S and P separately),
+`test_check_append_shape.py` (11 layer-0 tests), and per-arm configs.
+
+**Probe result — both arms at ceiling:**
+
+| arm | surface actually served | score | distinct |
+|---|---|---:|---:|
+| enum | 10 × `mcp__codescout__doc` | **5/5** | 5 |
+| split | 10 × `mcp__codescout__doc_append_entry` | **5/5** | 5 |
+
+The pre-registered rule fires: *"if `P` returns 5/5 or 0/5, that stimulus has no power and
+the matrix must not run on it."* **It did not run.** Cost ~$1.80 against a ~30-run matrix.
+This independently reproduces `ledger-vs-tracker`'s conclusion on a different manipulation:
+a capable model ceilings on codescout tool-selection tasks, so the ceiling is a property of
+the *stimulus class*, not of either shape.
+
+**A VOIDED RESULT CAME FIRST, and how it was caught is the transferable part.** The initial
+probe used ONE shared `prompt_tdd.yaml`. `run_arms.py` applied its single `mcp_command` to
+both scenario dirs, so **both arms were served the enum surface** — the split arm called
+`mcp__codescout__doc`, a tool absent from its own surface, and returned a clean `5/5 vs 5/5`
+that read exactly like the ceiling above.
+
+> **`distinct` did not catch it.** `distinct == 1` is the documented signature of a
+> manipulation that never arrived; here it was **5** — five genuinely different answers,
+> because the model was doing real work on the wrong surface. Only grepping the trace for
+> *which tool names actually appear* separated the two worlds. **A per-arm assertion that
+> the served surface is the intended one belongs in the checker, not in a human's habit.**
+
+The structural cause is one `surface-budget` already documented from the other side: its
+README records that `run_arms.py` takes the **first arm's checker** and scores every arm with
+it. Same sharing, different field, same remedy — **one config per arm**, now in place.
+
+### What this establishes, and what it does not
+
+**Establishes:** the `append_entry` stimulus cannot discriminate tool shape at n=5 on sonnet;
+both shapes reach the correct operation with valid arguments every time. A follow-up needs
+the pre-registered escape — an **ambiguous** task scored by classification, or a weaker model
+— and that is a new pre-registration, not a re-run of this one.
+
+**Does not establish** anything about `ΔS` or `ΔP`. A ceiling on both arms is *no measurement
+of the difference*, and reporting `5/5 vs 5/5` as "no effect" would be the error P-2a exists
+to prevent.
+
+### Two findings that arrived from BUILDING the arm, before any model ran
+
+1. **The split surface is 61% larger: 97,438 chars against 60,437**, same capability, 20
+   other tools byte-identical. Splitting costs ~37 KB because shared params (`id`,
+   `workspace`, `entry_collection`, …) stop being written once and start being written per
+   tool. Mechanical, arm-independent, and an independent confirmation of the byte-grounds
+   refutation in § SM-1–SM-3 — so `ΔS > 0` would have had to be very large to pay for it.
+2. **`doc(action="augment")` derives exactly ONE param.** The `id` param's routing prose
+   names eleven actions and omits `augment`, and the `augment` param itself leads with
+   `create:`, so the enum surface never binds `id` to that action. Filed against codescout;
+   the generator carries a named, asserted `MANUAL_ROUTE_FIXUPS` override because leaving it
+   would have made `doc_augment` read as unusable — biasing the split arm away from one of
+   the stimulus's tempting wrong answers and **manufacturing the predicted `ΔS`**.
+
+**Valid:** dated 2026-09-03 — the ceiling is a measurement of this stimulus at n=5 on sonnet
+
+**Rests on:** `/tmp/ts-enum`, `/tmp/ts-split` per-run logs (ephemeral — the counts above are
+the durable record); `prompt-engineering:scenarios/tool-shape/`;
+`prompt-hamsa-audit-log:A-38`'s sibling treatment of the same harness constraints.
 ## Template for new entries
 
 <!-- Appends land above this line. Use:
