@@ -70,8 +70,28 @@ result of having made it. The discriminator that follows from it:
 > *Can a first call, made without this text, destroy something or silently produce a wrong
 > result? If yes it stays inline; if it merely produces an error or a dry run, it can move.*
 
-~2,155 B is pinned by this today (`doc.patch` 1,068, `edit_markdown.action` 578,
-`doc.new_rel_path` 509). **SM-2 is the mechanism that unpins it.**
+~2,237 B is pinned by this today — `doc.patch` 1,160, `doc.new_rel_path` 543,
+`edit_file.action` 534 — re-derived 2026-09-03 at `0647a6da` from
+`python3 scripts/probe_tool_surface.py` § *TOP 20 SINGLE PARAMETERS*, not remembered.
+
+> **Corrected 2026-09-03, on both halves.** This paragraph read *"~2,155 B … `doc.patch`
+> 1,068, `edit_markdown.action` 578, `doc.new_rel_path` 509"* and ended **"SM-2 is the
+> mechanism that unpins it."**
+>
+> **(a) The figures and one of the names were wrong.** `edit_markdown` has not been a tool
+> since the surface collapse; the parameter is `edit_file.action`. Writing a retired tool
+> name into a tracker trips nothing — `prompt_surfaces_reference_only_real_tools` covers
+> the three prompt surfaces and `claude_md_contains_no_deprecated_tool_names` covers
+> CLAUDE.md, and `docs/trackers/` is outside both.
+>
+> **(b) SM-2 shipped, and does NOT unpin this.** An `@ack_*` handle is minted **per call**,
+> and the pinned prose sits on the *frequent* actions while the irreversible-rare ones
+> carry almost none: over 30 days `update` ran 2,555 times against `delete` 15 and `graft`
+> 1. Gating `update` would buy 1,160 chars for ~2,555 extra round-trips a month. **SM-3 is
+> the route**, because `server_instructions` is session-scoped — it delivers the same
+> guidance once per session with no round-trip at all, which is what SM-2 could never do at
+> any scope. SM-2's value is safety on rare irreversible operations, with zero budget
+> movement.
 
 ## External research — 2026-09-03, with source quality flagged
 

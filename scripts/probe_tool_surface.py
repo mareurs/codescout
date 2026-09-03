@@ -8,8 +8,10 @@ down (per parameter, per action) and joins usage.db so cost can be read against 
 
     python3 scripts/probe_tool_surface.py [--db PATH] [--top N] [--json]
 
-THREE WAYS THIS MEASUREMENT RETURNS A PLAUSIBLE NUMBER INSTEAD OF AN ERROR. Two were hit
-while writing it; keep them if you adapt it.
+WAYS THIS MEASUREMENT RETURNS A PLAUSIBLE NUMBER INSTEAD OF AN ERROR. Two were hit while
+writing it; keep them if you adapt it. Deliberately UNCOUNTED: this header read "THREE"
+while listing four, because a tally of a list's own contents is a premise every addition
+falsifies -- CLAUDE.md states the same rule for its own Testing Discipline section.
 
 1. `json.dumps` defaults to SPACED separators; Rust's `serde_json::to_string()` is compact.
    The first run over-reported schema size by ~4.7% and reconciled with nothing. Every dump
@@ -41,6 +43,16 @@ while writing it; keep them if you adapt it.
 
    A count that stops on a date is a fixed bug, not a live one. Re-derive the population
    with `called_at > '<fix timestamp>'` and work from that.
+
+5. **This probe modelled the wire by ENUMERATING the fields it knew, so a NEW field was
+   counted as zero rather than reported.** `annotations` shipped 2026-09-03 (`71c827f9`)
+   with the in-tree gate taught to count it and this probe not, and the TOTAL here read
+   55,719 against the gate's 56,476 -- a 757-char silent shortfall in the instrument
+   `docs/PROBES.md` names for this surface. The cross-check printed just below the total
+   would have caught it on any run; nobody ran it, because a trigger the reader must
+   remember is a policy, not a mechanism. So the enumeration is now `MODELLED_WIRE_KEYS`
+   and every key outside it is REPORTED with its byte cost: the default is loud, not
+   silent. When that fires, size the field and add it here -- do not silence it.
 """
 
 import argparse
@@ -51,6 +63,12 @@ import sys
 from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Every key this probe knows how to size on an MCP tool object. A key OUTSIDE this set is
+# reported with its byte cost, never silently dropped -- see trap 5. `name` is modelled in
+# the sense of "deliberately not counted": the in-tree gate sums description + schema +
+# annotations only, and the cross-check is meaningful only while this matches it exactly.
+MODELLED_WIRE_KEYS = {"name", "description", "inputSchema", "annotations"}
 
 
 def dj(o):
@@ -151,32 +169,51 @@ def main():
 
     tools = fetch_tools(a.binary)
     surface = {}
+    unmodelled = Counter()
     for t in tools:
         schema = t.get("inputSchema", {})
         props = schema.get("properties", {}) or {}
+        annot = t.get("annotations")
         surface[t["name"]] = {
             "desc": len(t.get("description", "")),
             "schema": len(dj(schema)),
+            # `.unwrap_or(0)` on the Rust side (src/server.rs, advertised_surface): an
+            # absent `annotations` is 0, NOT len("null"). Match it, or the cross-check
+            # below compares two different quantities and calls them equal.
+            "annot": len(dj(annot)) if annot is not None else 0,
             "props": {k: len(dj(v)) for k, v in props.items()},
         }
+        for k, v in t.items():
+            if k not in MODELLED_WIRE_KEYS:
+                unmodelled[k] += len(dj(v))
 
     calls, seen, actions, first, last, total_calls = usage(a.db)
     tot_schema = sum(v["schema"] for v in surface.values())
     tot_desc = sum(v["desc"] for v in surface.values())
-    TOTAL = tot_schema + tot_desc
+    tot_annot = sum(v["annot"] for v in surface.values())
+    TOTAL = tot_schema + tot_desc + tot_annot
     tot_prose = sum(prose_bytes(t.get("inputSchema", {})) for t in tools) + tot_desc
     tot_machine = TOTAL - tot_prose
 
     if a.json:
         print(json.dumps({"surface": surface, "calls": calls, "total": TOTAL,
-                          "schema": tot_schema, "desc": tot_desc,
+                          "schema": tot_schema, "desc": tot_desc, "annot": tot_annot,
+                          "unmodelled": dict(unmodelled),
                           "prose": tot_prose, "machine": tot_machine}, indent=1))
         return
 
-    print("tools %d   schema %d   desc %d   TOTAL %d" % (len(surface), tot_schema, tot_desc, TOTAL))
+    print("tools %d   schema %d   desc %d   annot %d   TOTAL %d"
+          % (len(surface), tot_schema, tot_desc, tot_annot, TOTAL))
     print("  cross-check: `cargo test --lib tool_surface_report_lengths -- --nocapture`")
-    print("  must print the same three numbers. A mismatch means this probe and list_tools")
+    print("  must print the same four numbers. A mismatch means this probe and list_tools")
     print("  have diverged, and the delta is meaningless until they agree (trap 1/2).")
+    if unmodelled:
+        print("  !! %d WIRE FIELD(S) OUTSIDE MODELLED_WIRE_KEYS, %d chars:"
+              % (len(unmodelled), sum(unmodelled.values())))
+        for k, n in unmodelled.most_common():
+            print("       %-20s %6d chars" % (k, n))
+        print("     TOTAL does not count these unless a sizing line adds them, so treat")
+        print("     it as a FLOOR and model the field before trusting a delta (trap 5).")
     print("prose %d (%.1f%%)   machine %d (%.1f%%)"
           % (tot_prose, 100.0 * tot_prose / TOTAL,
              tot_machine, 100.0 * tot_machine / TOTAL))
@@ -188,7 +225,7 @@ def main():
     rows = []
     for t, v in surface.items():
         c = calls.get(t, 0)
-        rows.append((v["schema"] + v["desc"], t, c))
+        rows.append((v["schema"] + v["desc"] + v["annot"], t, c))
     for tot, t, c in sorted(rows, key=lambda r: -(r[0] / r[2] if r[2] else float("inf"))):
         print("  %-18s %7d chars %8d calls %10s" %
               (t, tot, c, "NEVER" if c == 0 else "%.1f" % (tot / c)))
