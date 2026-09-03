@@ -1368,9 +1368,9 @@ fn declares_a_fn(trimmed: &str) -> bool {
 /// not) from `src`: the line declaring it, through the line immediately
 /// before the next line — at the SAME OR LOWER indentation — that itself
 /// declares a `fn`, with that next function's own leading `#[...]`
-/// attributes and `///`/`//!` doc comments backed out of the result (see
-/// the last bullet below). Returns `None` when no line declares `fn <name>`
-/// at all.
+/// attributes and plain `//`-prefixed comment lines (including `///` and
+/// `//!` doc comments) backed out of the result (see the last bullet
+/// below). Returns `None` when no line declares `fn <name>` at all.
 ///
 /// This is a HEURISTIC, not a parser, and `probed_rows_cite_a_real_test`
 /// relies on knowing exactly what it does not catch:
@@ -1403,15 +1403,17 @@ fn declares_a_fn(trimmed: &str) -> bool {
 ///   followed by generics or unusual whitespace before punctuation), so
 ///   searching for `foo` cannot match a line declaring `fn foo_helper`.
 /// - **The end boundary backs up over the NEXT function's leading `#[...]`
-///   attributes and `///`/`//!` doc comments**, stopping at the first blank
-///   line or other line found walking backward from the next `fn`
-///   declaration. Without this, the next function's own `#[test]` and doc
-///   comments landed inside THIS function's extracted body (verified: a
-///   `#[test]` attribute was included in a prior version's
+///   attributes and any plain `//`-prefixed comment line** (not only
+///   `///`/`//!` doc comments — a bare `// note` immediately before a
+///   `#[test]` backs up too), stopping at the first blank line or other
+///   line found walking backward from the next `fn` declaration. Without
+///   this, the next function's own `#[test]` and doc/plain comments landed
+///   inside THIS function's extracted body (verified: a `#[test]`
+///   attribute was included in a prior version's
 ///   `glob_explosion_returns_recoverable` extraction). This back-up is
 ///   itself a heuristic: a `/* block comment */`, or an attribute separated
-///   from the `fn` line by something other than more attributes/doc
-///   comments, is not recognised and would still leak into the body.
+///   from the `fn` line by something other than more attributes/comments,
+///   is not recognised and would still leak into the body.
 fn extract_fn_body(src: &str, name: &str) -> Option<String> {
     let lines: Vec<&str> = src.lines().collect();
     let paren = format!("fn {name}(");
@@ -1439,16 +1441,16 @@ fn extract_fn_body(src: &str, name: &str) -> Option<String> {
             break;
         }
     }
-    // Back up over the NEXT function's own leading attributes and doc
-    // comments — the forward scan above only recognises that function's
-    // `fn` line itself as an end marker, so without this its `#[...]`,
-    // `///` and `//!` lines land inside THIS function's extracted body.
-    // Stops at the first blank line (the real gap between the two
-    // functions) or any other line, so it never walks into the CURRENT
-    // function's own content.
+    // Back up over the NEXT function's own leading attributes and comment
+    // lines — the forward scan above only recognises that function's `fn`
+    // line itself as an end marker, so without this its `#[...]` and any
+    // `//`-prefixed line (plain comment or `///`/`//!` doc comment) land
+    // inside THIS function's extracted body. Stops at the first blank line
+    // (the real gap between the two functions) or any other line, so it
+    // never walks into the CURRENT function's own content.
     while end > start + 1 {
         let trimmed = lines[end - 1].trim_start();
-        if trimmed.starts_with("#[") || trimmed.starts_with("///") || trimmed.starts_with("//!") {
+        if trimmed.starts_with("#[") || trimmed.starts_with("//") {
             end -= 1;
         } else {
             break;
@@ -1534,35 +1536,60 @@ fn extract_fn_body_returns_none_when_the_name_is_not_declared_anywhere() {
 /// The lines of `body` that belong to an `assert!`/`assert_eq!`/`assert_ne!`/
 /// `debug_assert!` call — from the line the macro name appears on (at paren-depth 0)
 /// through the line that closes its outermost `(...)`, tracked by counting `(`/`)`
-/// across each included line. A single physical line is NOT enough: rustfmt wraps a
-/// long `assert!`/`assert_eq!` call so the macro name is on its own line and the
-/// condition, actual marker text included, lands on the NEXT line — the shape both real
-/// `cited_test` bodies this gate checks use. A per-line-only filter (matching just the
-/// line containing the literal `assert`) would exclude that condition line entirely,
-/// making every multi-line assertion in this style invisible to
-/// [`marker_is_asserted`] — checked against both real call sites before landing on this
-/// design: a per-line filter passed all four of this function's own single-line unit
-/// test fixtures and failed both real bodies.
+/// across each included line, and then narrowed by [`condition_args`] to just the
+/// value/condition arguments (never the failure-message argument). A single physical
+/// line is NOT enough: rustfmt wraps a long `assert!`/`assert_eq!` call so the macro
+/// name is on its own line and the condition, actual marker text included, lands on
+/// the NEXT line — the shape both real `cited_test` bodies this gate checks use. A
+/// per-line-only filter (matching just the line containing the literal `assert`)
+/// would exclude that condition line entirely, making every multi-line assertion in
+/// this style invisible to [`marker_is_asserted`] — checked against both real call
+/// sites before landing on this design.
+///
+/// The macro-name trigger is matched at a WORD BOUNDARY via [`opens_assert_call`], not
+/// as a bare substring: an earlier version matched `line.contains("assert")`, which
+/// also opened an inclusion window on `assertions`, `asserted`, `reassert`, or a
+/// comment reading `// we assert so` — and the paren-depth counter would then swallow
+/// following lines as if they were part of a real call. Lines whose trimmed form
+/// starts with `//` are skipped entirely before the trigger check, so a comment can
+/// never open (or, via its own stray `(`, corrupt the depth of) an assertion span.
 ///
 /// [`marker_is_asserted`] searches this text, not the whole body: searching the whole
 /// body let deleting the very assertion a row cites still pass, because the marker's
 /// text also occurred elsewhere in the body — a comment, a nearby `let`, the enclosing
-/// test's setup code. Verified by mutation at both of this gate's current call sites
-/// (reported by `probed_rows_cite_a_real_test`'s caller): deleting
-/// `glob_explosion_returns_recoverable`'s own `assert!` blocks left the text "cap"
-/// present via a doc comment and the `enforce_file_cap` call, and deleting
+/// test's setup code. And searching the FULL assertion span (condition plus failure
+/// message) let deleting or weakening the condition still pass, because the marker
+/// text lived in the message string instead — verified by mutation at both of this
+/// gate's current call sites (reported by `probed_rows_cite_a_real_test`'s caller):
+/// weakening `glob_explosion_returns_recoverable`'s condition to `msg.contains('5')`
+/// alone left `TextContains("cap")` satisfied by that same `assert!`'s own message
+/// argument ("error should name the **cap** and the actual count"); and deleting only
 /// `a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped`'s
-/// `packing` `assert_eq!` left both `$.overflow.packing` segments present in that
-/// test's own prose comments — before this scoping, neither mutation changed this
-/// gate's verdict.
+/// `packing` `assert_eq!` left both `$.overflow.packing` segments present via a
+/// NEIGHBOURING `assert_eq!`'s own message text ("full-text **packing** would have
+/// dropped most of them") plus its `v["overflow"]` indexing. [`condition_args`] closes
+/// both: it keeps only the condition/value arguments of each recognised macro, so a
+/// marker string that lives solely in a message argument no longer counts.
+///
+/// Remaining known limit: a marker string present in the condition arguments of some
+/// OTHER assertion in the same body — not the one actually exercising the cap — still
+/// satisfies [`marker_is_asserted`], because this function concatenates every
+/// recognised assertion's condition text rather than requiring one specific assertion
+/// to carry the whole marker. Neither of this gate's two live rows depends on that
+/// laxity, but a future row with several assertions sharing vocabulary should not
+/// assume per-assertion isolation.
 fn assertion_lines(body: &str) -> String {
     let mut out = String::new();
     let mut depth: i32 = 0;
+    let mut block = String::new();
     for line in body.lines() {
-        let starts_call = depth == 0 && line.contains("assert");
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        let starts_call = depth == 0 && opens_assert_call(line);
         if depth > 0 || starts_call {
-            out.push_str(line);
-            out.push('\n');
+            block.push_str(line);
+            block.push('\n');
             for ch in line.chars() {
                 match ch {
                     '(' => depth += 1,
@@ -1570,45 +1597,135 @@ fn assertion_lines(body: &str) -> String {
                     _ => {}
                 }
             }
-            if depth < 0 {
+            if depth <= 0 {
                 depth = 0;
+                out.push_str(&condition_args(&block));
+                out.push('\n');
+                block.clear();
             }
         }
     }
     out
 }
 
+/// True when `line` contains one of [`ASSERT_MACROS`] at a word boundary — the
+/// character immediately before the match, if any, is not alphanumeric or `_`. Guards
+/// [`assertion_lines`]'s trigger against `assertions`, `asserted`, `reassert`, and
+/// similar tokens that contain `assert` as a substring but do not open a real macro
+/// call.
+const ASSERT_MACROS: [&str; 4] = ["assert!", "assert_eq!", "assert_ne!", "debug_assert!"];
+
+fn opens_assert_call(line: &str) -> bool {
+    ASSERT_MACROS.iter().any(|tok| {
+        line.match_indices(tok).any(|(idx, _)| {
+            !matches!(line[..idx].chars().next_back(), Some(c) if c.is_alphanumeric() || c == '_')
+        })
+    })
+}
+
+/// Narrows a complete assertion span (as accumulated by [`assertion_lines`], one macro
+/// call's lines with balanced parens) to just its value/condition arguments, splitting
+/// the macro's argument list on TOP-LEVEL commas (paren depth 1, relative to the
+/// macro's own opening `(`): `assert!`/`debug_assert!` keep argument 0 only;
+/// `assert_eq!`/`assert_ne!` keep arguments 0 and 1; anything else that reached here
+/// (should not happen given [`opens_assert_call`]'s trigger list, but kept conservative)
+/// returns the block unchanged rather than guessing. This is what excludes a macro's
+/// failure-message argument from the text [`marker_is_asserted`] searches.
+fn condition_args(block: &str) -> String {
+    let (tok, keep): (&str, usize) = if block.contains("assert_eq!") {
+        ("assert_eq!", 2)
+    } else if block.contains("assert_ne!") {
+        ("assert_ne!", 2)
+    } else if block.contains("debug_assert!") {
+        ("debug_assert!", 1)
+    } else if block.contains("assert!") {
+        ("assert!", 1)
+    } else {
+        return block.to_string();
+    };
+    let Some(tok_start) = block.find(tok) else {
+        return block.to_string();
+    };
+    let Some(open_rel) = block[tok_start + tok.len()..].find('(') else {
+        return block.to_string();
+    };
+    let open_idx = tok_start + tok.len() + open_rel;
+    let mut depth: i32 = 0;
+    let mut arg_count: usize = 0;
+    let mut args_start: Option<usize> = None;
+    let mut kept_end: Option<usize> = None;
+    for (i, ch) in block.char_indices().skip(open_idx) {
+        match ch {
+            '(' => {
+                depth += 1;
+                if depth == 1 {
+                    args_start = Some(i + 1);
+                }
+            }
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    if arg_count < keep {
+                        kept_end = Some(i);
+                    }
+                    break;
+                }
+            }
+            ',' if depth == 1 => {
+                arg_count += 1;
+                if arg_count == keep {
+                    kept_end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    match (args_start, kept_end) {
+        (Some(s), Some(e)) if e >= s => block[s..e].to_string(),
+        _ => block.to_string(),
+    }
+}
+
 /// True when `marker` is asserted inside `body` — the heuristic
 /// `probed_rows_cite_a_real_test` runs against a cited test's extracted
-/// body. Only searches [`assertion_lines`]`(body)`, not `body` itself — see
-/// that function's doc comment for why a property mutation (deleting the
-/// cited assertion) previously survived without it.
+/// body. Only searches [`assertion_lines`]`(body)`, not `body` itself, and
+/// within that text only the CONDITION/value arguments of each recognised
+/// assertion — never a failure-message argument. See [`assertion_lines`]'s
+/// doc comment for the two mutations (weakened condition; deleted
+/// assertion with a marker-bearing message left on a neighbour) that
+/// motivated narrowing to the condition, and for the remaining
+/// cross-assertion laxity this function does not itself resolve.
 ///
 /// `TextContains(s)` requires the literal `s` to appear anywhere across the
-/// assertion lines: strict on the string (whitespace and all), lax on the
-/// location within them — `s` need not be the direct argument to `assert!`
-/// itself, so a bare mention on the SAME line as some other assertion
-/// would also satisfy it.
+/// condition text: strict on the string (whitespace and all), lax on the
+/// location within it — `s` need not be the direct argument to `assert!`
+/// itself, so a bare mention in the condition of some OTHER assertion in
+/// the same body would also satisfy it (see [`assertion_lines`]'s "Remaining
+/// known limit").
 ///
 /// `JsonPath(p)` requires EVERY dot-separated segment of `p` after the
-/// leading `$.` to appear somewhere across the assertion lines — not as
-/// one contiguous substring, not in path order, not on the same line, and
-/// not exclusively: a body asserting `v["overflow"]["packing"]` satisfies
+/// leading `$.` to appear together on ONE assertion's condition line — not
+/// as one contiguous substring, not in path order, but no longer spread
+/// across separate assertions or separate lines. This is a change from an
+/// earlier version that accepted the segments anywhere across the whole
+/// condition text regardless of line: that version was satisfied by two
+/// DIFFERENT assert lines that each mentioned only one of "overflow" and
+/// "packing", which is not what `JsonPath("$.overflow.packing")` claims to
+/// check. A body asserting `v["overflow"]["packing"]` still satisfies
 /// `$.overflow.packing` even though the literal text `"$.overflow.packing"`
-/// never appears, but two DIFFERENT assert lines that each mention one of
-/// "overflow" and "packing" would satisfy it too. This is intentionally
-/// lax — the alternative (requiring one specific bracket-indexing idiom, on
-/// one line) would need to know which of several equivalent ways a body
-/// reads a JSON value, and neither of the two `Probed` rows this gate
-/// checks today would be helped by making it stricter.
+/// never appears — this remains intentionally lax about the specific
+/// bracket-indexing idiom, since neither of the two `Probed` rows this gate
+/// checks today would be helped by requiring one.
 fn marker_is_asserted(marker: &CitedMarker, body: &str) -> bool {
     let body = assertion_lines(body);
     match marker {
         CitedMarker::TextContains(s) => body.contains(s.as_str()),
         CitedMarker::JsonPath(p) => match p.strip_prefix("$.") {
-            Some(rest) => rest
-                .split('.')
-                .all(|seg| !seg.is_empty() && body.contains(seg)),
+            Some(rest) => body.lines().any(|line| {
+                rest.split('.')
+                    .all(|seg| !seg.is_empty() && line.contains(seg))
+            }),
             None => false,
         },
     }
