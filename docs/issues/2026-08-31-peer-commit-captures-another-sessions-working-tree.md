@@ -479,6 +479,70 @@ Their note on why nobody reaches for it is the actionable half, and is now fixed
 
 **`route=named` earns its own sentence.** It marks a deliberate `git add <path>`, which told `c45dd5ef` that `63083c9e` was mid-commit rather than incidentally dirty — and that is what made a *"do not re-commit, you will find nothing"* warning the right message to send instead of a bare apology. A field whose value nobody would have predicted mattering.
 
+## Instance 9 — 2026-09-04, both halves taken together, and the captured side got a free detector
+
+`f35591b7` (*"docs(trackers): BL-72 done and measured; F-115 records the axis/constant name
+collision"*, `Session-Id: ffb95976-dc89-4cca-87aa-c026544faf2f`) captured `F-114` and `W-104` from
+`docs/trackers/bug-fix-session-log.md` — two entry sections, two index rows and the
+`entry_high_water_F`/`_W` frontmatter bump — written minutes earlier by session
+`d2bc134a-4e6b-470f-b742-1abd5b278279` during a reconnaissance pass. The capturing commit's own
+work was `F-115` into the same ledger plus `open-issue-work-queue.md` and `retrieval-benchmark.md`.
+
+**Both sides are positively identified, which makes this the corpus's second classifiable capture
+and the first classified by two different instruments.** The capturing side by its `Session-Id`
+trailer; the captured side by the harness making the session id a path component of its scratchpad
+(`/tmp/claude-1000/<project>/d2bc134a-…/scratchpad`), so that id is *given* rather than inferred.
+Neither side was reconstructed from a commit range.
+
+**`ffb95976` has captured this same file before, by this same mechanism.**
+`docs/issues/2026-09-02-a-pathspec-commit-does-capture-staged-content-and-both-guards-stand-down.md`
+records `cffc3cf2` — *"a pathspec commit, `Session-Id: ffb95976`"* — taking three staged citation
+re-points from `docs/trackers/bug-fix-session-log.md`, and that bug file exists because of it. Two
+occurrences, same session, same file, same route: a pathspec commit naming a shared ledger commits
+that path's **working tree**, so whatever a peer has written there since goes with it. The recorded
+remedy did not prevent the repeat, and nothing in either session's view would have shown it.
+
+### What is new: this was not a split, so § *the append convention* does not describe it
+
+The seam that section measures is the gap **between the two writes** — `append_entry` writes the
+`## <ID> — <title>` section, then the Index row follows — and it produces the 11/186 split
+population. **This capture took both writes at once**, along with the frontmatter counter, so it
+lands in none of those buckets and would be invisible to a heading-vs-row disagreement probe.
+
+The window here is a different one and it is much wider: between the moment the entry is *complete*
+and the moment it is *staged*. For a recon write-up that is however long the write-up takes — minutes,
+not the seconds between two ordered calls. The append convention did not create this window; the
+convention of finishing before staging did, and every session has it.
+
+**Outcome was benign, and that is itself the datapoint.** Because both halves travelled together,
+`HEAD` is coherent: `F-114` and `W-104` are present and intact, the peer's own `F-115` stacked on top
+of `F-114`, and the marks read `entry_high_water_F: 115` / `_W: 104` — correct for both sessions.
+Unlike Instance 6, no defect was left at `HEAD`; unlike Instance 7, no protocol was interrupted
+mid-flight. The entire residue is **misattribution**: two entries filed under another session's
+message, in a corpus where `%an` reads identically for every commit. Verified, not assumed — both
+sections, both rows and both marks were read out of `git show HEAD:` before anything else was done.
+
+### The detector fired on the CAPTURED side, cost nothing, and § *the detector was an arithmetic mismatch* said that side is the hard one
+
+The capture surfaced from a step taken for an unrelated reason. After `unreviewed-content` refused a
+pathspec commit, the prescribed remedy is `git add <paths>` then `git diff --cached --name-only`. Four
+paths were added; **three came back**. `docs/trackers/bug-fix-session-log.md` was absent from the
+staged list — not conflicting, not erroring, simply not there, because its working tree already
+matched `HEAD`.
+
+> **A file you just `git add`ed that does not appear in `git diff --cached --name-only` was already
+> committed by someone else.** `git add` on an unchanged path is a silent no-op and reports success.
+
+That is a captured-side detector, it is one command, and it is already inside the sequence the
+pre-commit hook prescribes — step 5's *"verify the INDEX, not the exit code"* turns out to detect
+capture as well as contention, which is not what it was written for. It complements § *Detection*'s
+`--stat` check rather than duplicating it: that one reads **extra** files on the capturing side, this
+one reads a **missing** file on the captured side, and the two cannot see each other's cases.
+
+Left alone deliberately, per the shared-checkout sequence's step 6 — no reset, no amend, no
+cherry-pick. The work is intact and mislabelled, and on a live tree the repair is the more expensive
+of the two states.
+
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
