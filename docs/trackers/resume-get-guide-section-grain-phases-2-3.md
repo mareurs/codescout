@@ -11,7 +11,7 @@ tags:
 - prompt-surfaces
 - progressive-disclosure
 topic: get_guide section grain
-entry_high_water_GG: 9
+entry_high_water_GG: 11
 entry_prefix: GG
 ---
 
@@ -216,19 +216,17 @@ now rather than later.
 > child's block is the caller's only copy of the shape. Cutting it would have removed the fact
 > and left the sentence that assumes it.
 >
-> **Successor concern — measured here, STILL OWED ITS OWN `GG-N` id.** `append_entry` refused
-> allocation (*"this ledger has commits that are not on its upstream branch"*): the unpushed
-> commits touching this ledger are from this work stream, but pushing would push several other
-> sessions' work, which is not this task's to do. Recorded in full so the follow-up is a
-> `git push` plus one `append_entry`, never a re-derivation.
+> **Successor concern — allocated as `GG-11` on 2026-09-03.** The measurement recorded inline
+> here (§ *librarian(action=…) — Reference* serving eight shapes at 26 B of margin, green under
+> both guards by construction) now lives in **`GG-11`**, with its instrument, its drift table and
+> its remedy candidates. **Cite `GG-11`, not this paragraph** — and re-derive its figures rather
+> than copying them: three of them moved in the one day between this entry's measurement and that
+> allocation.
 >
-> **Retried 2026-09-03 — refused again, and the re-measurement is why this paragraph is not just
-> a repeat.** The branch had gone from 69 ahead to **116**, so the blocker widened rather than
-> cleared. The figures below were re-derived before the retry, and **three of them had moved in
-> one day**: the margin narrowed by **74%** with no change addressed at it, and the shape
-> namespace was renamed `artifact.*` → `doc.*` by the doc-tool collapse (`3fc38348`). **Cite the
-> figures below, and re-derive rather than copy** — the drift rate is the finding, not a caveat
-> about it.
+> Kept here only as the provenance link. Allocation was blocked twice by `append_entry`'s
+> unpushed-commits guard (branch 69 then 118 ahead of `origin/experiments`) and released once
+> `experiments` was pushed at `7c021c9f..dd31047d`. **`GG-10` is burned and will never be
+> defined** — see § *History*.
 >
 > **The concentration this entry was chasing has moved, and it now sits where neither guard sees
 > it at session grain.** § *librarian(action=…) — Reference* declares **eight** shapes
@@ -460,6 +458,91 @@ method today carries two engines' delivery paths, not one.
 **Next:** do `GG-3` as a pure refactor, no behaviour change. It serves both
 streams and blocks neither.
 
+## GG-11 — `librarian` § Reference serves eight shapes at 26 B of margin, and both guards are green by construction
+
+**Status:** open — measurement complete, remedy unadjudicated.
+
+**Valid:** conditional — the ceiling fixture gains a `librarian.*` shape
+
+Owed by `GG-4`, which measured this on 2026-09-02 and could not allocate an id
+(`append_entry` refused: *"this ledger has commits that are not on its upstream
+branch"*). Retried and refused again on 2026-09-03 with the branch **118** ahead;
+allocated here after `experiments` was pushed (`7c021c9f..dd31047d`). Figures
+below were re-derived at allocation time, not transcribed — see *Drift* below for
+why that mattered.
+
+**The concentration `GG-4` was chasing has moved, and now sits where neither
+guard sees it at session grain.**
+
+`librarian.md` § *librarian(action=…) — Reference* declares **eight** shapes
+(`reindex, link_scan, doctor, audit_doc_refs, context, tracker_design,
+legibility_scan, audit_log`) and is **2,474 B against
+`MAX_DECLARED_SECTION_BYTES = 2500`** (`src/prompts/guide_index.rs:272`) — a
+**26 B margin**, under half of one percent of the cap. Every one of the eight
+draws the whole section. `librarian.doctor` draws **3,959 B** (2,474 Reference +
+1,485 § *doctor repairs — what each `fix=` mode does*), the largest per-shape
+draw in the corpus and **1.9× the largest `doc.*` shape** (`doc.update`, 2,123 B).
+
+**It is green twice, and that is the finding.**
+`declared_sections_are_within_the_size_cap` (`guide_index.rs:977`) is
+per-**section** and passes at 2,474 ≤ 2,500.
+`a_p50_session_stays_under_the_committed_emission_byte_ceiling`
+(`src/server.rs:9166`, `CEILING = 12_244`) is per-**session** over six `doc`
+calls — `create`, `get`, `update`, `append_entry`, `find`, `move` — so **no
+`librarian.*` shape is exercised by it at all**, and it is silent here by
+construction rather than by measurement. A section can serve eight shapes at
+3,959 B apiece and pass both. The `CEILING` population note enumerates what its
+widening is and is not — operator rules, session opener, `craft-skills`, the PRE
+phase — and does not say *shapes outside the p50 six are unbudgeted at session
+grain*, which is the exclusion that hides this.
+
+**Drift — the reason this entry says "re-derive, don't cite".** Between GG-4's
+measurement (2026-09-02) and this allocation (2026-09-03), one day, three figures
+moved with no change addressed at any of them:
+
+| figure | 2026-09-02 | 2026-09-03 |
+|---|---|---|
+| § *Reference* | 2,401 B | **2,474 B** |
+| margin to cap | 99 B | **26 B** |
+| `librarian.doctor` | 3,891 B | **3,959 B** |
+| shape namespace | `artifact.*` | **`doc.*`** (doc-tool collapse, `3fc38348`) |
+
+The margin narrowed **74%** in a day. GG-4's 99 B read as comfortable and was
+not a floor. **Anything citing this entry should re-derive rather than copy** —
+the drift rate is the finding, not a caveat about it.
+
+**Instrument, and what validated it.** Per-shape draw summed from
+`<!-- serves: … -->` declarations in **bytes** (`sec.body.len()`, the cap test's
+own unit — these guides are full of multi-byte em-dashes, so a char count
+under-reports). Validated against the production partition invariant at
+`guide_index.rs:642` (`pre.len() + Σ sec.body.len() == source.len()`), which
+reproduced exactly. Its one known divergence from the production parser —
+blindness to `#` lines inside fences (`guide_index.rs:571` shows production skips
+them) — was **checked against this section rather than assumed**: § *Reference*
+holds one fenced block containing no `#`-prefixed line, so fence handling cannot
+move the 2,474.
+
+**Not a defect claim.** Nothing here shows a `doctor` caller is over-served;
+`doctor` is a broad action and 3,959 B may be exactly right. What is shown is
+that **no instrument would say either way.**
+
+**Remedy candidates, unadjudicated —** whoever picks this up owns choosing, and
+the third is a real option, not a formality:
+
+1. Extend the ceiling fixture with a `librarian.*` shape. Prices it, but needs a
+   re-derived `CEILING` — a spec amendment, not a test edit.
+2. Decompose § *Reference* at `###` and move the declarations onto the children,
+   under the same *split-don't-merge* rule Phase 1 established. Note `GG-4`'s own
+   result before assuming this yields much: its second child yielded **24 B**,
+   because worked examples addressed to the caller a section serves are
+   irreducible by this method.
+3. Decide 3,959 B is correct, and record that here so the next reader stops.
+
+**Rests on:** `MAX_DECLARED_SECTION_BYTES = 2500`; `CEILING = 12_244`; the
+ceiling fixture's six-shape `doc.*` population. If that fixture gains a
+`librarian.*` shape, this entry's central claim is closed by that change — which
+is why `**Valid:**` is conditional on it rather than dated.
+
 ## Template for new entries
 
 ```
@@ -480,3 +563,24 @@ streams and blocks neither.
 Seeded GG-1..GG-7 from the Phase 1 plan's `## Out of scope for Phase 1` and
 `### Carried deferred minors` sections plus one open bug. Phase 1 delivery
 re-confirmed live the same day.
+
+
+### 2026-09-03 — `GG-10` is burned; the ledger jumps GG-9 → GG-11
+
+**There is no `GG-10` and there never will be. Do not hunt for it.**
+
+`GG-10` was allocated and its section written, then discarded by a
+`git checkout -- <ledger>` in the same session — the section and the frontmatter
+high-water bump were both uncommitted, so both went. The content was re-appended
+immediately and came back as **`GG-11`**.
+
+**Why the id could not be recovered, which is the part worth knowing:** the
+reservation high-water lives in the **catalog**, not in the file, and the catalog
+is not in git. After the restore the two disagreed — `append_entry` reported
+`body_max: 9, reserved_max: 10, frontmatter_max: 9` — and it allocated from
+`reserved_max`, correctly: an id that may already have been observed elsewhere
+must never be reissued. A reverted file cannot un-reserve an id.
+
+**The tell was three numeric fields disagreeing in a success response.** Nothing
+errored and nothing warned; the call returned a valid new id. Filed as
+`docs/issues/2026-09-03-a-reverted-ledger-burns-an-entry-id-with-no-warning.md`.
