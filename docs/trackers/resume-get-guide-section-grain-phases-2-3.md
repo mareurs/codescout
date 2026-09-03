@@ -193,7 +193,7 @@ now rather than later.
 > | claim in this entry | today |
 > |---|---|
 > | `artifact.update` is 3,265 B | **2,164 B** (1,355 anti-patterns + 809 shrink-guard) |
-> | … "the largest single shape" | **false** — `librarian.doctor` is 3,891 B |
+> | … "the largest single shape" | **false** — `librarian.doctor` is 3,959 B (was 3,891 B when this row was written 2026-09-02) |
 > | margin 54 B | **359 B** at the 2026-09-02 re-derivation; ceiling test green |
 >
 > **The cut that existed.** *Choosing a mode — anti-patterns* still closed with *"the response
@@ -216,34 +216,62 @@ now rather than later.
 > child's block is the caller's only copy of the shape. Cutting it would have removed the fact
 > and left the sentence that assumes it.
 >
-> **Successor concern — measured here, OWED ITS OWN `GG-N` id.** `append_entry` refused
-> allocation (*"this ledger has commits that are not on its upstream branch"*): the two unpushed
-> commits touching this ledger are from this work stream, but the branch is 69 ahead of
-> `origin/experiments` and pushing it would push five other sessions' work, which is not this
-> task's to do. Recorded in full so the follow-up is a `git push` plus one `append_entry`, never a
-> re-derivation.
+> **Successor concern — measured here, STILL OWED ITS OWN `GG-N` id.** `append_entry` refused
+> allocation (*"this ledger has commits that are not on its upstream branch"*): the unpushed
+> commits touching this ledger are from this work stream, but pushing would push several other
+> sessions' work, which is not this task's to do. Recorded in full so the follow-up is a
+> `git push` plus one `append_entry`, never a re-derivation.
+>
+> **Retried 2026-09-03 — refused again, and the re-measurement is why this paragraph is not just
+> a repeat.** The branch had gone from 69 ahead to **116**, so the blocker widened rather than
+> cleared. The figures below were re-derived before the retry, and **three of them had moved in
+> one day**: the margin narrowed by **74%** with no change addressed at it, and the shape
+> namespace was renamed `artifact.*` → `doc.*` by the doc-tool collapse (`3fc38348`). **Cite the
+> figures below, and re-derive rather than copy** — the drift rate is the finding, not a caveat
+> about it.
 >
 > **The concentration this entry was chasing has moved, and it now sits where neither guard sees
 > it at session grain.** § *librarian(action=…) — Reference* declares **eight** shapes
 > (`reindex, link_scan, doctor, audit_doc_refs, context, tracker_design, legibility_scan,
-> audit_log`) and is **2,401 B against `MAX_DECLARED_SECTION_BYTES = 2500`** — a **99 B** margin,
-> tighter than the 54 B that opened this entry. Every one of the eight draws the whole section;
-> `librarian.doctor` draws **3,891 B** (Reference + § *doctor repairs*), the largest per-shape draw
-> in the corpus and **1.8× the largest p50 shape**.
+> audit_log`) and is **2,474 B against `MAX_DECLARED_SECTION_BYTES = 2500`** (`guide_index.rs:272`)
+> — a **26 B** margin, under half of one percent of the cap, and *tighter than the 54 B that
+> opened this entry*. Every one of the eight draws the whole section; `librarian.doctor` draws
+> **3,959 B** (2,474 Reference + 1,485 § *doctor repairs*), the largest per-shape draw in the
+> corpus and **1.9× the largest p50 shape** (`doc.update`, 2,123 B).
 >
-> **It is green twice, and that is the finding.** `declared_sections_are_within_the_size_cap` is
-> per-**section** and passes at 2,401 ≤ 2,500. `a_p50_session_stays_under_…_byte_ceiling` is
-> per-**session** over the p50 six — all `artifact.*` — so no `librarian.*` shape is exercised and
-> it is silent by construction. A section can serve eight shapes at 3,891 B apiece and pass both.
+> | figure | as first measured 2026-09-02 | re-derived 2026-09-03 |
+> |---|---|---|
+> | § *Reference* | 2,401 B | **2,474 B** |
+> | margin to cap | 99 B | **26 B** |
+> | `librarian.doctor` | 3,891 B | **3,959 B** |
+> | shape namespace | `artifact.*` | **`doc.*`** |
+>
+> **Instrument, and what validated it.** Per-shape draw summed from `<!-- serves: … -->`
+> declarations in **bytes** (`sec.body.len()`, the cap test's own unit — these guides are full of
+> multi-byte em-dashes, so a char count under-reports). Validated against the production partition
+> invariant at `guide_index.rs:642` (`pre.len() + Σ sec.body.len() == source.len()`), which
+> reproduced exactly. Its one known divergence from the production parser — blindness to `#` lines
+> inside fences — was **checked against this section rather than assumed**: § *Reference* holds one
+> fenced block containing no `#`-prefixed line, so fence handling cannot move the 2,474.
+>
+> **It is green twice, and that is the finding.** `declared_sections_are_within_the_size_cap`
+> (`guide_index.rs:977`) is per-**section** and passes at 2,474 ≤ 2,500.
+> `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (`src/server.rs:9166`,
+> `CEILING = 12_244`) is per-**session** over six `doc` calls — `create`, `get`, `update`,
+> `append_entry`, `find`, `move` — so **no `librarian.*` shape is exercised by it at all**, and it
+> is silent here by construction rather than by measurement. A section can serve eight shapes at
+> 3,959 B apiece and pass both.
 > The ceiling's own comment enumerates what its widening is and is not — operator rules, session
 > opener, `craft-skills`, the PRE phase — and does not say *shapes outside the p50 six are
 > unbudgeted at session grain*, which is the exclusion that hides this.
 >
 > **Not a defect claim.** Nothing shows a `doctor` caller is over-served; `doctor` is a broad
-> action and 3,891 B may be right. What is shown is that **no instrument would say either way.**
+> action and 3,959 B may be right. What is shown is that **no instrument would say either way.**
 > Remedy candidates, unadjudicated: extend the ceiling fixture with a `librarian.*` shape (prices
-> it, but needs a re-derived ceiling — a spec amendment); decompose § *Reference* at `###` under
-> the same *split-don't-merge* rule; or decide 3,891 B is correct and record it so the next reader
+> it, but needs a re-derived `CEILING` — a spec amendment, not a test edit); decompose § *Reference*
+> at `###` under the same *split-don't-merge* rule (but note this entry's own result first — its
+> second child yielded **24 B**, because worked examples addressed to the caller a section serves
+> are irreducible by this method); or decide 3,959 B is correct and record it so the next reader
 > stops here.
 
 ## GG-5 — Phase 3 derivation: three surfaces still feed the index instead of projecting from it
