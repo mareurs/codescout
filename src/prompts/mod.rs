@@ -1995,7 +1995,7 @@ mod tests {
     /// here two independent ways — its `a_documented_call_names_a_live_tool` skips every token
     /// without an underscore (`artifact` has none, so `artifact(` was never checked), and
     /// `present_tense_surfaces()` walks neither `docs/architecture/`, `docs/conventions/` nor
-    /// `docs/adrs/`, which between them held 60 of the 160. That is `IC-11` exactly: a
+    /// `docs/adrs/`, which between them held 60 of the 160. That is `IC-18` exactly: a
     /// hand-enumerated sweep reports the surfaces it changed, never the ones it missed.
     ///
     /// **Call forms only, and that restriction is the whole design.** A denylist over bare
