@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 15
+entry_high_water_OB: 16
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-16 | 2026-09-04 | **a redirect, hint or guard in repo A names a capability registered in repo B** — correct when written, decaying when B changes, and no gate in *either* repo can evaluate the pair, because neither repo holds both halves at the moment its own gate runs | **both repos' gates, each for its own reason and neither for carelessness** — codescout's three surface gates enumerate `DEPRECATED_TOOL_NAMES` against codescout's own text at test time, and a version-pinned plugin in a per-profile cache is not in that tree; the plugin holds no copy of the tool registry and runs with no server, so it can check that a hook *fires* but never that what it *names* still exists. The missing thing is a corpus, not attention | wrong instrument — the filing session read the deny message and the doc inventory, and neither can answer *"does the named tool still exist?"*; reading the hook source would not have helped either, since the source was correct-and-obsolete and only the installed copy's absence settles it | none yet — candidate is a smoke check in the plugin's own suite asserting every tool named in a hook redirect is one the currently-installed server advertises, which must run where both halves co-exist rather than in either repo's CI. **Fails closed**, and that sets the blast radius: a stale advisory costs a round-trip, a stale `permissionDecision: deny` removes the capability. 1 instance, 1 session |
 | OB-15 | 2026-09-02 | **a mechanism that is GATED OFF and one that was never BUILT produce identical observations** — no output, every call, forever. The diagnostician's evidence cannot discriminate, and the two have opposite remedies. Runs in both directions: *no output ⇒ no mechanism*, and *a published limitation ⇒ this instance is covered by it* | **anyone diagnosing a missing output from the output.** Not carelessness — they hold the *complete* observation, which is what disqualifies a care-based remedy. The discriminator is in the code, never in the absence | wrong instrument, and **asymmetrically pulled**: *build it* is actionable and ends in a plan, *ungate it* asks you to believe in something you have no evidence for — so the tie breaks toward building predictably rather than randomly, which is what earns a standing check | none yet — candidate is one line in reconnaissance Phase 1: *an output you have never seen is not evidence that nothing emits it; grep the emitter.* 3 instances, 2 substrates, 3 sessions; instance 3 argues it should reach **records** too, not only emitters (`.git/session-stage-log` answered in one command a question three sessions were answering from memory) |
 | OB-14 | 2026-09-02 | **the sampling frame — what the corpus contains, what one row means, how rows were selected — is the premise every number rests on and the one no downstream check reads.** A frame error moves numerator and denominator together, so every consistency check passes | **the analyst**, whose entire access to the population runs *through* the frame; auditing it needs a view of the population that does not come through it | wrong instrument, and uniquely so for the **review** half: 13 rounds plus a sustained adversarial review that reversed 4 conclusions, and none of five parties questioned the frame — `OB-4`'s shared-substrate law applied to reviewers rather than instruments | **designed** — show the data owner the corpus census and the sampling frame *before* the findings; census is 3 queries plus a per-producer byte share. Not promoted: 2 instances, 1 work stream |
 | OB-13 | 2026-09-02 | **deleting a token makes every negative assertion naming it vacuously true — permanently, silently, while staying green.** The instance was *written as a forward-looking guard and made vacuous by the very event it anticipated* (`prompts/mod.rs:2603`, "After Task 14 lands…") | **the author performing the deletion.** The diff enumerates removals; the assertions that MENTION the token are not in it — they survive untouched, compile, pass, and read as guards. Nothing in the act of deleting points backwards | wrong instrument — the reverse direction is **closed**: token→assertions is a grep, assertions→"which go vacuous" is unanswerable, since the discriminator is who OWNS the token and that is not in the text. Measured: a selector over 93 assertions returned **28**, overwhelmingly fixtures | `designed, not built` — H-N: trigger on a token leaving the tree, `grep -rn '!.*contains.*<token>'`. **Plus a repair-side check**, because the blindness recurs in the fix: the prescribed replacement needle was itself vacuous, by a different mechanism, and passed |
@@ -1680,6 +1681,30 @@ emits it; grep the emitter.** Instance 3 argues the line should reach records to
 emitters.
 
 **Status:** open
+
+## OB-16 — a cross-repo redirect names a capability neither repo's gates can evaluate, because neither holds both halves
+
+**Valid:** conditional — a check spanning both repos ships (see *Mechanism status*)
+
+**Rests on:** `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md` (artifact `13382b706c9c77b0`), and the principle that a gate can only read a corpus it is checked out against.
+
+**Class:** a redirect, hint or guard in repo A names a capability registered in repo B. The naming is correct when written and decays when B changes, and no gate in **either** repo can evaluate the pair — because neither repo contains both halves at the moment its own gate runs.
+
+**Blind party:** both repos' gates, each for its own reason, and neither for carelessness. codescout's three surface gates — `prompt_surfaces_reference_only_real_tools`, `claude_md_contains_no_deprecated_tool_names`, `guide_bodies_contain_no_deprecated_tool_names` — enumerate `DEPRECATED_TOOL_NAMES` against codescout's *own* text at test time; a plugin hook is a JS file in another repository, version-pinned into a per-profile cache, and is not in the tree they scan. The plugin's suite is the mirror image: it holds no copy of codescout's tool registry and runs with no server, so it can check that a hook *fires* but never that what the hook *names* still exists. **A more careful author on either side is structurally unable to check this**, which is the admission test — the missing thing is a corpus, not attention.
+
+**Who can see it:** only a live session with both halves installed, because that is the sole place the pair co-exists. And specifically a **probe**, never a reading: `docs/architecture/companion-plugin.md` already warns that hook source is not ground truth for runtime behaviour. Confirmed here — the retirement was invisible to the source repo alone and became legible only by diffing the *installed* plugin (`1.20.3 → 1.20.4`) and calling the tool once.
+
+**Plausible-answer property:** the hook keeps evaluating correctly against its own rule and keeps emitting a confident, well-formatted message. What the caller receives is a **plausible instruction** — *"use `read_markdown` instead"* — naming a tool the server no longer registers. Nothing errors at the seam; the error surfaces one call later, attributed to the caller's next action rather than to the hook.
+
+**Vigilance:** wrong instrument — the filing session read the deny message and the doc inventory, and neither can answer *"does the named tool still exist?"*. It correctly recorded that it had not read the hook source, and reading it would not have helped either: the source was already correct-and-obsolete, and only the installed copy's absence settles it.
+
+**Severity asymmetry worth naming:** this class fails **closed**. A stale *advisory* costs a round-trip; a stale `permissionDecision: deny` removes the capability. The blast radius is set by the hook's decision type, not by how wrong the name is.
+
+**Mechanism status:** none yet — the candidate is a smoke check in the plugin's own suite asserting that every tool named in a hook redirect is one the currently-installed server advertises. That requires the plugin to read the live tool list, which is exactly the capability whose absence defines this class, so the check has to run where both halves exist rather than in either repo's CI. Recorded as a design item; a `Mechanism status: none yet` row is what `H-N` and `I-N` consume.
+
+**Instances:** `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`; `bug-fix-session-log:W-104` (the probe that established the fix had landed); `bug-fix-session-log:F-114` (the re-probe instruction naming the source repo rather than the served copy — the same two-copy confusion, one layer up).
+
+**Status:** open — 1 instance, 1 session (2026-09-04). Promote on a second: the shape to watch is any hook, skill or guide in `claude-plugins` naming a codescout tool, since the fold retired six names at once and only this one was wired to a deny.
 
 ## Template for new entries
 

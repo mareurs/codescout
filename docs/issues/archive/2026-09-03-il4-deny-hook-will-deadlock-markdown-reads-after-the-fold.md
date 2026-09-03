@@ -1,14 +1,14 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
-claimed_at: 2026-09-04
-claimed_by: d2bc134a-4e6b-470f-b742-1abd5b278279
+closed: 2026-09-04
 opened: 2026-09-03
 owner: marius
 related: []
 severity: high
+unverified: no regression guard exists in either repo, so nothing prevents a plugin hook from naming a retired tool again; the fix was established by a live probe on one profile at one instant, never by a test
 ---
 
 # BUG: the companion plugin's IL-4 hook will deadlock every markdown read once the fold ships
@@ -110,25 +110,21 @@ which is what makes three prompt-surface gates refuse to mention it.
 
 ## Fix
 
-Not applied here. Task 12 of the tool-surface collapse owns the companion plugin, and the fix
-is to **delete the hook**, not to update its message: after the fold there is no wrong tool to
-redirect away from, so the rule it enforces no longer exists.
+Applied in the **plugin** repo, not here. The prescribed fix was *"delete the hook, not update its message"* — after the fold there is no wrong tool to redirect away from, so the rule it enforced no longer exists — and that is what landed.
 
-**Ordering is the load-bearing part, and it is a cross-repo ship sequence.** The plugin change
-must land *before or with* the binary. If codescout ships first, every session using the
-plugin loses markdown reads until the plugin catches up — and the plugin is a different repo
-with its own cadence, so "before or with" is a decision someone has to make rather than a
-thing that happens.
+- **SHA:** `claude-plugins:bb24b7f` (`bb24b7f7d351b27bb6ffad06cc6a0a5f5e4d905b`), 2026-09-03 08:40:42 +0300 — *"feat: follow codescout's tool collapse — doc replaces artifact, IL-4 retired, read_file/edit_file handle markdown"*.
+- **patch-id:** `1175e6f8b54fff099d6342967d4ea09b8f92a6a4`.
 
+Shipped as **1.20.4** (`34f5da6`, 09:13:27). `git ls-files | grep -c il4` in that repo returns **0**, and the installed `1.20.3 → 1.20.4` diff removes exactly two files: `il4-deny-hook.mjs` and `il4-deny-hook.test.sh`.
+
+**The cross-repo ordering this file flagged resolved correctly, and by 7h35m rather than by design.** The bug was filed at `99cc3313` (2026-09-03 01:05) and the plugin retired the hook the same morning, so the window in which a collapsed binary could meet an un-updated plugin never opened on this machine. That was a decision someone made, exactly as the original text predicted it would have to be — it is not a property the system now has.
+
+**Verified live, not inferred.** Probe 2026-09-04 01:33 EEST, one path, one profile (`~/.claude-sdd`): `read_file(path="README.md")` reached the server and returned a heading map plus an `@file_*` handle — no deny. Corroborated on the distribution axis by **content, not mtime** (the installed `1.20.4` directories stat two days *before* the commit that created 1.20.4): `installed_plugins.json` reads 1.20.4 in all three profiles, the only surviving `read_file` matcher in `hooks.json` routes to `cs-liveness.mjs` (an advisory), and no `settings*.json` in any profile registers the hook directly.
 ## Tests added
 
-None, and this is the uncomfortable part: **there is no test surface that spans both repos.**
-codescout's gates cannot see a plugin hook; the plugin cannot see codescout's tool registry.
-The nearest available check is a smoke probe in the plugin's own suite asserting that every
-tool a hook names in a redirect is one the currently-installed server advertises — which
-requires the plugin to read the server's tool list, the very thing the hook cannot do today.
-Recorded as a design question for Task 12 rather than claimed as covered.
+**None, and the gap named in the original filing is untouched by this fix.** There is still no test surface spanning the two repos: codescout's gates (`prompt_surfaces_reference_only_real_tools`, `claude_md_contains_no_deprecated_tool_names`, `guide_bodies_contain_no_deprecated_tool_names`) scan codescout's own surfaces and cannot reach a plugin; the plugin holds no copy of the tool registry to check a redirect against.
 
+So the deadlock is gone and the **mechanism** that let a stale `permissionDecision: deny` remove a capability is not. Recorded as a class in `observer-blindness:OB-16` rather than claimed as covered here — a deny fails closed, so the next occurrence costs a capability rather than a round-trip.
 ## Workarounds
 
 Until the plugin is updated: `read_markdown` still works against a pre-fold binary. Against a
@@ -138,12 +134,7 @@ the collapsed binary alongside the un-updated plugin.
 
 ## Resume
 
-Confirm the hook file's presence and matcher in `../claude-plugins/codescout-companion/`
-(`hooks/il4-deny-hook.mjs` per the inventory), then delete it as part of Task 12 together with
-the `mcp__.*__read_file` matcher entry in the plugin's hook config. Re-probe by calling
-`read_file` on a `.md` path from a session with the plugin active and the collapsed binary
-installed; the call must reach the server and return a heading map.
-
+N/A — fixed and verified. The residual is `observer-blindness:OB-16` (no gate spans the two repos), which is a design item, not a resumption of this bug.
 ## References
 
 - `docs/architecture/companion-plugin.md` — hook inventory; its line for this hook now carries

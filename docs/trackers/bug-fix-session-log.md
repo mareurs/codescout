@@ -11150,8 +11150,8 @@ start rewriting correct tests.
 
 **Valid:** dated 2026-09-04
 
-**Observed:** Took `docs/issues/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`
-(artifact `7f544aaa28c9c869`, `severity: high`), whose `## Fix` reads *"Not applied here. Task 12 of
+**Observed:** Took `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`
+(artifact `13382b706c9c77b0`, `severity: high`), whose `## Fix` reads *"Not applied here. Task 12 of
 the tool-surface collapse owns the companion plugin"* and whose prediction is that markdown reads have
 **no working path at all** once the fold ships. The fold has shipped — this session's tool surface has
 no `read_markdown`, and it sits in `DEPRECATED_TOOL_NAMES` (`src/prompts/mod.rs:1956`). Rather than
