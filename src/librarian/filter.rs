@@ -334,9 +334,18 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
                     "Provide a string value, e.g. `{\"contains\": \"docs/trackers\"}`.",
                 )
             })?;
+            // Escape the caller's value and declare an escape character, as the
+            // `Prefix` arm below does. Without both, `%` and `_` inside the
+            // value are live SQL wildcards and there is NO way to write either
+            // literally — a caller passing `\%` binds an ordinary backslash into
+            // a pattern with no escape char declared, so the match gets
+            // narrower and stays wrong. `_` is the expensive one: it is common
+            // in identifiers and filenames, and `contains` is the op this
+            // repo's own docs recommend for path filters.
+            let escaped = crate::librarian::util::escape_like_pattern(s);
             Ok(SqlFragment {
-                sql: format!("{sql_field} LIKE ?"),
-                params: vec![rusqlite::types::Value::Text(format!("%{s}%"))],
+                sql: format!("{sql_field} LIKE ? ESCAPE '\\'"),
+                params: vec![rusqlite::types::Value::Text(format!("%{escaped}%"))],
             })
         }
         LeafOp::Prefix => {
@@ -897,7 +906,7 @@ mod tests {
             "one correction expected: {corrections:?}"
         );
         let f = compile(&node).unwrap();
-        assert_eq!(f.sql, "title LIKE ?");
+        assert_eq!(f.sql, "title LIKE ? ESCAPE '\\'");
     }
 
     #[test]
@@ -933,7 +942,12 @@ mod tests {
     fn rel_path_filter_compiles_to_abs_path_sql() {
         let node = parse(json!({"rel_path": {"contains": "docs/trackers"}}));
         let f = compile(&node).unwrap();
-        assert_eq!(f.sql, "abs_path LIKE ?");
+        // The ESCAPE clause is not decoration: without it `%` and `_` inside a
+        // caller's value are live wildcards with no way to write either
+        // literally. Pinned by
+        // `contains_treats_percent_and_underscore_as_literal_characters`, which
+        // asserts the resulting ROWS rather than this string.
+        assert_eq!(f.sql, "abs_path LIKE ? ESCAPE '\\'");
         assert_eq!(
             f.params,
             vec![rusqlite::types::Value::Text("%docs/trackers%".into())]
@@ -1043,6 +1057,92 @@ mod tests {
                 "`{op}` refusal must name the field: {err}"
             );
         }
+    }
+
+    /// `contains` binds its value into a SQL `LIKE` pattern, so `%` and `_`
+    /// inside it were live wildcards with no way to escape either — the sibling
+    /// `prefix` arm called `escape_like_pattern` and this one did not.
+    ///
+    /// Asserts the ROWS, not parity with `eval`. Parity is the cheaper test and
+    /// it is not sufficient: `eval` implements `contains` as a literal substring
+    /// search, so a future change making IT wildcard-aware would restore parity
+    /// while leaving both engines wrong. The expected id lists below are the
+    /// claim; agreement is a consequence.
+    #[test]
+    fn contains_treats_percent_and_underscore_as_literal_characters() {
+        use rusqlite::Connection;
+
+        // LOAD-BEARING titles. `Docs%Frog` and `D_cs` match row "a" under a
+        // WILDCARD reading and nothing under a LITERAL one — that is the whole
+        // discrimination, and it needs the metacharacter to sit BETWEEN literal
+        // text. A trailing one does not discriminate: `contains "50%"` compiles
+        // to `LIKE '%50%%'`, which is equivalent to `LIKE '%50%'`, so it returns
+        // the same row either way and cannot fail. Row "b" carries a real
+        // percent sign so the positive control below has something to find.
+        let rows: &[(&str, &str)] = &[
+            ("a", "Docs Lotus Frog"),
+            ("b", "50% off sale"),
+            ("c", "hardware roadmap"),
+        ];
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE e (id TEXT, title TEXT)", [])
+            .unwrap();
+        for (id, title) in rows {
+            conn.execute(
+                "INSERT INTO e (id, title) VALUES (?1, ?2)",
+                rusqlite::params![id, title],
+            )
+            .unwrap();
+        }
+
+        let run = |fj: Value| -> Vec<String> {
+            let frag = compile(&parse(fj)).unwrap();
+            let sql = format!("SELECT id FROM e WHERE {} ORDER BY id", frag.sql);
+            let mut stmt = conn.prepare(&sql).unwrap();
+            stmt.query_map(rusqlite::params_from_iter(frag.params.iter()), |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        let none: Vec<String> = vec![];
+
+        // The wildcards must not fire. Both halves were observed RED
+        // independently before the fix (each returned ["a"]) — the first
+        // assertion short-circuits the second, so checking only one would have
+        // claimed coverage of a metacharacter never exercised.
+        assert_eq!(
+            run(json!({"title": {"contains": "Docs%Frog"}})),
+            none,
+            "`%` inside a contains value must be a literal percent sign"
+        );
+        assert_eq!(
+            run(json!({"title": {"contains": "D_cs"}})),
+            none,
+            "`_` inside a contains value must be a literal underscore"
+        );
+
+        // POSITIVE CONTROL. Without these, "escaped correctly" is
+        // indistinguishable from "matches nothing at all" — the two assertions
+        // above are absence assertions and so are monotone under a change that
+        // breaks `contains` outright.
+        assert_eq!(
+            run(json!({"title": {"contains": "50%"}})),
+            vec!["b"],
+            "a literal percent sign must still be findable"
+        );
+        assert_eq!(
+            run(json!({"title": {"contains": "50% off"}})),
+            vec!["b"],
+            "a literal percent sign mid-value must still be findable"
+        );
+        assert_eq!(
+            run(json!({"title": {"contains": "Lotus"}})),
+            vec!["a"],
+            "ordinary substrings are unaffected"
+        );
     }
 
     #[test]
@@ -1172,6 +1272,9 @@ mod tests {
             json!({"title": {"contains": "FROG"}}), // case-insensitivity parity
             json!({"title": {"contains": "lotus"}}),
             json!({"title": {"prefix": "50%"}}), // %-escape parity
+            json!({"title": {"contains": "50%"}}),
+            json!({"title": {"contains": "Docs%Frog"}}),
+            json!({"title": {"contains": "D_cs"}}),
         ];
 
         // `rel_path` is deliberately absent, and adding it here would fail: it
