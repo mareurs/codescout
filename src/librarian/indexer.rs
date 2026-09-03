@@ -573,7 +573,7 @@ fn chunk_grain_for_file(
     cache: &mut std::collections::HashMap<std::path::PathBuf, ChunkGrain>,
 ) -> ChunkGrain {
     let Some(dir) = abs_path.parent() else {
-        return ChunkGrain::Artifact;
+        return ChunkGrain::default();
     };
     if let Some(hit) = cache.get(dir) {
         return *hit;
@@ -585,7 +585,7 @@ fn chunk_grain_for_file(
                 break ChunkGrain::resolve(d.to_str());
             }
             Some(d) => cur = d.parent(),
-            None => break ChunkGrain::Artifact,
+            None => break ChunkGrain::default(),
         }
     };
     cache.insert(dir.to_path_buf(), grain);
@@ -1344,20 +1344,23 @@ kind = "memory"
         // Guarded site 2 of 2, and the one that matters most: whether the flag is
         // WIRED. Every other test in this change passes against an
         // `index_repo_sync` that never calls `ChunkGrain::resolve` at all —
-        // which is exactly how `ListFunctions` and `ListDocs` carried a green
-        // suite for months while registered nowhere.
+        // which is how `ListFunctions` and `ListDocs` carried a green suite for
+        // months while registered nowhere.
+        //
+        // The default is CHUNK since the grain comparison of 2026-09-03, so the
+        // discriminating fixture is now the OPT-OUT.
         let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
 
-        let run = |opt_in: bool| -> usize {
+        let run = |opt_out: bool| -> usize {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
             std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
             std::fs::write(root.join("docs/trackers/log.md"), body).unwrap();
-            if opt_in {
+            if opt_out {
                 std::fs::create_dir_all(root.join(".codescout")).unwrap();
                 std::fs::write(
                     root.join(".codescout/project.toml"),
-                    "[librarian]\nchunk_grain = true\n",
+                    "[librarian]\nchunk_grain = false\n",
                 )
                 .unwrap();
             }
@@ -1378,15 +1381,15 @@ kind = "memory"
         };
 
         let default_cost = run(false);
-        let opted_in_cost = run(true);
-        assert_eq!(
-            default_cost, 1,
-            "default is OFF: one vector for the whole artifact"
-        );
+        let opted_out_cost = run(true);
         assert!(
-            opted_in_cost >= 3,
-            "[librarian] chunk_grain = true must reach the walk: expected one vector \
-             per chunk, got {opted_in_cost}"
+            default_cost >= 3,
+            "default is ON: one vector per chunk (preamble + two entries), got {default_cost}"
+        );
+        assert_eq!(
+            opted_out_cost, 1,
+            "[librarian] chunk_grain = false must reach the walk: one vector for \
+             the whole artifact"
         );
     }
 
@@ -1439,19 +1442,15 @@ kind = "memory"
             "# L\n\nintro\n\n## W-1 — a\n\nalpha\n\n## W-2 — b\n\nbeta\n",
         )
         .unwrap();
-        // LOAD-BEARING: chunk grain is OFF by default, so without this file the
-        // backfill correctly writes ONE vector and the `>= 3` assertion below
-        // fails — it is a claim about chunk grain, and the fixture has to declare
-        // the grain it is claiming about. It also makes this the only test that
-        // exercises `chunk_grain_for_file`, the backfill's per-file resolver:
-        // unlike index_repo_sync, the backfill pages a machine-global catalog and
-        // has no walk root to resolve from.
-        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
-        std::fs::write(
-            tmp.path().join(".codescout/project.toml"),
-            "[librarian]\nchunk_grain = true\n",
-        )
-        .unwrap();
+        // NOTE: no `.codescout/project.toml` here, deliberately. Chunk grain is
+        // the DEFAULT since the 2026-09-03 grain comparison, so the `>= 3`
+        // assertion below rides on the default and this fixture needs nothing to
+        // declare. It therefore no longer exercises `chunk_grain_for_file` in a
+        // discriminating direction — that job moved to
+        // `the_backfill_honours_a_projects_opt_out`, which supplies the opt-out
+        // the resolver has to notice. Do not "restore" a config file here: it
+        // would be inert, and an inert fixture that looks load-bearing is how a
+        // test gets credited with coverage it does not provide.
 
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
         let (trapped, q) =
@@ -1492,6 +1491,55 @@ kind = "memory"
             "and the indexer still declines to queue it — the ORDERING defect is \
              untouched, so a new artifact can still fall in"
         );
+    }
+
+    /// The backfill's per-file resolver, guarded in the direction that
+    /// discriminates. `index_repo_sync` resolves the grain once from its walk
+    /// root; `backfill_chunk_vectors` cannot, because it pages a machine-global
+    /// catalog whose rows can span projects — so it walks up from each artifact's
+    /// own path. With chunk grain now the default, only an OPT-OUT can show that
+    /// walk happening: a resolver hard-wired to the default passes every other
+    /// test in this file.
+    #[tokio::test]
+    async fn the_backfill_honours_a_projects_opt_out() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("ledger.md"),
+            "# L\n\nintro\n\n## W-1 — a\n\nalpha\n\n## W-2 — b\n\nbeta\n",
+        )
+        .unwrap();
+        // LOAD-BEARING: the whole point. Remove this file and the artifact is
+        // chunked, `embedded` becomes >= 3, and the assertion below reds.
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        std::fs::write(
+            tmp.path().join(".codescout/project.toml"),
+            "[librarian]\nchunk_grain = false\n",
+        )
+        .unwrap();
+
+        // Same absorbing state as the sibling test: index with embeddings off so
+        // the content is stamped seen, then on so the early return skips it.
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
+
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+            .await
+            .unwrap();
+        assert_eq!(report.artifacts, 1, "sanity: one artifact was reached");
+        assert_eq!(
+            report.embedded, 1,
+            "an opted-out project gets ONE vector for the whole artifact — a \
+             resolver that ignored the file would write one per chunk"
+        );
+        let rows: i64 = m
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "and exactly one chunk row backs it");
     }
 
     /// An empty body and a missing file are different outcomes with different

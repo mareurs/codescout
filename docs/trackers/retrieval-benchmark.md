@@ -209,6 +209,79 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-04 — the two grains measured head to head; the default flips to ON
+
+**This supersedes the ruling below it.** That entry recorded chunk grain as a
+20× cost for better ranking, and therefore the project's call. Measuring the two
+grains against each other refuted the premise: it is not better-versus-worse, it
+is working-versus-not.
+
+Method: build a real per-file Qdrant collection (`bench_artifact_grain_codescout`,
+1,475 points, one vector per artifact over the frontmatter-stripped body), then
+run the same 12 suite queries against both collections with the same embedder and
+the same query prefix. Scored at **file level** — did the right document come
+back — because that is the only metric fair to both grains; the suite's own
+entry-level metric is unscorable at artifact grain by construction.
+
+| | chunk grain | artifact grain |
+|---|---|---|
+| file-level hits@5 | **6/12** (MRR 0.396) | **0/12** (MRR 0.000) |
+| entry-level hits@5 | 3/12 | 0/12 — structurally impossible |
+| vectors | 29,138 | 1,475 (19.8× cheaper) |
+| artifacts the embedder REFUSED | 0 | **473 of 1,475 (32%)** |
+
+**The 0/12 passed a positive control, which is the only reason it is quoted.** A
+zero is the shape a broken collection also produces. Querying the artifact-grain
+collection with a document's own *title* ranks that document #1 every time, with
+clear margin: 0.5743 vs 0.5072, 0.5087 vs 0.3346, 0.4248 vs 0.3891. The
+collection retrieves correctly; the grain cannot answer the question.
+
+**Mechanism.** A per-artifact vector represents the document's opening ~2,048
+characters. For a ledger that is frontmatter, an index table and conventions
+boilerplate. `W-81` sits at line 7,956 of a 10,752-line file and has *no*
+representation in that vector. Artifact grain answers *"which document is this?"*
+and cannot answer *"which document says this?"* — and every real query is the
+second kind.
+
+**The 32% is the finding that made the decision one-sided rather than a
+trade.** The embedder rejects oversized input with HTTP 500 instead of
+truncating, and nothing in the librarian embed path clips first, so artifact
+grain leaves a third of this corpus permanently vectorless in the absorbing state
+`2026-09-02-indexer-stamps-content-seen-before-it-embeds` describes. Filed as
+`618fcd89dd2c5e24`. It was visible three times before it was seen —
+`embed_error_count` read 2, 1 and 1 across the preceding day and was dismissed as
+incidental each time, because at chunk grain only a handful of chunks exceed the
+limit.
+
+**Ruling:** chunk grain becomes the default; `[librarian] chunk_grain = false`
+opts out. The silence around a mistyped key now fails SAFE — a typo costs
+embedding time and leaves search working, where under the previous default the
+same typo cost a third of the corpus its vectors.
+
+**Also measured, and not yet acted on:** the page policy is worth more than the
+grain debate. Simulated over raw kNN, with `cap=1 limit=5` reproducing the
+shipped 3/12 exactly as a positive control:
+
+| policy | entry-level hits@5 |
+|---|---|
+| cap=1 limit=5 (shipped) | 3/12 |
+| cap=1 limit=10 · cap=2 limit=5 | 5/12 |
+| **cap=2 limit=10** | **7/12** |
+| cap=3 limit=10 | 6/12 |
+| cap=∞ limit=10 | 5/12 |
+
+`cap=2` is a genuine optimum — both directions are worse, because uncapping lets
+one artifact flood the page. Not changed here: `find.rs:800-805` carries a
+standing warning that both side maps are keyed by artifact id and whoever raises
+the cap owns restructuring them.
+
+**What the residual 5 misses are, at the best policy:** 1 unscorable (`AE-9`
+wants `IC-16`, which has no `## IC-16 —` heading — a suite defect), 2
+mis-specified ground truth (`AE-11`/`AE-12` point at 256- and 372-byte evidence
+stubs rather than the prose that answers the query; for `AE-11` the correct FILE
+already ranks 1), and 2 genuine ranking losses (`AE-4`, `AE-7`). Re-point or
+retire those three before quoting any number from this suite again.
+
 ### 2026-09-03 — the ruling: chunk grain ships OFF by default, opt in per project
 
 **Shipped** `4f172f70` (patch-id `991386342baded3dccbc6f59b7b578fb114851db`), on `experiments`, gate green including the `--features server-stack` lane.

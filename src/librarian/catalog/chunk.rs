@@ -84,53 +84,78 @@ pub fn build_chunks(
 
 /// Which grain artifact vectors are written at, decided per project.
 ///
-/// **Off by default; opt in with `[librarian] chunk_grain = true`.** Chunk grain
-/// multiplies embedding cost by the mean chunk count per artifact. Measured on
-/// this repo 2026-09-03: 1,457 artifacts became 28,612 chunks (mean 19.6, median
-/// 16, max 565), and a full re-embed wrote 27,762 vectors in ~12m10s at ~38/sec.
-/// The distribution is BROAD rather than skewed — the top six artifacts are 6% of
-/// the cost — so there is no targeting rule that makes it cheap for a subset. It
-/// is the right trade with a fast embedder and the wrong one on modest hardware,
-/// which makes it the project's call rather than ours.
+/// **On by default; opt OUT with `[librarian] chunk_grain = false`.** The default
+/// was `Artifact` for one day (2026-09-03, `4f172f70`) on the theory that chunk
+/// grain was a 20× cost for better ranking and therefore the project's call.
+/// Measuring the two grains head to head that night refuted the premise: it is
+/// not better-versus-worse, it is working-versus-not.
 ///
-/// **[`ChunkGrain::Artifact`] is not a neutral cheap mode — it is the ranking
-/// behaviour of the defect in
-/// `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`.**
-/// One vector per artifact, on a 512-token embedder, represents only the
-/// document's first ~2,048 characters; every later section is unsearchable. Two
-/// things differ from that defect and neither recovers the ranking: the whole
-/// body is stored as ONE chunk row, so `matched` reports the document's real span
-/// instead of a wrong one, and a larger-context embedder would improve it for
-/// free. Treat this as a hardware concession, not a recommendation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// **Measured 2026-09-03 on this corpus, same 12 queries, same embedder:**
+///
+/// | | chunk grain | artifact grain |
+/// |---|---|---|
+/// | file-level hits@5 (did the right DOCUMENT come back) | **6/12** | **0/12** |
+/// | entry-level hits@5 | 3/12 | 0/12 — impossible by construction |
+/// | vectors | 29,138 | 1,475 (19.8× cheaper) |
+/// | artifacts the embedder REFUSED | 0 | **473 of 1,475 (32%)** |
+///
+/// The `0/12` survived a positive control, which is why it is quoted: querying an
+/// artifact-grain collection with a document's own *title* ranks that document #1
+/// with clear margin every time. The collection retrieves fine; the grain cannot
+/// answer the question. A per-artifact vector represents the document's opening
+/// ~2,048 characters — for a ledger that is frontmatter, an index table and
+/// conventions boilerplate — so an entry at line 7,956 of a 10,752-line file has
+/// no representation in it at all. Artifact grain answers *"which document is
+/// this?"* and cannot answer *"which document says this?"*.
+///
+/// **[`ChunkGrain::Artifact`] is therefore a degraded mode, not a cheap one**, and
+/// on this corpus it is additionally *broken*: the embedder rejects oversized
+/// input with HTTP 500 rather than truncating, and nothing in the librarian embed
+/// path cuts the text first, so a third of artifacts would be left permanently
+/// vectorless in the absorbing state
+/// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
+/// describes. Do not reach for it as a hardware concession until that is fixed.
+/// It is kept, rather than deleted, because the *storage* shape is sound (one
+/// whole-body chunk row, so `matched` reports a true span) and a larger-context
+/// embedder would make it viable without further change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChunkGrain {
-    /// One vector per chunk — [`build_chunks`].
+    /// One vector per chunk — [`build_chunks`]. The default, and the ONLY place
+    /// that default is written down: every fallback below says
+    /// `ChunkGrain::default()` rather than naming a variant, because when this
+    /// default was flipped on 2026-09-04 the literal fallbacks in
+    /// `chunk_grain_for_file` were missed and the flip silently did not reach the
+    /// backfill. One `#[default]` marker cannot be half-changed.
+    #[default]
     Chunk,
-    /// One vector per artifact — [`build_single_chunk`]. The default.
+    /// One vector per artifact — [`build_single_chunk`]. Degraded; see the type
+    /// doc before selecting it.
     Artifact,
 }
 
 impl ChunkGrain {
     /// Resolve the grain for the project rooted at `project_path`:
     /// `[librarian] chunk_grain = true|false` in `<project>/.codescout/project.toml`,
-    /// defaulting to [`ChunkGrain::Artifact`].
+    /// defaulting to [`ChunkGrain::Chunk`].
     ///
-    /// Absent file / unparseable TOML / missing key all resolve to the default,
-    /// like [`crate::librarian::indexer`]'s `read_force_include`: this is an
-    /// opt-in, and a config typo must not fail a reindex.
+    /// **Only a literal `false` opts out.** Absent file / unparseable TOML /
+    /// missing key / wrong type all resolve to the default, like
+    /// [`crate::librarian::indexer`]'s `read_force_include`: a config typo must
+    /// not fail a reindex. Since the default flipped, that silence now fails
+    /// SAFE — a mistyped opt-out costs embedding time and leaves search working,
+    /// where under the old default it cost a third of the corpus its vectors.
     ///
     /// Mirrors `ArtifactBackend::resolve`'s raw-TOML-read pattern — librarian's
     /// `ToolContext` does not carry the main server's parsed config (see
     /// `ProjectConfig`'s `force_include` note), so the file is read fresh rather
     /// than threaded through.
     ///
-    /// **The opt-in does not travel.** `.codescout/project.toml` is gitignored,
-    /// so this is a machine-local decision — the same is already true of
-    /// `[librarian] vector_backend`, which this sits beside. A clone on a second
-    /// machine reindexes at [`ChunkGrain::Artifact`] until someone sets the key
-    /// there too, and nothing reports the difference: both grains produce a
-    /// populated index and a plausible ranking. If that becomes a problem the fix
-    /// is a tracked config surface, not a louder default.
+    /// **The setting does not travel**, because `.codescout/project.toml` is
+    /// gitignored — as is already true of `[librarian] vector_backend` beside it.
+    /// That was a hazard under the old default and is benign under this one: a
+    /// clone on a second machine now inherits the WORKING grain, and only a
+    /// deliberate local opt-out is lost. Nothing reports the difference either
+    /// way, since both grains produce a populated index.
     ///
     /// **Deliberately has no env override, unlike its sibling `ArtifactBackend`.**
     /// That sibling's env branch is reachable in tests only because `EnvGuard`
@@ -142,24 +167,24 @@ impl ChunkGrain {
     /// serialisation story first, not a `var()` call.
     pub fn resolve(project_path: Option<&str>) -> Self {
         let Some(root) = project_path else {
-            return ChunkGrain::Artifact;
+            return ChunkGrain::default();
         };
         let cfg = std::path::Path::new(root)
             .join(".codescout")
             .join("project.toml");
         let Ok(text) = std::fs::read_to_string(&cfg) else {
-            return ChunkGrain::Artifact;
+            return ChunkGrain::default();
         };
         let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
-            return ChunkGrain::Artifact;
+            return ChunkGrain::default();
         };
         match parsed
             .get("librarian")
             .and_then(|t| t.get("chunk_grain"))
             .and_then(|v| v.as_bool())
         {
-            Some(true) => ChunkGrain::Chunk,
-            _ => ChunkGrain::Artifact,
+            Some(false) => ChunkGrain::Artifact,
+            _ => ChunkGrain::default(),
         }
     }
 }
@@ -517,60 +542,62 @@ mod tests {
     }
 
     #[test]
-    fn chunk_grain_is_off_unless_a_project_opts_in() {
+    fn chunk_grain_is_on_unless_a_project_opts_out() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(
             ChunkGrain::resolve(None),
-            ChunkGrain::Artifact,
+            ChunkGrain::Chunk,
             "no project at all"
         );
         assert_eq!(
             ChunkGrain::resolve(d.path().to_str()),
-            ChunkGrain::Artifact,
+            ChunkGrain::Chunk,
             "a project with no .codescout/project.toml"
         );
         write_project_toml(d.path(), "[project]\nname = \"x\"\n");
         assert_eq!(
             ChunkGrain::resolve(d.path().to_str()),
-            ChunkGrain::Artifact,
+            ChunkGrain::Chunk,
             "a project.toml with no [librarian] section"
         );
         write_project_toml(d.path(), "[librarian]\nvector_backend = \"qdrant\"\n");
         assert_eq!(
             ChunkGrain::resolve(d.path().to_str()),
-            ChunkGrain::Artifact,
+            ChunkGrain::Chunk,
             "a [librarian] section that does not mention chunk_grain"
         );
     }
 
     #[test]
-    fn only_a_literal_true_opts_in_and_every_near_miss_stays_off() {
+    fn only_a_literal_false_opts_out_and_every_near_miss_stays_on() {
         let d = tempfile::tempdir().unwrap();
-        write_project_toml(d.path(), "[librarian]\nchunk_grain = true\n");
+        write_project_toml(d.path(), "[librarian]\nchunk_grain = false\n");
         assert_eq!(
             ChunkGrain::resolve(d.path().to_str()),
-            ChunkGrain::Chunk,
-            "the positive leg — without it every assertion below is satisfied \
-             by a resolve() that returns Artifact unconditionally"
+            ChunkGrain::Artifact,
+            "the opt-out leg — without it every assertion below is satisfied \
+             by a resolve() that returns Chunk unconditionally"
         );
 
-        // Each row is a plausible way to write "on" that is not `= true`. They
-        // are all silently ignored, and that is safe ONLY because the default is
-        // OFF: a typo costs the writer the feature, never a 20x embedding bill.
-        // If the default is ever flipped, this silence stops being acceptable
-        // and these rows become the argument for validating the key.
+        // Each row is a plausible way to write "off" that is not `= false`. All are
+        // silently ignored, and since the default was inverted that silence now
+        // fails SAFE: a mistyped opt-out costs embedding time and leaves search
+        // working. Under the previous default the same typo cost a third of this
+        // corpus its vectors, because artifact grain's oversize failures are silent
+        // — which is the asymmetry that decided the flip, not the ranking numbers
+        // alone.
         for (label, text) in [
-            ("explicit false", "[librarian]\nchunk_grain = false\n"),
-            ("a quoted string", "[librarian]\nchunk_grain = \"true\"\n"),
-            ("an integer 1", "[librarian]\nchunk_grain = 1\n"),
-            ("the wrong section", "[project]\nchunk_grain = true\n"),
-            ("unparseable TOML", "[librarian\nchunk_grain = true\n"),
+            ("explicit true", "[librarian]\nchunk_grain = true\n"),
+            ("a quoted string", "[librarian]\nchunk_grain = \"false\"\n"),
+            ("an integer 0", "[librarian]\nchunk_grain = 0\n"),
+            ("the wrong section", "[project]\nchunk_grain = false\n"),
+            ("unparseable TOML", "[librarian\nchunk_grain = false\n"),
         ] {
             write_project_toml(d.path(), text);
             assert_eq!(
                 ChunkGrain::resolve(d.path().to_str()),
-                ChunkGrain::Artifact,
-                "{label} must not opt in"
+                ChunkGrain::Chunk,
+                "{label} must not opt out"
             );
         }
     }
