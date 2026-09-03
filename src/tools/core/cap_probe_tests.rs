@@ -208,14 +208,18 @@ fn print_mutation_tally() {
     );
 }
 
-/// The real `PROBE_ROWS` has zero `Mutation::Killed` rows today (Task 5a is
-/// classification-only scope), so [`print_mutation_tally`]'s `mutation_verified`
-/// count is otherwise checked only against an all-`NotYet` population — a
-/// counting bug that always reports 0 would pass that silently. This pins
-/// `cap_probe::tally` — the SAME function `print_mutation_tally` calls — against
-/// a synthetic fixture that DOES mix `Killed` with `NotYet` and `Deferred`, so a
-/// mis-count in the shared counting logic has somewhere to fail before the real
-/// table ever grows a `Killed` row.
+/// The real `PROBE_ROWS` carried zero `Mutation::Killed` rows until the Task 6
+/// sweep of 2026-09-03; it now carries 17 of 18 `Probed` rows killed, so
+/// [`print_mutation_tally`]'s `mutation_verified` count is no longer checked
+/// only against an all-`NotYet` population. This fixture stays, and stays
+/// load-bearing, for a reason that outlives that: it is the ONLY mixed
+/// `Killed`/`NotYet`/`Deferred` population **independent of the real table**, so
+/// a future edit that flips the last `NotYet` row — or that empties the table —
+/// cannot silently take the mix away and leave a counting bug that always
+/// reports 0 (or always reports `probed`) with nowhere to fail. Do not fold it
+/// into an assertion over `PROBE_ROWS`: that would make the detector a function
+/// of the data it is meant to police. It pins `cap_probe::tally` — the SAME
+/// function `print_mutation_tally` calls.
 #[test]
 fn tally_distinguishes_killed_from_not_yet_and_deferred() {
     use super::cap_probe::{tally, Coverage, Marker, Mutation, ProbeRow};

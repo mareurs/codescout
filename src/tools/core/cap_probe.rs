@@ -121,15 +121,53 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
     }
 }
 
-const NOT_MUTATED_YET: &str =
-    "Task 5a is classification-only scope; no mutation run has been performed for this id";
-
-/// The `Mutation::NotYet` reason for a row promoted by the Task 5c citation
-/// census. Deliberately NOT [`NOT_MUTATED_YET`], which says "Task 5a is
-/// classification-only scope" — false for a 5c row, whose citation was derived
-/// by reading the cited test's body and its cap's bound.
-const NOT_MUTATED_CENSUS: &str =
-    "Task 5c is a citation census; the mutation run for this id is Task 6's scope";
+// TASK 6 MUTATION SWEEP, 2026-09-03 — how every `Mutation::Killed` below was earned,
+// published here rather than only in a report so the next reader can RE-RUN it instead
+// of re-deriving it. Two constants used to live at this spot, `NOT_MUTATED_YET` ("Task
+// 5a is classification-only scope") and `NOT_MUTATED_CENSUS` ("the mutation run for this
+// id is Task 6's scope"); both are gone because no row still says either thing.
+//
+// The method, and it is the OPPOSITE direction from Task 5c's spot-checks — 5c deleted
+// the cited TEST's assertion and asked whether the GATE reds, proving the citation is
+// wired; this deletes the PRODUCTION marker emission and asks whether the CITED TEST
+// reds, proving the test catches the marker disappearing. A row can pass the first and
+// fail the second. The truncation itself is never touched: the mutated tree returns a
+// result that is still capped and no longer says so, which is `IC-13` exactly. One
+// mutation in the tree at a time (`target/` is shared; two live mutations can compile a
+// tree that never existed), `git status --short` confirmed empty between rows.
+//
+// row id                                  | production line suppressed        | cited test red at
+// ----------------------------------------|-----------------------------------|------------------
+// tool_output.inline_tokens               | output_buffer.rs:466 "@tool_"     | core/tests.rs:1097
+// run_command.inline_bytes                | run_command/output.rs:268         | run_command/tests.rs:2118
+// tool_output.inline_byte_budget          | read_file.rs:350 (hint)           | read_file.rs:2060
+// tool_output.compact_summary_hard_bytes  | core/types.rs:531 "(truncated)"   | core/tests.rs:1180
+// doctor.caveat_chars                     | doctor.rs:4445 "…"                | doctor.rs:6636
+// audit_doc_refs.files                    | audit_doc_refs/mod.rs:930 "cap"   | audit_doc_refs/mod.rs:1960
+// context.max_tokens                      | context.rs:521 "packing"          | context.rs:2327
+// context.attestation_exposure            | context.rs:570 verification_state | context.rs:1685
+// artifact.get_lines                      | get.rs:749 "shown_lines"          | get.rs:977
+// link_scan.findings                      | link_scan/mod.rs:960 "dangling"   | link_scan/mod.rs:1844
+// prompts.client_instructions_chars       | prompts/mod.rs:422 trim_note      | prompts/mod.rs:1284
+// grep.match_bytes                        | grep.rs:825 "truncated:"          | grep.rs:2031
+// preview.default_headings                | headings.rs:93 headings_truncated | preview/default.rs:87
+// preview.observation_text                | preview/memory.rs:50 "…"          | preview/memory.rs:148
+// tracker_design.existing_trackers        | tracker_design.rs:665-669 hint    | tracker_design.rs:975
+// index_state.skipped_sample              | NOT KILLED — see that row         | (n/a)
+// command_summary.buffer_query_lines      | run_command/output.rs:269         | run_command/tests.rs:2262
+// run_command.stderr_lines                | run_command/output.rs:272         | run_command/tests.rs:2224
+//
+// Line numbers are as of `9b40742d`. The two rows the Task 5c census does not cover
+// (`audit_doc_refs.files`, `context.max_tokens`) had their emission sites located for
+// this sweep: `enforce_file_cap`'s refusal message and `pack_entry_anchor`'s `packing`
+// key, both cited above. Note `prompts/mod.rs`: the census recorded the `trim_note`
+// writer at `:414` and `SHORT_NOTE` at `:377`; at this HEAD they are `:422` and `:385`,
+// an 8-line drift, so the census's line numbers were re-verified rather than trusted.
+//
+// 17 of 18 killed. The one that did not is `index_state.skipped_sample`, and its row
+// carries the finding: its declared marker names the capped payload rather than a
+// disclosure beside it, so no mutation of the line the census names can suppress a
+// marker while leaving the cap standing.
 
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
 /// 2026-09-02 census in `tests/result_caps.rs`. The id list is derived from
@@ -146,7 +184,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "tool_output.inline_tokens",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("@tool_"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "call_content_buffers_at_token_threshold",
         },
     },
@@ -158,7 +196,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "run_command.inline_bytes",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "run_command_buffer_only_large_single_line_does_not_rebuffer",
         },
     },
@@ -169,7 +207,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "tool_output.inline_byte_budget",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("json_path"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "read_file_buffer_single_oversized_line_still_fits_the_threshold",
         },
     },
@@ -219,7 +257,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "tool_output.compact_summary_hard_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "call_content_caps_compact_summary",
         },
     },
@@ -419,7 +457,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "doctor.caveat_chars",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("…"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "a_long_caveat_is_truncated_without_splitting_a_character",
         },
     },
@@ -500,7 +538,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "audit_doc_refs.files",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("cap"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
+            mutation: Mutation::Killed,
             cited_test: "glob_explosion_returns_recoverable",
         },
     },
@@ -554,7 +592,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "context.max_tokens",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.overflow.packing"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
+            mutation: Mutation::Killed,
             cited_test: "a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped",
         },
     },
@@ -566,7 +604,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "context.attestation_exposure",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.verification.verification_state"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "a_load_bearing_statement_arms_the_tap_and_says_what_would_discharge_it",
         },
     },
@@ -595,7 +633,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "artifact.get_lines",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.overflow.shown_lines"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "full_true_triggers_overflow_over_cap",
         },
     },
@@ -621,7 +659,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "link_scan.findings",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.counts.truncated.dangling"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "counts_flags_truncation_per_finding_array_when_the_cap_is_exceeded",
         },
     },
@@ -647,24 +685,39 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // test seeds ~1,006 chars against a DYNAMIC budget of 302 (2048 ceiling - 48
         // margin - 1698 static prefix; the fixture's char count was verified with
         // `wc -m`, not eyeballed). Marker written by production at
-        // `src/prompts/mod.rs:414`.
-        // MUTATION FINDING, 2026-09-03 (Task 5c verification round, reported not acted on):
-        // this citation is NOT DISCRIMINATING as the gate reads it. Deleting the cited
-        // marker assertion — `rendered.contains("status trimmed: ")` — leaves
-        // `probed_rows_cite_a_real_test` GREEN, because a later assertion in the same body
-        // carries the literal `trimmed` inside its OWN condition:
-        // `assert!(!block.contains("trimmed"), ...)`. The row is therefore certifiable by
-        // an assertion that the marker is ABSENT from the response channel — the inverse
-        // of what `Coverage::Probed` claims. Only neutralising BOTH reds the gate
-        // (verified: replacing the second condition's literal with one not containing
-        // "trimmed" produces the expected red naming this row). This is
-        // `assertion_lines`' documented cross-assertion laxity for `TextContains` with a
-        // LIVE instance rather than a hypothetical one; the row is left Probed per the
-        // census rather than silently downgraded, and the marker choice is Task 5a's.
+        // `src/prompts/mod.rs:422` (the census recorded `:414`; an 8-line drift since,
+        // re-verified at `9b40742d`).
+        //
+        // MARKER NARROWED, 2026-09-03 (Task 6). This row carried `TextContains("trimmed")`
+        // and a note that the citation was NOT DISCRIMINATING as the gate reads it:
+        // deleting the cited marker assertion — `rendered.contains("status trimmed: ")` at
+        // `mod.rs:1285` — left `probed_rows_cite_a_real_test` GREEN, because a later
+        // assertion in the same body carries the literal `trimmed` inside its OWN
+        // condition, `assert!(!block.contains("trimmed"), ...)` at `:1303`. The row was
+        // therefore certifiable by an assertion that the marker is ABSENT from a different
+        // channel — the inverse of what `Coverage::Probed` claims. That is
+        // `assertion_lines`' documented cross-assertion laxity for `TextContains`, with a
+        // LIVE instance rather than a hypothetical one.
+        //
+        // The narrowing to `TextContains("status trimmed: ")` is independently the more
+        // accurate marker, not a fix aimed at the gate: `SHORT_NOTE` (`mod.rs:385`) reads
+        // "status trimmed to fit…" with NO COLON, so the colon-space form is the only
+        // marker that tells the `trim_note` writer (`:422`) apart from its fallback.
+        // `TextContains("trimmed")` cannot distinguish the two production paths at all.
+        //
+        // BOTH DIRECTIONS MEASURED at `9b40742d`, and they are different questions:
+        //   - stale marker `"trimmed"`, cited assertion at `:1284-1287` deleted -> gate
+        //     `probed_rows_cite_a_real_test` GREEN (1 passed). The defect, reproduced.
+        //   - narrowed marker, same assertion deleted -> gate RED, naming this row.
+        //   - narrowed marker restored, production `:422` suppressed
+        //     (`format!("- ({list})\n")`) -> cited test `a_trim_names_what_it_dropped` RED
+        //     at `mod.rs:1284`, "the note must name the losses, not just announce one".
+        // The first two prove the CITATION is wired (Task 5c's direction); the third proves
+        // the TEST catches the marker disappearing (this task's). Hence `Mutation::Killed`.
         id: "prompts.client_instructions_chars",
         coverage: Coverage::Probed {
-            marker: Marker::TextContains("trimmed"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            marker: Marker::TextContains("status trimmed: "),
+            mutation: Mutation::Killed,
             cited_test: "a_trim_names_what_it_dropped",
         },
     },
@@ -696,7 +749,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "grep.match_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "grep_marks_a_clamped_line_instead_of_silently_cutting",
         },
     },
@@ -747,7 +800,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "preview.default_headings",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.headings_truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "a_truncated_preview_still_names_its_final_heading",
         },
     },
@@ -759,7 +812,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "preview.observation_text",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("…"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "observation_text_truncated_to_limit",
         },
     },
@@ -796,7 +849,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "tracker_design.existing_trackers",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.existing_trackers_overflow_hint"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "overflow_hint_when_above_cap",
         },
     },
@@ -859,10 +912,35 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `last_sync_skipped_count` beside it. The gate's per-segment substring check
         // passes either way and the cited test asserts both fields. Task 5a owns the
         // marker string; it is recorded here rather than silently re-derived.
+        //
+        // TASK 6 MUTATION FINDING, 2026-09-03 — the only row of the 18 not killed as
+        // declared, and the reason is the marker, not the test. Every other row's marker
+        // names a DISCLOSURE field emitted beside the capped payload, so deleting it
+        // leaves the truncation in place and the result silently capped — the mutation
+        // this task runs. Here the declared marker names the capped PAYLOAD itself:
+        // `index_state.rs:278` IS `last_sync_skipped_sample`, so no edit to that line
+        // suppresses a marker while leaving the cap standing. The disclosure is the
+        // sibling `last_sync_skipped_count` at `:277`, which the declared JsonPath does
+        // not name. Suppressing THAT (`skipped.len()` ->
+        // `skipped.iter().take(SKIPPED_SAMPLE_CAP).count()`, so the count agrees with the
+        // capped sample and the result reads as complete) DOES red the cited test at
+        // `index_state.rs:629` — "count must stay exact even when the sample is capped",
+        // left 20 right 30. So the test does observe disclosure loss; the row is left
+        // NotYet because that is a mutation of a line the marker does not declare, and
+        // tuning the mutation until it reds is exactly what this task must not do.
         id: "index_state.skipped_sample",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.last_sync_skipped.sample"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::NotYet(
+                "the declared marker names the capped payload, not a disclosure beside it: \
+                 `index_state.rs:278` IS the `last_sync_skipped_sample` field, so no edit \
+                 there suppresses a marker while leaving the cap in place. Suppressing the \
+                 real disclosure — the sibling `last_sync_skipped_count` at `:277` — does \
+                 red the cited test at `index_state.rs:629` (left 20, right 30), but that \
+                 line is not what this row's marker declares. Citable as Killed once the \
+                 marker is re-declared onto `last_sync_skipped_count`; that is a marker \
+                 change, which Task 5a owns",
+            ),
             cited_test: "last_sync_skipped_sample_is_capped_but_count_stays_exact",
         },
     },
@@ -885,7 +963,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "command_summary.buffer_query_lines",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.stdout_shown"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "run_command_buffer_only_short_stderr_gives_budget_to_stdout",
         },
     },
@@ -897,7 +975,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "run_command.stderr_lines",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.stderr_shown"),
-            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            mutation: Mutation::Killed,
             cited_test: "run_command_buffer_only_stderr_gets_priority",
         },
     },
