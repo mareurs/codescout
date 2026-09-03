@@ -209,6 +209,67 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-03 (late) — the first genuine RANKING measurement: 3/12
+
+**hits@5 3/12, MRR 0.1875, `search_live=true`**, on a fully populated chunk-grain
+index. Every previous number from this suite was coverage wearing a ranking's
+clothes; this one is not.
+
+| run | hits@5 | MRR | what the number was actually about |
+|---|---|---|---|
+| baseline (Task 1) | 0/12 | 0.0 | — |
+| after Tasks 2–11 | 0/12 | 0.0 | correct artifact ranked #1, span published wrong |
+| after `36afd405` | 2/12 | 0.1667 | **coverage**: 2 of 2 targets that had chunk rows |
+| after `f74f25ec` | 1/12 | 0.0833 | **coverage**: editing an artifact removed it from the index |
+| **after `6f032dbd` + full re-embed** | **3/12** | **0.1875** | **ranking** — 12 of 12 targets indexed |
+
+**The denominator is real this time, and it was checked rather than assumed.**
+Every one of the twelve suite targets holds chunk rows (565, 97, 76, 39, 451, 35,
+95, 150, 38, 175, 19, 23 — zero targets at zero). So no case can fail for want of
+being in the index, and 3/12 measures what the ranker does.
+
+**A correction to this tracker's own previous entry, which flattered the system.**
+The 2026-09-03 earlier entry reported `2/12` as "2 of 2 reachable" and read that
+as retrieval being perfect on what it could see. True as stated, and misleading:
+AE-10 ranked **1** when only two artifacts were indexed and ranks **nothing** now
+that it competes against a full corpus. A near-empty index makes ranking trivial,
+so a hit rate computed over a tiny reachable set is not evidence about a full one.
+The generalisable form: **a ratio whose denominator is small because the system is
+broken cannot be extrapolated to the fixed system** — the same population that
+makes the ratio flattering is the one the fix removes.
+
+**Per-case ranks:** AE-1 **1**, AE-2 **4**, AE-6 **1**; AE-3/4/5/7/8/9/10/11/12
+absent from the top 5. AE-10 is the regression described above.
+
+**Config.** Host `ripper`, `experiments` @ `6f032dbd` (patch-id
+`2605fac14725020fcd4fcb66e5a22d6d21d85f9a`), `target/release/codescout`
+(`server-stack` → Qdrant), collection
+`artifact_chunks_codescout_dc6a871595179329` — per-project, chunk-keyed, both
+`chunk_id` and `artifact_id` in the payload. Embeddings `CodeRankEmbed` @
+127.0.0.1:48081. Suite `scripts/tc-suites/artifact-entries.json`, harness
+`scripts/run-artifact-bench.py --bin target/release/codescout`.
+
+**The re-embed that produced it.** `librarian(reindex, reembed=true)`: **27,762
+vectors written, 2 failures** (embedder HTTP 500, oversized input), down from 169
+refusals before the fix. ~12m10s wall clock at ~38 vectors/sec, holding the
+project write lock throughout — which blocked every other session in the
+checkout and is being filed separately.
+
+**Cost, measured, because it is now a product decision.** 1,457 artifacts →
+**28,612 chunks**: mean 19.6, median 16, max 565. The cost is **broad, not
+skewed** — the top six artifacts are only 6% of it, and capping at 32 chunks per
+artifact still keeps 87%. It is not concentrated by kind either (bug 38.7%, plan
+21.9%, tracker 18.2%, spec 10.1%), so "chunk only the ledgers" saves just 41%.
+There is no targeting rule that makes this cheap; chunk-grain is ~20x
+artifact-grain and the only real lever is on/off. Ruling 2026-09-03: **default
+off, opt in per project**; codescout itself opts in.
+
+**What 3/12 does and does not settle.** It is the first honest read of whether
+chunk-grain earns its cost, and 25% is not a strong result — but the suite is
+twelve hand-written queries against prose entries, so it bounds nothing tightly.
+Do not read it as a verdict on the feature; read it as the first number that was
+ever *about* the feature.
+
 ### 2026-09-03 — after the coordinate fix: 2/12, and the denominator is the finding
 
 **hits@5 2/12, MRR 0.1667, `search_live=true`.** The first non-zero score this
