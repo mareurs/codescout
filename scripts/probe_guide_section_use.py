@@ -99,8 +99,25 @@ PROFILES = [".claude", ".claude-sdd", ".claude-kat"]
 # Only calls that OPERATE the librarian mechanism count as activity. A call that merely
 # mentions it in a payload (writing a guide, a doc, this script) does not -- see the
 # module docstring's measured self-trigger. Substring match, so it covers the MCP-prefixed
-# forms (`mcp__codescout__artifact`, `artifact_augment`, `artifact_event`, ...).
-MECHANISM_TOOLS = ("artifact", "librarian")
+# forms (`mcp__codescout__doc`, `mcp__codescout__artifact`, `artifact_augment`, ...).
+#
+# BOTH names are listed and the union is REQUIRED, not tidiness. The 2026-09-02 tool
+# collapse renamed `artifact` / `artifact_event` / `artifact_augment` / `artifact_refresh`
+# to `doc` (`6e8b4170`, `dac1068a`), but the corpus this probe reads is HISTORICAL: a
+# transcript written before the collapse carries `artifact`, one written after carries
+# `doc`, and a session keeps its old binary until `cargo rb` + `/mcp`. Drop either name
+# and the probe goes blind in one direction while its output stays well-formed and
+# differentiated -- the worst shape, because nothing signals the change. Measured
+# 2026-09-03: 9 of 1,382 relevant transcripts already carried the new name, and every
+# future session moves that ratio the same way, so a run today is nearly correct and the
+# same command in a month is materially wrong.
+# docs/issues/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md
+#
+# `"doc"` is slightly greedy under a substring test: it would also match a hypothetical
+# `mcp__codescout__docs_*`. No such tool exists in the registry today. If one is added,
+# tighten `is_mechanism_tool` to match the full `mcp__codescout__<name>` form rather than
+# widening this tuple further -- widening is what made this defect possible.
+MECHANISM_TOOLS = ("artifact", "doc", "librarian")
 
 GUIDE_DIR = Path(__file__).resolve().parent.parent / "src" / "prompts" / "guides"
 FROZEN_FRAME = (
@@ -303,6 +320,27 @@ def current_section_bytes(topic: str) -> dict[str, int]:
         else:
             buf.append(line)
     out[current] = out.get(current, 0) + len("".join(buf).encode())
+    return out
+def topics_with_rules() -> list[str]:
+    """Topics whose section headings intersect `SECTION_SIGNATURES`' keys.
+
+    DERIVED, never hand-listed. `SECTION_SIGNATURES` is keyed by section HEADING, so the
+    set of topics it can measure is a function of the guides on disk right now. A
+    hand-maintained list here would be the same defect this function exists to guard --
+    `cluster/selector-narrower-than-its-population`, whose sibling instance in this very
+    file was `MECHANISM_TOOLS` going stale across a tool rename.
+
+    A topic whose guide file is missing is reported as unmeasurable rather than crashing:
+    the caller's job is to refuse the run, and a missing guide is one reason to.
+    """
+    out = []
+    for t in TOPICS:
+        try:
+            sections = current_section_bytes(t)
+        except (FileNotFoundError, OSError):
+            continue
+        if set(sections) & set(SECTION_SIGNATURES):
+            out.append(t)
     return out
 
 
@@ -571,6 +609,32 @@ def main() -> int:
         frame_attrition()
         return 0
 
+    # REFUSE rather than report. `--topic` accepts all ten registered topics, but
+    # `SECTION_SIGNATURES` is keyed by section HEADING and today only
+    # `tracker-conventions`' headings appear there. For any other topic the two key sets
+    # are disjoint, so `r["engaged"].get(section, 0)` returns 0 for every section of
+    # every session and the report reads `100.0% never engaged` -- a confident figure
+    # produced by CONSTRUCTION rather than by measurement, exit 0, no warning.
+    #
+    # The guard is the fix, and authoring signatures for another topic is a separate
+    # change. Shipping signatures without this guard would leave the next eight topics
+    # silently broken, which is the trap that made this defect worth filing.
+    # docs/issues/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
+    measurable = topics_with_rules()
+    if args.topic not in measurable:
+        print(
+            f"REFUSING to report on `{args.topic}`: no SECTION_SIGNATURES rule matches "
+            f"any section of that topic, so every section would score zero and the run "
+            f"would report ~100% never-engaged by construction rather than by "
+            f"measurement.\n"
+            f"  topics with rules: {', '.join(measurable) if measurable else '(none)'}\n"
+            f"  Authoring rules for `{args.topic}` is a separate change -- the guard is "
+            f"the fix.\n"
+            f"  docs/issues/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md",
+            file=sys.stderr,
+        )
+        return 2
+
     since_ts = None
     if args.since:
         import datetime as dt
@@ -611,6 +675,17 @@ def main() -> int:
     n = len(records)
     print(f"TOPIC: {args.topic}   sessions with >=1 injection: {n}")
     print(f"guide on disk NOW: {total_bytes:,} B across {len(sizes)} sections")
+    # Name the rule-set's scope on EVERY run, not only when it is empty. Per
+    # docs/adrs/2026-08-27-negative-results-name-their-scope.md: a zero that is
+    # suspicious must name the scope examined. An unruled section reports zero
+    # engagement whatever the sessions did, so the reader needs the denominator of
+    # RULES beside the denominator of bytes.
+    ruled = sorted(set(sizes) & set(SECTION_SIGNATURES))
+    print(
+        f"rule-set scope: {len(ruled)} of {len(sizes)} sections of this topic have "
+        f"SECTION_SIGNATURES rules -- a zero on an UNRULED section is a statement "
+        f"about the rules, not about the sessions"
+    )
     machine = args.machine_label or os.uname().nodename
     print(f"transcripts from: {machine}   scanned: {' '.join(args.roots or args.profiles)}")
     if args.roots:
