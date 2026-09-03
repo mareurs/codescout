@@ -88,6 +88,72 @@ from the same `ChunkRow` they seeded, so they are satisfied by any coordinate sp
 - The stored rows are wrong, so this is not fixable by an export-time patch alone unless
   the offset is recoverable per artifact at read time.
 
+
+### 2026-09-04 — still open, and now quantified: the fix is PARTIAL, not absent
+
+Measured over every chunk in this repo's `docs/` carrying an `entry_token`
+(n = 3,729), comparing the published `start_line` against the file line of the
+heading that defines that token:
+
+| delta | count | reading |
+|---|---|---|
+| `+0` | 1,305 | correct — chunk starts at its heading |
+| large `+N` | ~2,000 | correct — sub-chunks of an entry longer than 2,048 chars |
+| **negative** | **378** | **the defect: the chunk starts BEFORE the heading it is labelled with** |
+
+The negatives are a **per-file constant**, and in the worst files **not one chunk
+lands on its heading**:
+
+| file | delta | chunks | on-heading |
+|---|---|---|---|
+| `docs/trackers/bug-fix-session-log.md` | −2 | 218 | **0** |
+| `docs/trackers/open-issue-work-queue.md` | −1 | 71 | **0** |
+| `docs/trackers/tool-usage-patterns.md` | −5 | 27 | 6 |
+
+So the offset **is** applied and is short by a small per-file amount — not omitted.
+That is why it stopped being visible: the original symptom was short by the whole
+frontmatter (7793 vs a true 7808, 15 lines), which a reader notices. Short by 1–2
+lands in the tail of the previous entry and reads as a slightly generous span.
+
+**Three things this rules out, each measured rather than reasoned:**
+
+- **Not staleness.** `librarian(action="reindex", force=true)` over all 1,471
+  artifacts left it at 378 (up from 315 — *worse*, because more files had been
+  edited meanwhile). `replace_chunks` does re-sync positions on a content-hash
+  match exactly as its doc comment claims; the value it re-syncs **to** is wrong.
+- **Not the frontmatter's height in any simple form.** `bug-fix-session-log.md`
+  and `open-issue-work-queue.md` both have 13-line frontmatter and take
+  **different** offsets (−2 and −1); `tool-usage-patterns.md` and
+  `reconnaissance-patterns.md` both have 3 YAML sequence items and take −5 and
+  **0**. Whatever `body_line_offset` under-counts, it is not "lines" or "sequence
+  items" as such. (Hypothesis not yet tested: `parse()` may normalise the body so
+  `doc.ends_with(body)` holds at a slightly different split point than the raw
+  frontmatter boundary.)
+- **Not the entry token.** The token is correct in every case checked — looked up
+  in body coordinates *before* the shift, exactly as `build_chunks`' comment
+  prescribes. Only the published line is wrong.
+
+**That asymmetry is a free detector, and it is already in the response.**
+`matched.entry_token` (computed at chunk-build time) and
+`entry_at(matched.start_line)` (re-derived from the file) disagree **iff** this bug
+is present. `scripts/run-artifact-bench.py` now compares them and warns; it fired
+on the first run, naming `AE-1:bug-fix-session-log.md@7996 indexed=W-81
+on-disk=W-80`.
+
+**Who it costs.** Any consumer resolving *"which entry is this?"* from the line
+range gets the **previous** entry — including the recovery action the tool's own
+hint recommends, `doc(action="get", id=…, start_line=…, end_line=…)`. It also
+re-scored the retrieval benchmark: `AE-1` moved `hit` → `wrong_entry` with the
+retrieval result **byte-identical** (same rank 1, same line 7996), which reads as
+a retrieval regression and is not one.
+
+**A design that would retire the class rather than fix the arithmetic** (raised by
+the user, 2026-09-04): if each chunk carried its entry's **header text**, its
+**position within that entry** ("part 3 of 7"), and a **stable handle** for the
+whole entry, then no consumer would resolve an entry from a line number and the
+range would become advisory. `RawChunk::metadata` already exists for the first of
+those — *"searchable header prepended before embedding"* — and is explicitly `None`
+on the markdown path.
 ## Fix
 
 **Not implemented — two shapes, and they differ in what has to be re-run.**

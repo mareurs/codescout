@@ -69,12 +69,24 @@ def main():
     ap.add_argument("--suite", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--bin", default="target/debug/codescout")
+    # Default 5, NOT the product's 50. Deliberate, and the two are different
+    # kinds of number: 5 makes the benchmark strict and keeps every figure in
+    # `docs/trackers/retrieval-benchmark.md` comparable back to the first
+    # baseline, while `find.rs`'s `default_limit() = 50` is what a caller
+    # actually gets. Until this flag existed the harness hardcoded 5 and the
+    # SHIPPED configuration had never been measured at all -- BL-72 was even
+    # written as though the 5 were a product constant to be raised (F-115).
+    # Pass `--limit 50` to measure the deployment; keep 5 to compare history.
+    ap.add_argument("--limit", type=int, default=5,
+                    help="page size passed to `doc find --limit` (default 5: the "
+                         "strict measurement setting, not the product's 50)")
     args = ap.parse_args()
 
     suite = json.load(open(args.suite))
     cases, hits, file_hits, rr = [], 0, 0, 0.0
     any_results = False
     unscorable = []
+    stale = []
     for c in suite["cases"]:
         # Check the GROUND TRUTH before the retriever is charged for it. A case
         # whose expected entry is no longer defined at its expected path cannot
@@ -92,7 +104,8 @@ def main():
             # verdict. Caught 2026-09-03 only by the `any_results` guard at the
             # bottom; the returncode check just below now catches it at case 1
             # with the real error instead of at case 12 with a summary.
-            [args.bin, "doc", "find", "--semantic", c["query"], "--limit", "5", "--json"],
+            [args.bin, "doc", "find", "--semantic", c["query"],
+             "--limit", str(args.limit), "--json"],
             capture_output=True, text=True)
         if proc.returncode != 0:
             raise SystemExit(
@@ -123,14 +136,42 @@ def main():
             if line is None:
                 line = (r.get("matched") or {}).get("start_line")
             ent = entry_at(path, line) if line is not None else None
+            # THE INDEX'S OWN ANSWER, which this harness spent two sessions not
+            # reading. `matched.entry_token` is computed when the chunk is BUILT,
+            # in body coordinates; `entry_at` above re-derives it from the file on
+            # disk using the PUBLISHED line. They can only disagree if the two
+            # coordinate systems have drifted apart -- which makes their
+            # disagreement a free detector, and it was sitting unused in the
+            # response the whole time.
+            #
+            # Measured 2026-09-04, and the cause is NOT staleness (a forced
+            # re-walk of all 1,471 artifacts left it in place, and got worse):
+            # 378 of 3,729 entry-bearing chunks publish a `start_line` that
+            # precedes the heading whose token they correctly carry, by a
+            # PER-FILE constant -- -2 on all 218 chunks of bug-fix-session-log.md,
+            # -1 on all 71 of open-issue-work-queue.md, with zero chunks landing
+            # on a heading in either. That is the open bug
+            # `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`,
+            # only PARTIALLY fixed: short by 1-2 rather than by the whole
+            # frontmatter, which is why it stopped being visible.
+            #
+            # Why the harness cannot be trusted without this: AE-1 read as `hit`
+            # in one run and `wrong_entry` in the next with the retrieval result
+            # BYTE-IDENTICAL -- same rank 1, same line 7996, resolving to `W-80`
+            # instead of `W-81`. Nothing errored and the corpus counts were
+            # identical, so the natural reading was a retrieval regression.
+            indexed_ent = (r.get("matched") or {}).get("entry_token")
+            if indexed_ent is not None and ent is not None and indexed_ent != ent:
+                stale.append(f"{c['id']}:{path.rsplit('/', 1)[-1]}@{line} "
+                             f"indexed={indexed_ent} on-disk={ent}")
             # Record EVERY result, not only a matching one. Before this the loop
             # kept nothing but `rank`, and `None` was the same value for "the
             # target file never came back" and "the target file ranked 1 and the
             # chunk that matched belongs to no entry at all" -- findings whose
             # fixes point in opposite directions (retrieval vs page policy).
-            # Separating them cost a session of hand-run queries on 2026-09-03
-            # and is three fields.
-            top.append({"rank": i, "path": path, "line": line, "entry": ent})
+            # Separating them cost a session of hand-run queries on 2026-09-03.
+            top.append({"rank": i, "path": path, "line": line,
+                        "entry": ent, "indexed_entry": indexed_ent})
             if not path.endswith(c["expect_path"]):
                 continue
             if file_rank is None:
@@ -168,16 +209,24 @@ def main():
                       "miss_class": klass, "top": top})
 
     out = {"suite": suite["suite"], "n": len(cases),
-           "hits_at_5": hits, "file_hits_at_5": file_hits,
+           # `limit` is recorded because the two figures below are meaningless
+           # without it, and RENAMED off `hits_at_5` for the same reason: that
+           # key baked a constant into a name while the value stopped being
+           # computed at 5 the moment `--limit` existed. A number labelled with
+           # a parameter it no longer uses is the defect this suite keeps
+           # finding in other people's code (F-115).
+           "limit": args.limit,
+           "hits_at_limit": hits, "file_hits_at_limit": file_hits,
            "unscorable": unscorable,
+           "stale_index": stale,
            "mrr": round(rr / max(len(cases), 1), 4),
            "search_live": any_results, "cases": cases}
     json.dump(out, open(args.out, "w"), indent=2)
     by = {}
     for c in cases:
         by[c["miss_class"]] = by.get(c["miss_class"], 0) + 1
-    print(f"{out['suite']}: hits@5 {hits}/{len(cases)}  "
-          f"file-hits@5 {file_hits}/{len(cases)}  MRR {out['mrr']}  "
+    print(f"{out['suite']}: hits@{args.limit} {hits}/{len(cases)}  "
+          f"file-hits@{args.limit} {file_hits}/{len(cases)}  MRR {out['mrr']}  "
           f"search_live={any_results}")
     # The class breakdown goes to STDOUT beside the score, not into the warning
     # below, because the number is what gets copied into a tracker and a warning
@@ -189,18 +238,39 @@ def main():
             "WARNING: %d of %d cases are UNSCORABLE -- their expected entry is no\n"
             "         longer defined at their expected path, so they cannot score\n"
             "         under any retrieval quality: %s\n"
-            "         hits@5 is therefore capped at %d/%d. Repoint or retire them\n"
+            "         hits@N is therefore capped at %d/%d. Repoint or retire them\n"
             "         before quoting the score." % (
                 len(unscorable), len(cases), ", ".join(unscorable),
                 len(cases) - len(unscorable), len(cases)),
+            file=sys.stderr)
+
+    if stale:
+        # Louder than `unscorable`, because this one moves a number that already
+        # looks fine. An unscorable case is at least visible as a class in the
+        # stdout breakdown; a mis-anchored one is scored normally, in whichever
+        # direction the drift happens to fall, and reads as retrieval.
+        print(
+            "WARNING: %d result(s) carry an entry token the PUBLISHED LINE does not\n"
+            "         resolve to. The token is right and the line is short -- the\n"
+            "         two are computed in different coordinate systems and have\n"
+            "         drifted apart:\n"
+            "           %s\n"
+            "         This is the open bug docs/issues/2026-09-02-chunk-line-ranges-\n"
+            "         are-body-relative-but-published-as-file-lines.md, only PARTIALLY\n"
+            "         fixed -- short by a per-file 1-5 rather than by the whole\n"
+            "         frontmatter. Reindexing does NOT clear it (a forced re-walk of\n"
+            "         1,471 artifacts left it in place); the arithmetic is wrong, not\n"
+            "         stale. Any case touching those files is scored against a target\n"
+            "         that moved for a reason unrelated to retrieval."
+            % (len(stale), "\n           ".join(stale[:8])),
             file=sys.stderr)
 
     if not any_results:
         print(
             "FATAL: every query returned zero items — this is a dead search path "
             "(bad --bin, crashing subprocess, unreachable embedder), not a "
-            "retrieval finding. hits@5 0/N here is NOT a baseline. Check "
-            f"`{args.bin} doc find --semantic '<query>' --limit 5 --json` by hand.",
+            "retrieval finding. hits 0/N here is NOT a baseline. Check "
+            f"`{args.bin} doc find --semantic '<query>' --limit {args.limit} --json` by hand.",
             file=sys.stderr)
         return 1
     return 0
