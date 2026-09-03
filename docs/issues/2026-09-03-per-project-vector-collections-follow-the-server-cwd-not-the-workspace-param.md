@@ -1,14 +1,14 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/accepted-parameter-silently-dropped
+closed: null
 opened: 2026-09-03
-closed:
-severity: high
 owner: marius
 related: []
-tags:
-  - cluster/accepted-parameter-silently-dropped
-kind: bug
-unverified: 'the misfiled points were not read back out of codescout''s collection — the payload carries no path, so ownership was inferred from the absent collection plus the code path, not observed directly'
+severity: high
+unverified: 'the misfiled points were not read back out of codescout''s collection — the payload carries no path, so ownership is inferred from the absent collection plus the derivation, not observed directly. The ROOT CAUSE section was corrected after filing: the store is not pinned; the caller derives an empty project_id.'
 ---
 
 # BUG: per-project vector collections follow the server's cwd, so a `workspace=`-scoped reindex files another project's vectors under the active project and reports success
@@ -77,42 +77,53 @@ target `/home/marius/work/claude/prompt-engineering`, Qdrant backend.
 
 ## Root cause
 
-`src/librarian/mod.rs::build_tool_context_with` resolves the project **once**, from the
-process's cwd, and hands its path to the store constructor:
+**CORRECTED 2026-09-03, hours after filing and before any fix was written.** The first
+version of this section said the store captures a project path at
+`build_tool_context_with` time and holds it for the process lifetime, so a per-call
+`workspace=` "cannot reach it". That is **wrong**, and it would have sent the next reader to
+the wrong file. `QdrantArtifactStore` takes a `project_id` on **every** call —
+`upsert(project_id, …)` and `knn(Some(pid), …)` both route through `collection_for(pid)`.
+The store is not the defect.
+
+**The caller never derives one.** `src/librarian/tools/reindex.rs:369-375`:
 
 ```rust
-let current_project = env.cwd.clone()
-    .or_else(|| std::env::current_dir().ok())
-    .and_then(|cwd| current_project::resolve(&cwd, &ws_arc))
-    .map(std::sync::Arc::new);
-…
-let project_path = current_project.as_deref().map(|cp| cp.abs_path.to_string_lossy().into_owned());
-…
-QdrantArtifactStore::new(qdrant, prefix, project_path.as_deref().unwrap_or_default())
+let project_id = crate::librarian::tools::containing_root(&root_paths, abs_root)
+    .map(|p| p.to_string_lossy().into_owned())
+    .unwrap_or_default();
 ```
 
-The store is built at process start and holds that path for its lifetime. Nothing in a
-per-call path re-derives it, so `workspace=` — which the catalog *does* honour, and visibly:
-the same call's `find` returns the other project's artifacts — is invisible to the vector
-layer. The two halves of one call disagree about which project they are serving, and only
-one of them says so.
+`root_paths` is `ctx.workspace.roots` — the registry's `[[roots]]`. Both projects on this
+host are `[[umbrella]]` **members**, which is a different list, so `containing_root` returns
+`None` for **both** and `project_id` is `""`:
 
-**The commit that introduced this diagnosed the same shape one layer down.** Its message
-rejects payload-based scoping because *"`reindex` derives the id from
-`containing_root(...).unwrap_or_default()` … so 4395 of 5388 live points carried an EMPTY
-project_id"*. The replacement reaches for `.unwrap_or_default()` on the project path itself,
-so an unresolved project yields the collection `artifact_chunks_` + `sha256("")` rather than
-an error — the same silent-default failure it was written to remove, moved up a level.
+```
+/home/marius/work/claude/codescout           containing root: NONE -> project_id = ""
+/home/marius/work/claude/prompt-engineering  containing root: NONE -> project_id = ""
+```
 
-Measured 2026-09-03: collection census above; `sha256` of both project paths computed
-directly; `build_tool_context_with` read at `src/librarian/mod.rs:78-233`.
+`collection_for("")` then falls back to `default_collection`, which IS derived from the
+active project. So every reindex lands in the active project's collection regardless of its
+target — codescout is correct **by accident**, because it happens to be the active one, and
+every other target is silently misfiled.
+
+**The fallback was correct when it was written and is not any more.** Its doc comment says
+an empty `project_id` means "unscoped KNN (the catalog scoped filter still narrows
+results)" — true when one shared collection was filtered by a `project_id` payload. Once the
+name *selects the collection*, the same empty value stops meaning "unscoped" and starts
+meaning "the active project's", which is a different claim that happens to be true only
+when target == active. The comment now describes semantics the code no longer has.
+
+Measured 2026-09-03: collection census; `sha256` of both project paths; the roots-vs-members
+resolution above computed against the live `~/.config/librarian/workspace.toml`;
+`build_tool_context_with` (`src/librarian/mod.rs:78-233`), `QdrantArtifactStore`
+(`src/librarian/artifact_store.rs:189-344`) and the derivation site
+(`src/librarian/tools/reindex.rs:369-375`) all read.
 
 **Not established:** that prompt-engineering's points are physically inside
 `artifact_chunks_codescout_…`. Its payload carries only `chunk_id`, `artifact_id` and an
-empty `project_id`, so a scroll cannot attribute a point to a project. Ownership is inferred
-from the absent collection plus the code path. The reachable-consequence half — success
-reported, document unretrievable — is observed.
-
+empty `project_id`, so a scroll cannot attribute a point to a project. The reachable
+consequence — success reported, document unretrievable — is observed.
 ## Evidence
 
 ### `reembed` converges rather than repairing, which is what sent me looking
@@ -133,6 +144,37 @@ one message from being published and is wrong.
 whose collection is misderived, so following it re-files the vectors in the same wrong
 collection and reports success again.
 
+
+### Corroborated from the other side, 2026-09-04
+
+Measured independently by another session, on the **codescout** catalog rather than the
+prompt-engineering one — so a different instrument, a different corpus, and a different
+direction of approach:
+
+```
+artifact_chunks_codescout_dc6a871595179329   points_count      = 29,077
+artifact_chunk rows under .../codescout                        = 28,659
+delta                                                          =   +418
+```
+
+418 points in codescout's collection resolve to **no chunk row in codescout's catalog** —
+the same population my `unresolved: 846` counts from the far end, and exactly what the
+misfiling predicts: foreign targets writing in. Two catalogs, two instruments, agreeing in
+the direction the mechanism requires.
+
+**Stated as its author scoped it:** 418 is a *lower bound* on misfiled points, not an exact
+count — a codescout artifact deleted since its vectors were written would also leave an
+orphan, and those were not separated. It carries more weight than a raw delta would, though,
+because 27,762 vectors were re-embedded earlier the same night: any surviving orphan has
+outlived a full rewrite.
+
+**One case the planned GC will not cover, and it comes from this number.** Those 418 orphans
+have a `project_id` payload naming a path that *still exists*, so a GC keyed on "the recorded
+path is gone from disk" — the design chosen to protect de-registered projects — cannot reap
+them. They are identifiable only by the chunk-row join, which is catalog-local and therefore
+only checkable from the catalog that owns the collection. Path-existence reaps abandoned
+*projects*; it does not reap misfiled *points* inside a live one. Both are wanted; only the
+first is planned.
 ## Hypotheses tried
 
 1. **Hypothesis:** this is the already-filed grain mixture,

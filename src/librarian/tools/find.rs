@@ -737,15 +737,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend.",
             )
         })?;
-        // Project scope → stamp the parent workspace root (superset-safe for the
-        // catalog scoped filter); other scopes search all projects.
+        // Project scope → the project's OWN collection, named by the same value the
+        // write side uses. `reindex` derives its `project_id` from `abs_root`, which
+        // for `Scope::Project` IS `current_project.abs_path`, so read and write agree
+        // by construction rather than by two lookups happening to land together.
+        // Other scopes pass None, which `knn` reads as "every project" and fans out —
+        // NOT as "no filter". That distinction is load-bearing; see `knn`'s doc.
+        //
+        // This used to stamp the containing `[[roots]]` entry, described as
+        // "superset-safe for the catalog scoped filter". That reasoning held when one
+        // shared collection was narrowed by a `project_id` payload: a broader id still
+        // let the catalog filter do the narrowing. Once the id NAMES the collection,
+        // a superset id is a different collection that holds none of these vectors, so
+        // the safe direction inverted. On a host where no `[[roots]]` entry contained
+        // the project, the lookup missed entirely and every project-scoped search
+        // silently fanned out, hydrating another project's chunk ids against this
+        // catalog — which is what `semantic_find`'s `unresolved` counter reports.
+        // docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md
         let project_id = if effective_scope == Scope::Project {
-            current.and_then(|cp| {
-                let roots: Vec<std::path::PathBuf> =
-                    ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
-                crate::librarian::tools::containing_root(&roots, &cp.abs_path)
-                    .map(|p| p.to_string_lossy().into_owned())
-            })
+            current.map(|cp| cp.abs_path.to_string_lossy().into_owned())
         } else {
             None
         };

@@ -191,9 +191,6 @@ pub struct QdrantArtifactStore {
     /// `{config_prefix}artifact_chunks_` — every artifact collection starts with
     /// this, which is also how the cross-project fan-out enumerates them.
     prefix: String,
-    /// The active project's collection. Every write and every project-scoped
-    /// read goes here.
-    default_collection: String,
     /// Collections already bootstrapped in this process. Was a `OnceCell<()>`
     /// when there was exactly one collection; a set, now that there is one per
     /// project and a single reindex can touch a sub-project's.
@@ -202,38 +199,66 @@ pub struct QdrantArtifactStore {
 
 #[cfg(feature = "server-stack")]
 impl QdrantArtifactStore {
-    /// Construct over a connected Qdrant, for one active project.
+    /// Construct over a connected Qdrant. `prefix` is
+    /// `config.collection("artifact_chunks_")`.
     ///
-    /// `prefix` is `config.collection("artifact_chunks_")`; `project_root` is
-    /// the active project's absolute path. Collections are bootstrapped lazily
-    /// on first write (dim taken from the first vector), so a remote embedder
-    /// whose dimension is only known after the first embed still works.
-    pub fn new(qdrant: QdrantWrap, prefix: impl Into<String>, project_root: &str) -> Self {
-        let prefix = prefix.into();
-        let default_collection = artifact_collection_name(&prefix, project_root);
+    /// **The store deliberately does NOT know the active project.** It used to, purely
+    /// to serve as the fallback collection when a caller passed an empty `project_id` —
+    /// and that fallback silently filed every non-active target's vectors under the
+    /// active project
+    /// (`docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md`).
+    ///
+    /// Removing the field does more than delete dead code. With no notion of an active
+    /// project, defaulting to one becomes *unrepresentable* rather than merely unused,
+    /// so the defect cannot come back by someone restoring a fallback branch — the
+    /// same shape as `read_only.unwrap_or(!is_home)`, where the fix was a form in which
+    /// the wrong arm could not be written.
+    ///
+    /// Every collection name is therefore derived from the `project_id` the caller
+    /// passes. Collections are bootstrapped lazily on first write (dim taken from the
+    /// first vector), so a remote embedder whose dimension is only known after the
+    /// first embed still works.
+    pub fn new(qdrant: QdrantWrap, prefix: impl Into<String>) -> Self {
         Self {
             qdrant,
-            prefix,
-            default_collection,
+            prefix: prefix.into(),
             ensured: tokio::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
-    /// Which collection a write for `project_id` belongs in.
+    /// Which collection a write or a project-scoped read for `project_id` belongs in.
     ///
-    /// An EMPTY `project_id` falls back to the active project rather than
-    /// deriving a name from `""`. That case is real, not defensive: `reindex`
-    /// computes it as `containing_root(...).unwrap_or_default()`, and on this
-    /// host that returned `None` for codescout itself — 4395 of the 5388 live
-    /// points in the old shared collection carry an empty `project_id`.
-    /// Deriving from `""` would file them under a collection named after
-    /// nothing; the active project is the right answer and is always known.
-    fn collection_for(&self, project_id: &str) -> String {
+    /// **An empty `project_id` is a BUG and is refused.** It used to fall back to the
+    /// active project's collection, and that fallback is what let
+    /// `docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md`
+    /// ship: `reindex` computed the id by looking its target up in the deprecated
+    /// `[[roots]]` registry, missed for every project under the `[[project]]` model,
+    /// and passed `""` — so vectors for any target that was not the active project were
+    /// filed under the active one and the call reported success.
+    ///
+    /// The earlier note here cited "4395 of the 5388 live points carry an empty
+    /// `project_id`" as evidence the empty case was real and had to be tolerated. That
+    /// count was taken by scrolling the pre-rewrite `artifacts` collection, where the
+    /// empty id was the DEFECT being characterised — not a supported input. Restated
+    /// here at its author's request, because the original sentence reads as
+    /// "legitimate and common" and is the reason the fallback looked deliberate.
+    ///
+    /// Refusing is safe because the caller set is bounded and known: `upsert` has
+    /// exactly one production caller (`tools::reindex`), which now derives the id from
+    /// the target it is indexing, and project-scoped `knn` passes
+    /// `current_project.abs_path`. Neither can be empty. A future caller that forgets
+    /// gets an error naming the problem instead of a silently misfiled vector — which
+    /// is the whole difference this class turns on.
+    fn collection_for(&self, project_id: &str) -> Result<String> {
         if project_id.is_empty() {
-            self.default_collection.clone()
-        } else {
-            artifact_collection_name(&self.prefix, project_id)
+            anyhow::bail!(
+                "artifact vector write/read with an EMPTY project_id. The collection is \
+                 named from the project path, so there is no correct collection for \
+                 this call and the previous fallback (the active project's) silently \
+                 misfiled it. Derive the id from the project being indexed or read."
+            );
         }
+        Ok(artifact_collection_name(&self.prefix, project_id))
     }
 
     async fn ensure(&self, collection: &str, dim: u64) -> Result<()> {
@@ -266,7 +291,7 @@ impl ArtifactVectorStore for QdrantArtifactStore {
         // this backend could not represent a chunk id — one id slot, spent as
         // both the point id and the payload's `artifact_id`. Now that both ids
         // travel, the input it refused is exactly the input this path is for.
-        let collection = self.collection_for(project_id);
+        let collection = self.collection_for(project_id)?;
         self.ensure(&collection, vector.len() as u64).await?;
         self.qdrant
             .artifact_upsert(
@@ -318,7 +343,7 @@ impl ArtifactVectorStore for QdrantArtifactStore {
         k: usize,
     ) -> Result<Vec<(String, f32)>> {
         let collections: Vec<String> = match project_id {
-            Some(pid) => vec![self.collection_for(pid)],
+            Some(pid) => vec![self.collection_for(pid)?],
             None => self.qdrant.artifact_collections(&self.prefix).await?,
         };
 
@@ -445,6 +470,28 @@ pub mod test_support {
     #[derive(Default)]
     pub struct InMemoryArtifactStore {
         points: parking_lot::Mutex<HashMap<String, StoredPoint>>,
+    }
+
+    impl InMemoryArtifactStore {
+        /// Every distinct `project_id` this store was written with, sorted.
+        ///
+        /// Exists so a coordinator test can assert WHICH project a write was filed
+        /// under, not merely that a write happened. That distinction is the whole of
+        /// `docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md`:
+        /// the misfiling reindex reported `embedded: N` and `embed_error_count: 0`, so
+        /// every count-shaped assertion passed while the vectors went to another
+        /// project's collection. A test reading only counters cannot fail on it.
+        pub fn project_ids(&self) -> Vec<String> {
+            let mut ids: Vec<String> = self
+                .points
+                .lock()
+                .values()
+                .map(|(pid, _, _)| pid.clone())
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        }
     }
 
     fn cosine(a: &[f32], b: &[f32]) -> f32 {

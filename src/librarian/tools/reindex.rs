@@ -305,11 +305,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let ignore = crate::librarian::workspace::compile_ignore(&ctx.workspace.ignore)?;
 
-    // Workspace root paths for stable, batch-uniform project_id derivation at
-    // index time (see artifact_store docs).
-    let root_paths: Vec<std::path::PathBuf> =
-        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
-
     let mut total_added = 0usize;
     let mut total_updated = 0usize;
     let mut total_removed = 0usize;
@@ -366,13 +361,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         all_unknown_ids.extend(report.unknown_ids);
 
         if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
-            // project_id = the workspace root containing this target — stable
-            // and batch-uniform (every file under the target shares it). Empty
-            // when outside every registered root → unscoped KNN (the catalog
-            // scoped filter still narrows results).
-            let project_id = crate::librarian::tools::containing_root(&root_paths, abs_root)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            // project_id = the target being indexed, which IS the project. Still
+            // stable and batch-uniform — every file under this target shares it, by
+            // construction rather than by lookup. `Scope::Project` resolves `targets`
+            // to `current_project.abs_path`, which `derive_ctx` rebuilds per call from
+            // the `workspace=` pin, so a pinned reindex names the project it was
+            // pinned to; every other scope iterates roots that are themselves project
+            // boundaries.
+            //
+            // This used to look `abs_root` up in `ctx.workspace.roots` and fall back to
+            // `""`, and both halves were wrong. `[[roots]]` is DEPRECATED —
+            // `workspace::load` warns that roots "are no longer consulted at query
+            // time" — and a project under the `[[project]]`/`[[umbrella]]` model is
+            // absent from it, so the lookup returned None for every project on the
+            // host that found this. `collection_for` then read the empty id as "the
+            // ACTIVE project's collection", so every reindex whose target was not the
+            // active project filed its vectors under the active one and reported
+            // `vectorless: 0, embed_error_count: 0`. The answer was already in hand and
+            // was being thrown away for a lookup in a list the project tells users to
+            // delete.
+            // docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md
+            let project_id = abs_root.to_string_lossy().into_owned();
             for item in &embed_queue {
                 match svc.embed_artifact(item.title.as_deref(), &item.text).await {
                     Ok(vec) => match store
@@ -706,6 +715,81 @@ mod tests {
             0,
             "backfill_commits sits AFTER the embed block and the `?` used to skip it, \
              so it must now run for every target"
+        );
+    }
+
+    /// A reindex must file its vectors under the TARGET it indexed, not under
+    /// whatever the workspace registry happens to contain.
+    ///
+    /// Regression for
+    /// `docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md`.
+    /// The old code looked `abs_root` up in `ctx.workspace.roots` and fell back to
+    /// `""`; under the `[[project]]`/`[[umbrella]]` model a project is absent from that
+    /// list, so the lookup missed and the empty id meant "the ACTIVE project's
+    /// collection" downstream. Vectors for any non-active target were filed under the
+    /// active project.
+    ///
+    /// THE SETUP IS THE TEST. No root containing the target is registered — that is
+    /// precisely the live condition, not an artificial one — so a derivation that
+    /// consults the registry can only produce `""` here.
+    ///
+    /// And the assertion is on the project_id, deliberately, because every
+    /// count-shaped assertion PASSED while the defect was live: the misfiling reindex
+    /// reported `embedded: 1` and `embed_error_count: 0`. Asserting "a vector was
+    /// written" cannot fail on this; only asserting WHERE can.
+    #[tokio::test]
+    async fn embedded_vectors_are_filed_under_the_target_not_the_workspace_registry() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        struct OkEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for OkEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        std::fs::write(proj.join("docs/specs/a.md"), "# A\nbody\n").unwrap();
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let store = std::sync::Arc::new(InMemoryArtifactStore::default());
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_rules(rules)
+            .with_current_project(std::sync::Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: proj.clone(),
+                    git_root: proj.clone(),
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(OkEmbedder)),
+            ))
+            .with_artifact_store(store.clone())
+            .build();
+
+        let v = call(&ctx, json!({"scope": "project"})).await.unwrap();
+
+        assert_eq!(
+            v["embedded"].as_u64().unwrap(),
+            1,
+            "test setup: exactly one artifact must reach the embed path, or the \
+             project_id assertion below is vacuous"
+        );
+        assert_eq!(
+            store.project_ids(),
+            vec![proj.to_string_lossy().into_owned()],
+            "vectors must be filed under the indexed project's own path. An empty id \
+             here is the original defect: it routed the write to the ACTIVE project's \
+             collection while reporting success."
         );
     }
 

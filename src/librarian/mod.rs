@@ -181,22 +181,26 @@ pub async fn build_tool_context_with(
                     // resolve here; it is superseded rather than migrated.
                     // Per-project rather than one collection scoped by a
                     // `project_id` payload, because that scoping was already
-                    // broken: `reindex` derives the id from
-                    // `containing_root(...).unwrap_or_default()`, which returned
-                    // None for codescout itself, so 4395 of 5388 live points
-                    // carried an EMPTY project_id. A collection name derived
-                    // from the active project's path is always known.
+                    // broken: the id was derived by looking a path up in the
+                    // deprecated `[[roots]]` registry, which misses under the
+                    // `[[project]]` model, so 4395 of 5388 live points carried
+                    // an EMPTY project_id.
+                    //
+                    // The store is NOT given the active project. It was, as the
+                    // fallback for that empty id — and the fallback then filed
+                    // every non-active reindex target's vectors under the active
+                    // project while reporting success. Both callers now derive the
+                    // id from the project they are actually indexing or reading,
+                    // and an empty one is refused at `collection_for`.
+                    // docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md
+                    //
                     // Cross-project scopes fan out; see QdrantArtifactStore::knn.
                     anyhow::Ok((qdrant, config.collection("artifact_chunks_")))
                 }
                 .await;
                 match connected {
                     Ok((qdrant, prefix)) => Some(std::sync::Arc::new(
-                        artifact_store::QdrantArtifactStore::new(
-                            qdrant,
-                            prefix,
-                            project_path.as_deref().unwrap_or_default(),
-                        ),
+                        artifact_store::QdrantArtifactStore::new(qdrant, prefix),
                     )),
                     Err(err) => {
                         tracing::warn!(
@@ -463,19 +467,18 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
                 // — the two must derive collection names the SAME way or the CLI
                 // and the MCP server read different stores.
                 //
-                // This path walks EVERY root, so there is no single active
-                // project. The default below is a fallback that is never
-                // reached: `upsert` routes by the `project_id` computed just
-                // downstream from `containing_root(&root_paths, &root.path)`,
-                // and `root.path` is itself a member of `root_paths`, so that
-                // lookup always matches and the id is always non-empty here.
+                // This path walks EVERY root, so there is no single active project —
+                // and the store no longer wants one. It used to be handed a
+                // `fallback_root` here, guarded by a comment arguing the fallback was
+                // "never reached" because this loop looks each `root.path` up in the
+                // list it came from. That argument was sound HERE and false at the MCP
+                // call site, which looks a foreign target up in the same list; the
+                // asymmetry is what shipped the misfiling bug. The constructor now
+                // takes no project at all, so the claim is carried by the signature
+                // instead of by a comment that was only locally true.
                 let prefix = config.collection("artifact_chunks_");
-                let fallback_root = root_paths
-                    .first()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_default();
                 Some(std::sync::Arc::new(
-                    artifact_store::QdrantArtifactStore::new(qdrant, prefix, &fallback_root),
+                    artifact_store::QdrantArtifactStore::new(qdrant, prefix),
                 ))
             }
             #[cfg(not(feature = "server-stack"))]
