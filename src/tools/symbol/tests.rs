@@ -8719,7 +8719,7 @@ fn focus_single_symbol_completes_a_declaration_the_lsp_reported_as_one_line() {
     // symbols(name=…) match arrives this way. The old guard `if start == 0 || end < start`
     // let equality through, computed line_span = 1, classified the function as a leaf, and
     // sliced ONE line -- yielding `pub fn wrapped(`, arity 0, no return type, unmarked.
-    // docs/issues/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
+    // docs/issues/archive/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
     let mut matches = vec![json!({
         "name": "wrapped", "symbol": "wrapped", "kind": "Function",
         "file": "wrapped.rs", "start_line": 1, "end_line": 1,

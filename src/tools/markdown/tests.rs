@@ -2152,7 +2152,7 @@ async fn line_range_past_eof_returns_recoverable_error() {
 
 #[tokio::test]
 async fn read_file_on_markdown_offset_slice_excludes_its_neighbours() {
-    // docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
+    // docs/issues/archive/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
     //
     // `read_file` normalises native-`Read`-style offset/limit into start_line/end_line
     // before doing anything else; `read_markdown` -- the tool Iron Law 4 then redirected

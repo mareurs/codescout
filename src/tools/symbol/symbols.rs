@@ -1056,7 +1056,7 @@ pub(crate) fn focus_single_symbol(matches: &mut [Value], root: &std::path::Path)
     //
     // Only reachable WITH a language server: the AST fallback path already reports true
     // ranges, so a cold probe sees correct output and this code never runs.
-    // docs/issues/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
+    // docs/issues/archive/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md
     let (start, end) = if end == start {
         crate::ast::extract_symbols(&abs)
             .ok()

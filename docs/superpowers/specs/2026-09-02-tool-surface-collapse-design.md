@@ -181,7 +181,7 @@ Description: names all 17 actions, under the 1,800-char cap now expressed as
   `.markdown` paths and to buffer handles whose content is markdown.
 - `normalize_line_nav_aliases` already runs first (`:55`), so `offset`/`limit` reach the
   markdown path normalised — closing
-  `docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md`.
+  `docs/issues/archive/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md`.
 - `force=true` keeps its meaning: raw line range, no heading map.
 - Schema gains `heading` (string) and `headings` (array). Description rewritten. The
   `json_path` / `toml_key` hints at `:573` and `:622` stop naming `read_markdown`.

@@ -356,6 +356,6 @@ it would re-create the complaint in a new file.
   the one member open in both its file and its code.
 - `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (fixed at
   `488192e8`, file stale) and
-  `docs/issues/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md`
+  `docs/issues/archive/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md`
   (fix in flight in a peer session) — **not** reconciled by this spec; both belong to their
   authors.

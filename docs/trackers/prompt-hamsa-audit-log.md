@@ -1907,7 +1907,9 @@ simply never queried.
 
 A-35/A-36 used synthetic Python fixtures whose naive answer had to be *detectably*
 wrong, so they measured "can the model reason around a planted trap". A-37's trap is a
-genuine defect in codescout's own output — `bc0d99757221c176`, filed during this scout:
+genuine defect in codescout's own output — `3a68e76e4a9bdfe8` (filed during this scout as
+`bc0d99757221c176`; re-pointed 2026-09-04 when the bug was archived, since `id =
+sha256(abs_path)` re-keys on a move):
 `symbols(name=…)` asks the language server, rust-analyzer returns a name-only range, and
 `focus_single_symbol` inlines a **one-line body slice**, so a wrapped signature renders
 `pub fn resolve_manifest(` — arity 0, no return type, no truncation marker. The model

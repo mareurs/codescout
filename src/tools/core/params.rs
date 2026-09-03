@@ -247,7 +247,7 @@ pub fn optional_u64_param(input: &serde_json::Value, name: &str) -> Option<u64> 
 /// That ordering is what puts `start_line`/`end_line` in front of `markdown::read` -- a
 /// function that reads neither alias and requires BOTH bounds, so an un-normalised
 /// `offset`/`limit` reaches it as neither and falls through to the default heading map.
-/// docs/issues/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
+/// docs/issues/archive/2026-09-02-read-markdown-silently-ignores-offset-and-limit.md
 pub fn normalize_line_nav_aliases(input: &mut serde_json::Value) {
     if optional_u64_param(input, "start_line").is_some()
         || optional_u64_param(input, "end_line").is_some()
