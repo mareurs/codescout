@@ -254,7 +254,7 @@ doc(update, id=X, patch={body_edits: [{
 
 The shrink guard cannot catch this: it compares whole-file totals, so a write that
 adds more than it removed passes. The response names the casualties in
-`replaced_subsections` — **read it.** (After the fact, § *artifact_event — Event
+`replaced_subsections` — **read it.** (After the fact, § *doc — Event
 Log*.) To add a sibling, target the last existing child with `insert_after` instead
 of replacing the parent.
 

@@ -3928,6 +3928,89 @@ mod tests {
         assert!(server.find_tool("").is_none());
         assert!(server.find_tool("READ_FILE").is_none()); // case-sensitive
     }
+    /// The advertised surface after the 2026-09-02 tool-surface collapse.
+    ///
+    /// **A pin, not a count.** `tool_surface_under_budget` next door bounds the surface's
+    /// SIZE and is satisfied by any set that fits; this bounds its MEMBERSHIP. The two fail
+    /// in different directions, which is the point — a tool swapped for one of equal length
+    /// moves neither the budget nor the tool count, and only this test notices.
+    ///
+    /// Adding a tool is a deliberate edit here, and the assertion names it. A RETIRED name
+    /// reappearing is a regression, and the second loop is what catches that specifically:
+    /// an equality check alone would report "left != right" over two 21-element lists and
+    /// leave the reader to diff them, where the loop names the offender and the date it went.
+    ///
+    /// The dead list is exactly the six the collapse retired — five folded into `doc`
+    /// (Tasks 3-6) and two markdown tools folded into `read_file`/`edit_file` (Tasks 7-8).
+    /// There is deliberately **no alias shim**: these names return the MCP unknown-tool
+    /// error rather than resolving, so the failure is loud at the call site rather than a
+    /// silent redirect that outlives the rename.
+    ///
+    /// **The two assertions are ORDERED, and the second is only reachable when the first
+    /// passes.** Verified 2026-09-03 by mutation: renaming `ReadFile::name()` to
+    /// `read_markdown` fires the equality assert, and the loop never runs. Reaching the loop
+    /// took a two-part mutation — rename the tool AND swap the name in `expected` — which is
+    /// precisely the case it exists for. The equality assert catches an ACCIDENT (a
+    /// registration leaked in, a tool vanished); the loop catches a considered-but-wrong
+    /// edit, where someone updated both sides and made a retired name look intended. Neither
+    /// is redundant with the other, and only the loop names the retirement date.
+    #[tokio::test]
+    async fn the_registry_is_exactly_the_post_collapse_surface() {
+        let (_dir, server) = make_server().await;
+        let mut names: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        names.sort();
+
+        let mut expected = vec![
+            "approve_write",
+            "call_graph",
+            "create_file",
+            "edit_code",
+            "edit_file",
+            "get_guide",
+            "grep",
+            "index",
+            "library",
+            "memory",
+            "onboarding",
+            "read_file",
+            "references",
+            "run_command",
+            "semantic_search",
+            "symbol_at",
+            "symbols",
+            "tree",
+            "workspace",
+        ];
+        // `doc` and `librarian` register only with the feature, so the lean lane pins a
+        // 19-tool surface and the default lane a 21-tool one. Gating the EXPECTATION rather
+        // than the test keeps both lanes checking membership; skipping under `--no-default-
+        // features` would leave the lean surface unpinned entirely.
+        #[cfg(feature = "librarian")]
+        expected.extend(["doc", "librarian"]);
+        expected.sort();
+
+        assert_eq!(
+            names, expected,
+            "the advertised tool set changed. Adding a tool is a deliberate edit to this \
+         list; if you did not intend one, a registration leaked in."
+        );
+
+        for dead in [
+            "artifact",
+            "artifact_event",
+            "artifact_augment",
+            "artifact_refresh",
+            "read_markdown",
+            "edit_markdown",
+        ] {
+            assert!(
+                server.find_tool(dead).is_none(),
+                "`{dead}` was retired by the 2026-09-02 collapse and must not be registered \
+             again. There is no alias shim by design — the old name returns the MCP \
+             unknown-tool error."
+            );
+        }
+    }
 
     #[cfg(feature = "librarian")]
     #[tokio::test]
