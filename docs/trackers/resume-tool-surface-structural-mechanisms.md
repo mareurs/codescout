@@ -183,10 +183,68 @@ Guidance attached to a **refusal** arrives before any effect; guidance attached 
 Payoff: the ~2,155 B pinned by the open delivery-ordering bug becomes movable, and the bug
 is retired rather than worked around.
 
-**Open question before building:** does the model reliably retry after a
-confirmation-required refusal? The research could not find a production reference
-implementation — only blog descriptions of the pattern. Our own `@ack_*` gate is the
-in-house evidence; measure its retry rate from `usage.db` before committing to the design.
+**Precondition ANSWERED 2026-09-03 — the pattern works here, measured.** The question was
+whether a model reliably retries after a confirmation-required refusal; the external
+research found only blog descriptions of the pattern and no production reference. Our own
+`@ack_*` gate is that reference, and it was never measured. Over the 30-day `usage.db`
+window (71,745 calls, 2026-08-04 → 2026-09-03), keyed per **distinct handle** rather than
+per row:
+
+| population | handles minted | replayed | rate |
+|---|---:|---:|---:|
+| **all** | 258 | 231 | **89.5%** |
+| out-of-scope write | 90 | 86 | 96% |
+| `run_command` (dangerous command) | 168 | 145 | 86% |
+| `edit_file` / `edit_markdown` | 53 | 53 | **100%** |
+| `create_file` | 36 | 32 | 89% |
+
+**230 of 231 replays came from the same tool that minted the handle**, which is the
+cross-tool rejection working rather than being tested.
+
+Three things this does NOT establish, each of which would inflate the number if ignored:
+
+- **A non-replay is not necessarily a failure.** The caller may have read the refusal and
+  correctly decided not to proceed — which is the gate succeeding, not failing. So 89.5%
+  is a floor on *"the mechanism is usable"*, never a claim that the remaining 10.5% are
+  defects. The two figures are not separable from `usage.db` alone.
+- **The reason labels are approximate.** They are keyword-classified from the refusal text;
+  the 168-row `run_command` bucket is dangerous-command mints my classifier could not label
+  more precisely, not a distinct third reason.
+- **Retention truncates both ends.** A handle minted near the window edge can have its
+  replay swept. Observed effect is small — exactly 1 replay of a handle whose mint row is
+  gone — but the direction is toward under-counting replays.
+
+Derivation: `/home/marius/.claude/jobs/…/ack_retry.py`, re-derivable from the schema above;
+not committed, because it is a one-question query rather than an instrument.
+
+**So the design is unblocked — and then the scoping data falsified the entry's own
+premise.** SM-2 was written as *"the mechanism that unpins the ~2,155 B floor"*. It is not.
+Call frequency over the same 30-day window:
+
+| action | calls | pinned prose it would free |
+|---|---:|---:|
+| `update` | **2,555** | `doc.patch`, 1,068 chars |
+| `move` | **327** | `doc.new_rel_path`, 509 chars |
+| `delete` | 15 | — |
+| `graft` | 1 | — |
+
+**The pinned prose sits on the two most frequent write actions; the genuinely
+irreversible-and-rare ones carry almost none.** An `@ack_*` handle is minted **per call**,
+not per session, so gating `update` buys 1,068 chars at the cost of ~2,555 extra
+round-trips per month — on a surface that is ~100% cache_read and costs ~$0.0043/request
+whole. That is a bad trade in every direction, and it does not improve by making the ack
+session-scoped: a session-scoped ack delivers the guidance exactly once per session, which
+is **what `server_instructions` already does for free and with no round-trip**. At
+session grain, **SM-3 strictly dominates SM-2**.
+
+**Re-scoped.** SM-2's value is *safety on rare irreversible operations*, not bytes:
+`delete` (15 calls) and `graft` (1) destroy rows outright and are exactly where per-call
+friction is cheap and warranted. Gate those two, expect **no** budget movement, and stop
+describing this entry as the route off the floor. **SM-3 is that route**; the § *constraint
+that shapes everything* note above should be read with this correction.
+
+Still a runtime behaviour change on a shared checkout, so it needs an explicit decision
+before it ships — though at 16 calls per 30 days the blast radius is now known to be small.
 
 **Valid:** conditional — `docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md` stays open
 

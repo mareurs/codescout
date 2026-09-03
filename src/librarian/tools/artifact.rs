@@ -247,7 +247,7 @@ impl Tool for Artifact {
                 "force": {
                     "type": "boolean",
                     "default": false,
-                    "description": "update: bypass the body-shrink guard. Required when a body write would cut the file by >50% in bytes or lines. Use only when shrinkage is intentional (full rewrite, archiving stale sections). Default false. See get_guide(\"librarian\") § Body Editing Surfaces."
+                    "description": "update/delete/graft: apply rather than preview. update — bypass the body-shrink guard, required when a body write would cut the file by >50% in bytes or lines; see get_guide(\"librarian\") § Body Editing Surfaces. delete and graft are DRY RUNS by default and return what WOULD be destroyed: delete cascades to the augmentation, events, links and observations (catalog-only — the file is git-restorable, these are not), and graft DELETES from_id. Default false."
                 },
                 "commit_refresh": {
                     "type": "boolean",

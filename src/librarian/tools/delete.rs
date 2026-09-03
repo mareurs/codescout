@@ -8,6 +8,9 @@ use crate::librarian::catalog::artifact;
 #[derive(Deserialize)]
 struct Args {
     id: String,
+    /// Omitted or false = dry run. See the gate in `call`.
+    #[serde(default)]
+    force: Option<bool>,
 }
 
 /// Delete an artifact: remove its file from disk and its catalog row.
@@ -51,6 +54,36 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             a.id,
             abs_path.display()
         )));
+    }
+
+    // Dry-run gate. The catalog delete cascades to this artifact's augmentation, links,
+    // observations and events — and those are CATALOG-ONLY. `reindex` rebuilds the row
+    // from the file, but nothing rebuilds an augmentation's params or an event log, and
+    // neither is in git. So the FILE is recoverable and the HISTORY is not, which is the
+    // asymmetry a caller cannot see from the id alone.
+    //
+    // Preview first; `force=true` applies. Modelled on `librarian(doctor, fix=…)`, which
+    // is a dry run until `confirm=true`. Measured 2026-09-03: `delete` runs ~15 times per
+    // 30 days, so the round-trip is cheap — that frequency is why this gate is here and
+    // not on `update` (2,555 calls).
+    if !a.force.unwrap_or(false) {
+        use crate::librarian::catalog::{augmentation, events, links, observations};
+        return Ok(json!({
+            "dry_run": true,
+            "deleted": false,
+            "id": a.id,
+            "would_delete_abs_path": abs_path.display().to_string(),
+            "cascades": {
+                "augmentation": augmentation::get(&cat, &a.id)?.is_some(),
+                "links_out": links::outgoing(&cat, &a.id)?.len(),
+                "links_in": links::incoming(&cat, &a.id)?.len(),
+                "observations": observations::list_for_artifact(&cat, &a.id)?.len(),
+                "has_events": events::latest_for_artifact(&cat, &a.id)?.is_some(),
+            },
+            "recoverable": "the file is git-tracked and restorable; the augmentation, \
+                            events, links and observations are catalog-only and are not",
+            "hint": format!("re-run with force=true to apply: doc(action=\"delete\", id=\"{}\", force=true)", a.id),
+        }));
     }
 
     // Remove the file. A missing file is not fatal — still drop the catalog row
@@ -158,9 +191,12 @@ mod tests {
         let file = tmp.path().join("docs/trackers/doomed.md");
         assert!(file.exists());
 
-        let result = delete::call(&ctx, serde_json::json!({"action": "delete", "id": ID}))
-            .await
-            .unwrap();
+        let result = delete::call(
+            &ctx,
+            serde_json::json!({"action": "delete", "id": ID, "force": true}),
+        )
+        .await
+        .unwrap();
         assert_eq!(result["deleted"], true);
         assert!(result["deleted_abs_path"]
             .as_str()
@@ -185,12 +221,53 @@ mod tests {
         let ctx = mk_ctx(tmp.path());
         std::fs::remove_file(tmp.path().join("docs/trackers/doomed.md")).unwrap();
 
-        let result = delete::call(&ctx, serde_json::json!({"id": ID}))
+        let result = delete::call(&ctx, serde_json::json!({"id": ID, "force": true}))
             .await
             .unwrap();
         assert_eq!(result["deleted"], true);
         let cat = ctx.catalog.lock();
         assert!(artifact::get(&cat, ID).unwrap().is_none());
+    }
+
+    /// The gate, asserted on the EFFECT rather than on the flag.
+    ///
+    /// A dry run that reported `dry_run: true` and deleted anyway would satisfy a
+    /// flag-only assertion, so the load-bearing checks here are that the file is still on
+    /// disk and the catalog row still resolves. The flag is asserted too, but it is the
+    /// weaker half.
+    ///
+    /// The preview must also report the augmentation, because that is the one casualty
+    /// `reindex` cannot rebuild — the file is git-tracked and restorable; an
+    /// augmentation's params are catalog-only and are not.
+    #[tokio::test]
+    async fn delete_without_force_is_a_dry_run_and_destroys_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let file = tmp.path().join("docs/trackers/doomed.md");
+        assert!(file.exists());
+
+        let result = delete::call(&ctx, serde_json::json!({"id": ID}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["dry_run"], true);
+        assert_eq!(result["deleted"], false);
+        assert_eq!(
+            result["cascades"]["augmentation"], true,
+            "this fixture carries an augmentation, and it is the casualty `reindex` cannot \
+             rebuild — a preview that omits it hides the only irreversible part"
+        );
+
+        assert!(file.exists(), "dry run must not remove the file");
+        let cat = ctx.catalog.lock();
+        assert!(
+            artifact::get(&cat, ID).unwrap().is_some(),
+            "dry run must not drop the catalog row"
+        );
+        assert!(
+            augmentation::get(&cat, ID).unwrap().is_some(),
+            "dry run must not cascade-delete the augmentation"
+        );
     }
 
     #[tokio::test]
@@ -230,7 +307,7 @@ mod tests {
         assert!(file.exists());
 
         // Before the fix this returned "outside every workspace root".
-        let result = delete::call(&ctx, serde_json::json!({"id": ID}))
+        let result = delete::call(&ctx, serde_json::json!({"id": ID, "force": true}))
             .await
             .unwrap();
         assert_eq!(result["deleted"], true);
@@ -336,7 +413,7 @@ mod tests {
             ))
             .build();
 
-        let result = delete::call(&ctx, serde_json::json!({"id": id}))
+        let result = delete::call(&ctx, serde_json::json!({"id": id, "force": true}))
             .await
             .unwrap();
         assert_eq!(result["deleted"], true);

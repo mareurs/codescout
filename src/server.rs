@@ -3471,7 +3471,24 @@ mod tests {
     /// one that can grow without limit — the failure its own doc comment warns about.
     /// Report run 2026-09-03: TOTAL (21 tools) = 56_276
     /// (desc 6_997 / schema 48_522 / annot 757).
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_276;
+    ///
+    /// **Raised again 2026-09-03, 56_276 → 56_476 (+200) — `doc`'s `force` now advertises
+    /// the `delete`/`graft` dry-run gate (SM-2, narrow scope).** Both actions destroyed on
+    /// their first call; they now return a preview of what would be destroyed and require
+    /// `force=true` to apply.
+    ///
+    /// The +200 is the *discoverability* half and is not optional: without it a caller
+    /// receives a dry run with nothing in the schema explaining why, which is a worse
+    /// failure than the one the gate prevents.
+    ///
+    /// **Blast radius was measured before shipping, and it is what chose the scope.**
+    /// Over the same 30-day window `delete` ran **15** times and `graft` **once**, against
+    /// `update`'s **2,555**. So the gate is on the two rare irreversible actions and NOT on
+    /// the frequent write actions, where a per-call round-trip would cost far more than the
+    /// prose it could retire — an `@ack_*`-style handle is minted per call, not per session,
+    /// and at session grain `server_instructions` already does the job for free. Report run
+    /// 2026-09-03: TOTAL (21 tools) = 56_476 (desc 6_997 / schema 48_722 / annot 757).
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_476;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
