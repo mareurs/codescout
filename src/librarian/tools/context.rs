@@ -2295,7 +2295,17 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
 
         seed_ledger(&cat, root, "ledger.md", "ledger", "## W-1 — anchor\nbody\n");
-        // Six neighbours of ~3KB each: 18KB of neighbourhood against a 16KB budget.
+        // Six neighbours of ~3KB each: 18KB of neighbourhood against a 16KB budget. This
+        // 18,000-byte total (6 * 3000) is LOAD-BEARING beyond this test: it is the sole
+        // evidence `cap_probe.rs`'s `context.max_tokens` `ProbeRow` cites for being
+        // `Coverage::Probed` (`cited_test` names this function) — of the other 24
+        // omitting-`max_tokens` call sites checked, none builds content anywhere near the
+        // 16,000-byte `char_cap`. Shrink the total below 16,000 bytes (fewer neighbours, or
+        // less than ~2667 bytes each) and the neighbourhood fits WHOLE: `packing` stops
+        // reporting `"excerpted"`, the assertions below start failing loudly, and the
+        // `context.max_tokens` row's citation silently loses the one fixture that drives it
+        // past its bound — a second, quieter failure that `probed_rows_cite_a_real_test`
+        // would not by itself explain.
         let mut other = String::new();
         for i in 1..=6 {
             other.push_str(&format!(

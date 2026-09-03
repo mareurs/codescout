@@ -1078,3 +1078,409 @@ fn truncation_sites_reach_the_real_corpus() {
         all_sites.len()
     );
 }
+
+/// One `Coverage::Probed` row's id, marker, and cited test name — parsed
+/// from `cap_probe.rs`'s source TEXT for the same reason [`probe_row_ids`]
+/// is: the module is `#[cfg(test)]`-gated with `pub(crate)` items this
+/// integration-test binary cannot `use`. `Marker` itself is not visible
+/// either, so [`CitedMarker`] is a local stand-in carrying only what this
+/// gate needs.
+#[derive(Debug, PartialEq)]
+struct ProbedCitation {
+    id: String,
+    marker: CitedMarker,
+    cited_test: String,
+}
+
+/// A cited marker's kind and payload — see [`ProbedCitation`] for why this
+/// is a local type rather than `cap_probe::Marker`.
+#[derive(Debug, PartialEq)]
+enum CitedMarker {
+    JsonPath(String),
+    TextContains(String),
+}
+
+/// Finds the first line in `chunk`, trimmed, that starts with the literal
+/// `prefix`, and returns the first quoted string that follows it on that
+/// same line. Reused by [`probed_citations`] for `id:`, `cited_test:`, and
+/// both `marker: Marker::...(` forms — same anchoring rule as
+/// [`probe_row_ids`]: a match must start the trimmed line, so `prefix`
+/// appearing mid-line (inside a comment, or as part of another field's
+/// value) does not match.
+fn line_field(chunk: &str, prefix: &str) -> Option<String> {
+    for raw in chunk.lines() {
+        let line = raw.trim_start();
+        let Some(rest) = line.strip_prefix(prefix) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        return Some(rest[..end].to_string());
+    }
+    None
+}
+
+/// Extracts every `Coverage::Probed` row's `(id, marker, cited_test)` from
+/// `cap_probe.rs`'s source TEXT.
+///
+/// Splits on the literal `"ProbeRow {"` token: every row in `PROBE_ROWS`
+/// opens with exactly that text, and so does the `ProbeRow` struct's own
+/// definition earlier in the file — so the FIRST chunk after the split is
+/// that struct's field list, not a row. It is excluded the same way every
+/// `Deferred` row is: a chunk counts as a citation only when it contains
+/// the literal `"Coverage::Probed {"`, and neither the struct definition
+/// nor a `Deferred` row's fields ever do (verified 2026-09-02: exactly 4
+/// occurrences of `"Coverage::Probed {"` exist in `cap_probe.rs` today — 2
+/// inside `tally()`'s own `matches!` calls, which are never reached by this
+/// function because they occur before the first `"ProbeRow {"` split point,
+/// and 2 inside the two real `Probed` rows). Each of the three fields is
+/// then read by [`line_field`] using the same anchored-line technique
+/// [`probe_row_ids`] uses for `id:`. A chunk missing any one of the three —
+/// should not happen for a well-formed `Coverage::Probed` variant, since
+/// the compiler requires all three fields — is silently excluded from the
+/// result rather than panicking; a `Probed` row absent from this function's
+/// output because ITS OWN citation could not be parsed is exactly the
+/// finding `probed_rows_cite_a_real_test` exists to surface, not a crash.
+fn probed_citations(src: &str) -> Vec<ProbedCitation> {
+    let mut out = vec![];
+    for chunk in src.split("ProbeRow {").skip(1) {
+        if !chunk.contains("Coverage::Probed {") {
+            continue;
+        }
+        let Some(id) = line_field(chunk, "id:") else {
+            continue;
+        };
+        let marker = if let Some(v) = line_field(chunk, "marker: Marker::JsonPath(") {
+            CitedMarker::JsonPath(v)
+        } else if let Some(v) = line_field(chunk, "marker: Marker::TextContains(") {
+            CitedMarker::TextContains(v)
+        } else {
+            continue;
+        };
+        let Some(cited_test) = line_field(chunk, "cited_test:") else {
+            continue;
+        };
+        out.push(ProbedCitation {
+            id,
+            marker,
+            cited_test,
+        });
+    }
+    out
+}
+
+#[test]
+fn probed_citations_reads_marker_and_cited_test_alongside_id_and_skips_deferred_rows() {
+    let fixture = r#"
+        pub(crate) struct ProbeRow {
+            pub id: &'static str,
+            pub coverage: Coverage,
+        }
+        pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
+            ProbeRow {
+                id: "a.b",
+                coverage: Coverage::Deferred("no test yet"),
+            },
+            ProbeRow {
+                id: "c.d",
+                coverage: Coverage::Probed {
+                    marker: Marker::TextContains("needle"),
+                    mutation: Mutation::NotYet("x"),
+                    cited_test: "some_test_fn",
+                },
+            },
+            ProbeRow {
+                id: "e.f",
+                coverage: Coverage::Probed {
+                    marker: Marker::JsonPath("$.a.b"),
+                    mutation: Mutation::NotYet("x"),
+                    cited_test: "another_test_fn",
+                },
+            },
+        ];
+    "#;
+    let citations = probed_citations(fixture);
+    assert_eq!(
+        citations,
+        vec![
+            ProbedCitation {
+                id: "c.d".to_string(),
+                marker: CitedMarker::TextContains("needle".to_string()),
+                cited_test: "some_test_fn".to_string(),
+            },
+            ProbedCitation {
+                id: "e.f".to_string(),
+                marker: CitedMarker::JsonPath("$.a.b".to_string()),
+                cited_test: "another_test_fn".to_string(),
+            },
+        ],
+        "the Deferred row a.b must not appear, and both Probed rows must carry their own \
+         marker and cited_test, not the other's"
+    );
+}
+
+/// True when a trimmed line begins a `fn` declaration, allowing the
+/// visibility and `async` qualifiers this corpus actually writes (`pub`,
+/// `pub(crate)`, `pub(super)`, `async`, and combinations). Not a full
+/// grammar — a qualifier this corpus does not use (e.g. `pub(in path)`)
+/// would not be recognised, and a line using one would be invisible to
+/// [`extract_fn_body`] as an end-of-body marker.
+fn declares_a_fn(trimmed: &str) -> bool {
+    let mut rest = trimmed;
+    for prefix in ["pub(crate) ", "pub(super) ", "pub "] {
+        if let Some(r) = rest.strip_prefix(prefix) {
+            rest = r;
+            break;
+        }
+    }
+    if let Some(r) = rest.strip_prefix("async ") {
+        rest = r;
+    }
+    rest.starts_with("fn ")
+}
+
+/// Extracts the heuristic "body" of `fn <name>` (any visibility, `async` or
+/// not) from `src`: the line declaring it, through the line immediately
+/// before the next line — at the SAME OR LOWER indentation — that itself
+/// declares a `fn`. Returns `None` when no line declares `fn <name>` at
+/// all.
+///
+/// This is a HEURISTIC, not a parser, and `probed_rows_cite_a_real_test`
+/// relies on knowing exactly what it does not catch:
+///
+/// - **A comment or string literal containing the text `fn <name>(`** would
+///   be misread as the declaration. Nothing here skips comments or string
+///   bodies, unlike this file's `raw_string_lines` for the declaration
+///   scanner — accepted for this gate because a cited test name is a real
+///   identifier the compiler already forces to be unique among sibling
+///   `fn`s, so a decoy occurring only in prose is a narrower risk than the
+///   one `raw_string_lines` was written for.
+/// - **A `fn` nested inside the body at STRICTLY GREATER indentation** (a
+///   local helper function) is correctly kept as part of the body, because
+///   ending the scan requires indentation `<=` the declaration's own — but
+///   a `fn` nested at exactly the SAME indentation (legal Rust, unusual
+///   style) would end the body early, before the outer function's own
+///   closing brace.
+/// - **The first matching declaration wins** when a name is declared more
+///   than once across the scanned source — impossible for two sibling
+///   `#[test]` functions (duplicate names in the same module do not
+///   compile), but a real limitation of this function taken on its own,
+///   independent of how `probed_rows_cite_a_real_test` uses it.
+/// - **A name that is a substring of another never matches upward**: the
+///   search requires the literal `fn <name>(` or `fn <name> ` (for a name
+///   followed by generics or unusual whitespace before punctuation), so
+///   searching for `foo` cannot match a line declaring `fn foo_helper`.
+fn extract_fn_body(src: &str, name: &str) -> Option<String> {
+    let lines: Vec<&str> = src.lines().collect();
+    let paren = format!("fn {name}(");
+    let spaced = format!("fn {name} ");
+    let mut start = None;
+    let mut start_indent = 0usize;
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains(paren.as_str()) || line.contains(spaced.as_str()) {
+            let trimmed = line.trim_start();
+            start = Some(i);
+            start_indent = line.len() - trimmed.len();
+            break;
+        }
+    }
+    let start = start?;
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate().skip(start + 1) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        if indent <= start_indent && declares_a_fn(trimmed) {
+            end = i;
+            break;
+        }
+    }
+    Some(lines[start..end].join("\n"))
+}
+
+#[test]
+fn extract_fn_body_finds_the_declaration_and_stops_at_the_next_fn_at_same_or_lower_indent() {
+    let fixture = "\
+mod tests {
+    fn unrelated_before() {
+        let x = 1;
+    }
+
+    #[test]
+    fn target_fn() {
+        let marker_text = \"needle\";
+        assert!(marker_text.contains(\"needle\"));
+    }
+
+    #[test]
+    fn unrelated_after() {
+        let y = 2;
+    }
+}
+";
+    let body = extract_fn_body(fixture, "target_fn").expect("target_fn should be found");
+    assert!(
+        body.contains("needle"),
+        "body should include the fn's own content: {body}"
+    );
+    assert!(
+        !body.contains("unrelated_after"),
+        "body must stop before the NEXT fn at the same indentation: {body}"
+    );
+}
+
+#[test]
+fn extract_fn_body_returns_none_when_the_name_is_not_declared_anywhere() {
+    let fixture = "mod tests {\n    fn something_else() {}\n}\n";
+    assert!(extract_fn_body(fixture, "does_not_exist_anywhere").is_none());
+}
+
+/// True when `marker` is asserted inside `body` — the heuristic
+/// `probed_rows_cite_a_real_test` runs against a cited test's extracted
+/// body.
+///
+/// `TextContains(s)` requires the literal `s` to appear anywhere in `body`:
+/// strict on the string (whitespace and all), lax on the location — `s`
+/// need not be inside an `assert!`, so a bare mention in a comment would
+/// also satisfy it.
+///
+/// `JsonPath(p)` requires EVERY dot-separated segment of `p` after the
+/// leading `$.` to appear anywhere in `body` — not as one contiguous
+/// substring, not in path order, and not exclusively: a body asserting
+/// `v["overflow"]["packing"]` satisfies `$.overflow.packing` even though
+/// the literal text `"$.overflow.packing"` never appears, but a body that
+/// merely contains the two words "overflow" and "packing" in unrelated
+/// places would satisfy it too. This is intentionally lax — the
+/// alternative (requiring one specific bracket-indexing idiom) would need
+/// to know which of several equivalent ways a body reads a JSON value, and
+/// neither of the two `Probed` rows this gate checks today would be helped
+/// by making it stricter.
+fn marker_is_asserted(marker: &CitedMarker, body: &str) -> bool {
+    match marker {
+        CitedMarker::TextContains(s) => body.contains(s.as_str()),
+        CitedMarker::JsonPath(p) => match p.strip_prefix("$.") {
+            Some(rest) => rest
+                .split('.')
+                .all(|seg| !seg.is_empty() && body.contains(seg)),
+            None => false,
+        },
+    }
+}
+
+#[test]
+fn marker_is_asserted_true_when_text_contains_marker_is_present() {
+    let body = "assert!(msg.contains(\"cap\") && msg.contains('5'));";
+    assert!(marker_is_asserted(
+        &CitedMarker::TextContains("cap".to_string()),
+        body
+    ));
+}
+
+#[test]
+fn marker_is_asserted_false_when_text_contains_marker_is_absent() {
+    let body = "assert!(msg.contains(\"unrelated\"));";
+    assert!(!marker_is_asserted(
+        &CitedMarker::TextContains("cap".to_string()),
+        body
+    ));
+}
+
+#[test]
+fn marker_is_asserted_true_when_every_json_path_segment_is_present() {
+    let body = "assert_eq!(v[\"overflow\"][\"packing\"], json!(\"excerpted\"));";
+    assert!(marker_is_asserted(
+        &CitedMarker::JsonPath("$.overflow.packing".to_string()),
+        body
+    ));
+}
+
+#[test]
+fn marker_is_asserted_false_when_one_json_path_segment_is_missing() {
+    let body = "assert_eq!(v[\"overflow\"][\"omitted\"], json!(0));";
+    assert!(!marker_is_asserted(
+        &CitedMarker::JsonPath("$.overflow.packing".to_string()),
+        body
+    ));
+}
+
+/// Checks that every `Coverage::Probed` row's `cited_test` names a REAL
+/// test — a `fn` that exists somewhere in tracked `src/` — and that the
+/// row's marker is asserted somewhere in that test's extracted body. This
+/// is the mechanism Task 5b adds: before it, a `cited_test`-shaped claim
+/// was a prose comment nobody checked, and two of the original 25 `Probed`
+/// rows had already drifted from what their cited test actually asserts —
+/// both reclassified to `Deferred` rather than left citing evidence that
+/// does not hold up (see `cap_probe.rs`'s row comments for
+/// `markdown.headings_hard_cap` and `lsp.first_call_budget`).
+///
+/// Both extraction steps ([`extract_fn_body`] and [`marker_is_asserted`])
+/// are HEURISTICS — read their own doc comments for exactly what each does
+/// not catch; this test does not repeat that list, only relies on it. In
+/// particular this gate CANNOT detect a citation that names a real test
+/// whose body happens to contain the marker text for a reason unrelated to
+/// asserting it (a comment, an unrelated string) — narrowing that further
+/// is future work, not a claim this gate makes today.
+///
+/// Failure messages name the row id, the cited test, and the marker —
+/// never a bare count — so a failure here is a single lookup, not a second
+/// investigation.
+#[test]
+fn probed_rows_cite_a_real_test() {
+    let cap_probe_path = repo_root().join("src/tools/core/cap_probe.rs");
+    let cap_probe_src = std::fs::read_to_string(&cap_probe_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", cap_probe_path.display()));
+    let citations = probed_citations(&cap_probe_src);
+
+    assert!(
+        !citations.is_empty(),
+        "probed_citations found zero Coverage::Probed rows in cap_probe.rs — either every row \
+         really is Deferred (check by hand before trusting this), or the parser's anchors \
+         (\"ProbeRow {{\", \"Coverage::Probed {{\", \"id:\", \"cited_test:\") have drifted from \
+         the file's actual formatting"
+    );
+
+    let mut sources = vec![];
+    for file in tracked_src_files() {
+        let path = repo_root().join(&file);
+        let src =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {file}: {e}"));
+        sources.push(src);
+    }
+
+    let mut failures = vec![];
+    for c in &citations {
+        let body = sources
+            .iter()
+            .find_map(|src| extract_fn_body(src, &c.cited_test));
+        let Some(body) = body else {
+            failures.push(format!(
+                "{}: cited_test \"{}\" names no `fn` found anywhere in tracked src/",
+                c.id, c.cited_test
+            ));
+            continue;
+        };
+        if !marker_is_asserted(&c.marker, &body) {
+            let marker_desc = match &c.marker {
+                CitedMarker::JsonPath(p) => format!("JsonPath(\"{p}\")"),
+                CitedMarker::TextContains(s) => format!("TextContains(\"{s}\")"),
+            };
+            failures.push(format!(
+                "{}: cited_test \"{}\" exists but its body does not assert marker {}",
+                c.id, c.cited_test, marker_desc
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "Probed rows whose citation does not hold up:\n{}",
+        failures.join("\n")
+    );
+}

@@ -94,7 +94,11 @@ fn probe_rows_are_well_formed() {
                     bad_reasons.push(row.id);
                 }
             }
-            Coverage::Probed { marker, mutation } => {
+            Coverage::Probed {
+                marker,
+                mutation,
+                cited_test,
+            } => {
                 let marker_ok = match marker {
                     Marker::JsonPath(path) => path.starts_with("$."),
                     Marker::TextContains(text) => !text.trim().is_empty(),
@@ -106,6 +110,9 @@ fn probe_rows_are_well_formed() {
                     if is_placeholder(reason) {
                         bad_reasons.push(row.id);
                     }
+                }
+                if cited_test.trim().is_empty() {
+                    bad_reasons.push(row.id);
                 }
             }
         }
@@ -159,6 +166,7 @@ fn tally_distinguishes_killed_from_not_yet_and_deferred() {
             coverage: Coverage::Probed {
                 marker: Marker::TextContains("z"),
                 mutation: Mutation::Killed,
+                cited_test: "fixture_test_that_kills_the_marker",
             },
         },
         ProbeRow {
@@ -166,6 +174,7 @@ fn tally_distinguishes_killed_from_not_yet_and_deferred() {
             coverage: Coverage::Probed {
                 marker: Marker::JsonPath("$.a"),
                 mutation: Mutation::NotYet("no mutation run yet"),
+                cited_test: "fixture_test_that_asserts_the_marker",
             },
         },
         ProbeRow {

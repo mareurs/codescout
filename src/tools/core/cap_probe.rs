@@ -52,7 +52,14 @@ pub(crate) enum Coverage {
     /// marker arrives, through the tool's real call surface or a shared
     /// primitive whose output composes unmodified into that surface's
     /// response.
-    Probed { marker: Marker, mutation: Mutation },
+    Probed {
+        marker: Marker,
+        mutation: Mutation,
+        /// The name of the EXISTING test that drives this cap past its bound and
+        /// asserts the marker. Checked by `probed_rows_cite_a_real_test` — this is
+        /// a reference, not a note.
+        cited_test: &'static str,
+    },
     /// No behavioural test. The string says WHY — and "not got to it" is
     /// not a why.
     Deferred(&'static str),
@@ -120,45 +127,58 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/core/types.rs --
     ProbeRow {
         id: "tool_output.inline_tokens",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("@tool_"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"@tool_\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "run_command.inline_bytes",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.truncated\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "tool_output.inline_byte_budget",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("json_path"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"json_path\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
-        // Verified: `ReadMarkdown::output_form()` (`read_markdown.rs:592-594`) is
-        // `OutputForm::Text`, so a `JsonPath` marker is unreachable — the primary
-        // block is never the raw JSON. `many_headings_escalates_to_map_shape_even_when_bytes_fit`
-        // (`tests.rs`) drives HEADINGS_HARD_CAP past its bound through ReadMarkdown's real
-        // call surface and confirms the escalation to MAP shape (`headings` + `file_id`
-        // fields). `format_read_markdown`'s MAP-shape branch (`read_markdown.rs:660-661`)
-        // embeds `file_id` literally into the rendered text
-        // (`format!("{} lines  {}\n\n", lines, file_id)`), and
-        // `format_compact_map_shape_renders_indented_headings` (`tests.rs`) asserts the
-        // rendered text `contains("@file_xyz")` — the composed pair is real evidence for
-        // the text surface a caller actually reads. Note: `read_file.rs` is NOT a second
-        // consumer of this cap — its `.md`-open path refuses outright
-        // (`read_file.rs:108-115`, "Use read_markdown for markdown files"), and its
-        // `markdown_coverage` helper never references HEADINGS_HARD_CAP.
+        // Task 5a's comment (preserved below in spirit) cited a COMPOSED PAIR, not one
+        // test: `many_headings_escalates_to_map_shape_even_when_bytes_fit` (tests.rs)
+        // drives HEADINGS_HARD_CAP past its bound through ReadMarkdown's real call
+        // surface, but asserts only JSON key presence (`headings`, `file_id`) — never the
+        // literal "@file_" text. `format_compact_map_shape_renders_indented_headings`
+        // (tests.rs) asserts `contains("@file_xyz")`, but calls `format_compact` on a
+        // hand-built JSON literal that already carries `file_id: "@file_xyz"` — it never
+        // drives HEADINGS_HARD_CAP at all. `Coverage::Probed`'s `cited_test` field names
+        // ONE test that both drives the cap and asserts the marker; neither of these does
+        // either half completely, and Task 5b searched further (per this file's own
+        // header) and found no third candidate: `read_markdown_call_content_returns_text_map_not_json`
+        // (tests.rs) drives the cap cleanly (41 headings, ~1.8KB, well under the byte
+        // budget) through the real `call_content()` surface, but its assertions check for
+        // "lines"/'L', never the literal "@file_" substring;
+        // `format_compact_live_renders_claude_md_as_map_shape` (tests.rs) does assert
+        // `contains("lines  @file_")` against a live CLAUDE.md read, but CLAUDE.md has 15
+        // headings against HEADINGS_HARD_CAP=40 and 40143 bytes against the
+        // MAX_INLINE_TOKENS*4=10000-byte oversized threshold, so its MAP-shape escalation
+        // is driven by the byte-size path, not the headings-count path — confounded
+        // evidence for a different cap. Reclassifying to `Deferred` rather than inventing
+        // a citation for a claim no single test backs.
         id: "markdown.headings_hard_cap",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("@file_"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a's Probed claim (marker TextContains(\"@file_\")) cited a composed \
+             pair of tests, neither of which alone drives HEADINGS_HARD_CAP past its \
+             bound AND asserts the \"@file_\" marker in the same body; see the comment \
+             above for the full breakdown, including two further candidates ruled out on \
+             direct measurement",
+        ),
     },
     ProbeRow {
         id: "tool_output.compact_summary_bytes",
@@ -170,10 +190,11 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "tool_output.compact_summary_hard_bytes",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"truncated\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "tool_output.largest_array_depth",
@@ -291,17 +312,19 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/preview/plan.rs --
     ProbeRow {
         id: "preview.plan_headings",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.headings_truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.headings_truncated\")) with \
+             no comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "preview.plan_open_next",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.tasks.open_next"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.tasks.open_next\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
@@ -329,17 +352,20 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "doctor.exposure_threshold",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.summary.by_check.entry_conditional_past_due"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker \
+             JsonPath(\"$.summary.by_check.entry_conditional_past_due\")) with no comment \
+             citing a test; Task 5b's cited_test requirement found none named, and \
+             inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "doctor.caveat_chars",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("…"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"…\")) with no comment \
+             citing a test; Task 5b's cited_test requirement found none named, and \
+             inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/tools/format.rs --
     ProbeRow {
@@ -419,6 +445,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         coverage: Coverage::Probed {
             marker: Marker::TextContains("cap"),
             mutation: Mutation::NotYet(NOT_MUTATED_YET),
+            cited_test: "glob_explosion_returns_recoverable",
         },
     },
     ProbeRow {
@@ -472,14 +499,17 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.overflow.packing"),
             mutation: Mutation::NotYet(NOT_MUTATED_YET),
+            cited_test: "a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped",
         },
     },
     ProbeRow {
         id: "context.attestation_exposure",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.verification.verification_state"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker \
+             JsonPath(\"$.verification.verification_state\")) with no comment citing a \
+             test; Task 5b's cited_test requirement found none named, and inventing one \
+             is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/librarian/tools/find.rs --
     ProbeRow {
@@ -501,10 +531,11 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/get.rs --
     ProbeRow {
         id: "artifact.get_lines",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.overflow.shown_lines"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.overflow.shown_lines\")) \
+             with no comment citing a test; Task 5b's cited_test requirement found none \
+             named, and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "artifact.get_overflow_headings",
@@ -523,10 +554,12 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "link_scan.findings",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.counts.truncated.dangling"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker \
+             JsonPath(\"$.counts.truncated.dangling\")) with no comment citing a test; \
+             Task 5b's cited_test requirement found none named, and inventing one is the \
+             exact failure this gate exists to prevent",
+        ),
     },
     // -- src/librarian/tools/refresh_stale.rs --
     ProbeRow {
@@ -547,25 +580,28 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/prompts/mod.rs --
     ProbeRow {
         id: "prompts.client_instructions_chars",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("trimmed"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"trimmed\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "prompts.trim_note_names",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("+2 more"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"+2 more\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/tools/grep.rs --
     ProbeRow {
         id: "grep.match_bytes",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"truncated\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     ProbeRow {
         id: "grep.total_bytes",
@@ -603,18 +639,20 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/preview/default.rs --
     ProbeRow {
         id: "preview.default_headings",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.headings_truncated"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.headings_truncated\")) \
+             with no comment citing a test; Task 5b's cited_test requirement found none \
+             named, and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/librarian/preview/memory.rs --
     ProbeRow {
         id: "preview.observation_text",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("…"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker TextContains(\"…\")) with no comment \
+             citing a test; Task 5b's cited_test requirement found none named, and \
+             inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/librarian/preview/spec.rs --
     ProbeRow {
@@ -644,18 +682,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/tracker_design.rs --
     ProbeRow {
         id: "tracker_design.existing_trackers",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.existing_trackers_overflow_hint"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker \
+             JsonPath(\"$.existing_trackers_overflow_hint\")) with no comment citing a \
+             test; Task 5b's cited_test requirement found none named, and inventing one \
+             is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/librarian/tools/workspace_state_at.rs --
     ProbeRow {
         id: "workspace_state_at.rows",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.hints.more_in_scope"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.hints.more_in_scope\")) \
+             with no comment citing a test; Task 5b's cited_test requirement found none \
+             named, and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/lsp/client.rs --
     ProbeRow {
@@ -667,26 +708,34 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/lsp/mod.rs --
     ProbeRow {
-        // Verified: `Symbols::output_form()` is OutputForm::Text (symbols.rs:356), so a
-        // JsonPath marker on "$.lsp" is unreachable — the primary block is never the raw
-        // JSON. `display.rs:252-256` pushes `[lsp warming] {hint}` into the rendered text
-        // whenever `val["lsp"] == "warming"`, and
-        // `format_overview_symbols_file_mode_warming_marker` (display.rs:548-565) asserts
-        // `result.contains("[lsp warming]")` — a real, currently-passing assertion on the
-        // literal text marker.
+        // Task 5a's comment cited ONE test, but that test never drives the real
+        // first-call-time-budget cap: `format_overview_symbols_file_mode_warming_marker`
+        // (display.rs:548-565) hand-builds a JSON value with `"lsp": "warming"` already
+        // set and asserts the renderer embeds "[lsp warming]" in the rendered text — it
+        // never calls the code path that decides whether the first-call time budget
+        // elapsed (`src/lsp/mod.rs`'s cold-start race). This is the render-only half of
+        // the same gap `markdown.headings_hard_cap` has above: a marker-rendering test
+        // standing in for a cap-driving one. `Coverage::Probed` requires a test that
+        // drives the cap past its bound AND asserts the marker; this one only does the
+        // latter, against a synthetic already-tripped input. Reclassifying to `Deferred`.
         id: "lsp.first_call_budget",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("[lsp warming]"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a's Probed claim (marker TextContains(\"[lsp warming]\")) cited \
+             format_overview_symbols_file_mode_warming_marker, which asserts the renderer \
+             embeds the marker given an already-synthetic `\"lsp\": \"warming\"` input — \
+             it never drives the real first-call-budget race past its bound; no test \
+             today does both",
+        ),
     },
     // -- src/retrieval/index_state.rs --
     ProbeRow {
         id: "index_state.skipped_sample",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.last_sync_skipped.sample"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker \
+             JsonPath(\"$.last_sync_skipped.sample\")) with no comment citing a test; \
+             Task 5b's cited_test requirement found none named, and inventing one is the \
+             exact failure this gate exists to prevent",
+        ),
     },
     // -- src/symbol/edit.rs --
     ProbeRow {
@@ -699,18 +748,20 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/command_summary.rs --
     ProbeRow {
         id: "command_summary.buffer_query_lines",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.stdout_shown"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.stdout_shown\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/tools/run_command/output.rs --
     ProbeRow {
         id: "run_command.stderr_lines",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.stderr_shown"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "Task 5a classified this Probed (marker JsonPath(\"$.stderr_shown\")) with no \
+             comment citing a test; Task 5b's cited_test requirement found none named, \
+             and inventing one is the exact failure this gate exists to prevent",
+        ),
     },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
