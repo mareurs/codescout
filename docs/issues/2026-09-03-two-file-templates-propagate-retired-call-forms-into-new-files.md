@@ -170,10 +170,10 @@ out-of-scope files into record vs instruction surface — needed once either way
 
 **Catalog note:** the `cluster/` tag is in frontmatter, which for a *new* file is the catalog's
 source — the classifier reads it on first index, as it does `kind: bug`. This is not the BL-48
-hazard, which concerns editing a file that already has a row. It has no row yet because it was
-created in a worktree, where `reindex` walks zero files
-(`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`);
-verify the tag after this branch reaches the main checkout and is reindexed there.
+hazard, which concerns editing a file that already has a row. **Verified landed** — row
+`192b99619018ed2c`, returned by
+`doc(action="find", filter={"tags": {"contains": "cluster/selector-narrower-than-its-population"}})`
+after the branch merged and the main checkout was reindexed (`added: 2`). Nothing owed here.
 
 ## References
 

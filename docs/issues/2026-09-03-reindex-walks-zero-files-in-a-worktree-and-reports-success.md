@@ -202,7 +202,10 @@ own `## Resume` so the step is not lost, as the sibling bug does.
 
 For querying: `doc(action="find", kind="bug")` from a worktree is a **lower bound**. Cross-check
 with `librarian(action="doctor")` and read the `worktree_scoped_row` paths before concluding a
-bug is unfiled.
+bug is unfiled. **Confirmed cost, 2026-09-03:** this very session nearly filed a duplicate of an
+open severity-high bug because the worktree `find` did not return it; it surfaced only from
+`doctor`. Filing from the main checkout has no such gap — after this branch merged, a reindex
+there picked up both new files (`added: 2`) and their `cluster/` tags immediately.
 
 ## Resume
 
