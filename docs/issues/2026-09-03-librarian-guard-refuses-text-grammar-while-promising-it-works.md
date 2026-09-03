@@ -139,6 +139,29 @@ refuses. Then **either**:
 The second is likely correct if the restriction is deliberate (Iron Law 5 points that way), but
 that is a design call and the message is wrong under either.
 
+**Second observation, 2026-09-03 — the discriminator is now MEASURED, not inferred.** A later
+session hit this independently and ran the A/B: two calls on
+`docs/trackers/prompt-surface-compaction-session-log.md`, differing **only** in grammar and
+neither passing `frontmatter`.
+
+| call | params | result |
+|---|---|---|
+| A | `path`, `old_string`, `new_string` (identical, so nothing could be written) | **refused**, with the `:207` message |
+| B | `path`, `heading`, `action="edit"`, `old_string`, `new_string` | `status: "ok"`, written |
+
+So *"which grammar the call uses"* is established at the runtime boundary rather than read off
+commit subjects. What stays unverified is unchanged and is the `unverified:` note's subject:
+`src/util/librarian_guard.rs` has still not been read past `:207`, so **where** the narrowing
+lives is inferred. Prefer the identical-`old_string` form above when re-probing — it exercises
+the refusal without any possibility of a write.
+
+A duplicate of this bug was filed the same day and deleted on discovery
+(`librarian-guard-blames-frontmatter-for-a-body-only-edit`, tagged `IC-22`). The retained
+reading is **`IC-11`**: the sentence was accurate when `c26943b5` wrote it, so this is a
+capability lost under a standing document, not a hint composed without consulting its request.
+The duplicate was filed because the filer did not run the open-bug triage query first — the
+step `get_guide("project-activation-bootstrap")` § Phase 0 exists for.
+
 SHA: *pending.* patch-id: *pending.*
 
 ## Tests added
