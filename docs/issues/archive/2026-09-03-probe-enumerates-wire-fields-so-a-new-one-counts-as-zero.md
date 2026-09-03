@@ -1,7 +1,7 @@
 ---
-id: ca4f9e373548c2bb
+id: 1d5af6a4a915308d
 kind: bug
-status: open
+status: fixed
 title: probe_tool_surface enumerates wire fields, so annotations counted as zero
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - tool-surface
 - instrument
 topic: measurement instruments
+closed: 2026-09-03
 opened: 2026-09-03
 severity: medium
 unverified: 'no CI-level guard: the unmodelled-field alarm fires only on a probe run, never in the test lane'
@@ -132,7 +133,11 @@ The docstring's trap list gained trap 5 and **lost its count** — the header re
 names for its own laws: *"a tally of the section's own contents is a premise that every
 addition falsifies"*.
 
-Fix commit: *(recorded on archive)*
+**Fix commit:** `dcd4b1d0da074927aa04423aa8075e8678cda178` on **`experiments`**
+(short `dcd4b1d0`).
+**patch-id:** `739d71cda5231f9f0f85df3aa0836c0fe244f783` — `git show <sha> | git patch-id
+--stable`. The SHA is positional and dies when `experiments` is rebased; the patch-id is a
+content hash of the diff and survives rebase and cherry-pick. Nothing is owed later.
 
 ## Tests added
 
@@ -155,7 +160,8 @@ TOTAL when the two disagree — the gate is the surface that is actually enforce
 
 ## Resume
 
-N/A once the gate is green and the fix is committed.
+N/A — fixed and verified. Gate green in the documented order at `dcd4b1d0`: fmt 0, clippy
+0, lean lane 0, default lane 0, zero failures in either binary.
 
 ## References
 
@@ -166,4 +172,3 @@ N/A once the gate is green and the fix is committed.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md`
 - `docs/trackers/resume-tool-surface-structural-mechanisms.md` — SM-1 shipped the
   annotations this failed to count
-
