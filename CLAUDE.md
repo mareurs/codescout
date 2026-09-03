@@ -256,11 +256,19 @@ session".
   Blindness*).
   Broadcasting widens the guess without closing it, and on a 16-session machine "tell everyone
   plausible" is not a bounded action.
-- **Report the scope you searched, and name the unit.** A count from `ListAgents` alone is a
-  lower bound; say which profile it covered. **Sessions and peers differ by one — yours** — and
-  that off-by-one has now been shipped three times in one evening, twice *inside a correction of
-  itself*. Write `6 sessions (5 peers plus me), by socket enumeration at <time>`, never a bare
-  number.
+- **Report the scope you searched, name the unit, and stamp the instant.** A count from
+  `ListAgents` alone is a lower bound; say which profile it covered. **Sessions and peers differ
+  by one — yours** — and that off-by-one has now been shipped three times in one evening, twice
+  *inside a correction of itself*. Write `6 sessions (5 peers plus me), by socket enumeration at
+  <time>`, never a bare number. **The `<time>` is load-bearing and reads as decoration, which is
+  why it gets dropped.** A peer count is valid only at its instant: sessions start and exit
+  continuously, so two honest counts taken hours apart share almost none of the same PIDs.
+  Measured 2026-09-03 — two sessions in this checkout compared enumerations that overlapped in
+  **1 PID out of 5**, which reads exactly like two instruments disagreeing; run at the same
+  moment, `scripts/peer-sessions.sh` and the skill's inline socket walk returned **21 and 21,
+  zero difference either way**. The cost of omitting the timestamp is specific and expensive:
+  ordinary churn presents as a tooling defect, and the natural next step is to go debug an
+  instrument that is working.
 - **Check independence, not agreement.** Two instruments returning the same number is evidence
   only if their *scopes* differ; two per-profile instruments agreeing is one blind spot counted
   twice, which at the point of use is indistinguishable from corroboration.

@@ -95,7 +95,15 @@ Three separate traps, each measured:
   "msg"` exits 1 with `pathspec '-m' did not match any file(s)`.
 - **Staging is what satisfies the unreviewed-content check, not the pathspec.** A pathspec
   commit takes the *working tree* at those paths, so on a shared checkout it can carry a
-  concurrent session's writes.
+  concurrent session's writes. **This also breaks the assumption this step rests on** — that
+  the diff you read is the diff that lands. It is not, for any path a second session touches
+  between your `git diff --cached` and your `git commit`. Re-check immediately before
+  committing (`git diff --quiet -- <paths>`) rather than trusting the earlier read.
+  **`docs/trackers/issue-clusters.md` is the known hot file for this** — 22 classes share it,
+  every bug filing touches it, and it once took 16 sessions and 53 commits in a day. Measured
+  2026-09-03: a pathspec commit over it (`964df77e`) carried six Index-row edits belonging to
+  another session. They landed correctly but under the committer's `Session-Id`. Nothing was
+  lost — the attribution was wrong — so step 6 applies rather than a repair.
 
 ### 5. Verify the index, not the exit code
 
@@ -166,4 +174,3 @@ per-session worktree does that, which is what
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`
 - `docs/trackers/response-envelope-session-log.md` — `F-2`, `F-3`, `F-4`, `F-5`
 - `CLAUDE.md` § *Reaching a Peer Session*
-

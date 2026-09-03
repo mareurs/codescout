@@ -127,6 +127,37 @@ None => Ok(make_range(&headings[substring_matches[0]])),
 `HeadingQuery::new("## Fix", Some(1))` — prefixed. Every exact-tier test therefore exercises
 the form that reaches tier 1, and none exercises the bare form that cannot.
 
+### Second instance, on the WRITE path — and its diagnostic names the wrong cause
+
+Reported 2026-09-03 by sessionId `63083c9e-cc56-4dbd-9852-820f34261eeb`, who hit it **hours
+before this file existed** and recorded it in commit `4d4d804f`'s message, so it is
+independently dated rather than reconstructed. Same file, same mis-binding, different surface:
+
+```
+doc(action="update", patch={body_edits:[{heading: "Index", ...}]})
+  → body_edits[0]: old_string not found in section 'Index'. The text must match
+    exactly (whitespace-sensitive). I looked, and nothing scored above 0.5 similarity.
+    scoped_miss_tier: "no_similar_match"
+```
+
+Passing `## Index` resolved it immediately. **The read path and the write path share the
+resolver**, so this is not a `body_edits` quirk — `doc(action="get", heading="Index")`
+mis-binds identically.
+
+**The part that makes this worse than a wrong section, and worth its own remedy: the error
+reports the wrong cause, confidently, with a number attached.** It names an `old_string`
+problem and volunteers a similarity score, when the `old_string` was present and correct in the
+section the caller meant — what was wrong was the *section selection*. `scoped_miss_tier:
+"no_similar_match"` is a true statement about the section the resolver **chose** and a false one
+about the section the caller **named**, so the diagnostic points away from the defect. The
+reporter re-read their `old_string` twice before questioning the heading. So the fix owes a
+third thing beyond the two in `## Fix`: when a heading resolves through tier 3 or 4, say which
+heading was bound, in the error as well as in the success path.
+
+**And the section it wrongly bound is the note warning that a `cluster/`-prefixed pattern
+cannot see the Index table** — an addressing-failure warning, mis-addressed. That is `IC-6`
+firing inside the ledger that defines `IC-6`, twice in one day, on two different surfaces.
+
 ## Hypotheses tried
 
 1. **Hypothesis** — a peer had moved the sections mid-session, so the "wrong" body was
@@ -196,4 +227,3 @@ invisible for the whole session that found it.
 - Found while auditing the `IC-N` ledger — on `issue-clusters.md`, whose `### One slug, two
   spellings` section warns about exactly this class of two-spelling trap, one heading above the
   section the query failed to reach.
-

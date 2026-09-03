@@ -172,6 +172,53 @@ This reads the INDEX and nothing else -- `git ls-files` for the population, `git
 `main()`'s only early exits are `--fixture-*` (stdin-pure test modes) and *"ledger neither
 staged nor on disk"*. No branch consults `GIT_INDEX_FILE`.
 
+### Fresh instance 2026-09-03 — and it sharpens the claim in two places
+
+sessionId `12dee32b-d0db-40c0-b79a-770720fb3eab`. A docs-only pathspec commit of 8 paths (6
+class files under `docs/trackers/issue-clusters/`, the trunk ledger, one new bug file) was
+refused by `ledger-counts` naming **a file outside the pathspec**: a peer's
+`classify-conflates-two-malformed-reasons-under-one-message`, staged `A` and tagged
+`cluster/unclassified` with no matching `**Members:**` append. `refuse an index commit
+carrying another session's staged paths` **Passed** in the same run — both guards behaving
+exactly as designed, in opposite directions, on one commit.
+
+**1. "No ordering of correct steps escapes it" is right, but "no move" is the wrong word, and
+the difference is load-bearing.** The hook's own text names a legal move — leave your bug file
+unstaged, since `git ls-files` is the population. That move exists only when the unpaired file
+is **yours**. When it is a peer's you cannot take it, because step 6 of
+`docs/conventions/shared-checkout-commit-sequence.md` forbids the repair. So the precise claim
+is that the set of **permitted** moves is empty, not the set of moves. Worth the extra word:
+`--no-verify` *is* a move, the config argues one line above that *"a hook that fires on every
+commit to say nothing is how `--no-verify` gets learned"*, and describing the state as "no move
+available" is exactly the framing under which a blocked session reaches for it — in the
+entangled case, when the guard is most load-bearing. **The exit is social, not procedural.**
+This one cleared only when another session acted: the owner was identified positively
+(`pre-commit-foreign-index`'s stager field, the session registry, and `Session-Id` trailers on
+the `result-cap-marker-gate` branch — three instruments, three different sources, all naming
+`c95ba99b`), asked, and committed their pair at `964df77e`. The blocked commit then passed as
+`20083067` with nothing about it changed.
+
+**2. The asymmetry, observed live rather than reasoned about.** A concurrent peer
+(`66523284`) committing `docs/trackers/prompt-hamsa-audit-log.md` against the *same broken
+index* saw `(no files to check) Skipped` and committed straight through, then reported
+"pathspec commit clears it" as a general remedy. It does not: `files:` decides whether
+`ledger-counts` **runs**, matched against the committer's own paths, and once it runs the
+pathspec is invisible to it. Two sessions, one index, opposite outcomes, neither reading
+wrong. **So the population that meets this bug is exactly the sessions doing bug-file or
+ledger work** — a session committing Rust never sees it, which is why it stays open.
+
+**3. Why publishing the correction did not work, which is the transferable part.**
+`.pre-commit-config.yaml:122-135` already states this, in terms, and records that *"two
+sessions misread this the same way within an hour"*. Two more of us misread it identically
+anyway, so "state it in the config" is **falsified** here rather than unlucky. The reason is
+read-surface, not diligence: the warning lives in the hook's **config**, the misreading happens
+at the hook's **output**, and `(no files to check) Skipped` is pre-commit's generic string — not
+the hook's — so the one surface a committer actually reads is the one surface that cannot carry
+the correction. That is `CLAUDE.md` § *Observer Blindness*'s own shape: a bound published to
+the enforcement layer, whose audience never reads it. A concrete remedy that informs without
+widening the refusal (which the config rightly argues against): `always_run: true` plus an
+explicit in-scope / out-of-scope line the hook **prints itself**.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** one guard is simply wrong and should be relaxed.
