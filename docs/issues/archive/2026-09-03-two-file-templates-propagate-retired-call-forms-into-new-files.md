@@ -187,6 +187,17 @@ time on `experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targ
 local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
 --workspace` — exit 0 on all four, no failures.
 
+**Correction, 2026-09-03 (later the same evening):** the commit that repaired the lost `closed:`
+date (`e6343717`) attributed the loss to a `doc(action="move")` staleness bug reported by a peer
+session. That report was **retracted by its own author** minutes later: `src/librarian/tools/mv.rs`
+uses `std::fs::rename`, which cannot write a stale copy. The actual mechanism was
+`8cc95806a7b5f37a` (*"every session's commit removes every other session's unstaged work from the
+working tree for the duration of its hooks"*) — a peer's commit in this shared checkout stashed my
+unstaged `edit_file(frontmatter={closed:...})` write during the exact window my `doc(action="move")`
+ran, so the atomic rename correctly moved the file as it stood at that instant: reverted to its
+last-committed content. The repaired content is unaffected; only `e6343717`'s stated cause is wrong.
+Not re-attributed in that commit's message because git history here is append-only by convention —
+recorded here instead.
 ## Resume
 
 Settle narrow-vs-structural above before adding the three files, since picking narrow is
