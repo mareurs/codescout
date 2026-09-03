@@ -31,6 +31,14 @@ Why each part, one line each. Every measurement, date and superseded form →
 - **`--workspace` on both test lanes:** bare `cargo test` builds only the **root package's**
   targets, so every test in a workspace member — including inline `#[cfg(test)]` modules — is
   invisible to it.
+- **The lean lane is VACUOUS for librarian code — same gate, opposite direction.**
+  `--no-default-features` switches the librarian *off*, which is why a terminal lean lane leaves a
+  librarian-less binary; the half that went unwritten is that it therefore **never runs a librarian
+  test**. Measured 2026-09-04 over one gate run: **0** `librarian::` tests in the lean lane against
+  **1676** in the default one — absence, not a thinner sample. So `LEAN exit=0` on librarian work is
+  a suite that never compiled the code under test, returned identically whether it is right or
+  broken, and two sessions cited it as a pass in one evening. Read **your own test names** out of
+  the default lane (`grep -E '^test librarian::<module>::tests::'`), never either lane's total.
 
 The gate sentence above is pinned byte-for-byte by
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`). If it

@@ -139,6 +139,60 @@ over: every other gate command runs **with** default features, so an uncondition
 all. Four instances of that class in one day (2026-08-27); the one that shipped left `experiments`
 HEAD failing the lean build, so every session that merged inherited the break.
 
+## The lean lane is VACUOUS for librarian code — the same gate, a second consequence
+
+The section above says why the lean lane exists. This says what it cannot tell you, and the two
+are one fact read in opposite directions.
+
+`--no-default-features` switches the librarian **off**. That is precisely why a terminal lean lane
+leaves a librarian-less binary — the trap § *Why the order is load-bearing* describes at length.
+The corollary stayed unwritten for as long as the trap was documented: **the lane that produces a
+librarian-less binary also never runs a librarian test.**
+
+Measured 2026-09-04, one gate run, both lanes appended to one log:
+
+```
+sed -n '1,/^LEAN exit=/p' gate.log | grep -c '^test librarian::'    # 0
+sed -n '/^LEAN exit=/,$p'  gate.log | grep -c '^test librarian::'    # 1676
+```
+
+Zero against 1676 — not a thinner sample of the librarian surface, its complete absence. So
+`LEAN exit=0` on a librarian change is the output of a suite that never compiled the code under
+test, returned identically whether that change is correct or catastrophically wrong.
+
+That is § *Testing Discipline*'s first law reaching past an assertion to a whole **lane**: a suite
+is monotone under every change to code it excludes. The reflex remedy — widen the sample — is a
+no-op here, because the exclusion is a compile-time feature gate rather than a selection over
+tests.
+
+**Both consequences bite the same reader in opposite directions, which is why naming only the
+first is worse than naming neither.** Someone who knows the ordering trap knows the lean lane
+leaves a *degraded binary* — and has every reason to infer from that it at least *ran the tests*.
+One hazard is about what the lane leaves behind; this one is about what it never did. A document
+that carefully names one failure mode implies by omission that the rest are handled (`OB-1`).
+
+Two sessions reached for it as evidence on the same evening, independently, both on
+entirely-librarian changes: one cited `lean lane 3526 passed` in a commit message as gate evidence,
+the other was one message from citing it to a peer as a pass. Neither is carelessness — the number
+is real, the lane is in the gate, and nothing in its output mentions `librarian`, including by
+omission. There is no line reading *0 librarian tests ran*; there is simply nothing where 1676
+results would be.
+
+**What to do instead.** On a librarian change the default lane is the only one of the two that is
+evidence at all. Run it and read **your own test names** out of it:
+
+```
+grep -E '^test librarian::<module>::tests::' gate.log
+```
+
+Not the totals. A total is an aggregate over a population, and § *Testing Discipline* is explicit
+that an aggregate cannot verify a claim about a member — `5130 passed` is equally satisfied by a
+run in which your tests never existed.
+
+This does **not** demote the lean lane. It still catches exactly what the section above says it
+catches: an unconditional module reaching feature-gated code. That failure is a *compile* error,
+and a compile error is the one class the lane can still see with the feature off.
+
 ## Why it is `test`, not `check` — and that upgrade is load-bearing
 
 A `check` — even with `--all-targets` — compiles the lean test targets and never runs them, so a
