@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 9
+entry_high_water_F: 10
 entry_high_water_W: 17
 entry_prefix:
 - F
@@ -82,6 +82,7 @@ entry_prefix:
 | F-8 | 2026-08-20 | high | process | mitigated | The `git add -A` prohibition existed, was measured, and still did not reach the moment of committing — and the mitigation I switched to is itself the documented anti-pattern one rung up |
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
+| F-10 | 2026-09-03 | med | self-friction | mitigated | I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed in 10 hours, found by a peer, on the gate carrying my own prediction that it would |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1941,6 +1942,58 @@ run puts 396 words in repeated spans, of which the 18 `workspace` copies are ~34
 `resume-tool-surface-structural-mechanisms:SM-3`.
 
 **Status:** validated
+
+## F-10 — I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed within 10 hours, by a peer, on the gate carrying my own prediction that this would happen
+
+**Valid:** dated 2026-09-03
+
+**Severity:** med
+**Category:** self-friction
+**Status:** mitigated — a peer widened the list; nothing yet DERIVES it
+
+**Observed.** `3e8193a0` (2026-09-03, ~10:00) extended
+`reader_docs_contain_no_retired_call_forms` with the `.codescout` root and
+`docs/issues/_TEMPLATE.md`. The justification is a comment I wrote directly above the
+entry: a template is *"prescriptive, copied verbatim into every new bug file, so a stale
+call form in it propagates itself once per bug."*
+
+By ~20:00 the same day a peer had found three more files the list missed —
+`docs/ROADMAP.md`, `docs/TEAM-ONBOARDING.md`, and **`docs/templates/session-log.md`** —
+filed and archived
+`docs/issues/archive/2026-09-03-two-file-templates-propagate-retired-call-forms-into-new-files.md`,
+and extended `FILES` with the note *"missed the first time this gate was written."*
+
+**The defect is not the missing file; it is the missing file sitting beside a correct rule
+that selects it.** *"Prescriptive, copied verbatim"* is true of `docs/templates/session-log.md`
+in exactly the sense it is true of `docs/issues/_TEMPLATE.md` — the same predicate, the same
+propagation mechanism, one copied per session log instead of one per bug file. I stated the
+selection rule and then hand-enumerated one member of the set it defines. Nothing in the
+gate derives the list from the rule, so the rule's correctness bought nothing.
+
+**And the same commit predicted this, in writing, and it changed nothing.** `IC-14`'s member
+7, authored in `3e8193a0`, says: *"The fix is not a wider list — that re-arms on the next
+axis."* It re-armed within ten hours, on the very gate that carried the sentence, found by
+someone else. Knowing the class did not prevent the instance — which is `CLAUDE.md` §
+*Observer Blindness*'s own measured claim ("every one was committed by an author actively
+writing about that class") holding for a fourth time, and the reason that section says to
+build a mechanism rather than resolve to check harder.
+
+**Cost.** No failed call and no wrong code: the peer's extension is additive and all three
+guards stay green. What it cost is a second party's time to re-derive a population I had
+already characterised correctly, plus one bug file and one commit that would not have
+existed had the list been derived.
+
+**What would actually fix it, and why I did not do it here.** The gate's population should
+be computed, not typed: every tracked `.md` whose path matches a template/prescriptive
+predicate, plus every root, minus a small documented exclusion list — so adding a template
+enrolls it automatically. That is a different change from this bug's, needs its own red, and
+would want the exclusion list to be the thing under review rather than the inclusion list.
+Filed here rather than done, because doing it inside a fix for something else is how the
+inclusion list got hand-typed in the first place.
+
+**Rests on:** `3e8193a0` (patch-id `a6584765c1e76bfaea7b2697eb991b4e63571c2e`); the peer's
+uncommitted extension to `src/prompts/mod.rs` read at 2026-09-03; `IC-14` member 7 in
+`docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md`.
 
 ## Template for new entries
 

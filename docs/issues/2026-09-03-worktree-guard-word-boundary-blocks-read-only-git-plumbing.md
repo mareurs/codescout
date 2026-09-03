@@ -36,7 +36,30 @@ SHA.
 
 ## Reproduction
 
-**Not reproducible end-to-end right now, and the reason is recorded rather than worked
+**Live reproduction obtained 2026-09-03 (later the same day), profile `.claude`, session
+`2cb44cd3-8673-4604-a8ac-5adea75ca54b`.** Native `Bash`, main checkout, 3 worktrees present.
+All three refused with *"Worktree-ambiguous git mutation. BLOCKED."*, the `Offender:` line
+naming the bare command:
+
+```
+git merge-base --is-ancestor 3e8193a0 experiments   # BLOCKED
+git merge-base 3e8193a0 experiments                 # BLOCKED  (flag is irrelevant)
+git commit-graph verify                             # BLOCKED  (second verb family)
+git -C /home/marius/work/claude/codescout merge-base 3e8193a0 experiments   # allowed
+```
+
+The first was hit ACCIDENTALLY, mid-reconnaissance, on the ancestry check that verifies a
+fix is still on the branch after a rebase — the check `CLAUDE.md` § *Git Workflow*
+prescribes. The other three were then run deliberately to find the boundary. This closes
+Hypothesis 2 below and upgrades the severity evidence from source-only to observed.
+
+**Two dead ends worth recording, both falsified here:** the `--is-ancestor` flag is NOT the
+trigger (bare `git merge-base` is refused identically), and the shell segmenter is NOT the
+cause (the first refusal arrived inside a `for` loop with a mis-cut `Offender:` fragment,
+which looks exactly like a `segments()` defect; the bare one-line form is refused too).
+Both will re-suggest themselves to the next reader of that `Offender:` line.
+
+**Why the earlier probes could not reach it, recorded rather than worked
 around:** the `pre-tool-guard` shell redirect (*"codescout offers a leaner path for shell
 work"*) now intercepts `Bash` before `git-worktree-guard.mjs` is reached, and the worktree the
 original refusal fired in has since been removed. Two probes on 2026-09-03 — `git merge-base
@@ -124,10 +147,14 @@ does not apply to the command it is rescuing.
 
 2. **Hypothesis:** the symptom can be re-triggered on demand today.
    **Test:** two `Bash` probes, from the main checkout and against a peer worktree.
-   **Verdict:** rejected — both were intercepted earlier by the shell redirect. Recorded as a
-   **denominator, not a catch**: the mechanism is confirmed at the source, so the missing live
-   repro limits the severity evidence, not the diagnosis. It also means anyone re-checking this
-   from a `Bash`-redirected profile will see the wrong refusal and may conclude the bug is gone.
+   **Verdict:** rejected AT THE TIME, then **confirmed later the same day** from a different
+   profile — see § *Reproduction*. The interception was real and the denominator was the right
+   call; what it turned out to measure is the PROFILE, not the bug. A `.claude-sdd` session
+   reaches the shell redirect first and a `.claude` session reaches the worktree guard, so
+   "not reproducible" was true of the observer rather than of the defect. That sharpens the
+   warning already written here: a re-checker does not merely see the wrong refusal — they see
+   a DIFFERENT one depending on which profile they run, and neither refusal names the profile
+   as the variable.
 
 ## Fix
 
