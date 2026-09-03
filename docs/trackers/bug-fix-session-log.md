@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 108
+entry_high_water_F: 109
 entry_high_water_W: 102
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 102
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-109 | 2026-09-03 | med | self-friction | promoted-to-bug-tracker | **Corrected a peer's conclusion and inherited its premise.** `codescout-7e` read a low-CPU sleeping process during my 12-minute `reindex(reembed=true)` as a **leaked lock guard**; I replaced the consequent (I/O-bound embed loop, with a 9760 → 10518 progress delta as evidence) and carried the antecedent — *a lock is held across the run* — into a queued bug file titled "reindex holds the catalog write lock for 12 minutes". The code refutes it: `ToolContext.catalog` is an in-process `Arc<parking_lot::Mutex<Catalog>>` (`tools/mod.rs:85`) with no lock file anywhere; cross-process safety is `PRAGMA busy_timeout = 5000` over WAL (`catalog/mod.rs:481`); and the mutex is **dropped** before the embed loop (`tools/reindex.rs:346-357`), which awaits the embedder holding nothing and re-takes it per upsert — ~27,762 acquisitions, never a long hold. **Supplying the correct half of a diagnosis is what makes the other half feel checked**: disagreeing about the ending presents the beginning as shared ground rather than as a claim. The surviving bug is real and differently shaped — no caller or observer can distinguish a working long reindex from a wedged one, the gap `index` closed on 2026-08-24 with `running_elsewhere` + `holder_pid` (`05a0548d57664984`) and `librarian` never got |
 | F-108 | 2026-09-03 | med | shared-state | open | **A rebuild plus `/mcp` upgraded 1 MCP server of 15, and I reported the fix as live.** Measured 00:44:02 by `readlink /proc/<pid>/exe` over processes matching `codescout start --debug`: **1** on the image built at 00:42:44, **14** still mapping a deleted pre-fix binary. All 15 share one catalog. `embed_queue_items` writes `artifact_chunk` rows as a side effect of QUEUEING, so any stale server reindexing a **changed** artifact rewrites its rows at body-relative coordinates and silently reverts `36afd405`'s migration for it — which already happened once this session, through my own reindex on the old image (`added: 2, updated: 1`). **The obvious instrument cannot see it:** "did I rebuild and reconnect?" is truthfully yes, and `/mcp` reports success accurately about the one server it owns — the population that matters is per-MACHINE while the instrument is per-SESSION, the same scope error `CLAUDE.md` records for `ListAgents`. Unit stated because a first pass counted the `mux --socket` LSP multiplexers too and got 22. Damage is to reproducibility rather than data: a later benchmark run could move for a reason neither the code nor the catalog explains. Ship the probe, not the resolve — `(deleted)` in `/proc/<pid>/exe` is the whole test and needs no cooperation from the peer |
 | F-106 | 2026-09-02 | high | plan-drift | fixed-verified | **A plan named the wrong file in BOTH the places that name it, so the natural check — does the plan contradict itself? — passed cleanly.** Task 10's Files list said `artifact.rs` for the response builder and its Step 6 staged `artifact.rs src/server.rs`; the builder is in `tools/find.rs`, which that `git add` names nowhere. Only the schema description was where the plan said. **The second mention reads as corroboration of the first** — internal consistency is not evidence of external correctness, and two expressions of one fact fail together because they share an author and one mistake. The shipped failure would have been the expensive shape, not a loud one: a tool schema advertising `matched` (line range, entry token, snippet) beside a build emitting none of it, with `tools/find.rs` simply unmodified and untested, so **the gate stays green**. Caught by one `grep` for `semantic_find` before the first edit, run only because Task 8 had touched a file the plan did not name. Owed by any plan step naming both a file and a `git add`: re-derive the staging line from where the symbol lives. Sibling of `F-105` — same plan, same root, different mechanism, neither catchable from inside the document |
 | F-105 | 2026-09-02 | high | test-rigor | fixed-verified | **A plan specified a complete test that could not fail, and the reason was a fallback the plan never mentions.** Task 9's test asserted only that `context`'s candidate ids hold no duplicate. Two defects were loud (it read `candidate_ids`, a field the tool does not emit; it called two non-existent helpers). The third is the one a careful transcription still ships: the fixture supplied **no embedder and no store**, which routes `context`'s topic branch into a `title\|topic contains` fallback that is **artifact-grain** — so the distinctness assertion is satisfied by the fallback while exercising none of the code under test, and is monotone under narrowing besides, so an empty page satisfies it too. Fix the two loud defects and it is green on a tree with `max_per_artifact` deleted. **The remedy is a fixture property, not an assertion:** the topic string matches no artifact's title or topic, so the fallback returns **zero** rows and a skipped semantic path reds a positive assertion instead of passing in silence. Adds a question the monotone-direction law does not reach — *what runs INSTEAD when this path is unavailable, and does that also pass?* A fallback is not a mutation of the feature, it is a second implementation of the same signature |
@@ -285,6 +286,72 @@ sessions have used:
 Add a new category by writing it as a kebab-case string; no central registry needed.
 
 ---
+
+## F-109 — Corrected a peer's conclusion while inheriting its premise — the reindex holds no lock across the embed loop
+
+**Valid:** dated 2026-09-03
+
+**Observed:** 2026-09-03, scouting before filing the "reindex write-lock disclosure" bug
+
+**When:** A peer session (`codescout-7e`) watched my ~12-minute
+`librarian(action="reindex", reembed=true)` and diagnosed a **leaked lock guard**
+from a low-CPU sleeping process. I corrected the conclusion — the loop was
+I/O-bound on the embedder, and I sent the 9760 → 10518 progress delta as
+evidence. I then queued a bug file titled *"reindex holds the catalog write lock
+for 12 minutes with no progress disclosure."*
+
+**Expected:** That a long reindex holds the catalog write lock for its duration,
+which is what made the peer's observation reasonable and my correction feel like
+a refinement of it.
+
+**Got:** Reading the code refutes the premise both of us were using.
+
+- `ToolContext.catalog` is `Arc<parking_lot::Mutex<Catalog>>`
+  (`src/librarian/tools/mod.rs:85`) — **in-process only**. There is no catalog
+  lock *file*; a grep for `lock_path` / `LOCK_FILE` returns only the LSP mux and
+  `src/retrieval/index_lock.rs` (the code index, a different subsystem).
+- Cross-process serialization is `PRAGMA busy_timeout = 5000` over WAL
+  (`src/librarian/catalog/mod.rs:481`, `:524`) — 5 seconds, not a held guard.
+- The mutex is taken for `index_repo_sync` and **dropped at the closing brace**
+  (`src/librarian/tools/reindex.rs:346-357`). The embed loop that follows
+  (`:368-390`) awaits `svc.embed_artifact(...)` holding **no** catalog lock; each
+  `store.upsert(...)` re-takes it briefly via `SqliteVecArtifactStore`'s own
+  `Arc` (`src/librarian/artifact_store.rs:351`).
+
+So across a 12-minute run the mutex is acquired and released on the order of
+27,762 times and never held long. "Held for 12 minutes" is false.
+
+**Probable cause:** Correcting the *conclusion* of a diagnosis silently ratifies
+its *premise*. The peer's inference was `lock held + low CPU -> leaked guard`; I
+replaced the consequent (`-> I/O-bound loop`) and carried the antecedent forward
+unexamined, because disagreeing about the ending makes the beginning feel like
+shared ground rather than a claim. Being the party who supplied the *correct*
+half is what made it feel checked.
+
+**Workaround:** Read the substrate before filing. The bug that survives is real
+but has a different mechanism — no observer, and no caller, can distinguish a
+working long reindex from a wedged one, because the tool emits nothing until it
+returns. The `index` family fixed exactly this on 2026-08-24 by disclosing
+`running_elsewhere` + `holder_pid`
+(`docs/issues/archive/2026-08-24-index-status-lock-contention-reads-as-failed.md`,
+`05a0548d57664984`); `librarian` never got the equivalent.
+
+**Not concluded:** whether a peer's librarian write actually exceeded the 5000 ms
+`busy_timeout` during my run. A 27k-upsert loop is the workload that could, but I
+have no observation of one, and the peer reported a process symptom rather than a
+`database is locked` error. Left as a thing to check.
+
+**Severity:** med — would have shipped a bug file whose stated mechanism is
+false. A false mechanism is worse than no file: it aims the fix at a lock that is
+not held, and the resulting change would pass review by matching the file.
+
+**Status:** promoted-to-bug-tracker
+
+**Fix idea / Pointer:** `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+
+**Rests on:** the reindex embed loop staying outside the `ctx.catalog.lock()`
+scope at `src/librarian/tools/reindex.rs:346-390`. If that loop is ever moved
+inside the guard, the premise becomes true and this entry inverts.
 
 ## F-N entry template
 
