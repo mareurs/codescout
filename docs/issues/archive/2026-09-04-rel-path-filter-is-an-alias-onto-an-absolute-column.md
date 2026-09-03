@@ -1,10 +1,12 @@
 ---
-id: '9383d8a81b041e26'
+id: d0a4d6e530048d6a
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the rel_path filter is an alias onto an absolute column, so nine of its ten ops are wrong'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-09-04
+unverified: not re-checked against the deployed release binary — the MCP server still runs the pre-fix build until `cargo rb` + /mcp
 ---
 
 ## Summary
@@ -161,37 +163,80 @@ returns the row, `status: fixed`). The zero was the filter, not the backlog.
 
 ## Fix
 
-Not started. Three shapes, and the choice matters because two of them are silent:
+Fixed at **`5253297a`** on `experiments`, patch-id
+**`66b4bcda49601dfee601c6a458d438f5d4891159`**.
 
-- **(a) Normalise the value, not just the field.** Where `field == "rel_path"`, resolve
-  the caller's argument against the scope's `git_root` before binding it, so all ten ops
-  compare like with like. Correct, and the only option that makes the served guide
-  example work as written.
-- **(b) Refuse every op but `contains` on `rel_path`,** with a `RecoverableError` naming
-  the absolute-storage reason and suggesting `contains`. Cheapest, loud, and consistent
-  with `CLAUDE.md` § *Parsers Over a Namespace* — *"Where no escape is affordable, say so
-  at the refusal site"*. Breaks any caller relying on today's `ne`, which is a caller
-  already getting wrong answers.
-- **(c) Documentation only.** Rejected as a standalone: it leaves `ne`/`nin` silently
-  returning excluded rows, and § *Observer Blindness* is explicit that a doc fix for a
-  silent wrong answer publishes to an audience that does not know to read it.
+Option **(a)** from the original plan, but implemented at a different site than that plan
+named — and the difference is the whole point. The plan said *"resolve the caller's
+argument against the scope's `git_root`"*, which would have meant threading a root through
+`compile` → `compile_composition` → `compile_leaf` and updating every caller. Reading the
+code first killed that: `compile` takes only a node, its one production caller
+(`src/librarian/catalog/find.rs`, 4 sites) has no root either, and an **umbrella** query
+spans several repos, so there is no single root to normalise against even in principle.
 
-Recommend **(a)**, with **(b)** as the fallback for ops that cannot be normalised
-meaningfully (the four ordering ops, whose lexicographic meaning over paths is unclear
-either way). Either way the guide example at
-`src/prompts/guides/librarian.md:77` must be re-verified live, not just re-read.
+What shipped instead is **root-agnostic boundary anchoring**, gated on the column exactly
+as BL-47 gated `tags`/`owners` twelve lines above:
 
+| op | before | after |
+|---|---|---|
+| `contains` | `abs_path LIKE '%v%'` | unchanged — was already correct |
+| `prefix` | `abs_path LIKE 'v%'` | `abs_path LIKE '%/v%'` |
+| `eq` | `abs_path = v` | `abs_path LIKE '%/v'` |
+| `ne` | `abs_path != v` | `NOT (abs_path LIKE '%/v')` |
+| `in` | `abs_path IN (…)` | OR of the `eq` form |
+| `nin` | `abs_path NOT IN (…)` | `NOT` of that OR |
+| `gt` `lt` `gte` `lte` | lexicographic on the wrong string | **`RecoverableError`** |
+
+The ordering ops are refused rather than repaired because there is no coordinate system in
+which they mean what they read as. The refusal names the field and points at `prefix` /
+`eq` / `contains`, and at `updated_at` / `created_at` if a range was the actual intent —
+per `CLAUDE.md` § *Parsers Over a Namespace*, *"where no escape is affordable, say so at
+the refusal site"*.
+
+**Residual, stated at the site rather than hidden.** `%/docs/trackers%` also matches a
+nested `…/vendor/docs/trackers/…`. Under the default `scope="project"` the AND'd scope
+clause already pins the root, so this needs a second `docs/trackers` deeper in the same
+tree to bite. Named in the code comment, not only here.
+
+**`eval()` deliberately unchanged.** Its one production caller is
+`src/librarian/tools/get.rs:537`, the `entry_filter` path over augmentation params rows —
+where `rel_path` would be an ordinary user-defined field, not the catalog alias. Remapping
+there would have been a new bug. The parity fixture `eval_matches_compile_on_fixture` now
+carries a comment saying the two engines answer different questions for that one name on
+purpose, so its silence on `rel_path` reads as a decision rather than a gap.
+
+**Budget.** `TOOL_SURFACE_CHAR_BUDGET` raised 37 to the exact measured `56_513`, logged at
+the constant. Gross addition was 180; 143 was paid on the spot by compressing the same
+description's `LIKE '%v%'` / `LIKE 'v%'` idioms, which were verbose *and*, for `rel_path`,
+describing a comparison that no longer happens.
 ## Tests added
 
-None yet. What a real regression test needs, given the two laws the existing one trips:
+`rel_path_filter_matches_rows_whose_stored_path_is_absolute`
+(`src/librarian/filter.rs:839`). Watched RED first — `left: []`, `right: ["t1", "t2"]`,
+which is the live symptom reproduced in a fixture.
 
-- It must **run a query and assert on returned rows**, not on `f.sql`. A SQL-string
-  assertion cannot express either failure.
-- It needs **both directions**: a `prefix` case asserting a non-empty result, and a `ne`
-  case asserting the excluded path is absent. The `prefix` half alone is monotone under
-  the fix and would pass a change that repaired nothing about `ne`.
-- Per-op, not per-field: nine ops share one remap site.
+It satisfies all three requirements this section stated before the fix:
 
+- **Runs queries, asserts on ROWS.** An in-memory table holding absolute paths, the filter
+  compiled and executed, ids compared. The pre-existing
+  `rel_path_filter_compiles_to_abs_path_sql` asserts on `f.sql` and stayed green through
+  every failure above; it is kept, because it still pins the field remap itself.
+- **Both directions.** `prefix` / `eq` / `in` assert non-empty results; `ne` / `nin`
+  assert the named row is absent. The second half is the one a prefix-only test is
+  monotone under.
+- **Per-op, not per-field.** Six ops across one remap site.
+
+Plus `contains` as a **regression anchor** in the same test: without it, a fix could repair
+the other five by breaking the one op every existing caller relies on, and nothing would
+say so.
+
+`rel_path_rejects_the_ordering_ops_it_cannot_mean` (`src/librarian/filter.rs:925`) — all
+four ordering ops refused, each refusal asserted to name the field. Also watched RED
+(``gt` on rel_path must be refused`).
+
+The fixture's absolute paths carry an on-line annotation saying they are load-bearing and
+what breaks if they are “tidied” to relative form — that edit would leave the test passing
+and no longer discriminating, which no assertion can catch.
 ## Workarounds
 
 **Use `contains` for every path filter.** It is the only op whose meaning survives the
@@ -205,18 +250,21 @@ with no signal.
 
 ## Resume
 
-Decide between fix (a) and (b) — see § *Fix*. If (a): the change is at
-`src/librarian/filter.rs:146-152`, where `compile_leaf` needs the scope's `git_root` in
-hand to normalise the bound value; check whether `compile()` has it or whether the root
-must be threaded in from `find.rs`. Write the two-direction test in § *Tests added*
-first and watch both halves fail. Then re-run
-`doc(action="find", filter={"rel_path": {"prefix": "docs/trackers"}})` live and confirm
-it returns ~101 rows, because that exact call is the served guide example.
+N/A for the fix. One thing deliberately left, recorded in frontmatter as `unverified:`:
+the live MCP surface still runs the pre-fix **release** binary, so
+`doc(action="find", filter={"rel_path": {"prefix": "docs/trackers"}})` will keep returning
+`0` from a session until someone runs `cargo rb` and reconnects with `/mcp`. Expected, not
+a regression. After that rebuild the call should return ~101 rows, and that is the
+end-to-end confirmation the unit test cannot give.
 
-Also reconcile `rel_path_hint` (`src/librarian/tools/find.rs:463`) with whichever
-semantics win — it currently accepts `prefix` and applies relative matching, so under
-fix (b) it accepts an op the query layer refuses.
-
+One adjacent defect noticed while reading `compile_leaf` and **not** fixed here, because
+it is a different mechanism and mixing them would muddy the diff: `LeafOp::Contains` binds
+its value with no `escape_like_pattern` call and emits no `ESCAPE` clause, while
+`LeafOp::Prefix` immediately below it does both. So `{"title": {"contains": "50%"}}`
+over-matches, and `eval` — which does a plain substring test — disagrees with `compile`
+about it. The parity fixture `eval_matches_compile_on_fixture` holds a row titled
+`"50% off sale"` and exercises `prefix: "50%"` against it, commented `%-escape parity`,
+without ever trying `contains`. Worth its own bug file; verify before filing.
 ## References
 
 - `src/librarian/filter.rs:146-152` (remap), `:827-837` (the narrow guard test)
