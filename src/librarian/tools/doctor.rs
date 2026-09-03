@@ -77,7 +77,9 @@
 //! required `root=` argument) prunes every `artifact` + `commits` row anchored
 //! under a dead/renamed repo root — cascade-safe through codescout's own
 //! (vec0-linked) connection, which a bare `sqlite3` CLI cannot do (7ca71bf7).
-//! Output is a JSON report with `violations` + `summary` (per-check counts); a
+//! Output is a JSON report with `violations` + `summary` (per-check counts,
+//! plus `total` / `defects` / `informational` — `defects` is the one a gate
+//! acts on); a
 //! fix run returns `pruned` counts instead.
 //!
 //! A second opt-in fix, `fix=reseat_worktree`, consumes `scan_worktree_scoped`
@@ -167,6 +169,44 @@ macro_rules! declare_checks {
             }
         }
     };
+}
+
+/// How many of these rows are **defects** — `summary.defects`, and the number
+/// `codescout doctor --fail-on-violations` gates on.
+///
+/// A free function rather than an inline `filter().count()` inside `call()` so a test
+/// can run the real scan, feed it the real `Violation`s and assert on the real
+/// predicate. Inlined, the only reachable assertion would have been about a
+/// hand-written summary object — a second implementation asserting about itself.
+pub fn defect_count(violations: &[Violation]) -> usize {
+    violations
+        .iter()
+        .filter(|v| !Check::from_wire(&v.check).is_some_and(Check::is_informational))
+        .count()
+}
+
+impl Check {
+    /// Whether this check reports something that is **not a defect**.
+    ///
+    /// `Violation` has no severity axis and deliberately still does not: its serialized
+    /// shape is read by other consumers, so the informational/defect split lives here,
+    /// beside the check names, rather than as a new field on every row.
+    ///
+    /// Exactly one check qualifies today. `claim_held_by_live_session` fires on the
+    /// feature's *success* state — a bug correctly claimed by a session that is still
+    /// running — and exists only to carry the paste-ready `SendMessage` address. Counting
+    /// it as drift made `codescout doctor --fail-on-violations` exit 1 on a healthy repo,
+    /// i.e. the gate reporting the intended outcome as a failure.
+    ///
+    /// Adding a variant here silently changes two published numbers (`summary.defects`
+    /// and the CLI's exit code), and neither the compiler nor
+    /// `summary_total_partitions_by_check` can notice — `total` still partitions
+    /// `by_check` either way. So the bar is the one this check meets: the emitted row's
+    /// own first word tells a reader it is not a defect, and there is no edit to the
+    /// repo that would make it stop firing.
+    pub fn is_informational(self) -> bool {
+        matches!(self, Check::ClaimHeldByLiveSession)
+    }
 }
 
 declare_checks! {
@@ -425,14 +465,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // The reader half of `status: taken`. Without this line the check compiles, its own
     // tests pass, and `librarian(action="doctor")` never calls it — which is exactly the
     // failure mode the status exists to make visible.
-    if let Some(home) = crate::platform::home_dir() {
-        all_violations.extend(scan_claim_liveness(
-            ctx,
-            &cat.conn,
-            &crate::librarian::session_registry::default_profile_dirs(&home),
-            &crate::librarian::session_registry::RealProcProbe,
-        )?);
-    }
+    //
+    // Called UNCONDITIONALLY, with an empty profile list where `home_dir()` yields
+    // nothing. Gating this on `if let Some(home)` reproduced that same failure mode in
+    // the registration line itself: with `$HOME` unset the whole check went silent and a
+    // repo full of dead claims was indistinguishable from a clean one. `claim_without_
+    // claimant` needs no registry at all and was suppressed with the rest. An empty list
+    // degrades honestly instead — every claim resolves `UnresolvableHere`, and the detail
+    // says no registries were found rather than naming an empty scope.
+    all_violations.extend(scan_claim_liveness(
+        ctx,
+        &cat.conn,
+        &crate::platform::home_dir()
+            .map(|h| crate::librarian::session_registry::default_profile_dirs(&h))
+            .unwrap_or_default(),
+        &crate::librarian::session_registry::RealProcProbe,
+    )?);
 
     // Ruling 17 for the row-grain checks that carry no per-row state, applied as one
     // filter over the finished list rather than five scoping blocks.
@@ -576,6 +624,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
     let total_violations = all_violations.len();
+
+    // The defect/informational split, published as two more numbers rather than as a
+    // redefinition of `total`. `total` still means "rows emitted" and still partitions
+    // `by_check`; `defects` is the number a gate should act on.
+    //
+    // Why both: `claim_held_by_live_session` fires on the claim feature's SUCCESS state,
+    // so before this split `codescout doctor --fail-on-violations` exited 1 on a healthy
+    // repo, and `summary.total` — the number readers quote as "catalog drift" — counted
+    // rows the check's own first word calls non-defects. Silently narrowing `total` would
+    // have traded one wrong number for another: a reader asking "how many rows will I
+    // see?" needs the old meaning, and a reader asking "is anything wrong?" needs the new
+    // one. Neither is derivable from the other without this pair, so both ship.
+    let informational_violations = total_violations - defect_count(&all_violations);
+    let defect_violations = total_violations - informational_violations;
 
     // Cap the emitted `abs_path_outside_managed_roots` rows. On a catalog
     // spanning several projects this check legitimately fires for every row
@@ -801,6 +863,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "violations": all_violations,
         "summary": {
             "total": total_violations,
+            "defects": defect_violations,
+            "informational": informational_violations,
             "shown": all_violations.len(),
             "by_check": by_check,
         },
@@ -5514,7 +5578,9 @@ fn scan_unterminated_fence(
 /// **Three liveness outcomes, all reported, only two of them defects.**
 /// `claim_held_by_live_session` is INFORMATIONAL and says so in its first word — it exists
 /// to carry the paste-ready `to:` address, which is how a reader asks the holder rather
-/// than guessing. `claim_held_by_dead_session`'s remedy is a demotion to `investigating` —
+/// than guessing. It is declared non-defect in [`Check::is_informational`], so it is
+/// excluded from `summary.defects` and from `codescout doctor --fail-on-violations` —
+/// otherwise the feature's SUCCESS state fails a gate-shaped command. `claim_held_by_dead_session`'s remedy is a demotion to `investigating` —
 /// *not* `open`, because work probably happened and the body records it.
 /// `claim_unresolvable_here` is a separate check rather than a flavour of dead: it needs a
 /// different fix, and on any second machine EVERY foreign claim lands there, so reporting
@@ -5536,7 +5602,10 @@ fn scan_unterminated_fence(
 /// work stands, which this check cannot make.
 ///
 /// Registry dirs and the process probe are **parameters**, not ambient lookups, so tests
-/// need no real sessions.
+/// need no real sessions. An EMPTY `profile_dirs` is a supported input, not a bug: the
+/// caller passes one whenever `home_dir()` yields nothing, and every claim then resolves
+/// `claim_unresolvable_here` with a detail naming that condition. Degrading loudly is the
+/// point — skipping the scan would make a claim-laden repo look clean.
 fn scan_claim_liveness(
     ctx: &ToolContext,
     conn: &rusqlite::Connection,
@@ -5561,11 +5630,6 @@ fn scan_claim_liveness(
     }
 
     let registry = SessionRegistry::load(profile_dirs);
-    let searched = profile_dirs
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
 
     let mut out = Vec::new();
     for (id, abs_path) in &rows {
@@ -5630,6 +5694,13 @@ fn scan_claim_liveness(
                         "a process with that pid exists but started at a different time, so the \
                          pid was recycled onto a stale row"
                     }
+                    DeadReason::StartUnrecorded => {
+                        "a process with that pid exists, but the registry row records no \
+                         `procStart`, so nothing distinguishes it from an unrelated process \
+                         that inherited the pid — liveness is UNDETERMINABLE here, not \
+                         disproven, and the claim is reported as unbacked because an \
+                         unverifiable claim is worth what an unverified one is worth"
+                    }
                 };
                 let who = name.unwrap_or_else(|| "unnamed".to_string());
                 out.push(Violation::new(
@@ -5646,14 +5717,34 @@ fn scan_claim_liveness(
                     ),
                 ));
             }
-            ClaimLiveness::UnresolvableHere { .. } => {
+            ClaimLiveness::UnresolvableHere { profiles_searched } => {
+                // The scope clause is read from the registry's OWN record of what it
+                // searched, not recomputed from `profile_dirs` here — one source, so the
+                // two can never drift into a report that names a scope nobody looked in.
+                //
+                // The empty case is the whole reason this is a branch. `profiles_searched`
+                // is empty on any host with no `.claude*` directory (a CI runner, a
+                // container, a second machine), and the old `({searched})` rendered
+                // "… on this machine ()." — an empty parenthetical, in the one check that
+                // cites `docs/adrs/2026-08-27-negative-results-name-their-scope.md` by
+                // name. An unnamed scope is exactly what that ADR forbids.
+                let scope = if profiles_searched.is_empty() {
+                    "no Claude Code session registries (`<home>/.claude*/sessions`) exist on \
+                     this host at all, so NO claim can be resolved here and this row says \
+                     nothing whatsoever about this particular claim"
+                        .to_string()
+                } else {
+                    format!(
+                        "it appears in none of the session registries on this machine ({})",
+                        profiles_searched.join(", ")
+                    )
+                };
                 out.push(Violation::new(
                     "claim_unresolvable_here",
                     Some(id.clone()),
                     abs_path.clone(),
                     format!(
-                        "status is `taken`, claimed by session `{sid}`, which appears in none of \
-                         the session registries on this machine ({searched}). This is NOT \
+                        "status is `taken`, claimed by session `{sid}`: {scope}. This is NOT \
                          evidence the claim is dead — a claim made on another host is \
                          unresolvable here by construction. Check on the claiming machine, or \
                          demote to `investigating` if the work has been abandoned."
@@ -13931,6 +14022,13 @@ body
     }
 
     /// `live_pid: None` means nothing is running and no socket exists.
+    ///
+    /// `starttime` is **inert in every test that passes `live_pid: None`** — with no live
+    /// pid the closure below never yields it, so those fixtures' `starttime` values carry
+    /// no coverage and changing them proves nothing. It is load-bearing in exactly two
+    /// places: `a_live_claim_…` (equal to the row's `procStart`, which is what makes the
+    /// claim Live) and `a_recycled_pid_…` (deliberately unequal, which is what makes it
+    /// `PidReused` rather than `SocketAbsent`).
     struct TestProbe {
         live_pid: Option<i64>,
         starttime: String,
@@ -13997,7 +14095,7 @@ body
         let ctx = ctx_rooted_at(cat, &root);
         let probe = TestProbe {
             live_pid: None,
-            starttime: "555".into(),
+            starttime: "555".into(), // inert: `live_pid: None` means it is never yielded.
         };
 
         let v = {
@@ -14078,21 +14176,26 @@ body
         let ctx = ctx_rooted_at(cat, &root);
         let probe = TestProbe {
             live_pid: None,
-            starttime: "1".into(),
+            starttime: "1".into(), // inert: `live_pid: None` means it is never yielded.
         };
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            scan_claim_liveness(&ctx, &cat.conn, std::slice::from_ref(&sessions), &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(
             v[0].check, "claim_unresolvable_here",
             "must NOT be reported as a dead claim"
         );
+        // The SEEDED path, not the substring `.claude`: every host has a `.claude`
+        // somewhere, so a hardcoded literal in the message would have satisfied the
+        // weaker assertion while naming a scope this scan never searched.
         assert!(
-            v[0].detail.contains(".claude"),
-            "a negative result must name the scope searched: {}",
+            v[0].detail.contains(&sessions.display().to_string()),
+            "a negative result must name the directories actually searched \
+             (expected {}): {}",
+            sessions.display(),
             v[0].detail
         );
     }
@@ -14106,7 +14209,7 @@ body
         let ctx = ctx_rooted_at(cat, &root);
         let probe = TestProbe {
             live_pid: None,
-            starttime: "1".into(),
+            starttime: "1".into(), // inert: `live_pid: None` means it is never yielded.
         };
 
         let v = {
@@ -14125,6 +14228,12 @@ body
         );
     }
 
+    /// Only `status: taken` is examined.
+    ///
+    /// `assert!(v.is_empty())` alone is monotone under removal — a `scan_claim_liveness`
+    /// that returned `Ok(vec![])` unconditionally, or one never reached at all, would
+    /// pass it. The fourth bug is the positive control: the scan must find `d` and
+    /// exactly `d`, so the test discriminates "filters correctly" from "finds nothing".
     #[tokio::test]
     async fn non_taken_statuses_are_not_examined() {
         let (_tmp, root, _live) = git_fixture_with_commit();
@@ -14146,18 +14255,286 @@ body
             "claimed_by: sid-dead\n",
             "body\n",
         );
+        // The positive control. Same fixture, same claimed_by, same everything the three
+        // above carry — only `status` differs, so its presence in the output isolates the
+        // status filter as the discriminator. Remove it and this test can no longer tell
+        // a working scan from a dead one.
+        seed_live_bug(
+            &cat,
+            &root,
+            "d",
+            "taken",
+            "claimed_by: sid-dead\n",
+            "body\n",
+        );
         let sessions = seed_session(&root, "sid-other", 1, "1");
         let ctx = ctx_rooted_at(cat, &root);
         let probe = TestProbe {
             live_pid: None,
-            starttime: "1".into(),
+            starttime: "1".into(), // inert: `live_pid: None` means it is never yielded.
         };
 
         let v = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
         };
-        assert!(v.is_empty(), "only `taken` is in scope: {v:#?}");
+        assert_eq!(
+            v.len(),
+            1,
+            "exactly the `taken` bug is in scope, and it MUST be found: {v:#?}"
+        );
+        assert!(
+            v[0].path.ends_with("d.md"),
+            "the one finding must be the `taken` bug, not one of the other three: {v:#?}"
+        );
+    }
+
+    /// M11: `DeadReason::ProcessGone` reaching the DOCTOR message.
+    ///
+    /// `session_registry` pins the production conjunction that produces the variant; what
+    /// was unpinned is this module's `match reason` arm, so swapping its string with
+    /// `SocketAbsent`'s stayed green. Reached by making the socket exist while the process
+    /// does not — the one input shape the other tests here cannot produce, since they all
+    /// use `live_pid: None`, which kills the socket and the process together.
+    #[tokio::test]
+    async fn a_gone_process_names_a_gone_process_not_an_absent_socket() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "gone",
+            "taken",
+            "claimed_by: sid-gone\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-gone", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &root);
+        // Socket present, process absent — the exact conjunction `ProcessGone` needs.
+        struct SocketButNoProcess;
+        impl crate::librarian::session_registry::ProcProbe for SocketButNoProcess {
+            fn starttime(&self, _pid: i64) -> Option<String> {
+                None
+            }
+            fn socket_exists(&self, _path: &str) -> bool {
+                true
+            }
+        }
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &SocketButNoProcess).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_held_by_dead_session");
+        assert!(
+            v[0].detail.contains("no such process is running"),
+            "must name the gone process: {}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("its messaging socket is gone")
+                && !v[0].detail.contains("pid was recycled"),
+            "must not borrow another arm's reason: {}",
+            v[0].detail
+        );
+    }
+
+    /// M1/M7: a row with NO `procStart` must not be described as a recycled pid.
+    ///
+    /// Both inputs used to take one arm, so the message asserted "the pid was recycled
+    /// onto a stale row" about a row where the code had observed no start time at all.
+    /// Paired with `a_recycled_pid_names_pid_reuse_as_the_reason` above, which holds the
+    /// other direction: collapsing the variants back makes exactly one of the two red.
+    #[tokio::test]
+    async fn a_row_with_no_procstart_says_undeterminable_not_recycled() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "nostart",
+            "taken",
+            "claimed_by: sid-nostart\n",
+            "body\n",
+        );
+        // Deliberately written without `seed_session`, because the omitted `procStart`
+        // IS the fixture: restoring that key moves this test onto the Live path and it
+        // stops testing anything.
+        let dir = root.join(".claude").join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("77.json"),
+            r#"{"pid":77,"sessionId":"sid-nostart","cwd":"/repo",
+                 "messagingSocketPath":"/sock/77.sock","name":"codescout-zz"}"#,
+        )
+        .unwrap();
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: Some(77),
+            // Load-bearing: a live pid makes this value reachable, so the ONLY thing
+            // keeping the row off the Live path is the missing `procStart`.
+            starttime: "555".into(),
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[dir], &probe).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "claim_held_by_dead_session");
+        assert!(
+            v[0].detail.contains("UNDETERMINABLE"),
+            "must say liveness could not be determined: {}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("pid was recycled onto a stale row"),
+            "must NOT assert reuse the code never observed: {}",
+            v[0].detail
+        );
+    }
+
+    /// Important 4: on a host with no `.claude*` directory — a CI runner, a container, a
+    /// second machine — the searched list is EMPTY and the detail used to render
+    /// "… on this machine ()." An empty parenthetical is an unnamed scope, in the one
+    /// check that cites the name-your-scope ADR by name. Also the Important 5 input: this
+    /// is exactly what `home_dir() == None` now hands the scan.
+    #[tokio::test]
+    async fn an_empty_registry_set_names_that_condition_not_empty_parens() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "homeless",
+            "taken",
+            "claimed_by: sid-anything\n",
+            "body\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(), // inert: `live_pid: None` means it is never yielded.
+        };
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[], &probe).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "the check must still run with zero registries, not go silent: {v:#?}"
+        );
+        assert_eq!(v[0].check, "claim_unresolvable_here");
+        assert!(
+            !v[0].detail.contains("()"),
+            "must not render an empty parenthetical: {}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("no Claude Code session registries")
+                && v[0].detail.contains("exist on this host"),
+            "must name the empty-registry condition itself: {}",
+            v[0].detail
+        );
+    }
+
+    /// Important 3: the informational row must not be counted as a defect.
+    ///
+    /// Runs the REAL scan and the REAL `defect_count`, so a mutation to either is red.
+    /// The dead claim is the positive control: without it, `defect_count` hardwired to
+    /// `0` would pass.
+    #[tokio::test]
+    async fn a_live_claim_is_informational_and_a_dead_one_is_a_defect() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "held",
+            "taken",
+            "claimed_by: sid-live\n",
+            "body\n",
+        );
+        let sessions = seed_session(&root, "sid-live", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &root);
+        let probe = TestProbe {
+            live_pid: Some(4242),
+            starttime: "555".into(), // load-bearing: equal to the row's procStart => Live.
+        };
+
+        let live_only = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, std::slice::from_ref(&sessions), &probe).unwrap()
+        };
+        assert_eq!(live_only.len(), 1, "{live_only:#?}");
+        assert_eq!(live_only[0].check, "claim_held_by_live_session");
+        assert_eq!(
+            defect_count(&live_only),
+            0,
+            "a correctly-held claim is the feature's SUCCESS state and must not be a \
+             defect — counting it made `--fail-on-violations` exit 1 on a healthy repo"
+        );
+
+        // Positive control: add a claim whose session is not in the registry.
+        {
+            let guard = ctx.catalog.lock();
+            seed_live_bug(
+                &guard,
+                &root,
+                "orphan",
+                "taken",
+                "claimed_by: sid-nowhere\n",
+                "body\n",
+            );
+        }
+        let both = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert_eq!(both.len(), 2, "{both:#?}");
+        assert_eq!(
+            defect_count(&both),
+            1,
+            "the informational row is excluded and the real one is not: {both:#?}"
+        );
+    }
+
+    /// `summary` must publish BOTH numbers. A reader asking "how many rows will I see?"
+    /// needs `total`; one asking "is anything wrong?" needs `defects`. Neither is
+    /// derivable from the other, so redefining `total` in place would have traded one
+    /// wrong number for another.
+    #[tokio::test]
+    async fn summary_publishes_defects_and_informational_beside_total() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "e2e-split",
+            "taken",
+            "claimed_by: sid-0000-no-such-session-anywhere\n",
+            "body\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        let s = &out["summary"];
+        let total = s["total"].as_u64().expect("summary.total");
+        let defects = s["defects"].as_u64().expect("summary.defects");
+        let informational = s["informational"].as_u64().expect("summary.informational");
+
+        assert_eq!(
+            defects + informational,
+            total,
+            "the two must partition `total`, or a reader cannot recover either: {s:#?}"
+        );
+        assert!(
+            defects >= 1,
+            "an unresolvable claim IS a defect and must be counted as one: {s:#?}"
+        );
     }
 
     /// Guards the registration line, which no test above can observe. Deterministic on

@@ -53,9 +53,21 @@ pub enum DeadReason {
     SocketAbsent,
     /// No such process.
     ProcessGone,
-    /// A process with that pid exists but started at a different time: the pid was
-    /// recycled onto a stale row.
+    /// A process with that pid exists, and the row records a `procStart` that
+    /// **disagrees** with it: the pid was recycled onto a stale row.
+    ///
+    /// Split from [`DeadReason::StartUnrecorded`] because the two support different
+    /// claims. Reuse is *observed* here — two timestamps that differ. It is only
+    /// *unruled-out* there, and one arm covering both made the doctor message assert
+    /// a recycled pid in a case where the code had seen no evidence of one.
     PidReused,
+    /// A process with that pid exists, but the row records **no** `procStart`, so
+    /// nothing distinguishes it from an unrelated process that inherited the pid.
+    ///
+    /// **Liveness is undeterminable here, not disproven.** The claim is treated as
+    /// unbacked — an unverifiable claim is worth what an unverified one is worth —
+    /// but the reason string must say *that*, and not assert reuse nobody measured.
+    StartUnrecorded,
 }
 
 /// The outcome of resolving one `claimed_by`.
@@ -65,8 +77,9 @@ pub enum ClaimLiveness {
         pid: i64,
         name: Option<String>,
         cwd: Option<String>,
-        socket: String,
-        /// Ready to paste into `SendMessage(to: …)`.
+        /// Ready to paste into `SendMessage(to: …)`. The bare socket path is
+        /// deliberately NOT carried alongside it: every consumer wants the pasteable
+        /// form, and a second field nobody reads is a shape promise with no reader.
         address: String,
     },
     Dead {
@@ -236,10 +249,11 @@ impl SessionRegistry {
                 name: row.name.clone(),
                 cwd: row.cwd.clone(),
                 address: format!("uds:{socket}"),
-                socket,
             },
-            // A row with no recorded start cannot rule out reuse, so it is not Live.
-            _ => dead(DeadReason::PidReused),
+            // A recorded start that disagrees: reuse is observed, not merely possible.
+            Some(_) => dead(DeadReason::PidReused),
+            // No recorded start at all: reuse can be neither ruled out nor shown.
+            None => dead(DeadReason::StartUnrecorded),
         }
     }
 }
@@ -317,6 +331,39 @@ mod tests {
             ),
             "a recycled pid must not report Live"
         );
+    }
+
+    /// A row with NO `procStart` reaches its own reason, not `PidReused`.
+    ///
+    /// Before the split, this input and the recycled-pid input above took the same arm,
+    /// so the doctor message asserted "the pid was recycled onto a stale row" about a
+    /// row that records no start time at all — a claim the code cannot support. This
+    /// test is what makes collapsing the two arms back together a red.
+    #[test]
+    fn a_row_with_no_procstart_is_undeterminable_not_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Deliberately omits `procStart` — that omission IS the fixture; `serde(default)`
+        // makes it `None`, which is the only state this test can reach its arm through.
+        // Restoring the key here would silently move the test onto the Live path.
+        let dir = seed_profile(
+            tmp.path(),
+            ".claude",
+            r#"{"pid":31,"sessionId":"sid-nostart","cwd":"/repo",
+                 "messagingSocketPath":"/sock/31.sock","name":"codescout-aa"}"#,
+        );
+        let reg = SessionRegistry::load(&[dir]);
+        let probe = FakeProbe {
+            // Process and socket both present, so only the missing `procStart` decides.
+            starttimes: HashMap::from([(31, "5".to_string())]),
+            sockets: vec!["/sock/31.sock".to_string()],
+        };
+        match reg.resolve("sid-nostart", &probe) {
+            ClaimLiveness::Dead {
+                reason: DeadReason::StartUnrecorded,
+                ..
+            } => {}
+            other => panic!("expected Dead{{StartUnrecorded}}, got {other:?}"),
+        }
     }
 
     #[test]
