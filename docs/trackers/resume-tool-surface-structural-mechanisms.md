@@ -296,7 +296,8 @@ before it ships — though at 16 calls per 30 days the blast radius is now known
 
 ## SM-3 — Move de-duplicable protective prose into `server_instructions`
 
-**Status:** open
+**Status:** **REFUTED 2026-09-03** — on both halves, by measurement and by a prior eval.
+Do not re-propose without reading § *Why, in two independent parts* below.
 
 `instructions` in `InitializeResult` is a **pre-call** channel: it lands in the system
 prompt before any tool call, and codescout already ships it. Crucially it is **shared
@@ -310,10 +311,73 @@ ordering**, not raw bytes. Do not scope this as a byte saving.
 Client support is uneven (there is an open request for Claude Desktop to consume it), so
 this is a Claude-Code-and-some-hosts channel, not universal.
 
-**Valid:** conditional — the 1,900-char `server_instructions` slice cap stands
+### Why, in two independent parts — either alone is fatal
 
-**Rests on:** `src/prompts/README.md` § *Surfaces*; the MCP `InitializeResult.instructions`
-definition.
+**1. There is no capacity.** Measured 2026-09-03 off the live wire (`initialize` →
+`result.instructions`): the static slice is **1,696 chars against the 1,900 cap — 204 chars
+of headroom**, and production renders 1,827 with the dynamic Project Status block, 221
+short of the 2,048 client cliff. The prose this entry proposed to move is **2,069 chars**
+(`doc.patch` 1,126 + `doc.new_rel_path` 509 + `edit_file.action` 434). That is a **10×
+overflow**. Note the unit: 2,069 is the *description strings*; the same three cost **2,237**
+as serialized wire property objects. Both are right, they answer different questions, and
+the earlier form of this entry quoted the second under the name of the first.
+
+**2. The premise is false: the surface is not duplicated.** Measured by 8-word shingles
+over all **308** description strings (36,540 chars): only **18 of 3,328 distinct shingles
+(0.54%)** appear in two or more descriptions. The three blocks above are not copies of each
+other — they are three different mechanisms — and `doc.patch` *already* de-duplicates
+against `edit_file` by pointing at it (*"edit_file's heading-addressed batch shape
+exactly"*) rather than restating it. There is nothing to state once.
+
+### The one real duplicate is settled, and cutting it is REFUTED by eval
+
+The shingle run surfaces exactly one large repeat: the injected `workspace` param, **one
+distinct 132-char sentence on 18 of 21 tools** — 2,376 chars of prose, **2,244 of it
+redundant**, 3,204 as serialized properties (5.7% of the surface). It is the obvious
+compaction target and it must not be cut.
+
+`prompt-hamsa-audit-log:A-28` already ran it: four arms, 10 runs each, sonnet pinned,
+against a **live `tools/list` capture** rather than a hand-written fixture. Base (132
+chars) **10/10**; treatment (53 chars, routing clause dropped) **8/10**; control-null
+(description removed) 9/10; control-positive (directive forbidding the pin) **0/10**, which
+is what proves the channel binds and the run is not void. The pre-registered rule required
+`treatment ≥ base − 1`; it got 8. **Verdict KEEP** — 1,896 chars deliberately not cut.
+
+**The mechanism is the finding, and it generalises past this string.** Every failure in
+treatment and control-null was the same one, and none occurred in base: the model reached
+for `workspace(action="activate", path=…)`. Activation is **global**, so with a parent
+session concurrently working the active project that clobbers it — the exact condition the
+per-call pin exists to prevent. The clause is not *describing* the parameter, it is
+**displacing a competing prior**.
+
+> Ask of a candidate sentence not *"is this redundant?"* but **"does this DESCRIBE the
+> parameter, or DISPLACE something the model would otherwise reach for?"** The second kind
+> is invisible to n-gram redundancy analysis.
+
+That blindness is not hypothetical here. This session reached the `workspace` string **by
+running exactly the n-gram analysis A-28 names as the trap**, and would have proposed the
+cut had `grep` not surfaced the audit. Recorded as a confirmation, not a catch: A-28 states
+that once `workspace` and the A-27 clauses are set aside, remaining cross-tool duplication
+is **~300 chars**. Today's independent shingle run puts 396 words inside a repeated span,
+of which the 18 `workspace` copies account for ~342 — leaving ~54 words ≈ **300 chars**.
+Same number, different instrument, derived without reading A-28 first.
+
+### What survives
+
+Nothing that is an *edit*. The 204 chars of headroom could hold one more line, but
+`src/prompts/README.md` rule 1 caps hard rules at 5–8 and the slice already carries 6 Iron
+Laws plus a quickref, and this repo does not ship prompt changes without an arm (A-20–A-29
+are that discipline). Any residual is therefore a **new pre-registration**, which is what
+SM-4 already is. **The ~2,155–2,237 B of pinned protective prose stays pinned**, and the
+routing-vs-describing question above is the tool for judging the next candidate.
+
+**Valid:** invariant — the two refuting measurements are structural (a 204-char headroom
+against a 2,069-char payload; 0.54% shingle repetition), and A-28's verdict is a
+pre-registered eval result, not a snapshot. Re-derive the headroom before quoting it.
+
+**Rests on:** `src/prompts/README.md` § *Surfaces* and rule 8 (`STATIC_SLICE_CHAR_BUDGET =
+1900`, `src/prompts/mod.rs`); `prompt-hamsa-audit-log:A-28`; the MCP
+`InitializeResult.instructions` definition.
 
 ## SM-4 — Run the A/B nobody has run: enum-dispatched `doc` vs split per-action tools
 

@@ -9,7 +9,7 @@ tags:
 - compaction
 topic: prompt-surfaces
 entry_high_water_F: 9
-entry_high_water_W: 16
+entry_high_water_W: 17
 entry_prefix:
 - F
 - W
@@ -102,6 +102,7 @@ entry_prefix:
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
 | W-15 | 2026-09-02 | med | A substring join on `input_json` reads a value as a key — join on the key (`json_extract`) and read the rows before publishing a count | A bug file would have opened with "8 field instances in 30 days" for a defect with 0 real ones; a second join the same hour read 48 for a real count of 1 | open |
 | W-16 | 2026-09-03 | med | Price a schema restructuring against its own scaffolding before proposing it — compare the bytes the new shape *requires* against the bytes the old shape spends on the same fact | Would have shipped `oneOf` narrowing on `doc` as a size reduction: +2,022 chars at the optimal encoding, ~2× the whole five-tool collapse's saving and in the opposite direction — and provably unwinnable, since 17 minimal branches (794) already exceed every action-qualifier prefix in the tool (616) | validated |
+| W-17 | 2026-09-03 | high | Ask of a candidate cut "does this DESCRIBE the parameter, or DISPLACE something the model would otherwise reach for?" — redundancy analysis is structurally blind to the second, and routes you straight at it | Would have proposed cutting the `workspace` routing clause — the surface's largest duplicate at 2,244 redundant chars across 18 tools — which `prompt-hamsa-audit-log:A-28` had already measured at 8/10 against base 10/10 and marked KEEP; every failure was the model reaching for global `activate`, which clobbers a concurrent parent on a machine running 16 sessions. The proposal would have carried a correctly-derived number and read as the session's strongest finding | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -1891,6 +1892,55 @@ schema edits and flips only if those two diverge. Derivation: `scripts/probe_too
 `crate::tools::param_probe::sweep`.
 
 **Status:** validated — one datapoint, arithmetically bounded rather than sampled.
+
+## W-17 — n-gram redundancy analysis cannot see a clause that DISPLACES a prior, and it routed me to the one string an eval had already saved
+
+**Observed:** SM-3 asked to move "de-duplicable protective prose" into
+`server_instructions`. Testing the premise rather than the plan, an 8-word-shingle run over
+all 308 description strings on the live surface found only **0.54%** cross-description
+repetition — and essentially all of it in **one** string: the injected `workspace` param,
+132 chars on 18 of 21 tools, **2,244 redundant chars**, 3,204 as serialized properties.
+That is the single largest compaction lever on the surface and I was one step from
+proposing it.
+
+`grep` for the sentence hit `prompt-hamsa-audit-log:A-28`, which had already run it: four
+arms × 10 runs against a **live `tools/list` capture**. Base (132 chars) 10/10, treatment
+(routing clause dropped) **8/10**, control-positive 0/10 proving the channel binds.
+Pre-registered rule `treatment ≥ base − 1` not met. **Verdict KEEP.**
+
+**Why it is load-bearing:** every failure was the same one and none occurred in base — the
+model reached for `workspace(action="activate", …)`, which is **global** and clobbers a
+concurrently-working parent. The clause does not describe the parameter, it **displaces a
+competing prior**.
+
+**Counterfactual — concrete, not rhetorical.** Without the grep I would have proposed
+cutting a clause already measured at 8/10 vs 10/10, on a machine documented to run 16
+concurrent sessions across 3 profiles (CLAUDE.md § *Reaching a Peer Session*) — i.e.
+reintroducing a cross-session clobber in the exact population that suffers it. The proposal
+would have arrived carrying a real number (2,244 redundant chars, derived correctly) and
+looked like the strongest finding of the session.
+
+**The transferable half.** A-28 names the trap in its own text: *"the second kind is
+invisible to n-gram redundancy analysis — which is exactly how it nearly got cut here."* I
+reached the string **by running that analysis**, which makes this an independent
+reproduction of the predicted failure path rather than a near-miss. Redundancy analysis
+answers *"is this repeated?"*; the question that decides a cut is **"does this DESCRIBE the
+parameter, or DISPLACE something the model would otherwise reach for?"** — and no
+byte-counting instrument can express the second.
+
+**Published as a denominator, not a catch** (CLAUDE.md § *Testing Discipline*): the scout
+also **confirmed** A-28's residual figure independently. It records ~300 chars of remaining
+cross-tool duplication once `workspace` and the A-27 clauses are set aside; today's shingle
+run puts 396 words in repeated spans, of which the 18 `workspace` copies are ~342, leaving
+~54 words ≈ 300 chars. Same number, different instrument, derived before reading A-28.
+
+**Valid:** invariant
+
+**Rests on:** `prompt-hamsa-audit-log:A-28` (pre-registered four-arm eval, verdict KEEP);
+`src/server.rs::inject_workspace_param`; the shingle measurement recorded in
+`resume-tool-surface-structural-mechanisms:SM-3`.
+
+**Status:** validated
 
 ## Template for new entries
 
