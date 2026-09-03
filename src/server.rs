@@ -1113,7 +1113,7 @@ impl CodeScoutServer {
         let mut ctx = self.build_context(progress, peer);
         ctx.workspace_override = workspace_override;
 
-        let timeout_secs = if tool_skips_server_timeout(&req.name) {
+        let timeout_secs = if tool_skips_server_timeout(&req.name, &input) {
             None
         } else {
             self.agent
@@ -1268,8 +1268,17 @@ impl CodeScoutServer {
 /// - `run_command`: the caller supplies `timeout_secs` in the request params; the
 ///   server-level timeout is unaware of that value and would fire first, making
 ///   the per-request `timeout_secs` parameter effectively ignored.
-fn tool_skips_server_timeout(name: &str) -> bool {
+/// - `librarian(action="reindex")`: also an embedding loop — `reembed=true` awaits
+///   `embed_artifact` once per queued chunk and can run well past the default budget
+///   on a large corpus (measured 2026-09-03: 12m10s for 27,762 vectors). Scoped to
+///   this one action, not the whole tool: `librarian` multiplexes ten actions, and
+///   `doctor` / `link_scan` / `context` / `audit_log` are ordinary calls that must
+///   keep their runaway-protection — exempting the tool wholesale would let a hung
+///   one of those park forever instead of returning a timeout error.
+///   docs/issues/archive/2026-09-03-librarian-is-an-embedding-loop-omitted-from-the-embedding-loop-exemption.md
+fn tool_skips_server_timeout(name: &str, arguments: &Value) -> bool {
     matches!(name, "index" | "index_library" | "run_command")
+        || (name == "librarian" && arguments["action"] == "reindex")
 }
 
 /// Whether to register the embedded librarian tool surface for this session.
@@ -5321,24 +5330,46 @@ mod tests {
         // The server-level tool_timeout_secs (default 60s) must not wrap it,
         // otherwise the server fires first and the per-request value is ignored.
         assert!(
-            tool_skips_server_timeout("run_command"),
+            tool_skips_server_timeout("run_command", &Value::Null),
             "run_command must not be wrapped by the server-level timeout"
         );
     }
 
     #[test]
     fn indexing_tools_skip_server_timeout() {
-        assert!(tool_skips_server_timeout("index"));
-        assert!(tool_skips_server_timeout("index_library"));
+        assert!(tool_skips_server_timeout("index", &Value::Null));
+        assert!(tool_skips_server_timeout("index_library", &Value::Null));
     }
 
     #[test]
     fn other_tools_do_not_skip_server_timeout() {
         for name in &["read_file", "edit_file", "symbols", "semantic_search"] {
             assert!(
-                !tool_skips_server_timeout(name),
+                !tool_skips_server_timeout(name, &Value::Null),
                 "tool '{}' should be subject to the server-level timeout",
                 name
+            );
+        }
+    }
+
+    /// The discriminating test the bug's own "Tests added" note called for: the three
+    /// tests above assert about names the author was already thinking about, and none
+    /// would have caught `librarian` being left out. This asserts the actual population —
+    /// the one action that runs a real embedding loop is exempt, the ordinary actions on
+    /// the same multiplexed tool are not.
+    /// docs/issues/archive/2026-09-03-librarian-is-an-embedding-loop-omitted-from-the-embedding-loop-exemption.md
+    #[test]
+    fn librarian_reindex_skips_server_timeout_but_other_actions_dont() {
+        assert!(
+            tool_skips_server_timeout("librarian", &serde_json::json!({"action": "reindex"})),
+            "librarian(action=\"reindex\") is an embedding loop that can run for minutes, \
+             the same shape as index"
+        );
+        for action in &["doctor", "link_scan", "context", "audit_log"] {
+            assert!(
+                !tool_skips_server_timeout("librarian", &serde_json::json!({"action": action})),
+                "librarian(action=\"{action}\") is an ordinary call and must keep its \
+                 runaway-protection from the server-level timeout"
             );
         }
     }
