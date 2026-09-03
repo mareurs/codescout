@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
-closed: null
+closed: 2026-09-04
 opened: 2026-09-04
 owner: marius
 related: []
@@ -170,28 +170,70 @@ That is the failure mode currently unguarded on five ledgers.
 
 ## Fix
 
-Not applied. The change is one condition in `declared_entry_prefixes`: a flush `- ` line following
-`entry_prefix:` is an item of that key's sequence, not a top-level sequence. The existing
-sibling-key guard (`strip_prefix("- ")` failing ends the loop) already stops `entry_high_water_F: 3`
-from being swallowed, so the indentation test is doing no work the item test does not already do —
-**delete it rather than invert it**, and confirm against the `sequence then sibling key` case.
+Applied on `experiments` — the one-condition deletion prescribed above, not an inversion. The
+block sequence is now bounded by the ITEM test alone:
 
-**Do the test first, and add the case to the parity test rather than a new one** — a fixture list
-that omits the corpus's only real form is the actual defect here; a second test asserting the same
-agreement over the same 11 forms adds nothing. RED must be observed on the flush case before the
-one-line change.
+```rust
+let Some(item) = next.trim_start().strip_prefix("- ") else { break; };
+```
 
+The `if next.len() == t.len() { break; }` arm is gone. The sibling-key case it was believed to
+protect is held by the item test, and that is now pinned by a fixture rather than argued.
 ## Tests added
 
-None yet. The regression guard is the flush block-sequence case added to
-`both_entry_prefix_readers_agree_on_every_yaml_form` — where an observed RED is available, since the
-two readers demonstrably disagree there today.
+Two cases added to `both_entry_prefix_readers_agree_on_every_yaml_form`
+(`src/librarian/catalog/augmentation.rs`) — **not** a new test. The defect was the fixture list's
+population, so a second test asserting the same agreement over the same 11 forms would have added
+nothing.
 
-Worth pairing with a corpus-derived case: the eleven fixtures were written from the YAML spec, and
-the form that broke is the one the repo's own writers emit. A test that reads the actual
-`entry_prefix:` blocks under `docs/` and asserts both readers agree on each would have failed on day
-one.
+- `"flush block sequence"` — the form the corpus actually uses. **RED observed before the fix**, in
+  the diagnostic direction: `left: ["F", "W"]` (allocator) vs `right: []` (guard), both readers on
+  one input.
+- `"flush sequence then sibling key"` — pins that the item test is what now stops
+  `entry_high_water_F: 3` being swallowed, since the indentation test believed to do that is gone.
 
+Both fixture lines carry an annotation naming what breaks if the indentation is "tidied" back in.
+
+**Not** added: the corpus-derived case proposed above. It remains the stronger guard, but it is a
+different test with a different failure mode — it goes red when a ledger is *edited*, not when the
+parser regresses. Left as an explicit follow-up rather than folded in silently.
+
+Still overclaiming: `every_yaml_form_of_entry_prefix_is_recognised`
+(`src/util/librarian_guard.rs`) passed both before and after this fix, so it carries the same
+fixture omission under an even broader name. The parity test now covers the form; that one does not.
+## Fix provenance
+
+Fixed on `experiments` — the indentation test deleted, not inverted.
+
+- **SHA:** `56f3d0bb`
+- **patch-id:** `aaeeeacaaa4ae26e7eaa0057a9671520c95989dd`
+
+Gate green at fix time: `cargo fmt -- --check` clean; `clippy --workspace --all-targets --features
+local-embed -D warnings` clean — re-run after `touch` on both files, because the first pass returned
+in 0.33s off a warm cache and a cache hit is not evidence; default lane 8657 passed / 1 failed. That
+one failure is `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, itself open
+as `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, in
+`peer/server.rs`, and it passes in 1.15s run alone.
+
+**The lean lane's `exit 0` is NOT evidence for this fix.** Measured 2026-09-04 by running the
+`entry_prefix` filter through both lanes and reading the test NAMES rather than either total:
+
+| lane | `entry_prefix` tests run | the new regression guard |
+|---|---|---|
+| `--no-default-features` | 3 — all `util::librarian_guard::tests::*` | **absent** |
+| default | 6 | `librarian::catalog::augmentation::tests::both_entry_prefix_readers_agree_on_every_yaml_form` |
+
+The parity test lives under `librarian::`, which `--no-default-features` compiles out, so the lean
+lane never built the regression guard at all. And it is worse than merely thin: the one
+`entry_prefix` test the lean lane DOES run is `every_yaml_form_of_entry_prefix_is_recognised`, which
+passed **before and after** this fix — so on the lean lane the broken parser and the fixed one are
+indistinguishable. This file is a datapoint for CLAUDE.md § *Development Commands*, whose
+lean-lane-vacuity rule was added the same day.
+
+**Scope of the verification, stated because it is narrower than "fixed" sounds.** The parser and the
+two readers' agreement are verified, in the default lane. The live end-to-end effect named under
+*Resume* — that `append_entry` now refuses on an unpushed `bug-fix-session-log.md` — is **not**: the
+running MCP server predates this commit, so confirming it needs `cargo rb` and an `/mcp` reconnect.
 ## Workarounds
 
 Re-indent the five files' sequence items by two spaces — a whitespace-only change that restores both
@@ -200,14 +242,12 @@ ledgers as unguarded: do not hand-write `## PREFIX-N` headings into them, and pu
 
 ## Resume
 
-Read `declared_entry_prefixes` (`src/util/librarian_guard.rs:293-335`), add
-`("block sequence, flush", "---\nkind: tracker\nentry_prefix:\n- F\n- W\n---\n\n# L\n")` to the
-fixture list in `both_entry_prefix_readers_agree_on_every_yaml_form`
-(`src/librarian/catalog/augmentation.rs:3089`), observe RED, then delete the
-`if next.len() == t.len() { break; }` arm and re-run. Verify the live effect by committing a change
-to `docs/trackers/bug-fix-session-log.md` without pushing and confirming `append_entry` now refuses
-with *"Push this ledger's commits, then allocate."*
+Done: fixture added, RED observed, indentation arm deleted, gate green, committed at `56f3d0bb`.
 
+Remaining, and only this — `cargo rb`, then `/mcp` reconnect, then confirm the live effect on a
+ledger using the flush form: commit a change to `docs/trackers/bug-fix-session-log.md` without
+pushing and check `append_entry` refuses with *"Push this ledger's commits, then allocate."* Until
+that runs, the fix is verified at the parser and unverified at the tool surface.
 ## References
 
 - `src/util/librarian_guard.rs:293-335` — `declared_entry_prefixes`, the mis-parse.
