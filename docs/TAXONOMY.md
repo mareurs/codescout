@@ -342,7 +342,7 @@ Different prefixes use slightly different status enums:
 - **R-N verdicts** — `hit | miss | proposal | promoted`.
 - **T-N verdicts** — `legitimate | debatable | wrong-tool`.
 - **WIN-N statuses** — `fixed | mitigated | open | deferred | wontfix` (canonical in the `params_schema` of `docs/trackers/windows-platform-support.md`).
-- **BUG statuses** — `open | investigating | fixed | mitigated | wontfix | zombie` (canonical in `docs/issues/_TEMPLATE.md`).
+- **BUG statuses** — `open | taken | investigating | fixed | mitigated | wontfix | zombie` (canonical in `docs/issues/_TEMPLATE.md`). `taken` means a live session holds it (`claimed_by: <sessionId>`, resolved by `doctor`'s `claim_liveness` check); `investigating` is the residue state — worked, no live owner.
 
 When in doubt, mirror the existing entries in that file — consistency beats
 correctness here.

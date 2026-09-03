@@ -427,6 +427,7 @@ Files:
 - **[`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md)** — the derivations behind § *Testing Discipline*'s laws: the mutation runs, the four-defensible-numbers count, and the two superseded formulations (including a "pair an absence test with a positive one" remedy the `e6414362` run falsified).
 - `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow
 - `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 1900-**character** cap, style guide
+- **`.codescout/system-prompt.md`** — a **fourth prompt surface**, and the one no other index in this repo names. It is **tracked in git**, generated once by `onboarding`, and **injected into every codescout session in this repo at project activation** — so a rule, query or tool name that goes stale here is served to every session while all three `src/prompts/` surfaces stay green. Sweep it whenever you sweep the other three; `onboarding(refresh_prompt=true)` regenerates it from the current templates.
 
 Memories (Claude auto-loads these; listed for reference):
 

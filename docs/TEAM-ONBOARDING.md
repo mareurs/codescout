@@ -121,7 +121,7 @@ relevant guide the first time a call of yours needs it.
 indexed by the librarian. Enter through the catalog, not the filesystem:
 
 ```
-artifact(action="find", kind="bug", filter={"status": {"in": ["open","investigating","zombie"]}})
+artifact(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})
 artifact(action="find", kind="tracker")
 artifact(action="get", id="<id>")                    # read
 artifact(action="get", id="<id>", heading="## Foo")  # one section
@@ -190,7 +190,7 @@ first-class citizens in the defect taxonomy here.
 | Is there already an instrument for the number I need? | `docs/PROBES.md` |
 | How do I add or change a tool? | `docs/PROGRESSIVE_DISCOVERABILITY.md` |
 | Build/test gate, release flow | `CLAUDE.md`, `docs/RELEASE.md` |
-| Known bugs before I re-discover one | `artifact(action="find", kind="bug", filter={"status": {"in": ["open","investigating","zombie"]}})` |
+| Known bugs before I re-discover one | `artifact(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})` |
 | What defect classes exist? | `docs/trackers/issue-clusters.md` (via `artifact(get)`) |
 | Fresh machine / big pull | `docs/conventions/cross-machine-catalog-resume.md` |
 | This guide's origin and the honest system critique | `docs/trackers/2026-09-01-fable-system-review.md` |

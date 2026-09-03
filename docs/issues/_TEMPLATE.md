@@ -40,9 +40,14 @@ Trigger rules — open a tracker for ANY bug noticed during work:
 Status field semantics:
   open          — Logged, investigation not started or paused.
   taken         — A live session holds this right now. Requires
-                  claimed_by: <sessionId> in frontmatter. Decays to
-                  `investigating` when that session exits; run
-                  librarian(action="doctor") to find dead claims.
+                  claimed_by: <sessionId> in frontmatter — set it through
+                  artifact(action="update", id=..., extra={"claimed_by":
+                  "<sessionId>"}), never by hand-editing the frontmatter:
+                  a raw file edit does not reach the catalog (BL-48), so
+                  the claim sits on disk while every find() reports the
+                  bug unclaimed. Decays to `investigating` when that
+                  session exits; run librarian(action="doctor") to find
+                  dead claims.
   investigating — Worked, but no live owner. The residue of an
                   unconcluded claim, not a synonym for `taken`.
   fixed         — Root cause addressed, regression test added, verified.
