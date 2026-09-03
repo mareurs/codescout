@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/declared-not-wired
 closed: null
@@ -8,6 +8,7 @@ opened: 2026-09-04
 owner: marius
 related: []
 severity: medium
+unverified: 'the ARCHIVE path is fixed and gate-verified (049c6c97); the title''s claim is still literally true for the other two. `doc(action="delete")` and a file removed from disk both still drop a catalog row without touching Qdrant, and `ArtifactVectorStore::delete` still has no production caller. Kept out of the archive folder for that reason. Also not retroactive: the 7 orphan artifacts / 126 points measured here remain.'
 ---
 
 # BUG: the artifact vector `delete` has no production caller, so every `doc(action="move")` and every catalog-row removal strands that artifact's vectors
@@ -166,35 +167,86 @@ records `2 of 3 families open`.
 
 ## Fix
 
-Not attempted. The shape: wire the existing `delete` into the three paths that drop a
-catalog row, `move` first since it is the one with a measured, growing population.
+Fixed in `049c6c97` — *fix(librarian): a move RE-FILES its chunk vectors instead of stranding or
+deleting them*. patch-id `747f9f72143f21f3d35ce24e5b421b1e9ccb9e33`.
 
-`move` is the awkward one and is worth stating before implementing. It is a *re-key*, not a
-removal — the right behaviour is arguably to **re-file** the vectors under the new id rather
-than delete them, since the content is unchanged and re-embedding costs an embedder pass.
-Deleting is correct-but-lossy: the artifact silently leaves the semantic index until the
-next `reembed`, which is a *second* silent degradation and not obviously better than the
-first. Whichever is chosen, `move`'s response should say which happened.
+**Re-file, not delete** — the design question this record was filed open, now settled. A move is
+a re-key: the bytes are unchanged, so deleting would trade a silent orphan for a silent hole in
+the index until the next `reembed`. Points are keyed on `chunk_id` with `artifact_id` as an
+INDEXED payload field, so re-filing is a payload write on Qdrant and a join-row `UPDATE` on
+sqlite. **Nothing is re-embedded.**
 
-Note the trait's `delete` carries no project and so fans out over every collection
-(`:308-313`). That was affordable while it had no caller; on the archive path it becomes a
-per-archive full scan of every artifact collection, so the signature likely wants the
-project the caller already holds.
+- **`src/retrieval/artifact.rs`** — `artifact_refile`, a filtered `set_payload`. Counts first,
+  because `set_payload`'s `UpdateResult` reports operation status rather than how many points
+  matched, and "re-filed 0" is exactly the outcome a caller needs to see.
+- **`src/librarian/artifact_store.rs`** — `ArtifactVectorStore::refile` on all three backends.
+  **It carries no project, deliberately.** `mv` holds a root it could pass, which is the reason
+  not to take one: two call sites deriving the same project by their own routes and disagreeing
+  is precisely what `99558134` fixed. A signature that never claims to know the project cannot
+  be wrong about it.
+- **`src/librarian/tools/mv.rs`** — the call, between the upsert and the graft, plus
+  `vectors_refiled` in the response.
 
-**Do not add a sweep keyed on `project_id` being unresolvable.** Every pre-`99558134` vector
-carries `project_id: ''` — 200 of 200 sampled — so that predicate matches the entire legacy
-index. See `bug-fix-session-log:W-103`.
+### The ordering is load-bearing, and so is the block
 
+`refile` must run **after** the new artifact row exists (sqlite's FK rejects the re-point
+otherwise) and **before** the graft drops the old row (after it, there is nothing left to
+re-point). Both neighbours are stated at the call site.
+
+The catalog guard moved into an explicit block, and **that block is the fix rather than a
+tidy-up**. `refile` is async and the guard is a `parking_lot::MutexGuard`, so holding it across
+the await does not compile — but the substance is that `SqliteVecArtifactStore::refile`
+re-acquires that same mutex, and parking_lot's is not reentrant, so a version that merely
+silenced the compiler would **hang that backend on every move**. Caught by rustc, not by a test,
+and no test could have caught it: every in-tree test constructs `InMemoryArtifactStore`, whose
+`refile` takes no lock and therefore cannot deadlock.
+
+Two dead ends are recorded in the comment because both are things a reader would otherwise
+retry:
+
+1. **Reassigning `cat` after the await** — same error. rustc keeps the binding live in the
+   generator's state machine for its whole lexical scope even once moved, so `drop` alone does
+   not help; only ending the scope does.
+2. **Dropping inside the `if`** — compiles, then deadlocks on the `new_id == a.id` path when the
+   re-lock runs against a still-held guard. A workaround that compiles and fails only on the
+   branch nobody exercises is worse than one that does not compile.
 ## Tests added
 
-None — not fixed. The regression guard must assert the **effect**: after a `move`, no point
-remains under the previous id. A test asserting `delete` works passes today, which is the
-whole problem.
+`move_refiles_chunk_vectors_onto_the_new_id` (`src/librarian/tools/mv.rs`) is the one that would
+have caught this, and it had to live at the `mv` layer. The store's own tests prove `refile`
+works *when called*, which was never in doubt — what was broken is that **nothing called it**,
+and every existing `mv` test passes on the pre-fix code because a move that stranded its vectors
+returns a byte-identical response.
 
-The durable guard is a reachability check for this family — a production call site for
-`ArtifactStore::delete` — extending `tests/tool_reachability.rs`'s approach past `impl Tool`
-types. Without it the fix is one commit away from regressing invisibly again.
+It asserts **both directions**, because the two backends failed in opposite ones: `under(new_id)
+== 3` alone would pass the Qdrant bug if it also copied, and `under(old_id) == 0` alone would
+pass a delete. It also carries a second artifact that must not move — without it, a `refile`
+that re-pointed the whole store satisfies every other assertion.
 
+Three store-level tests
+(`refile_moves_every_chunk_of_one_artifact_and_no_others`,
+`refile_preserves_the_vectors_and_the_chunk_ids`,
+`refile_of_an_artifact_with_no_vectors_is_zero_not_an_error`) cover the trait. The second
+asserts vectors **by value**: a `refile` implemented as delete-then-reinsert keeps every count
+identical, and "no embedder ran" is observable only as unchanged bytes.
+
+### Mutation-tested, because green is not evidence
+
+Five mutations of the production path, control green, **all killed**:
+
+| mutation | killed by |
+|---|---|
+| never call `refile` (the shipped bug) | `move_refiles_chunk_vectors_onto_the_new_id` |
+| call `delete` instead (the rejected design) | same |
+| re-point only the first chunk | + `refile_moves_every_chunk_of_one_artifact_and_no_others` |
+| re-point every chunk, ignore the old id | + `refile_of_an_artifact_with_no_vectors_is_zero_not_an_error` |
+| absurd no-op (control on the RUNNER) | + `refile_preserves_the_vectors_and_the_chunk_ids` |
+
+The absurd control earned its place immediately, twice. The first run reported the **control**
+RED because the runner string-matched `error[E` in the output instead of reading exit codes; and
+the first "never call refile" mutation was killed by a **compile failure**, which is not a kill
+— re-typed as `Some(_store) => Some(0u64)` it reds the right test. Both are
+`bug-fix-session-log:F-113` recurring in a second language.
 ## Workarounds
 
 None needed urgently: 126 of 29,154 points is 0.43%, and the cost is a few result slots.
@@ -204,13 +256,19 @@ catalog, never against `project_id`.
 
 ## Resume
 
-Decide re-file vs delete for `doc(action="move")` — that is the design call gating
-everything else. Then read `ArtifactStore::delete` (`src/librarian/artifact_store.rs:307`)
-and settle whether it takes a project, since the current fan-out becomes a per-archive full
-scan once it has a caller. `move`'s implementation lives under
-`src/librarian/tools/` (not `move.rs` — that path does not exist; locate it with
-`grep "new_rel_path"`).
+N/A — fixed and gate-verified.
 
+Two things deliberately **not** done here, recorded so nobody reads them as oversights:
+
+- **The 126 pre-existing orphan points are not swept.** This fix is not retroactive: it stops
+  new orphans, and the 7 artifacts already stranded stay until something removes them. 0.43% of
+  the collection, and deleting from a live collection is a separate change with its own blast
+  radius.
+- **`ArtifactVectorStore::delete` still has no production caller.** `refile` covers `move`,
+  which is the path with a measured, growing population. `doc(action="delete")` and a
+  removed-from-disk file both still drop a catalog row without touching Qdrant. That is the
+  remaining half of this class and wants its own record rather than being quietly folded in
+  here.
 ## References
 
 - `src/librarian/artifact_store.rs:152` (trait), `:307-313` (the comment naming the gap),
