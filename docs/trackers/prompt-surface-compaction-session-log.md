@@ -9,7 +9,7 @@ tags:
 - compaction
 topic: prompt-surfaces
 entry_high_water_F: 9
-entry_high_water_W: 15
+entry_high_water_W: 16
 entry_prefix:
 - F
 - W
@@ -101,6 +101,7 @@ entry_prefix:
 | W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for 7 of the 9 unanchored records — the hashes are environments and siblings, never the fix — and the `grep -c patch-id` used to measure THIS entry scored two more as anchored on prose mentions | validated |
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
 | W-15 | 2026-09-02 | med | A substring join on `input_json` reads a value as a key — join on the key (`json_extract`) and read the rows before publishing a count | A bug file would have opened with "8 field instances in 30 days" for a defect with 0 real ones; a second join the same hour read 48 for a real count of 1 | open |
+| W-16 | 2026-09-03 | med | Price a schema restructuring against its own scaffolding before proposing it — compare the bytes the new shape *requires* against the bytes the old shape spends on the same fact | Would have shipped `oneOf` narrowing on `doc` as a size reduction: +2,022 chars at the optimal encoding, ~2× the whole five-tool collapse's saving and in the opposite direction — and provably unwinnable, since 17 minimal branches (794) already exceed every action-qualifier prefix in the tool (616) | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -1797,6 +1798,99 @@ Both are the shape `scripts/probe_tool_surface.py`'s docstring already warns abo
 **Promote-when:** a third usage.db join is caught reading a value as a key. Then add `json_extract` as the prescribed form to `scripts/probe_tool_surface.py`'s docstring traps and to `docs/PROBES.md`'s usage.db row.
 
 **Status:** open — two datapoints, awaiting the third.
+
+## W-16 — Price a schema restructuring against its own scaffolding — `oneOf` narrowing on `doc` is provably a regression at fan-out 1.29
+
+**Observed:** 2026-09-03, investigating why the tool surface sat at 55,421 chars *after*
+the 2026-09-02 five-tool collapse. `oneOf` / `if-then` narrowing on `doc` was the leading
+structural candidate: a flat 60-param union over 17 actions plainly advertises more than
+any one call needs, and per-action branches would let every `<action>:` prefix disappear.
+
+Measured on the live wire, reusing `scripts/probe_tool_surface.py`'s own `fetch_tools` so
+the prototype cannot drift from the budget gate (compact separators — spaced ones
+over-report by ~4.7%):
+
+| variant | chars | Δ vs today |
+|---|---:|---:|
+| V0 — flat union (today) | 16,518 | — |
+| V3 — flat + `if/then` required | 17,876 | +1,358 (+8.2%) |
+| V4 — `oneOf` hybrid (**optimal**: fan-out-1 inlined, shared `$ref`d) | 18,540 | +2,022 (+12.2%) |
+| V2 — `oneOf` + `$defs`/`$ref` throughout | 20,478 | +3,960 (+24.0%) |
+| V1 — `oneOf`, properties inlined per branch | 22,237 | +5,719 (+34.6%) |
+
+Every variant is **larger**. V4's cost accounting closes: `-616` prefixes removed,
+`+1362` branch wrappers, `+1386` for 42 `$ref` entries.
+
+**Pattern.** Before proposing a schema restructuring as a size reduction, price the
+*scaffolding the new shape requires* against the *text the old shape spends on the same
+fact*. Here the two are directly comparable and the comparison is decisive:
+
+- 17 minimal `oneOf` branches carrying **zero** params and **zero** `required` — the
+  irreducible floor — cost **794 chars**.
+- Every action-qualifier prefix in `doc` (`create/update:`, `append_entry/update_entry:`,
+  …) totals **616 chars**.
+
+`794 > 616`, so **no `oneOf` encoding of `doc` can be smaller than the flat union**,
+whatever the param placement. This is an arithmetic bound, not a sample.
+
+The reason is a property nobody had measured: **mean fan-out is 1.29.** 58 labelled params
+generate only 75 (action, param) pairs — 50 belong to exactly one action, and only `id` is
+genuinely shared (11 actions). The union is already nearly a **partition**, so there is no
+redundancy for `oneOf` to factor out; it pays 17 branch wrappers and 42 `$ref`s to delete
+616 chars.
+
+Stated generally: the `<action>:` label convention is a **denser encoding of the action
+mapping than JSON Schema composition** — ~11 chars per param against ~80 per branch. And
+it is not informal. `sweep()` (`src/tools/param_probe.rs:84`) parses it, and
+`every_action_labelled_schema_key_is_honored_by_that_action` asserts every labelled key is
+honored by that action, so `doc` already carries machine-checked per-action binding.
+`oneOf` would re-encode, more expensively, a mapping that is already validated.
+
+**Counterfactual.** This was the top structural candidate after the collapse itself was
+measured to have saved only 1,098 chars (56,519 → 55,421) for five deleted tools — a 1.9%
+return that made a structural fix look overdue. Shipping it unmeasured would have added
+~2,022 chars to `doc` alone, roughly **twice the entire collapse's saving, in the opposite
+direction**, and would have read as progress: `oneOf` *is* the standard remedy for an
+over-wide union, and it does genuinely narrow what each action advertises. The budget gate
+would have caught the byte growth — but only as a number to be paid for elsewhere, not as
+a verdict on the change.
+
+**Scope — what this does NOT settle.** The measurement is on bytes only, and
+`prompt-surface-compaction-session-log:W-2` establishes that bytes are close to free here
+(100% cache_read; ~$0.0043/request for the whole surface). Whether per-action branches
+improve *parameter selection* is a legibility claim, unmeasured, and would need an arm
+under W-2's frame. This entry refutes `oneOf` on the axis it was proposed for; it says
+nothing about the axis W-2 argues actually matters. It does **not** fire W-2's
+`Promote-when` either — this decision was scoped by byte count, which is the thing W-2
+says to stop doing.
+
+**Where the bytes actually are**, for whoever picks this up: 264 params carry 27,001 chars
+of description prose (48.7% of the whole surface) against 6,899 for all 21 tool
+descriptions (12.4%). `doc` + `librarian` alone are 50.2%. A 250-char cap on those two
+frees 3,620 chars — more than the five-tool collapse achieved — but those descriptions
+carry deliberate caveats, so that is an editorial call under W-2's frame, not a mechanical
+one.
+
+**Impact:** med — closes a plausible, recurring proposal with an arithmetic bound rather
+than an opinion, and names the one number (fan-out) that would have to change for the
+answer to flip.
+
+**Promote-when:** a second collapsed tool is measured and its fan-out is also ≈1. The rule
+then generalises to *"a tool collapse preserves parameter count — price restructuring
+against branch scaffolding, never against tool count"* and belongs in
+`src/prompts/README.md` § *The tool-surface budget*.
+
+**Valid:** conditional — `doc`'s action count falls below ~13, or its total
+action-prefix text grows past 794 chars
+
+**Rests on:** the comparison, not either value alone — branch scaffolding scales with
+*action* count, prefix text with *param* count, so the bound is stable under ordinary
+schema edits and flips only if those two diverge. Derivation: `scripts/probe_tool_surface.py`
+(`fetch_tools`, reused deliberately); per-action required map at `tests::probe_required`
+(`src/librarian/tools/artifact.rs`); label convention enforced by
+`crate::tools::param_probe::sweep`.
+
+**Status:** validated — one datapoint, arithmetically bounded rather than sampled.
 
 ## Template for new entries
 

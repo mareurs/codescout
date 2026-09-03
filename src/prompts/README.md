@@ -10,7 +10,20 @@ Read this when touching `source.md` (the single source for the `server_instructi
   - `server_instructions` surface — injected **once at MCP session start**, not per-request. Token cost is session-scoped, not per-call — invest in clarity over brevity.
   - `onboarding_prompt` surface — one-time onboarding, read only when a project is activated for the first time.
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project and embedded into the project's system prompt via onboarding.
-- **`tools/list`** — every tool's `description()` + `input_schema()`, delivered **on every request of every session**. The largest surface by an order of magnitude and the only one with a per-request cost: **54,976 characters** as of 2026-09-01, of which schemas are 47,549 and descriptions 7,427 — so **schema is 86% of it**, and an instinct to tighten descriptions is aimed at the wrong 14%. Budgeted — see § The tool-surface budget. **Derive this number, don't cite it:** `cargo test --lib tool_surface_report_lengths -- --nocapture` prints it per tool. These figures read `57,148 / 48,627 as of 2026-08-18` until 2026-09-01, against a surface that had since been ratcheted down *and* grown again — which is the two-representations-one-truth seam this file's own § budget warns about, occurring in the file that warns about it.
+- **`tools/list`** — every tool's `description()` + `input_schema()`, delivered **on every request of every session**. The largest surface by an order of magnitude and the only one with a per-request cost: **55,519 characters** as of 2026-09-03. Budgeted — see § The tool-surface budget. **Derive these numbers, don't cite them:** `cargo test --lib tool_surface_report_lengths -- --nocapture` prints the per-tool map, and `python3 scripts/probe_tool_surface.py` prints both cuts below plus the per-parameter table.
+
+  **There are two cuts of that total. They answer different questions, and the second is the one that tells you what to trim.**
+
+  | cut | figures | answers |
+  |---|---|---|
+  | by **field** | schema 48,522 (87.4%) / desc 6,997 (12.6%) | where the bytes sit on the wire |
+  | by **authorship** | **prose 36,715 (66.1%)** / machine 18,804 (33.9%) | how much of it a human wrote |
+
+  **The field cut hides the largest bucket in the surface.** `desc` is *tool* descriptions only. The parameter descriptions — 289 strings once nested object fields are counted, **29,718 chars, 53.5% of everything** — are serialized inside `input_schema` and land in the "schema" column. So the surface is two-thirds prose, and the schema/desc ratio is a fact about JSON nesting rather than about where the writing is.
+
+  *(This bullet said the opposite until 2026-09-03: "**schema is 86% of it**, and an instinct to tighten descriptions is aimed at the wrong 14%." Both its figures were correct and its advice was backwards, because "descriptions" silently means two different populations one clause apart — the `desc` field in one, every human-written string in the other. Nothing could have caught it: the numbers reconciled, and the only tell was that the surface's own instrument had no way to express the second population. That is why `probe_tool_surface.py` now emits the authorship cut — so the correction is **derivable**, not remembered.)*
+
+  Numeric drift here is expected and is not a defect to chase: these figures read `54,976 / 47,549 / 7,427 as of 2026-09-01`, and `57,148 / 48,627 as of 2026-08-18` before that, against a surface ratcheted down *and* grown again — the two-representations-one-truth seam this file's own § budget warns about, occurring in the file that warns about it.
 ## Rules for editing the `server_instructions` surface
 
 1. **Cap hard rules at 5–8.** Beyond 8 behavioral constraints, compliance on all drops. Consolidate, don't accumulate.

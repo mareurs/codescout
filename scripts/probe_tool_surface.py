@@ -56,6 +56,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def dj(o):
     """Compact, to match serde_json::to_string(). See trap 1 in the module docstring."""
     return json.dumps(o, separators=(",", ":"), ensure_ascii=False)
+def prose_bytes(node):
+    """Every `description` string VALUE at any depth, sized as it goes on the wire.
+
+    Trap 4, and the reason this exists: parameter descriptions live INSIDE
+    `input_schema`, so the schema/desc split reads "schema is 87% of the surface"
+    while two thirds of THAT schema is prose a human wrote. A reader who takes the
+    split at face value optimises the 13% `desc` bucket and leaves the 54% one
+    alone. Measured 2026-09-03: prose 36,715 of 55,519 (66.1%), of which parameter
+    descriptions are 29,718 and tool descriptions 6,997.
+    """
+    if isinstance(node, dict):
+        total = 0
+        for k, v in node.items():
+            if k == "description" and isinstance(v, str):
+                total += len(dj(v)) - 2  # minus the enclosing quotes
+            else:
+                total += prose_bytes(v)
+        return total
+    if isinstance(node, list):
+        return sum(prose_bytes(v) for v in node)
+    return 0
+
+
 
 
 def fetch_tools(binary):
@@ -141,16 +164,25 @@ def main():
     tot_schema = sum(v["schema"] for v in surface.values())
     tot_desc = sum(v["desc"] for v in surface.values())
     TOTAL = tot_schema + tot_desc
+    tot_prose = sum(prose_bytes(t.get("inputSchema", {})) for t in tools) + tot_desc
+    tot_machine = TOTAL - tot_prose
 
     if a.json:
         print(json.dumps({"surface": surface, "calls": calls, "total": TOTAL,
-                          "schema": tot_schema, "desc": tot_desc}, indent=1))
+                          "schema": tot_schema, "desc": tot_desc,
+                          "prose": tot_prose, "machine": tot_machine}, indent=1))
         return
 
     print("tools %d   schema %d   desc %d   TOTAL %d" % (len(surface), tot_schema, tot_desc, TOTAL))
     print("  cross-check: `cargo test --lib tool_surface_report_lengths -- --nocapture`")
     print("  must print the same three numbers. A mismatch means this probe and list_tools")
     print("  have diverged, and the delta is meaningless until they agree (trap 1/2).")
+    print("prose %d (%.1f%%)   machine %d (%.1f%%)"
+          % (tot_prose, 100.0 * tot_prose / TOTAL,
+             tot_machine, 100.0 * tot_machine / TOTAL))
+    print("  A DIFFERENT cut of the same total, not a subdivision of the three above.")
+    print("  Parameter descriptions live INSIDE `schema`, so `desc` is TOOL descriptions")
+    print("  only -- cutting prose aims at the prose figure, never at `desc` (trap 4).")
 
     print("\n== COST PER CALL (surface chars / recorded calls) ==")
     rows = []
