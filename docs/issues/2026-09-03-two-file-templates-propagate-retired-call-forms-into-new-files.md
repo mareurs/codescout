@@ -5,205 +5,188 @@ closed:
 severity: medium
 owner: marius
 related: []
-tags: ["cluster/selector-narrower-than-its-population"]
+tags:
+- cluster/selector-narrower-than-its-population
 kind: bug
 ---
 
-# BUG: four more instruction surfaces carry retired call forms, and two of them are templates that propagate into files created after the fix
+# BUG: the second file template still propagates retired call forms — the fix covered `_TEMPLATE.md` and not `docs/templates/session-log.md`
 
 ## Summary
 
-**This is a supplement to `docs/issues/2026-09-03-retired-tool-names-survive-in-the-surfaces-that-actually-reach-agents.md`
-(artifact `bd0979bf7e454567`, severity high), not an independent finding.** That file
-establishes the class and the site; do not read this one first. It adds four verified
-surfaces its fix sketch does not list, and one of the four changes the fix's shape rather
-than only its size: `docs/issues/_TEMPLATE.md` and `docs/templates/session-log.md` are
-**copied to create new files**, so their retired call forms keep entering the repo after
-every instance has been swept.
+**This is the residue of a bug that was fixed and archived on 2026-09-03**
+(`docs/issues/archive/2026-09-03-retired-tool-names-survive-in-the-surfaces-that-actually-reach-agents.md`,
+fixed by `3e8193a0`, archived at `c8447014`). Read that file first — it owns the class and the
+site.
 
-It is filed separately rather than appended because `bd0979bf7e454567` is **untracked in the
-main checkout** — a live peer session's in-flight working tree — and writing into it would be
-the interference recorded in
-`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`.
+That fix reached the propagation argument for **one** template: it added
+`docs/issues/_TEMPLATE.md` to the gate's `FILES` with a comment saying the template is
+*"prescriptive, copied verbatim into every new bug file"*. `docs/templates/session-log.md` is
+the other template, is copied verbatim into every new session log, still carries **2** retired
+call forms, and is in neither `ROOTS` nor `FILES`. Two further reader surfaces —
+`docs/TEAM-ONBOARDING.md` (9) and `docs/ROADMAP.md` (4) — are also still uncovered.
+
+**15 occurrences across 3 files**, unit: occurrences, matching the gate's per-`(line, call)`
+`bad` vector.
 
 ## Symptom (Effect)
 
-Four surfaces, 16 occurrences, none named in `bd0979bf7e454567`'s fix sketch (whose step 4
-extends the gate to `.codescout/memories`, `.codescout/private-memories` and
-`docs/issues/_TEMPLATE.md` only):
-
-| occurrences | file | what it is |
-|---|---|---|
-| 9 | `docs/TEAM-ONBOARDING.md` | the onboarding guide; its own line 193 row is "Known bugs before I re-discover one" |
-| 4 | `docs/ROADMAP.md` | current status, present tense |
-| 2 | `docs/templates/session-log.md` (`:12`, `:240`) | **copied to create every new session log** |
-| 1 | `docs/issues/_TEMPLATE.md:92` | **copied to create every new bug file** — `:20` is already listed there, `:92` is not |
+`reader_docs_contain_no_retired_call_forms` is green while these are on disk:
 
 ```
 docs/templates/session-log.md:12:> artifact(action="append_entry", id="<artifact id>", id_prefix="F",
 docs/templates/session-log.md:240:     artifact(action="append_entry", id="<artifact id>", id_prefix="F",
-docs/issues/_TEMPLATE.md:92:Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
 ```
+
+plus 9 in `docs/TEAM-ONBOARDING.md` and 4 in `docs/ROADMAP.md`. Each is a call form — what the
+gate's own assertion message defines as *"a claim that this is how you invoke the tool today"*
+— naming a tool retired on 2026-09-02.
+
+The session-log pair is the load-bearing one. `CLAUDE.md` § *Session Intelligence Trackers*
+points at `docs/templates/session-log.md` as the template for every new per-work-stream log,
+and routes non-Claude harnesses to it explicitly (*"any agent that reads markdown can use the
+template — no plugin required"*). So the surface most likely to be copied by an agent that
+cannot ask a follow-up question is the one still teaching a dead call.
 
 ## Reproduction
 
-At `d864c46f` (worktree `.worktrees/bug-claim-liveness`, rebased onto `experiments`
-`26b1f5c6`):
+On `bug-claim-liveness` rebased onto `experiments` `c8447014`:
 
 ```
 cargo test --lib reader_docs_contain_no_retired_call_forms   # passes
-for f in docs/TEAM-ONBOARDING.md docs/ROADMAP.md docs/templates/session-log.md \
-         docs/issues/_TEMPLATE.md; do
+for f in docs/TEAM-ONBOARDING.md docs/ROADMAP.md docs/templates/session-log.md; do
   printf '%4d  %s\n' "$(grep -o -E 'artifact\(|artifact_event\(|artifact_augment\(|artifact_refresh\(|read_markdown\(|edit_markdown\(' "$f" | wc -l)" "$f"
 done
+# 9 docs/TEAM-ONBOARDING.md / 4 docs/ROADMAP.md / 2 docs/templates/session-log.md
 ```
+
+Control, same command on the two surfaces the fix did reach — both `0`:
+`docs/issues/_TEMPLATE.md`, `.codescout/system-prompt.md`.
 
 ## Environment
 
-Linux. Branch `bug-claim-liveness` at `d864c46f`. Gate green at filing: fmt 0, clippy 0, lean
-3512 passed / 0 failed, default 5340 passed / 0 failed.
+Linux. Branch `bug-claim-liveness` rebased onto `experiments` `c8447014`. Gate green at
+filing: fmt 0, clippy 0, lean 0, default 5340 passed / 0 failed over 31 binaries.
 
 ## Root cause
 
-The same one `bd0979bf7e454567` § *Why the gates missed it — the class* names, and its wording
-stands. What this file adds is a **direction the ranking heuristic does not cover.** That file
-prescribes ranking candidate surfaces by *how often an agent reads them without asking*, which
-correctly puts the auto-loaded memory store first. A template is read rarely — but every read
-**produces a new file containing the defect**. Read-frequency and propagation are different
-axes, and the two templates score low on the first and highest possible on the second.
+The scope is two hand-written `const` arrays, `ROOTS` (`src/prompts/mod.rs:2041-2047`) and
+`FILES` (`:2056-2073`). Nothing derives them; a file is scanned iff an author typed its path
+there. Measured 2026-09-03 by classifying all git-tracked `*.md` against the gate's own
+predicate: **153 of 1519 files scanned, 10%** — 0 in-scope occurrences, 2164 out-of-scope
+across 407 files.
 
-Derivation of the coverage figure, so it is re-checkable rather than quotable: classifying all
-1516 git-tracked `*.md` files by the gate's own `ROOTS`/`FILES` predicate
-(`src/prompts/mod.rs:2062-2079`) gives **152 files scanned, 10%**, with 0 in-scope occurrences
-and 2163 out-of-scope ones across 413 files. **The 2163 is not a defect count and must not be
-quoted as one** — the overwhelming majority are historical records (session logs, archived
-issues, plans) that the gate's doc comment `:2030-2042` deliberately and correctly tolerates.
-The defect is the live-instruction-surface subset, which is what both this file and
-`bd0979bf7e454567` enumerate by hand. Unit throughout: occurrences, not lines, matching the
-gate's per-`(line, call)` `bad` vector.
+**The 2164 is not a defect count and must not be quoted as one.** The overwhelming majority
+are historical records — session logs, archived issues, plans — which the gate's doc comment
+deliberately and correctly tolerates. The defect is the live-instruction-surface subset,
+enumerated by hand above, which is the same manual step this bug is about.
+
+**The interesting part is which way the fix generalised.** `3e8193a0`'s own comment states the
+rule correctly — a template is prescriptive, not a record — and then applies it to the single
+template in front of it. The rule was written down and the population it ranges over was not
+enumerated, so the second member of that population survived the commit that named the
+category. This is `IC-18`'s mechanism note (*"nothing reaches an author-written selector"*) in
+its least visible form: not a forgotten directory, but a **correctly stated general rule
+instantiated once**.
 
 ## Evidence
 
-### The two templates propagate
+### The predecessor gate's defect, now three generations deep
 
-`docs/issues/_TEMPLATE.md:92` is the archive instruction every new bug file inherits:
+`tests/doc_tool_refs.rs`'s `present_tense_surfaces()` was an enumerated allowlist that missed
+`docs/architecture/`, `docs/conventions/` and `docs/adrs/` — 60 of 160 mentions
+(`docs/issues/2026-09-02-docs-architecture-is-in-neither-the-gates-inclusion-list-nor-its-exclusion-rationale.md`).
+`reader_docs_contain_no_retired_call_forms` was written to backstop it, as another enumerated
+allowlist. `3e8193a0` extended that allowlist by hand, and this file is what the extension
+missed. Three passes, same shape each time.
 
-```
-Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
-— never a bare git mv, which orphans the catalog row.
-```
+### The one-token miscitation, fixed here
 
-The advice around the dead call is still correct — the catalog-vs-`git mv` point holds — which
-makes this worse than a plainly broken instruction: the surrounding text lends the dead call
-form credibility. This bug file's own creation is the reproduction; the template was copied to
-produce it.
-
-### The gate's doc comment cites the wrong cluster
-
-`src/prompts/mod.rs:2029` reads *"That is `IC-11` exactly"*. `IC-11`
-(`docs/trackers/issue-clusters.md:312`) is *"documentation denies a capability the code has
-since gained"*, slug `doc-contradicted-by-code`. The sentence that follows the citation
-describes `IC-18`, *"a selector is narrower than the population it names"* — accurately, it
-just cites the wrong id, so a reader following the pointer lands on an unrelated class. Fixed
-separately as a one-token correction; recorded here because that is where it was noticed.
+`src/prompts/mod.rs:2008` cited `IC-11` (`doc-contradicted-by-code`) for a defect its very next
+clause describes accurately as `IC-18` (`selector-narrower-than-its-population`). Still present
+at `c8447014`; corrected on this branch.
 
 ## Hypotheses tried
 
-1. **Hypothesis:** these are lines the `bug-claim-liveness` branch added and failed to sweep.
-   **Test:** `git grep -n -E '<retired forms>' 26b1f5c6 -- <files>`.
+1. **Hypothesis:** these are lines this branch added and failed to sweep.
+   **Test:** `git grep -n -E '<retired forms>' <base> -- <files>`.
    **Verdict:** rejected. All present at the merge base. The branch's own five added lines were
-   swept in `d864c46f`, and `src/prompts/guides/tracker-conventions.md` — the one file it
-   touched that lies *inside* `ROOTS` — has zero residue at base. The residue sits exactly
-   where the gate does not look.
+   swept before the rebase, and every file it touched inside `ROOTS` has zero residue.
 
-2. **Hypothesis:** this duplicates `bd0979bf7e454567`.
-   **Test:** read that file's `## Fix sketch` and `## Why the gates missed it — the class`.
-   **Verdict:** **partially confirmed, and the file was rewritten because of it.** An earlier
-   draft of this bug re-derived the class independently and was discarded. The class, the site
-   and the severity belong to `bd0979bf7e454567`. Only the four surfaces above and the
-   propagation axis survive as additive. Recorded rather than silently dropped, because the
-   discarded draft is what a second reader would otherwise write again.
+2. **Hypothesis:** this duplicates the bug it supplements.
+   **Test:** read that file's `## Fix sketch` and `## Why the gates missed it — the class`,
+   then re-measure after its fix landed.
+   **Verdict:** **it did, in part, and the file was rewritten twice because of it.** The first
+   draft re-derived the class independently and was discarded on reading the peer's filing. The
+   second listed five surfaces; re-measuring against `c8447014` showed the fix had cleared two
+   of them. What survives is three surfaces and the generalisation gap above. Recorded rather
+   than quietly dropped, because a third reader starting from the same observation would write
+   the discarded draft again.
 
-3. **Hypothesis:** the two 2026-09-02 gate-scope bugs in the `tool-collapse` worktree cover it.
-   **Test:** read
-   `2026-09-02-docs-architecture-is-in-neither-the-gates-inclusion-list-nor-its-exclusion-rationale.md`
-   and `2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-saying-so.md`.
-   **Verdict:** rejected as duplicates, kept as **class precedent**. Both are against
-   `tests/doc_tool_refs.rs` — the *older* gate, the one
-   `reader_docs_contain_no_retired_call_forms` was written to backstop. The replacement gate
-   reproduced its predecessor's defect at a new site one day later: the remedy for an
-   enumerated allowlist was another enumerated allowlist. Note how nearly this check failed —
-   `doc(action="find", kind="bug")` from this worktree returns neither file, because they are
-   worktree-scoped rows under a *different* worktree. They surfaced only via
-   `librarian(action="doctor")`'s `worktree_scoped_row` list.
+3. **Hypothesis:** the `IC-13` class (`capped-result-presented-as-complete`) fits.
+   **Verdict:** rejected — nothing is capped or truncated. `IC-18`'s claim ends *"a zero reads
+   as 'not present' rather than 'not looked at'"*, which is what a green gate over 10% of the
+   corpus is.
 
 ## Fix
 
-Fold these four surfaces into `bd0979bf7e454567`'s step 4 — they are the same edit. But note a
-disagreement worth settling before that step is executed, because it is the difference between
-fixing instances and fixing the class:
+Two directions, and they are not equivalent:
 
-- **Step 4 as written extends the allowlist by hand.** That is the third hand-extension of a
-  scope on this gate lineage in two days, and hypothesis 3 above shows what the previous two
-  bought.
-- **The alternative is to invert the selector:** scan **all** tracked `*.md`, and maintain an
-  explicit *exclusion* list of historical-record roots (`docs/issues/archive`, `docs/archive`,
+- **Narrow:** add the three files to `FILES`. It is the same edit `3e8193a0` made, and this bug
+  is what that edit missed — so choosing it again is choosing the same failure mode for a
+  fourth pass.
+- **Structural:** invert the selector. Scan **all** tracked `*.md` and maintain an explicit
+  *exclusion* list of historical-record roots (`docs/issues/archive`, `docs/archive`,
   `docs/trackers`, `docs/superpowers`, `docs/evals`, `CHANGELOG.md`). A new file is then covered
-  by default, and every exemption is a written claim that the file is a record. The cost is
-  honest and non-trivial: the exclusion list is itself hand-written, and the 2163 out-of-scope
-  occurrences need classifying once. What changes is the failure mode — from *silently
-  unscanned* to *loudly scanned until someone justifies an exemption*, which is the shape
-  `CLAUDE.md` § *Observer Blindness* asks for.
+  by default and every exemption is a written claim that the file is a record. The cost is
+  honest: the exclusion list is itself hand-written, and the 2164 out-of-scope occurrences need
+  classifying once. What changes is the failure mode — from *silently unscanned* to *loudly
+  scanned until someone justifies an exemption*, the shape `CLAUDE.md` § *Observer Blindness*
+  asks for.
 
-Separately: `src/prompts/mod.rs:2029` `IC-11` → `IC-18`.
+Whichever is chosen, extend the per-root non-vacuity assertion to `FILES` too: every named file
+must exist, so a rename cannot silently empty an entry. That guard covers roots today and not
+files.
 
 SHA: *pending.* patch-id: *pending.*
 
 ## Tests added
 
-None yet. For whichever direction is chosen, the non-vacuity pattern at
-`src/prompts/mod.rs:2094-2103` should extend to `FILES` as well as `ROOTS` — every named file
-must exist, so a rename cannot silently empty an entry. That guard exists for roots today and
-not for files.
+None for the scope gap. The `IC-11` → `IC-18` correction is a doc comment and carries no test.
 
 ## Workarounds
 
-When copying `docs/issues/_TEMPLATE.md` or `docs/templates/session-log.md`, translate by hand:
-`artifact(action="find"…)` → `doc(action="find"…)`, `artifact(action="move"…)` →
-`doc(action="move"…)`, `artifact(action="append_entry"…)` → `doc(action="append_entry"…)`.
+When copying `docs/templates/session-log.md`, translate by hand:
+`artifact(action="append_entry"…)` → `doc(action="append_entry"…)`.
 
-Treat a green `reader_docs_contain_no_retired_call_forms` as covering 152 of 1516 markdown
-files; read `src/prompts/mod.rs:2062-2079` for which.
+Treat a green `reader_docs_contain_no_retired_call_forms` as covering 153 of 1519 markdown
+files; read `src/prompts/mod.rs:2041-2073` for which.
 
 ## Resume
 
-Do not act on this file alone — read `bd0979bf7e454567` first and settle the allowlist-vs-
-exclusion-list question in its `## Fix sketch` step 4, since that decides whether these four
-surfaces are added by hand or covered by default.
+Settle narrow-vs-structural above before adding the three files, since picking narrow is
+picking the same shape a fourth time. If structural, the actual work is classifying the 407
+out-of-scope files into record vs instruction surface — needed once either way.
 
-**Catalog note:** the `cluster/selector-narrower-than-its-population` tag is in this file's
-frontmatter, which for a *new* file is the catalog's source — the classifier reads it on first
-index, the same way `kind: bug` is discovered. BL-48 (a frontmatter edit not reaching the
-catalog) applies to files that *already* have a row, not to this one. It has no row yet because
-it was created in the `bug-claim-liveness` worktree, where `librarian(action="reindex")` walks
-zero files — see
-`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`. Verify
-the tag landed after the branch reaches the main checkout and is reindexed there. The cluster
-differs deliberately from `bd0979bf7e454567`'s `cluster/guard-narrower-than-its-name` (`IC-14`):
-that file's claim is about the guard's **name** overstating its coverage, this one's is about
-the **selector** being narrower than its population (`IC-18`).
+**Catalog note:** the `cluster/` tag is in frontmatter, which for a *new* file is the catalog's
+source — the classifier reads it on first index, as it does `kind: bug`. This is not the BL-48
+hazard, which concerns editing a file that already has a row. It has no row yet because it was
+created in a worktree, where `reindex` walks zero files
+(`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`);
+verify the tag after this branch reaches the main checkout and is reindexed there.
 
 ## References
 
-- **Primary record:** `docs/issues/2026-09-03-retired-tool-names-survive-in-the-surfaces-that-actually-reach-agents.md`,
-  artifact `bd0979bf7e454567`, severity high, tagged `cluster/guard-narrower-than-its-name`.
-- `src/prompts/mod.rs:2018-2118` — the gate. `ROOTS` `:2062-2068`, `FILES` `:2069-2079`,
-  per-root non-vacuity `:2094-2103`, the `IC-11` miscitation `:2029`.
-- [`docs/trackers/issue-clusters.md`](../trackers/issue-clusters.md) — `IC-18`
-  (`cluster/selector-narrower-than-its-population`), artifact `1b5a080fe2efcb6b`; its mechanism
-  column already reads "partial — nothing reaches an author-written selector".
-- Class precedents, both open in the `tool-collapse` worktree:
-  `docs/issues/2026-09-02-docs-architecture-is-in-neither-the-gates-inclusion-list-nor-its-exclusion-rationale.md`
-  and `docs/issues/2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-saying-so.md`.
-- `d864c46f` — the commit that swept this branch's own five added lines, whose green gate is
-  the symptom above.
+- **Predecessor, fixed:** `docs/issues/archive/2026-09-03-retired-tool-names-survive-in-the-surfaces-that-actually-reach-agents.md`
+  — fix `3e8193a0`, archived at `c8447014`, tagged `cluster/guard-narrower-than-its-name`
+  (`IC-14`). Kept apart from this file on the standing test: that claim is about the guard's
+  **name** overstating coverage, this one about the **selector** being narrower than its
+  population.
+- `src/prompts/mod.rs` — the gate `reader_docs_contain_no_retired_call_forms`; `ROOTS`
+  `:2041-2047`, `FILES` `:2056-2073`, the `IC-11` miscitation `:2008`.
+- [`docs/trackers/issue-clusters.md`](../trackers/issue-clusters.md) — `IC-18`, artifact
+  `1b5a080fe2efcb6b`; mechanism column reads "partial — nothing reaches an author-written
+  selector".
+- Class precedents against the older `tests/doc_tool_refs.rs`:
+  `docs/issues/2026-09-02-docs-architecture-is-in-neither-the-gates-inclusion-list-nor-its-exclusion-rationale.md`,
+  `docs/issues/2026-09-02-both-doc-citation-guards-skip-half-the-corpus-without-saying-so.md`.
