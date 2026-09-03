@@ -3109,6 +3109,25 @@ mod tests {
                 "sequence then sibling key",
                 "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\nentry_high_water_F: 3\n---\n\n# L\n",
             ),
+            // FLUSH items — zero extra indentation — are valid YAML, are the style
+            // `serde_yml` emits, and are the form 5 of this repo's 45 `entry_prefix`
+            // ledgers use on disk, including the busiest (`bug-fix-session-log.md`).
+            // Every block-sequence fixture above is INDENTED; that omission is what let
+            // `declared_entry_prefixes` ship a branch that breaks on the first flush
+            // item and returns `[]`, so `append_entry`'s cross-host high-water collision
+            // guard and the librarian write guard both silently skipped those five
+            // files. Indent these two and the hole reopens with the suite still green.
+            (
+                "flush block sequence",
+                "---\nkind: tracker\nentry_prefix:\n- F\n- W\n---\n\n# L\n",
+            ),
+            // Pairs with the case above: the fix deletes the indentation test, so this
+            // pins that the ITEM test (`- ` absent ends the sequence) is what keeps a
+            // sibling key from being swallowed as a list item.
+            (
+                "flush sequence then sibling key",
+                "---\nkind: tracker\nentry_prefix:\n- F\n- W\nentry_high_water_F: 3\n---\n\n# L\n",
+            ),
             ("absent", "---\nkind: tracker\n---\n\n# L\n"),
             ("bare key", "---\nkind: tracker\nentry_prefix:\n---\n\n# L\n"),
             (

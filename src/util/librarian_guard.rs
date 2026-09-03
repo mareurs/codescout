@@ -311,22 +311,22 @@ pub(crate) fn declared_entry_prefixes(text: &str) -> Vec<String> {
         if !val.is_empty() {
             return clean_prefix(val).into_iter().collect();
         }
-        // Block sequence: the key's value is the indented `- F` lines that follow.
-        // Stops at the first line that is not one, so a sibling key cannot be
-        // swallowed as a list item.
+        // Block sequence: the key's value is the `- F` lines that follow, at ANY
+        // indentation. Flush items are valid YAML and are the style `serde_yml`
+        // emits, so 5 of this repo's 45 `entry_prefix` ledgers use them — including
+        // the busiest. The ITEM test is the only bound needed: the first line that is
+        // not `- ` ends the sequence, which is what keeps a sibling key such as
+        // `entry_high_water_F: 3` from being swallowed as a list item. An additional
+        // indentation test also broke on the flush form and returned `[]`, silently
+        // disabling both protections gated on this predicate.
         let mut out = Vec::new();
         for next in lines {
             if next == "---" {
                 break;
             }
-            let t = next.trim_start();
-            let Some(item) = t.strip_prefix("- ") else {
+            let Some(item) = next.trim_start().strip_prefix("- ") else {
                 break;
             };
-            if next.len() == t.len() {
-                // Not indented — a top-level sequence, so this key is not its parent.
-                break;
-            }
             out.extend(clean_prefix(item));
         }
         return out;
