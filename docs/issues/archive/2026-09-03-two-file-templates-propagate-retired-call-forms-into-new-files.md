@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
 closed: null
@@ -181,7 +181,11 @@ green: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features l
 warnings` (exit 0), `cargo test --workspace --no-default-features` (exit 0), `cargo test
 --workspace` (exit 0) — no failures in either lane.
 
-**Not committed yet** — SHA and patch-id pending; archive after commit per convention.
+**Committed** at `269651a4` (`docs: sweep session-log template, TEAM-ONBOARDING, and ROADMAP for
+retired call forms`), patch-id `93cf7b4bb447c67b00f09aaab0a884702a0d23ec`. Gate green at fix
+time on `experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features
+local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
+--workspace` — exit 0 on all four, no failures.
 
 ## Resume
 
