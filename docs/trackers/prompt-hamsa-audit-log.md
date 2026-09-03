@@ -9,7 +9,7 @@ tags:
 - audit
 entry_prefix: A
 expects_augmentation: docs/augmentations/docs-trackers-prompt-hamsa-audit-log.yaml
-entry_high_water_A: 37
+entry_high_water_A: 38
 ---
 
 # Prompt Hamsa — Audit Log
@@ -72,6 +72,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-34 | 2026-08-28 | The deployed CLAUDE.md profile *as a document* — the compiled `OP-1` block's position within it, and the competing imperative sections `### Memory` (`OP-3`) and `### Subagent Dispatch` (`OP-2`); arms `s6-block-at-top` / `s7-no-competing-rules` | A-33 settled that the Conclude Last prose was not load-bearing but left the LARGER effect unexplained: with the prose gone the real profile still scores 4/10 plausibility-verified excl-t2 against 7/10 for the block delivered alone. Two mechanisms predict the arms run so far identically and have very different remedies — **position** (a compiler change, free to the operator) vs **instruction competition** (trimming the operator's own rules, a more expensive decision). | Run a 2×2 that separates them: `s6-block-at-top` (s5's content with the block moved to the top — position only, an identical multiset of lines apart from one blank) and `s7-no-competing-rules` (block still at the END, Memory + Subagent Dispatch removed, the *factual* Three Instances retained — competition only, 1190 B against s5's 3845 B), against anchors s2 7/10 and s5 4/10 | Decision table frozen before the run so no outcome can be narrated afterwards as the one expected — P-P1 s6 high (>=6/10) / s7 low (~4/10) ⇒ position, compile the block to the top; P-P2 s6 low / s7 high ⇒ instruction competition, trim the other rules or accept the cost; P-P3 both high ⇒ additive; P-P4 both low (~4/10) ⇒ neither, the cause is something else about the document (H1 framing, or that *any* surrounding text costs). P-P5 — s7 should NOT exceed s2, since s7 is s2 plus ~900 B of factual prose; if it does, the effect is noise at this n and the whole decomposition is unsupported. | P-P1/P-P2 **low individually** — a genuine fork with no strong prior on which wins, which is exactly why both are run; P-P4 medium-high. The decision table, not any single prediction, is this pre-registration's real content. | **RUN 2026-08-28, n=35/arm, 0 errored. P-P2 HELD — the mechanism is INSTRUCTION COMPETITION, not position. P-P5 held, so the decomposition is supported.** excl-t2 (n=10) / all-plausibility (n=15) / all-class (n=35) / wrong&unchecked: `s2` block alone 7/10, 12/15, 28/35, 0/35 · `s5` real profile 4/10, 6/15, 21/35, 1/35 · `s6` block at top 5/10, 7/15, 22/35, **3/35** · `s7` competing rules removed **7/10**, 11/15, 26/35, 1/35. `s7` lands EXACTLY on `s2`'s ceiling — with the block still at the END and ~900 B of factual prose retained; `s6` gains one run over s5 (inside noise) and made `wrong&unchecked` worse. Three independent cuts agree on the ordering, materially better powered than A-33's two-run result. **The remedy is not available to the compiler:** splicing the block at the top buys ~1 run, removing the two competing imperative sections buys all 3. The removed sections are `OP-3` and `OP-2`, both already classified `triggered`; the RETAINED `## Three Claude Code Instances` is `OP-4`, also `triggered`, and cost nothing — so the effect is **not bulk** and **not triggered-ness**, but specifically **competing imperatives resident in the same file**. **Phase 2 routing is therefore the measured fix for a 3-of-7 (~43%) loss in the deployed rule's effect**, overturning the earlier recommendation to sequence Phase 3 ahead of it because routing had 'an empty population' — the population is not empty, it is resident. Interim remedy has an honest cost: unlike the Conclude Last deletion, `OP-2`/`OP-3` have NO measured replacement, so retiring them means they go undelivered until routing exists. Contamination guard clean (`path_security.rs` last moved 08:45:38, before the 09:07:08 start). |
 | A-35 | 2026-09-02 | `CAP-10`'s first drafted practice rule — **"Never write a function's signature, types, arity or call shape into a plan from a symbol listing or from memory — open the function body first. An overview gives you names; it does not give you shapes."** The UNIT UNDER TEST is the rule TEXT. Delivery is not in question and is not measured here: `CAP-10`'s Open decision 1 was settled 2026-09-02 as option 2, and the mechanism already exists — `Serves: create_file(path~docs/superpowers/plans/)` routes with no new code, proven for the same selector shape by `operator-rules:OP-4`. | `CAP-10` measured **6 of 6** subagent task briefs carrying code defects in one SDD run, all from one cause: the plan's Rust was written from `symbols(path=…)` OVERVIEWS rather than bodies — wrong capture count, a non-dependency crate, a constructor's return type, a field's type, absent test helpers, and two hand-rolled reimplementations of an existing date function. One rule prevents all six and belongs in `superpowers:writing-plans`, which we cannot edit. UNESTABLISHED, and the whole question: whether the text CHANGES BEHAVIOUR when delivered. `CAP-10`'s own standard — *an injected rule that does not measurably change behaviour is decoration*. The moment is argued rather than assumed: 6/6 was observed at DISPATCH, but dispatch is where the harm lands and plan-writing is where the cause is. | Four arms, `mode: output`, runs:10, pinned (P-7), modelled on `prompt-engineering:scenarios/workspace-pin-routing` — arms differ ONLY in which fixture CLAUDE.md `setup:` copies; stimulus byte-identical across all four. base / treatment / control-null (equal-length unrelated imperative, separating "the rule worked" from "any imperative worked") / control-positive. STIMULUS: plan a change touching one named function whose TRUE shape differs from what its name and one-line listing imply — an overview-level read returns a PLAUSIBLE WRONG answer, which is the measured defect's mechanism rather than a proxy for it. Mechanical checker, no judge (P-5), three classes (CORRECT / LISTING-SHAPED / UNPARSEABLE); mutation-tested in two layers before any arm (P-6), including the exec-bit case that summarises as a clean `0/N`. Scored via `scripts/run_arms.py --all`; read the rate and distinct-answer count, never the PASS verdict (`prompt-tdd-operating-guide:OP-2`, `:OP-3`). **NOT YET BUILT** — fixtures, checker and arms are unwritten as this row is committed; P-2 makes pre-registration binding and a decision rule written after seeing a number is not one. | PRE-REGISTERED BEFORE ANY ARM EXISTS. (1) VALIDITY GATE, binding and first — base/treatment/control-null tying is VOID until control-positive moves the number (A-27's exact experience). (2) WORTH INJECTING iff treatment >= base + 3 AND treatment > control-null; both conjuncts required, the second so a generic compliance bump cannot read as a content effect. (3) DECORATION iff treatment <= base + 1 — and on that outcome `CAP-10`'s injection route is RETIRED rather than re-tuned, since the strongest-evidenced of its three candidates failing is evidence about the layer. (4) BASE IS INDEPENDENTLY DIAGNOSTIC and the more interesting half — base >= 8/10 means this stimulus does not reproduce the deficit, the honest reading is that the dispatch layer manufactured it, and NO treatment result from the run may be cited. (5) Otherwise INDETERMINATE, re-run at n=20. | Moderate on the deficit, LOW on the treatment. FOR: 6/6 needs no large n to re-observe and the mechanism is mundane — an overview is cheaper than a body and answers a question that LOOKS like the one asked. AGAINST: this is a rule against a shortcut whose appeal is being invisible at the moment of taking it, and A-26 (naming a thing does not displace a competing prior) applies directly, the prior here being *"I already have the symbol list in context."* A null is live and unsurprising, and worth MORE than a positive — it retires a proposal rather than growing one. SELF-FLATTERY RISK, recorded because I am author and beneficiary: I settled Open decision 1 hours before writing this, and a treatment win retroactively justifies that settlement; branch (4) exists so a base ceiling reads as "stimulus too easy", never as "rule unnecessary". | **RUN 2026-09-02, n=10/arm, 0 errored, $2.71. BRANCH (4) FIRES — DISQUALIFIED FOR ANY TREATMENT CLAIM.** base **9/10** (distinct 3; PASS=9, FAIL(listing-shaped)=1) · treatment **10/10** · control-null **10/10** · control-positive **10/10** (distinct 3). Gate (1) did NOT fire — arms differ and control-positive is live, so this is a real measurement of the wrong thing, not a broken pipe. base >= 8/10 means the stimulus does not reproduce the deficit: **the instrument failed, not the rule**, which is neither vindicated nor refuted. **Defect in the pre-registration itself:** (3) and (4) both fire and contradict — (4) governs since (3) is a treatment claim — and at base 9 the ship threshold in (2) was `treatment >= 12` on a 10-point scale, i.e. **unreachable once base cleared 7**. A ship condition that cannot be met is not a decision rule; v2 must state thresholds as headroom-relative, not as absolute deltas. Spot-read all 40: base's lone failure is exactly the predicted `["R-1","R-2","R-1","R-1"]`, and one base run volunteered the right mechanism unprompted — the trap is real, the model just walks past it 9 times in 10 unaided. Cause was pre-registered as caveat (1): one factual question about one small module in an empty repo makes opening the body nearly free, where the field 6-of-6 arose drafting six briefs under length pressure. **V2 must make the shortcut attractive** — a multi-function plan, or a repo where the overview is the cheap path. |
 | A-36 | 2026-09-02 | The SAME practice rule as A-35, unchanged byte-for-byte. **ONLY THE STIMULUS CHANGES** — varying rule and stimulus together would leave a null uninterpretable. Scenario: `prompt-engineering:scenarios/plan-opens-the-function-competing`. | A-35 disqualified itself under its own branch (4): base 9/10, no treatment result citable. The diagnosis was pre-registered as its caveat (1) — one question about one small module in an empty repo makes opening the body nearly free. CAP-10's 6-of-6 arose drafting SIX briefs under length pressure where every lookup competes with five others: **the deficit is a property of that competition** and A-35 removed it. NOT a rate too low to see (base's one failure was exactly the predicted shape, so trap and checker both work) and NOT fixable by more runs — n does not move a ceiling. | FOUR traps in FOUR modules, one turn, brevity instruction so lookups compete. `extract_citations` dedups · `normalise` int()s away zero-padding · `count_entries` needs dash AND title · `strip_prefix` strips EVERY repetition. Each true value EXECUTED before the checker was written. PASS requires all four by design: P(pass) = (1-p)^4, so A-35's p~0.1 predicts base ~0.9^4 = 66% — headroom one trap cannot produce at any n. Stimulus byte-identity verified independently: all four `977e973f63da`. Checker mutation-tested, 12 cases, 6 classes; **the test already paid for itself**, catching a parser defect that rejected backticked assignments, which A-35's logs show in 8 of 10 runs. | PRE-REGISTERED. **THRESHOLDS ARE HEADROOM-RELATIVE** — A-35's ship condition `treatment >= base+3` read `>= 12` on a ten-point scale at base 9, unreachable once base cleared 7; a ship condition that cannot be met is not a decision rule. gap = 10 - base. (1) control-positive < 8/10 => VOID — with four traps it must show the task is ANSWERABLE when the facts are known, so a low base reads as "did not look" not "could not tell". (1b) three-way tie => VOID. (2) base >= 9/10 => no treatment result citable; v3 needs more competition, not more runs. (3) SHIP iff treatment closes >= 60% of gap AND treatment > control-null. (4) DECORATION iff treatment closes <= 20% of gap — CAP-10's injection route RETIRED, not re-tuned. (5) else INDETERMINATE at n=20. | Moderate that the deficit appears: the (1-p)^4 arithmetic rests on A-35's p, one observation at n=10, so base could land 41–82% — stated as a range, with (2) catching the top and (5) the middle. LOW that the treatment moves it, unchanged from A-35. **What I have already been wrong about:** I predicted A-35 would show a deficit and got 9/10; the error was the STIMULUS, not the rule's plausibility. The same error is available here in smaller form — four traps in ONE turn compresses the competition rather than reproducing its duration, and if that compression is what mattered, v2 ceilings too and v3 needs multi-turn. | **RUN 2026-09-02. BRANCH (2) FIRES AGAIN — base 9/10, CEILING DISQUALIFICATION, no treatment result citable.** base **9/10** (distinct 4; PASS=9, UNPARSEABLE=1, and that one is a checker surface gap not a model error) · control-null **8/8** before the run was stopped · treatment and control-positive NOT RUN, stopped deliberately once base ceilinged rather than paying for two arms of uncitable numbers. **The pre-registered caveat fired verbatim** — "four traps in ONE turn compresses the competition rather than reproducing its duration; if that compression is what mattered, v2 ceilings too and v3 needs multi-turn." The (1-p)^4 arithmetic was sound and its premise was wrong: p is not a per-trap constant, because the marginal cost of a fourth read is still trivial. **Two independent stimuli, both ceilinged, both pre-registered as diagnostic — the honest conclusion is that this rule is not testable in `mode: output` at all.** v3 needs A-29's multi-turn trace-scored shape, which costs a subsystem to answer a question about one sentence. **A SECOND scoring bug reached a paid run:** 9 of 10 base runs first scored UNPARSEABLE with every answer in them CORRECT — the model answered in CALL form (`extract_citations(DOC) = …`), reproducing the question's notation, and the parser demanded the bare name. Trusted, it would have read as base 1/10. Same cause as the backtick defect before it: **mutation cases written from an imagined output shape, not an observed one.** The cheap rule I did not have — seed the checker's cases from a pilot run's real responses before spending on the arm. Re-scored from existing logs via score_arm.py rather than re-running. |
+| A-38 | 2026-09-03 | `prompt-engineering:scenarios/surface-budget` — the baseline instrument, built 2026-08-23 | Its pre-registration is **owed and unwritten**: the task was scoped not to modify this repo, and its own README states the `-base` table must not be published until the entry exists. So a RUN-READY instrument is blocked on a missing ledger row | Register the thresholds that README already lists (nullctl TIE; tracker-base and routing-base each ≥ 8/10; record prompt-per-turn, calls, guidechars, distinct), and fill P-2a's observable table before any arm | `nullctl` splits by 0; both `-base` arms land at or near ceiling — a prediction of LOW POWER, not of success, grounded in `ledger-vs-tracker`'s measured 10/10 across all four cells AND under `--ablate` | high on the ceiling | *(empty — the `-base` matrix has not run)* |
 ## Protocol — subtract-and-measure (P-1..P-8)
 
 Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo. **P-2a's observable table is cross-repo too, and for a sharper reason: the failure that produced it happened in `claude-plugins`, outside this protocol's stated binding.** A gate only works where the form is filled in, so the table travels with the pre-registration rather than with this repo — mirrored at `claude-plugins:docs/templates/eval-pre-registration.md`.
@@ -1960,3 +1961,140 @@ been uncitable under a branch fixed before the run. The pre-registration paid fo
 here.
 
 Cumulative across A-35, A-36, A-37: **$5.74**.
+
+
+## A-38 — the surface-budget baseline's owed pre-registration, and its identity control is a dead observable without layer 0
+
+**Status:** **PRE-REGISTERED 2026-09-03 — the `-base` matrix has NOT run.** Written to
+discharge an obligation the scenario recorded against itself and could not satisfy.
+
+**Why this entry exists at all.** `prompt-engineering:scenarios/surface-budget/README.md`
+§ *Pre-registration (design step 0g)* states the obligation and why it went unmet: *"the
+design puts pre-registration in codescout's `docs/trackers/prompt-hamsa-audit-log.md`, and
+this task was scoped not to modify the codescout repo. Nothing in that tracker is believed
+without pre-registration, so the `-base` table must not be published until the entry
+exists."* The instrument was built 2026-08-23 in a repo that could not write here; this is the
+missing half, written by a later session in the repo that owns the ledger.
+
+### A-38 — what is ALREADY OBSERVED and is deliberately NOT under this registration
+
+Recorded first, because a registration written after *some* measurement must say which
+measurements it does not cover, or it is backdating:
+
+- **The schema-deferral calibration.** `eval-bins/calibrate_attach.py`, three runs,
+  reproducible to the token: attaching codescout raises the prompt by **1,175 tokens** against
+  a 57,713-char / ~16,000-token wire surface. Claude Code 2.1.241 injects only tool **names**;
+  the ~85% that is JSON schema arrives later via `ToolSearch`. A completed instrument
+  calibration, not an arm — it needs no threshold, but it is why the `-base` table means
+  something different than the design assumed.
+- **The smoke arm** (design step 0c) ran, and produced the OP-2 lesson in that README:
+  `Summary: 1/1 passed` printed while the run had FAILED, because `pass_threshold: 0.0`.
+- **The project-state dependence** (23 / 26 / 27 tools by fixture) was measured against
+  `codescout-base` at git_sha `7c3245d7`.
+
+Nothing else has been run. `nullctl`, `tracker` and `routing` have no recorded results, and
+`results/` holds none.
+
+### A-38 — P-1, the failure named
+
+The tool-surface budget work shipped a **char** ceiling (`TOOL_SURFACE_CHAR_BUDGET`,
+`resume-tool-surface-budget`, closed 2026-08-18) and every compaction decision since has been
+argued in chars. The deferral calibration says chars-in-prefix is **not** the resident cost.
+Before any compaction arm can be believed, the instrument needs a baseline in the units that
+actually move: prompt-per-turn, tool calls, `guidechars`.
+
+### A-38 — the move, and the prediction
+
+**Move:** run the three `-base` arms and `nullctl`'s identity pair, recording the observables
+below. **No prompt surface changes.** A baseline, not an intervention — P-3's *base arm
+first* taken literally, with the treatment arms deliberately unwritten.
+
+**Prediction, committed now:** `nullctl` splits by 0; `tracker-base` and `routing-base` both
+land **at or near ceiling (9–10/10)**. **Confidence: high on the ceiling**, and that is a
+prediction of *low power*, not of success — `prompt-engineering:scenarios/ledger-vs-tracker`
+measured an equivalent codescout-tool task at 10/10 on all four cells **and 10/10 under
+`--ablate`**, concluding *"tautological for sonnet … NO POWER for a capable model."*
+
+### A-38 — P-2a, the observable table, filled before running
+
+**Observable 1 — `nullctl` split, `|base − null|`.** The two binaries are byte-identical, so
+this asks whether the *instrument* can distinguish anything at all.
+
+| trace | observable returns |
+|---|---|
+| instrument sound | split ≈ 0 |
+| instrument noisy | split > 0 |
+| **checker cannot fail at all** | **split ≈ 0** |
+
+**Rows 1 and 3 COLLIDE, so by P-2a's stop rule this observable is DEAD on its own.** A zero
+split is equally the signature of a clean instrument and of a checker that returns PASS
+unconditionally — the `works`-vs-`absent` collision P-2a names. It is rescued only by a
+separate layer: `test_checker.py`'s 31 tests that a checker cannot fake a result, plus the
+exec-bit assertion in three places (`gen.py`, `test_checker.py`, `score_arm.py:82-85`).
+**Those tests are load-bearing evidence for this observable, not hygiene**, and `nullctl` must
+not be read as validating the instrument unless layer 0 is green in the same session. The
+exec-bit case is not hypothetical — that README records it *"has already published a
+fabricated result in this repo once"*, as a clean `0/N` byte-identical to a genuine floor.
+
+**Observable 2 — `tracker-base` / `routing-base` pass rate.** The table resolves only once the
+question is named, and the two candidate questions give different answers.
+
+| trace | *"can this task gate a regression?"* | *"does the guidance secure the behaviour?"* |
+|---|---|---|
+| works | ≥ 8/10 | high |
+| fails | < 8/10 | low |
+| absent (no guidance) | *n/a — no treatment exists* | **high, if the model does it anyway** |
+
+For the **first** question — the one that README actually asks — there is no `absent` world,
+no collision, and the observable is sound. For the **second**, rows 1 and 3 collide and it is
+dead. **These arms are registered for the first question only.** They establish a floor for
+later regression-gating and say **nothing** about whether any guidance works.
+
+The sharper consequence, and the reason this is worth writing rather than assuming: **the same
+number that qualifies the task for regression-gating disqualifies it for
+improvement-detection.** A base at 10/10 can only be pushed down. Any future arm hoping to
+show an *improvement* needs a different stimulus, and `ledger-vs-tracker` supplies the known
+escape — an ambiguous task whose checker classifies runs into a distribution instead of
+passing them.
+
+**Observable 3 — `prompt_per_turn`, `calls`, `guidechars`, `distinct`.** Descriptive; **no
+decision rule reads them**, so no threshold is registered and none may be invented later.
+`distinct == 1` across runs is recorded as *one answer repeated*, never as agreement.
+
+### A-38 — decision rule, registered before any arm
+
+1. **Layer 0 first, binding.** `test_checker.py` green and every checker executable, **in the
+   same session as the run**. If not, the matrix does not run — Observable 1 cannot be
+   interpreted without it.
+2. `nullctl-base` vs `nullctl-null` must **TIE**. Any split **invalidates every later delta**
+   from this instrument; the baseline is not published and the instrument is repaired first.
+3. `tracker-base` ≥ **8/10** and `routing-base` ≥ **8/10**, or that task **cannot gate a
+   regression** and is recorded as unusable for that purpose rather than re-run to a better
+   number.
+4. Report **rates from the `score_arm.py` table**, never the `Summary: N/M` verdict (OP-2) and
+   never the exit code, which is 0 even when every arm failed.
+5. **Outcome stays empty until evidence lands.** A ceiling is the predicted result and is
+   recorded with the same care as a win — 6 of 9 intervention audits to date landed no-ship.
+
+### A-38 — what this cannot establish, recorded before the run
+
+- **It is a baseline, not a finding about any prompt.** No treatment arm exists; nothing here
+  can say a surface change helps or hurts.
+- **The deferral calibration is one client, one profile.** That README is explicit: not
+  asserted whether deferral is default-on for every client; it was default-on for a
+  `settings.json` of `{}` on that machine. A session with schemas resident pays a different
+  cost, and both readings are correct about different configurations.
+- **`prompt_per_turn` confounds surface size with task difficulty** unless turns are held
+  comparable — every extra turn re-reads the prefix, so a harder run reports more prompt
+  tokens on an identical surface.
+- **Written by a later session than the one that built the instrument**, 11 days on. It
+  registers thresholds that README already stated; it does not reconstruct the original
+  author's intent beyond them.
+
+**Valid:** conditional — until the `-base` matrix runs and an outcome is recorded here
+
+**Rests on:** `prompt-engineering:scenarios/surface-budget/README.md` § *Pre-registration
+(design step 0g)* for the owed thresholds; `prompt-engineering:scenarios/ledger-vs-tracker`
+for the measured ceiling grounding the prediction; `P-2`/`P-2a`/`P-3`/`P-6`/`P-8` above;
+`docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`;
+`resume-tool-surface-structural-mechanisms:SM-4`, which carries the same deferral finding.
