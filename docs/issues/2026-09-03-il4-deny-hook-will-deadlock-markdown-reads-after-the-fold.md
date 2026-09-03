@@ -1,12 +1,14 @@
 ---
-status: open
-opened: 2026-09-03
-severity: high
-owner: marius
-related: []
+kind: bug
+status: taken
 tags:
 - cluster/gate-keyed-on-unobservable-event
-kind: bug
+claimed_at: 2026-09-04
+claimed_by: d2bc134a-4e6b-470f-b742-1abd5b278279
+opened: 2026-09-03
+owner: marius
+related: []
+severity: high
 ---
 
 # BUG: the companion plugin's IL-4 hook will deadlock every markdown read once the fold ships
