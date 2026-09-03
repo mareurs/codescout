@@ -147,7 +147,7 @@ impl Tool for Artifact {
                 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list/gather: document id (16-hex). find and create take none."
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list/gather/augment: document id (16-hex). find and create take none."
                 },
                 "threshold_hours": {
                     "type": "integer",
@@ -197,7 +197,7 @@ impl Tool for Artifact {
                 },
                 "augment": {
                     "type": "object",
-                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. action=\"augment\": attach or replace a persistent prompt + params on any artifact (merge=false, default) or patch only the fields you provide (merge=true — see the top-level `merge` property). Fields below are augment's own — see that action's own field descriptions for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
+                    "description": "augment: attach or replace a persistent prompt + params on any artifact (merge=false, default) or patch only the fields you provide (merge=true — see the top-level `merge` property). create: attach the augmentation atomically, so a tracker needs no follow-up call. Fields below are augment's own — see that action's own field descriptions for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
                     "properties": {
                         "prompt": {
                             "type": "string",
@@ -514,6 +514,34 @@ mod tests {
                 "schema documents `{phantom}` but update.rs has no field backing it"
             );
         }
+    }
+    /// Regression for the bug where the `id` param's routing prefix listed eleven actions
+    /// and omitted `augment`, even though `doc(action="augment", id=…)` is the documented call
+    /// form in CLAUDE.md and `get_guide("librarian")`. The prose routing prefix is the only
+    /// machine- or agent-readable statement of which actions accept a param, so an omission
+    /// here silently misleads a reader deciding whether `augment` takes an `id`.
+    /// docs/issues/archive/2026-09-03-doc-id-param-routing-omits-the-augment-action.md
+    #[test]
+    fn id_param_routing_names_augment() {
+        let schema = Artifact.input_schema();
+        let id_desc = schema["properties"]["id"]["description"]
+            .as_str()
+            .expect("id param must have a description");
+        assert!(
+            id_desc.contains("augment"),
+            "the `id` param's routing prefix must name `augment` — it requires an id and \
+             the prefix is the only place that says so: {id_desc}"
+        );
+
+        let augment_desc = schema["properties"]["augment"]["description"]
+            .as_str()
+            .expect("augment param must have a description");
+        assert!(
+            augment_desc.starts_with("augment") || augment_desc.starts_with("action=\"augment\""),
+            "the `augment` param's own description must open with its own routing token \
+             rather than leading with an unrelated action's, or a reader has no reason to \
+             expect it needs `id`: {augment_desc}"
+        );
     }
 
     /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
