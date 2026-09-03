@@ -167,10 +167,10 @@ fn guard_with_oracle(
 
     let why = if augmented {
         " (augmented — its params live in the catalog, and this file is only a \
-         rendered snapshot of them)"
+             rendered snapshot of them)"
     } else if ledger {
         " (a ledger — it declares an entry_prefix, and its PREFIX-N ids are \
-         allocated by the server)"
+             allocated by the server)"
     } else {
         // The `stamped` arm carried the empty string until 2026-09-01, so the one
         // reason most likely to fire UNINTENDED was also the only one that did not say
@@ -179,7 +179,7 @@ fn guard_with_oracle(
         // name its scope. Naming the mechanism is also what lets a reader judge whether
         // the refusal is protecting anything on THIS file.
         " (stamped — it carries a librarian `id:`, so its frontmatter is catalog-indexed \
-         and a direct frontmatter edit would not reach the catalog)"
+             and a direct frontmatter edit would not reach the catalog)"
     };
     // A ledger that is NEITHER augmented nor stamped is the class this guard newly
     // covers, and it is the only one whose file is still where its state lives — so
@@ -190,28 +190,43 @@ fn guard_with_oracle(
     // is what trains callers to route around it.
     let hint = if ledger && !augmented && !stamped {
         "This file is a ledger — it owns a PREFIX-N id namespace.\n\
-         • Add an entry:  doc(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
-         \x20 then write the section yourself with the id it returns.\n\
-         • Edit anything else (prose, a heading, a typo):\n\
-         \x20 doc(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
-         action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
+             • Add an entry:  doc(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
+             \x20 then write the section yourself with the id it returns.\n\
+             • Edit anything else (prose, a heading, a typo):\n\
+             \x20 doc(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
+             action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
             .to_string()
     } else if stamped_only {
         // Reached only by a FrontmatterWrite, since every other access returned Ok
         // above. So the hint can name the one route that does reach the catalog,
         // instead of the generic three-line menu — and say what is now allowed, or the
         // caller has no way to learn that the body was never the problem.
+        //
+        // **The real discriminator is grammar, not the `frontmatter` param** — this hint
+        // used to say "edit_file without its `frontmatter` param" works, which is false:
+        // `edit_file`'s plain text grammar (old_string/new_string, insert, or a
+        // non-heading edits[] item) reaches this guard as `FrontmatterWrite`
+        // unconditionally, because it cannot prove its own extent stays out of the
+        // frontmatter block — see `read_edit_target` in `src/tools/edit_file/mod.rs`.
+        // Only the markdown heading grammar (`heading` + `action`, no `frontmatter` key)
+        // is structurally scoped to one section, so only it is passed `BodyWrite` and
+        // only it reaches here successfully.
+        // docs/issues/archive/2026-09-03-librarian-guard-refuses-text-grammar-while-promising-it-works.md
         "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
-         • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
-         Reads and BODY edits are allowed directly — read_file, and edit_file \
-         without its `frontmatter` param, both work on this file."
+             • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
+             Reads and BODY edits are allowed directly, but only via a call that can prove \
+             it stays in the body: read_file always works; for edit_file, only the markdown \
+             heading grammar (`heading` + `action`) does — its plain text grammar \
+             (`old_string`/`new_string`, `insert`, or a non-heading `edits[]` item) cannot \
+             bound its own extent and is refused here even with no `frontmatter` param. Use \
+             doc(action=\"update\", patch={body_edits: [...]}) for that shape instead."
             .to_string()
     } else {
         "Use artifact tools instead:\n\
-         • Read:   doc(action=\"get\", id=\"<id>\")\n\
-         • Find:   doc(action=\"find\", semantic=\"<topic>\")\n\
-         • Edit:   doc(action=\"update\", id=\"<id>\", patch={...})\n\
-         Full guide: resources/read doc://librarian-guide"
+             • Read:   doc(action=\"get\", id=\"<id>\")\n\
+             • Find:   doc(action=\"find\", semantic=\"<topic>\")\n\
+             • Edit:   doc(action=\"update\", id=\"<id>\", patch={...})\n\
+             Full guide: resources/read doc://librarian-guide"
             .to_string()
     };
     // The trailing clause is a claim about SCOPE, and for `stamped_only` the blanket form is
@@ -840,6 +855,62 @@ mod tests {
         assert!(
             !hint.contains("append_entry"),
             "a stamped non-ledger owns no id namespace: {hint}"
+        );
+    }
+    /// Regression for the bug this hint used to cause: it named the WRONG discriminator.
+    ///
+    /// Until 2026-09-03 this hint read "edit_file without its `frontmatter` param, both work
+    /// on this file" — a claim that is true of every call `edit_file`'s plain text grammar can
+    /// make, since that grammar has no `frontmatter` param to omit, and false regardless: a
+    /// text-grammar edit reaches this guard as `Access::FrontmatterWrite` unconditionally
+    /// (`read_edit_target` in `src/tools/edit_file/mod.rs` — it cannot prove its `old_string`
+    /// stays out of the frontmatter block), so it is refused by this very branch. Only the
+    /// markdown heading grammar (`heading` + `action`) is passed `Access::BodyWrite` and
+    /// reaches this file successfully. The real discriminator is grammar, not a param's
+    /// presence — this test pins the corrected wording so it cannot drift back.
+    /// docs/issues/archive/2026-09-03-librarian-guard-refuses-text-grammar-while-promising-it-works.md
+    #[test]
+    fn the_stamped_hint_names_grammar_not_the_frontmatter_param_as_the_discriminator() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let text = "---\nid: '23421bbc5b226368'\nkind: doc\n---\n\n## A\n\nprose\n";
+        let abs = std::path::Path::new("/repo/docs/TEAM-ONBOARDING.md");
+        let err = guard_with_oracle(
+            "docs/TEAM-ONBOARDING.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a frontmatter write on a stamped file must still be refused");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+
+        assert!(
+            !hint.contains("without its `frontmatter` param"),
+            "the old wording named the `frontmatter` param as the discriminator — that claim \
+             is vacuously true of the plain text grammar (which has no such param) and does \
+             not describe why it is refused: {hint}"
+        );
+        assert!(
+            hint.contains("heading"),
+            "the hint must name the markdown heading grammar as the route that DOES prove \
+             it stays in the body: {hint}"
+        );
+        assert!(
+            hint.to_lowercase().contains("text grammar")
+                || hint.to_lowercase().contains("old_string"),
+            "the hint must name the plain text grammar as the one that is refused, so a \
+             caller who used it learns why: {hint}"
         );
     }
 
