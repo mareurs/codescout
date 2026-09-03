@@ -37,6 +37,197 @@
 //! does count. A miss that close to a hit is the plainest statement of why
 //! instrument B ([`truncation_sites`]) exists: it reads the truncating
 //! OPERATION, which no name regex can be widened into.
+//!
+//! ## Reachability of every gate red — 2026-09-03
+//!
+//! Rounds 3–4 proved the gate's HELPERS discriminate on crafted fixture
+//! strings. That is a claim about a re-implementation's inputs, not about the
+//! shipping path — `CLAUDE.md` § *Testing Discipline*: "loudness is a property
+//! of a PATH, not of a failure", whose worked example is two `Tool` impls that
+//! carried a green suite for months while registered nowhere. So every
+//! condition below was **driven red by breaking the REAL corpus and
+//! reverting**, one mutation in the tree at a time, `git status --short`
+//! confirmed empty between each. Four are marked otherwise: two reachable only
+//! by mutating the real HELPER, two only by breaking the ENVIRONMENT.
+//!
+//! **How the population was enumerated.** Publish the derivation, not the
+//! count, so the next reader re-checks it instead of re-deriving it under a
+//! counting rule of their own. Every corpus-facing test's body was read and
+//! every reachable `panic!` / `assert!` / `expect` listed — *including those
+//! inside the helpers it calls* (`tracked_src_files`, `unclassified_decls`,
+//! `resolve_cited_test`), which is where a third of the population turned out
+//! to live. **Unit: one distinct corpus defect needing its own remedy, counted
+//! once per guarded SITE.** Two defects hitting one `assert!` but interpolating
+//! different fields (`missing_rows` vs `orphaned_rows`) are TWO; one predicate
+//! guarded at three call sites is THREE — "mutate once per guarded SITE, not
+//! once per feature". That yields **30 sites over 27 distinct predicates**: the
+//! read-a-tracked-`src/`-file predicate is guarded at 3 sites and the
+//! read-`cap_probe.rs` predicate at 2. A prior brief for this work said five.
+//!
+//! `tracked_src_files` (shared by four tests):
+//! - `git` not spawnable → `PATH=/nonexistent` on the built test binary →
+//!   `git ls-files failed to run — this gate needs a git checkout: Os { code: 2
+//!   … }`. ENVIRONMENT, not corpus.
+//! - `git ls-files` exits non-zero → `GIT_DIR=/nonexistent-git-dir` →
+//!   `git ls-files exited Some(128): fatal: not a git repository: …`.
+//!   ENVIRONMENT, not corpus.
+//!
+//! [`tracked_src_files_returns_rust_files_under_src_and_excludes_tests`]:
+//! - known src file missing → `git rm --cached src/tools/grep.rs` →
+//!   `a known src file must be present; got 307 files`.
+//! - a listed path outside `src/**.rs` → **not reachable from any corpus
+//!   state**: `git ls-files src` cannot emit a path that does not start
+//!   `src/`, and the helper's own `.ends_with(".rs")` filter supplies the rest,
+//!   so this assertion restates the helper. Driven by mutating the HELPER
+//!   (`args(["ls-files"])`) → `only tracked .rs under src/`.
+//! - a `tests/` path listed → **strictly shadowed.** Any input satisfying it
+//!   violates the assertion above, which runs first; under the helper mutation
+//!   the observed message is the previous one. Proved live rather than dead by
+//!   additionally commenting that assertion out → `tests/ carries cap-class
+//!   fixtures and must never be scanned`. Two mutations were needed to see one
+//!   message.
+//!
+//! [`every_cap_constant_is_classified`]:
+//! - no annotation → delete `src/tools/grep.rs:786`'s `cap-class:` line →
+//!   `1 cap constant(s) …\nsrc/tools/grep.rs:786 MAX_TOTAL_MATCH_BYTES — no
+//!   cap-class annotation`.
+//! - `NOT_A_CAP` with no reason → cut `src/logging.rs:80` to the bare token →
+//!   `src/logging.rs:81 MAX_LOG_BYTES — NOT_A_CAP with no reason`.
+//! - `RESULT_CAP` with an id outside the grammar → rewrite
+//!   `src/tools/grep.rs:781` to `// cap-class: RESULT_CAP probed` →
+//!   `src/tools/grep.rs:782 MAX_MATCH_BYTES — NOT_A_CAP with no reason`.
+//!   **The message is wrong for this condition** — see *Two defects sharing a
+//!   message* below.
+//!
+//! [`result_caps_and_probe_rows_correspond_in_both_directions`]:
+//! - a tracked `src/**.rs` unreadable → `git add` a `src/zz_phantom.rs` whose
+//!   file is then deleted → `failed to read src/zz_phantom.rs: No such file or
+//!   directory (os error 2)` at the src loop.
+//! - `cap_probe.rs` unreadable → **shadowed while `cap_probe.rs` is tracked**:
+//!   the src loop reads it first and panics there. Reached only in the corpus
+//!   state where it is BOTH untracked and absent (`git rm --cached` + move) →
+//!   `failed to read <abs>/src/tools/core/cap_probe.rs: …` at the dedicated
+//!   read.
+//! - declared id with no row → delete the `grep.total_bytes` `ProbeRow` →
+//!   `Declared with no ProbeRow: ["grep.total_bytes"] / ProbeRow with no
+//!   matching RESULT_CAP declaration: []`.
+//! - row with no declaration → the `RESULT_CAP probed` mutation above →
+//!   `Declared with no ProbeRow: [] / ProbeRow with no matching RESULT_CAP
+//!   declaration: ["grep.match_bytes"]`.
+//!
+//! [`truncation_sites_reach_the_real_corpus`]:
+//! - a tracked `src/**.rs` unreadable → same phantom-path mutation → same
+//!   message, at this test's own loop.
+//! - a pinned `.next().await` drain reported → put ONE space before `.await` on
+//!   `src/librarian/indexer.rs:918` → `src/librarian/indexer.rs:918 is a
+//!   `.next().await` stream drain, not a cap …`. `cargo fmt` normalises that
+//!   space away (verified on that line), so no formatted tree can hold it; the
+//!   fixture twin is
+//!   `truncation_sites_reports_a_next_await_written_with_a_space_before_await_known_limitation`.
+//! - the pinned real `.truncate(` not found → insert one comment line above
+//!   `src/tools/symbol/symbols.rs:48` → `expected to find
+//!   src/tools/symbol/symbols.rs:48 (`.truncate(`) … not among the 308 sites`.
+//!   Note the two causes share this message: an instrument regression and an
+//!   innocuous line shift are indistinguishable here, which the assertion's own
+//!   comment already says.
+//!
+//! [`probed_rows_cite_a_real_test`]:
+//! - `cap_probe.rs` unreadable → move it aside (it is `#[cfg(test)]`-gated, so
+//!   this test target still builds) → `failed to read <abs>/…/cap_probe.rs: …`.
+//! - zero `Probed` rows parsed → `s/Coverage::Probed {/Coverage::Probed  {/g`
+//!   in `cap_probe.rs` → `probed_citations found zero Coverage::Probed rows …
+//!   or the parser's anchors … have drifted from the file's actual
+//!   formatting`.
+//! - a row silently dropped → split one row's `marker:` across two lines →
+//!   `probed_citations returned 17 citations but 18 chunks … look like a
+//!   genuine Coverage::Probed row`.
+//! - a tracked `src/**.rs` unreadable → same phantom-path mutation → same
+//!   message, at this test's own loop.
+//! - `cited_test` names no `fn` → point one row at `no_such_test_anywhere_in_src`
+//!   → `tool_output.inline_tokens: cited_test "…" names no `fn` found anywhere
+//!   in tracked src/`.
+//! - `cited_test` is ambiguous → point one row at the live three-way collision
+//!   `heading_truncation_is_signaled` → `… is declared more than once in
+//!   tracked src/ (src/librarian/preview/default.rs,
+//!   src/librarian/preview/plan.rs, src/librarian/preview/spec.rs) …`. The
+//!   refusal `resolve_cited_test` was written for, fired by the corpus that
+//!   motivated it.
+//! - the marker is not asserted → delete `assert!(text.ends_with('…'));` from
+//!   `src/librarian/preview/memory.rs:147`, the cited test, leaving it
+//!   compiling and green → `preview.observation_text: cited_test
+//!   "observation_text_truncated_to_limit" exists but its body does not assert
+//!   marker TextContains("…")`. This is the drift the citation mechanism
+//!   exists for, driven from the TEST side rather than the row side.
+//!
+//! `probe_rows_are_well_formed` (`src/tools/core/cap_probe_tests.rs`), all by
+//! editing the real `PROBE_ROWS`:
+//! - empty table → `PROBE_ROWS = &[]` (rows shelved under another name) →
+//!   `PROBE_ROWS must not be empty — an empty table would pass every check
+//!   below vacuously`.
+//! - malformed id → `id: "nodot"` → `malformed ProbeRow ids: ["nodot"]`.
+//! - duplicate id → repeat `tool_output.inline_tokens` → `ProbeRow ids that
+//!   appear more than once: ["tool_output.inline_tokens"]`.
+//! - malformed marker, BOTH sites: `JsonPath("truncated")` (no `$.`) →
+//!   `… malformed Marker: ["run_command.inline_bytes"]`; `TextContains("   ")`
+//!   → `… malformed Marker: ["tool_output.inline_tokens"]`.
+//! - placeholder reason, BOTH sites: `Deferred("TODO")` → `… placeholder (not a
+//!   real) reason: ["grep.total_bytes"]`; `NotYet("tbd")` → `… placeholder (not
+//!   a real) reason: ["index_state.skipped_sample"]`.
+//! - `Probed` row with empty `cited_test` → `cited_test: ""` → `Probed ProbeRow
+//!   ids with an empty cited_test …: ["tool_output.inline_tokens"]`.
+//!
+//! `tally_distinguishes_killed_from_not_yet_and_deferred` — its INPUT is a
+//! fixture on purpose (it is the only mixed population independent of the real
+//! table), so the shipping path it guards is `cap_probe::tally`, and that is
+//! what was mutated:
+//! - `probed` miscounts → `.filter(|_r| true)` → `both Probed rows should count
+//!   as probed / left: 3 right: 2`.
+//! - `mutation_verified` miscounts → drop `mutation: Mutation::Killed` from the
+//!   inner `matches!` → `only the Killed row should count as mutation-verified
+//!   / left: 2 right: 1`.
+//!
+//! **Both levels are kept deliberately.** The fixture tests in this file prove
+//! these same conditions on synthetic input; the mutations above prove the
+//! shipping path reaches them. A second level asserting about its own
+//! re-implementation is indistinguishable from coverage until you break the
+//! thing that ships — one guard in this corpus survived its own detector being
+//! disabled, 24 green. Neither level replaces the other, and neither should be
+//! deleted as redundant. The two fixtures added on 2026-09-03 were themselves
+//! mutation-verified against the real helpers rather than merely written:
+//! widening the `.next()` exclusion to `code.contains(".await")` reds the
+//! whitespace one and none of the other eight `truncation_sites` tests;
+//! dropping `!is_valid_cap_id(id)` from [`classify`] reds the malformed-id one
+//! while `unclassified_decls_names_every_offender_and_is_not_a_bare_count`
+//! stays green — which is the measurement that says the new fixture covers
+//! something the old one does not.
+//!
+//! ### What the run found
+//!
+//! **Two defects sharing one message.** `classify` returns `MalformedReason`
+//! for a `NOT_A_CAP` with no reason AND for a `RESULT_CAP` whose id is outside
+//! the grammar, and [`unclassified_decls`] renders both as
+//! `— NOT_A_CAP with no reason`. For the second the text names a token that is
+//! not on the line and prescribes the wrong repair. The two need different
+//! fixes, so one message sends half the readers to the wrong place. Pinned (not
+//! fixed) by
+//! `unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message`,
+//! so a fix and its wording must land together.
+//!
+//! **Two conditions are shadowed by a sibling assertion, not dead.** The
+//! `tests/` exclusion above can only be violated by input that also violates
+//! the `src/**.rs` assertion that runs first; and the correspondence test's own
+//! `cap_probe.rs` read is preceded by the loop that already reads
+//! `cap_probe.rs` as a tracked src file. Both are live code reachable only by
+//! removing the assertion in front of them (proved by doing exactly that) or,
+//! for the second, by an unusual corpus state.
+//!
+//! **[`every_cap_constant_is_classified`] alone survives an unreadable tracked
+//! file.** Under the phantom-path mutation its three sibling corpus tests
+//! panicked and it stayed green: it takes `let Ok(src) = … else { continue }`
+//! where they take `unwrap_or_else(|e| panic!(…))`, so a `src/` file that
+//! vanishes is silently dropped from the classification scan. It is not a hole
+//! in the gate as a whole — the siblings red on the same corpus state, loudly
+//! and by name — but this test's own scope is quietly narrower than it reads.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -783,6 +974,38 @@ fn truncation_sites_reports_an_op_inside_a_trailing_comment_known_limitation() {
 }
 
 #[test]
+fn truncation_sites_reports_a_next_await_written_with_a_space_before_await_known_limitation() {
+    // KNOWN LIMITATION, and the fixture twin of a real-corpus mutation run on
+    // 2026-09-03 (see this file's header): the `.next().await` exclusion is a
+    // byte-substring test, so ONE space between the call and the `.await`
+    // defeats it and the drain is reported as a cap. Writing that space onto
+    // `src/librarian/indexer.rs:918` is exactly what drove
+    // `truncation_sites_reach_the_real_corpus`'s drain assertion red.
+    //
+    // Not a live defect: `cargo fmt` — the FIRST gate command — rewrites
+    // `s.next() .await` back to `s.next().await`, verified 2026-09-03 on that
+    // same line, so no formatted tree can hold this shape. It is pinned here
+    // because the exclusion's narrowness is deliberate (see `truncation_sites`'
+    // doc comment on why the anchor is `.await` and not the receiver's name),
+    // and a reader must be able to see the price of that choice WITHOUT
+    // editing production source to find it.
+    let src = "while let Some(res) = stream.next() .await {\n";
+    let ops: Vec<String> = truncation_sites(src, "src/x.rs")
+        .into_iter()
+        .map(|s| s.op)
+        .collect();
+    assert_eq!(
+        ops,
+        vec![".next()".to_string()],
+        "current behavior: the exclusion matches the literal `.next().await`, so \
+         whitespace before `.await` slips past it and a stream drain is reported \
+         as a truncation site — over-reporting, the safe direction for this gate, \
+         but not free: an annotation written to silence a false positive \
+         classifies nothing"
+    );
+}
+
+#[test]
 fn truncation_sites_reports_the_correct_file_and_one_indexed_line() {
     // The op sits on line 3, not line 1 — a fixture with the op on line 1
     // cannot distinguish a 0-indexed `idx` from the correct 1-indexed
@@ -832,6 +1055,58 @@ fn unclassified_decls_names_every_offender_and_is_not_a_bare_count() {
         ],
         "the classified one must not appear, and each offender must arrive \
          with its file:line — a count tells nobody which constant to go fix"
+    );
+}
+
+/// The `MalformedReason` branch has TWO producers and ONE message, and this is
+/// the only fixture that drives the second producer through the real
+/// [`unclassified_decls`].
+///
+/// `unclassified_decls_names_every_offender_and_is_not_a_bare_count` covers
+/// `NOT_A_CAP` with no reason. `classify_rejects_a_result_cap_id_without_a_dot`
+/// covers [`classify`]'s verdict on a dotless `RESULT_CAP` id. Neither shows
+/// what the GATE PRINTS for the second case — and what it prints names the
+/// wrong token: a line reading `// cap-class: RESULT_CAP probed` is reported as
+/// `NOT_A_CAP with no reason`, sending the reader to add a reason to a token
+/// that is nowhere on the annotated line. Observed through the live gate,
+/// 2026-09-03: rewriting `src/tools/grep.rs:781` to
+/// `// cap-class: RESULT_CAP probed` printed
+/// `src/tools/grep.rs:782 MAX_MATCH_BYTES — NOT_A_CAP with no reason`.
+///
+/// This test pins TODAY's (misdirecting) text rather than tolerating it
+/// silently, so a fix and its wording have to land together. Narrowness, which
+/// an exemption test owes: a well-formed `RESULT_CAP a.b` decl sits in the same
+/// input and must NOT be reported — a filter that swallowed it would make the
+/// whole `RESULT_CAP` side of the gate vacuous while staying green.
+#[test]
+fn unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message() {
+    let decls = vec![
+        CapDecl {
+            name: "GOOD_MAX".into(),
+            file: "src/good.rs".into(),
+            line: 2,
+            annotation: Some("RESULT_CAP a.b — probed".into()),
+        },
+        // LOAD-BEARING: the payload must start with `RESULT_CAP`, not
+        // `NOT_A_CAP`. That is what makes the shared message a MISdirection
+        // rather than a terse one — swap the token and this fixture stops
+        // demonstrating anything the sibling test does not already cover.
+        CapDecl {
+            name: "BAD_MAX".into(),
+            file: "src/bad.rs".into(),
+            line: 7,
+            annotation: Some("RESULT_CAP probed".into()),
+        },
+    ];
+    assert_eq!(
+        unclassified_decls(&decls),
+        vec!["src/bad.rs:7 BAD_MAX — NOT_A_CAP with no reason".to_string()],
+        "the dotless RESULT_CAP id must be REPORTED — `MalformedReason` is a \
+         refusal, not a classification — and the well-formed sibling must not \
+         be. The message text asserted here is today's, and it is wrong: \
+         `NOT_A_CAP` appears nowhere on the annotated line. Recorded as a defect \
+         in this file's header rather than quietly accepted, because two \
+         conditions needing different fixes share one message"
     );
 }
 
