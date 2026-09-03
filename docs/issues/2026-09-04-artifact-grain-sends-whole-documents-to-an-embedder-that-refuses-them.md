@@ -91,9 +91,24 @@ The result is per-artifact, silent, and permanent: `index_repo_sync` stamps
 `content_unchanged == true` and never retries. `reembed=true` is the only escape,
 and it hits the same rejection.
 
-**Why chunk grain does not have this problem:** chunks are built to a 2,048-char
-budget, so all but a handful sit under the limit by construction. The bug is
-specific to the grain that removes that budget.
+**Why chunk grain does not have this problem *by this mechanism*:** chunks are built to a
+2,048-char budget, so all but a handful sit under the limit by construction.
+
+> ⚠ **Corrected 2026-09-04 — the sentence above was right about the mechanism and wrong about
+> the conclusion, and it was the sentence scoping this record to a non-default grain.** The
+> budget is enforced by *splitting*, and splitting needs a split point: a single unbroken line
+> cannot be split at all. Measured over the whole corpus the same day — **68 of 35,810 chunks
+> exceed the budget, and 68 of those 68 are single-line.** Not a long tail of near-misses; a
+> distinct population the budget cannot act on. Three of them exceed the embedder and produce
+> this record's identical HTTP 500 **under chunk grain, the default since `63fae4ea`**.
+>
+> So the failure is not confined to `chunk_grain = false`. Full derivation, and the reason the
+> affected files keep growing (a pre-commit gate mandates appending to one line):
+> `docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`.
+>
+> The Fix section below is unaffected and is now the shared one: clipping at the embed
+> boundary closes both records, because both fail for the same reason — **the embedder rejects
+> rather than truncates, so the caller must bound what it sends.**
 
 ## Evidence
 
