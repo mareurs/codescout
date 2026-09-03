@@ -34,8 +34,8 @@ src/
     catalog/         — SQLite store, migrations, augmentation, worktree overlay
     tools/           — one file per verb: artifact.rs, find.rs, get.rs, create.rs,
                        update.rs, mv.rs, delete.rs, graft.rs, link.rs, graph.rs,
-                       append_entry.rs, update_entry.rs, augment.rs, artifact_event.rs,
-                       event_create.rs, artifact_refresh.rs, refresh.rs, refresh_stale.rs,
+                       append_entry.rs, update_entry.rs, augment.rs, event_create.rs,
+                       refresh.rs, refresh_stale.rs,
                        gather.rs, reindex.rs, context.rs, doctor.rs, link_scan/,
                        audit_doc_refs/, legibility_scan/, merge_worktree.rs,
                        tracker_design.rs, state_at.rs, workspace_state_at.rs, timeline.rs,

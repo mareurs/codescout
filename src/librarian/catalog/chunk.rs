@@ -33,7 +33,7 @@ pub struct ChunkRow {
 /// returned range, so [`ChunkRow`]'s `start_line` / `end_line` mean
 /// **the line in the FILE, in every ChunkRow that exists** — freshly built or
 /// read back out of `artifact_chunk`. One meaning is the whole point: these
-/// numbers leave the process through `artifact(find, semantic=)`'s `matched`
+/// numbers leave the process through `doc(action="find", semantic=)`'s `matched`
 /// block, where a caller opens the file at them. Publishing body-relative
 /// numbers as file lines put every hit on a tracker short by the frontmatter's
 /// height, landing inside the PREVIOUS entry — measured 2026-09-02 at 7793 vs

@@ -6,7 +6,7 @@
 - `src/tools/core/types.rs` — `Tool` trait + `ToolContext`; read before adding or modifying any tool
 - `src/tools/mod.rs` — the LIVE module index. `src/tools/` is grouped (`symbol/`, `semantic/`, `markdown/`, `memory/`, `config/`, `edit_file/`, `run_command/`), not flat
 - `src/agent/mod.rs::Agent::new` (:444) — project activation and state wiring
-- `src/librarian/tools/` — one file per artifact verb: `find.rs`, `get.rs`, `update.rs`, `artifact_event.rs`, `doctor.rs`, `link_scan/`
+- `src/librarian/tools/` — one file per doc verb: `find.rs`, `get.rs`, `update.rs`, `event_create.rs`, `augment.rs`, `doctor.rs`, `link_scan/`
 - `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
 
 ## Key Abstractions
@@ -31,8 +31,8 @@
 2. Know only the concept → `semantic_search(query)`; exact string → `grep(pattern, glob=...)`
 3. Who calls it → `references(symbol, path)`, never `grep`
 4. Before any refactor → `call_graph(symbol, path, direction="callers")` for blast radius; `direction="callees"` to trace flow
-5. Bug or regression work → `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` before filing anything new
-6. Markdown → `read_markdown` / `edit_markdown`; librarian-managed trackers refuse direct edits, use `artifact(action="update", patch={body_edits: [...]})`
+5. Bug or regression work → `doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` before filing anything new
+6. Markdown → `read_file` (heading-addressed) / `edit_file` (heading+action); librarian-managed trackers refuse direct edits, use `doc(action="update", patch={body_edits: [...]})`
 7. Cross-cutting change → check all 3 prompt surfaces (`src/prompts/source.md` ×2 slices + `builders.rs`)
 
 ## Project Rules

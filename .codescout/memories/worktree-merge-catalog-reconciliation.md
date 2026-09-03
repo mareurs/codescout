@@ -33,7 +33,7 @@ schema lacks `worktree_scoped_row` / the `fix` enum lacks `reseat_worktree`):**
 3. **no_collision** → `librarian(action="doctor", fix="reseat_worktree")` (seeds the
    main-path id + grafts children across — durable, survives reindex).
 4. **collision** → settle file content via R-3 first, then
-   `artifact(action="graft", from_id=<worktree-id>, into_id=<main-id>)`; check the
+   `doc(action="graft", from_id=<worktree-id>, into_id=<main-id>)`; check the
    returned `remap`/`suspicious`, rewrite live-tree citations + breadcrumb.
 5. Verify (`doctor` clean, entries+events under the surviving id), THEN
    `git worktree remove`.
@@ -62,7 +62,7 @@ event to three-way against, and a second clone has none.
 
 **The trap.** When two hosts have both migrated an augmentation's `params_schema`
 AND its `params` to a new field shape, you cannot restore one field-group at a time
-in either order. `artifact_augment` validates merged params against the schema, so:
+in either order. `doc(action="augment")` validates merged params against the schema, so:
 
 - old stored schema **rejects** new params, and
 - new schema **rejects** the old stored params.
@@ -77,7 +77,7 @@ incompatibility is exactly the swapped field. `fable-tuning-findings`
 **The escape is one atomic call, and it is a designed affordance rather than a
 bypass.** `validate_merged_against_schema` (`src/librarian/tools/augment.rs:36-52`,
 called at `:370`, comment-tagged `F-5`) validates merged params against *the schema
-this call supplies*. So a single `artifact_augment(merge=true, …)` carrying params and
+this call supplies*. So a single `doc(action="augment", merge=true, …)` carrying params and
 `params_schema` together is fully validated against the target schema — not slipped
 past a guard. The three-call alternative (permissive schema → params → real schema)
 writes shape fields twice for no gain — and did, until 2026-08-31, additionally risk the
@@ -85,7 +85,7 @@ write-through clobber described below.
 
 **Two hazards that bite here specifically.**
 
-- **`artifact_augment` used to republish the WHOLE augmentation row**, so a call changing
+- **`doc(action="augment")` used to republish the WHOLE augmentation row**, so a call changing
   one field published its stale siblings over a correct sidecar. **Fixed 2026-08-31 at
   `eab7fca3`** — the write-through now refuses to republish a field the calling merge never
   authored; archived at
@@ -120,7 +120,7 @@ Full design and the rejected alternatives:
 
 **A catalog-only task leaves no git anchor unless its event carries one.** When a task's
 entire output is catalog-side — params restored, shape migrated, nothing written to a file —
-there is no commit, so `artifact_event`'s `anchor_commit` / `head_commit` are the only thing
+there is no commit, so `doc(action="event_create")`'s `anchor_commit` / `head_commit` are the only thing
 that can place the work in repo history. Measured 2026-08-31: two events recording a
 cross-host schema migration were written with both fields empty, leaving a wall-clock
 timestamp as the sole locator. Pass `head_commit` explicitly on any event whose task will not

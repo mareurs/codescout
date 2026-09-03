@@ -759,7 +759,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // One chunk per artifact, which PRESERVES this caller's current
                 // result shape: the store was artifact-keyed until Task 7, so
                 // every artifact appeared at most once. Task 10 decides whether
-                // `artifact(find, semantic=)` should surface several chunks per
+                // `doc(action="find", semantic=)` should surface several chunks per
                 // artifact; until then this is a grain fix, not a shape change.
                 1,
                 limit,
@@ -916,11 +916,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // which is `cluster/capped-result-presented-as-complete`. The
                     // line range travels alongside precisely so the caller can
                     // read the full span with
-                    // `artifact(get, id=…, start_line=…, end_line=…)`.
+                    // `doc(action="get", id=…, start_line=…, end_line=…)`.
                     const SNIPPET_CHARS: usize = 480;
                     let snippet = if chunk.content.chars().count() > SNIPPET_CHARS {
                         let mut s: String = chunk.content.chars().take(SNIPPET_CHARS).collect();
-                        s.push_str(" … [snippet truncated — read the span with artifact(get)]");
+                        s.push_str(
+                            " … [snippet truncated — read the span with doc(action=\"get\")]",
+                        );
                         s
                     } else {
                         chunk.content.clone()
@@ -984,7 +986,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         "{cap_suppressed} further chunk(s) belonging to artifacts already on \
                          this page were dropped -- this page is ONE chunk per artifact, so a \
                          single artifact answering the query several times appears once. Read \
-                         the whole thing with artifact(action=\"get\", id=…), or narrow the \
+                         the whole thing with doc(action=\"get\", id=…), or narrow the \
                          query if you wanted breadth."
                     )),
                 );
@@ -1969,7 +1971,7 @@ mod tests {
             v["hints"]["cap_suppressed_hint"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("artifact(action=\"get\""),
+                .contains("doc(action=\"get\""),
             "the hint must name the recovery action, not only the condition: {}",
             v["hints"]
         );

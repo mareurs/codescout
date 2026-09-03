@@ -105,7 +105,7 @@ The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below 
 ## Bug Tracking
 
 Every noticed bug gets a file in `docs/issues/YYYY-MM-DD-<slug>.md` (copy `_TEMPLATE.md`).
-Archive to `docs/issues/archive/` once the fix is **verified on `experiments`** — gate green plus a regression test. Reaching `master` is NOT required (`experiments` is never deleted). Archive via `artifact(action="move", …)`, never a bare `git mv` (`id = sha256(abs_path)`, so a hand-move orphans the catalog row). An experiments-only archive carries the SHA labelled `experiments` plus a Resume line saying the master-side SHA is still owed — an experiments SHA orphans on rebase.
+Archive to `docs/issues/archive/` once the fix is **verified on `experiments`** — gate green plus a regression test. Reaching `master` is NOT required (`experiments` is never deleted). Archive via `doc(action="move", …)`, never a bare `git mv` (`id = sha256(abs_path)`, so a hand-move orphans the catalog row). An experiments-only archive carries the SHA labelled `experiments` plus a Resume line saying the master-side SHA is still owed — an experiments SHA orphans on rebase.
 Every `## Root cause` cites both the mechanism (`path:line`) and what **measured** it (command + date); a mechanism inferred from code but never observed at runtime says so (W-13).
 Frontmatter/status vocabulary: `get_guide("tracker-conventions")`.
 

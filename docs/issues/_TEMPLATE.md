@@ -17,8 +17,8 @@ To open a bug:
   2. Replace this comment block with the bug content.
   3. Done — the librarian discovers the file on next reindex via its
      `kind: bug` frontmatter. List active bugs with:
-       artifact(action="find", kind="bug",
-                filter={"status": {"in": ["open", "investigating", "zombie"]}})
+       doc(action="find", kind="bug",
+           filter={"status": {"in": ["open", "investigating", "zombie"]}})
      status="open" alone hides any bug marked `investigating` (actively being
      worked) or `zombie` (recurring-but-unconfirmed -- a "has this come back?"
      check, not a task to pick up). No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
@@ -78,7 +78,7 @@ bug files had already lost their SHA; zero patch-id collisions in 3594
 commits.
 Check where a SHA lives with:
   git branch --contains <fix-sha>
-Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
+Archive via doc(action="move", id=..., new_rel_path="docs/issues/archive/...")
 — never a bare git mv, which orphans the catalog row.
 
 Use `N/A` or `Unknown — under investigation` for sections that don't

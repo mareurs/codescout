@@ -2,7 +2,7 @@
 
 Recovering "early-`claude-fable-5`" quality in codescout via prompts/tools/trackers. Ran 2026-07-07 (2 sessions) + 2026-07-10 continuation. **High-priority backlog complete; single-turn inspection has hit ceiling — every probe returns "fable fine locally."**
 
-Trackers (docs/trackers/fable-tuning-*.md — query via `artifact(find, tags=["fable"])`, never raw read):
+Trackers (docs/trackers/fable-tuning-*.md — query via `doc(action="find", filter={"tags": {"contains": "fable"}})`, never raw read):
 - index    `ca8c26fecbbc4f37` — start here; § Session passover has full state
 - findings `35de33286cd34f87` — FND-1..17
 - tasks    `ad1af8262fdce357` — FT-N with closure notes (renamed from T-N in `d3282868`; the prefix collided with two other ledgers)

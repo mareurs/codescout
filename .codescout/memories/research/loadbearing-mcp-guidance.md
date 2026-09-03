@@ -25,7 +25,7 @@ the file.
 - GREEN-LIT, not yet built: server-computed provenance envelope keys
   (`refreshed_at_commit`, `commits_behind_head`) on result envelopes. KEY-PRIORITY 6/6
   across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet. NEXT feature; scout the
-  envelope seam in `src/tools/core/types.rs`; intersects the G5 artifact(get) bug.
+  envelope seam in `src/tools/core/types.rs`; intersects the G5 doc(action="get") bug.
 - DO NOT build: a persona preamble (A-4), or a delegation line/`<codescout-guide>`
   envelope (A-7 Test 1 — a plain footer suffices single-turn).
 

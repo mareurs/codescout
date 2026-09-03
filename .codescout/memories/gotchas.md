@@ -155,7 +155,7 @@ the whole probe; without it you have measured nothing and feel informed.
 **The refusal that makes that probe work is the same thing that HIDES the staleness in normal
 use.** The anonymous *"do not read or edit it directly"* is a detector only once you are already
 suspicious. Measured 2026-09-01 from the *receiving* side: a session hit several stamped-file
-refusals (`issue-clusters.md`, an archived bug file), routed around each via `artifact(get)`, and
+refusals (`issue-clusters.md`, an archived bug file), routed around each via `doc(action="get")`, and
 questioned none — because **a refusal reads as the guard working correctly**. Its workarounds
 happened to be right, so nothing downstream broke and nothing prompted a re-check, while some of
 those refusals had been fixed hours earlier. That is `R-89`'s process axis with a wrinkle worth
@@ -166,7 +166,7 @@ the shape nothing downstream fires on.
 **Freshness is per-TRANSPORT, not per-session — one session can be fresh on the CLI path and
 stale on MCP in the same minute.** Measured 2026-09-01: a session's `doctor` runs all went
 through `./target/debug/codescout doctor`, rebuilt before each run and therefore current, while
-every `artifact()` / `edit_markdown()` call it made in the same window went through an MCP server
+every librarian and markdown-edit call it made in the same window went through an MCP server
 started six hours earlier. Its **measurements stand; its writes were stale.** The split falls the
 dangerous way by default, because measurements tend to go through the CLI and mutations through
 MCP — so the readings look fine and the *writes* are the stale half. Ask which transport a call
@@ -245,11 +245,11 @@ A bare SHA implies the current repo. Unenforced by tooling — readers must noti
 
 ## Artifact Freshness Requires a `reviewed` EVENT — Not a Refresh
 
-`artifact(get).freshness` stays `"unknown"` no matter how many `commit_refresh=true`
+`doc(action="get").freshness` stays `"unknown"` no matter how many `commit_refresh=true`
 updates land: `freshness::compute` (src/librarian/freshness.rs) returns Unknown whenever
 `latest_reviewed_at` is absent. `commit_refresh` feeds the `provenance` keys
 (`refreshed_at_commit`, `commits_behind_head`); freshness anchors on
-`artifact_event(kind="reviewed")`. To flip a tracker fresh: emit a reviewed event (earn it —
+`doc(action="event_create", event={kind: "reviewed"})`. To flip a tracker fresh: emit a reviewed event (earn it —
 an actual content review), THEN freshness computes fresh/stale from file mtime + commit
 distance. Discovered on the W3 audit-log retrofit (2026-07-05).
 
@@ -262,7 +262,7 @@ Never hand-curate `cites` edges — cite in prose and run
 only, never touches manual rels/supersedes). `context(anchor_id=…)`'s large-hub neighbor
 starvation is FIXED (2026-07-05, `src/librarian/tools/context.rs::call`) — the packing loop
 now reserves half the budget for neighbors and truncates an oversized anchor rather than
-letting it consume the whole budget; `artifact(graph)` + targeted `get(heading=…)` remains
+letting it consume the whole budget; `doc(action="graph")` + targeted `get(heading=…)` remains
 a fine alternative but is no longer a required workaround.
 ## link_scan Can't See Augmented-Artifact Param Rows (Only Markdown Headings)
 
@@ -317,20 +317,25 @@ returned "AST parse failed" is the proof. Datapoint: the 2026-06-04 extractor-co
 receivers) — `symbols` showed LSP output for all; `edit_code` on `my_macro` / impl `Output` was
 the real proof.
 
-## `artifact(create, augment={...})` Silently Drops `entry_collection`
+## `create(augment={...})` Dropping `entry_collection` — FIXED, kept for the shape
 
-The `augment` shortcut on `artifact(action="create")` only accepts `prompt` and `params`
-(per its own input schema) — passing `entry_collection` (or `render_template`, `params_schema`,
-etc.) alongside them inside `augment` is silently ignored, leaving the new artifact's
-augmentation with `entry_collection: null`. Any code that filters on `entry_collection`
-(e.g. `find_matching_rules`/`find_global_rules` in the constitution-tracker feature, which
-skip any tracker whose `entry_collection != "rules"`) will then see the artifact as invisible,
-with no error anywhere in the chain — it looks exactly like "no matching trackers exist."
-Hit twice in one session (2026-07-06) creating throwaway test trackers for the constitution
-archetype's `rules` entry_collection.
-**Fix:** follow `artifact(create, augment={prompt, params})` with a separate
-`artifact_augment(id=..., entry_collection="...", merge=true)` call — `create`'s `augment`
-shortcut only ever gets you `prompt`+`params`; everything else needs the dedicated tool.
+**No longer true; verified 2026-09-03.** `doc(action="create", augment={...})` accepts the
+full augmentation shape, `entry_collection` included — `src/librarian/tools/create.rs:55`
+declares the field, `:440` propagates it into the written row, and `:790` pins it
+(`aug.entry_collection == Some("rows")`). The tool description now states the property
+directly: *"attach the augmentation atomically, so a tracker needs no follow-up call."*
+
+**What it was, recorded because the CLASS outlived the instance.** The `augment` shortcut on
+the old `artifact` tool's `create` action accepted only `prompt` and `params` per its own input
+schema. `entry_collection`, `render_template` and `params_schema` passed alongside them were
+silently ignored, leaving the new artifact's augmentation with `entry_collection: null`.
+Anything filtering on it — `find_matching_rules` / `find_global_rules` skip any tracker whose
+`entry_collection != "rules"` — then saw the artifact as invisible, with no error anywhere in
+the chain: indistinguishable from "no matching trackers exist". Hit twice in one session
+(2026-07-06) creating throwaway trackers for the constitution archetype. That is
+`cluster/accepted-parameter-silently-dropped` (`IC-15`), whose remedy is a probe at each
+accepting site rather than a fix at one — the class is still open even though this member
+is closed.
 
 ## Machine-Wide Startup-Env Symlink Can Silently Contradict the Running docker-compose Profile
 
@@ -535,7 +540,7 @@ a shell-dependent difference in what reaches the process.
 semantic index, its `cites` edges, and every artifact augmentation — while markdown bodies
 look perfect, because those are the half that travels. Nothing errors; you quietly get less.
 Each layer is silent in a *different* way: `reindex` preserves augmentation keyed by id
-rather than regenerating it, so it reports healthy and repairs nothing; `artifact(get)`
+rather than regenerating it, so it reports healthy and repairs nothing; `doc(action="get")`
 returns `augmentation: null` without comment; a missing edge is indistinguishable from an
 artifact that cites nothing.
 
@@ -565,7 +570,7 @@ by a codescout action carries its augmentation via `include_str!`, so it is in t
 `legibility-backlog` ← `src/librarian/tools/legibility_scan/render_prompt.md` +
 `render_template.j2`, `entry_collection: "candidates"`. The owning action does NOT self-heal —
 `legibility_scan(write=true)` on an existing-but-unaugmented tracker returns `ok: true` WITH
-`tracker_error: "no augmentation … call artifact_augment first"`, because create-and-augment
+a `tracker_error` reporting that the artifact has no augmentation, because create-and-augment
 only fires when the tracker does not exist. Attach the exact bytes, then re-run the action.
 
 **Shape survives in prose; the prompt does not.** Archived bug files quote the original calls

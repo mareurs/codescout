@@ -2012,6 +2012,17 @@ mod tests {
     /// A call form (`name(`) is none of those. It is a claim that this is how you invoke the
     /// tool today, which is exactly the claim the collapse falsified.
     ///
+    /// **The memory store was added 2026-09-03, and its absence is the lesson this gate
+    /// keeps re-learning.** The five original roots were chosen by asking "which doc
+    /// directories did the sweep touch?". The right question is **how often does an agent
+    /// read this without being asked to** — and by that measure `.codescout/memories/` beats
+    /// every root above it: 42 tracked files, named in every session-start banner, with the
+    /// model instructed to read them before exploring. `project-overview.md` was still
+    /// enumerating the pre-collapse tool inventory a day after the rename shipped with five
+    /// gates green, which is the worst possible file to be wrong: a tool inventory's entire
+    /// purpose is to be believed about which tools exist. Nothing here was hard to find; it
+    /// was outside the population, and a population is not falsified by the corpus it omits.
+    ///
     /// `CHANGELOG.md` is excluded: its released sections are a historical record by
     /// construction, and its Unreleased section documents the rename by naming both sides.
     #[test]
@@ -2033,6 +2044,14 @@ mod tests {
             "docs/conventions",
             "docs/adrs",
             "src/prompts/guides",
+            // The memory store, added 2026-09-03 — see the "read frequency" note above.
+            // One root covers all three tiers: `.codescout/memories/` (42 tracked files),
+            // `.codescout/projects/*/memories/` (per-sub-project), and, on a developer's
+            // machine only, the gitignored `.codescout/private-memories/`. That last tier
+            // is why this is one root rather than three: it has ZERO tracked files, so a
+            // per-root non-vacuity assertion naming it would fail on every clone and in CI.
+            // Folded in here, it is scanned when present and costs nothing when absent.
+            ".codescout",
         ];
         const FILES: &[&str] = &[
             "CLAUDE.md",
@@ -2044,6 +2063,13 @@ mod tests {
             "docs/RELEASE.md",
             "src/prompts/source.md",
             "src/prompts/README.md",
+            // The bug-file template, and ONLY the template — never `docs/issues/` as a root.
+            // A bug file quotes retired call forms as evidence (the 2026-09-03 filing that
+            // produced this gate quotes `artifact(get)` six times), so the directory is a
+            // historical record and rooting it here would red permanently. The template is
+            // the opposite: it is prescriptive, copied verbatim into every new bug file, so
+            // a stale call form in it propagates itself once per bug.
+            "docs/issues/_TEMPLATE.md",
         ];
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -2112,6 +2138,176 @@ mod tests {
          To MENTION a retired form (a translation note, a migration record), write it \
          without the paren — `read_markdown`, not `read_markdown(`. That is the escape \
          hatch, and it is deliberate: this gate is about invocation claims, not vocabulary.",
+            bad.len(),
+            bad.join("\n")
+        );
+    }
+
+    /// Retired tool names must not survive as CALL FORMS in RUNTIME strings — the text
+    /// codescout hands an agent while it runs.
+    ///
+    /// **This is the surface the other gates cannot reach, and it is the one an agent reads
+    /// most often.** `reader_docs_contain_no_retired_call_forms`,
+    /// `claude_md_contains_no_deprecated_tool_names`,
+    /// `guide_bodies_contain_no_deprecated_tool_names`,
+    /// `prompt_surfaces_reference_only_real_tools` and
+    /// `companion_surfaces_reference_only_real_tools` all walk PROSE. Not one walks a `hint`,
+    /// an error message, or a `next_step` literal. Measured 2026-09-03, a day after the
+    /// collapse landed with five gates green: `src/librarian/tools/find.rs` was still
+    /// appending `[snippet truncated — read the span with artifact(get)]` to every truncated
+    /// semantic snippet, and naming `artifact(action="get", id=…)` in `cap_suppressed_hint`.
+    /// Both were seen in LIVE `doc(action="find")` output before they were found in source —
+    /// the binary was telling agents to call a tool it had itself stopped registering.
+    ///
+    /// **Two cuts define the population, and each has a case that forced it.**
+    ///
+    /// - **From the first `#[cfg(test)]` onward is dropped.** A test literal is not a string
+    ///   any agent receives. `src/cli/format.rs:506` is why the cut must exist: it holds
+    ///   `"Call artifact_refresh(id) on each item …"` as an INERT fixture, annotated on the
+    ///   line as pinning nothing about the runtime, while the real string at
+    ///   `src/librarian/tools/refresh_stale.rs:91` already reads `doc(action="gather", …)`.
+    ///   Without the cut this gate would demand a change that fixture's own comment forbids.
+    ///   `tests.rs` files are skipped wholesale for the same reason — being included through
+    ///   a `#[cfg(test)] mod`, they carry no marker of their own for the cut to find.
+    /// - **Comment lines are skipped, and the cost is named here rather than hidden.**
+    ///   Archaeology legitimately lives in comments: a note recording what a call USED to
+    ///   look like is correct prose. The price is that a stale `///` naming `artifact(find,
+    ///   …)` will NOT red this gate. Three such comments were corrected by hand when it was
+    ///   written (`find.rs:762`, `find.rs:919`, `librarian/catalog/chunk.rs:36`); nothing
+    ///   here stops a fourth appearing.
+    ///
+    /// **The three exclusions below are `artifact(`'s alone.** The other five retired names
+    /// collide with nothing in this tree. `artifact` collides with three live things at once,
+    /// and every exclusion was derived by RUNNING the scan and reading what it flagged rather
+    /// than by predicting it — the unfiltered scan returned 27 hits, of which 25 were correct
+    /// code:
+    ///
+    /// - **word boundary** — `embed_artifact(`, `list_for_artifact(`,
+    ///   `timeline_for_artifact(`, `is_main_checkout_artifact(` are live functions. This one
+    ///   exclusion removes 20 of the 27.
+    /// - **`artifact(s)`** — English pluralisation, which four runtime messages in this crate
+    ///   already use (`"{n} artifact(s) without a vector"`).
+    /// - **`ON artifact(` / `REFERENCES artifact(`** — SQL DDL naming the `artifact` TABLE,
+    ///   which the collapse did not rename and must not.
+    ///
+    /// The `find.rs` line floor below is a PER-MEMBER assertion on purpose. A total-lines
+    /// floor is monotone under a `#[cfg(test)]` moving up in any one file: coverage of that
+    /// file would vanish while the total stayed comfortable. `find.rs` is the member that
+    /// actually held the defect, so it is the one whose coverage is asserted by name.
+    #[test]
+    fn runtime_strings_contain_no_retired_call_forms() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        const RETIRED_CALLS: &[&str] = &[
+            "artifact(",
+            "artifact_event(",
+            "artifact_augment(",
+            "artifact_refresh(",
+            "read_markdown(",
+            "edit_markdown(",
+        ];
+        // The file that held the two live defects. Its `#[cfg(test)]` sits at ~1107, so a
+        // healthy scan reads ~1100 lines of it; 900 leaves room for ordinary edits while
+        // still failing loudly if the cut migrates to the top of the file.
+        const WITNESS: &str = "src/librarian/tools/find.rs";
+        const WITNESS_MIN_LINES: usize = 900;
+
+        fn is_word(c: char) -> bool {
+            c.is_alphanumeric() || c == '_'
+        }
+
+        fn walk_rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk_rs(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs")
+                    && p.file_name().is_some_and(|n| n != "tests.rs")
+                {
+                    out.push(p);
+                }
+            }
+        }
+
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        walk_rs(&root.join("src"), &mut paths);
+        assert!(
+            paths.len() > 100,
+            "the scan found only {} .rs file(s) under src/ — it is not reading what it \
+             claims. The violation assertion below is `is_empty()`, which is monotone under \
+             removal: an empty corpus produces exactly the silence it asserts.",
+            paths.len()
+        );
+
+        let mut bad: Vec<String> = Vec::new();
+        let mut witness_lines = 0usize;
+
+        for p in &paths {
+            let Ok(text) = std::fs::read_to_string(p) else {
+                continue;
+            };
+            let rel = p
+                .strip_prefix(root)
+                .unwrap_or(p)
+                .display()
+                .to_string()
+                .replace('\\', "/");
+            let mut scanned = 0usize;
+            for (n, line) in text.lines().enumerate() {
+                if line.contains("#[cfg(test)]") {
+                    break;
+                }
+                scanned += 1;
+                let t = line.trim_start();
+                if t.starts_with("//") || t.starts_with('*') {
+                    continue;
+                }
+                for &call in RETIRED_CALLS {
+                    let mut from = 0usize;
+                    while let Some(hit) = line[from..].find(call) {
+                        let idx = from + hit;
+                        let boundary =
+                            idx == 0 || !line[..idx].chars().next_back().is_some_and(is_word);
+                        let pre = line[..idx].trim_end();
+                        let post = &line[idx + call.len()..];
+                        let plural = post.starts_with("s)");
+                        let sql = pre.ends_with("ON") || pre.ends_with("REFERENCES");
+                        if boundary && !plural && !sql {
+                            bad.push(format!("  {rel}:{}  `{call}`  {}", n + 1, line.trim()));
+                            break;
+                        }
+                        from = idx + 1;
+                    }
+                }
+            }
+            if rel == WITNESS {
+                witness_lines = scanned;
+            }
+        }
+
+        assert!(
+            witness_lines >= WITNESS_MIN_LINES,
+            "the witness file `{WITNESS}` contributed only {witness_lines} non-test line(s) \
+             (expected >= {WITNESS_MIN_LINES}). Either it moved, or a `#[cfg(test)]` migrated \
+             above its runtime strings — in which case this gate silently stopped covering \
+             the exact file whose two live defects it was written for."
+        );
+
+        assert!(
+            bad.is_empty(),
+            "{} retired call form(s) in RUNTIME strings — text codescout hands an agent:\n{}\n\n\
+             An agent that follows one of these emits a call to a tool absent from its own \
+             tools/list, and gets a hard unknown-tool error. `artifact(` → `doc(`; \
+             `artifact_event(` → `doc(action=\"event_create\"|\"event_list\")`; \
+             `artifact_augment(` → `doc(action=\"augment\")`; `artifact_refresh(` → \
+             `doc(action=\"gather\"|\"list_stale\")`; `read_markdown(` → `read_file(`; \
+             `edit_markdown(` → `edit_file(`.\n\n\
+             Three escapes, all deliberate: SQL naming the `artifact` TABLE is exempt when \
+             written `ON artifact(` or `REFERENCES artifact(`; English pluralisation \
+             `artifact(s)` is exempt; and a historical note belongs in a comment, which this \
+             gate does not read.",
             bad.len(),
             bad.join("\n")
         );

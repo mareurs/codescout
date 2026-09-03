@@ -5,7 +5,7 @@ Cross-repo. Canonical spec: codescout `docs/superpowers/specs/2026-06-18-headroo
 **Discoverable hub:** codescout tracker *Headroom + llm-proxy integration & trial*
 (id `2483966c259c55e6`, `docs/trackers/archive/headroom-llm-proxy-integration.md`, status
 **archived**) — phase, §9 gates, pointers, history. Read it with
-`artifact(action="get", id="2483966c259c55e6")`. This memory holds
+`doc(action="get", id="2483966c259c55e6")`. This memory holds
 the live ops detail; the tracker is the catalog-indexed hub.
 
 ## Topology
