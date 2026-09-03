@@ -2327,14 +2327,14 @@ mod tests {
             v["overflow"]["packing"],
             json!("excerpted"),
             "the mode must be REPORTED — a reader cannot tell a whole section from a \
-             1000-byte excerpt that happened to end at a paragraph, and 'is this the entry \
-             or the top of it' changes what they do next: {v:#?}"
+         1000-byte excerpt that happened to end at a paragraph, and 'is this the entry \
+         or the top of it' changes what they do next: {v:#?}"
         );
         assert_eq!(
             v["overflow"]["omitted"],
             json!(0),
             "excerpting is what buys completeness: all six neighbours are present, where \
-             full-text packing would have dropped most of them: {v:#?}"
+         full-text packing would have dropped most of them: {v:#?}"
         );
 
         let md = v["markdown"].as_str().unwrap();

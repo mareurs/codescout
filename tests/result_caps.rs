@@ -1130,22 +1130,39 @@ fn line_field(chunk: &str, prefix: &str) -> Option<String> {
 ///
 /// Splits on the literal `"ProbeRow {"` token: every row in `PROBE_ROWS`
 /// opens with exactly that text, and so does the `ProbeRow` struct's own
-/// definition earlier in the file — so the FIRST chunk after the split is
-/// that struct's field list, not a row. It is excluded the same way every
-/// `Deferred` row is: a chunk counts as a citation only when it contains
-/// the literal `"Coverage::Probed {"`, and neither the struct definition
-/// nor a `Deferred` row's fields ever do (verified 2026-09-02: exactly 4
-/// occurrences of `"Coverage::Probed {"` exist in `cap_probe.rs` today — 2
-/// inside `tally()`'s own `matches!` calls, which are never reached by this
-/// function because they occur before the first `"ProbeRow {"` split point,
-/// and 2 inside the two real `Probed` rows). Each of the three fields is
-/// then read by [`line_field`] using the same anchored-line technique
-/// [`probe_row_ids`] uses for `id:`. A chunk missing any one of the three —
-/// should not happen for a well-formed `Coverage::Probed` variant, since
-/// the compiler requires all three fields — is silently excluded from the
-/// result rather than panicking; a `Probed` row absent from this function's
-/// output because ITS OWN citation could not be parsed is exactly the
-/// finding `probed_rows_cite_a_real_test` exists to surface, not a crash.
+/// definition earlier in the file — so the FIRST chunk kept after
+/// `.skip(1)` is that struct's tail (its remaining fields, `Tally`,
+/// `tally()`, `NOT_MUTATED_YET`), not a row. That chunk DOES contain the
+/// literal `"Coverage::Probed {"` — `tally()`'s own two `matches!` calls
+/// put it there, both AFTER `struct ProbeRow {`'s own line, not before it
+/// as an earlier version of this comment claimed (verified 2026-09-02:
+/// `struct ProbeRow {` at `cap_probe.rs:69`, `tally()`'s two occurrences at
+/// `:95` and `:103`) — so this chunk passes the `"Coverage::Probed {"`
+/// filter exactly like a real row's chunk would (verified 2026-09-02:
+/// exactly 4 occurrences of `"Coverage::Probed {"` exist in `cap_probe.rs`
+/// today — 2 inside `tally()`, 2 inside the two real `Probed` rows — and
+/// this loop reaches all 4). The struct's tail chunk produces no citation
+/// only because its `id` field is written `pub id: &'static str,`:
+/// [`line_field`]'s `"id:"` search anchors to the START of a trimmed line,
+/// and no line in that chunk starts with the bare literal `id:` — the
+/// field's own line starts with `pub`.
+///
+/// Each of the three fields is then read by [`line_field`] using the same
+/// anchored-line technique [`probe_row_ids`] uses for `id:`. A chunk
+/// missing any one of the three fields is silently excluded from THIS
+/// function's own output — that covers both the struct's tail chunk
+/// (excluded for the `pub id:` reason above, by design) and a genuine
+/// `Coverage::Probed` row that fails to parse for some other formatting
+/// reason (NOT by design: this function alone cannot tell the two cases
+/// apart, and does not itself surface the difference — a prior version of
+/// this comment claimed it did). [`count_probed_chunks`] closes that gap:
+/// it counts chunks that clear the SAME `"Coverage::Probed {"` filter AND
+/// have a bare `id:` field this function can read, which is exactly the
+/// population this function ought to turn into a citation. A mismatch
+/// between that count and `probed_citations(src).len()` — checked by
+/// `probed_rows_cite_a_real_test` — is how a row silently dropped for the
+/// wrong reason actually gets surfaced; this function does not surface it
+/// on its own.
 fn probed_citations(src: &str) -> Vec<ProbedCitation> {
     let mut out = vec![];
     for chunk in src.split("ProbeRow {").skip(1) {
@@ -1174,12 +1191,40 @@ fn probed_citations(src: &str) -> Vec<ProbedCitation> {
     out
 }
 
+/// Counts the chunks [`probed_citations`] iterates that look like a
+/// genuine `Coverage::Probed` row: the same `"Coverage::Probed {"` filter,
+/// AND a bare `id:` field [`line_field`] can find — the same two gates
+/// that exclude the `ProbeRow` struct's own tail chunk (see
+/// `probed_citations`'s doc comment) from ever being counted here. Using
+/// the `"Coverage::Probed {"` filter ALONE, without the `id:` gate, would
+/// overcount by exactly one in `cap_probe.rs` today: the struct's tail
+/// chunk always contains that literal text (`tally()`'s `matches!` calls
+/// put it there) and is correctly excluded BY DESIGN, not by accident, so
+/// counting it here would make this function permanently disagree with
+/// `probed_citations` for a reason that is not a bug.
+///
+/// A chunk that clears both gates here but still yields no citation from
+/// `probed_citations` — because its `marker` or `cited_test` field could
+/// not be parsed — is exactly the silent drop `probed_rows_cite_a_real_test`
+/// exists to surface; comparing this count against
+/// `probed_citations(src).len()` there is how.
+fn count_probed_chunks(src: &str) -> usize {
+    src.split("ProbeRow {")
+        .skip(1)
+        .filter(|chunk| chunk.contains("Coverage::Probed {") && line_field(chunk, "id:").is_some())
+        .count()
+}
+
 #[test]
 fn probed_citations_reads_marker_and_cited_test_alongside_id_and_skips_deferred_rows() {
     let fixture = r#"
         pub(crate) struct ProbeRow {
             pub id: &'static str,
             pub coverage: Coverage,
+        }
+        fn tally() {
+            let _ = matches!(c, Coverage::Probed { .. });
+            let _ = matches!(c, Coverage::Probed { .. });
         }
         pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             ProbeRow {
@@ -1222,6 +1267,81 @@ fn probed_citations_reads_marker_and_cited_test_alongside_id_and_skips_deferred_
         "the Deferred row a.b must not appear, and both Probed rows must carry their own \
          marker and cited_test, not the other's"
     );
+    // The struct-tail chunk mirrors cap_probe.rs's own real shape: a `tally()`-style
+    // function containing "Coverage::Probed {" text sits between `struct ProbeRow {`
+    // and the first real row, so this chunk PASSES the substring filter exactly like a
+    // real row's chunk would, and is excluded only because its own `id` field reads
+    // `pub id:`, not the bare `id:` line_field anchors on. Without this snippet the
+    // fixture only exercised "chunk fails the substring filter entirely" — a different,
+    // easier case than the one that actually occurs in cap_probe.rs (see
+    // `probed_citations`'s doc comment).
+    assert_eq!(
+        count_probed_chunks(fixture),
+        citations.len(),
+        "the struct-tail chunk must be excluded from the count for the SAME reason \
+         probed_citations excludes it from its output (pub id: not bare id:), not because \
+         it fails the Coverage::Probed {{ substring filter — this is what proves the two \
+         functions agree for the right reason"
+    );
+}
+
+/// Reproduces the Finding #1 exploit: a `Coverage::Probed` row collapsed onto ONE
+/// physical line breaks [`line_field`]'s per-field anchoring for every field after the
+/// first, because `line_field` scans `chunk.lines()` and only the very first (and here,
+/// only) line of the chunk can ever match a prefix. The collapsed row's `id` happens to
+/// be first on that line and still parses; `marker` and `cited_test` do not, so the
+/// ENTIRE row is silently dropped from `probed_citations`'s output — while
+/// [`count_probed_chunks`] still counts it as a candidate, because counting only needs
+/// `id:` to parse, not all three fields. The resulting mismatch is exactly what
+/// `probed_rows_cite_a_real_test`'s count assertion exists to catch: before that
+/// assertion existed, this fixture's dropped row was invisible to the gate —
+/// `probed_citations` returned only the second, well-formed row, and a bare
+/// `!citations.is_empty()` was satisfied by it alone.
+#[test]
+fn count_probed_chunks_exceeds_citations_when_a_row_is_collapsed_onto_one_line() {
+    let fixture = r#"
+        pub(crate) struct ProbeRow {
+            pub id: &'static str,
+            pub coverage: Coverage,
+        }
+        pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
+            ProbeRow { id: "collapsed.row", coverage: Coverage::Probed { marker: Marker::TextContains("needle"), mutation: Mutation::NotYet("x"), cited_test: "fabricated_test_fn" } },
+            ProbeRow {
+                id: "well.formed",
+                coverage: Coverage::Probed {
+                    marker: Marker::TextContains("needle"),
+                    mutation: Mutation::NotYet("x"),
+                    cited_test: "some_test_fn",
+                },
+            },
+        ];
+    "#;
+
+    let citations = probed_citations(fixture);
+    assert_eq!(
+        citations,
+        vec![ProbedCitation {
+            id: "well.formed".to_string(),
+            marker: CitedMarker::TextContains("needle".to_string()),
+            cited_test: "some_test_fn".to_string(),
+        }],
+        "the collapsed row's id parses (it is first on its line) but its marker and \
+         cited_test do not, so probed_citations must drop the WHOLE row rather than emit \
+         a half-parsed citation: {citations:?}"
+    );
+    assert_eq!(
+        count_probed_chunks(fixture),
+        2,
+        "both rows look like a genuine Coverage::Probed row by the id-gated chunk count — \
+         this is the population probed_rows_cite_a_real_test's count assertion compares \
+         citations.len() against"
+    );
+    assert_ne!(
+        citations.len(),
+        count_probed_chunks(fixture),
+        "the mismatch (1 citation vs 2 candidate chunks) is the signal a silent drop \
+         happened — this is what a bare !citations.is_empty() check cannot see"
+    );
 }
 
 /// True when a trimmed line begins a `fn` declaration, allowing the
@@ -1247,8 +1367,10 @@ fn declares_a_fn(trimmed: &str) -> bool {
 /// Extracts the heuristic "body" of `fn <name>` (any visibility, `async` or
 /// not) from `src`: the line declaring it, through the line immediately
 /// before the next line — at the SAME OR LOWER indentation — that itself
-/// declares a `fn`. Returns `None` when no line declares `fn <name>` at
-/// all.
+/// declares a `fn`, with that next function's own leading `#[...]`
+/// attributes and `///`/`//!` doc comments backed out of the result (see
+/// the last bullet below). Returns `None` when no line declares `fn <name>`
+/// at all.
 ///
 /// This is a HEURISTIC, not a parser, and `probed_rows_cite_a_real_test`
 /// relies on knowing exactly what it does not catch:
@@ -1259,7 +1381,12 @@ fn declares_a_fn(trimmed: &str) -> bool {
 ///   scanner — accepted for this gate because a cited test name is a real
 ///   identifier the compiler already forces to be unique among sibling
 ///   `fn`s, so a decoy occurring only in prose is a narrower risk than the
-///   one `raw_string_lines` was written for.
+///   one `raw_string_lines` was written for. The SAME blind spot applies to
+///   the END boundary below, not only the START: a line inside a raw-string
+///   fixture (this very file's own `r#"..."#` bodies, for instance) that
+///   happens to look like a `fn` declaration at the same-or-lower
+///   indentation would end the scan early, exactly as a decoy at the START
+///   would misdirect it.
 /// - **A `fn` nested inside the body at STRICTLY GREATER indentation** (a
 ///   local helper function) is correctly kept as part of the body, because
 ///   ending the scan requires indentation `<=` the declaration's own — but
@@ -1275,6 +1402,16 @@ fn declares_a_fn(trimmed: &str) -> bool {
 ///   search requires the literal `fn <name>(` or `fn <name> ` (for a name
 ///   followed by generics or unusual whitespace before punctuation), so
 ///   searching for `foo` cannot match a line declaring `fn foo_helper`.
+/// - **The end boundary backs up over the NEXT function's leading `#[...]`
+///   attributes and `///`/`//!` doc comments**, stopping at the first blank
+///   line or other line found walking backward from the next `fn`
+///   declaration. Without this, the next function's own `#[test]` and doc
+///   comments landed inside THIS function's extracted body (verified: a
+///   `#[test]` attribute was included in a prior version's
+///   `glob_explosion_returns_recoverable` extraction). This back-up is
+///   itself a heuristic: a `/* block comment */`, or an attribute separated
+///   from the `fn` line by something other than more attributes/doc
+///   comments, is not recognised and would still leak into the body.
 fn extract_fn_body(src: &str, name: &str) -> Option<String> {
     let lines: Vec<&str> = src.lines().collect();
     let paren = format!("fn {name}(");
@@ -1299,6 +1436,21 @@ fn extract_fn_body(src: &str, name: &str) -> Option<String> {
         let indent = line.len() - trimmed.len();
         if indent <= start_indent && declares_a_fn(trimmed) {
             end = i;
+            break;
+        }
+    }
+    // Back up over the NEXT function's own leading attributes and doc
+    // comments — the forward scan above only recognises that function's
+    // `fn` line itself as an end marker, so without this its `#[...]`,
+    // `///` and `//!` lines land inside THIS function's extracted body.
+    // Stops at the first blank line (the real gap between the two
+    // functions) or any other line, so it never walks into the CURRENT
+    // function's own content.
+    while end > start + 1 {
+        let trimmed = lines[end - 1].trim_start();
+        if trimmed.starts_with("#[") || trimmed.starts_with("///") || trimmed.starts_with("//!") {
+            end -= 1;
+        } else {
             break;
         }
     }
@@ -1334,6 +1486,43 @@ mod tests {
         !body.contains("unrelated_after"),
         "body must stop before the NEXT fn at the same indentation: {body}"
     );
+    // extract_fn_body's `start` search anchors on the line containing `fn target_fn(`
+    // itself, never on any attribute preceding it — so target_fn's OWN `#[test]` is
+    // never part of the extracted body either, before or after this fix. A body
+    // containing zero occurrences of "#[test]" is therefore exactly what a correct
+    // extraction produces; before the end-boundary fix this body contained ONE
+    // (`unrelated_after`'s leaked attribute), never target_fn's own.
+    assert!(
+        !body.contains("#[test]"),
+        "the NEXT function's own #[test] attribute must not leak into this body: {body}"
+    );
+}
+
+/// [`extract_fn_body`]'s end boundary must back up over the next function's leading DOC
+/// COMMENT too, not only its `#[...]` attribute — this fixture puts a `///` line (no
+/// `#[test]`) directly before the next `fn`, a case the attribute-only fixture above does
+/// not cover.
+#[test]
+fn extract_fn_body_excludes_the_next_functions_leading_doc_comment() {
+    let fixture = "\
+fn target_fn() {
+    let x = 1;
+}
+
+/// Doc comment that belongs to the NEXT function, not this one.
+fn next_fn() {
+    let y = 2;
+}
+";
+    let body = extract_fn_body(fixture, "target_fn").expect("target_fn should be found");
+    assert!(
+        !body.contains("belongs to the NEXT function"),
+        "the next function's leading doc comment must not leak into this body: {body}"
+    );
+    assert!(
+        !body.contains("next_fn"),
+        "the next function's declaration must not leak into this body: {body}"
+    );
 }
 
 #[test]
@@ -1342,27 +1531,78 @@ fn extract_fn_body_returns_none_when_the_name_is_not_declared_anywhere() {
     assert!(extract_fn_body(fixture, "does_not_exist_anywhere").is_none());
 }
 
+/// The lines of `body` that belong to an `assert!`/`assert_eq!`/`assert_ne!`/
+/// `debug_assert!` call — from the line the macro name appears on (at paren-depth 0)
+/// through the line that closes its outermost `(...)`, tracked by counting `(`/`)`
+/// across each included line. A single physical line is NOT enough: rustfmt wraps a
+/// long `assert!`/`assert_eq!` call so the macro name is on its own line and the
+/// condition, actual marker text included, lands on the NEXT line — the shape both real
+/// `cited_test` bodies this gate checks use. A per-line-only filter (matching just the
+/// line containing the literal `assert`) would exclude that condition line entirely,
+/// making every multi-line assertion in this style invisible to
+/// [`marker_is_asserted`] — checked against both real call sites before landing on this
+/// design: a per-line filter passed all four of this function's own single-line unit
+/// test fixtures and failed both real bodies.
+///
+/// [`marker_is_asserted`] searches this text, not the whole body: searching the whole
+/// body let deleting the very assertion a row cites still pass, because the marker's
+/// text also occurred elsewhere in the body — a comment, a nearby `let`, the enclosing
+/// test's setup code. Verified by mutation at both of this gate's current call sites
+/// (reported by `probed_rows_cite_a_real_test`'s caller): deleting
+/// `glob_explosion_returns_recoverable`'s own `assert!` blocks left the text "cap"
+/// present via a doc comment and the `enforce_file_cap` call, and deleting
+/// `a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped`'s
+/// `packing` `assert_eq!` left both `$.overflow.packing` segments present in that
+/// test's own prose comments — before this scoping, neither mutation changed this
+/// gate's verdict.
+fn assertion_lines(body: &str) -> String {
+    let mut out = String::new();
+    let mut depth: i32 = 0;
+    for line in body.lines() {
+        let starts_call = depth == 0 && line.contains("assert");
+        if depth > 0 || starts_call {
+            out.push_str(line);
+            out.push('\n');
+            for ch in line.chars() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth < 0 {
+                depth = 0;
+            }
+        }
+    }
+    out
+}
+
 /// True when `marker` is asserted inside `body` — the heuristic
 /// `probed_rows_cite_a_real_test` runs against a cited test's extracted
-/// body.
+/// body. Only searches [`assertion_lines`]`(body)`, not `body` itself — see
+/// that function's doc comment for why a property mutation (deleting the
+/// cited assertion) previously survived without it.
 ///
-/// `TextContains(s)` requires the literal `s` to appear anywhere in `body`:
-/// strict on the string (whitespace and all), lax on the location — `s`
-/// need not be inside an `assert!`, so a bare mention in a comment would
-/// also satisfy it.
+/// `TextContains(s)` requires the literal `s` to appear anywhere across the
+/// assertion lines: strict on the string (whitespace and all), lax on the
+/// location within them — `s` need not be the direct argument to `assert!`
+/// itself, so a bare mention on the SAME line as some other assertion
+/// would also satisfy it.
 ///
 /// `JsonPath(p)` requires EVERY dot-separated segment of `p` after the
-/// leading `$.` to appear anywhere in `body` — not as one contiguous
-/// substring, not in path order, and not exclusively: a body asserting
-/// `v["overflow"]["packing"]` satisfies `$.overflow.packing` even though
-/// the literal text `"$.overflow.packing"` never appears, but a body that
-/// merely contains the two words "overflow" and "packing" in unrelated
-/// places would satisfy it too. This is intentionally lax — the
-/// alternative (requiring one specific bracket-indexing idiom) would need
-/// to know which of several equivalent ways a body reads a JSON value, and
-/// neither of the two `Probed` rows this gate checks today would be helped
-/// by making it stricter.
+/// leading `$.` to appear somewhere across the assertion lines — not as
+/// one contiguous substring, not in path order, not on the same line, and
+/// not exclusively: a body asserting `v["overflow"]["packing"]` satisfies
+/// `$.overflow.packing` even though the literal text `"$.overflow.packing"`
+/// never appears, but two DIFFERENT assert lines that each mention one of
+/// "overflow" and "packing" would satisfy it too. This is intentionally
+/// lax — the alternative (requiring one specific bracket-indexing idiom, on
+/// one line) would need to know which of several equivalent ways a body
+/// reads a JSON value, and neither of the two `Probed` rows this gate
+/// checks today would be helped by making it stricter.
 fn marker_is_asserted(marker: &CitedMarker, body: &str) -> bool {
+    let body = assertion_lines(body);
     match marker {
         CitedMarker::TextContains(s) => body.contains(s.as_str()),
         CitedMarker::JsonPath(p) => match p.strip_prefix("$.") {
@@ -1410,6 +1650,33 @@ fn marker_is_asserted_false_when_one_json_path_segment_is_missing() {
     ));
 }
 
+/// Scoping [`marker_is_asserted`] to [`assertion_lines`] is what THIS test proves: before
+/// that scoping, a marker mentioned only in a comment (never inside any assertion) still
+/// made this function return `true`, which is exactly how deleting the real `assert!`
+/// site at either of this gate's two live call sites (`glob_explosion_returns_recoverable`,
+/// `a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped`) failed to
+/// turn the gate red. The fixture body deliberately avoids the literal substring
+/// `assert` outside of what it is testing for, so the line-trigger itself cannot fire.
+#[test]
+fn marker_is_asserted_false_when_text_contains_marker_only_appears_outside_an_assert_line() {
+    let body = "// cap is mentioned only in this comment, never checked\nlet x = 1;";
+    assert!(!marker_is_asserted(
+        &CitedMarker::TextContains("cap".to_string()),
+        body
+    ));
+}
+
+/// The `JsonPath` sibling of the test above: both segments appear in the body, but only
+/// in a comment, never on any line that is part of an assert call.
+#[test]
+fn marker_is_asserted_false_when_json_path_segment_only_appears_outside_an_assert_line() {
+    let body = "// overflow and packing are both mentioned only in this comment, never checked\nlet x = 1;";
+    assert!(!marker_is_asserted(
+        &CitedMarker::JsonPath("$.overflow.packing".to_string()),
+        body
+    ));
+}
+
 /// Checks that every `Coverage::Probed` row's `cited_test` names a REAL
 /// test — a `fn` that exists somewhere in tracked `src/` — and that the
 /// row's marker is asserted somewhere in that test's extracted body. This
@@ -1428,6 +1695,24 @@ fn marker_is_asserted_false_when_one_json_path_segment_is_missing() {
 /// asserting it (a comment, an unrelated string) — narrowing that further
 /// is future work, not a claim this gate makes today.
 ///
+/// A `cited_test` naming a `fn` that lives under `tests/` rather than
+/// tracked `src/` is unrepresentable by this gate BY DESIGN, not a bug:
+/// [`tracked_src_files`] scopes the search to `src/` (mirroring where a
+/// `cap-class: RESULT_CAP` annotation itself must live), so a future probe
+/// row whose only behavioural test is an integration test needs a citation
+/// into `src/`, not a scope widening here — and the failure message below
+/// already names that scope.
+///
+/// Before checking any individual citation, this test also asserts that
+/// [`probed_citations`] did not silently drop one: [`count_probed_chunks`]
+/// counts the chunks that look like a genuine `Coverage::Probed` row by the
+/// same two gates `probed_citations` itself applies, and a mismatch against
+/// `citations.len()` means a row's `marker` or `cited_test` field failed to
+/// parse and vanished without a trace — the exact failure mode a bare
+/// `!citations.is_empty()` cannot see (that check alone is satisfied by a
+/// single surviving citation no matter how many others were silently
+/// dropped).
+///
 /// Failure messages name the row id, the cited test, and the marker —
 /// never a bare count — so a failure here is a single lookup, not a second
 /// investigation.
@@ -1444,6 +1729,19 @@ fn probed_rows_cite_a_real_test() {
          really is Deferred (check by hand before trusting this), or the parser's anchors \
          (\"ProbeRow {{\", \"Coverage::Probed {{\", \"id:\", \"cited_test:\") have drifted from \
          the file's actual formatting"
+    );
+
+    let expected_chunk_count = count_probed_chunks(&cap_probe_src);
+    assert_eq!(
+        citations.len(),
+        expected_chunk_count,
+        "probed_citations returned {} citations but {} chunks in cap_probe.rs look like a \
+         genuine Coverage::Probed row (contain \"Coverage::Probed {{\" and have a bare id: \
+         field) — at least one row was silently dropped because its marker or cited_test field \
+         could not be parsed; diff the ids in `citations` against \
+         `grep -n \"Coverage::Probed {{\" src/tools/core/cap_probe.rs` to find which row",
+        citations.len(),
+        expected_chunk_count
     );
 
     let mut sources = vec![];

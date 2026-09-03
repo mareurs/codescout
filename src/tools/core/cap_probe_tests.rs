@@ -52,12 +52,34 @@ async fn the_lifted_driver_reaches_a_real_tool_from_this_module() {
     let _ = shared_ctx(&server);
 }
 
+/// Returns the id of every `Probed` row whose `cited_test` is empty (after
+/// trimming). Split out from `probe_rows_are_well_formed`'s main loop so an
+/// empty citation gets its OWN failure message rather than being lumped into
+/// "placeholder reason" — a `Probed` row's `cited_test` is not a `Deferred`
+/// or `NotYet` reason at all, and a reader hitting that message would look
+/// in the wrong place (the `banned` placeholder-word list) for a defect
+/// that is really "nobody named a test yet".
+fn missing_cited_tests(rows: &[super::cap_probe::ProbeRow]) -> Vec<&'static str> {
+    use super::cap_probe::Coverage;
+
+    rows.iter()
+        .filter_map(|row| match &row.coverage {
+            Coverage::Probed { cited_test, .. } if cited_test.trim().is_empty() => Some(row.id),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Every row is internally consistent: a unique, non-empty id in the id
 /// grammar `RESULT_CAP` annotations use, a `Deferred`/`NotYet` reason that is
 /// not empty (after trimming) and not one of the banned placeholders this
-/// convention explicitly rules out, and — for `Probed` rows — a `Marker`
-/// shaped the way the caller reads it (a `JsonPath` starting with `$.`, a
-/// non-empty `TextContains`).
+/// convention explicitly rules out, a `Marker` shaped the way the caller
+/// reads it (a `JsonPath` starting with `$.`, a non-empty `TextContains`) for
+/// `Probed` rows, and — also for `Probed` rows, checked separately by
+/// [`missing_cited_tests`] — a non-empty `cited_test`:
+/// `probed_rows_cite_a_real_test` (in `tests/result_caps.rs`) can only check
+/// that a NAMED test holds up, so a row naming none would need catching
+/// here instead.
 #[test]
 fn probe_rows_are_well_formed() {
     use super::cap_probe::{Coverage, Marker, Mutation, PROBE_ROWS};
@@ -95,9 +117,7 @@ fn probe_rows_are_well_formed() {
                 }
             }
             Coverage::Probed {
-                marker,
-                mutation,
-                cited_test,
+                marker, mutation, ..
             } => {
                 let marker_ok = match marker {
                     Marker::JsonPath(path) => path.starts_with("$."),
@@ -111,12 +131,10 @@ fn probe_rows_are_well_formed() {
                         bad_reasons.push(row.id);
                     }
                 }
-                if cited_test.trim().is_empty() {
-                    bad_reasons.push(row.id);
-                }
             }
         }
     }
+    let bad_cited_tests = missing_cited_tests(PROBE_ROWS);
 
     assert!(bad_ids.is_empty(), "malformed ProbeRow ids: {bad_ids:?}");
     assert!(
@@ -131,6 +149,48 @@ fn probe_rows_are_well_formed() {
         bad_reasons.is_empty(),
         "ProbeRow ids with a placeholder (not a real) reason: {bad_reasons:?}"
     );
+    assert!(
+        bad_cited_tests.is_empty(),
+        "Probed ProbeRow ids with an empty cited_test — probed_rows_cite_a_real_test cannot \
+         check a citation that names no test at all: {bad_cited_tests:?}"
+    );
+}
+
+/// Negative-direction check for [`missing_cited_tests`]: a `Probed` row with
+/// an empty `cited_test` must be reported, a `Probed` row with a non-empty
+/// one must not, and a `Deferred` row (no `cited_test` field to check at
+/// all) must not either. Without this, `missing_cited_tests` could report
+/// nothing on every run just because the real `PROBE_ROWS` table happens to
+/// have no empty `cited_test` today — this fixture forces the RED case to
+/// exist somewhere, independent of the live table's current contents.
+#[test]
+fn missing_cited_tests_flags_only_probed_rows_with_an_empty_cited_test() {
+    use super::cap_probe::{Coverage, Marker, Mutation, ProbeRow};
+
+    let rows = [
+        ProbeRow {
+            id: "fixture.empty",
+            coverage: Coverage::Probed {
+                marker: Marker::TextContains("z"),
+                mutation: Mutation::NotYet("no mutation run yet"),
+                cited_test: "",
+            },
+        },
+        ProbeRow {
+            id: "fixture.named",
+            coverage: Coverage::Probed {
+                marker: Marker::TextContains("z"),
+                mutation: Mutation::NotYet("no mutation run yet"),
+                cited_test: "some_real_test",
+            },
+        },
+        ProbeRow {
+            id: "fixture.deferred",
+            coverage: Coverage::Deferred("no test drives this cap past its bound"),
+        },
+    ];
+
+    assert_eq!(missing_cited_tests(&rows), vec!["fixture.empty"]);
 }
 
 /// Prints the tally this convention lives and dies by. Asserts nothing
