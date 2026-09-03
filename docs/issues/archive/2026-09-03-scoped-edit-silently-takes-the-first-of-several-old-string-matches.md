@@ -1,7 +1,7 @@
 ---
-id: '03556b44c4fd145f'
+id: be5c9b94ee94821d
 kind: bug
-status: open
+status: fixed
 title: scoped markdown edit silently takes the first of several old_string matches
 owners:
 - marius
@@ -11,9 +11,9 @@ tags:
 - markdown
 - data-loss
 topic: markdown editing
+closed: 2026-09-03
 opened: 2026-09-03
 severity: high
-unverified: not fixed; no regression test. The remedy (refuse an ambiguous old_string) is proposed, not implemented, and the corrupting call still succeeds today
 ---
 
 ## Summary
@@ -181,7 +181,12 @@ computed `content[..offset].lines().count() + 1`, which is correct only when the
 starts at a line start — Rust's `lines()` counts a partial trailing line, so a mid-line
 match reported N+1. Both sites now count newlines. No test pinned the old numbers.
 
-Fix commit: *(recorded on archive)*
+**Fix commit:** `85666ef0873d519b93fe3893037d1278bf01279a` on **`experiments`**
+(short `85666ef0`).
+**patch-id:** `c87e93c5ddb6aa8d11e35a3bf754502db81cc5ff` — `git show <sha> | git patch-id
+--stable`. The SHA is positional and dies when `experiments` is rebased after a ship; the
+patch-id is a content hash of the diff and survives rebase and cherry-pick. Recorded once,
+nothing owed later.
 
 ## Tests added
 
@@ -228,9 +233,8 @@ way, so verification is the only signal.
 
 ## Resume
 
-Decide between remedy 1 and 2 above; remedy 1 is preferred and is a pure refusal, so it
-cannot corrupt anything it currently writes. The text-replacement path is in
-`src/tools/markdown/`.
+N/A — fixed and verified. Gate green in the documented order at `85666ef0`: fmt 0, clippy
+0, lean lane 0, default lane 0, no flake.
 
 ## References
 
