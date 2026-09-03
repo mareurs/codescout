@@ -34,95 +34,149 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         )));
     }
 
-    let mut cat = ctx.catalog.lock();
-    let row = artifact::get(&cat, &a.id)?
-        .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
+    // The catalog guard lives in an EXPLICIT BLOCK, and the block is the fix rather
+    // than a tidy-up. `refile` below is `async`, and this guard is a
+    // `parking_lot::MutexGuard` -- not `Send`, so holding it across that `.await`
+    // does not compile. `drop(cat)` does NOT satisfy that: the binding stays in
+    // scope for the generator's state machine even once moved, so only ending the
+    // scope works. The `Send` error is the surface symptom; the substance is that
+    // `SqliteVecArtifactStore::refile` re-acquires THIS mutex, and parking_lot's is
+    // not reentrant -- so a version that merely silenced the compiler would hang
+    // that backend on every move.
+    let (old_full, new_full, new_id) = {
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, &a.id)?
+            .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
-    // Fork-on-first-write gate: a worktree session may not move an artifact
-    // that belongs to the main checkout — that would rename the shared
-    // file/row out from under the main checkout. Merge first, or run from
-    // the main checkout.
-    if let Some(cp) = ctx.current_project.as_deref() {
-        if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-            return Err(super::RecoverableError::new(
+        // Fork-on-first-write gate: a worktree session may not move an artifact
+        // that belongs to the main checkout — that would rename the shared
+        // file/row out from under the main checkout. Merge first, or run from
+        // the main checkout.
+        if let Some(cp) = ctx.current_project.as_deref() {
+            if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+                return Err(super::RecoverableError::new(
                 "refused from a worktree session: this artifact belongs to the main checkout. \
                  Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
             ));
+            }
         }
-    }
 
-    // Find the managed root that contains this artifact — a workspace
-    // `[[roots]]` entry or the active project. `new_rel_path` is interpreted
-    // relative to that root. See `super::managed_roots`.
-    let roots = super::managed_roots(ctx);
-    let root_path = super::containing_root(&roots, &row.abs_path)
-        .ok_or_else(|| anyhow::anyhow!("no managed root contains {}", row.abs_path.display()))?;
+        // Find the managed root that contains this artifact — a workspace
+        // `[[roots]]` entry or the active project. `new_rel_path` is interpreted
+        // relative to that root. See `super::managed_roots`.
+        let roots = super::managed_roots(ctx);
+        let root_path = super::containing_root(&roots, &row.abs_path).ok_or_else(|| {
+            anyhow::anyhow!("no managed root contains {}", row.abs_path.display())
+        })?;
 
-    let old_full = row.abs_path.clone();
-    let new_full = root_path.join(&a.new_rel_path);
+        let old_full = row.abs_path.clone();
+        let new_full = root_path.join(&a.new_rel_path);
 
-    if new_full.exists() {
-        return Err(super::RecoverableError::new(format!(
-            "destination '{}' already exists — choose a different path or delete it first",
-            a.new_rel_path
-        )));
-    }
+        if new_full.exists() {
+            return Err(super::RecoverableError::new(format!(
+                "destination '{}' already exists — choose a different path or delete it first",
+                a.new_rel_path
+            )));
+        }
 
-    if let Some(parent) = new_full.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+        if let Some(parent) = new_full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
-    std::fs::rename(&old_full, &new_full)?;
+        std::fs::rename(&old_full, &new_full)?;
 
-    let now = chrono::Utc::now().timestamp_millis();
+        let now = chrono::Utc::now().timestamp_millis();
 
-    // Catalog identity is `id == artifact_id_from_abs(abs_path)` — stated in
-    // `doctor.rs` and relied on by `migrate_v6`'s implicit id migration. Keeping
-    // the old id while rewriting `abs_path` leaves that invariant broken, and the
-    // next reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact WHERE
-    // abs_path=? AND id != ?`) deletes the row — cascading its events, links,
-    // observations and augmentation away, silently and later.
-    //
-    // So do what `doctor`'s `reseat_worktree` does for the same situation: seed a
-    // row at the path-derived id, then graft the history across and drop the old
-    // row. `graft_rows` re-points `artifact_link` on BOTH endpoints, so a
-    // `worktree_of` lineage edge survives whether it was the shadow or the main
-    // twin that moved.
-    // docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
-    let new_id = crate::librarian::ids::artifact_id_from_abs(&new_full);
+        // Catalog identity is `id == artifact_id_from_abs(abs_path)` — stated in
+        // `doctor.rs` and relied on by `migrate_v6`'s implicit id migration. Keeping
+        // the old id while rewriting `abs_path` leaves that invariant broken, and the
+        // next reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact WHERE
+        // abs_path=? AND id != ?`) deletes the row — cascading its events, links,
+        // observations and augmentation away, silently and later.
+        //
+        // So do what `doctor`'s `reseat_worktree` does for the same situation: seed a
+        // row at the path-derived id, then graft the history across and drop the old
+        // row. `graft_rows` re-points `artifact_link` on BOTH endpoints, so a
+        // `worktree_of` lineage edge survives whether it was the shadow or the main
+        // twin that moved.
+        // docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+        let new_id = crate::librarian::ids::artifact_id_from_abs(&new_full);
 
-    // The file's own `id:` now asserts an identity this move just invalidated.
-    // Repair it here, in the same call, because nothing downstream can: every
-    // write path into a managed artifact refuses one (`edit_file`'s markdown and raw
-    // routes both guard on the frontmatter id; `doc(update)`'s `extra`
-    // writes custom keys but never `id`), so a later repair pass has no route to
-    // the file. BL-23.
-    let content = repair_frontmatter_id(&new_full, &new_id)?;
+        // The file's own `id:` now asserts an identity this move just invalidated.
+        // Repair it here, in the same call, because nothing downstream can: every
+        // write path into a managed artifact refuses one (`edit_file`'s markdown and raw
+        // routes both guard on the frontmatter id; `doc(update)`'s `extra`
+        // writes custom keys but never `id`), so a later repair pass has no route to
+        // the file. BL-23.
+        let content = repair_frontmatter_id(&new_full, &new_id)?;
 
-    // Both derived AFTER the repair. A digest taken before it describes a file
-    // that no longer exists on disk, which leaves the row looking dirty on every
-    // subsequent walk.
-    let file_mtime = std::fs::metadata(&new_full)
-        .ok()
-        .and_then(|m| {
-            m.modified().ok().and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_millis() as i64)
+        // Both derived AFTER the repair. A digest taken before it describes a file
+        // that no longer exists on disk, which leaves the row looking dirty on every
+        // subsequent walk.
+        let file_mtime = std::fs::metadata(&new_full)
+            .ok()
+            .and_then(|m| {
+                m.modified().ok().and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_millis() as i64)
+                })
             })
-        })
-        .unwrap_or(now);
-    let file_sha256 = crate::librarian::util::sha_of_bytes(content.as_bytes());
+            .unwrap_or(now);
+        let file_sha256 = crate::librarian::util::sha_of_bytes(content.as_bytes());
 
-    let updated_row = crate::librarian::catalog::artifact::ArtifactRow {
-        id: new_id.clone(),
-        abs_path: new_full.clone(),
-        updated_at: now,
-        file_mtime,
-        file_sha256,
-        ..row.clone()
+        let updated_row = crate::librarian::catalog::artifact::ArtifactRow {
+            id: new_id.clone(),
+            abs_path: new_full.clone(),
+            updated_at: now,
+            file_mtime,
+            file_sha256,
+            ..row.clone()
+        };
+        artifact::upsert(&cat, &updated_row)?;
+
+        (old_full, new_full, new_id)
     };
-    artifact::upsert(&cat, &updated_row)?;
+
+    // Re-file the artifact's chunk vectors onto the new id, BETWEEN the upsert
+    // and the graft. Both neighbours are load-bearing: before the upsert the new
+    // artifact row does not exist and sqlite's FK rejects the re-point; after the
+    // graft the old row is gone and there is nothing left to re-point.
+    //
+    // A move is a RE-KEY, so re-filing rather than deleting is the whole point —
+    // the bytes did not change, and dropping the vectors would take the artifact
+    // out of semantic search until someone ran a `reembed`, trading one silent
+    // degradation for another. This is a payload/join-row write on both backends;
+    // nothing is re-embedded.
+    //
+    // Until 2026-09-04 neither backend did anything here, and they failed in
+    // OPPOSITE directions: Qdrant stranded the vectors under the dead id (7
+    // orphan artifacts / 126 points measured on this checkout), while sqlite let
+    // the graft's FK cascade delete the chunk rows and the
+    // artifact_vec_v2_cascade_delete trigger take their vectors with them.
+    // docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md
+    let vectors_refiled = {
+        // The guard is already gone — the block above ended its scope, which is what
+        // makes this `.await` legal at all. Nothing to drop here.
+        if new_id != a.id {
+            match ctx.artifact_store.as_ref() {
+                Some(store) => Some(store.refile(&a.id, &new_id).await?),
+                // No backend configured (unreachable Qdrant, or a lean build).
+                // Reported as null rather than 0: "no store to ask" and "asked, the
+                // artifact had none" are different facts, and a 0 here would assert
+                // the second while meaning the first.
+                None => None,
+            }
+        } else {
+            None
+        }
+    };
+
+    // Re-acquired under a FRESH binding rather than assigning back to `cat`.
+    // Assigning back keeps the original binding live across the `.await` above as
+    // far as the generator analysis is concerned — which is why `drop` alone did
+    // not fix the `Send` error — so the rebind is load-bearing, not style.
+    let mut cat = ctx.catalog.lock();
 
     // Two transactions (`upsert` autocommits, `graft_rows` runs its own IMMEDIATE
     // tx) — same shape as `reseat_worktree`. A crash between them leaves both rows
@@ -152,6 +206,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })),
         "old_abs_path": to_forward_slash(&old_full),
         "new_abs_path": to_forward_slash(&new_full),
+        // How many chunk vectors followed the artifact onto its new id.
+        // Reported because a re-file nobody can observe is indistinguishable
+        // from the bug it fixes: the pre-2026-09-04 behaviour also produced a
+        // clean `moved: true`. `null` means no vector backend was reachable —
+        // deliberately not 0, which would claim the artifact had none.
+        "vectors_refiled": vectors_refiled,
         // A move is a tracked DELETION plus an untracked ADDITION, so every
         // selector defined over index entries — `git add -u`, `git commit -a` —
         // enumerates only the first half and silently undoes the archive with a
@@ -698,6 +758,125 @@ mod tests {
                 "the event history must survive the reindex"
             );
         }
+    }
+
+    /// A move RE-FILES the artifact's chunk vectors onto the new id — it does not
+    /// delete them, and it does not leave them under the dead one.
+    ///
+    /// This is the test that would have caught the shipped bug, and it has to be
+    /// here rather than in `artifact_store`: the store's own tests prove `refile`
+    /// works when called, which was never in doubt. What was broken is that
+    /// nothing called it. `move_renames_file_and_updates_catalog` passes on the
+    /// pre-fix code, and so does every other test in this module, because a
+    /// successful move and a successful move that stranded its vectors produce
+    /// byte-identical responses apart from the field added for exactly that reason.
+    ///
+    /// Both directions are asserted, and both matter, because the two backends
+    /// failed in OPPOSITE directions from this one missing call: Qdrant left the
+    /// vectors under the old id (orphans that answer queries and resolve to
+    /// nothing), while sqlite's FK cascade deleted them outright when the graft
+    /// dropped the old row. So `new == 3` alone would pass the Qdrant bug if it
+    /// also copied, and `old == 0` alone would pass a delete.
+    #[tokio::test]
+    async fn move_refiles_chunk_vectors_onto_the_new_id() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        // The trait, for `upsert` on the concrete fixture type.
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let row = ArtifactRow {
+            id: "aabbccdd11223344".into(),
+            abs_path: tmp.path().join("docs/trackers/foo.md"),
+            kind: "tracker".into(),
+            status: "active".into(),
+            title: Some("Foo Tracker".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+        let src = tmp.path().join("docs/trackers/foo.md");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(
+            &src,
+            "---\nid: aabbccdd11223344\nkind: tracker\n---\n# Foo\n",
+        )
+        .unwrap();
+
+        let store = Arc::new(InMemoryArtifactStore::default());
+        // Three chunks, not one: a per-chunk bug that moved only the first would be
+        // invisible against a single-chunk fixture, which behaves identically under
+        // "re-file all" and "re-file one".
+        for (c, v) in [("c1", 0.25f32), ("c2", 0.5), ("c3", 0.75)] {
+            store
+                .upsert("p", c, "aabbccdd11223344", &[v, 1.0 - v])
+                .await
+                .unwrap();
+        }
+        // A second artifact that must not move. Without it, a `refile` that
+        // re-pointed the entire store would pass every assertion below.
+        store
+            .upsert("p", "c9", "other-art", &[9.0, 9.0])
+            .await
+            .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .with_artifact_store(store.clone())
+            .build();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let new_id = result["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            result["vectors_refiled"], 3,
+            "the count is reported so a caller can tell a re-file from the no-op it replaced"
+        );
+
+        assert_eq!(
+            store.chunks_under(&new_id),
+            3,
+            "vectors did not follow the artifact"
+        );
+        assert_eq!(
+            store.chunks_under("aabbccdd11223344"),
+            0,
+            "a vector still answers under the dead id — the Qdrant-shaped orphan"
+        );
+        assert_eq!(
+            store.chunks_under("other-art"),
+            1,
+            "an unrelated artifact was re-filed"
+        );
+
+        // Vectors and chunk ids unchanged: re-filing must not re-embed, and the
+        // catalog's `artifact_chunk` rows still name these chunk ids, so a re-keyed
+        // point would be an orphan wearing the right artifact id.
+        assert_eq!(
+            store.chunk("c1"),
+            Some((new_id.clone(), vec![0.25, 0.75])),
+            "the vector was recomputed or dropped rather than re-filed"
+        );
     }
 
     #[tokio::test]

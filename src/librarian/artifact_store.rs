@@ -151,6 +151,22 @@ pub trait ArtifactVectorStore: Send + Sync {
     /// chunk-grain delete would leave N−1 orphans that no sweep collects.
     async fn delete(&self, artifact_id: &str) -> Result<()>;
 
+    /// Re-point every chunk vector of `old_artifact_id` at `new_artifact_id`.
+    /// Returns how many were re-filed; 0 when the artifact had no vectors.
+    ///
+    /// **Carries no project, deliberately.** An artifact id does not say which
+    /// project it belongs to, and the one caller (`mv`) does hold a root it
+    /// could pass — which is exactly the reason not to take one. Two call sites
+    /// deriving the same project by their own routes, and disagreeing, is the
+    /// mechanism that filed every non-active project's vectors under the active
+    /// one (`99558134`). A signature that never claims to know the project
+    /// cannot be wrong about it; implementations locate the vectors by id.
+    ///
+    /// Exists because a move is a RE-KEY, not a removal: the content is
+    /// unchanged, so deleting would drop the artifact out of semantic search
+    /// until the next `reembed` — a different silent degradation, not a fix.
+    async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64>;
+
     /// Dense KNN → ranked `(chunk_id, distance)` pairs, closest first.
     ///
     /// **The returned id is a CHUNK id**, which the caller resolves to its
@@ -321,6 +337,28 @@ impl ArtifactVectorStore for QdrantArtifactStore {
         Ok(())
     }
 
+    async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+        // Fans out for the same reason `delete` does: an artifact id does not
+        // name its project. Unlike `delete` this DOES have a production caller
+        // (`mv`), so the cost is real rather than hypothetical — one exact
+        // count per collection per move. Affordable because a move is rare
+        // (measured over 30 days: `delete` 15, `graft` 1, against `update`'s
+        // 2,555) and because `artifact_id` carries a keyword index, so each
+        // probe is an index lookup rather than a scan.
+        //
+        // The alternative — take the project from `mv`, which holds a root —
+        // is the shape that caused `99558134`: a second call site deriving the
+        // same value by its own route. Not repeating that for one saved probe.
+        let mut total = 0u64;
+        for collection in self.qdrant.artifact_collections(&self.prefix).await? {
+            total += self
+                .qdrant
+                .artifact_refile(&collection, old_artifact_id, new_artifact_id)
+                .await?;
+        }
+        Ok(total)
+    }
+
     /// `project_id = Some` reads the active project's collection; `None` fans
     /// out across every artifact collection and merges.
     ///
@@ -426,6 +464,31 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         Ok(())
     }
 
+    async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+        // sqlite-vec keys vectors by `chunk_id` in `artifact_vec_v2` and reaches
+        // the artifact through `artifact_chunk`, so re-filing is a re-point of
+        // that join row — the vectors themselves are never touched or recomputed.
+        //
+        // THIS BACKEND'S FAILURE IS THE MIRROR OF QDRANT'S, not the same one.
+        // `artifact_chunk.artifact_id` is `REFERENCES artifact(id) ON DELETE
+        // CASCADE`, and `artifact_vec_v2_cascade_delete` fires AFTER DELETE ON
+        // artifact_chunk. So when `mv`'s graft drops the old artifact row, the
+        // chunks cascade away and take their vectors with them: Qdrant strands
+        // vectors under a dead id, sqlite DELETES them and leaves the artifact
+        // unsearchable until someone reindexes. Both silent, opposite directions.
+        //
+        // ORDERING IS LOAD-BEARING and is the caller's contract: this must run
+        // AFTER the new artifact row exists (the FK above rejects it otherwise)
+        // and BEFORE the graft drops the old one (after, there is nothing left
+        // to re-point). `mv` calls it between those two steps.
+        let cat = self.catalog.lock();
+        let n = cat.conn.execute(
+            "UPDATE artifact_chunk SET artifact_id = ?1 WHERE artifact_id = ?2",
+            rusqlite::params![new_artifact_id, old_artifact_id],
+        )?;
+        Ok(n as u64)
+    }
+
     async fn knn(
         &self,
         _project_id: Option<&str>,
@@ -492,6 +555,35 @@ pub mod test_support {
             ids.dedup();
             ids
         }
+
+        /// `(artifact_id, vector)` for the chunk stored under `chunk_id`, if any.
+        ///
+        /// The sibling of `project_ids` and there for the same reason: a coordinator
+        /// test needs to assert WHICH artifact a chunk now belongs to and that its
+        /// vector is byte-unchanged, neither of which any count can express. Re-filing
+        /// is defined precisely by "the owner moved and the vector did not", so a
+        /// test that could only count would pass against an implementation that
+        /// deleted and re-embedded — the outcome re-filing exists to avoid.
+        pub fn chunk(&self, chunk_id: &str) -> Option<(String, Vec<f32>)> {
+            self.points
+                .lock()
+                .get(chunk_id)
+                .map(|(_, aid, v)| (aid.clone(), v.clone()))
+        }
+
+        /// How many stored chunks currently belong to `artifact_id`.
+        ///
+        /// Deliberately a per-ARTIFACT count rather than a total: the two backends'
+        /// pre-fix failures are opposite (vectors stranded under the old id vs.
+        /// deleted outright), and only a count that names the id can tell those
+        /// apart. A store-wide total is equal under both.
+        pub fn chunks_under(&self, artifact_id: &str) -> usize {
+            self.points
+                .lock()
+                .values()
+                .filter(|(_, aid, _)| aid == artifact_id)
+                .count()
+        }
     }
 
     fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -534,6 +626,23 @@ pub mod test_support {
                 .lock()
                 .retain(|_, (_, aid, _)| aid != artifact_id);
             Ok(())
+        }
+
+        async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+            // Artifact-grain and IN PLACE, mirroring `delete` above: re-point
+            // EVERY chunk point under the artifact and keep its vector and
+            // chunk_id untouched. Re-inserting under a fresh key instead would
+            // let a fixture agree with an implementation that silently
+            // re-embeds, which is the exact behaviour re-filing exists to avoid.
+            let mut pts = self.points.lock();
+            let mut n = 0u64;
+            for (_, aid, _) in pts.values_mut() {
+                if aid == old_artifact_id {
+                    *aid = new_artifact_id.to_string();
+                    n += 1;
+                }
+            }
+            Ok(n)
         }
 
         async fn knn(
@@ -726,6 +835,88 @@ mod backend_tests {
             left,
             vec!["c9".to_string()],
             "every chunk of art-a must go, and art-b's must stay"
+        );
+    }
+
+    /// Re-filing moves EVERY chunk of one artifact and leaves the others alone.
+    ///
+    /// The decoy artifact is load-bearing in the same way the three chunks are: a
+    /// `refile` that re-pointed every row in the store would satisfy an assertion
+    /// that only checked the target, and over-reach is the direction that costs
+    /// something here — it would silently merge two artifacts' vectors.
+    #[tokio::test]
+    async fn refile_moves_every_chunk_of_one_artifact_and_no_others() {
+        let store = InMemoryArtifactStore::default();
+        for c in ["c1", "c2", "c3"] {
+            store.upsert("p", c, "art-old", &[1.0, 0.0]).await.unwrap();
+        }
+        store.upsert("p", "c9", "art-b", &[1.0, 0.0]).await.unwrap();
+
+        assert_eq!(store.refile("art-old", "art-new").await.unwrap(), 3);
+
+        assert_eq!(store.chunks_under("art-new"), 3);
+        assert_eq!(
+            store.chunks_under("art-b"),
+            1,
+            "an unrelated artifact moved"
+        );
+        assert_eq!(
+            store.chunks_under("art-old"),
+            0,
+            "a chunk still answers under the dead id -- exactly the orphan this fixes"
+        );
+    }
+
+    /// The whole point of re-filing over deleting: the VECTORS survive.
+    ///
+    /// Asserted by value, not by count. A `refile` implemented as delete-then-
+    /// reinsert-with-a-zero-vector, or one that dropped the chunk and let a later
+    /// reindex recreate it, both keep the count at 3 and pass any test that only
+    /// counts. What distinguishes re-filing from deleting is that no embedder ran,
+    /// and the observable proof of that is the bytes being unchanged.
+    #[tokio::test]
+    async fn refile_preserves_the_vectors_and_the_chunk_ids() {
+        let store = InMemoryArtifactStore::default();
+        store
+            .upsert("p", "c1", "art-old", &[0.25, 0.75])
+            .await
+            .unwrap();
+        store
+            .upsert("p", "c2", "art-old", &[0.5, 0.5])
+            .await
+            .unwrap();
+
+        store.refile("art-old", "art-new").await.unwrap();
+
+        // Chunk ids are the point KEYS and must be untouched: the catalog's
+        // `artifact_chunk` rows still name them, so a re-keyed point is an orphan
+        // wearing the right artifact id.
+        assert_eq!(
+            store.chunk("c1"),
+            Some(("art-new".to_string(), vec![0.25, 0.75]))
+        );
+        assert_eq!(
+            store.chunk("c2"),
+            Some(("art-new".to_string(), vec![0.5, 0.5]))
+        );
+    }
+
+    /// An artifact with no vectors re-files zero, and says so rather than erroring.
+    ///
+    /// `mv` calls this on every id-changing move, including for artifacts that were
+    /// never embedded (a lean build, an unreachable Qdrant, a file added since the
+    /// last reindex). A `refile` that failed there would turn a working archive into
+    /// a refused one.
+    #[tokio::test]
+    async fn refile_of_an_artifact_with_no_vectors_is_zero_not_an_error() {
+        let store = InMemoryArtifactStore::default();
+        store.upsert("p", "c1", "art-b", &[1.0, 0.0]).await.unwrap();
+
+        assert_eq!(store.refile("art-ghost", "art-new").await.unwrap(), 0);
+        assert_eq!(
+            store.chunk("c1").map(|(aid, _)| aid),
+            Some("art-b".to_string()),
+            "a no-op refile must not touch an unrelated artifact"
         );
     }
 

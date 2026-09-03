@@ -18,9 +18,10 @@
 
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
-    Distance, FieldType, Filter, PointId, PointStruct, Query, QueryPointsBuilder,
-    UpsertPointsBuilder, Value, VectorInput, VectorParamsBuilder, VectorsConfigBuilder,
+    Condition, CountPointsBuilder, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder,
+    DeletePointsBuilder, Distance, FieldType, Filter, PointId, PointStruct, Query,
+    QueryPointsBuilder, SetPayloadPointsBuilder, UpsertPointsBuilder, Value, VectorInput,
+    VectorParamsBuilder, VectorsConfigBuilder,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -143,6 +144,76 @@ impl QdrantWrap {
             .await
             .context("delete_points(artifact)")?;
         Ok(())
+    }
+
+    /// Re-point every chunk vector of `old_artifact_id` at `new_artifact_id`.
+    /// Returns the number of points re-filed.
+    ///
+    /// **A move is a re-key, not a removal.** Catalog identity is
+    /// `sha256(abs_path)`, so archiving a file mints a new id and the vectors keep
+    /// answering under the old one, which no catalog row resolves — they are
+    /// returned by KNN and dropped at hydration, consuming result slots silently
+    /// (`docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`).
+    /// Deleting them instead is correct and lossy: the content did not change, so
+    /// the artifact would leave the semantic index until someone ran a `reembed`
+    /// — trading a silent degradation for a different silent degradation.
+    ///
+    /// Points are keyed on `chunk_id` and carry `artifact_id` as an INDEXED
+    /// payload field, so this is a payload write, not a re-embed. Nothing is
+    /// recomputed and no `EmbeddingService` is touched.
+    ///
+    /// Counts first so the caller can report a number rather than a bare "ok" —
+    /// `set_payload`'s `UpdateResult` reports operation status, not how many
+    /// points matched, and "re-filed 0" is exactly the outcome a caller needs to
+    /// be able to see.
+    pub async fn artifact_refile(
+        &self,
+        collection: &str,
+        old_artifact_id: &str,
+        new_artifact_id: &str,
+    ) -> Result<u64> {
+        let filter = Filter::must(vec![Condition::matches(
+            "artifact_id",
+            old_artifact_id.to_string(),
+        )]);
+
+        let matched = self
+            .client
+            .count(
+                CountPointsBuilder::new(collection)
+                    .filter(filter.clone())
+                    .exact(true),
+            )
+            .await
+            .context("count(artifact_refile)")?
+            .result
+            .map(|r| r.count)
+            .unwrap_or(0);
+
+        // Skip the write when nothing matches. Not just an optimisation: a
+        // set_payload over an empty selector is indistinguishable in its result
+        // from one that matched, so the early return is what keeps the returned
+        // count honest.
+        if matched == 0 {
+            return Ok(0);
+        }
+
+        let mut payload: HashMap<String, Value> = HashMap::new();
+        payload.insert(
+            "artifact_id".into(),
+            Value::from(new_artifact_id.to_string()),
+        );
+
+        self.client
+            .set_payload(
+                SetPayloadPointsBuilder::new(collection, payload)
+                    .points_selector(filter)
+                    .wait(true),
+            )
+            .await
+            .context("set_payload(artifact_refile)")?;
+
+        Ok(matched)
     }
 
     /// Every artifact-chunk collection currently in Qdrant, by name prefix.
