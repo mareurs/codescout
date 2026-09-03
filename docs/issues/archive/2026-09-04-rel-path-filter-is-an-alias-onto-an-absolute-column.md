@@ -6,7 +6,6 @@ title: 'BUG: the rel_path filter is an alias onto an absolute column, so nine of
 tags:
 - cluster/selector-narrower-than-its-population
 closed: 2026-09-04
-unverified: not re-checked against the deployed release binary — the MCP server still runs the pre-fix build until `cargo rb` + /mcp
 ---
 
 ## Summary
@@ -250,21 +249,41 @@ with no signal.
 
 ## Resume
 
-N/A for the fix. One thing deliberately left, recorded in frontmatter as `unverified:`:
-the live MCP surface still runs the pre-fix **release** binary, so
-`doc(action="find", filter={"rel_path": {"prefix": "docs/trackers"}})` will keep returning
-`0` from a session until someone runs `cargo rb` and reconnects with `/mcp`. Expected, not
-a regression. After that rebuild the call should return ~101 rows, and that is the
-end-to-end confirmation the unit test cannot give.
+N/A. **Verified live 2026-09-04 01:50** against the rebuilt release binary (built 01:47:49,
+post-dating both the fix `5253297a` at 01:29:33 and HEAD `998f64d3` at 01:46:51), five
+probes through the MCP surface:
 
-One adjacent defect noticed while reading `compile_leaf` and **not** fixed here, because
-it is a different mechanism and mixing them would muddy the diff: `LeafOp::Contains` binds
-its value with no `escape_like_pattern` call and emits no `ESCAPE` clause, while
-`LeafOp::Prefix` immediately below it does both. So `{"title": {"contains": "50%"}}`
-over-matches, and `eval` — which does a plain substring test — disagrees with `compile`
-about it. The parity fixture `eval_matches_compile_on_fixture` holds a row titled
-`"50% off sale"` and exercises `prefix: "50%"` against it, commented `%-escape parity`,
-without ever trying `contains`. Worth its own bug file; verify before filing.
+| probe | before | after |
+|---|---|---|
+| `{"rel_path": {"prefix": "docs/trackers"}}` — the served guide example | `0` | **94** |
+| `{"rel_path": {"ne": "docs/trackers/issue-clusters.md"}}` — rows kept | 101, nothing excluded | **100** |
+| … same, `AND title contains "Issue Clusters"` | returned the excluded file | **0** |
+| `{"rel_path": {"gt": "docs/trackers"}}` | lexicographic on the wrong string | **refused**, naming the field |
+| the triage query in § *Evidence* → *How it was noticed* | `0` | **7** |
+
+The third row is the one that carries the `ne` claim, and it needed the second beside it:
+a zero there is *also* what a `ne` excluding everything would return, so the pair — 100
+kept, 1 dropped — is the discriminating result and either alone is not.
+
+The last row closes the loop on how this was found. The seven are byte-identical to what
+`grep -l '^status: fixed' docs/issues/*.md` returns, and that agreement counts because the
+two instruments have **different scopes**: one reads SQLite through the compiled filter,
+the other reads the filesystem. Per `CLAUDE.md` § *Observer Blindness*, two instruments
+agreeing is evidence only when they do not share a blind spot.
+
+Build mtime was established *before* reading any probe result, deliberately: a stale binary
+and a broken fix both return zero, so a negative would otherwise have been uninterpretable.
+In the event every probe was positive, which is unambiguous on its own.
+
+---
+
+One adjacent defect noticed while reading `compile_leaf` and **not** fixed here, because it
+is a different mechanism and mixing them would muddy the diff: `LeafOp::Contains` binds its
+value with no `escape_like_pattern` call and emits no `ESCAPE` clause, while `LeafOp::Prefix`
+immediately below it does both. Confirmed live rather than left as a lead —
+`{"title": {"contains": "%"}}` returned 100 trackers, none of whose titles hold a percent
+sign. Filed as `docs/issues/2026-09-04-contains-binds-percent-and-underscore-as-live-wildcards.md`
+(`IC-6`, the no-escape half) at `22808be4`.
 ## References
 
 - `src/librarian/filter.rs:146-152` (remap), `:827-837` (the narrow guard test)

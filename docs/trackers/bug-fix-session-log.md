@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 115
-entry_high_water_W: 104
+entry_high_water_W: 105
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -170,6 +170,7 @@ entry_high_water_W: 104
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
 | W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
 | W-103 | 2026-09-04 | high | **A schema field is not a value — when a predicate's safety rests on a payload being populated, scroll the real store before writing the predicate.** Post-rebuild recon on the vector-routing seam sampled 200 points of the live codescout collection and found `project_id: ''` on **200 of 200**: every pre-fix vector carries the empty payload that `99558134` fixed, and the fix is not retroactive | The planned GC backstop drops a collection when its recorded path "no longer exists on disk". An empty string is not a path that exists, so the predicate evaluates TRUE for codescout's collection and destroys the whole semantic index — **29,154 vectors** — while doing exactly what it was specified to do. It would have shipped green: a fresh fixture writes through the *fixed* path, so its payloads are populated and the orphan branch never fires. The plan cited the field from `src/retrieval/artifact.rs:46,64`, where it is genuinely declared — reading the source confirms the field exists; only reading the data shows what is in it | validated |
 | W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
@@ -11271,6 +11272,57 @@ name the file and symbol beside the axis — `cap` = `find.rs:763` argument,
 **Severity:** med — one wrong edit to a shipped default, avoided.
 **Status:** fixed-verified — `BL-72` corrected in the same commit; the cap half is
 done and measured at `998f64d3`.
+
+## W-105 — scouting the seam moved the fix site, and the umbrella scope is why
+
+**Valid:** dated 2026-09-03
+
+**Observed:** Fixing the `rel_path` filter defect
+(`docs/issues/archive/2026-09-04-rel-path-filter-is-an-alias-onto-an-absolute-column.md`),
+the fix plan written into the bug file at filing time said: *"resolve the caller's argument
+against the scope's `git_root` before binding it, so all ten ops compare like with like"*,
+with a Resume line asking whether `compile()` already has the root or whether it must be
+threaded in from `find.rs`.
+
+Scouting that seam before writing any code killed the plan outright, on three findings the
+plan had assumed away:
+
+1. `compile(node: &FilterNode)` takes **only** the node — no root, no context.
+2. Its one production caller is `src/librarian/catalog/find.rs` (4 sites), which holds
+   `cat: &Catalog` and also has no root. The root lives two layers up, in `apply_scope`.
+3. **The decisive one:** `Scope::Umbrella` composes an OR over *several repo roots*. There
+   is no single `git_root` to normalise against — not merely "not in hand here", but
+   **non-existent in principle** for that scope.
+
+**Counterfactual.** Finding (3) is the one that matters, and it is invisible from the
+symptom. The plan's approach would have compiled, passed a project-scoped test, and been
+silently wrong for every `scope="umbrella"` query — a scope this repo actually uses, and
+whose failure mode is the same clean-zero the bug was about. Findings (1) and (2) alone
+would have cost a signature change to `compile`, `compile_composition` and `compile_leaf`
+plus ~24 call-site updates, most of them in tests.
+
+What shipped instead is root-agnostic **boundary anchoring** — `LIKE '%/v%'` for `prefix`,
+`LIKE '%/v'` for `eq`, negated for `ne` — which needs no root at all and is therefore
+correct under every scope. Five files, no signature change, verified live at five probes.
+
+**The scout also found the fix pattern already written.** Twelve lines above the defect,
+BL-47's comment describes the *identical* failure for `tags`/`owners` — *"comparing the
+column directly compares its raw JSON text against a scalar, which is never equal and
+fails silently: `in` returned nothing and `nin` returned everything"* — and states the
+remedy: *"gating this on the op was the bug; it is now gated on the COLUMN, with the op
+selecting the shape."* Reading the surrounding function rather than jumping to the flagged
+line is what surfaced it, and the fix now mirrors that structure deliberately.
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* (a test asserting on its own
+re-implementation); the reconnaissance skill's Phase 1 (read the symbol body and its
+callers before editing).
+
+**Status:** validated
+
+**Category:** plan-vs-substrate drift caught pre-implementation.
+
+**Severity of the averted miss:** high — a scope-specific silent wrong answer in the same
+class as the bug being fixed, shipped behind a passing project-scoped test.
 
 ## Template for new entries
 
