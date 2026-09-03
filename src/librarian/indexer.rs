@@ -163,6 +163,9 @@ pub(crate) fn embed_queue_items(
         }
     };
     let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
+    // Built once per artifact, not per chunk: a ledger has hundreds of chunks and
+    // one heading table.
+    let titles = crate::librarian::entry_token::entry_titles_by_token(body);
     Ok(stored
         .into_iter()
         .filter(|r| !r.content.trim().is_empty())
@@ -172,9 +175,25 @@ pub(crate) fn embed_queue_items(
             // chunk from the middle of a five-chunk entry would otherwise embed
             // with no idea what it belongs to. Skipped when the chunk already
             // opens with its own heading, which is the common case.
+            //
+            // THE TITLE, NOT JUST THE TOKEN. This prepended a bare `W-81` from
+            // 2026-09-03 until 2026-09-04, which satisfied the paragraph above
+            // and could not do the job it describes: `W-81` is an opaque
+            // identifier with no semantic content, so a query like "choosing
+            // where a gate lives by how fast it reports" has nothing to match
+            // against it. The mechanism was built, wired, and carrying a payload
+            // that could not work — only the chunk physically containing the
+            // heading was findable by a query about the entry. Costs one line and
+            // a re-embed.
             let text = match &r.entry_token {
                 Some(tok) if !r.content.trim_start().starts_with('#') => {
-                    format!("{tok}\n\n{}", r.content)
+                    match titles.get(tok) {
+                        Some(title) => format!("{tok} — {title}\n\n{}", r.content),
+                        // No title means the token came from scope rather than
+                        // from a heading in this body — keep the old bare-token
+                        // form rather than inventing one.
+                        None => format!("{tok}\n\n{}", r.content),
+                    }
                 }
                 _ => r.content,
             };
@@ -1337,6 +1356,66 @@ kind = "memory"
             )
             .unwrap();
         assert_eq!(n, 1, "the chunk rows were replaced, not appended to");
+    }
+
+    /// A mid-entry chunk embeds with its entry's TITLE, not just its token.
+    ///
+    /// Observed RED against the bare-token form with the assertion on `contains`
+    /// of the title text. The token alone satisfied the old code and could not
+    /// do the job its own comment described: `W-81` carries no words a query can
+    /// match, so only the chunk physically holding the heading was findable by a
+    /// query about the entry.
+    ///
+    /// LOAD-BEARING: the fixture's second chunk must NOT open with a heading, or
+    /// it takes the `_ => r.content` arm and the prefix is never exercised — the
+    /// test would pass against a tree with this feature deleted.
+    #[test]
+    fn a_mid_entry_chunk_embeds_with_its_entrys_title_not_just_its_token() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let line = "aaaa bbbb cccc dddd eeee\n";
+        // 120 lines x ~25 chars = ~3,000, comfortably past the production
+        // CHUNK_CHARS of 2,048. The budget is not settable from here, so the
+        // fixture has to be genuinely long; the guard below fails loudly if a
+        // future budget change makes this fit in one chunk again.
+        let body = format!(
+            "## W-81 — choose a gate by its feedback latency\n\n{}",
+            line.repeat(120)
+        );
+        let items = embed_queue_items(&cat, "a", None, &body, ChunkGrain::Chunk).unwrap();
+        assert!(
+            items.len() > 1,
+            "fixture must split the entry; got {}",
+            items.len()
+        );
+
+        let mid = &items[1];
+        assert!(
+            !mid.text.trim_start().starts_with("## "),
+            "the second chunk must not open with a heading or the prefix arm is skipped: {:?}",
+            &mid.text[..mid.text.len().min(40)]
+        );
+        assert!(
+            mid.text
+                .starts_with("W-81 — choose a gate by its feedback latency\n\n"),
+            "a mid-entry chunk must carry its entry's TITLE — a bare `W-81` is an \
+             opaque id no query can match: {:?}",
+            &mid.text[..mid.text.len().min(80)]
+        );
+        // And the chunk that DOES open with its heading is left alone — it
+        // already carries the title in its own content.
+        assert!(
+            items[0].text.trim_start().starts_with("## W-81 —"),
+            "the heading-bearing chunk needs no prefix: {:?}",
+            &items[0].text[..items[0].text.len().min(40)]
+        );
     }
 
     #[test]
