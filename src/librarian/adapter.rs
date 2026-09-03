@@ -358,8 +358,18 @@ impl crate::tools::Tool for LibrarianAdapter {
     }
 
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
-        // Two guides serve this tool and only one can be delivered per call, so pick by
-        // what the call actually touched rather than always sending the bigger one.
+        // Three guides serve this tool and only one can be delivered per call.
+        //
+        // An overflowing result wins first: `doc(find|get)` buffers into an @tool_*
+        // handle exactly like `symbols`/`references`/`call_graph`, and those three
+        // already check this before their own topic split (see
+        // `Symbols::relevant_guide_topic`) so a caller learns the buffer mechanics
+        // before reaching for the wrong reader on it. This adapter previously had no
+        // such branch — `librarian`/`tracker-conventions` were chosen unconditionally,
+        // so a `doc` call could overflow and never surface `progressive-disclosure` at
+        // all, even though it keeps five other triggers (grep, tree, read_file,
+        // run_command, semantic_search) plus these three symbol tools, so most
+        // sessions still receive it from elsewhere.
         //
         // A response naming a path under `docs/issues/` or `docs/trackers/` is a
         // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
@@ -385,6 +395,9 @@ impl crate::tools::Tool for LibrarianAdapter {
         // deleted outright rather than corrected: there the number did no work.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+            return Some("progressive-disclosure");
+        }
         if names_tracker_path(result) {
             return Some("tracker-conventions");
         }
@@ -1680,6 +1693,37 @@ mod tests {
                     || names_path_containing(&v, "docs/trackers/")
             );
         }
+    }
+
+    #[test]
+    fn overflow_wins_the_guide_slot_even_on_a_tracker_path() {
+        // Regression for the gap this session found: `doc(find|get)` buffers into an
+        // @tool_* handle exactly like `symbols`/`references`/`call_graph`, but this
+        // adapter's topic split never checked for it, so an overflowing `doc` call could
+        // never surface `progressive-disclosure` -- only `librarian`/`tracker-conventions`.
+        // The tracker-path branch alone would pick `tracker-conventions` here; asserting
+        // `progressive-disclosure` instead is what pins the ordering, not just the value.
+        let a = adapter_for_test();
+        let overflowed_tracker_result = json!({
+            "abs_path": "docs/trackers/tool-usage-patterns.md",
+            "output_id": "@tool_69062af3",
+        });
+        assert_eq!(
+            a.relevant_guide_topic(&overflowed_tracker_result),
+            Some("progressive-disclosure")
+        );
+    }
+
+    #[test]
+    fn non_overflowing_tracker_path_still_gets_tracker_conventions() {
+        // Companion to the regression above: the new overflow check must not swallow
+        // the existing split for results that did NOT overflow.
+        let a = adapter_for_test();
+        let plain_tracker_result = json!({"abs_path": "docs/trackers/tool-usage-patterns.md"});
+        assert_eq!(
+            a.relevant_guide_topic(&plain_tracker_result),
+            Some("tracker-conventions")
+        );
     }
 
     /// A doctor result routes AWAY from `librarian`, so the `fix=` repair modes
