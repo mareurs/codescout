@@ -1364,6 +1364,28 @@ fn declares_a_fn(trimmed: &str) -> bool {
     rest.starts_with("fn ")
 }
 
+/// Line indices in `src` whose text declares `fn <name>`, by exactly the rule
+/// [`extract_fn_body`] uses to find its START line.
+///
+/// Factored out so that counting declarations and extracting one body can never
+/// use different matchers. A second, separately-written predicate here would be
+/// `IC-18` (`selector-narrower-than-its-population`) shipped inside the gate
+/// built to catch it: [`resolve_cited_test`] would be certifying uniqueness over
+/// a population that is not the one [`extract_fn_body`] draws its answer from,
+/// and the two could disagree silently. Inherits every blind spot listed on
+/// [`extract_fn_body`]'s doc comment (a decoy inside a comment or raw-string
+/// fixture counts as a declaration here too) — deliberately, since a decoy able
+/// to misdirect the extractor must also be visible to the uniqueness check.
+fn fn_declaration_lines(src: &str, name: &str) -> Vec<usize> {
+    let paren = format!("fn {name}(");
+    let spaced = format!("fn {name} ");
+    src.lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(paren.as_str()) || line.contains(spaced.as_str()))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Extracts the heuristic "body" of `fn <name>` (any visibility, `async` or
 /// not) from `src`: the line declaring it, through the line immediately
 /// before the next line — at the SAME OR LOWER indentation — that itself
@@ -1397,7 +1419,10 @@ fn declares_a_fn(trimmed: &str) -> bool {
 ///   than once across the scanned source — impossible for two sibling
 ///   `#[test]` functions (duplicate names in the same module do not
 ///   compile), but a real limitation of this function taken on its own,
-///   independent of how `probed_rows_cite_a_real_test` uses it.
+///   independent of how `probed_rows_cite_a_real_test` uses it. That gate
+///   no longer relies on it: [`resolve_cited_test`] counts declarations via
+///   [`fn_declaration_lines`] first and REFUSES an ambiguous name outright,
+///   so first-match is reached only after uniqueness is established.
 /// - **A name that is a substring of another never matches upward**: the
 ///   search requires the literal `fn <name>(` or `fn <name> ` (for a name
 ///   followed by generics or unusual whitespace before punctuation), so
@@ -1416,19 +1441,8 @@ fn declares_a_fn(trimmed: &str) -> bool {
 ///   is not recognised and would still leak into the body.
 fn extract_fn_body(src: &str, name: &str) -> Option<String> {
     let lines: Vec<&str> = src.lines().collect();
-    let paren = format!("fn {name}(");
-    let spaced = format!("fn {name} ");
-    let mut start = None;
-    let mut start_indent = 0usize;
-    for (i, line) in lines.iter().enumerate() {
-        if line.contains(paren.as_str()) || line.contains(spaced.as_str()) {
-            let trimmed = line.trim_start();
-            start = Some(i);
-            start_indent = line.len() - trimmed.len();
-            break;
-        }
-    }
-    let start = start?;
+    let start = *fn_declaration_lines(src, name).first()?;
+    let start_indent = lines[start].len() - lines[start].trim_start().len();
     let mut end = lines.len();
     for (i, line) in lines.iter().enumerate().skip(start + 1) {
         let trimmed = line.trim_start();
@@ -2382,6 +2396,205 @@ fn marker_is_asserted_false_when_json_path_segment_only_appears_outside_an_asser
     ));
 }
 
+/// What resolving a `cited_test` name against tracked `src/` produced.
+///
+/// A named state per outcome, not an `Option` plus a count: `CLAUDE.md`
+/// § *Testing Discipline* — where a system already names its own failure state,
+/// assert on the NAME rather than on a proxy for it. `Ambiguous` is the state
+/// this branch added, and the one a test can pin without re-deriving a number.
+#[derive(Debug, PartialEq, Eq)]
+enum CitedTestResolution {
+    /// Exactly one `fn` declaration across tracked `src/`, with its body.
+    Unique(String),
+    /// No `fn` declaration anywhere in tracked `src/`.
+    NotFound,
+    /// More than one `fn` declaration. Carries every file that declares the
+    /// name, in `git ls-files src` order, a file contributing more than one
+    /// declaration suffixed `(xN)`.
+    Ambiguous(Vec<String>),
+}
+
+/// Resolve a `cited_test` name to ONE body, or refuse.
+///
+/// The refusal is the point, and it is not hypothetical. Before it, the resolver
+/// was `sources.iter().find_map(|src| extract_fn_body(src, &c.cited_test))` —
+/// silent first-match over `git ls-files src` order — and the namespace already
+/// holds a live collision: `heading_truncation_is_signaled` is declared THREE
+/// times (`src/librarian/preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`),
+/// each driving a DIFFERENT cap past its bound. Citing it from the
+/// `preview.plan_headings` row would have bound to `default.rs:57` — the SIBLING
+/// row's test — and the gate would have gone green while certifying one cap
+/// using another cap's evidence. No assertion downstream can detect that,
+/// exactly as none can check the bound itself.
+///
+/// This is `IC-6`'s *no disambiguator* half (`CLAUDE.md` § *Parsers Over a
+/// Namespace*): an unqualified name over a namespace that admits collisions owes
+/// a way to say which one you mean, or a refusal. There is no qualified citation
+/// syntax here, so this is the refusal.
+///
+/// Two research agents hit the collision independently from different rows
+/// during the 2026-09-02 census; the round-4 re-review's note that it "checked
+/// uniqueness for the two live rows and found them unique" is the shape of a
+/// property held by habit rather than by mechanism — true at the time, and
+/// nothing would have said so once it stopped being true.
+fn resolve_cited_test(sources: &[(String, String)], name: &str) -> CitedTestResolution {
+    let mut declarers = vec![];
+    let mut total = 0usize;
+    let mut first_body = None;
+    for (file, src) in sources {
+        let n = fn_declaration_lines(src, name).len();
+        if n == 0 {
+            continue;
+        }
+        total += n;
+        declarers.push(if n == 1 {
+            file.clone()
+        } else {
+            format!("{file} (x{n})")
+        });
+        if first_body.is_none() {
+            first_body = extract_fn_body(src, name);
+        }
+    }
+    if total == 0 {
+        return CitedTestResolution::NotFound;
+    }
+    if total > 1 {
+        return CitedTestResolution::Ambiguous(declarers);
+    }
+    match first_body {
+        Some(body) => CitedTestResolution::Unique(body),
+        None => CitedTestResolution::NotFound,
+    }
+}
+
+/// The guard for the tightening [`resolve_cited_test`] adds.
+///
+/// A tightening CANNOT red an already-green suite — every live citation is
+/// unique today, so `probed_rows_cite_a_real_test` is green with the new rule
+/// and was green without it. Its existence is therefore no evidence at all. This
+/// test drives the REAL helper (not a re-implementation) with input the OLD rule
+/// accepts and the NEW rule must reject, which is the only shape that can red.
+///
+/// Observed RED, 2026-09-02: reverting `resolve_cited_test`'s `total > 1` branch
+/// to first-match (`return CitedTestResolution::Unique(...)`) reds THIS test and
+/// nothing else in the suite.
+#[test]
+fn resolve_cited_test_refuses_a_name_declared_in_more_than_one_file() {
+    // LOAD-BEARING: both fixture bodies must ASSERT THE MARKER. That is what makes
+    // this the silent-green case rather than a mere lookup failure — under
+    // first-match the gate finds a body, finds the marker in it, and passes while
+    // pointing at the wrong file. Delete the assert from either body and this
+    // fixture stops reproducing the defect it exists for.
+    let sources = vec![
+        (
+            "src/librarian/preview/default.rs".to_string(),
+            "    fn heading_truncation_is_signaled() {\n        assert!(v[\"headings_truncated\"]);\n    }\n"
+                .to_string(),
+        ),
+        (
+            "src/librarian/preview/plan.rs".to_string(),
+            "    fn heading_truncation_is_signaled() {\n        assert!(v[\"headings_truncated\"]);\n    }\n"
+                .to_string(),
+        ),
+    ];
+
+    let resolved = resolve_cited_test(&sources, "heading_truncation_is_signaled");
+    assert_eq!(
+        resolved,
+        CitedTestResolution::Ambiguous(vec![
+            "src/librarian/preview/default.rs".to_string(),
+            "src/librarian/preview/plan.rs".to_string(),
+        ]),
+        "a cited_test declared in two files must resolve to Ambiguous naming BOTH files, \
+         not to the first one silently: {resolved:?}"
+    );
+
+    // The other half of the claim, stated as an assertion rather than left to the
+    // reader: the old rule really does accept this input. If `find_map` returned
+    // `None` here the fixture would be proving nothing about the tightening.
+    let old_rule = sources
+        .iter()
+        .find_map(|(_, src)| extract_fn_body(src, "heading_truncation_is_signaled"));
+    assert!(
+        old_rule.is_some_and(|body| marker_is_asserted(
+            &CitedMarker::JsonPath("$.headings_truncated".to_string()),
+            &body
+        )),
+        "the pre-tightening resolver must ACCEPT this input — find a body and find the \
+         marker asserted in it — or this test is not guarding a tightening at all"
+    );
+}
+
+/// The positive twin. Without it, `resolve_cited_test` could be mutated to return
+/// `Ambiguous` unconditionally and the test above would still pass — an assertion
+/// monotone in the wrong direction, which is the failure `CLAUDE.md`
+/// § *Testing Discipline* names first.
+#[test]
+fn resolve_cited_test_returns_the_body_when_exactly_one_file_declares_it() {
+    let sources = vec![
+        (
+            "src/librarian/preview/default.rs".to_string(),
+            "    fn a_truncated_preview_still_names_its_final_heading() {\n        assert!(v[\"headings_truncated\"]);\n    }\n"
+                .to_string(),
+        ),
+        (
+            "src/librarian/preview/plan.rs".to_string(),
+            "    fn something_else_entirely() {\n        assert!(true);\n    }\n".to_string(),
+        ),
+    ];
+
+    match resolve_cited_test(
+        &sources,
+        "a_truncated_preview_still_names_its_final_heading",
+    ) {
+        CitedTestResolution::Unique(body) => assert!(
+            body.contains("headings_truncated"),
+            "the resolved body must be the declaring file's, not an empty or truncated \
+             extraction: {body:?}"
+        ),
+        other => panic!("a uniquely-declared cited_test must resolve to Unique, got {other:?}"),
+    }
+}
+
+/// A name nothing declares must stay distinguishable from one declared twice —
+/// the two failures need different fixes (write the test vs. rename one of
+/// three), so collapsing them into one state would send the reader the wrong way.
+#[test]
+fn resolve_cited_test_reports_not_found_when_no_file_declares_the_name() {
+    let sources = vec![(
+        "src/librarian/preview/default.rs".to_string(),
+        "    fn something_else_entirely() {\n        assert!(true);\n    }\n".to_string(),
+    )];
+
+    assert_eq!(
+        resolve_cited_test(&sources, "never_declared_anywhere"),
+        CitedTestResolution::NotFound,
+        "an undeclared name is NotFound, never Ambiguous(vec![]) — the two failures have \
+         different remedies and the message must not conflate them"
+    );
+}
+
+/// Two declarations inside ONE file are still ambiguous. `extract_fn_body` takes
+/// the first and says nothing, and a file-granular uniqueness check would agree
+/// with it — so counting DECLARATIONS rather than declaring FILES is its own
+/// guarded site, not a stylistic choice.
+#[test]
+fn resolve_cited_test_refuses_two_declarations_inside_one_file() {
+    let sources = vec![(
+        "src/tools/run_command/tests.rs".to_string(),
+        "mod a {\n    fn dup_test() {\n        assert!(x);\n    }\n}\nmod b {\n    fn dup_test() {\n        assert!(x);\n    }\n}\n"
+            .to_string(),
+    )];
+
+    assert_eq!(
+        resolve_cited_test(&sources, "dup_test"),
+        CitedTestResolution::Ambiguous(vec!["src/tools/run_command/tests.rs (x2)".to_string()]),
+        "two declarations in one file must be reported with their count — a file-granular \
+         check would see one declaring file and call it Unique"
+    );
+}
+
 /// Checks that every `Coverage::Probed` row's `cited_test` names a REAL
 /// test — a `fn` that exists somewhere in tracked `src/` — and that the
 /// row's marker is asserted somewhere in that test's extracted body. This
@@ -2421,6 +2634,16 @@ fn marker_is_asserted_false_when_json_path_segment_only_appears_outside_an_asser
 /// Failure messages name the row id, the cited test, and the marker —
 /// never a bare count — so a failure here is a single lookup, not a second
 /// investigation.
+///
+/// A `cited_test` declared more than once in tracked `src/` is REFUSED by
+/// [`resolve_cited_test`] rather than resolved to the first match. That is
+/// this gate's `IC-6` *no disambiguator* obligation: the namespace holds a
+/// live three-way collision (`heading_truncation_is_signaled`), and taking
+/// the first match there certifies one cap using a different cap's test
+/// while going green. The tightening is guarded by
+/// `resolve_cited_test_refuses_a_name_declared_in_more_than_one_file`,
+/// because a tightening cannot red an already-green suite and its presence
+/// here proves nothing on its own.
 #[test]
 fn probed_rows_cite_a_real_test() {
     let cap_probe_path = repo_root().join("src/tools/core/cap_probe.rs");
@@ -2454,20 +2677,33 @@ fn probed_rows_cite_a_real_test() {
         let path = repo_root().join(&file);
         let src =
             std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {file}: {e}"));
-        sources.push(src);
+        sources.push((file, src));
     }
 
     let mut failures = vec![];
     for c in &citations {
-        let body = sources
-            .iter()
-            .find_map(|src| extract_fn_body(src, &c.cited_test));
-        let Some(body) = body else {
-            failures.push(format!(
-                "{}: cited_test \"{}\" names no `fn` found anywhere in tracked src/",
-                c.id, c.cited_test
-            ));
-            continue;
+        let body = match resolve_cited_test(&sources, &c.cited_test) {
+            CitedTestResolution::Unique(body) => body,
+            CitedTestResolution::NotFound => {
+                failures.push(format!(
+                    "{}: cited_test \"{}\" names no `fn` found anywhere in tracked src/",
+                    c.id, c.cited_test
+                ));
+                continue;
+            }
+            CitedTestResolution::Ambiguous(files) => {
+                failures.push(format!(
+                    "{}: cited_test \"{}\" is declared more than once in tracked src/ ({}) \
+                     — an unqualified name cannot say which one this row means, and the \
+                     resolver would otherwise take the first in `git ls-files src` order, \
+                     certifying this cap with another cap's test. Give one declaration a \
+                     distinguishing name and cite that.",
+                    c.id,
+                    c.cited_test,
+                    files.join(", ")
+                ));
+                continue;
+            }
         };
         if !marker_is_asserted(&c.marker, &body) {
             let marker_desc = match &c.marker {

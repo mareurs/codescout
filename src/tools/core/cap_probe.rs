@@ -124,6 +124,13 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 const NOT_MUTATED_YET: &str =
     "Task 5a is classification-only scope; no mutation run has been performed for this id";
 
+/// The `Mutation::NotYet` reason for a row promoted by the Task 5c citation
+/// census. Deliberately NOT [`NOT_MUTATED_YET`], which says "Task 5a is
+/// classification-only scope" — false for a 5c row, whose citation was derived
+/// by reading the cited test's body and its cap's bound.
+const NOT_MUTATED_CENSUS: &str =
+    "Task 5c is a citation census; the mutation run for this id is Task 6's scope";
+
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
 /// 2026-09-02 census in `tests/result_caps.rs`. The id list is derived from
 /// the gate itself (`grep(pattern="cap-class: RESULT_CAP", path="src")`),
@@ -132,28 +139,39 @@ const NOT_MUTATED_YET: &str =
 pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/core/types.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 13,685 B against the 10,000 B oversized threshold
+        // (`MAX_INLINE_TOKENS` 2500 x 4). Marker written by production at
+        // `src/tools/output_buffer.rs:466`.
         id: "tool_output.inline_tokens",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"@tool_\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("@tool_"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "call_content_buffers_at_token_threshold",
+        },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 11,000 B against a 9,700 B budget (10,000 - 300 envelope overhead -
+        // 0 stderr). Marker written by production at
+        // `src/tools/run_command/output.rs:268`.
         id: "run_command.inline_bytes",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.truncated\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.truncated"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "run_command_buffer_only_large_single_line_does_not_rebuffer",
+        },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a 13,212 B SINGLE line against `INLINE_BYTE_BUDGET` 9,000. Marker
+        // written by production at `src/tools/read_file.rs:350`, literal at `:442-443`.
         id: "tool_output.inline_byte_budget",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"json_path\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("json_path"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "read_file_buffer_single_oversized_line_still_fits_the_threshold",
+        },
     },
     ProbeRow {
         // Task 5a's comment (preserved below in spirit) cited a COMPOSED PAIR, not one
@@ -195,12 +213,15 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 3,901 B against the 3,000 B hard cap. Marker written by production
+        // at `src/tools/core/types.rs:531`.
         id: "tool_output.compact_summary_hard_bytes",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"truncated\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("truncated"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "call_content_caps_compact_summary",
+        },
     },
     ProbeRow {
         id: "tool_output.largest_array_depth",
@@ -317,19 +338,36 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/preview/plan.rs --
     ProbeRow {
+        // Reported ARGUABLE by the Task 5c census and ruled NO-CITE: the obvious citation
+        // resolves to a DIFFERENT cap's test. This row is why
+        // `probed_rows_cite_a_real_test` now refuses an ambiguous `cited_test` outright
+        // (`IC-6`'s *no disambiguator* half) rather than taking the first match.
         id: "preview.plan_headings",
         coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.headings_truncated\")) with \
-             no comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
+            "`MAX_HEADINGS` is exercised past its bound by `heading_truncation_is_signaled` \
+             (`src/librarian/preview/plan.rs:168`, 25 headings vs 20), which asserts the \
+             marker on production output from `headings::stamp_truncation`. It is not \
+             citable: that function name is declared identically in \
+             `preview/default.rs:57`, `preview/plan.rs:168` and `preview/spec.rs:76`, and \
+             the gate resolves a `cited_test` by first match in `git ls-files src` order, \
+             so the citation would silently bind to `default.rs:57` — the test for the \
+             sibling `preview.default_headings` row. Citable as soon as one of the three \
+             is given a distinguishing name.",
         ),
     },
     ProbeRow {
+        // A cap that truncates and emits NO marker at all. Flagged to the whole-branch
+        // review as arguably an `IC-13` MEMBER rather than a coverage gap.
         id: "preview.plan_open_next",
         coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.tasks.open_next\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
+            "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
+             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop, \
+             so the only observable is the array's own length. Every test in tracked \
+             `src/` therefore reads the field into a `let` and asserts on that length \
+             (`open_next_returns_first_three_unchecked`, `plan.rs:108`, drives 4 tasks \
+             past the cap but asserts `open.len(), 3`), while the one assertion naming \
+             `[\"tasks\"][\"open_next\"]` inline (`plan.rs:130`) seeds zero tasks. Uncitable \
+             until the cap emits a marker of its own.",
         ),
     },
     ProbeRow {
@@ -357,21 +395,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // A suppression FLOOR, not a truncating ceiling. Flagged to the whole-branch
+        // review: `RESULT_CAP` currently conflates ceilings that truncate with floors
+        // that suppress, and "the marker arrives" means a different thing under each.
         id: "doctor.exposure_threshold",
         coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker \
-             JsonPath(\"$.summary.by_check.entry_conditional_past_due\")) with no comment \
-             citing a test; Task 5b's cited_test requirement found none named, and \
-             inventing one is the exact failure this gate exists to prevent",
+            "`EXPOSURE_THRESHOLD` (5) is a suppression floor, not a truncating ceiling: \
+             `src/librarian/tools/doctor.rs:2947` drops rows *below* it and no field \
+             reports how many were dropped, while the marker \
+             `$.summary.by_check.entry_conditional_past_due` counts rows that survived. \
+             The marker is therefore observable non-zero only when the cap did not bite. \
+             The one test that drives exposure below the floor \
+             (`conditional_past_due_fires_exactly_at_the_exposure_threshold`, \
+             `doctor.rs:11267`) calls `scan_conditional_past_due` directly rather than \
+             `call()`, so no `summary.by_check` object exists in its output at all.",
         ),
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a 480-CHARACTER caveat against the 240-character cap (the repeated
+        // unit is 4 chars / 9 bytes, x120). Marker written by production at
+        // `src/librarian/tools/doctor.rs:4445`.
         id: "doctor.caveat_chars",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"…\")) with no comment \
-             citing a test; Task 5b's cited_test requirement found none named, and \
-             inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("…"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "a_long_caveat_is_truncated_without_splitting_a_character",
+        },
     },
     // -- src/tools/format.rs --
     ProbeRow {
@@ -509,13 +559,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 5 citers against a threshold of 5 — this cap is a `>=` FLOOR, so 5
+        // is past its bound, and the test brackets it with a negative control at 4.
+        // Marker written by production at `src/librarian/tools/context.rs:568-574`.
         id: "context.attestation_exposure",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker \
-             JsonPath(\"$.verification.verification_state\")) with no comment citing a \
-             test; Task 5b's cited_test requirement found none named, and inventing one \
-             is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.verification.verification_state"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "a_load_bearing_statement_arms_the_tap_and_says_what_would_discharge_it",
+        },
     },
     // -- src/librarian/tools/find.rs --
     ProbeRow {
@@ -536,12 +589,15 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/get.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 605 lines against `SOFT_CAP_LINES` 500. Marker written by production
+        // at `src/librarian/tools/get.rs:748-752`.
         id: "artifact.get_lines",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.overflow.shown_lines\")) \
-             with no comment citing a test; Task 5b's cited_test requirement found none \
-             named, and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.overflow.shown_lines"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "full_true_triggers_overflow_over_cap",
+        },
     },
     ProbeRow {
         id: "artifact.get_overflow_headings",
@@ -559,13 +615,15 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 51 findings against `FINDINGS_CAP` 50. Marker written by production
+        // at `src/librarian/tools/link_scan/mod.rs:960`.
         id: "link_scan.findings",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker \
-             JsonPath(\"$.counts.truncated.dangling\")) with no comment citing a test; \
-             Task 5b's cited_test requirement found none named, and inventing one is the \
-             exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.counts.truncated.dangling"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "counts_flags_truncation_per_finding_array_when_the_cap_is_exceeded",
+        },
     },
     // -- src/librarian/tools/refresh_stale.rs --
     ProbeRow {
@@ -585,29 +643,62 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/prompts/mod.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds ~1,006 chars against a DYNAMIC budget of 302 (2048 ceiling - 48
+        // margin - 1698 static prefix; the fixture's char count was verified with
+        // `wc -m`, not eyeballed). Marker written by production at
+        // `src/prompts/mod.rs:414`.
+        // MUTATION FINDING, 2026-09-03 (Task 5c verification round, reported not acted on):
+        // this citation is NOT DISCRIMINATING as the gate reads it. Deleting the cited
+        // marker assertion — `rendered.contains("status trimmed: ")` — leaves
+        // `probed_rows_cite_a_real_test` GREEN, because a later assertion in the same body
+        // carries the literal `trimmed` inside its OWN condition:
+        // `assert!(!block.contains("trimmed"), ...)`. The row is therefore certifiable by
+        // an assertion that the marker is ABSENT from the response channel — the inverse
+        // of what `Coverage::Probed` claims. Only neutralising BOTH reds the gate
+        // (verified: replacing the second condition's literal with one not containing
+        // "trimmed" produces the expected red naming this row). This is
+        // `assertion_lines`' documented cross-assertion laxity for `TextContains` with a
+        // LIVE instance rather than a hypothetical one; the row is left Probed per the
+        // census rather than silently downgraded, and the marker choice is Task 5a's.
         id: "prompts.client_instructions_chars",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"trimmed\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("trimmed"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "a_trim_names_what_it_dropped",
+        },
     },
     ProbeRow {
+        // Reported ARGUABLE by the Task 5c census and ruled NO-CITE: promoting it would
+        // certify a marker no caller can observe. `Coverage::Probed` claims the marker
+        // ARRIVES, and through the tool surface this one cannot. The trigger that makes
+        // it live is annotated at the segment site (`build_project_status_segments` in
+        // `src/prompts/mod.rs`), not here — that is where someone would fire it.
         id: "prompts.trim_note_names",
         coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"+2 more\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
+            "`MAX_NAMED_DROPS` (3) caps the labels `trim_note` lists \
+             (`src/prompts/mod.rs:405-412`), but its only production caller \
+             `fit_dynamic_block` draws labels from non-`Anchor`, non-`Substitutable` \
+             segments and exactly one such segment exists (`custom instructions`, \
+             `StatusPriority::UserAuthored`, `mod.rs:242`), so `labels.len() <= 1` and the \
+             `+2 more` branch cannot be reached through `build_server_instructions`. \
+             `the_trim_note_caps_the_names_it_lists` (`mod.rs:1341`) drives the primitive \
+             itself past the cap and asserts the marker, so this becomes citable the \
+             moment a second droppable persistent segment exists — **and that is the \
+             trigger to watch, not this row.**",
         ),
     },
     // -- src/tools/grep.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a 50,013 B SINGLE line against `MAX_MATCH_BYTES` 2,000. Marker
+        // written by production at `src/tools/grep.rs:825`.
         id: "grep.match_bytes",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"truncated\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("truncated"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "grep_marks_a_clamped_line_instead_of_silently_cutting",
+        },
     },
     ProbeRow {
         id: "grep.total_bytes",
@@ -644,21 +735,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/preview/default.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 26 headings against `MAX_HEADINGS` 20. Marker written by production
+        // at `src/librarian/preview/headings.rs:93`.
+        //
+        // UNIQUENESS: the semantically obvious citation here is
+        // `heading_truncation_is_signaled`, which is declared THREE times in tracked
+        // `src/` (`preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`). The uniquely
+        // named sibling below is cited instead; see the `preview.plan_headings` row for
+        // why the collision is disqualifying rather than merely untidy.
         id: "preview.default_headings",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.headings_truncated\")) \
-             with no comment citing a test; Task 5b's cited_test requirement found none \
-             named, and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.headings_truncated"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "a_truncated_preview_still_names_its_final_heading",
+        },
     },
     // -- src/librarian/preview/memory.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 300 chars against `OBSERVATION_TEXT_MAX` 200. Marker written by
+        // production at `src/librarian/preview/memory.rs:50`.
         id: "preview.observation_text",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker TextContains(\"…\")) with no comment \
-             citing a test; Task 5b's cited_test requirement found none named, and \
-             inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("…"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "observation_text_truncated_to_limit",
+        },
     },
     // -- src/librarian/preview/spec.rs --
     ProbeRow {
@@ -687,21 +790,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/tracker_design.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 10 trackers against `EXISTING_TRACKERS_CAP` 5. Marker written by
+        // production at `src/librarian/tools/tracker_design.rs:666`.
         id: "tracker_design.existing_trackers",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker \
-             JsonPath(\"$.existing_trackers_overflow_hint\")) with no comment citing a \
-             test; Task 5b's cited_test requirement found none named, and inventing one \
-             is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.existing_trackers_overflow_hint"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "overflow_hint_when_above_cap",
+        },
     },
     // -- src/librarian/tools/workspace_state_at.rs --
     ProbeRow {
+        // The marker IS reached by a real test that drives the cap past its bound; it is
+        // read through `.expect()` rather than an assertion macro, so `assertion_lines`
+        // never opens a block on it. A test change would make this citable — which is
+        // not the same thing as an existing citation, and 5c does not write tests.
         id: "workspace_state_at.rows",
         coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.hints.more_in_scope\")) \
-             with no comment citing a test; Task 5b's cited_test requirement found none \
-             named, and inventing one is the exact failure this gate exists to prevent",
+            "`MAX_ROWS` (200) bounds the `find` call at \
+             `src/librarian/tools/workspace_state_at.rs:152` and the overflow signal is \
+             written at `:231`. `cap_returns_hint` (`:339`) seeds 250 artifacts and \
+             reaches that branch, but reads the signal through a `let` + `.expect()` at \
+             `:358-360` — not an assertion macro — and its only assert conditions are \
+             `arts.len() <= MAX_ROWS` and `more >= 50`. No assertion condition anywhere in \
+             tracked `src/` names both `hints` and `more_in_scope`, so the marker is not \
+             certifiable today. Hoisting the presence check into an `assert!` would make \
+             it citable; that is a test change, not an existing citation.",
         ),
     },
     // -- src/lsp/client.rs --
@@ -735,13 +850,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/retrieval/index_state.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 30 entries against `SKIPPED_SAMPLE_CAP` 20. Marker written by
+        // production at `src/retrieval/index_state.rs:278`.
+        //
+        // MARKER NOTE, flagged not fixed: `$.last_sync_skipped.sample` is not literally a
+        // nested path — the serde field is the FLAT `last_sync_skipped_sample`, with
+        // `last_sync_skipped_count` beside it. The gate's per-segment substring check
+        // passes either way and the cited test asserts both fields. Task 5a owns the
+        // marker string; it is recorded here rather than silently re-derived.
         id: "index_state.skipped_sample",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker \
-             JsonPath(\"$.last_sync_skipped.sample\")) with no comment citing a test; \
-             Task 5b's cited_test requirement found none named, and inventing one is the \
-             exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.last_sync_skipped.sample"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "last_sync_skipped_sample_is_capped_but_count_stays_exact",
+        },
     },
     // -- src/symbol/edit.rs --
     ProbeRow {
@@ -753,21 +876,30 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/tools/command_summary.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
+        // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
+        // separately and does NOT bind here (9,060 B available vs 5,760 B kept), so the
+        // line cap is what this row's evidence isolates. Marker written by production at
+        // `src/tools/run_command/output.rs:269`.
         id: "command_summary.buffer_query_lines",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.stdout_shown\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.stdout_shown"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "run_command_buffer_only_short_stderr_gives_budget_to_stdout",
+        },
     },
     // -- src/tools/run_command/output.rs --
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 25 stderr lines against `STDERR_BUDGET` 20. Marker written by
+        // production at `src/tools/run_command/output.rs:272`.
         id: "run_command.stderr_lines",
-        coverage: Coverage::Deferred(
-            "Task 5a classified this Probed (marker JsonPath(\"$.stderr_shown\")) with no \
-             comment citing a test; Task 5b's cited_test requirement found none named, \
-             and inventing one is the exact failure this gate exists to prevent",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.stderr_shown"),
+            mutation: Mutation::NotYet(NOT_MUTATED_CENSUS),
+            cited_test: "run_command_buffer_only_stderr_gets_priority",
+        },
     },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
