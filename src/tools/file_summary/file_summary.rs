@@ -119,6 +119,27 @@ pub fn heading_level(line: &str) -> Option<usize> {
     }
 }
 
+/// A heading's text with its `#` level marker removed — `"## Index"` → `"Index"`. A string
+/// carrying no marker comes back unchanged, which is the whole point: `HeadingInfo::text` is
+/// the RAW line (see `parse_all_headings`), so without normalising both sides a caller's bare
+/// `Index` can never equal a stored `## Index`. Tiers 1-2 were therefore unreachable for any
+/// query written without its markers, leaving such queries to the fuzzy tiers'
+/// first-match-wins — which binds whichever EARLIER heading merely contains the word.
+///
+/// Applied in tier 2 only. Tier 1 still compares raw text, so a caller who passes `## Foo`
+/// keeps exact level semantics and `### Foo` cannot answer it. Where both `## Foo` and
+/// `### Foo` exist, a bare `Foo` now matches both at tier 2 and raises the duplicate error
+/// naming each line, which is the honest answer rather than a silent pick.
+/// docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+fn strip_heading_marker(s: &str) -> &str {
+    let trimmed = s.trim_start_matches('#');
+    if trimmed.len() == s.len() {
+        s
+    } else {
+        trimmed.trim_start()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeadingInfo {
     pub text: String,    // e.g. "## Setup"
@@ -375,10 +396,18 @@ pub fn resolve_section_range<'a>(
     }
 
     // Tier 2: Exact match (stripped)
+    //
+    // Both sides pass through `strip_heading_marker` so a bare `Index` reaches this
+    // EXACT tier instead of falling through to tier 4's first-match-wins. Tier 1 above
+    // still compares raw text, so level semantics survive for a `## Foo` query.
+    // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
     let exact_stripped: Vec<usize> = headings
         .iter()
         .enumerate()
-        .filter(|(_, h)| strip_inline_formatting(&h.text) == query_stripped)
+        .filter(|(_, h)| {
+            let h_stripped = strip_inline_formatting(&h.text);
+            strip_heading_marker(&h_stripped) == strip_heading_marker(&query_stripped)
+        })
         .map(|(i, _)| i)
         .collect();
     if !exact_stripped.is_empty() {

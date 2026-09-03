@@ -946,6 +946,81 @@ fn resolve_section_range_nested_sections() {
 }
 
 #[test]
+fn resolve_section_range_bare_query_reaches_the_exact_tier() {
+    // Regression for
+    // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+    //
+    // FIXTURE DETAIL IS LOAD-BEARING, both properties: the `###` must come BEFORE
+    // `## Index` in document order AND contain "Index" as a substring. Drop either and
+    // the bare query resolves correctly through tier 4 by accident, leaving this test
+    // green and no longer discriminating. That is precisely why the bare-form assertion
+    // in `resolve_section_range_finds_last_heading` does not cover this: its fixture has
+    // no earlier heading containing "Resume", so tier 4's first-match-wins happens to be
+    // right there and wrong here.
+    let content = "# Title\n\
+                   ## Alpha\n\
+                   ### One slug, two spellings - a pattern cannot see the Index\n\
+                   subsection body\n\
+                   ## Index\n\
+                   INDEX-BODY\n";
+
+    let range = resolve_section_range(content, "Index").unwrap();
+
+    assert_eq!(
+        range.heading_text, "## Index",
+        "a bare query must reach an EXACT tier and bind `## Index`; binding the earlier \
+         `###` that merely CONTAINS the word means tiers 1-2 were unreachable and tier 4 \
+         picked by document order"
+    );
+    assert_eq!(range.level, 2);
+}
+
+#[test]
+fn resolve_section_range_prefixed_query_keeps_exact_level_semantics() {
+    // The guard on what the tier-2 fix must NOT cost. Tier 1 compares raw text, so a
+    // caller who writes the markers still selects by level and `### Fix` cannot answer a
+    // `## Fix` query.
+    //
+    // MUTATION-CHECKED, not assumed: deleting the tier-1 early return sends this query to
+    // the marker-stripping tier 2, which matches BOTH headings and returns the duplicate
+    // error instead — so this test observes a real RED when the property it names is
+    // broken. Without tier 1 there is nothing else in the cascade that is level-aware.
+    let content = "# Title\n## Fix\ntwo-level\n### Fix\nthree-level\n";
+
+    let range = resolve_section_range(content, "## Fix").unwrap();
+
+    assert_eq!(range.heading_text, "## Fix");
+    assert_eq!(
+        range.level, 2,
+        "a `## ` query must not bind the `### ` heading"
+    );
+}
+
+#[test]
+fn resolve_section_range_bare_query_matching_two_levels_is_ambiguous_not_silent() {
+    // The behaviour the tier-2 fix deliberately CHANGES, so it is asserted rather than
+    // discovered later. Before the fix this query fell to tier 4, matched both headings on
+    // substring, and returned `## Fix` by document order with nothing said. Now both match
+    // at an exact tier and the caller is told, with both line numbers and the `occurrence`
+    // escape — the same contract two byte-identical headings already get.
+    //
+    // Asserting on the NAMED discriminant, not on the message text: `heading_ambiguous` is
+    // the field a caller one frame up reads, and a message-substring assertion would still
+    // pass if the extra were dropped and the error silently collapsed into a plain miss.
+    let content = "# Title\n## Fix\ntwo-level\n### Fix\nthree-level\n";
+
+    let err = resolve_section_range(content, "Fix").unwrap_err();
+
+    assert_eq!(
+        err.extra.get("heading_ambiguous").and_then(|v| v.as_bool()),
+        Some(true),
+        "a bare query matching two levels must report ambiguity, not silently pick the \
+         first in document order: {}",
+        err.message
+    );
+}
+
+#[test]
 fn resolve_section_range_heading_in_code_block() {
     let content = "# Title\n```\n## Not a heading\n```\n## Real\ntext";
     let range = resolve_section_range(content, "## Real").unwrap();
