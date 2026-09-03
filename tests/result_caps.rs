@@ -38,8 +38,6 @@
 //! instrument B ([`truncation_sites`]) exists: it reads the truncating
 //! OPERATION, which no name regex can be widened into.
 
-// Consumed by Task 5's probe_row_ids; allow until then.
-#[allow(unused_imports)]
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
@@ -936,4 +934,141 @@ fn unclassified_decls(decls: &[CapDecl]) -> Vec<String> {
         .collect();
     out.sort();
     out
+}
+
+/// Parses the `id` field of every `ProbeRow { id: "...", ... }` entry out
+/// of `cap_probe.rs`'s source TEXT — never a compiled import. `cap_probe`
+/// is `#[cfg(test)]`-gated and its items are `pub(crate)`, neither of which
+/// this integration-test binary can `use` at all; and even if it could, a
+/// compiled read would see `PROBE_ROWS` change shape across
+/// `--no-default-features` the moment a row moves behind
+/// `#[cfg(feature = "librarian")]` — the same asymmetry `cap_constants`
+/// reads around for the `RESULT_CAP` side. A line only contributes an id
+/// when it starts (after trimming) with the literal `id:` — a `pub id:
+/// &'static str,` field declaration doesn't match (it starts with `pub`),
+/// and an `id:` substring appearing mid-line inside some other field's
+/// value (e.g. a `JsonPath` string) doesn't match either, because the
+/// match is anchored to the start of the trimmed line.
+fn probe_row_ids(src: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for raw in src.lines() {
+        let line = raw.trim_start();
+        let Some(rest) = line.strip_prefix("id:") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        out.insert(rest[..end].to_string());
+    }
+    out
+}
+
+#[test]
+fn probe_row_ids_reads_a_quoted_id_field_and_ignores_everything_else() {
+    let fixture = r#"
+        pub(crate) struct ProbeRow {
+            /// Matches a `cap-class: RESULT_CAP <id>` annotation in `src/`.
+            pub id: &'static str,
+        }
+        pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
+            ProbeRow {
+                id: "a.b",
+                coverage: Coverage::Deferred("x"),
+            },
+            ProbeRow {
+                id: "c.d",
+                coverage: Coverage::Probed {
+                    marker: Marker::JsonPath("$.id: not-a-row"),
+                    mutation: Mutation::NotYet("y"),
+                },
+            },
+        ];
+    "#;
+    let ids = probe_row_ids(fixture);
+    let expected: BTreeSet<String> = ["a.b", "c.d"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(ids, expected);
+}
+
+/// Both directions of `IC-13`'s cross-check: every `RESULT_CAP` id declared
+/// in tracked `src/` has exactly one [`ProbeRow`]-shaped entry in
+/// `cap_probe.rs`, and every entry there names an id that's actually
+/// declared. Naming offenders in both directions — rather than a bare
+/// count — is what makes a failure here actionable instead of a second
+/// puzzle.
+///
+/// [`ProbeRow`]: crate is not visible from an integration-test binary; see
+/// `probe_row_ids`'s doc comment for why this reads `cap_probe.rs` as text.
+#[test]
+fn result_caps_and_probe_rows_correspond_in_both_directions() {
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    for file in tracked_src_files() {
+        let path = repo_root().join(&file);
+        let src =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {file}: {e}"));
+        for decl in cap_constants(&src, &file) {
+            if let CapClass::ResultCap(id) = classify(&decl) {
+                declared.insert(id);
+            }
+        }
+    }
+
+    let cap_probe_path = repo_root().join("src/tools/core/cap_probe.rs");
+    let cap_probe_src = std::fs::read_to_string(&cap_probe_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", cap_probe_path.display()));
+    let rows = probe_row_ids(&cap_probe_src);
+
+    let missing_rows: Vec<&String> = declared.difference(&rows).collect();
+    let orphaned_rows: Vec<&String> = rows.difference(&declared).collect();
+
+    assert!(
+        missing_rows.is_empty() && orphaned_rows.is_empty(),
+        "RESULT_CAP ids and cap_probe.rs's ProbeRows have drifted apart.\n\
+         Declared with no ProbeRow: {missing_rows:?}\n\
+         ProbeRow with no matching RESULT_CAP declaration: {orphaned_rows:?}"
+    );
+}
+
+/// Wires [`truncation_sites`] (instrument B) to the REAL corpus. Every
+/// other test for it runs against a small crafted fixture string; this is
+/// the one place a change to `OPS` or the `.next().await` exclusion that
+/// only breaks on real code — not on the hand-written fixtures — has
+/// somewhere to fail.
+#[test]
+fn truncation_sites_reach_the_real_corpus() {
+    let mut all_sites: Vec<TruncSite> = vec![];
+    for file in tracked_src_files() {
+        let path = repo_root().join(&file);
+        let src =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {file}: {e}"));
+        all_sites.extend(truncation_sites(&src, &file));
+    }
+
+    // `.next().await` on a stream is iteration, not capping — these two
+    // real drain sites must never be reported.
+    for (file, line) in [
+        ("src/librarian/indexer.rs", 918usize),
+        ("src/librarian/indexer.rs", 1051usize),
+    ] {
+        assert!(
+            !all_sites.iter().any(|s| s.file == file && s.line == line),
+            "{file}:{line} is a `.next().await` stream drain, not a cap — \
+             truncation_sites must not report it"
+        );
+    }
+
+    // A real, unambiguous `.truncate(` cap site must be found by exact
+    // file:line — proof this instrument reaches production code, not only
+    // its own test fixtures.
+    let (real_file, real_line, real_op) = ("src/tools/symbol/symbols.rs", 48usize, ".truncate(");
+    assert!(
+        all_sites
+            .iter()
+            .any(|s| s.file == real_file && s.line == real_line && s.op == real_op),
+        "expected {real_file}:{real_line} (`{real_op}`) in the real corpus scan, got: {all_sites:#?}"
+    );
 }
