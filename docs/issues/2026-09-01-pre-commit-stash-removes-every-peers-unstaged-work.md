@@ -177,6 +177,61 @@ grep -n  '<the line you wrote>' ~/.cache/pre-commit/patch<epoch>-<pid>
 bracketing this session's mutation run (`20:57:31`, `21:01:28`) correspond to **no commit at
 all** — an aborted or rejected hook run stashes just the same. The patch directory is the
 complete record; the commit log is a subset of it.
+### 2026-09-04 — a REFUSED commit opens the same window, and the commit log cannot see it
+
+Two stash windows from one session, 39 seconds apart, **the first from a commit the gate
+refused**:
+
+```
+23:47:49   attempt 1 — pre-commit stashes, `ledger-counts` REFUSES, hooks roll back,
+           stash restored. Nothing committed. No commit object exists.
+23:48:28   attempt 2 — retry as a pathspec commit; stashes again, succeeds (fe6364bc).
+```
+
+A peer's `doc(action="update")` calls at ~23:47 had written 295 lines to a bug file, unstaged.
+Their `doc(action="move")` ran inside a window and `fs::rename` correctly moved the 279-line
+**HEAD** version it found. The archive looked perfect: complete, well-formed, plausible —
+just the wrong bytes.
+
+**Four consequences, and the third is the one that changes how this is investigated.**
+
+1. **The stash precedes any hook verdict**, so a commit the gate BLOCKS costs a peer exactly
+   what a successful one does. Every hook in this repo's chain — `ledger-counts`, the
+   staged-path checks, `rustfmt` — refuses *after* the tree has already been emptied.
+2. **A refusal invites an immediate retry**, so the natural response to being blocked opens a
+   second window seconds later. The committer experiences one failure and one fix; the peer
+   is exposed twice.
+3. **A commit-log scan is a LOWER BOUND on stash windows, and it under-counts non-randomly.**
+   Refused commits leave no object, so any attempt to correlate a transient failure with
+   "who committed when" misses them entirely — and misses them precisely in the sessions
+   hitting gates, i.e. the ones doing ledger, coupling or archive work, which is the same
+   population most likely to be mid-edit on a shared file. Both parties in the 2026-09-04
+   instance reconstructed the window from the git log and both saw one commit where there
+   were two.
+4. **Atomicity is no defence.** `fs::rename` is atomic and still got the wrong file, because
+   the wrongness is in the *tree*, not in the operation. Any "use an atomic write" mitigation
+   is answering a different question.
+
+**Instrument, and it sees what the git log cannot.** `pre-commit` names its stash file
+`~/.cache/pre-commit/patch<epoch>-<pid>`, so the filename carries the window's start time to
+the second — for refused commits too. `date -d @<epoch>` over that directory reconstructs
+every window a machine has opened recently, including the ones that produced no commit. That
+is how the 23:47:49 window above was found, after the git log had already been read and had
+shown only 23:48:28.
+
+**Misattribution cost, and it was paid.** The peer filed this instance as a **high-severity
+bug against `doc(action="move")`** — a stale-snapshot-plus-missed-unlink defect — and
+broadcast it to five sessions before reading `src/librarian/tools/mv.rs` and retracting
+within the hour. `move` is `std::fs::rename` and can do neither thing. Three independent
+checks came back clean while the wrong hypothesis was live: two archive moves verified at the
+bytes, and a disposable probe that wrote a body *through the catalog*
+(`doc(action="update", patch={body_edits})`) before moving it, specifically to test the
+"serialises a catalog-held body" theory. All three were correct — because none of them ran
+inside a stash window. **A defect that only manifests during another process's 2-second
+window will pass every deliberate probe**, which is what makes the transience in § *Impact*
+worse than "hard to reproduce": it actively produces exculpatory evidence for the wrong
+component.
+
 ## Impact
 
 A peer running `cargo test`, `cargo build`, or any file read during another session's
@@ -221,6 +276,12 @@ None that are free. A session doing something timing-sensitive with uncommitted 
 stage it (staged content is not stashed), which is also the practice that
 `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` recommends
 for a different reason.
+
+**And the mitigation must be on the VICTIM's side, not the committer's** — which is not
+obvious, and the obvious alternative does not work. "Don't commit while a peer is mid-edit"
+fails on two counts established 2026-09-04: the stash happens before any hook verdict, so a
+*refused* commit exposes peers identically, and no committer can see who is mid-edit anyway.
+Staging is the only lever, and only the session holding the uncommitted work can pull it.
 
 ## Resume
 
