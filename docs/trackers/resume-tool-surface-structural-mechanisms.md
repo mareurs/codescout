@@ -60,6 +60,58 @@ This queue holds the structural mechanisms, in the order the evidence supports.
    marking it puts the p50 session ~1,671 B over `CEILING`, and the test's own failure
    message says *"Raising CEILING is a spec amendment, not a fix."*
 
+
+## The unit: chars are not tokens, and this repo's own ratio is 2× off for THIS surface
+
+Every figure in this queue is in **characters**, because that is what
+`scripts/probe_tool_surface.py` and `tool_surface_report_lengths` measure. The thing the
+surface actually spends is **context tokens**, and the conversion is not the one this repo
+documents.
+
+**Measured 2026-09-03** from Claude Code's `/context`, on a turn where the Gmail / Google /
+MindMap / Uber Eats servers had dropped out, isolating codescout's own surface:
+
+| instrument | unit | total | `doc` | `librarian` | those two |
+|---|---|---:|---:|---:|---:|
+| `probe_tool_surface.py` | chars | 56,476 | 17,940 | 10,204 | **49.8%** |
+| Claude Code `/context` | tokens | ~28,700 | 9.0k | 5.1k | **49.5%** |
+
+**Two conclusions, and the second is the one to carry.**
+
+**1. The composition is corroborated.** Two instruments sharing no code, in different units,
+agree on the librarian family's share within **0.3 pp**. Published as a denominator rather
+than banked as a catch: the char-side figure had been quoted all session and nothing had
+independently checked it.
+
+**2. The ratio is ~2.0 chars/token, not 4.** Adding the tool `name` and JSON envelope the
+probe excludes (~21 × 50 ≈ 1,050 chars) gives ~57,500 chars over ~28,700 tokens — **2.00**.
+This repo's house estimate is `bytes / 4`: `MAX_INLINE_TOKENS = 2_500 // ~10KB at ~4
+bytes/token` and `TOOL_OUTPUT_BUFFER_THRESHOLD = MAX_INLINE_TOKENS * 4` (`src/tools/mod.rs`,
+restated in `get_guide("progressive-disclosure")`). **So anyone converting a figure in this
+queue with the repo's own documented ratio halves it.**
+
+**The heuristic is not wrong where it lives, which is exactly why this is easy to get
+wrong.** It governs *tool output* buffering, and prose, code and markdown really do run near
+4 bytes/token. Dense JSON schema — short quoted keys, punctuation, `snake_case` identifiers
+— runs near 2. The ratio is a property of the **content**, and the constant is named for a
+budget rather than for a corpus, so nothing at the point of use says which corpus it was
+calibrated on.
+
+**What this changes: the stakes, not the options.** The surface costs ~28.7k tokens per
+request-set, roughly double what a reader of the house ratio would assume — 2.9% of a 1M
+context, ~14% of a 200k one. Every compaction route is still refuted (§ SM-1–SM-3), so this
+raises the value of SM-4 rather than reopening anything.
+
+**Limits, stated because the instrument is a display.** `/context` rounds to 0.1k above 1k,
+so the eight rounded tools carry up to ±400 chars of aggregate error; the per-tool hand-sum
+comes to 28,470 against a reported 28.7k, consistent within that. The conclusion separates
+2.0 from 4.0 and is nowhere near the rounding band. It is also **one client's tokenizer** —
+treat 2.0 as this-client-specific until a second one is measured.
+
+**Valid:** dated 2026-09-03
+
+**Rests on:** Claude Code `/context` output, 2026-09-03; `scripts/probe_tool_surface.py` at
+`dcd4b1d0`; `src/tools/mod.rs` `MAX_INLINE_TOKENS` / `TOOL_OUTPUT_BUFFER_THRESHOLD`.
 ## The constraint that shapes everything
 
 `docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md`
