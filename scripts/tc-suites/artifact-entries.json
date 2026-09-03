@@ -19,7 +19,7 @@
     {"id": "AE-8", "query": "a dangling-citation gate is prefix-gated so a wholly broken namespace still reads as healthy",
      "expect_entry": "BL-41", "expect_path": "docs/trackers/open-issue-work-queue.md"},
     {"id": "AE-9", "query": "an assertion with no input that could ever make it fail is zero coverage wearing a passing test's clothes",
-     "expect_entry": "IC-16", "expect_path": "docs/trackers/issue-clusters.md"},
+     "expect_entry": "IC-16", "expect_path": "docs/trackers/issue-clusters/IC-16-assertion-that-cannot-fail.md"},
     {"id": "AE-10", "query": "extracting a clean tree at HEAD to tell whether a failing test is yours or pre-existing",
      "expect_entry": "W-27", "expect_path": "docs/trackers/prompt-surface-measurement-session-log.md"},
     {"id": "AE-11", "query": "augmentation lives only in the catalog database and reindex cannot rebuild it",

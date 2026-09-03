@@ -209,6 +209,72 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-04 (late) — the harness now says WHY a case missed, and one case could never have passed
+
+**The score was understating retrieval by a full point, for a reason that is not
+retrieval.** `AE-9` expected `IC-16` in `docs/trackers/issue-clusters.md`. That
+ledger has since been split into one file per cluster, so `IC-16` is defined at
+`docs/trackers/issue-clusters/IC-16-assertion-that-cannot-fail.md` and the old path
+defines **zero** `IC-N` headings. The case could not have scored under any
+retrieval quality whatever — and it did not read as broken, because a stale
+ground truth and a genuine miss produce the byte-identical `rank: null`. It has
+been charged to retrieval in every number recorded since the split.
+
+Neither existing guard could see it. `search_live` covers a dead search path;
+the returncode check covers a dead binary. Both were healthy. **The ground truth
+was the unchecked input** — the harness validated its tool and its transport and
+never its own question. Second instance in this tracker: `2026-05-12 — T5
+expected-path fix` found 4 of 5 TCs with wrong truth on the *other* suite, and
+the lesson did not travel to this one.
+
+**Instrument changes** (`scripts/run-artifact-bench.py`), all additive to the
+recorded JSON schema, so older consumers reading `rank` / `hits_at_5` still work:
+
+- `defines_entry()` pre-flight per case → `unscorable` class, named loudly on
+  stderr with the resulting cap on `hits@5`, and counted on **stdout** beside the
+  score, because the score is what gets copied into a tracker and a stderr warning
+  is not.
+- every result recorded (`top`: rank, path, line, resolved entry) rather than only
+  the matching one.
+- `file_hits_at_5` alongside the entry-level `hits_at_5`. The file-level figure
+  was previously derived by hand and quoted next to the entry-level one as though
+  they were the same metric.
+- five miss classes: `hit` / `preamble` / `wrong_entry` / `wrong_file` /
+  `unscorable`.
+
+**Measured, `target/release/codescout` at `28de2827`, chunk grain (default):**
+
+| | hits@5 | file-hits@5 | MRR | classes |
+|---|---|---|---|---|
+| before repoint | 3/12 | 6/12 | 0.1875 | hit=3 unscorable=1 preamble=3 wrong_file=5 |
+| after repoint | **4/12** | **7/12** | 0.2708 | hit=4 preamble=3 wrong_file=5 |
+
+The `+1` is attributable rather than noise: `unscorable` is a deterministic file
+check, not a retrieval outcome, and the other eleven cases kept their classes
+across both runs.
+
+**The diagnosis the classes buy, which nine `rank: null`s could not.** Of the
+eight misses at `limit=5`: **three are the preamble attractor, five are genuine
+retrieval loss, zero are ordinary intra-file ranking.** All three near-misses
+return the right file — twice at rank 1 — with a chunk whose line maps to **no
+entry token at all**, i.e. the file's index/preamble, a section that summarises
+every entry and so out-scores each specific one on any query about that file.
+With `max_per_artifact=1` it then evicts the real answer. That is `BL-72`'s
+territory, now with a count attached instead of an impression.
+
+Worth recording that the harness corrected its own author here: the first run
+labelled those three `wrong_entry`, and only the new `entry` field showed every
+one of them resolving to `None`. "Right file, wrong place in it" is two findings
+with opposite fixes.
+
+**Caveat with teeth — the corpus is live and shared.** Two runs twenty minutes
+apart returned 2/12 and 3/12; `artifact_chunk` went 35,508 → 35,533 rows and
+1,850 → 1,851 artifacts *within a single turn* as peer sessions committed and
+reindexed. Three back-to-back runs agreed exactly (4/12, 7/12, 0.2708, identical
+classes), so the movement is corpus drift rather than jitter — but a delta of ±1
+across runs minutes apart on this checkout is not evidence of anything. Pin the
+comparison to one run window, or record the chunk-row count beside the score.
+
 ### 2026-09-04 — the two grains measured head to head; the default flips to ON
 
 **This supersedes the ruling below it.** That entry recorded chunk grain as a

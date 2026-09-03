@@ -18,7 +18,16 @@ ENTRY = re.compile(r'^#{2,4}\s+([A-Z]{1,3}-\d+)\s+[—–-]\s')
 def entry_at(path, line):
     """The PREFIX-N entry enclosing 1-indexed `line`, or None."""
     tok = None
-    with open(path, encoding="utf-8") as fh:
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError:
+        # A returned path that does not resolve from here (a linked worktree, a
+        # since-deleted file) is a diagnostic fact, not a crash. Before this the
+        # scorer only opened paths it had already matched against `expect_path`;
+        # recording every result means opening paths chosen by the RETRIEVER,
+        # which is a wider and less trustworthy set.
+        return None
+    with fh:
         for i, text in enumerate(fh, 1):
             if i > line:
                 break
@@ -26,6 +35,34 @@ def entry_at(path, line):
             if m:
                 tok = m.group(1)
     return tok
+
+def defines_entry(path, token):
+    """True iff `path` carries a heading that DEFINES `token`.
+
+    The suite's ground truth decays silently, and its decay is shaped exactly
+    like a retrieval failure: when `expect_path` no longer defines
+    `expect_entry`, the scorer below reports `rank: None` -- the same value a
+    genuine miss produces. A stale case is therefore not merely uncounted, it is
+    counted AGAINST retrieval, and the score comes out lower for a reason that
+    has nothing to do with the thing being measured.
+
+    Measured 2026-09-04: AE-9 expected IC-16 in `docs/trackers/issue-clusters.md`,
+    which had since been split into `docs/trackers/issue-clusters/IC-16-*.md`. That
+    case could not have scored under any retrieval quality whatever, and had been
+    contributing a guaranteed -1 to every number recorded after the split, all of
+    them read as retrieval. Nothing here could have said so: `search_live` covers
+    a dead search path and the returncode check covers a dead binary, and both
+    were healthy. The GROUND TRUTH was the unchecked input.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for text in fh:
+                m = ENTRY.match(text)
+                if m and m.group(1) == token:
+                    return True
+    except OSError:
+        return False
+    return False
 
 def main():
     ap = argparse.ArgumentParser()
@@ -35,9 +72,17 @@ def main():
     args = ap.parse_args()
 
     suite = json.load(open(args.suite))
-    cases, hits, rr = [], 0, 0.0
+    cases, hits, file_hits, rr = [], 0, 0, 0.0
     any_results = False
+    unscorable = []
     for c in suite["cases"]:
+        # Check the GROUND TRUTH before the retriever is charged for it. A case
+        # whose expected entry is no longer defined at its expected path cannot
+        # score however good retrieval is, and its `rank: None` is byte-identical
+        # to a real miss. See `defines_entry`.
+        scorable = defines_entry(c["expect_path"], c["expect_entry"])
+        if not scorable:
+            unscorable.append(c["id"])
         proc = subprocess.run(
             # `doc`, not `artifact`: the subcommand was renamed and this line was
             # the only thing still calling the old name. A renamed subcommand
@@ -59,13 +104,11 @@ def main():
         if results:
             any_results = True
         rank = None
+        file_rank = None
+        file_entry = None
+        top = []
         for i, r in enumerate(results, 1):
             path = r.get("rel_path") or r.get("abs_path", "")
-            if not path.endswith(c["expect_path"]):
-                continue
-            # Pre-change the tool returns artifacts, not chunks: a path match with
-            # no line range cannot prove the ENTRY was found, so it is not a hit.
-            #
             # Read BOTH shapes. The baseline run scored against a top-level
             # `start_line`, which is where this harness expected the field; Task 10
             # shipped it under `matched` alongside `end_line`, `entry_token` and a
@@ -79,26 +122,85 @@ def main():
             line = r.get("start_line")
             if line is None:
                 line = (r.get("matched") or {}).get("start_line")
-            if line is not None and entry_at(path, line) == c["expect_entry"]:
+            ent = entry_at(path, line) if line is not None else None
+            # Record EVERY result, not only a matching one. Before this the loop
+            # kept nothing but `rank`, and `None` was the same value for "the
+            # target file never came back" and "the target file ranked 1 and the
+            # chunk that matched belongs to no entry at all" -- findings whose
+            # fixes point in opposite directions (retrieval vs page policy).
+            # Separating them cost a session of hand-run queries on 2026-09-03
+            # and is three fields.
+            top.append({"rank": i, "path": path, "line": line, "entry": ent})
+            if not path.endswith(c["expect_path"]):
+                continue
+            if file_rank is None:
+                file_rank, file_entry = i, ent
+            # Pre-change the tool returns artifacts, not chunks: a path match with
+            # no line range cannot prove the ENTRY was found, so it is not a hit.
+            if rank is None and line is not None and ent == c["expect_entry"]:
                 rank = i
-                break
         if rank:
             hits += 1
             rr += 1.0 / rank
-        cases.append({**c, "rank": rank})
+        if file_rank:
+            file_hits += 1
+        # Five outcomes, not two. `unscorable` outranks the rest: when the entry
+        # is not defined at the path, a file-level hit says nothing about whether
+        # retrieval could have found the entry.
+        #
+        # `preamble` vs `wrong_entry` is the split that a single "the right file,
+        # the wrong place in it" bucket hides, and the first run of this harness
+        # mislabelled all three of its own cases before the `entry` field made it
+        # visible. A chunk whose line maps to NO entry token landed in the file's
+        # index/preamble -- a section that summarises every entry and therefore
+        # out-scores each specific one on any query about that file, which with
+        # `max_per_artifact=1` evicts the real answer (BL-72). A chunk that maps
+        # to a DIFFERENT entry is ordinary intra-file ranking loss. The first is
+        # a page-policy defect, the second a retrieval one; one number cannot ask
+        # for both fixes.
+        klass = ("unscorable" if not scorable
+                 else "hit" if rank
+                 else ("preamble" if file_entry is None else "wrong_entry")
+                 if file_rank
+                 else "wrong_file")
+        cases.append({**c, "rank": rank, "file_rank": file_rank,
+                      "file_entry": file_entry,
+                      "miss_class": klass, "top": top})
 
     out = {"suite": suite["suite"], "n": len(cases),
-           "hits_at_5": hits, "mrr": round(rr / max(len(cases), 1), 4),
+           "hits_at_5": hits, "file_hits_at_5": file_hits,
+           "unscorable": unscorable,
+           "mrr": round(rr / max(len(cases), 1), 4),
            "search_live": any_results, "cases": cases}
     json.dump(out, open(args.out, "w"), indent=2)
-    print(f"{out['suite']}: hits@5 {hits}/{len(cases)}  MRR {out['mrr']}  search_live={any_results}")
+    by = {}
+    for c in cases:
+        by[c["miss_class"]] = by.get(c["miss_class"], 0) + 1
+    print(f"{out['suite']}: hits@5 {hits}/{len(cases)}  "
+          f"file-hits@5 {file_hits}/{len(cases)}  MRR {out['mrr']}  "
+          f"search_live={any_results}")
+    # The class breakdown goes to STDOUT beside the score, not into the warning
+    # below, because the number is what gets copied into a tracker and a warning
+    # on stderr is not part of what gets copied.
+    print("  " + "  ".join(f"{k}={v}" for k, v in sorted(by.items())))
+
+    if unscorable:
+        print(
+            "WARNING: %d of %d cases are UNSCORABLE -- their expected entry is no\n"
+            "         longer defined at their expected path, so they cannot score\n"
+            "         under any retrieval quality: %s\n"
+            "         hits@5 is therefore capped at %d/%d. Repoint or retire them\n"
+            "         before quoting the score." % (
+                len(unscorable), len(cases), ", ".join(unscorable),
+                len(cases) - len(unscorable), len(cases)),
+            file=sys.stderr)
 
     if not any_results:
         print(
             "FATAL: every query returned zero items — this is a dead search path "
             "(bad --bin, crashing subprocess, unreachable embedder), not a "
             "retrieval finding. hits@5 0/N here is NOT a baseline. Check "
-            f"`{args.bin} artifact find --semantic '<query>' --limit 5 --json` by hand.",
+            f"`{args.bin} doc find --semantic '<query>' --limit 5 --json` by hand.",
             file=sys.stderr)
         return 1
     return 0
