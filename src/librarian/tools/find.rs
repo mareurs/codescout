@@ -57,6 +57,33 @@ fn default_limit() -> usize {
     50
 }
 
+/// One page row plus the per-HIT data that belongs to it.
+///
+/// This type exists because the two facts a semantic hit carries — its distance
+/// and the chunk that matched — are properties of the HIT, while everything else
+/// on the page (overlay status, augmentation) is a property of the ARTIFACT.
+/// They used to be carried in two `HashMap<artifact_id, _>` side maps, which is
+/// only sound while at most one hit per artifact reaches the page. At
+/// `max_per_artifact = 2` a second hit silently overwrote the first and every
+/// item for that artifact rendered the last chunk's span — a wrong `matched` on
+/// a plausible-looking item, never an error. Pinned by
+/// `two_chunks_of_one_artifact_keep_their_own_matched_span`.
+///
+/// Carrying the data on the record rather than beside it also survives the
+/// worktree-overlay `retain` below by construction; a parallel `Vec` would
+/// desync there, which is the same defect one refactor later.
+///
+/// `overlay_ids` and `augmentation_by_id` stay artifact-keyed on purpose: two
+/// chunks of one ledger genuinely share its augmentation and its overlay
+/// status, so a lookup by id is correct there and a per-hit copy would only
+/// duplicate it.
+struct PageItem {
+    row: crate::librarian::catalog::artifact::ArtifactRow,
+    /// `None` on the non-semantic path, which has no distance to report.
+    distance: Option<f32>,
+    chunk: Option<crate::librarian::catalog::find::ChunkHit>,
+}
+
 fn merge_kind_status(
     filter: Option<FilterNode>,
     kind: Option<&str>,
@@ -766,12 +793,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 project_id.as_deref(),
                 &vec,
                 scoped_filter.as_ref(),
-                // One chunk per artifact, which PRESERVES this caller's current
-                // result shape: the store was artifact-keyed until Task 7, so
-                // every artifact appeared at most once. Task 10 decides whether
-                // `doc(action="find", semantic=)` should surface several chunks per
-                // artifact; until then this is a grain fix, not a shape change.
-                1,
+                // TWO chunks per artifact. Measured, not chosen: on the artifact
+                // suite `cap=2` beats both neighbours (`cap=1` 3/12, `cap=2` 5/12,
+                // `cap=3` 6/12 and `cap=∞` 5/12 at limit=10) — uncapping lets one
+                // ledger flood the page and crowd out other documents, so "more
+                // chunks per artifact" is not monotonically better and this number
+                // is load-bearing rather than a legacy default. See BL-72 in
+                // docs/trackers/open-issue-work-queue.md for the full sweep.
+                //
+                // WHY 1 WAS WRONG: in a ledger the preamble/index section is a
+                // broad-spectrum attractor — it summarises every entry, so it beats
+                // each specific entry on any query about that file. At `1` it always
+                // won and the entry the query was actually about never reached the
+                // page. Measured 2026-09-04 on the current corpus: of the three
+                // cases whose target file DID rank in the top 5, all three matched
+                // the preamble and none matched a different entry — the attractor
+                // was the whole intra-file loss, not part of it.
+                //
+                // Raising this was blocked until the side maps below stopped being
+                // keyed by artifact id; that is what `PageItem` now fixes.
+                2,
                 limit,
                 offset,
                 cutoff_ms,
@@ -801,52 +842,40 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         };
 
         // Split the page: `rows` feeds the existing overlay/augmentation pipeline
-        // unchanged, while the distances ride alongside in a map. Keeping
-        // `ArtifactRow` free of a score is deliberate — it is the row type every
-        // non-semantic read path shares, and a query-relative number does not
-        // belong on a record that outlives the query.
+        // unchanged, while each hit's distance and matched chunk ride ON the row
+        // rather than in a side map. Keeping `ArtifactRow` free of a score is
+        // deliberate — it is the row type every non-semantic read path shares, and
+        // a query-relative number does not belong on a record that outlives the
+        // query. `PageItem` is the wrapper that keeps the two apart without
+        // keying the second by something that is not unique per hit.
         //
-        // BOTH SIDE MAPS ARE KEYED BY ARTIFACT ID, AND THAT IS ONLY CORRECT WHILE
-        // THIS CALLER PASSES `max_per_artifact = 1`. Raise the cap and a second
-        // chunk of the same artifact overwrites the first here, silently — and
-        // `rows` collapses the same way, since it is one `ArtifactRow` per hit.
-        // Whoever raises it owns restructuring this into one record per HIT; the
-        // failure mode is a wrong `matched` span on a plausible-looking item, not
-        // an error.
-        let (semantic_rows, distance_by_id, chunk_by_id, starvation, cap_suppressed, unresolved) =
-            match semantic_page {
-                Some(page) => {
-                    let starvation = (page.widenings, page.exhausted);
-                    let cap_suppressed = page.cap_suppressed;
-                    let unresolved = page.unresolved;
-                    let mut d = std::collections::HashMap::new();
-                    let mut c = std::collections::HashMap::new();
-                    let mut r = Vec::with_capacity(page.hits.len());
-                    for hit in page.hits {
-                        d.insert(hit.row.id.clone(), hit.distance);
-                        if let Some(chunk) = hit.chunk {
-                            c.insert(hit.row.id.clone(), chunk);
-                        }
-                        r.push(hit.row);
-                    }
-                    (Some(r), d, c, Some(starvation), cap_suppressed, unresolved)
-                }
-                None => (
-                    None,
-                    std::collections::HashMap::new(),
-                    std::collections::HashMap::new(),
-                    None,
-                    0usize,
-                    0usize,
-                ),
-            };
+        // This replaces two `HashMap<artifact_id, _>` side maps that were only
+        // correct while this caller passed `max_per_artifact = 1`; see `PageItem`.
+        let (semantic_items, starvation, cap_suppressed, unresolved) = match semantic_page {
+            Some(page) => {
+                let starvation = (page.widenings, page.exhausted);
+                let cap_suppressed = page.cap_suppressed;
+                let unresolved = page.unresolved;
+                let items: Vec<PageItem> = page
+                    .hits
+                    .into_iter()
+                    .map(|hit| PageItem {
+                        row: hit.row,
+                        distance: Some(hit.distance),
+                        chunk: hit.chunk,
+                    })
+                    .collect();
+                (Some(items), Some(starvation), cap_suppressed, unresolved)
+            }
+            None => (None, None, 0usize, 0usize),
+        };
 
-        let rows = if no_augmentations_anywhere {
+        let rows: Vec<PageItem> = if no_augmentations_anywhere {
             // The "match nothing" filter the engine refuses to compile, applied here
             // instead. Everything downstream — scope, hints, catalog — still runs.
             Vec::new()
         } else {
-            match semantic_rows {
+            match semantic_items {
                 Some(r) => r,
                 None => find(
                     &cat,
@@ -856,7 +885,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         offset,
                     },
                     cutoff_ms,
-                )?,
+                )?
+                .into_iter()
+                // The non-semantic path has no hit-level data at all — no query,
+                // so no distance and no matched chunk. Wrapping rather than
+                // branching keeps ONE downstream pipeline, so a future field on
+                // `PageItem` cannot be wired for one path and forgotten on the
+                // other.
+                .map(|row| PageItem {
+                    row,
+                    distance: None,
+                    chunk: None,
+                })
+                .collect(),
             }
         };
 
@@ -875,7 +916,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let pairs = crate::librarian::tools::worktree::shadow_main_pairs(&cat, &wt)?;
             let shadowed: std::collections::HashSet<&str> =
                 pairs.iter().map(|(main_id, _)| main_id.as_str()).collect();
-            rows.retain(|r| !shadowed.contains(r.id.as_str()));
+            rows.retain(|it| !shadowed.contains(it.row.id.as_str()));
             overlay_ids = pairs
                 .iter()
                 .map(|(_, shadow_id)| shadow_id.clone())
@@ -887,12 +928,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // (rows) or append_entry(anchor_heading=…) (body sections)" needs this fact
         // without a separate `get` probe per candidate tracker.
         // docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md
-        let row_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+        let row_ids: Vec<String> = rows.iter().map(|it| it.row.id.clone()).collect();
         let augmentation_by_id = augmentation::get_batch(&cat, &row_ids)?;
 
         let items: Vec<Value> = rows
             .into_iter()
-            .map(|r| {
+            .map(|it| {
+                let PageItem {
+                    row: r,
+                    distance,
+                    chunk,
+                } = it;
                 let mut item = json!({
                     "id": r.id,
                     "kind": r.kind,
@@ -901,6 +947,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "abs_path": r.abs_path.display().to_string(),
                     "updated_at": r.updated_at,
                 });
+                // Artifact-level, so an id lookup is the RIGHT shape here: two
+                // chunks of one ledger share its overlay status and augmentation.
                 if overlay_ids.contains(&r.id) {
                     item["overlay"] = json!(true);
                 }
@@ -911,16 +959,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // path, and only as a WITHIN-response comparison: it is what lets a
                 // reader tell the top hit from the least-bad remainder, which the
                 // response could not express at all before.
-                if let Some(d) = distance_by_id.get(&r.id) {
+                if let Some(d) = distance {
                     if d.is_finite() {
-                        item["distance"] = json!((*d * 1000.0).round() / 1000.0);
+                        item["distance"] = json!((d * 1000.0).round() / 1000.0);
                     }
                 }
                 // The chunk that matched, not the artifact's opening lines. On a
                 // ledger those are the same thing only by accident: the preamble
                 // is the one part of the file that says nothing about the entry
                 // the query actually found.
-                if let Some(chunk) = chunk_by_id.get(&r.id) {
+                if let Some(chunk) = chunk {
                     // Bounded, and it SAYS SO when it cuts. A 2 KB chunk x a
                     // 50-item page is a 100 KB response, so the bound is not
                     // optional — but an unmarked 480-char snippet is
@@ -996,10 +1044,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "cap_suppressed_hint".into(),
                     json!(format!(
                         "{cap_suppressed} further chunk(s) belonging to artifacts already on \
-                         this page were dropped -- this page is ONE chunk per artifact, so a \
-                         single artifact answering the query several times appears once. Read \
-                         the whole thing with doc(action=\"get\", id=…), or narrow the \
-                         query if you wanted breadth."
+                         this page were dropped -- this page carries AT MOST TWO chunks per \
+                         artifact, so an artifact answering the query in more places than that \
+                         is under-represented here. Read the whole thing with \
+                         doc(action=\"get\", id=…), or narrow the query if you wanted breadth."
                     )),
                 );
             }
@@ -1966,16 +2014,84 @@ mod tests {
         );
     }
 
-    /// One artifact answering the query three times appears **once**, and the page
-    /// has to say so. The two dropped chunks are not absent from the corpus, only
-    /// from the page, and nothing else in the response distinguishes those two
-    /// states — which is `cluster/capped-result-presented-as-complete`.
+    /// Two chunks of ONE artifact in one page must each carry their own
+    /// `matched` span and `distance`.
+    ///
+    /// This is the case `max_per_artifact = 1` made unreachable, and the reason
+    /// raising the cap was blocked: `distance_by_id` and `chunk_by_id` were
+    /// `HashMap<artifact_id, _>`, so a second hit for the same artifact
+    /// OVERWROTE the first while `rows` kept both. Every item for that artifact
+    /// then rendered the LAST chunk's span — a wrong `matched` on a
+    /// plausible-looking item, never an error.
+    ///
+    /// LOAD-BEARING FIXTURE DETAIL: `seed_entry_chunks(.., None)` puts every
+    /// chunk on the same axis, so all three are equidistant and the CAP — not
+    /// distance — is what decides how many survive. Give one chunk a near axis
+    /// instead and the page holds a single hit, the collision cannot occur, and
+    /// this test passes against the defect it exists to catch.
+    ///
+    /// It pins the cap as well as the keying: at `max_per_artifact = 1` the page
+    /// holds one item and the first assertion fails. That coupling is deliberate
+    /// — the two are only correct together, and a future cap change should have
+    /// to come here and read this.
+    #[tokio::test]
+    async fn two_chunks_of_one_artifact_keep_their_own_matched_span() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("ledger", "Gate Ledger")).unwrap();
+        seed_entry_chunks(&cat, "ledger", None);
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 5, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        let items = v["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            2,
+            "one artifact should contribute exactly `max_per_artifact` = 2 hits: {v}"
+        );
+        assert_eq!(items[0]["id"], items[1]["id"], "both hits are one artifact");
+
+        let a = &items[0]["matched"];
+        let b = &items[1]["matched"];
+        assert!(
+            !a.is_null() && !b.is_null(),
+            "both hits must carry their matched span: {v}"
+        );
+        assert_ne!(
+            a["start_line"], b["start_line"],
+            "two chunks of one artifact rendered the SAME span — the side maps are \
+             keyed by artifact id and the second hit overwrote the first: {v}"
+        );
+        assert_ne!(
+            a["entry_token"], b["entry_token"],
+            "each hit must name the entry IT landed in, not the last one written: {v}"
+        );
+    }
+
+    /// An artifact answering the query more times than the cap allows appears
+    /// only `max_per_artifact` times, and the page has to say so. The dropped
+    /// chunks are not absent from the corpus, only from the page, and nothing
+    /// else in the response distinguishes those two states — which is
+    /// `cluster/capped-result-presented-as-complete`.
+    ///
+    /// LOAD-BEARING FIXTURE HEADROOM: `seed_entry_chunks` builds exactly three
+    /// chunks, so at `max_per_artifact = 2` this fixture has ONE chunk of slack.
+    /// Raise the cap to 3 and `cap_suppressed` becomes 0 — the assertions below
+    /// would still pass on `items.len()` while testing nothing about suppression
+    /// at all, because there would be nothing left to suppress. A cap change must
+    /// widen the fixture here, not just retune these two numbers.
     #[tokio::test]
     async fn suppressed_sibling_chunks_are_reported_rather_than_silently_dropped() {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_row("ledger", "Gate Ledger")).unwrap();
         // Every chunk on the auth axis, so all three are candidates and the
-        // per-artifact CAP is what removes two of them rather than distance.
+        // per-artifact CAP is what removes the surplus rather than distance.
         seed_entry_chunks(&cat, "ledger", None);
 
         let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
@@ -1989,13 +2105,13 @@ mod tests {
 
         assert_eq!(
             v["items"].as_array().unwrap().len(),
-            1,
-            "one chunk per artifact: {v}"
+            2,
+            "at most `max_per_artifact` = 2 chunks per artifact: {v}"
         );
         assert_eq!(
             v["hints"]["cap_suppressed"],
-            json!(2),
-            "two sibling chunks were dropped and the page must say how many: {}",
+            json!(1),
+            "the third sibling chunk was dropped and the page must say how many: {}",
             v["hints"]
         );
         assert!(

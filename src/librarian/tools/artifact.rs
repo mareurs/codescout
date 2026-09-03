@@ -116,7 +116,7 @@ impl Tool for Artifact {
                 },
                 "semantic": {
                     "type": "string",
-                    "description": "find: natural-language query for semantic search (requires embedder). Hits are CHUNK-grain: each item carries `matched` (line range, enclosing entry token, bounded snippet), so a hit names the entry that matched, not the file's opening lines. One chunk per artifact; `hints.cap_suppressed` counts the rest."
+                    "description": "find: natural-language query for semantic search (requires embedder). Hits are CHUNK-grain: each item carries `matched` (line range, enclosing entry token, bounded snippet), so a hit names the entry that matched, not the file's head. Up to 2 chunks per artifact, so ONE DOCUMENT CAN APPEAR TWICE with different `matched` spans; `hints.cap_suppressed` counts the rest."
                 },
                 "scope": {
                     "type": "string",

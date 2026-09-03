@@ -3508,7 +3508,16 @@ mod tests {
     /// 180; 143 of it was paid for on the spot by compressing the same description's
     /// `LIKE '%v%'` / `LIKE 'v%'` SQL idioms — which were verbose AND, for `rel_path`
     /// specifically, describing a comparison that no longer happens.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_513;
+    ///
+    /// 2026-09-04, +61 → 56_574. `doc`'s `semantic` description had to stop promising
+    /// "One chunk per artifact": `find` now passes `max_per_artifact = 2` (BL-72), so a
+    /// single document can occupy TWO items on one page with different `matched` spans.
+    /// The bytes buy a shape statement, not advice — a caller that assumes one item per
+    /// artifact will mis-count a page or dedupe away the better chunk, and nothing in
+    /// the response would look wrong. Gross addition was 85; 24 was paid on the spot by
+    /// compressing the same description's "not the file's opening lines" to "not the
+    /// file's head", which says the same thing.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_574;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
