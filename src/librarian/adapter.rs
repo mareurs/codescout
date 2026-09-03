@@ -360,16 +360,30 @@ impl crate::tools::Tool for LibrarianAdapter {
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
         // Three guides serve this tool and only one can be delivered per call.
         //
-        // An overflowing result wins first: `doc(find|get)` buffers into an @tool_*
-        // handle exactly like `symbols`/`references`/`call_graph`, and those three
-        // already check this before their own topic split (see
-        // `Symbols::relevant_guide_topic`) so a caller learns the buffer mechanics
-        // before reaching for the wrong reader on it. This adapter previously had no
-        // such branch — `librarian`/`tracker-conventions` were chosen unconditionally,
-        // so a `doc` call could overflow and never surface `progressive-disclosure` at
-        // all, even though it keeps five other triggers (grep, tree, read_file,
-        // run_command, semantic_search) plus these three symbol tools, so most
-        // sessions still receive it from elsewhere.
+        // An overflowing result wins first. Unlike `symbols`/`references`/`call_graph`
+        // (`Symbols::relevant_guide_topic`), which self-report their OWN truncation as
+        // `result["overflow"]` before this is even called, `doc(find|get)` sets neither
+        // `overflow` nor `output_id` on its raw pre-buffer value -- those two only exist
+        // on the envelope `call_content` builds AFTER this function returns, from the
+        // generic byte-threshold path. So `result.get("overflow").is_some() ||
+        // result.get("output_id").is_some()` -- the check this adapter shipped with
+        // first, copied from `Symbols` -- is dead code here: always false, on every
+        // call, overflowing or not. It passed its own unit test only because that test
+        // hand-inserted an `output_id` key no real `doc()` call ever produces at this
+        // point in the pipeline; the test mutated its input rather than exercising the
+        // production path. Caught live: rebuilding and reconnecting, the exact overflow
+        // + tracker-path call from the T-33 investigation still routed to
+        // `tracker-conventions`, proving the shipped condition never fires.
+        //
+        // The fix computes the SAME formula `call_content` uses for its independent
+        // `PostCtx::overflowing` gate (`src/engines/coordinator.rs`) -- `overflowing` is
+        // precomputed there because deciding it needs the serialised JSON, which the
+        // coordinator does not hold, and `relevant_guide_topic` does not hold `json`
+        // either, only `result`, so it is recomputed here. `emit_guide_sections` gates
+        // `"progressive-disclosure"` on `ctx.overflowing` regardless of what this
+        // function names, so if this ever drifts from that formula the topic silently
+        // stops firing again rather than erroring -- keep the two in lockstep with the
+        // one in `src/tools/core/types.rs::exceeds_inline_limit`.
         //
         // A response naming a path under `docs/issues/` or `docs/trackers/` is a
         // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
@@ -395,7 +409,14 @@ impl crate::tools::Tool for LibrarianAdapter {
         // deleted outright rather than corrected: there the number did no work.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
-        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+        let overflowing = crate::tools::exceeds_inline_limit(
+            &serde_json::to_string(result).unwrap_or_else(|_| result.to_string()),
+        ) || result
+            .as_object()
+            .and_then(|o| o.get("output_id"))
+            .and_then(|v| v.as_str())
+            .is_some();
+        if overflowing {
             return Some("progressive-disclosure");
         }
         if names_tracker_path(result) {
@@ -1701,13 +1722,23 @@ mod tests {
         // @tool_* handle exactly like `symbols`/`references`/`call_graph`, but this
         // adapter's topic split never checked for it, so an overflowing `doc` call could
         // never surface `progressive-disclosure` -- only `librarian`/`tracker-conventions`.
-        // The tracker-path branch alone would pick `tracker-conventions` here; asserting
-        // `progressive-disclosure` instead is what pins the ordering, not just the value.
+        //
+        // The payload here is a REAL overflow, not a stand-in: earlier this session a
+        // version of this test hand-inserted an `output_id` key to simulate overflow,
+        // which is exactly the field `doc()`'s raw pre-buffer result never carries in
+        // production (only `call_content`'s post-buffer envelope does) -- so that test
+        // passed while the shipped fix was dead code, confirmed live after a rebuild.
+        // Padding past `exceeds_inline_limit`'s ~10KB threshold exercises the same
+        // condition `call_content` actually evaluates.
         let a = adapter_for_test();
+        let padding = "x".repeat(11_000);
         let overflowed_tracker_result = json!({
             "abs_path": "docs/trackers/tool-usage-patterns.md",
-            "output_id": "@tool_69062af3",
+            "padding": padding,
         });
+        assert!(crate::tools::exceeds_inline_limit(
+            &serde_json::to_string(&overflowed_tracker_result).unwrap()
+        ));
         assert_eq!(
             a.relevant_guide_topic(&overflowed_tracker_result),
             Some("progressive-disclosure")
