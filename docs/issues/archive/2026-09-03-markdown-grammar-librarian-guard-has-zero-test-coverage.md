@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-03
 closed:
 severity: medium
@@ -150,32 +150,90 @@ test passed again.
    above.
 
 ## Fix
-*Not yet fixed — filing for tracking, per CLAUDE.md "capture on notice."* The fix is a
-regression test analogous to
-`librarian_guard_fires_on_every_edit_file_write_path` (`src/tools/edit_file/tests.rs`), but
-targeting the heading-addressed grammar: call `edit_file` with `heading`/`action` params
-against a path under `docs/trackers/` (or any path with a librarian-managed `id:`
-frontmatter key), and assert the call is refused with the librarian-guard error rather than
-applying the edit. Natural home: `src/tools/edit_file/tests.rs` (co-located with the
-raw-text sibling) or `src/tools/markdown/tests.rs` (co-located with the other
-markdown-grammar tests). No code fix is implied — the guard call itself is present and
-correct; only the missing regression test is the deliverable.
 
+**Fixed 2026-09-03** by `librarian_guard_fires_on_the_markdown_grammar_write_route`
+(`src/tools/edit_file/tests.rs`), sitting directly beneath its raw-text sibling.
+
+**The prescription below was WRONG, and following it literally would have produced a test
+that fails against correct code.** It said to assert that a call with `heading`/`action`
+against "any path with a librarian-managed `id:` frontmatter key" is refused. It is not:
+since the 2026-09-01 narrowing, a file that is stamped ONLY — not augmented, not a ledger —
+permits reads and body writes and refuses only frontmatter writes. The markdown-grammar
+route passes `Access::BodyWrite` whenever the caller sent no `frontmatter` param, so a
+heading edit on a stamped file returns `Ok` by design.
+
+The failure mode this would have caused is the interesting part. Written as prescribed, the
+test reds against the CORRECT guard; the obvious repair is to make the guard refuse body
+writes again, which silently reverts a deliberate narrowing and re-locks every stamped file
+in the repo. `docs/issues/_TEMPLATE.md` carries no `id:`, so files created the documented
+way are unstamped while `doc(action="create")` stamps everything — the affected population
+is selected by creation route, not by any property of the file (measured 2026-09-01: 57 of
+120 tracked files under `docs/trackers/`, 206 across `docs/issues/`).
+
+This is CLAUDE.md's *"run the reproduction before reading the fix plan — the plan is a
+hypothesis about the reproduction"* holding for a plan written by the same corpus that
+states the rule. What caught it was reading `Access`'s own table before writing the
+assertion, not running anything.
+
+**Original prescription, kept because it is the trap:** *"call `edit_file` with
+`heading`/`action` params against a path under `docs/trackers/` (or any path with a
+librarian-managed `id:` frontmatter key), and assert the call is refused with the
+librarian-guard error rather than applying the edit."*
 ## Tests added
-None yet — this file exists to track the gap, not to close it. `N/A` justified: this bug
-*is* "no test exists"; closing it means adding the test named in Fix above, at which point
-this file should flip to `fixed` with `Tests added:` naming it.
 
+`librarian_guard_fires_on_the_markdown_grammar_write_route` — `src/tools/edit_file/tests.rs`.
+
+An eight-row table over the heading-grammar route, spanning both `Access` values it can
+pass and all three guard reasons:
+
+| target | shape | access | expect |
+|---|---|---|---|
+| stamped | `frontmatter` | FrontmatterWrite | refuse |
+| ledger | `heading`+`action` | BodyWrite | refuse |
+| ledger | batch `edits[]` | BodyWrite | refuse |
+| ledger | `frontmatter` | FrontmatterWrite | refuse |
+| **stamped** | **`heading`+`action`** | **BodyWrite** | **ALLOW** |
+| **stamped** | **batch `edits[]`** | **BodyWrite** | **ALLOW** |
+| plain | `heading`+`action` | BodyWrite | allow |
+| plain | `frontmatter` | FrontmatterWrite | allow |
+
+The two bold rows are load-bearing: they fail in the OPPOSITE direction from every other
+row, so without them the table is satisfied by a guard that refuses everything — exactly
+the behaviour the narrowing removed. The allowed rows also assert the file actually
+CHANGED, so a route that silently applied nothing cannot satisfy them.
+
+**Failures are accumulated, not asserted per row, and the difference was measured.** A
+per-row `assert!` panics on the first bad row and leaves the rest unrun: under the mutation
+it reported **1 of 4** broken rows. The accumulating form reports **4 of 4**. Three rows
+could otherwise rot indefinitely behind a neighbour that happens to fail first.
 ## Workarounds
 None needed — no live incorrect behavior today, only an unguarded refactor hazard.
 
 ## Resume
-Add a test in `src/tools/edit_file/tests.rs` (or `src/tools/markdown/tests.rs`) that calls
-`edit_file` with `heading="## Foo", action="replace", content="..."` against a
-`docs/trackers/`-scoped or `id:`-frontmattered fixture path, and asserts the call returns
-the librarian-guard refusal rather than writing. Confirm with the same mutation (delete the
-guard call, expect this new test to red) before marking `fixed`.
 
+Nothing owed. Closed with the mutation run the original Resume demanded, extended past what
+it asked for: all FOUR `guard_not_librarian_managed` call sites were mutated independently,
+not just the one this bug names — CLAUDE.md's *"mutate once per guarded SITE, not once per
+feature."*
+
+| site | access passed | mutation reds |
+|---|---|---|
+| `src/tools/edit_file/mod.rs` (raw-text write) | always `FrontmatterWrite` | `librarian_guard_fires_on_every_edit_file_write_path` |
+| `src/tools/markdown/edit_markdown.rs` (heading write) | `BodyWrite` / `FrontmatterWrite` | **was NOTHING — now this bug's test, all 4 refusing rows** |
+| `src/tools/read_file.rs` (read) | `Read` | `read_file_force_true_on_a_managed_ledger_is_still_refused` |
+| `src/tools/markdown/read_markdown.rs` (read) | `Read` | `read_file_refuses_a_managed_ledger_and_names_doc` |
+
+So exactly one of four sites was uncovered and this bug named it correctly — but that was
+verified rather than assumed, and the two read sites had never been checked by anyone.
+
+The guard FUNCTION carries 23 unit tests, and every one of them passes with the
+markdown-grammar call site deleted. That is the site-vs-function distinction in one
+measurement: a well-tested predicate says nothing about whether anyone calls it.
+
+All mutation work was done in an isolated git worktree, never the shared checkout. Five to
+six sessions were committing into `experiments` throughout; a peer committing inside a
+mutation window would have captured a guard-less source file, and the resulting tree would
+have passed its own tests.
 ## References
 - `docs/superpowers/plans/2026-09-02-tool-surface-collapse.md` (Task 8, where this gap was
   discovered during Step 6's prescribed mutation test)

@@ -2148,6 +2148,156 @@ async fn librarian_guard_fires_on_every_edit_file_write_path() {
     }
 }
 
+/// The markdown-grammar write route's librarian guard, which had ZERO coverage anywhere
+/// in the workspace.
+///
+/// `guard_not_librarian_managed` is reached from two `edit_file` write routes. The sibling
+/// above covers only the raw-text one. Measured 2026-09-02: deleting the guard call at the
+/// markdown-grammar site (`src/tools/markdown/edit_markdown.rs`) reds **nothing** across
+/// both lanes, while the identical deletion at the raw-text site reds immediately. Two call
+/// sites of one law, one of them unguarded — which is `IC-14` and the reason
+/// "mutate once per guarded SITE, not once per feature" is a rule.
+/// `docs/issues/2026-09-03-markdown-grammar-librarian-guard-has-zero-test-coverage.md`
+///
+/// **The two sites are asymmetric BY DESIGN, so the sibling's table cannot be re-pointed
+/// here.** The raw-text route always passes `Access::FrontmatterWrite` — "the conservative
+/// value, not a claim" — because an `old_string` may match inside the frontmatter block, so
+/// it cannot bound its own extent. The markdown-grammar route CAN bound it: it passes
+/// `FrontmatterWrite` only when the caller sent a `frontmatter` param, and `BodyWrite`
+/// otherwise. A test asserting "a heading edit on a stamped artifact is refused" would
+/// encode the OPPOSITE of the 2026-09-01 narrowing, and would pass today only because the
+/// guard is missing from this path — a wrong test that a red-green cycle would confirm.
+///
+/// **The two `stamped` + body-write rows are the load-bearing ones, and they fail in the
+/// opposite direction from every other row.** Delete them and what remains is satisfied by
+/// a guard that refuses everything — precisely the behaviour the narrowing removed. They
+/// are the only rows that discriminate a correct guard from a maximally conservative one.
+///
+/// The `assert_ne!` on the allowed rows is not decoration: without it an allowed row is
+/// satisfied by a write that silently did nothing, so the row would keep passing if the
+/// route stopped applying edits at all.
+#[tokio::test]
+async fn librarian_guard_fires_on_the_markdown_grammar_write_route() {
+    // One property each, and none implies another (see `Access`'s table).
+    // `id:` alone is STAMPED. `entry_prefix:` alone is a LEDGER — it carries no id,
+    // because the catalog derives one from the path. Neither key is PLAIN.
+    const STAMPED: &str = "---\nid: abc513d3ee0f0b50\nkind: tracker\n---\n\n## S\n\nalpha\n";
+    const LEDGER: &str = "---\nentry_prefix: T\nkind: tracker\n---\n\n## S\n\nalpha\n";
+    const PLAIN: &str = "---\nkind: notes\n---\n\n## S\n\nalpha\n";
+
+    // Every shape that routes into the heading grammar (`heading_grammar`, edit_file/mod.rs),
+    // chosen so the pair spans both `Access` values the route can pass.
+    let heading_edit = json!({"heading": "## S", "action": "edit",
+                              "old_string": "alpha", "new_string": "beta"});
+    let batch_edit = json!({"edits": [{"heading": "## S", "action": "edit",
+                                       "old_string": "alpha", "new_string": "beta"}]});
+    let frontmatter_edit = json!({"frontmatter": {"set": {"status": "fixed"}}});
+
+    let cases: Vec<(&str, serde_json::Value, &str, &str, bool)> = vec![
+        // FrontmatterWrite on a stamped file — the one access the narrowing kept refusing,
+        // because a direct frontmatter edit never reaches the catalog (BL-48).
+        (
+            "frontmatter",
+            frontmatter_edit.clone(),
+            "stamped",
+            STAMPED,
+            true,
+        ),
+        // A ledger refuses every access, body writes included: its PREFIX-N counter is
+        // server-allocated, so no direct write to it is safe.
+        ("heading edit", heading_edit.clone(), "ledger", LEDGER, true),
+        ("batch edits[]", batch_edit.clone(), "ledger", LEDGER, true),
+        (
+            "frontmatter",
+            frontmatter_edit.clone(),
+            "ledger",
+            LEDGER,
+            true,
+        ),
+        // THE DISCRIMINATORS: a BodyWrite on a merely-stamped file is ALLOWED. The file is
+        // still where its state lives; only its frontmatter is catalog-indexed.
+        (
+            "heading edit",
+            heading_edit.clone(),
+            "stamped",
+            STAMPED,
+            false,
+        ),
+        (
+            "batch edits[]",
+            batch_edit.clone(),
+            "stamped",
+            STAMPED,
+            false,
+        ),
+        // Controls: nothing about a plain markdown file is guarded, either access.
+        ("heading edit", heading_edit.clone(), "plain", PLAIN, false),
+        (
+            "frontmatter",
+            frontmatter_edit.clone(),
+            "plain",
+            PLAIN,
+            false,
+        ),
+    ];
+
+    // Failures are ACCUMULATED, not asserted per row, and that is load-bearing rather than
+    // stylistic. A per-row `assert!` panics on the first bad row and every later row goes
+    // unrun — so a mutation that breaks all four refusing rows is indistinguishable from
+    // one that breaks only the first, and three rows could rot indefinitely behind a
+    // neighbour that happens to fail first. Measured 2026-09-03: deleting the guard call
+    // reds all four refusing rows, and the per-row form reported exactly one of them.
+    let mut failures: Vec<String> = Vec::new();
+
+    for (label, extra, kind, body, must_refuse) in cases {
+        let (dir, ctx) = project_ctx().await;
+        let md_file = dir.path().join("doc.md");
+        std::fs::write(&md_file, body).unwrap();
+
+        let mut args = extra.clone();
+        args["path"] = json!(md_file.to_str().unwrap());
+        let result = EditFile.call(args, &ctx).await;
+        let after = std::fs::read_to_string(&md_file).unwrap();
+
+        match (must_refuse, result) {
+            (true, Ok(v)) => failures.push(format!(
+                "{label}/{kind}: expected a refusal, got Ok({v}) — this write went past the \
+                 catalog, so no field_patch event, no shrink guard, stale updated_at"
+            )),
+            (true, Err(e)) => {
+                if !e.to_string().contains("librarian-managed artifact") {
+                    failures.push(format!("{label}/{kind}: refused for the wrong reason: {e}"));
+                }
+                if after != body {
+                    failures.push(format!(
+                        "{label}/{kind}: refused, but the file changed — a refusal must be \
+                         byte-identical, or the guard ran too late to protect anything"
+                    ));
+                }
+            }
+            (false, Err(e)) => failures.push(format!(
+                "{label}/{kind}: expected pass-through, got Err({e}) — refusing this would \
+                 restore the blanket guard the 2026-09-01 narrowing removed"
+            )),
+            (false, Ok(_)) => {
+                if after == body {
+                    failures.push(format!(
+                        "{label}/{kind}: allowed, but the file is unchanged — a route that \
+                         silently applied nothing would satisfy this row otherwise"
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} row(s) of the markdown-grammar guard table are wrong:\n  {}",
+        failures.len(),
+        failures.join("\n  ")
+    );
+}
+
 #[tokio::test]
 async fn edit_file_batch_mixed_replace_all_on_markdown_no_longer_gated() {
     // Since Task 8, batch text edits on .md are no longer gated on replace_all at
