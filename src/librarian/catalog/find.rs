@@ -245,6 +245,13 @@ pub struct ChunkHit {
     pub start_line: usize,
     pub end_line: usize,
     pub entry_token: Option<String>,
+    /// Which chunk of its entry this is, and how many there are — see
+    /// [`ChunkRow::entry_part`](crate::librarian::catalog::chunk::ChunkRow::entry_part).
+    /// `None` for a chunk belonging to no entry, and also for any row indexed
+    /// before the columns existed; a consumer must treat absence as "unknown",
+    /// never as "part 1 of 1".
+    pub entry_part: Option<usize>,
+    pub entry_parts: Option<usize>,
     pub content: String,
 }
 
@@ -396,6 +403,8 @@ pub async fn semantic_find(
                     start_line: row.start_line,
                     end_line: row.end_line,
                     entry_token: row.entry_token.clone(),
+                    entry_part: row.entry_part,
+                    entry_parts: row.entry_parts,
                     content: row.content.clone(),
                 },
                 row.artifact_id.clone(),

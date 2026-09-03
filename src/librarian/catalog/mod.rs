@@ -264,6 +264,8 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
            start_line   INTEGER NOT NULL,
            end_line     INTEGER NOT NULL,
            entry_token  TEXT,
+           entry_part   INTEGER,
+           entry_parts  INTEGER,
            content      TEXT NOT NULL,
            content_hash TEXT NOT NULL,
            UNIQUE (artifact_id, chunk_ix)
@@ -300,6 +302,29 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
     )?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_version (version) VALUES (11)",
+        [],
+    )?;
+    // v12: entry_part / entry_parts on artifact_chunk — "you are holding part 3
+    // of 7 of this entry". Nullable and unbackfilled on purpose: an existing row
+    // reads `NULL` until its artifact is next chunked, and `NULL` is the honest
+    // answer for "this index has not been rebuilt since the columns existed".
+    // Defaulting them to 1 would have every legacy row claim to be a complete
+    // entry, which is the same wrong answer a fragment gives today and would be
+    // indistinguishable from a real one.
+    if !column_exists(conn, "artifact_chunk", "entry_part")? {
+        conn.execute(
+            "ALTER TABLE artifact_chunk ADD COLUMN entry_part INTEGER",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "artifact_chunk", "entry_parts")? {
+        conn.execute(
+            "ALTER TABLE artifact_chunk ADD COLUMN entry_parts INTEGER",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (12)",
         [],
     )?;
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
@@ -589,7 +614,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 11);
+        assert_eq!(v, 12);
     }
 
     #[test]
@@ -624,7 +649,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 11);
+        assert_eq!(v, 12);
     }
 
     #[test]
@@ -657,7 +682,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 11);
+        assert_eq!(v, 12);
         let n: i64 = cat
             .conn
             .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
@@ -680,7 +705,75 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 11, "re-running must not advance or duplicate");
+        assert_eq!(v, 12, "re-running must not advance or duplicate");
+    }
+
+    /// v12 adds `entry_part` / `entry_parts` to `artifact_chunk`.
+    ///
+    /// Both halves are checked because they fail differently and only one is
+    /// visible from the version number. A missing column is a hard SQL error at
+    /// the next read; a missing *stamp* is silent, and re-running the ALTER on a
+    /// database that already has the column is a "duplicate column name" failure
+    /// — which is exactly what `column_exists` guards and what a second
+    /// `apply_migrations_in_txn` here exercises.
+    ///
+    /// LOAD-BEARING: the columns are asserted NULLABLE by inserting nothing and
+    /// reading them back. A `NOT NULL DEFAULT 1` would make every row indexed
+    /// before v12 claim to be a complete one-chunk entry — the same wrong answer
+    /// a fragment gives, and indistinguishable from a real one.
+    #[test]
+    fn v12_adds_nullable_entry_part_columns_and_is_idempotent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        for col in ["entry_part", "entry_parts"] {
+            assert!(
+                column_exists(&cat.conn, "artifact_chunk", col).unwrap(),
+                "v12 must add {col}"
+            );
+        }
+        // Re-running must not fail on "duplicate column name" and must not
+        // advance the stamp.
+        apply_migrations_in_txn(&cat.conn, None).unwrap();
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 12);
+
+        // Nullable, and NULL is the value a pre-v12 row carries.
+        {
+            use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("a")
+                    .with_abs_path("/test/a.md")
+                    .with_kind("tracker")
+                    .with_status("active")
+                    .with_file_sha256("x")
+                    .build(),
+            )
+            .unwrap();
+        }
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_chunk \
+                 (chunk_id, artifact_id, chunk_ix, start_line, end_line, content, content_hash) \
+                 VALUES ('c1', 'a', 0, 1, 2, 'x', 'h')",
+                [],
+            )
+            .unwrap();
+        let (p, n): (Option<i64>, Option<i64>) = cat
+            .conn
+            .query_row(
+                "SELECT entry_part, entry_parts FROM artifact_chunk WHERE chunk_id = 'c1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (p, n),
+            (None, None),
+            "a row written without them must read back NULL, not a fabricated 1-of-1"
+        );
     }
 
     #[test]

@@ -19,6 +19,25 @@ pub struct ChunkRow {
     /// 1-indexed, inclusive, **in the file**. See [`ChunkRow::start_line`].
     pub end_line: usize,
     pub entry_token: Option<String>,
+    /// Which chunk of its entry this is, 1-based, and how many there are.
+    ///
+    /// `None` when the chunk belongs to no entry (a ledger's preamble, a
+    /// non-ledger document). Both are `Some(1)` for an entry that fits in one
+    /// chunk, so a consumer never has to distinguish "not part of a series"
+    /// from "part 1 of 1" — the pair is either wholly absent or wholly present.
+    ///
+    /// WHY: an entry longer than `chunk_size` becomes several chunks, and a hit
+    /// on the fourth of them previously arrived indistinguishable from a hit on
+    /// a whole short entry. The reader could not tell they were holding a
+    /// fragment, and nothing in the response said how much was missing. The
+    /// span alone does not carry it either: `end_line - start_line` describes
+    /// the fragment, never the entry.
+    ///
+    /// Counted over CONSECUTIVE runs of one token, not globally — see
+    /// [`build_chunks`].
+    pub entry_part: Option<usize>,
+    /// Total chunks in this chunk's entry. See [`ChunkRow::entry_part`].
+    pub entry_parts: Option<usize>,
     pub content: String,
     pub content_hash: String,
 }
@@ -56,30 +75,63 @@ pub fn build_chunks(
     line_offset: usize,
 ) -> Vec<ChunkRow> {
     let tokens = entry_tokens_by_line(body);
-    codescout_embed::chunker::split_markdown_with_depth(body, chunk_size, 0, 6)
-        .into_iter()
-        .enumerate()
-        .map(|(ix, raw)| {
-            let mut hasher = Sha256::new();
-            hasher.update(raw.content.as_bytes());
-            ChunkRow {
-                // Placeholder — replace_chunks assigns or preserves the real id.
-                chunk_id: String::new(),
-                artifact_id: artifact_id.to_string(),
-                chunk_ix: ix,
-                // Keyed on the UNSHIFTED line — see the note above.
-                entry_token: tokens.get(raw.start_line).cloned().flatten(),
-                start_line: raw.start_line + line_offset,
-                end_line: raw.end_line + line_offset,
-                content: raw.content,
-                // Over `content` only, so re-chunking a file at a corrected
-                // offset preserves every hash — which is why the migration off
-                // body-relative ranges costs no re-embedding: replace_chunks
-                // keeps the id and the vector and re-syncs the position.
-                content_hash: format!("{:x}", hasher.finalize()),
-            }
-        })
-        .collect()
+    let mut rows: Vec<ChunkRow> =
+        codescout_embed::chunker::split_markdown_with_depth(body, chunk_size, 0, 6)
+            .into_iter()
+            .enumerate()
+            .map(|(ix, raw)| {
+                let mut hasher = Sha256::new();
+                hasher.update(raw.content.as_bytes());
+                ChunkRow {
+                    // Placeholder — replace_chunks assigns or preserves the real id.
+                    chunk_id: String::new(),
+                    artifact_id: artifact_id.to_string(),
+                    chunk_ix: ix,
+                    // Keyed on the UNSHIFTED line — see the note above.
+                    entry_token: tokens.get(raw.start_line).cloned().flatten(),
+                    // Assigned in the second pass below: a chunk cannot know how many
+                    // siblings its entry has until every chunk exists.
+                    entry_part: None,
+                    entry_parts: None,
+                    start_line: raw.start_line + line_offset,
+                    end_line: raw.end_line + line_offset,
+                    content: raw.content,
+                    // Over `content` only, so re-chunking a file at a corrected
+                    // offset preserves every hash — which is why the migration off
+                    // body-relative ranges costs no re-embedding: replace_chunks
+                    // keeps the id and the vector and re-syncs the position.
+                    content_hash: format!("{:x}", hasher.finalize()),
+                }
+            })
+            .collect();
+
+    // Second pass: number each chunk within its entry.
+    //
+    // Over CONSECUTIVE runs, not a global group-by. `entry_tokens_by_line`
+    // reports the token in SCOPE at a line, so an entry's chunks are always
+    // adjacent — but a token can legitimately reappear later in a file (a
+    // ledger's archive section re-stating an old id, a document quoting one),
+    // and a global group-by would then merge two unrelated stretches into one
+    // series and report "part 2 of 9" for a chunk that is part 2 of 3. Runs
+    // cannot make that mistake, and cost the same single pass.
+    let mut i = 0;
+    while i < rows.len() {
+        let Some(tok) = rows[i].entry_token.clone() else {
+            i += 1;
+            continue;
+        };
+        let mut j = i;
+        while j < rows.len() && rows[j].entry_token.as_deref() == Some(tok.as_str()) {
+            j += 1;
+        }
+        let total = j - i;
+        for (k, row) in rows[i..j].iter_mut().enumerate() {
+            row.entry_part = Some(k + 1);
+            row.entry_parts = Some(total);
+        }
+        i = j;
+    }
+    rows
 }
 
 /// Which grain artifact vectors are written at, decided per project.
@@ -222,6 +274,13 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
         artifact_id: artifact_id.to_string(),
         chunk_ix: 0,
         entry_token: None,
+        // Deliberately `None`, not `Some(1)`/`Some(1)`. At artifact grain the
+        // chunk spans the WHOLE body and belongs to no entry, so "part 1 of 1"
+        // would be a false claim of completeness about an entry that was never
+        // identified — the same wrong answer a fragment gives, and the reason
+        // `entry_token` is `None` here too.
+        entry_part: None,
+        entry_parts: None,
         start_line: 1 + line_offset,
         end_line: body.lines().count() + line_offset,
         content: body.to_string(),
@@ -304,10 +363,20 @@ pub fn replace_chunks(
                 // an UPDATE (never INSERT OR REPLACE — that relies on
                 // recursive_triggers, off by default, to avoid firing the vector
                 // cascade, which silently breaks the moment that pragma flips).
+                //
+                // `entry_part`/`entry_parts` are position fields in exactly this
+                // sense and must be compared here: appending a paragraph to an
+                // entry can push it from 6 chunks to 7, leaving every unchanged
+                // sibling's `content_hash` identical while its "of N" becomes
+                // wrong. A stale "part 3 of 6" is worse than a missing one — it
+                // is a specific, checkable, false claim about how much the reader
+                // is holding.
                 stored.chunk_id = e.chunk_id.clone();
                 if e.start_line != stored.start_line
                     || e.end_line != stored.end_line
                     || e.entry_token != stored.entry_token
+                    || e.entry_part != stored.entry_part
+                    || e.entry_parts != stored.entry_parts
                 {
                     to_resync.push(stored.clone());
                 }
@@ -340,14 +409,17 @@ pub fn replace_chunks(
     if !to_resync.is_empty() {
         let mut upd_stmt = cat.conn.prepare(
             "UPDATE artifact_chunk
-                SET start_line = ?1, end_line = ?2, entry_token = ?3
-              WHERE chunk_id = ?4",
+                    SET start_line = ?1, end_line = ?2, entry_token = ?3,
+                        entry_part = ?4, entry_parts = ?5
+                  WHERE chunk_id = ?6",
         )?;
         for r in &to_resync {
             upd_stmt.execute(rusqlite::params![
                 r.start_line as i64,
                 r.end_line as i64,
                 r.entry_token,
+                r.entry_part.map(|v| v as i64),
+                r.entry_parts.map(|v| v as i64),
                 r.chunk_id
             ])?;
         }
@@ -356,8 +428,9 @@ pub fn replace_chunks(
     if !to_insert.is_empty() {
         let mut ins_stmt = cat.conn.prepare(
             "INSERT INTO artifact_chunk
-               (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token, content, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                   (chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
+                    entry_part, entry_parts, content, content_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
         for r in &to_insert {
             // Bind the PARAMETER, not `r.artifact_id`: the row field is
@@ -383,6 +456,8 @@ pub fn replace_chunks(
                 r.start_line as i64,
                 r.end_line as i64,
                 r.entry_token,
+                r.entry_part.map(|v| v as i64),
+                r.entry_parts.map(|v| v as i64),
                 r.content,
                 r.content_hash
             ])?;
@@ -396,7 +471,7 @@ pub fn replace_chunks(
 pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
     let mut stmt = cat.conn.prepare(
         "SELECT chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
-                content, content_hash
+                entry_part, entry_parts, content, content_hash
            FROM artifact_chunk WHERE artifact_id = ?1 ORDER BY chunk_ix",
     )?;
     let rows = stmt
@@ -408,8 +483,10 @@ pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
                 start_line: r.get::<_, i64>(3)? as usize,
                 end_line: r.get::<_, i64>(4)? as usize,
                 entry_token: r.get(5)?,
-                content: r.get(6)?,
-                content_hash: r.get(7)?,
+                entry_part: r.get::<_, Option<i64>>(6)?.map(|v| v as usize),
+                entry_parts: r.get::<_, Option<i64>>(7)?.map(|v| v as usize),
+                content: r.get(8)?,
+                content_hash: r.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -435,7 +512,7 @@ pub fn rows_by_chunk_ids(
         .join(",");
     let sql = format!(
         "SELECT chunk_id, artifact_id, chunk_ix, start_line, end_line, entry_token,
-                content, content_hash
+                entry_part, entry_parts, content, content_hash
            FROM artifact_chunk WHERE chunk_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -448,8 +525,10 @@ pub fn rows_by_chunk_ids(
                 start_line: r.get::<_, i64>(3)? as usize,
                 end_line: r.get::<_, i64>(4)? as usize,
                 entry_token: r.get(5)?,
-                content: r.get(6)?,
-                content_hash: r.get(7)?,
+                entry_part: r.get::<_, Option<i64>>(6)?.map(|v| v as usize),
+                entry_parts: r.get::<_, Option<i64>>(7)?.map(|v| v as usize),
+                content: r.get(8)?,
+                content_hash: r.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -493,6 +572,132 @@ mod tests {
             (w.start_line, w.end_line),
             (5, 7),
             "range brackets the entry exactly"
+        );
+    }
+
+    /// A long entry becomes several chunks, and each says which of them it is.
+    ///
+    /// LOAD-BEARING FIXTURE SIZE: `chunk_size` is 60 here, not the production
+    /// 2,048, so the entry actually splits. At 2,048 this body is one chunk per
+    /// entry, every chunk is `1 of 1`, and the test passes against an
+    /// implementation that hardcodes both — it would assert nothing.
+    #[test]
+    fn each_chunk_of_a_split_entry_says_which_part_it_is() {
+        let long = "filler text that goes on and on. ".repeat(12);
+        let body =
+            format!("# Log\n\npreamble\n\n## W-1 — short\n\nbrief\n\n## W-2 — long\n\n{long}\n");
+        let rows = build_chunks("a", &body, 60, 0);
+
+        let w2: Vec<_> = rows
+            .iter()
+            .filter(|r| r.entry_token.as_deref() == Some("W-2"))
+            .collect();
+        assert!(
+            w2.len() > 1,
+            "fixture must actually split W-2 or this test asserts nothing; got {} chunk(s)",
+            w2.len()
+        );
+        let n = w2.len();
+        for (i, r) in w2.iter().enumerate() {
+            assert_eq!(r.entry_part, Some(i + 1), "parts number from 1 in order");
+            assert_eq!(
+                r.entry_parts,
+                Some(n),
+                "every sibling reports the same total"
+            );
+        }
+
+        // A one-chunk entry is `1 of 1` — present, not absent. A consumer must
+        // never have to tell "not part of a series" from "part 1 of 1".
+        let w1: Vec<_> = rows
+            .iter()
+            .filter(|r| r.entry_token.as_deref() == Some("W-1"))
+            .collect();
+        assert_eq!(w1.len(), 1);
+        assert_eq!((w1[0].entry_part, w1[0].entry_parts), (Some(1), Some(1)));
+
+        // The preamble belongs to no entry and claims no part.
+        let pre = rows
+            .iter()
+            .find(|r| r.entry_token.is_none())
+            .expect("preamble");
+        assert_eq!((pre.entry_part, pre.entry_parts), (None, None));
+    }
+
+    /// A token that reappears later in a file starts a NEW series.
+    ///
+    /// This is the whole reason `build_chunks` counts over consecutive runs
+    /// rather than a global group-by, so without this test that choice is a
+    /// comment rather than a behaviour. Under a global group-by the two
+    /// stretches merge and the first `W-9` chunk reports `1 of 2` — a specific,
+    /// checkable, false claim about how much the reader is holding.
+    #[test]
+    fn a_token_appearing_twice_is_two_series_not_one() {
+        let body = "# Log\n\n## W-9 — first\n\nalpha\n\n## Z-1 — other\n\nbeta\n\n## W-9 — again\n\ngamma\n";
+        let rows = build_chunks("a", body, 2048, 0);
+        let w9: Vec<_> = rows
+            .iter()
+            .filter(|r| r.entry_token.as_deref() == Some("W-9"))
+            .collect();
+        assert_eq!(
+            w9.len(),
+            2,
+            "fixture must produce two separate W-9 stretches"
+        );
+        for r in &w9 {
+            assert_eq!(
+                (r.entry_part, r.entry_parts),
+                (Some(1), Some(1)),
+                "each run is its own series: a global group-by would say 1-of-2 / 2-of-2"
+            );
+        }
+    }
+
+    /// Growing an entry re-syncs its SIBLINGS' totals, whose content never changed.
+    ///
+    /// The sibling's `content_hash` is identical across the edit, so it takes
+    /// `replace_chunks`' preserve-the-vector branch and is never re-inserted —
+    /// its `of N` is only corrected because that branch compares the part fields
+    /// too. Drop them from the comparison and this test reds while every other
+    /// test in the file stays green.
+    #[test]
+    fn growing_an_entry_corrects_the_of_n_on_siblings_that_did_not_change() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+
+        // Newline-separated on purpose: `split()` accumulates LINES and never
+        // breaks inside one, so a single long line is one chunk however big the
+        // text is and the entry could not grow. The fixture guard below catches
+        // that, and did.
+        let line = "aaaa bbbb cccc dddd\n";
+        let before = format!("## W-1 — t\n\n{}", line.repeat(6));
+        let stored = replace_chunks(&cat, "a", &build_chunks("a", &before, 40, 0)).unwrap();
+        let n_before = stored[0].entry_parts.expect("parts assigned");
+
+        // Append to the SAME entry: chunk 0's bytes are untouched, the entry gets longer.
+        let after = format!("## W-1 — t\n\n{}", line.repeat(14));
+        let rebuilt = build_chunks("a", &after, 40, 0);
+        assert_eq!(
+            rebuilt[0].content, stored[0].content,
+            "the fixture only works if chunk 0's content is byte-identical across the edit"
+        );
+        replace_chunks(&cat, "a", &rebuilt).unwrap();
+
+        let read = chunks_for(&cat, "a").unwrap();
+        let n_after = rebuilt[0].entry_parts.expect("parts assigned");
+        assert!(
+            n_after > n_before,
+            "fixture must actually grow the entry: {n_before} -> {n_after}"
+        );
+        assert_eq!(
+            read[0].entry_parts,
+            Some(n_after),
+            "an unchanged chunk must still learn its entry got longer; stale 'of {n_before}' \
+             is a false claim about how much of the entry the reader holds"
+        );
+        assert_eq!(
+            read[0].chunk_id, stored[0].chunk_id,
+            "and it must keep its id, or the resync destroyed the vector it exists to preserve"
         );
     }
 

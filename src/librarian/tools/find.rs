@@ -993,6 +993,34 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         "entry_token": chunk.entry_token,
                         "snippet": snippet,
                     });
+                    // "You are holding part 3 of 7." A hit on the fourth chunk of
+                    // a long entry was previously indistinguishable from a hit on
+                    // a whole short one, and the span cannot carry the difference:
+                    // `end_line - start_line` describes the FRAGMENT, never the
+                    // entry it came from. Emitted only when both are known — a row
+                    // indexed before these columns existed reports neither, and
+                    // absence must read as "unknown" rather than "part 1 of 1".
+                    if let (Some(part), Some(parts)) = (chunk.entry_part, chunk.entry_parts) {
+                        item["matched"]["part"] = json!(part);
+                        item["matched"]["of"] = json!(parts);
+                    }
+                    // The recovery action, addressed by TOKEN rather than by line.
+                    //
+                    // The line range is the wrong handle for this and has been
+                    // measurably wrong: 378 of 3,729 entry-bearing chunks publish a
+                    // `start_line` that resolves to the PREVIOUS entry
+                    // (docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-
+                    // but-published-as-file-lines.md, still open). A token is
+                    // resolved by `doc(action="get", heading=…)`'s fuzzy match, so
+                    // it survives every edit above it — which is exactly the class
+                    // of change that breaks a line number. Cheap, too: no title
+                    // text, so this is ~55 chars whatever the entry is called.
+                    if let Some(tok) = &chunk.entry_token {
+                        item["matched"]["retrieve"] = json!(format!(
+                            "doc(action=\"get\", id=\"{}\", heading=\"{tok}\")",
+                            item["id"].as_str().unwrap_or_default()
+                        ));
+                    }
                 }
                 item
             })
@@ -2071,6 +2099,84 @@ mod tests {
         assert_ne!(
             a["entry_token"], b["entry_token"],
             "each hit must name the entry IT landed in, not the last one written: {v}"
+        );
+    }
+
+    /// A hit on a fragment says so, and hands back a handle that is not a line.
+    ///
+    /// Both halves matter and they fail differently. Without `part`/`of` a hit on
+    /// chunk 4 of 7 is indistinguishable from a hit on a whole short entry — the
+    /// span cannot carry it, since `end_line - start_line` describes the fragment.
+    /// Without a token-addressed `retrieve` the only recovery offered is the line
+    /// range, which is measurably wrong for 378 of 3,729 entry-bearing chunks in
+    /// this repo (`7695ad877b44e96a`, open): it resolves to the PREVIOUS entry.
+    ///
+    /// LOAD-BEARING: `chunk_size` cannot be set from the tool, so the fixture
+    /// forces a split by making one entry long rather than by shrinking the
+    /// budget. If a future edit makes this body fit in one chunk, the
+    /// `parts > 1` assertion fails loudly rather than passing vacuously at
+    /// `1 of 1`.
+    #[tokio::test]
+    async fn a_hit_on_a_fragment_says_which_part_and_offers_a_token_handle() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("ledger", "Gate Ledger")).unwrap();
+
+        let filler = "auth login flow session token exchange and refresh handling\n".repeat(80);
+        let body = format!("# T\n\nintro\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\n{filler}");
+        let built = crate::librarian::catalog::chunk::build_chunks("ledger", &body, 2048, 0);
+        let rows =
+            crate::librarian::catalog::chunk::replace_chunks(&cat, "ledger", &built).unwrap();
+        let w2_parts = rows
+            .iter()
+            .filter(|r| r.entry_token.as_deref() == Some("W-2"))
+            .count();
+        assert!(
+            w2_parts > 1,
+            "fixture must split W-2 or the part/of assertion is vacuous; got {w2_parts}"
+        );
+        for r in &rows {
+            let mut v = vec![0.0f32; 768];
+            v[0] = 1.0;
+            let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            cat.conn
+                .execute(
+                    "INSERT OR REPLACE INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![r.chunk_id, blob],
+                )
+                .unwrap();
+        }
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 5, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        let m = &v["items"][0]["matched"];
+        let tok = m["entry_token"].as_str().expect("a hit names its entry");
+        assert_eq!(
+            m["of"].as_u64(),
+            Some(w2_parts as u64),
+            "a fragment must say how many parts its entry has: {v}"
+        );
+        assert!(
+            m["part"]
+                .as_u64()
+                .is_some_and(|p| p >= 1 && p <= w2_parts as u64),
+            "part must be a 1-based index within of: {m}"
+        );
+        let retrieve = m["retrieve"].as_str().expect("a recovery action");
+        assert!(
+            retrieve.contains(&format!("heading=\"{tok}\"")),
+            "the handle must address the entry by TOKEN — a line number is the thing \
+             that decays under edits above it: {retrieve}"
+        );
+        assert!(
+            !retrieve.contains("start_line"),
+            "the handle must not fall back to line addressing: {retrieve}"
         );
     }
 
