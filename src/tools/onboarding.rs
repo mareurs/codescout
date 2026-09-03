@@ -251,6 +251,12 @@ impl Tool for Onboarding {
         "onboarding"
     }
 
+    /// Additive: writes only codescout-owned generated files, never user source. A second
+    /// call sees `onboarding_version` stamped and does no further work.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::additive_closed()
+    }
+
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

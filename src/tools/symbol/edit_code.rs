@@ -92,6 +92,12 @@ impl Tool for EditCode {
         "edit_code"
     }
 
+    /// `destructive` stays `true`: `action="remove"` deletes a symbol and
+    /// `action="rename"` rewrites call sites across the whole codebase via LSP.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::writer_closed()
+    }
+
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

@@ -14,6 +14,20 @@ impl Tool for Workspace {
         "workspace"
     }
 
+    /// Mixed: `status`/`list_projects` read, `activate` writes — it calls
+    /// `auto_register_deps`, which persists `.codescout/libraries.json`
+    /// (`src/library/auto_register.rs:64-65`). Re-activating the same root re-registers
+    /// nothing, so the write is additive and idempotent.
+    ///
+    /// **This deliberately disagrees with `is_write`**, which returns the trait default
+    /// `false` for every `workspace` call. That is the narrower claim — `is_write` gates
+    /// the cross-process write lock, and the lock has never covered this path. Annotating
+    /// truthfully here does not change that; see
+    /// `docs/issues/2026-09-03-workspace-activate-writes-libraries-json-outside-the-write-lock.md`.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::additive_closed()
+    }
+
     fn description(&self) -> &str {
         "Project workspace operations. Actions: \
          `activate` (switch active project; pass `path` and optional `read_only`), \

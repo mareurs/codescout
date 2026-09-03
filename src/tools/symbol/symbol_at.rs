@@ -330,6 +330,11 @@ impl Tool for SymbolAt {
     fn name(&self) -> &str {
         "symbol_at"
     }
+
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Inspect a symbol at a position via LSP — returns definition location(s) and/or \
          hover (type signature + docs). Pass `fields` to choose; defaults to both. \

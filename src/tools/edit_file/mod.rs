@@ -363,6 +363,12 @@ impl Tool for EditFile {
         "edit_file"
     }
 
+    /// `destructive` stays `true`: `replace_all` and a section `replace` are lossy, and
+    /// re-applying an `old_string` edit is not a no-op.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::writer_closed()
+    }
+
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

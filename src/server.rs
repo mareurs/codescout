@@ -637,6 +637,40 @@ impl CodeScoutServer {
         }
     }
 
+    /// Build the exact `Tool` payloads `list_tools` advertises for `caps`.
+    ///
+    /// **Four things happen between a tool's raw `input_schema()` and the wire** — the
+    /// `availability` filter, the `workspace` pin injection, the description pairing, and
+    /// the annotation attachment. Each is a place a re-implementation can fall out of
+    /// step, and the failure is silent: the surface still serialises, just differently
+    /// from what any gate measured.
+    ///
+    /// Extracted 2026-09-03 when annotations were added, because **no test called
+    /// `ServerHandler::list_tools`** — every "advertised" helper re-derived the filter, so
+    /// the attachment line itself was unreachable by the suite. `list_tools` now delegates
+    /// here and `annotations_reach_the_advertised_payload` exercises this function, which
+    /// is the path the wire actually takes.
+    pub(crate) fn advertised_mcp_tools(
+        &self,
+        caps: &crate::tools::ToolCapabilities,
+    ) -> Vec<McpTool> {
+        self.tools
+            .iter()
+            .filter(|t| t.availability(caps).is_available(caps))
+            .map(|t| {
+                let schema = t.input_schema();
+                let mut schema_obj = schema.as_object().cloned().unwrap_or_default();
+                if t.pinnable() {
+                    Self::inject_workspace_param(&mut schema_obj);
+                }
+                let mut tool =
+                    McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj);
+                tool.annotations = t.annotations();
+                tool
+            })
+            .collect()
+    }
+
     async fn acquire_write_guard_if_writing(
         &self,
         name: &str,
@@ -1344,21 +1378,9 @@ impl ServerHandler for CodeScoutServer {
         _ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, McpError> {
         let caps = self.current_capabilities().await;
-        let tools = self
-            .tools
-            .iter()
-            .filter(|t| t.availability(&caps).is_available(&caps))
-            .map(|t| {
-                let schema = t.input_schema();
-                let mut schema_obj = schema.as_object().cloned().unwrap_or_default();
-                if t.pinnable() {
-                    Self::inject_workspace_param(&mut schema_obj);
-                }
-                McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
-            })
-            .collect();
-
-        Ok(ListToolsResult::with_all_items(tools))
+        Ok(ListToolsResult::with_all_items(
+            self.advertised_mcp_tools(&caps),
+        ))
     }
 
     async fn list_resources(
@@ -3193,8 +3215,8 @@ mod tests {
     /// Measured against ALL capabilities true: that is the maximal advertised
     /// surface, and the only one that must be guaranteed to fit.
     ///
-    /// Returns `(name, description_chars, schema_chars)` per advertised tool.
-    fn advertised_surface(server: &CodeScoutServer) -> Vec<(String, usize, usize)> {
+    /// Returns `(name, description_chars, schema_chars, annotation_chars)` per tool.
+    fn advertised_surface(server: &CodeScoutServer) -> Vec<(String, usize, usize, usize)> {
         let caps = crate::tools::ToolCapabilities {
             has_lsp: true,
             has_embeddings: true,
@@ -3213,10 +3235,21 @@ mod tests {
                     CodeScoutServer::inject_workspace_param(&mut schema_obj);
                 }
                 let schema_chars = Value::Object(schema_obj).to_string().chars().count();
+                // The FOURTH thing `list_tools` does between `input_schema()` and the
+                // wire. Counted here because a payload the gate cannot see is a payload
+                // that can grow without limit — exactly the failure the doc comment
+                // above warns about, and the reason annotations were added to both
+                // sites in one commit.
+                let annot_chars = t
+                    .annotations()
+                    .and_then(|a| serde_json::to_string(&a).ok())
+                    .map(|s| s.chars().count())
+                    .unwrap_or(0);
                 (
                     t.name().to_string(),
                     t.description().chars().count(),
                     schema_chars,
+                    annot_chars,
                 )
             })
             .collect()
@@ -3406,13 +3439,45 @@ mod tests {
     /// raise was unavoidable once the clause was trimmed as far as it would go
     /// without losing the fact that the remedy differs by outcome (dead session vs
     /// unresolvable host).
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_519;
+    ///
+    /// **Raised 2026-09-03, 55_519 → 56_276 (+757) — MCP tool annotations on the 17 tools
+    /// whose behaviour differs from the MCP defaults.** They let a CLIENT gate destructive
+    /// calls, and stop the nine pure readers being given destructive-by-default treatment,
+    /// without a byte of protective prose in any description.
+    ///
+    /// **This raise was meant to be funded, was not, and the reason is worth more than the
+    /// bytes.** The plan was to pay for it by trimming `librarian`'s `fix` description (980
+    /// chars) to a pointer at `get_guide("librarian")` § *doctor repairs*, which carries
+    /// `serves: librarian.doctor`. The trim was written and measured at a net −17 — then
+    /// reverted, because
+    /// `librarian::adapter::tests::doctor_results_route_away_from_librarian_so_fix_modes_stay_in_the_schema`
+    /// reds on it: `relevant_guide_topic` picks the topic from the RESULT, and a real doctor
+    /// result names tracker paths (128 of 138, measured 2026-08-31), so that section is
+    /// never consulted on a doctor call. The identical move had already shipped once
+    /// (`d94dd53d`) and been reverted (`c7d66f94`). The test exists to stop a third attempt
+    /// and it stopped this one — its own "mutations that must kill this" names the change.
+    ///
+    /// The lesson is narrower than "don't move prose": **a `serves:` marker proves the
+    /// section is DECLARED, not that the call REACHES it.** Routing is chosen from the
+    /// result, so the destination can be a different topic entirely. Check
+    /// `relevant_guide_topic` for the tool, not just the marker on the section.
+    ///
+    /// "Find the bytes" held; there were none to find there. The addition is owed on its own
+    /// merits, so it is taken as a raise rather than deferred.
+    ///
+    /// **The total now counts a THIRD component.** `advertised_surface` returns
+    /// `annotation_chars` beside description and schema, because `list_tools` attaches
+    /// annotations after `input_schema()` returns, and a payload this gate cannot see is
+    /// one that can grow without limit — the failure its own doc comment warns about.
+    /// Report run 2026-09-03: TOTAL (21 tools) = 56_276
+    /// (desc 6_997 / schema 48_522 / annot 757).
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_276;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
         let (_dir, server) = make_server().await;
         let rows = advertised_surface(&server);
-        let total: usize = rows.iter().map(|(_, d, s)| d + s).sum();
+        let total: usize = rows.iter().map(|(_, d, s, a)| d + s + a).sum();
         assert!(
             total <= TOOL_SURFACE_CHAR_BUDGET,
             "advertised tool surface is {total} chars across {} tools; budget is {}. \
@@ -3438,26 +3503,28 @@ mod tests {
     async fn tool_surface_report_lengths() {
         let (_dir, server) = make_server().await;
         let mut rows = advertised_surface(&server);
-        rows.sort_by_key(|r| std::cmp::Reverse(r.1 + r.2));
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1 + r.2 + r.3));
 
         let desc_total: usize = rows.iter().map(|r| r.1).sum();
         let schema_total: usize = rows.iter().map(|r| r.2).sum();
-        let total = desc_total + schema_total;
+        let annot_total: usize = rows.iter().map(|r| r.3).sum();
+        let total = desc_total + schema_total + annot_total;
 
         println!(
-            "\n  {:<22}{:>8}{:>9}{:>9}",
-            "tool", "desc", "schema", "total"
+            "\n  {:<22}{:>8}{:>9}{:>7}{:>9}",
+            "tool", "desc", "schema", "annot", "total"
         );
-        println!("  {}", "-".repeat(48));
-        for (name, d, s) in &rows {
-            println!("  {:<22}{:>8}{:>9}{:>9}", name, d, s, d + s);
+        println!("  {}", "-".repeat(55));
+        for (name, d, s, a) in &rows {
+            println!("  {:<22}{:>8}{:>9}{:>7}{:>9}", name, d, s, a, d + s + a);
         }
-        println!("  {}", "-".repeat(48));
+        println!("  {}", "-".repeat(55));
         println!(
-            "  {:<22}{:>8}{:>9}{:>9}",
+            "  {:<22}{:>8}{:>9}{:>7}{:>9}",
             format!("TOTAL ({} tools)", rows.len()),
             desc_total,
             schema_total,
+            annot_total,
             total
         );
         println!(
@@ -4534,6 +4601,150 @@ mod tests {
              truncated registry and would otherwise pass vacuously"
         );
     }
+
+    /// Annotations must not contradict `is_write` in the one direction that costs
+    /// something.
+    ///
+    /// The two are different axes — `annotations()` is PER-TOOL and static, `is_write` is
+    /// PER-CALL — so this gate runs in ONE direction deliberately. A tool that writes for
+    /// at least one action must not advertise `readOnlyHint: true`, because a client
+    /// filtering on that hint to decide what to auto-approve would run a mutation
+    /// unprompted.
+    ///
+    /// **The converse is NOT asserted, and must not be.** `is_write` gates the
+    /// cross-process write lock and nothing else, so it is not a reader-oracle:
+    /// `run_command` has no override and reports `false` for every input including
+    /// `rm -rf src`, and `workspace` reports `false` while `action="activate"` writes
+    /// `.codescout/libraries.json` (`src/library/auto_register.rs:64-65`). Asserting
+    /// "`is_write == false` implies read-only" would encode those gaps as a rule and red
+    /// on the two tools that are annotated correctly.
+    ///
+    /// Annotations are hints, not guarantees — nothing enforces them at runtime. This gate
+    /// is only about not shipping a hint that is actively wrong.
+    #[tokio::test]
+    async fn annotations_agree_with_is_write() {
+        let (_dir, server) = make_server().await;
+
+        let mut checked = 0usize;
+        let mut saw_read_only = false;
+        let mut saw_unannotated = false;
+
+        for tool in &server.tools {
+            let name = tool.name().to_string();
+            let ann = tool.annotations();
+
+            // Same oracle as `every_registered_tool_supplies_a_selector_key`: the tool's
+            // own action enum, so an action added later is covered with no edit here.
+            let mut inputs = vec![serde_json::json!({})];
+            if let Some(actions) = tool
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+            {
+                for a in actions.iter().filter_map(|x| x.as_str()) {
+                    inputs.push(serde_json::json!({ "action": a }));
+                }
+            }
+
+            let writes = inputs.iter().any(|i| tool.is_write(i));
+            let read_only = ann.as_ref().and_then(|a| a.read_only_hint) == Some(true);
+
+            assert!(
+                !(writes && read_only),
+                "tool `{name}` reports is_write=true for at least one action but advertises \
+                 `readOnlyHint: true`. A client auto-approving on that hint would run a \
+                 mutation unprompted. Fix the annotation, not this gate."
+            );
+
+            // Spec coherence: `destructiveHint` is meaningful only when `readOnlyHint` is
+            // false, so pairing them is both self-contradictory and dead bytes on every
+            // request.
+            if let Some(a) = ann.as_ref() {
+                assert!(
+                    !(a.read_only_hint == Some(true) && a.destructive_hint == Some(true)),
+                    "tool `{name}` sets both `readOnlyHint: true` and \
+                     `destructiveHint: true`; the MCP spec makes the second meaningless \
+                     when the first holds."
+                );
+            }
+
+            saw_read_only |= read_only;
+            saw_unannotated |= ann.is_none();
+            checked += 1;
+        }
+
+        // Non-triviality in BOTH directions. Without these, a regression that annotated
+        // nothing — or one that annotated everything read-only — reads as green. Same
+        // shape as `pinnable_tools_advertise_workspace_param`'s saw/saw-not pair, and for
+        // the same reason: a population-level assertion satisfied in one direction is not
+        // evidence about the other.
+        assert!(
+            saw_read_only,
+            "no tool advertises `readOnlyHint: true` — the annotation surface is inert and \
+             this gate passed vacuously"
+        );
+        assert!(
+            saw_unannotated,
+            "every tool carries annotations, so the `None` default is unexercised — a \
+             regression that annotated the destructive tools would not red here"
+        );
+
+        // Anti-vacuity floor, not an equality: 19 is the lean lane's count and the
+        // librarian family only adds to it, so this never needs revising upward.
+        assert!(
+            checked >= 19,
+            "the gate scanned only {checked} tools — it is reading a truncated registry \
+             and would otherwise pass vacuously"
+        );
+    }
+
+    /// The attachment itself, on the path the wire takes.
+    ///
+    /// `annotations_agree_with_is_write` reads `Tool::annotations()` directly, so it stays
+    /// green even if nothing ever attaches the result to the payload — an alarm on a path
+    /// no caller reaches. This exercises `advertised_mcp_tools`, which
+    /// `ServerHandler::list_tools` delegates to, and asserts the hint survives to the
+    /// serialised tool.
+    #[tokio::test]
+    async fn annotations_reach_the_advertised_payload() {
+        let (_dir, server) = make_server().await;
+        let caps = crate::tools::ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: true,
+            has_libraries: true,
+            shell_enabled: true,
+        };
+        let payload = server.advertised_mcp_tools(&caps);
+
+        let grep = payload
+            .iter()
+            .find(|t| t.name == "grep")
+            .expect("`grep` is advertised unconditionally");
+        assert_eq!(
+            grep.annotations.as_ref().and_then(|a| a.read_only_hint),
+            Some(true),
+            "`grep` reached the advertised payload without its readOnlyHint. The override \
+             exists but nothing is attaching it, so every client still applies the \
+             destructive-by-default treatment this annotation was added to remove."
+        );
+
+        // The other direction, and the one a byte-budgeted surface needs: a tool whose real
+        // behaviour already matches the MCP defaults must carry NO annotations object.
+        let run_command = payload
+            .iter()
+            .find(|t| t.name == "run_command")
+            .expect("`run_command` is advertised when shell is enabled");
+        assert!(
+            run_command.annotations.is_none(),
+            "`run_command` carries an annotations object. The MCP defaults — destructive, \
+             non-idempotent, open-world — already describe it exactly, so anything emitted \
+             here is dead weight paid on every request of every session."
+        );
+    }
+
     /// Every `triggered` rule must name a tool that can actually deliver it — or declare, by
     /// id, that it cannot.
     ///

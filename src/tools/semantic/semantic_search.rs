@@ -496,6 +496,13 @@ impl Tool for SemanticSearch {
     fn name(&self) -> &str {
         "semantic_search"
     }
+
+    /// `openWorld` stays at its `true` default: `RequiresEmbeddings`, and the embedder
+    /// factory resolves `openai:` / a bare `url` to an arbitrary host.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_open()
+    }
+
     fn description(&self) -> &str {
         "Find code by natural language description or code snippet. \
              Returns ranked chunks with file path and line range."

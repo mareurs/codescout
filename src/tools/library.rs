@@ -253,6 +253,13 @@ impl Tool for Library {
         "library"
     }
 
+    /// Mixed: `list` reads, `register` writes. Registration is additive to
+    /// `libraries.json` and `auto_register_deps_idempotent` pins that a second identical
+    /// run registers nothing new.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::additive_closed()
+    }
+
     fn is_write(&self, input: &Value) -> bool {
         input.get("action").and_then(Value::as_str) == Some("register")
     }

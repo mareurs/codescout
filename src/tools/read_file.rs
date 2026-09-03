@@ -17,6 +17,10 @@ impl Tool for ReadFile {
         "read_file"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Read a file. Large output → @file_* buffer. Markdown: heading map by default; \
      heading=/headings= for a section, force=true for raw lines. Format-aware: \

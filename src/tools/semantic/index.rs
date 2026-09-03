@@ -828,6 +828,13 @@ impl Tool for Index {
         "index"
     }
 
+    /// Mixed: `status`/`verify`/`cancel` read, `build` writes. Additive — a build
+    /// refreshes and never destroys user data — and incremental builds skip unchanged
+    /// hashes, so a repeat is a no-op. `openWorld` stays `true`: `RequiresEmbeddings`.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::additive_open()
+    }
+
     fn is_write(&self, input: &Value) -> bool {
         input.get("action").and_then(Value::as_str) == Some("build")
     }

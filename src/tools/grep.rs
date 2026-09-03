@@ -17,6 +17,10 @@ impl Tool for Grep {
         "grep"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Regex search across files. Flags: ignore_case, whole_word, glob (\"*.rs\"), include_hidden. mode=\"files\" for per-file counts. Source hits carry their enclosing symbol. context_lines for surrounding code."
     }

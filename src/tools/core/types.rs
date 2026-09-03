@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use rmcp::model::Content;
+use rmcp::model::{Content, ToolAnnotations};
 use rmcp::service::RoleServer;
 use rmcp::Peer;
 use serde_json::Value;
@@ -698,6 +698,74 @@ pub(crate) fn action_selector_key(name: &str, input: &Value) -> Option<String> {
     }
 }
 
+/// Named MCP tool-annotation shapes.
+///
+/// The byte-cost policy lives here rather than being re-decided in each `impl Tool`,
+/// for the same reason [`Tool::pinnable`] keeps its name list in the trait default: the
+/// rule is easy to state once and easy to violate twenty times.
+///
+/// **The rule: emit only what differs from the MCP defaults**, which are
+/// `readOnly=false`, `destructive=true`, `idempotent=false`, `openWorld=true`. Every
+/// field emitted is paid on every request of every session and counted by
+/// `server::tests::tool_surface_under_budget`, whose constant is lower-only.
+///
+/// Two consequences that are easy to get backwards:
+/// - `openWorld` defaults to **true**, so leaving it unset is an active claim that the
+///   tool reaches outside the project — a local-only reader must set it `false`.
+/// - `destructive` and `idempotent` are spec-meaningless when `readOnly` is true, so
+///   pairing them with it is pure dead weight.
+///
+/// A tool whose real behaviour already matches the defaults — a destructive, non-
+/// idempotent, open-world writer such as `doc`, `librarian`, `memory` or `run_command` —
+/// returns `None` and costs zero bytes.
+pub mod annot {
+    use rmcp::model::ToolAnnotations;
+
+    /// A pure reader confined to the project: local files, the AST/LSP index.
+    ///
+    /// The LSP-backed readers are included here as a deliberate judgement: they talk to a
+    /// local stdio subprocess, though rust-analyzer's own `cargo metadata` can reach
+    /// crates.io on a cold registry. That reach is transitive and incidental, not the
+    /// tool's own domain of interaction.
+    pub fn read_only_closed() -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::default().read_only(true).open_world(false))
+    }
+
+    /// A pure reader that may reach an external service, so `openWorld` is left at its
+    /// `true` default. Applies to the embedding-backed readers, whose backend resolves at
+    /// runtime — `local:`/`local-dir:` are in-process ONNX, but `openai:`/`ollama:`/a bare
+    /// `url` are HTTP to an arbitrary host.
+    pub fn read_only_open() -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::default().read_only(true))
+    }
+
+    /// A writer confined to the project whose effects may be destructive; `destructive`
+    /// and `idempotent` stay at their conservative defaults.
+    pub fn writer_closed() -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::default().open_world(false))
+    }
+
+    /// A writer confined to the project whose updates are additive and whose repeat call
+    /// has no further effect.
+    pub fn additive_closed() -> Option<ToolAnnotations> {
+        Some(
+            ToolAnnotations::default()
+                .destructive(false)
+                .idempotent(true)
+                .open_world(false),
+        )
+    }
+
+    /// As [`additive_closed`], but the tool may reach an external service.
+    pub fn additive_open() -> Option<ToolAnnotations> {
+        Some(
+            ToolAnnotations::default()
+                .destructive(false)
+                .idempotent(true),
+        )
+    }
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Tool name as exposed over MCP (e.g. "symbols")
@@ -832,6 +900,42 @@ pub trait Tool: Send + Sync {
     /// will receive.
     fn is_write(&self, _input: &Value) -> bool {
         false
+    }
+
+    /// Static MCP tool annotations advertised in `list_tools`.
+    ///
+    /// Defaults to `None` — **no `annotations` key on the wire at all** — which is both
+    /// the cheapest and the most conservative shape. The MCP defaults are
+    /// `readOnly=false`, `destructive=true`, `idempotent=false`, `openWorld=true`, so an
+    /// un-annotated tool is already treated as a destructive, open-world writer. Returning
+    /// an empty `ToolAnnotations` instead would serialise `"annotations":{}` and cost ~17
+    /// bytes per tool for nothing.
+    ///
+    /// Override only to say something *different* from those defaults:
+    /// - a pure reader sets `read_only(true)`, plus `open_world(false)` if it stays local
+    ///   — note `openWorld` defaults to **true**, so leaving it unset is not a safe
+    ///   omission, it is an active claim that the tool reaches the outside world;
+    /// - an additive-only writer sets `destructive(false)`;
+    /// - `destructive` and `idempotent` are spec-meaningless when `read_only` is true, so
+    ///   never pair them with it — they would be dead bytes.
+    ///
+    /// Every field emitted is paid on every request of every session;
+    /// `server::tests::tool_surface_under_budget` counts them and
+    /// `TOOL_SURFACE_CHAR_BUDGET` is lower-only.
+    ///
+    /// **This is the PER-TOOL axis; [`Tool::is_write`] is PER-CALL, and neither derives
+    /// from the other.** `is_write` gates the cross-process write lock and nothing else:
+    /// `run_command` has no override and reports `false` even for `rm -rf src`, while
+    /// `workspace` reports `false` yet `action="activate"` writes
+    /// `.codescout/libraries.json` (`src/library/auto_register.rs:64-65`). Classify from
+    /// what the tool actually does, never by lifting `is_write`.
+    ///
+    /// These are **hints, not security guarantees** — a client shapes confirmation and
+    /// auto-approval UX from them; nothing enforces them. Agreement with `is_write` in the
+    /// one direction that matters (a writer must not claim `readOnlyHint: true`) is pinned
+    /// by `server::tests::annotations_agree_with_is_write`.
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        None
     }
 
     /// Returns the JSON path to the most useful field in a buffered result.

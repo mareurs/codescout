@@ -49,6 +49,13 @@ impl ServerHandler for LibrarianServer {
             .map(|t| {
                 let schema = t.input_schema();
                 let schema_obj = schema.as_object().cloned().unwrap_or_default();
+                // No annotations here, deliberately. This binary's tools implement
+                // `librarian::tools::Tool` (src/librarian/tools/mod.rs:331), a separate
+                // 5-method trait — not `crate::tools::Tool`, which is where
+                // `annotations()` lives. Adding the method to this trait today would ship
+                // a default no impl overrides, i.e. `cluster/declared-not-wired`.
+                // Annotating the 15 standalone tools is its own change; see
+                // `resume-tool-surface-structural-mechanisms:SM-1`.
                 McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
             })
             .collect();

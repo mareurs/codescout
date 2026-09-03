@@ -14,6 +14,12 @@ impl Tool for CreateFile {
         "create_file"
     }
 
+    /// `destructive` stays at its `true` default: `overwrite: true` replaces an existing
+    /// file.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::writer_closed()
+    }
+
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

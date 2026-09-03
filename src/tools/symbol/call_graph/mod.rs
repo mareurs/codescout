@@ -345,6 +345,10 @@ impl Tool for CallGraph {
         "call_graph"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Transitive call graph for a symbol. `direction`: callers (blast radius), \
          callees (outbound), both. `max_depth=3` default. Edges tagged \

@@ -68,6 +68,10 @@ impl Tool for Symbols {
         "symbols"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
         // Two guides, one slot, chosen by what this result is.
         //

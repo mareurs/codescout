@@ -203,6 +203,11 @@ impl Tool for References {
     fn name(&self) -> &str {
         "references"
     }
+
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Find all usages of a symbol. Requires symbol and file."
     }

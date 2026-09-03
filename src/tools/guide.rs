@@ -38,6 +38,10 @@ impl Tool for GetGuide {
         "get_guide"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Deep guidance for a topic; call with no args to list every topic + one-line summaries. \
          Covers librarian/trackers, error-handling, progressive-disclosure, workspace-state, \

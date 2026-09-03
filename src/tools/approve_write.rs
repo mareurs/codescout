@@ -12,6 +12,14 @@ impl Tool for ApproveWrite {
         "approve_write"
     }
 
+    /// Additive and in-process: grants a session write root, never revokes one, and the
+    /// same path twice leaves the same state. **Not** `readOnlyHint: true` — this is the
+    /// call that widens the write sandbox, so a client filtering on that hint to decide
+    /// what to auto-approve must not auto-approve it.
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::additive_closed()
+    }
+
     fn description(&self) -> &str {
         "Grant write access to a directory outside the project root for this session. \
          Session-scoped — cleared on server restart. Call before edit_file, create_file, \

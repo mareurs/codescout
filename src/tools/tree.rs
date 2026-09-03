@@ -23,6 +23,10 @@ impl Tool for Tree {
         "tree"
     }
 
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
     fn description(&self) -> &str {
         "Explore the filesystem. With `glob` set, returns matching files (e.g. '**/*.rs'). Without `glob`, lists directory entries (recursive optional). Respects .gitignore."
     }
