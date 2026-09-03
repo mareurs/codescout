@@ -1,12 +1,13 @@
 ---
-id: af3a7ffe8626562c
+id: 288a1c5fcda2e73d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a heading query without its `#` markers cannot reach the exact tiers, so an earlier heading merely containing the word wins'
 owners:
 - marius
 tags:
 - cluster/truncated-window-ordered-by-the-wrong-key
+closed: 2026-09-03
 opened: 2026-09-03
 severity: medium
 ---
@@ -173,11 +174,12 @@ firing inside the ledger that defines `IC-6`, twice in one day, on two different
 
 ## Fix
 
-**Primary defect FIXED on `experiments`. The disclosure half is NOT, so this file stays open** —
-see *Still owed* below. Archiving requires both.
+**FIXED on `experiments`, both halves, each with a regression test and a green gate.**
 
-- **SHA** `205a04d4818c4f1ab3a1979fa9783f920c1a05b8` (on `experiments`)
-- **patch-id** `37615c490a973b822fa41eab49d56492904b4d04`
+| half | SHA | patch-id |
+|---|---|---|
+| reachability — a bare query can reach the exact tiers | `205a04d4818c4f1ab3a1979fa9783f920c1a05b8` | `37615c490a973b822fa41eab49d56492904b4d04` |
+| disclosure — a fuzzy bind is visible on both surfaces | `2e563a889f130876922da955ea5fcc2952da64d9` | `494c7dc8cd52c7cb003faa3c75c974110005a2b2` |
 
 **What shipped — direction 1 of the two below, and it cost nothing.** The trade-off this section
 originally described turned out not to exist. Normalising is confined to **tier 2**: a new
@@ -193,14 +195,28 @@ the silent document-order pick it replaces.
 Direction 2 (rank tiers 3/4 by match quality) was **not** taken and is not needed for this
 defect. Left recorded because it remains the answer if level-sensitivity ever has to move.
 
-### Still owed — the third remedy, and it survives this fix
+### The second half — disclosure, and why it was worth a separate remedy
 
-When resolution goes through tier 3 or 4, **name the heading that was actually bound** — in the
-error as well as on the success path. Tiers 3 and 4 remain for convenience, so a fuzzy bind can
-still happen and is still silent on `doc(action="get")`, whose `body_meta.heading` echoes the
-*request*. `read_file` already discloses it. This is what the second instance under `## Evidence`
-argues for, and it is a second **remedy**, not a second claim — so it belongs here rather than in
-a new file.
+Tiers 3 and 4 stay for convenience, so a fuzzy bind still happens after the reachability
+fix; what no longer remains is the caller being unable to see it. `SectionResult` gained
+`heading_text` (populated in all four constructors — markdown, TOML section, TOML key-path,
+YAML). `edit_markdown` builds its `diag_label` from `range.heading_text` and appends
+`(resolved from "<query>")` when the two differ, which corrects all three miss messages at
+one site. `get.rs`'s `find_heading_section` returns `(content, bound_heading)` and the
+single-`heading=` path reports the bound value.
+
+**The two halves of this defect fail in opposite directions, and only one of them is loud —
+which is the transferable part.** `edit_markdown` **errors**: the message is a true statement
+about the section it bound and reads as a false one about the section the caller meant, so
+the reporting session re-read a correct `old_string` twice before questioning the heading.
+`doc(action="get")` **succeeds**: real body, real content, `body_meta.heading` echoing the
+request, nothing signalling anything at all. The loud half was reported by a peer within
+hours of being hit. The silent half sat unnoticed until someone tripped over it while doing
+something else. **The silent half is worth more per line of fix**, and it is the one that
+looks harmless.
+
+Direction 2 (rank tiers 3/4 by match quality) remains **not taken** and is not needed.
+Recorded because it stays the answer if level-sensitivity ever has to move.
 
 - **Normalise the query and the heading text** — strip leading `#`+space from both sides
   before the tier-1/2 comparisons. This makes `Index` an *exact* match for `## Index` and the
