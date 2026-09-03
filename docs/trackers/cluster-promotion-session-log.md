@@ -14,7 +14,7 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 7
+entry_high_water_F: 8
 entry_high_water_W: 3
 ---
 
@@ -53,6 +53,7 @@ entry_high_water_W: 3
 | F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
 | F-6 | 2026-09-01 | med | architectural | fixed-verified | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; four-class partition taken → IC-19/20/21/22, IC-13 16→9 |
 | F-7 | 2026-09-01 | med | tooling | **fixed-verified** | The ledger shipped without its corpus — 3 new classes published counts of 3/1/2 against **0 members at HEAD**; the gate reads the working tree, so a partial commit is invisible to it. Repaired; mechanism owed |
+| F-8 | 2026-09-03 | low | documentation | open | A refusal hint's stated condition (`edit_file` "without its `frontmatter` param") is **always true of the call it refuses** — the real discriminator is extent-bounded vs raw-text grammar. I reported the guard as broken; the guard is correct and deliberate. `IC-22` fit left unsettled rather than resolved by filing |
 
 ## Wins Index
 
@@ -689,6 +690,74 @@ ordinary unstaged edit, which is the state the test is useful in.
 
 **Rests on:** the measured `HEAD`-vs-worktree divergence above, and on the gate's own
 implementation reading the working tree — not on any claim about how the commit was made.
+
+## F-8 — a refusal hint's stated condition was always true of the call it refused, and I reported the guard as broken instead
+
+**Valid:** dated 2026-09-03
+
+**Observed:** In a user-facing report I wrote that `edit_file`'s librarian guard "refuses a
+**body-only** edit while its own hint says body edits work" — offered as a probable defect, on
+the evidence of exactly one refused call. Scouting the guard before the claim went any further
+showed the central assertion is **false**. Recording it because the retraction is the cheap
+part; the reason I made it is the reusable part.
+
+**Reality, read this session:**
+
+- `Access::FrontmatterWrite` is documented at `src/util/librarian_guard.rs:37-40` as *"A write
+  that touches frontmatter, **or one whose extent the caller cannot bound**"* — the second
+  clause is the whole answer and I had not read it.
+- `edit_file`'s text grammar passes that value **deliberately**
+  (`src/tools/edit_file/mod.rs:754-764`): a raw `old_string` may match *inside* the frontmatter
+  block, so the call cannot promise body-only without asserting a negative it has not
+  established. The comment says so and cites
+  `docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
+- `edit_markdown`'s heading-addressed path *can* bound its extent, so it computes
+  `access` from whether `frontmatter` is an object (`src/tools/markdown/edit_markdown.rs:1305-1309`)
+  and passes `BodyWrite`. That is why the identical edit went through as markdown grammar
+  moments after being refused as text grammar.
+
+So the asymmetry I read as a contradiction is a deliberate, documented, per-grammar
+conservatism with a bug file behind it, and `guard_not_librarian_managed` is behaving
+correctly.
+
+**What survives, and it is small:** the hint at `src/util/librarian_guard.rs:206-207` reads
+*"Reads and BODY edits are allowed directly — read_file, and `edit_file` without its
+`frontmatter` param, both work on this file."* `edit_file`'s **text** grammar has no
+`frontmatter` param at all, so the hint's stated condition is **always true of the very call it
+refuses**. The real discriminator is *extent-bounded (heading-addressed)* versus *extent-unbounded
+(raw text)*, and the hint names neither. A caller who follows it literally — as I did — takes a
+refused route and then reads the refusal as a contradiction, which is the loop this entry is.
+
+**Category:** documentation / diagnostic wording. **Severity:** low — one refused call, no
+data at risk, and the markdown grammar is right there. Raised above cosmetic only because the
+hint's failure mode is to send the reader hunting for a guard bug that does not exist.
+
+**Classification deliberately NOT made.** The shape resembles `IC-22` — the hint is composed
+from the file's state (`stamped_only`) with no knowledge of which grammar called, so it
+prescribes a route the caller structurally cannot take, which is `IC-22`'s fifth member almost
+exactly. Not filed as a member, on an argument `codescout-e2` (sessionId `63083c9e`) made the
+same evening about a sibling finding and which applies here unchanged: `IC-22`'s claim requires
+the named route to return plausible data so that following it reads as *progress*, and this
+reads as a *different error*; the entry already flags its grain question twice and warns against
+widening it as a side effect of a filing; and the class documents a refusal to cross the ≥3 bar
+by re-partitioning, since *"a promotion bought that way is indistinguishable, at the point of
+use, from one a real third instance earned."* Settling `IC-22`'s grain question is worth more
+than adding this to it. Left as an open question, not resolved by filing.
+
+**Why the scout was worth running at all — this is `R-19` live.** The trigger was not an edit;
+it was a *sentence*. The refusal had already happened, I had already routed around it, and the
+task was complete. What made it a seam is that I had put a specific, checkable claim about
+current code into a report to the user, from one observation and no reading. The skill's own
+carve-out says describing behaviour is Q&A but *asserting* a checkable fact is not — and the
+assertion here was wrong in its central claim while being right enough at the edges to survive
+casual scrutiny. **Nothing downstream would have caught it:** the guard is not under test from
+my side, the claim was in prose, and the next reader's most likely response is to trust it and
+either file a phantom bug or stop using `edit_file` on stamped files.
+
+**Status:** open — the hint wording is unfixed and unowned. Fixing it is a one-line change at
+`src/util/librarian_guard.rs:206-207` naming the grammar rather than the parameter; whoever
+takes it should decide the `IC-22` grain question first, because the answer determines whether
+this is a wording fix or a member.
 
 ## Template for new entries
 
