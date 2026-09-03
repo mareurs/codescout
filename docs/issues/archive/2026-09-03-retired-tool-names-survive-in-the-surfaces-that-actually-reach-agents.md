@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
 - tool-surface-collapse
@@ -166,6 +166,10 @@ describing it.
 Step 5 is the load-bearing one — steps 1-4 fix instances, step 5 fixes the class.
 
 ## Fix applied 2026-09-03
+
+**Fixed by `3e8193a0`, patch-id `a6584765c1e76bfaea7b2697eb991b4e63571c2e`** (15 files, 519
+insertions). Gate at fix time: fmt 0, clippy 0, lean 0, default 0 — 8826 passed, 0 failed,
+90 ignored, both lanes.
 
 Both gates were written FIRST and observed RED over the real instances before anything was
 corrected — `reader_docs_…` at 23 violations, `runtime_strings_…` at 2 — then green.
