@@ -1,14 +1,14 @@
 ---
-status: open
-opened: 2026-09-03
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
-kind: bug
-unverified: 'which commit narrowed the allowance is inferred from history, not measured by running the pre-fold code'
+closed: null
+opened: 2026-09-03
+owner: marius
+related: []
+severity: medium
+unverified: which commit narrowed the allowance is inferred from history, not measured by running the pre-fold code
 ---
 
 # BUG: the librarian guard refuses `edit_file`'s text grammar on a stamped artifact while its own hint promises that call works
@@ -164,6 +164,25 @@ step `get_guide("project-activation-bootstrap")` § Phase 0 exists for.
 
 SHA: *pending.* patch-id: *pending.*
 
+
+**Fixed 2026-09-03.** Root cause confirmed at the source: `read_edit_target` in
+`src/tools/edit_file/mod.rs` passes `Access::FrontmatterWrite` unconditionally for every
+plain-text-grammar write (it cannot prove its `old_string` stays out of the frontmatter
+block), while `src/tools/markdown/edit_markdown.rs::edit` passes `Access::BodyWrite` for the
+heading grammar (provably scoped to one section). The restriction itself is deliberate and
+correct — Iron Law 5 already routes markdown edits to the heading grammar. Only the message
+was wrong. Corrected the `stamped_only` hint in `guard_with_oracle`
+(`src/util/librarian_guard.rs`) to name grammar (heading vs. plain text) as the discriminator
+instead of the `frontmatter` param's presence, and added
+`the_stamped_hint_names_grammar_not_the_frontmatter_param_as_the_discriminator` pinning the
+corrected wording.
+
+Committed at `81bed596`, patch-id `81b10af7d03e05e1037868f51384a1f243d86bf5`. Gate green on
+`experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features
+local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
+--workspace` — exit 0 on all four (one default-lane run hit the already-tracked flaky
+`run_exits_after_idle_timeout_with_no_connections` (`ee9d8d80ad5ecdc8`) under heavy concurrent
+load; a clean retry passed 5113/5113).
 ## Tests added
 
 None. A regression test is the unmatchable-`old_string` probe above: it asserts the guard's
