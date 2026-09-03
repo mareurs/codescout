@@ -2,159 +2,193 @@
 id: '3e02f30a7b6a2ab3'
 kind: bug
 status: open
-title: 'BUG: doc(action="move") writes a stale snapshot to the destination and does not delete the source, while reporting moved: true'
+title: 'BUG: a peer''s pre-commit stash window makes another session''s atomic file read/rename operate on the wrong bytes — or on no file at all'
 owners:
 - marius
 tags:
-- cluster/record-asserts-an-unchecked-completion
+- cluster/transient-shared-state-lies-to-readers
 opened: 2026-09-03
 severity: high
 ---
 
-# BUG: `doc(action="move")` writes a stale snapshot to the destination and does not delete the source, while reporting `moved: true`
+# BUG: a peer's pre-commit stash window makes another session's atomic file read/rename operate on the wrong bytes — or on no file at all
+
+> **This file was filed 2026-09-03 with the wrong cause and broadcast to five sessions before
+> being retracted the same hour.** It originally claimed `doc(action="move")` wrote a stale
+> snapshot and failed to delete its source. **That is false.** `src/librarian/tools/mv.rs:75`
+> is a bare `std::fs::rename(&old_full, &new_full)?` — one atomic syscall, no copy, no unlink —
+> which cannot produce a stale copy and cannot leave a source behind. The observations were
+> real; the mechanism was invented. The original slug and its `IC-8` tag are withdrawn.
 
 ## Summary
 
-Archiving a bug file with `doc(action="move")` produced a destination file whose content
-**predated two `doc(action="update")` calls made minutes earlier**, and left the source file in
-place holding the current content. The response reported `"moved": true`, `"id_changed": true`,
-a `history_grafted` count, and a `stage_hint` instructing the caller to expect *"a single `R`
-rename line"* — none of which was true of what landed on disk.
+`pre-commit` stashes **all unstaged work in the repository** before running any hook, and
+restores it afterwards. On a shared checkout that opens a window, several times an hour, in
+which the working tree does not hold what its owner put there. Any *other* session reading or
+moving a file during that window silently operates on **HEAD bytes**, or on **no file at all**.
 
-**The non-deletion is the only reason no content was lost.** Had `move` deleted the source as
-its own `stage_hint` implies it does, the newer content would be gone with nothing to recover
-it from — the destination looks like a complete, well-formed bug file.
+The operation need not be racy in itself. `fs::rename` is atomic and still moved the wrong
+file: atomicity guarantees the operation is indivisible, never that its *input* is the one the
+caller meant.
 
 ## Symptom (Effect)
 
-`git status --short` after the move, where a single `R` was expected:
+Three distinct symptoms from one evening, each invisible to the party that caused it.
+
+**1. An archive move captures HEAD content.** `doc(action="move")` after two
+`doc(action="update")` calls left two files where a rename was expected:
 
 ```
-M  docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
-A  docs/issues/archive/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+M  docs/issues/<name>.md              295 lines — working content
+A  docs/issues/archive/<name>.md      279 lines — byte-identical to HEAD (52682ddd)
 ```
 
-Two files, both present, **differing**: source 15532 bytes / 295 lines, destination 14352
-bytes / 279 lines.
+The destination is a plausible, complete, well-formed bug file. Nothing about it looks wrong.
+
+**2. A tracked source file reports ABSENT to the compiler**, observed by session `66523284`:
 
 ```
-$ diff <archive> <source>
-< status: open                 |  > status: fixed
-<                              |  > closed: 2026-09-03
-< **Primary defect FIXED … The disclosure half is NOT, so this file stays open**
-                               |  > **FIXED on `experiments`, both halves…**
-< ### Still owed — the third remedy, and it survives this fix
-                               |  > ### The second half — disclosure, and why it was worth a separate remedy
+error[E0583]: file not found for module `reindex`
+  = help: to create the module `reindex`, create file "src/librarian/tools/reindex.rs"
 ```
 
-The destination is the file **as it stood before** `doc(action="update", patch={status,
-body_edits})` and `doc(action="update", patch={extra:{closed}})`, both of which had returned
-`"updated": true` and both of which were correctly present on disk at the source path.
+The file was present throughout — 73,951 bytes, `M` in git, their uncommitted work intact.
+Re-running clippy immediately: exit 0. **This is wider than reversion**: a tracked file
+reverted to HEAD would compile as an older file, not vanish. For some part of the window the
+path does not exist at all, and anything walking the tree sees a hole.
+
+**3. A frontmatter field written seconds earlier is missing after an archive move**, observed
+by session `9f839a8e` — same shape, an `edit_file(frontmatter=…)` write sitting unstaged when
+the rename ran.
 
 ## Reproduction
 
-`git rev-parse HEAD` → `66e7a563` on `experiments`. Live MCP, release binary built 23:28.
+Not deterministic — it is a race, and reproducing it means winning one:
 
-1. `doc(action="update", id=X, patch={status:"fixed", body_edits:[…]})` → `updated: true`
-2. `doc(action="update", id=X, patch={extra:{closed:"2026-09-03"}})` → `updated: true`
-3. Confirm on disk: source path carries both changes.
-4. `doc(action="move", id=X, new_rel_path="docs/issues/archive/…")` → `moved: true`
-5. Destination carries **neither** change; source still exists and still carries both.
+1. Session A leaves unstaged modifications to any file.
+2. Session B commits **anything**, anywhere in the repo.
+3. Session A reads, moves, compiles or hashes one of those files during the hook run.
+4. A gets HEAD bytes, or `ENOENT`.
 
-Not yet reduced to a minimal case — in particular it is not established whether step 1's
-`body_edits` is required, or whether any update followed by a move reproduces it.
+**A FAILED commit opens the window identically, and this is what breaks the obvious
+mitigation.** `pre-commit` stashes *before* any hook verdict, so a refused commit costs peers
+exactly what a successful one does — and a refusal invites an immediate retry, so the natural
+response to being blocked opens a second window seconds later. Confirmed in this session's own
+transcript, on a `ledger-counts` refusal:
+
+```
+[INFO] Stashing unstaged files to /home/marius/.cache/pre-commit/patch1788460537-3900173.
+refuse a stored count, or a class gaining a member it does not name…Failed
+[INFO] Restored changes from /home/marius/.cache/pre-commit/patch1788460537-3900173.
+```
+
+Session `2cb44cd3` decoded two windows 39 seconds apart from the patch-file epochs — 23:47:49
+(refused, rolled back, **no commit object exists**) and 23:48:28 (`fe6364bc`, succeeded).
+**A commit-log scan is therefore a lower bound on stash windows**, because refused commits
+leave nothing to scan.
 
 ## Environment
 
-Linux, `experiments`, codescout MCP over stdio, project `codescout`, catalog at
-`~/.local/share/librarian/catalog.db`. Six sessions share the checkout; the write lock was
-free at the time (verified via `/proc/locks` on `.codescout/write.lock`).
+Linux, `experiments`, six live codescout sessions in one checkout, `pre-commit` framework.
 
 ## Root cause
 
-**Unknown — not established, and this file deliberately does not guess.** What is measured is
-the divergence, not the mechanism. The shape is consistent with `move` sourcing the destination
-body from a catalog-held copy rather than re-reading the file at `abs_path`, but that is a
-hypothesis, and `src/librarian/tools/` has not been read for this. Whoever takes it should start
-by finding where `move` obtains the bytes it writes.
+`pre-commit`'s stash-unstaged-then-restore cycle is repository-wide and has no notion of other
+processes. It is correct in intent — hooks should see the index, not the working tree — and the
+intent does not survive a shared checkout.
 
-The second half — the source not being deleted — may be the same defect or a separate one. The
-response's own `stage_together` + `stage_hint` establish that deletion is intended: it tells the
-caller to expect `R`, and warns that `git add -u` "takes the deletion and never enumerates the
-addition", which is a statement about a deletion that did not occur here.
+**Exposure bound, contributed by `ffb95976`, and much narrower than "any read":** the stash
+touches only **unstaged** work. A file with no unstaged modifications is byte-identical to HEAD
+inside the window and outside it, so it cannot be affected. The exposed population is exactly
+*files carrying unstaged modifications, read by another session, during someone else's commit*
+— and it is checkable in advance: `git status --porcelain` on your inputs before a long read
+tells you whether you are exposed at all. Symptom 2 shows the bound is on *unstaged-ness*, not
+on tracked-ness: a tracked file with unstaged edits is squarely in scope.
 
-measured 2026-09-03 23:47: `diff`, `wc -l`, `ls -l` on both paths, quoted above.
+measured 2026-09-03 23:47–23:49: byte-identity of the captured destination against
+`git show 52682ddd:<path>` (279 lines, `status: open`, `Still owed`, no `closed:`), and
+`fe6364bc`'s committer timestamp `23:48:28+03:00` with `Session-Id` trailer `2cb44cd3` falling
+inside the window.
 
 ## Evidence
 
-### The response claimed a rename
+### `move` is innocent, established two independent ways
 
-```json
-{"id": "288a1c5fcda2e73d", "previous_id": "af3a7ffe8626562c", "id_changed": true,
- "history_grafted": {"events": 4, ...}, "moved": true,
- "stage_hint": "…then confirm that `git status --short` shows a single `R` rename line."}
-```
+- **By reading:** `src/librarian/tools/mv.rs:75`, `std::fs::rename`.
+- **By behaviour**, run by `2cb44cd3` as a disposable probe *specifically to test the
+  catalog-body hypothesis this file originally asserted*: create an artifact, rewrite its body
+  through `doc(action="update", patch={body_edits})` so the change goes via the catalog, then
+  move it. Destination carried the post-update body; source deleted. Three correct moves
+  against the one bad one, one exercising the exact implicated path.
 
-The graft is real — the catalog row at the new id resolves, carries `status: fixed`, and its
-`body` field holds the *current* Fix section. So **the catalog was right and the file it wrote
-was wrong**, which narrows the suspect surface to whatever serialises the body to the
-destination path.
+### The misleading symptom is the expensive part
 
-### The destination is a plausible, complete file
+*"file not found for module X"* reads as *"you deleted a source file"*. The natural response is
+to hunt for what you broke, or to restore from git — **which would destroy the reader's own
+uncommitted work in response to a phantom.** The standard diagnostic confirms the lie: reading
+the file again, at that instant, agrees that it is gone.
 
-It has valid frontmatter, a coherent body, and the correct new `id`. Nothing in it is
-malformed. A reader who did not diff it against the source would find no signal at all — which
-is what makes the missing deletion load-bearing rather than merely untidy.
+### A withdrawn contrast case
+
+`66523284`'s three clean archive moves were offered as a contrast supporting a timing/cache
+hypothesis. They are consistent with the false mechanism *and* with the true one, so they
+discriminated nothing — those moves simply did not coincide with a peer commit. Recorded as
+withdrawn rather than deleted: a corpus that keeps only the evidence which survived teaches
+nothing about how the wrong call gets made.
 
 ## Hypotheses tried
 
-1. **Hypothesis** — a peer had edited the source after the move. **Test** — `diff` direction:
-   the source is a strict superset of the destination's edits plus my two updates, and every
-   difference is one I authored. **Verdict** — rejected.
-2. **Hypothesis** — the updates never reached disk and only the catalog had them. **Test** —
-   `head -12` on the source before repair. **Verdict** — rejected; disk carried
-   `status: fixed` and `closed: 2026-09-03`.
+1. **Hypothesis** — `move` serialises a catalog-held body instead of re-reading `abs_path`.
+   **Test** — read `mv.rs`; then `2cb44cd3`'s behavioural probe. **Verdict** — **rejected**,
+   twice, independently. This was the filed claim, and it was broadcast to five sessions before
+   either test was run. The check skipped was one function body.
+2. **Hypothesis** — a longer gap between update and move lets a cache go stale. **Test** —
+   there is no cache. **Verdict** — rejected in mechanism, *correct in correlate*: a longer gap
+   is more time for a peer's commit to land inside it.
+3. **Hypothesis** — only non-atomic operations are exposed. **Test** — `fs::rename` is atomic
+   and was hit. **Verdict** — rejected; atomicity constrains the operation, not its input.
 
 ## Fix
 
-Not fixed. Repaired by hand for the one artifact: current source content re-stamped with the
-new catalog id, written to the archive path, source removed, re-staged as a true `R` rename
-(`66e7a563`).
+Not fixed. Directions, none free:
 
-Two things a fix owes, and they are separable:
-
-- **Write what is on disk**, or state at the refusal site that the caller must sync first.
-- **Delete the source, or stop claiming a rename.** Of the two, leaving the source is the
-  *safe* half — a fix that starts deleting without also fixing the staleness converts this
-  from a recoverable inconsistency into silent content loss.
+- **Stop stashing.** `pre-commit`'s reason for the stash is that hooks should see the index.
+  Several hooks here already read the index directly (`ledger-counts` via `git show :<path>`),
+  so the stash may be buying less than it costs on this repo.
+- **Advertise the window.** A marker file peers can check, converting a silent hazard into a
+  precondition of the same shape as `git status --porcelain`.
+- **Do not** derive a rule from the retracted mechanism. "Staleness before deletion" was
+  proposed while the false cause stood, sounded right, and is meaningless under the true one.
+  A plausible rule resting on a falsified model is worse than no rule — it survives on
+  plausibility and quietly certifies the wrong picture.
 
 ## Tests added
 
-None yet. A regression test must assert the destination is **byte-identical to the source as
-it stood immediately before the call** — not merely that it exists, is non-empty, or parses.
-Every one of those weaker assertions passes against the stale file this bug produced.
+None. A regression test would have to win a race deliberately.
 
 ## Workarounds
 
-After any `doc(action="move")`, diff the two paths before staging. If the source still exists,
-that is itself the signal — treat a non-`R` `git status` as a failed move rather than a
-staging mistake, which is the reading the `stage_hint` invites.
+`git status --porcelain <your inputs>` before a long read or a move. Clean ⇒ not exposed.
+Dirty ⇒ you are in the population, and a peer commit — **including one that fails** — can
+change what you read. After any move, diff both paths before staging; a non-`R` `git status`
+is a failed move, not a staging mistake.
 
 ## Resume
 
-Find where `move` obtains the destination bytes (`src/librarian/tools/`, the `move` action) and
-determine whether it re-reads `abs_path` or serialises a catalog-held body. Then decide whether
-the missing `unlink` is the same defect or a second one; the answer changes whether the fix is
-one change or two.
+Fold into `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` or
+supersede it. That file records the *loss* half; this adds that the window also feeds **wrong
+bytes to concurrent readers**, that **failed commits open it too**, and that a tracked file can
+report **ENOENT** rather than merely older content.
 
 ## References
 
-- Repaired in `66e7a563`; the archived artifact is `288a1c5fcda2e73d`.
-- `get_guide("librarian")` § *Archiving / Moving Trackers* documents the intended contract,
-  including the `R`-line expectation this call did not meet.
-- Class note: filed `IC-8` on the claim test — `moved: true`, `history_grafted`, and a
-  `stage_hint` describing a rename are a **record asserting a completed action that nothing
-  re-checked**, and the party best placed to notice is the one who later diffs the two files,
-  which nobody has reason to do. It is a new subsystem for that class (librarian artifact
-  moves; existing members are bug-file frontmatter and `status: taken` claims).
-
+- `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — same
+  mechanism, loss half, already open.
+- `src/librarian/tools/mv.rs:75` — the `fs::rename` that exonerates `move`.
+- Class note: retagged to `IC-12` (`transient-shared-state-lies-to-readers`) from a withdrawn
+  `IC-8`. `IC-8` was reasoned entirely from `moved: true` being a false record, and it was a
+  **true** one — the move happened, correctly, on the bytes present. `IC-12`'s claim fits
+  exactly, including its clause that *the standard diagnostic confirms the lie*.
+- Contributions: `2cb44cd3` (two-window decode, behavioural probe), `66523284` (the `E0583`
+  observation and the tracked-file-reports-absent widening), `ffb95976` (the unstaged-only
+  exposure bound), `9f839a8e` (third symptom).
