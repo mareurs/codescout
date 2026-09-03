@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - librarian
 - mcp-timeout
@@ -185,6 +185,21 @@ Recommendation: **B now, C when a third long-running tool appears.** A is a trap
 SHA: *(not fixed)*
 patch-id: *(not fixed)*
 
+
+**Fixed 2026-09-03, Option B as recommended.** `tool_skips_server_timeout` now takes `(name: &str,
+arguments: &Value)` and exempts `librarian` only when `arguments["action"] == "reindex"`, alongside
+the existing `index`/`index_library`/`run_command` names. The call site at `src/server.rs:1116`
+now passes the already-parsed `input` value. Updated the three existing name-only tests to the new
+signature (passing `&Value::Null` where the action doesn't matter), and added
+`librarian_reindex_skips_server_timeout_but_other_actions_dont`, which asserts the population
+directly — `reindex` exempt, `doctor`/`link_scan`/`context`/`audit_log` not — per this bug's own
+"Tests added" note that a bare-name test would not have discriminating power. Option C (a
+trait-level self-declaration) left for when a third long-running tool appears, as recommended.
+
+Committed at `b96cdcdf`, patch-id `58330ca1b355570d7f4497c23d07f1e495976520`. Gate green on
+`experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features
+local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
+--workspace` — exit 0 on all four.
 ## Tests added
 
 None yet. When fixed, note that a test of the form
