@@ -1357,10 +1357,18 @@ nothing currently tests a page containing two chunks of the same artifact.
 **What it does NOT fix, stated so a future run does not credit it wrongly.** At
 `cap=2 limit=10` the residual five misses are:
 
-- **AE-9 — unscorable.** It wants `IC-16`, and `issue-clusters.md` defines `IC`
-  entries as Index table rows plus per-class files under
-  `docs/trackers/issue-clusters/`, never as a `## IC-16 — ` heading. The scorer's
-  regex can never match it, at any policy.
+- **AE-9 — ~~unscorable~~ STALE GROUND TRUTH. Corrected 2026-09-04 (`f796c857`).**
+  The claim this bullet used to make — that `issue-clusters.md` defines `IC`
+  entries only as Index rows plus per-class files, so *"the scorer's regex can
+  never match it, at any policy"* — is **false**, and false in the direction that
+  stops the next person looking. The per-class file carries a real heading:
+  `docs/trackers/issue-clusters/IC-16-assertion-that-cannot-fail.md:14` reads
+  `## IC-16 — an assertion that cannot fail is zero coverage wearing a passing
+  test's clothes`. The suite was simply still pointing at the pre-split path.
+  Repointed; the case now **hits** at the shipped `cap=1 limit=5`. *"Structurally
+  impossible"* and *"aimed at the wrong file"* are indistinguishable from the
+  score and have opposite costs — the first retires a case, the second is a
+  one-line fix worth a full point.
 - **AE-11, AE-12 — mis-specified ground truth.** Both point at 256- and
   372-byte *evidence stubs* (a tool-call dump and a config table) rather than the
   prose that answers the query. For AE-11 the correct FILE already ranks 1, so
@@ -1376,6 +1384,36 @@ change will be measured against cases it structurally cannot reach.
 targets all *do* have vectors (checked against Qdrant, 11/11 scorable), and the
 embedder is *not* flat on prose — its rank1−rank500 spread on artifact prose is
 **0.1479** against **0.1384** on `code_chunks`, the domain it was benchmarked for.
+
+**Addendum 2026-09-04 — the mechanism claim above is now stronger, and one
+residual is discharged** (`f796c857`).
+
+The harness gained a per-case ground-truth pre-flight and five miss classes, so
+the *"re-point or retire before quoting"* instruction two paragraphs up no longer
+depends on anyone reading it: a case whose expected entry is not defined at its
+expected path is classed `unscorable`, named on stderr with the resulting cap on
+`hits@5`, and counted on stdout beside the score. Repointing AE-9 took the suite
+**3/12 → 4/12** and file-level **6/12 → 7/12** at the shipped policy.
+
+The classes also sharpen this entry's own mechanism claim rather than restating
+it. On the current corpus at `cap=1 limit=5` they read **hit=4, preamble=3,
+wrong_file=5 — and `wrong_entry=0`.** All three intra-file misses return the
+right file, twice at rank 1, with a chunk whose line maps to *no entry token at
+all*. So the preamble attractor is not the largest part of the intra-file loss,
+it is **the whole of it**; there is no ordinary within-document ranking failure
+left to explain.
+
+AE-11 and AE-12 stay mis-specified in the subtler way the new check **cannot**
+catch — the heading exists, it is just a byte-sized evidence stub rather than the
+prose answering the query, so a structural check passes and the case still cannot
+score. That half of the instruction stands.
+
+**And a caveat on comparing any number here:** the catalog is live and shared.
+`artifact_chunk` moved 35,508 → 35,533 rows inside a single turn as peer sessions
+reindexed, and two runs twenty minutes apart returned 2/12 and 3/12 while three
+back-to-back runs agreed exactly. Pin a comparison to one run window, or record
+the chunk-row count beside the score.
+
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
