@@ -1550,6 +1550,21 @@ fn next_fn() {
     let y = 2;
 }
 ";
+    // The BARE `//` on the fixture's comment line is the whole point of this test, and
+    // the detail is machine-checked rather than merely annotated: change it to `///` and
+    // this test becomes a duplicate of
+    // `extract_fn_body_excludes_the_next_functions_leading_doc_comment`, silently ceasing
+    // to guard the bare-`//` half of `extract_fn_body`'s back-up walk. Measured in round
+    // 3's re-review: `//` -> `///` in the fixture, plus narrowing the production check to
+    // `starts_with("///") || starts_with("//!")`, left the suite fully green.
+    //
+    // This assertion guards the FIXTURE, not the production path — the two `!contains`
+    // assertions below are what exercise `extract_fn_body`. It buys exactly one thing:
+    // the load-bearing detail can no longer be removed silently.
+    assert!(
+        fixture.contains("\n// note"),
+        "fixture must keep a BARE `//` comment line, not `///` or `//!`"
+    );
     let body = extract_fn_body(fixture, "target_fn").expect("target_fn should be found");
     assert!(
         !body.contains("belongs to the NEXT function"),
@@ -1580,7 +1595,13 @@ fn next_fn() {
 /// comment reading `// we assert so` — and the paren-depth counter would then swallow
 /// following lines as if they were part of a real call. Lines whose trimmed form
 /// starts with `//` are skipped entirely before the trigger check, so a comment can
-/// never open (or, via its own stray `(`, corrupt the depth of) an assertion span.
+/// never open (or, via its own stray `(`, corrupt the depth of) an assertion span. Two
+/// separate guards, because the CALL SITE and the RULE are different sites and
+/// `opens_assert_call`'s own test cannot see a dead call:
+/// `assertion_lines_trigger_uses_the_word_boundary_matcher_at_its_call_site` (the call
+/// below) and `assertion_lines_skips_a_comment_line_that_merely_mentions_assert` (the
+/// `//` skip). Through round 3 the call site had no guard of its own and reverting it
+/// alone left the suite green.
 ///
 /// [`marker_is_asserted`] searches this text, not the whole body: searching the whole
 /// body let deleting the very assertion a row cites still pass, because the marker's
@@ -1615,22 +1636,33 @@ fn next_fn() {
 /// to the lax direction.
 ///
 /// Remaining known limits, in full — naming only one here would imply the others are
-/// handled:
-/// - **Cross-assertion laxity**: a marker string present in the condition arguments of
-///   some OTHER assertion in the same body — not the one actually exercising the cap —
-///   still satisfies [`marker_is_asserted`], because this function concatenates every
-///   recognised assertion's condition text rather than requiring one specific
-///   assertion to carry the whole marker. Neither of this gate's two live rows depends
-///   on this laxity.
-/// - **Not string-literal-aware**: [`condition_args`] scans `block` as raw text, not as
-///   Rust tokens, so a top-level comma or paren INSIDE a string literal in the
-///   condition (`assert_eq!(a, "x, y")`) can truncate the kept text or mis-scope the
-///   span. Every constructible case traced so far narrows (a false RED, the safe
-///   direction) rather than widens — see `condition_args_string_literal_hazards` for
-///   the traced cases — but this file's own `src/tools/edit_file/tests.rs` fixtures at
-///   `:3758` and `:3791` write `assert!(x, "msg")` as Rust STRING DATA, which
-///   `opens_assert_call` still opens a span on; harmless while neither is a
-///   `cited_test`, and a real hazard for any future citation search of the corpus.
+/// handled. Each is either pinned by a named test below or explicitly marked untested;
+/// three consecutive rounds shipped a false claim in this very block, so an unmarked
+/// claim here is a defect in its own right:
+/// - **Cross-assertion laxity** *(untested — traced, no fixture)*: a marker string
+///   present in the condition arguments of some OTHER assertion in the same body — not
+///   the one actually exercising the cap — still satisfies [`marker_is_asserted`],
+///   because this function concatenates every recognised assertion's condition text
+///   rather than requiring one specific assertion to carry the whole marker. Neither of
+///   this gate's two live rows depends on this laxity (checked by reading both bodies;
+///   no test enforces that it stays so).
+/// - **Not string-literal-aware, in BOTH directions**: [`condition_args`] scans `block`
+///   as raw text, not as Rust tokens, so a comma or paren INSIDE a string literal is
+///   indistinguishable from a real argument separator. The common cases narrow (a false
+///   RED, the safe direction) — `condition_args_string_literal_hazards`. **But not all
+///   of them**: an unbalanced `(` inside a condition's string literal, paired with a `)`
+///   in the message, WIDENS the kept text to include message content — a false GREEN,
+///   the dangerous direction, recorded with a worked input by
+///   `condition_args_string_literal_widening_is_a_known_vector`. Round 3's claim that
+///   this limit only ever produces a false RED was wrong and is withdrawn; see
+///   [`condition_args`]' own doc comment for why it is documented rather than fixed, and
+///   for what Task 5c must therefore avoid citing.
+/// - **Fixture text that is not code** *(untested — a corpus property, not a code
+///   property)*: the CORPUS's `src/tools/edit_file/tests.rs:3758` and `:3791` write
+///   `assert!(x, "msg")` as Rust STRING DATA, which [`opens_assert_call`] still opens a
+///   span on. Harmless while neither is a `cited_test`, and a real hazard for any future
+///   citation search of the corpus. (Round 3 wrote "this file's own …" of a file that is
+///   not this one.)
 fn assertion_lines(body: &str) -> String {
     let mut out = String::new();
     let mut depth: i32 = 0;
@@ -1661,51 +1693,128 @@ fn assertion_lines(body: &str) -> String {
     out
 }
 
-// `ASSERT_MACROS` is CODE, not a comment: `opens_assert_call` returns `true` on this
-// very declaration line (it contains the literal text `"assert!"` etc. at a word
-// boundary), and after round 3's fix `condition_args` reads the token from that same
-// line. `tracked_src_files()` currently scopes the gate to `src/`, which excludes this
-// file (`tests/result_caps.rs`) from its own scan — but if that scope is ever widened
-// to include `tests/`, this line becomes matchable assertion text and the gate's own
-// token list would need re-checking against itself. No code change needed today; this
-// is the annotation `tracked_src_files_returns_rust_files_under_src_and_excludes_tests`
-// cannot express on its own.
-const ASSERT_MACROS: [&str; 4] = ["assert!", "assert_eq!", "assert_ne!", "debug_assert!"];
+// `ASSERT_MACROS` is CODE, not a comment: `opens_assert_call` returns `true` on each of
+// this table's four entry lines (each contains the literal text `"assert!"` etc. at a
+// word boundary), and as of round 4 `condition_args` takes its token, that token's byte
+// offset AND its `keep` count from this one table via `first_assert_token`.
+// `tracked_src_files()` currently scopes the gate to `src/`, which excludes this file
+// (`tests/result_caps.rs`) from its own scan — but if that scope is ever widened to
+// include `tests/`, these lines become matchable assertion text and the gate's own token
+// list would need re-checking against itself. No code change needed today; this is the
+// annotation `tracked_src_files_returns_rust_files_under_src_and_excludes_tests` cannot
+// express on its own.
+//
+// The second element is `keep`: how many LEADING arguments of that macro are
+// condition/value arguments rather than the failure message. Each entry is deliberately
+// its own mutable site — a `match tok { "assert_eq!" | "assert_ne!" => 2, _ => 1 }` would
+// read identically and collapse four sites into two, making "is `assert_ne!`'s keep
+// guarded?" unanswerable separately from `assert_eq!`'s. One test per entry:
+// `condition_args_assert_keeps_only_the_first_argument`,
+// `condition_args_assert_eq_keeps_only_the_first_two_arguments`,
+// `condition_args_assert_ne_keeps_only_the_first_two_arguments`,
+// `condition_args_debug_assert_keeps_only_the_first_argument`.
+const ASSERT_MACROS: [(&str, usize); 4] = [
+    ("assert!", 1),
+    ("assert_eq!", 2),
+    ("assert_ne!", 2),
+    ("debug_assert!", 1),
+];
 
-/// True when `line` contains one of [`ASSERT_MACROS`] at a word boundary — the
-/// character immediately before the match, if any, is not alphanumeric or `_`. Guards
+/// The EARLIEST [`ASSERT_MACROS`] entry occurring in `line` at a word boundary — the
+/// character immediately before the match, if any, is not alphanumeric or `_` — returned
+/// as `(byte offset, token, keep)`.
+///
+/// This is the ONE matcher over the assert-macro namespace. [`opens_assert_call`] is its
+/// `.is_some()`, and [`condition_args`] takes the offset and the `keep` count straight
+/// from it, so the trigger that admits a block and the parser that narrows it can no
+/// longer disagree. They did for three rounds: `opens_assert_call` was word-boundary
+/// aware while `condition_args` ran its own bare `contains`/`find` pair, and every time
+/// they disagreed the resolution was toward widening.
+///
+/// Selection is POSITIONAL, not by name preference — this is the round-4 fix. The
+/// superseded chain (`if first_line.contains("assert_eq!") … else if …
+/// contains("assert!")`, then `find`) picked the macro by NAME, so in
+/// `assert!(x.is_ok(), "see assert_eq!(a, b) docs")` the `assert_eq!` branch won on a
+/// substring of the failure MESSAGE, `find` landed inside that message, and the extracted
+/// "condition" was the message's own text with the real condition dropped — a false
+/// GREEN. Earliest-wins makes `assert!` at column 0 beat `assert_eq!` at column 20. Both
+/// demonstrated vectors are pinned by
+/// `condition_args_prefers_the_earliest_token_over_a_later_one_in_the_message` and
+/// `condition_args_prefers_the_earliest_token_when_a_later_one_hides_in_a_trailing_comment`.
+fn first_assert_token(line: &str) -> Option<(usize, &'static str, usize)> {
+    ASSERT_MACROS
+        .iter()
+        .filter_map(|(tok, keep)| {
+            line.match_indices(tok)
+                .find(|(idx, _)| {
+                    !matches!(line[..*idx].chars().next_back(), Some(c) if c.is_alphanumeric() || c == '_')
+                })
+                .map(|(idx, _)| (idx, *tok, *keep))
+        })
+        .min_by_key(|(idx, _, _)| *idx)
+}
+
+/// True when `line` contains one of [`ASSERT_MACROS`] at a word boundary — a thin
+/// `.is_some()` over [`first_assert_token`], which is where the matching happens. Guards
 /// [`assertion_lines`]'s trigger against `assertions`, `asserted`, `reassert`, and
-/// similar tokens that contain `assert` as a substring but do not open a real macro
-/// call.
+/// similar tokens that contain `assert` as a substring but do not open a real macro call.
+///
+/// Two tests, because they answer different questions and neither answers the other's:
+/// `opens_assert_call_requires_a_word_boundary_before_the_token` checks the RULE by
+/// calling this function directly, and
+/// `assertion_lines_trigger_uses_the_word_boundary_matcher_at_its_call_site` checks that
+/// [`assertion_lines`] still CALLS it. A helper test cannot observe a dead call site —
+/// reverting the call at [`assertion_lines`] to `line.contains("assert")` left the whole
+/// suite green through round 3.
 ///
 /// Recognises exactly the four tokens in [`ASSERT_MACROS`] — `assert!`, `assert_eq!`,
 /// `assert_ne!`, `debug_assert!`. It does NOT recognise `debug_assert_eq!`,
 /// `debug_assert_ne!`, or `assert_matches!` (from the `assert_matches` crate): none of
-/// those tokens appear in the list, so a line using one of them never opens an
-/// assertion span at all. The failure direction is SAFE, not silent-lax: a
-/// `cited_test` whose only relevant check uses one of these unrecognised macros
-/// contributes no text to `marker_is_asserted`'s search, so the marker is not found and
-/// `probed_rows_cite_a_real_test` REDs for that row — confirmed after round 3's fix to
-/// `condition_args`'s fallbacks (`String::new()`, not `block.to_string()`); before that
-/// fix the fallback path made this distinction moot for the parts of the assertion
-/// `condition_args` couldn't parse, though an unrecognised macro name never reached
-/// `condition_args` at all since `opens_assert_call` gates entry into `assertion_lines`'
-/// block-accumulation in the first place.
+/// those tokens appears in the table, and the two `debug_assert_*` forms are additionally
+/// rejected by the word-boundary rule, since the `assert_eq!`/`assert_ne!` inside them is
+/// preceded by `_` — the half of the rule that `opens_assert_call_requires_a_word_boundary_before_the_token`'s
+/// `debug_assert_eq!` and `my_assert!` cases pin, and the only half where the predicate
+/// rather than the token list does the rejecting. The failure direction is SAFE rather
+/// than silently lax, and the
+/// reason is that THIS function gates entry into [`assertion_lines`]' block accumulation:
+/// a line using an unrecognised macro never opens a span, so it contributes no text to
+/// [`marker_is_asserted`]'s search at all, the marker is not found, and
+/// `probed_rows_cite_a_real_test` REDs for that row. Verified on the production path by
+/// `assertion_lines_contributes_nothing_for_an_unrecognised_assert_macro`.
+///
+/// (Round 3's doc comment attributed that safety to [`condition_args`]' `String::new()`
+/// fallbacks. The DIRECTION claim was and remains true; the ATTRIBUTION was wrong —
+/// [`condition_args`] is never reached at all for an unrecognised macro name, because
+/// this function gates entry first.)
 fn opens_assert_call(line: &str) -> bool {
-    ASSERT_MACROS.iter().any(|tok| {
-        line.match_indices(tok).any(|(idx, _)| {
-            !matches!(line[..idx].chars().next_back(), Some(c) if c.is_alphanumeric() || c == '_')
-        })
-    })
+    first_assert_token(line).is_some()
 }
 
 #[test]
 fn opens_assert_call_requires_a_word_boundary_before_the_token() {
     // M9's reverted trigger (`line.contains("assert")`, no word-boundary check) would
     // fire on `assertions_ok` even though no `(` ever follows `assert` as a real macro
-    // token here — this line must NOT open a span under the word-boundary rule.
+    // token here. Note what this pair does and does NOT discriminate: `assertions_ok`
+    // contains no ASSERT_MACROS token as a SUBSTRING at all (no `!`), so it is rejected
+    // by the token LIST and the boundary predicate is never consulted. Round 4 measured
+    // this: deleting the boundary predicate outright left the whole suite green on these
+    // two lines alone.
     assert!(!opens_assert_call("let assertions_ok = true;"));
     assert!(opens_assert_call("assert!(x.contains(\"cap\"));"));
+
+    // These are the cases where the WORD-BOUNDARY PREDICATE is the only thing doing the
+    // rejecting — the token IS present as a substring, preceded by `_`. Without the
+    // predicate, `debug_assert_eq!` would be parsed as an `assert_eq!` starting at offset
+    // 6 (keep 2), which is exactly the recognition `opens_assert_call`'s doc comment says
+    // does not happen, and `my_assert!` as an `assert!` at offset 3.
+    assert!(
+        !opens_assert_call("debug_assert_eq!(a, b);"), // LOAD-BEARING: `assert_eq!` is a substring of `debug_assert_eq!` at offset 6, preceded by `_`. This is the only test in the file where the boundary predicate, not the token list, decides.
+        "debug_assert_eq! is not in ASSERT_MACROS and its inner assert_eq! is preceded by `_`"
+    );
+    assert!(
+        !opens_assert_call("my_assert!(x, \"msg\");"), // LOAD-BEARING: same shape for a project-local wrapper — `assert!` at offset 3 preceded by `_`.
+        "a project-local wrapper must not be parsed as the bare macro it wraps"
+    );
 }
 
 #[test]
@@ -1727,39 +1836,117 @@ fn assertion_lines_excludes_the_failure_message_argument() {
     assert!(!assertion_lines(body).contains("message_only_token"));
 }
 
+#[test]
+fn assertion_lines_trigger_uses_the_word_boundary_matcher_at_its_call_site() {
+    // Guards the CALL SITE inside `assertion_lines`, not the RULE.
+    // `opens_assert_call_requires_a_word_boundary_before_the_token` calls the helper
+    // directly, so it stays green when the call below is reverted to
+    // `line.contains("assert")` — an alarm nothing reaches. Through round 3 that revert,
+    // done alone, left the whole suite green.
+    //
+    // Under the reverted trigger, line 0 opens a span (it contains "assert" inside
+    // `reassert`) that swallows the real `assert!` on line 1; `condition_args` then reads
+    // its token from line 0, finds none, and fails safe to an empty string — so the
+    // marker the real trigger keeps is dropped.
+    let body =
+        "let reassert = compute(\n    assert!(z.contains(\"call_site_marker\"), \"msg\"),\n);\n"; // LOAD-BEARING, both details: "assert" appears only inside the longer identifier `reassert` (no word-boundary macro token), AND line 0 leaves a paren open. Close that paren, or rename `reassert`, and this test passes under the reverted trigger too, silently ceasing to guard the call site.
+    assert!(
+        assertion_lines(body).contains("call_site_marker"),
+        "the real assert! on line 1 must open its own span; got: {:?}",
+        assertion_lines(body)
+    );
+}
+
+#[test]
+fn assertion_lines_contributes_nothing_for_an_unrecognised_assert_macro() {
+    // Pins the "fails SAFE" direction claimed on `opens_assert_call`'s doc comment, and
+    // pins it on the production path rather than at the helper: `assert_matches!` is not
+    // in `ASSERT_MACROS`, so this line never opens a span at all and contributes no
+    // searchable text. A row citing such a test would RED in
+    // `probed_rows_cite_a_real_test` rather than be silently certified on message text.
+    let body = "assert_matches!(x, Ok(v) if v.contains(\"unrecognised_macro_marker\"));\n"; // LOAD-BEARING: the macro must be one absent from `ASSERT_MACROS`. Swap in `assert!` and this test asserts the opposite of what it is named for.
+    assert!(!assertion_lines(body).contains("unrecognised_macro_marker"));
+}
+
 /// Narrows a complete assertion span (as accumulated by [`assertion_lines`], one macro
 /// call's lines with balanced parens) to just its value/condition arguments, splitting
-/// the macro's argument list on TOP-LEVEL commas (paren depth 1, relative to the
-/// macro's own opening `(`): `assert!`/`debug_assert!` keep argument 0 only;
-/// `assert_eq!`/`assert_ne!` keep arguments 0 and 1. Any OTHER shape reaching the three
-/// fallback points below returns an EMPTY string rather than the block unchanged — the
-/// FAIL-SAFE direction, not "conservative": returning the block let a failure-message
-/// argument (or, before round 3, an entire unparseable span) stay searchable, which is
-/// the exact laxity this function exists to remove. Three routes reach a fallback in
-/// practice, not "should not happen": (1) `opens_assert_call` accepted the line but
-/// none of the four token substrings is found on the block's first line — reachable if
-/// `assertion_lines`' line-0-only invariant is ever violated; (2) the token is found
-/// but no `(` follows it before the block ends; (3) paren-depth tracking never closes
-/// (an unbalanced block). This is what excludes a macro's failure-message argument from
-/// the text [`marker_is_asserted`] searches.
+/// the macro's argument list on TOP-LEVEL commas (paren depth 1, relative to the macro's
+/// own opening `(`). WHICH macro, WHERE it starts and HOW MANY arguments to keep all come
+/// from [`first_assert_token`] — the same matcher [`opens_assert_call`] uses, so this
+/// function can no longer disagree with the trigger that admitted the block. This is what
+/// excludes a macro's failure-message argument from the text [`marker_is_asserted`]
+/// searches.
 ///
-/// **Not string-literal-aware (M7).** The top-level-comma and paren-depth scan below
-/// reads `block` as raw bytes, not Rust tokens, so a comma or paren INSIDE a string
-/// literal in the condition (`assert_eq!(a, "x, y")`) is indistinguishable from a real
-/// argument separator. Every constructible case traces as NARROWING — truncating the
-/// kept text early, never extending it past the macro's real closing paren — so the
-/// failure direction is a false RED (under-reporting), never a false GREEN; see
-/// `condition_args_string_literal_hazards` for the traced case. [`raw_string_lines`] was
-/// considered and is NOT reusable here: it classifies whole LINES as inside/outside a
-/// RAW string literal (`r"..."`, `r#"..."#`) for a caller that reads source
-/// declaration-by-line, where this function's hazard is an ordinary `"..."` literal
+/// Any shape reaching one of the three fallback points below contributes an EMPTY string
+/// rather than the block unchanged — the FAIL-SAFE direction, not "conservative":
+/// returning the block let a failure-message argument (or, before round 3, an entire
+/// unparseable span) stay searchable, which is the exact laxity this function exists to
+/// remove. The three routes, each with what reaches it and the test that pins it:
+///
+/// 1. **No recognised token on line 0.** Pinned by
+///    `condition_args_returns_empty_for_an_unrecognised_macro_rather_than_the_whole_block`.
+///    UNREACHABLE from [`assertion_lines`] as of round 4, by construction rather than by
+///    test: the block's line 0 is exactly the line `opens_assert_call` fired on, and both
+///    now consult [`first_assert_token`], so a `Some` there implies a `Some` here.
+///    Reachable only by calling this function directly, as that test does.
+/// 2. **Token found, but no `(` follows it anywhere in the block.** Pinned by
+///    `condition_args_returns_empty_when_the_token_is_never_invoked`, which asserts both
+///    directly and through [`assertion_lines`]. Reachable from [`assertion_lines`]: a
+///    line that NAMES a macro without calling it has balanced (zero) parens, so the span
+///    closes on that same line and arrives here.
+/// 3. **Paren-depth tracking never closes** — the `_` arm of the final `match`. Pinned by
+///    `condition_args_returns_empty_when_the_call_never_closes`. This is the ONLY route
+///    that reaches that arm; routes 1 and 2 `return` early. Reachable from
+///    [`assertion_lines`] only by a CONTRIVED shape — the block's parens must balance (so
+///    the span closes and this function runs) while the parens after the macro's own `(`
+///    must not, which takes a stray `)` before the token. That test carries the worked
+///    fixture and asserts it through [`assertion_lines`] as well as directly. A round-3
+///    draft of this comment attributed the route to a string literal's unbalanced `(`;
+///    that is wrong, because such a block does not close in [`assertion_lines`] either
+///    and this function is then never called.
+///
+/// A FOURTH route existed through round 3 and is now structurally gone rather than merely
+/// untested: `first_line.find(tok)` re-ran the same search on the same haystack that
+/// `first_line.contains(tok)` had just succeeded on, so its `else` branch was dead code.
+/// [`first_assert_token`] returns the offset together with the token; there is nothing
+/// left to re-find.
+///
+/// **Not string-literal-aware, and this is a KNOWN FALSE-GREEN vector — a round-4
+/// correction, not a restatement.** The scan below reads `block` as raw bytes, not Rust
+/// tokens, so a comma or paren INSIDE a string literal is indistinguishable from a real
+/// argument separator. Round 3's doc comment claimed *"every constructible case traces as
+/// NARROWING … the failure direction is a false RED, never a false GREEN"*. **That claim
+/// is FALSE and is withdrawn.** An UNBALANCED `(` inside a condition's string literal
+/// raises the depth past 1, so the real argument comma is not counted; a later `)` inside
+/// the MESSAGE brings depth back to 1, and the next comma there terminates the keep —
+/// pulling message text into the searched region. Recorded, with a worked input, by
+/// `condition_args_string_literal_widening_is_a_known_vector`, which asserts today's
+/// WRONG output on purpose. The narrowing cases (the common ones) are traced by
+/// `condition_args_string_literal_hazards`.
+///
+/// **No fix is attempted for that vector, deliberately.** A correct answer needs a Rust
+/// tokenizer; widening this parser until the vector went green is what each of the
+/// previous three rounds did in a different place, and each widening was the round after's
+/// defect. Consequence for callers, stated at the refusal site rather than left implicit:
+/// a `Coverage::Probed` row whose `cited_test` asserts through a string literal
+/// containing an unbalanced `(` may be certified on message text — so **Task 5c must not
+/// cite such an assertion**, and the guarantee `Coverage::Probed`'s doc comment makes is
+/// bounded by this. Neither of the two live rows is affected: both are rustfmt-wrapped
+/// with the macro alone on line 0 and neither condition contains a string literal.
+///
+/// [`raw_string_lines`] was considered and is NOT reusable here: it classifies whole LINES
+/// as inside/outside a RAW string literal (`r"..."`, `r#"..."#`) for a caller that reads
+/// source declaration-by-line, where this function's hazard is an ordinary `"..."` literal
 /// embedded WITHIN one already-extracted single- or multi-line block, and needs a
-/// byte-position judgement inside a line, not a line classification — different
-/// literal kind, different granularity, and the wrong axis to build on rather than
-/// duplicate. This file's own `src/tools/edit_file/tests.rs:3758` and `:3791` write
-/// `assert!(x, "msg")` as Rust STRING DATA — a real instance of `opens_assert_call`
-/// opening a span on fixture text that is not code — harmless today because neither is
-/// a `cited_test`, and the reason this limitation is documented rather than ignored.
+/// byte-position judgement inside a line, not a line classification — different literal
+/// kind, different granularity, and the wrong axis to build on rather than duplicate.
+///
+/// The CORPUS's own `src/tools/edit_file/tests.rs:3758` and `:3791` write
+/// `assert!(x, "msg")` as Rust STRING DATA — a real instance of [`opens_assert_call`]
+/// opening a span on fixture text that is not code — harmless today because neither is a
+/// `cited_test`, and a live hazard for Task 5c's citation search of that corpus. (Round 3
+/// wrote "this file's own …", which reads as `tests/result_caps.rs`; those fixtures live
+/// in a different file entirely.)
 fn condition_args(block: &str) -> String {
     // Only the macro's own line can open its call — `assertion_lines` only ever opens
     // a span on a line where `opens_assert_call` fired (see its doc comment), so the
@@ -1767,19 +1954,12 @@ fn condition_args(block: &str) -> String {
     // (message included) let a failure message that happens to contain the literal
     // text "assert_eq!" be misread as the macro invocation itself — fixed round 3,
     // guarded by `condition_args_selects_the_macro_token_from_the_first_line_only`.
+    //
+    // Round 4: WHICH token on that line is chosen positionally (earliest word-boundary
+    // match wins) by `first_assert_token`, not by name preference. See its doc comment
+    // for the two false-GREEN vectors the name-preference chain admitted.
     let first_line = block.lines().next().unwrap_or(block);
-    let (tok, keep): (&str, usize) = if first_line.contains("assert_eq!") {
-        ("assert_eq!", 2)
-    } else if first_line.contains("assert_ne!") {
-        ("assert_ne!", 2)
-    } else if first_line.contains("debug_assert!") {
-        ("debug_assert!", 1)
-    } else if first_line.contains("assert!") {
-        ("assert!", 1)
-    } else {
-        return String::new();
-    };
-    let Some(tok_start) = first_line.find(tok) else {
+    let Some((tok_start, tok, keep)) = first_assert_token(first_line) else {
         return String::new();
     };
     let Some(open_rel) = block[tok_start + tok.len()..].find('(') else {
@@ -1825,13 +2005,15 @@ fn condition_args(block: &str) -> String {
     }
     match (args_start, kept_end) {
         (Some(s), Some(e)) if e >= s => block[s..e].to_string(),
-        // An unrecognised shape (should not happen given `opens_assert_call`'s trigger
-        // list, but three routes can still reach here — see this function's own doc
-        // comment) fails SAFE: no searchable text is contributed at all, which is the
-        // same fail-safe direction an unrecognised macro name already takes above.
-        // Returning `block.to_string()` here was the LAX direction fix round 3 removed
-        // (defect (c)): it restored the round-1 behaviour of making a message argument
-        // searchable whenever this branch was reached.
+        // Route 3 of the three named in this function's doc comment, and the ONLY one
+        // that reaches this arm: paren-depth tracking never closed. Routes 1 and 2
+        // `return` early above, so `_` is not a catch-all for them. Fails SAFE: no
+        // searchable text is contributed at all, the same direction an unrecognised
+        // macro name already takes at `opens_assert_call`. Returning `block.to_string()`
+        // here was the LAX direction fix round 3 removed (defect (c)); it restored the
+        // round-1 behaviour of making a message argument searchable whenever this branch
+        // was reached. Guarded by
+        // `condition_args_returns_empty_when_the_call_never_closes`.
         _ => String::new(),
     }
 }
@@ -1863,10 +2045,27 @@ fn condition_args_selects_the_macro_token_from_the_first_line_only() {
     // the real macro's own line 0 (`assert!`). Round-2 defect (a) searched the WHOLE
     // block for the token, so this message text would be misread as the macro
     // invocation and shift the extracted span into the message.
-    let block = "assert!(x.contains(\"cap\"),\n    \"see assert_eq!(a, b) docs\");\n";
+    let block = "assert!(x.contains(\"cap\"),\n    \"see assert_eq!(a, b) docs\");\n"; // LOAD-BEARING: the decoy `assert_eq!` must sit on line 1 and NOT on line 0. Move it up and this test no longer distinguishes whole-block token search from line-0 token search.
+    assert!(
+        !block.lines().next().unwrap().contains("assert_eq!") && block.contains("assert_eq!"),
+        "fixture must keep the decoy token OFF line 0 and present somewhere later"
+    );
     let kept = condition_args(block);
     assert!(kept.contains("x.contains(\"cap\")"));
     assert!(!kept.contains("see assert_eq!"));
+
+    // Second half, added round 4. With POSITIONAL selection the fixture above no longer
+    // discriminates the line-0 restriction on its own: the earliest word-boundary token
+    // in the whole block is the same `assert!` at offset 0 either way, so widening the
+    // search to `let first_line = block;` left the suite green when measured. What the
+    // restriction still buys is route 1's fail-safe — a block whose line 0 carries NO
+    // recognised token must contribute nothing, even when a later line has one.
+    let later_line = "assert_matches!(x, Ok(_) if y ==\n    assert_eq!(a, line_one_marker));\n"; // LOAD-BEARING: line 0's macro must be one ABSENT from ASSERT_MACROS, and line 1's must be present. Put a recognised token on line 0 and both selections agree again.
+    assert_eq!(
+        condition_args(later_line),
+        "",
+        "a token on a CONTINUATION line must not be mistaken for the one that opened the span"
+    );
 }
 
 #[test]
@@ -1875,7 +2074,12 @@ fn condition_args_indexes_by_bytes_not_chars_when_a_multibyte_character_precedes
     // BYTE offset; round-2 defect (b) (`.skip(open_idx)` on `char_indices()`) skips
     // `open_idx` CHARACTERS instead, overshooting past the real opening `(` whenever a
     // multi-byte character precedes it on the line.
-    let block = "— assert!(x.contains(\"cap\"), \"msg\");\n";
+    let block = "— assert!(x.contains(\"cap\"), \"msg\");\n"; // LOAD-BEARING: the leading character is an EM DASH (U+2014, 3 bytes / 1 char). Swap it for any ASCII character and the byte offset equals the char count, so the byte/char mutation stops being observable here and this test silently ceases to discriminate. Checked below rather than only stated.
+    assert!(
+        block.chars().next().is_some_and(|c| c.len_utf8() > 1),
+        "fixture must open with a MULTI-BYTE character; ASCII makes the byte/char \
+         distinction unobservable"
+    );
     assert_eq!(condition_args(block), "x.contains(\"cap\")");
 }
 
@@ -1900,6 +2104,122 @@ fn condition_args_string_literal_hazards() {
     assert_eq!(condition_args(block), "a, \"x");
 }
 
+#[test]
+fn condition_args_prefers_the_earliest_token_over_a_later_one_in_the_message() {
+    // Round-3 defect (item 1 of round 4): token selection was by NAME PREFERENCE
+    // (`if first_line.contains("assert_eq!") … else if … contains("assert!")`), so the
+    // `assert_eq!` inside this FAILURE MESSAGE won over the real `assert!` at column 0,
+    // `find` landed inside the message, and the extracted "condition" came back as
+    // `marker_from_message, b` with `x.is_ok()` dropped entirely — a false GREEN, the
+    // dangerous direction. `first_assert_token` picks the EARLIEST word-boundary match
+    // instead, so `assert!` at column 0 wins.
+    let block = "assert!(x.is_ok(), \"see assert_eq!(marker_from_message, b) docs\");\n"; // LOAD-BEARING: the decoy must be a LATER, well-formed `assert_eq!(a, b)` call inside the message. Move it before `assert!`, or malform it, and the superseded name-preference chain would not have mis-selected it, so this test would pass under the defect it exists to catch.
+    assert_eq!(condition_args(block), "x.is_ok()");
+}
+
+#[test]
+fn condition_args_prefers_the_earliest_token_when_a_later_one_hides_in_a_trailing_comment() {
+    // The second demonstrated vector for the same defect, and the one round 3's
+    // "select from line 0 only" narrowing could NOT close: the decoy is a trailing
+    // comment on line 0, so it is on line 0 too. `assertion_lines`' `//` skip does not
+    // help either — this line does not START with `//`. Under name preference the token
+    // resolved into the comment and the following `(` was then taken from LINE 1, so the
+    // extracted "condition" was the message-side call `"marker_from_message"`.
+    let block = "assert!(cond, // assert_eq!\n    f(\"marker_from_message\"));\n"; // LOAD-BEARING: the `//` must be MID-LINE (a line-leading `//` is skipped by `assertion_lines` and never reaches here), and line 0's paren must stay open so line 1 belongs to the same block.
+    assert_eq!(condition_args(block), "cond");
+}
+
+#[test]
+fn condition_args_assert_ne_keeps_only_the_first_two_arguments() {
+    // `ASSERT_MACROS`' `("assert_ne!", 2)` entry is its own mutable site. Bumping that 2
+    // to 3 pulls this message argument into the kept text, and no other test in this file
+    // reads that entry — `condition_args_assert_eq_keeps_only_the_first_two_arguments`
+    // reads the `assert_eq!` row, which is a different line.
+    let block = "assert_ne!(a, b, \"unique_ne_message_token\");\n"; // LOAD-BEARING: exactly THREE arguments. With two, the closing paren supplies `kept_end` before the keep count matters and the mutation goes undetected.
+    let kept = condition_args(block);
+    assert!(kept.contains('a'));
+    assert!(kept.contains('b'));
+    assert!(!kept.contains("unique_ne_message_token"));
+}
+
+#[test]
+fn condition_args_debug_assert_keeps_only_the_first_argument() {
+    // `ASSERT_MACROS`' `("debug_assert!", 1)` entry is its own mutable site. Bumping that
+    // 1 to 2 pulls this message argument into the kept text. It also pins the
+    // word-boundary half of `first_assert_token` from the other side: `debug_assert!`
+    // contains `assert!` at offset 6, preceded by `_`, so the shorter token must NOT be
+    // the one selected — if it were, `tok.len()` would be 7 instead of 13 and the scan
+    // would still land on the same `(`, but the `keep` taken would be `assert!`'s.
+    let block = "debug_assert!(x.contains(\"cap\"), \"unique_debug_message_token\");\n"; // LOAD-BEARING: the macro must be `debug_assert!`, not `assert!` — `assert!`'s keep is a different table entry with its own test, and swapping them here leaves the `debug_assert!` row unguarded while this test still passes.
+    let kept = condition_args(block);
+    assert!(kept.contains("x.contains(\"cap\")"));
+    assert!(!kept.contains("unique_debug_message_token"));
+}
+
+#[test]
+fn condition_args_returns_empty_when_the_token_is_never_invoked() {
+    // Fallback route 2 of the three named on `condition_args`' doc comment:
+    // `first_assert_token` matched, but no `(` follows the token anywhere in the block,
+    // so there is no argument list to narrow. Returning `block.to_string()` here (the
+    // pre-round-3 form) would make every word of the block — `route_two_marker` included
+    // — searchable by `marker_is_asserted`. Reachable from `assertion_lines`: a line that
+    // NAMES a macro without calling it has balanced (zero) parens, so its span closes on
+    // that same line and arrives here.
+    let block = "assert! route_two_marker;\n"; // LOAD-BEARING: NO `(` anywhere after the token. Add one and the scan proceeds past this route, and the test stops exercising it.
+    assert_eq!(condition_args(block), "");
+    // Second assertion, and the reason the doc comment can call this route reachable
+    // rather than only traced: the same fixture through the production path. It REDs
+    // under the `block.to_string()` mutation, which is what shows `assertion_lines`
+    // genuinely reaches this route rather than closing no span at all.
+    assert!(!assertion_lines(block).contains("route_two_marker"));
+}
+
+#[test]
+fn condition_args_returns_empty_when_the_call_never_closes() {
+    // Fallback route 3, the `_` arm of `condition_args`' final `match` and the ONLY route
+    // that reaches it — routes 1 and 2 `return` early. The opening `(` is found, but
+    // paren depth never returns to 0 and no top-level comma is seen, so `kept_end` stays
+    // `None`. Returning `block.to_string()` here was round 3's defect (c).
+    let block = "assert!(route_three_marker\n"; // LOAD-BEARING: NO `)` and NO top-level `,`. Either one gives the scan a `kept_end`, the first `match` arm fires, and the `_` arm goes unexercised.
+    assert_eq!(condition_args(block), "");
+    // Reaching this route from `assertion_lines` needs a shape whose parens balance over
+    // the whole block (so the span closes and `condition_args` runs) while the parens
+    // AFTER the macro's own `(` do not (so depth never returns to 0). A stray `)` BEFORE
+    // the token is the only construction that does both, and it is contrived — named
+    // here rather than left as an unqualified "reachable in practice".
+    let via_lines = "    ) assert!(z_route_three_marker\n"; // LOAD-BEARING: the leading `)` is what makes the line balance for `assertion_lines` while leaving the macro's own call open for `condition_args`.
+    assert_eq!(condition_args(via_lines), "");
+    assert!(!assertion_lines(via_lines).contains("z_route_three_marker"));
+}
+
+#[test]
+fn condition_args_string_literal_widening_is_a_known_vector() {
+    // KNOWN FALSE-GREEN VECTOR. This test asserts today's WRONG output on purpose, so the
+    // limitation is recorded as a fixture and not only as prose. The `(` inside the
+    // condition's string literal raises depth to 2, so the real argument comma is not
+    // counted at depth 1; the `)` inside the MESSAGE drops depth back to 1, and the comma
+    // after it terminates the keep — pulling message text into the searched region.
+    //
+    // Round 3's doc comment claimed this limit produces "a false RED ... never a false
+    // GREEN". It does produce a false GREEN, here. Not fixed: a correct answer needs a
+    // Rust tokenizer, and widening this parser until the vector went green is what each
+    // of the previous three rounds did somewhere else. See `condition_args`' doc comment
+    // for what Task 5c must therefore avoid citing.
+    //
+    // If a future round teaches `condition_args` about string literals, this test REDs.
+    // Invert it to `!contains` then — do not delete it.
+    let block = "assert!(x == \"(\", \"msg widening_marker_token ) , tail\");\n"; // LOAD-BEARING, three details: the condition's literal holds an UNBALANCED `(`; the message holds a `)`; and a `,` follows that `)`. Drop any one and the scan narrows instead, and this stops recording a widening vector.
+    assert!(
+        condition_args(block).contains("widening_marker_token"),
+        "known vector: message text leaks into the kept condition text; got {:?}",
+        condition_args(block)
+    );
+    assert!(
+        assertion_lines(block).contains("widening_marker_token"),
+        "and it reaches marker_is_asserted through the production path, not only the helper"
+    );
+}
+
 /// True when `marker` is asserted inside `body` — the heuristic
 /// `probed_rows_cite_a_real_test` runs against a cited test's extracted
 /// body. Only searches [`assertion_lines`]`(body)`, not `body` itself, and
@@ -1922,7 +2242,10 @@ fn condition_args_string_literal_hazards() {
 /// `JsonPath(p)` requires EVERY dot-separated segment of `p` after the
 /// leading `$.` to appear together on ONE assertion's condition line — not
 /// as one contiguous substring, not in path order, but no longer spread
-/// across separate assertions or separate lines. This is a change from an
+/// across separate assertions or separate lines. Pinned by
+/// `marker_is_asserted_false_when_json_path_segments_are_split_across_assertions`;
+/// an empty segment (a malformed marker like `$.` or `$.a..b`) never matches, pinned by
+/// `marker_is_asserted_false_for_a_json_path_with_no_segments`. This is a change from an
 /// earlier version that accepted the segments anywhere across the whole
 /// condition text regardless of line: that version was satisfied by two
 /// DIFFERENT assert lines that each mentioned only one of "overflow" and
@@ -1978,6 +2301,37 @@ fn marker_is_asserted_false_when_one_json_path_segment_is_missing() {
     let body = "assert_eq!(v[\"overflow\"][\"omitted\"], json!(0));";
     assert!(!marker_is_asserted(
         &CitedMarker::JsonPath("$.overflow.packing".to_string()),
+        body
+    ));
+}
+
+/// The one-line rule is what `marker_is_asserted`'s doc comment claims for `JsonPath`,
+/// and until round 4 nothing checked it: `body.lines().any(...)` reverted to a whole-text
+/// `body.contains(seg)` left the suite fully green. The re-review that introduced the
+/// tightening measured it against a COMBINED mutation (deleting the `packing`
+/// `assert_eq!` at the live row), which is an aggregate — it cannot say whether this site
+/// carries its own weight.
+#[test]
+fn marker_is_asserted_false_when_json_path_segments_are_split_across_assertions() {
+    // Two REAL assertions, one segment each, both inside condition arguments — so
+    // `assertion_lines` keeps both and only the per-line rule separates them. This is the
+    // exact shape that made the live `context.max_tokens` row survive deletion of the
+    // assertion it cites, via a neighbouring assert's own text.
+    let body = "assert!(v[\"overflow\"].is_object());\nassert!(w[\"packing\"].is_string());\n"; // LOAD-BEARING: the two segments must be on SEPARATE assertion lines. Merge them onto one and this test passes under the whole-text mutation too.
+    assert!(!marker_is_asserted(
+        &CitedMarker::JsonPath("$.overflow.packing".to_string()),
+        body
+    ));
+}
+
+#[test]
+fn marker_is_asserted_false_for_a_json_path_with_no_segments() {
+    // `!seg.is_empty()` is its own site. Without it, `line.contains("")` is vacuously
+    // true, so a malformed marker like `$.` (or `$.a..b`) would match ANY body containing
+    // any assertion at all — a row could be certified by a marker that names nothing.
+    let body = "assert_eq!(v[\"overflow\"][\"packing\"], json!(\"excerpted\"));";
+    assert!(!marker_is_asserted(
+        &CitedMarker::JsonPath("$.".to_string()),
         body
     ));
 }
