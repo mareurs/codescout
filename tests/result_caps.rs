@@ -1639,24 +1639,29 @@ fn next_fn() {
 /// handled. Each is either pinned by a named test below or explicitly marked untested;
 /// three consecutive rounds shipped a false claim in this very block, so an unmarked
 /// claim here is a defect in its own right:
-/// - **Cross-assertion laxity** *(untested — traced, no fixture)*: a marker string
-///   present in the condition arguments of some OTHER assertion in the same body — not
-///   the one actually exercising the cap — still satisfies [`marker_is_asserted`],
-///   because this function concatenates every recognised assertion's condition text
-///   rather than requiring one specific assertion to carry the whole marker. Neither of
+/// - **Cross-assertion laxity** *(untested — traced, no fixture)*: for `TextContains` and
+///   a single-segment `JsonPath` (e.g. `JsonPath("$.packing")`), a marker string present
+///   in the condition arguments of some OTHER assertion in the same body — not the one
+///   actually exercising the cap — still satisfies [`marker_is_asserted`], because this
+///   function concatenates every recognised assertion's condition text rather than
+///   requiring one specific assertion to carry the whole marker. **Closed for a
+///   multi-segment `JsonPath`** (e.g. `JsonPath("$.overflow.packing")`) by the one-line
+///   rule at [`marker_is_asserted`]'s own doc comment, which requires every segment to
+///   appear together on ONE assertion's condition line. Neither of
 ///   this gate's two live rows depends on this laxity (checked by reading both bodies;
 ///   no test enforces that it stays so).
-/// - **Not string-literal-aware, in BOTH directions**: [`condition_args`] scans `block`
-///   as raw text, not as Rust tokens, so a comma or paren INSIDE a string literal is
-///   indistinguishable from a real argument separator. The common cases narrow (a false
-///   RED, the safe direction) — `condition_args_string_literal_hazards`. **But not all
-///   of them**: an unbalanced `(` inside a condition's string literal, paired with a `)`
-///   in the message, WIDENS the kept text to include message content — a false GREEN,
-///   the dangerous direction, recorded with a worked input by
-///   `condition_args_string_literal_widening_is_a_known_vector`. Round 3's claim that
-///   this limit only ever produces a false RED was wrong and is withdrawn; see
-///   [`condition_args`]' own doc comment for why it is documented rather than fixed, and
-///   for what Task 5c must therefore avoid citing.
+/// - **Not string-literal-aware, in BOTH directions — and the false-GREEN half is wider
+///   than string literals**: [`condition_args`] scans `block` as raw text, not as Rust
+///   tokens, so a comma or paren INSIDE a string literal is indistinguishable from a real
+///   argument separator. The common cases narrow (a false RED, the safe direction) —
+///   `condition_args_string_literal_hazards`. **But not all of them**: an unbalanced `(`
+///   anywhere in the condition's non-code text — a string literal, a raw string literal,
+///   a char literal, or a trailing comment, paired with a `)` in the message — WIDENS the
+///   kept text to include message content — a false GREEN, the dangerous direction,
+///   recorded with a worked input by `condition_args_string_literal_widening_is_a_known_vector`.
+///   Round 3's claim that this limit only ever produces a false RED was wrong and is
+///   withdrawn; see [`condition_args`]' own doc comment for the other three measured
+///   constructs and for what Task 5c must therefore avoid citing.
 /// - **Fixture text that is not code** *(untested — a corpus property, not a code
 ///   property)*: the CORPUS's `src/tools/edit_file/tests.rs:3758` and `:3791` write
 ///   `assert!(x, "msg")` as Rust STRING DATA, which [`opens_assert_call`] still opens a
@@ -1864,7 +1869,7 @@ fn assertion_lines_contributes_nothing_for_an_unrecognised_assert_macro() {
     // in `ASSERT_MACROS`, so this line never opens a span at all and contributes no
     // searchable text. A row citing such a test would RED in
     // `probed_rows_cite_a_real_test` rather than be silently certified on message text.
-    let body = "assert_matches!(x, Ok(v) if v.contains(\"unrecognised_macro_marker\"));\n"; // LOAD-BEARING: the macro must be one absent from `ASSERT_MACROS`. Swap in `assert!` and this test asserts the opposite of what it is named for.
+    let body = "assert_matches!(x, Ok(v) if v.contains(\"unrecognised_macro_marker\"));\n"; // LOAD-BEARING: the macro must be one absent from `ASSERT_MACROS`. Swap in `assert!` and this test asserts something UNRELATED to what it is named for, not the opposite — with `ASSERT_MACROS` unchanged the marker still would not be found (the macro syntax around it would differ, not the pass/fail direction this test pins). This test is also PARTLY INERT against the mechanism it names: adding `("assert_matches!", 1)` to `ASSERT_MACROS` reds two other tests but leaves this one GREEN, because `keep = 1` truncates at the first comma so the marker never appears either way. That gap is guarded elsewhere (M14, and the table-addition mutation), and `assertion_lines_trigger_uses_the_word_boundary_matcher_at_its_call_site` is the positive twin this absence assertion needs. Annotating a partly-inert fixture as such is the point — it stops a reader crediting it with coverage it does not provide.
     assert!(!assertion_lines(body).contains("unrecognised_macro_marker"));
 }
 
@@ -1927,12 +1932,26 @@ fn assertion_lines_contributes_nothing_for_an_unrecognised_assert_macro() {
 /// **No fix is attempted for that vector, deliberately.** A correct answer needs a Rust
 /// tokenizer; widening this parser until the vector went green is what each of the
 /// previous three rounds did in a different place, and each widening was the round after's
-/// defect. Consequence for callers, stated at the refusal site rather than left implicit:
-/// a `Coverage::Probed` row whose `cited_test` asserts through a string literal
-/// containing an unbalanced `(` may be certified on message text — so **Task 5c must not
-/// cite such an assertion**, and the guarantee `Coverage::Probed`'s doc comment makes is
-/// bounded by this. Neither of the two live rows is affected: both are rustfmt-wrapped
-/// with the macro alone on line 0 and neither condition contains a string literal.
+/// defect. Consequence for callers, stated at the refusal site rather than left implicit —
+/// and wider than a single construct, because the scan is byte-level, not token-level: a
+/// `Coverage::Probed` row whose `cited_test` asserts through a condition carrying an
+/// unbalanced `(` **anywhere in its non-code text — a string literal, a raw string
+/// literal, a char literal, or a trailing comment** — may be certified on message text
+/// instead. Measured further instances, none a string literal: a CHAR literal
+/// (`c == '(', "msg …"`), a trailing COMMENT after the condition (`x.is_ok() // stray
+/// paren in comment: (`), and a RAW string (`x == r"(", "msg …"`) each reach the identical
+/// false GREEN. So **Task 5c must not cite an assertion whose condition contains an
+/// unbalanced `(` in any of these four forms** — a bare `'('` condition is not safe just
+/// because it is not a string literal — and the guarantee `Coverage::Probed`'s doc comment
+/// makes is bounded by this (see `condition_args_string_literal_widening_is_a_known_vector`
+/// for the pinned worked case; the other three are recorded here, not as separate tests).
+/// Neither of the two live rows is affected — not because either
+/// condition lacks a string literal (both have one: `msg.contains("cap")` in
+/// `glob_explosion_returns_recoverable`, and `json!("excerpted")` plus two
+/// `md.contains(...)` calls in the packing row) but because neither literal contains an
+/// unbalanced `(`, which is what the vector actually needs. (Rustfmt wrapping the macro
+/// alone on line 0 is inert here: line-0 scoping governs token SELECTION; this scan reads
+/// the whole block, so line-0-ness protects nothing against this vector.)
 ///
 /// [`raw_string_lines`] was considered and is NOT reusable here: it classifies whole LINES
 /// as inside/outside a RAW string literal (`r"..."`, `r#"..."#`) for a caller that reads
