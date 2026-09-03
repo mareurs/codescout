@@ -209,6 +209,58 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-03 — the ruling: chunk grain ships OFF by default, opt in per project
+
+**Shipped** `4f172f70` (patch-id `991386342baded3dccbc6f59b7b578fb114851db`), on `experiments`, gate green including the `--features server-stack` lane.
+
+`[librarian] chunk_grain = true` in `<project>/.codescout/project.toml` opts in.
+Default is one vector per artifact. **codescout itself opts IN** — 12 minutes is
+acceptable on this machine, and this is where the feature is measured.
+
+**Why the decision is the project's and not ours — the cost, measured 2026-09-03:**
+
+| | |
+|---|---|
+| artifacts | 1,457 |
+| chunks | 28,612 |
+| mean chunks/artifact | 19.6 |
+| median | 16 |
+| max | 565 |
+| top 6 artifacts' share of cost | **6%** |
+| full re-embed | 27,762 vectors, ~12m10s, ~38/sec, 2 failures |
+
+**The distribution is BROAD, not skewed, and that is the load-bearing half.** An
+earlier note in this tracker called it skewed, generalising from one 564-chunk
+file; the median is 16 and the top six artifacts are 6% of the total. A skewed
+distribution would have admitted a targeting rule — chunk the big trackers, leave
+the rest — and a broad one does not. There is no cheap subset, so the only
+available lever is per-project on/off, which is what shipped. Carry the
+retraction, not the original claim.
+
+**Artifact grain is not a neutral cheap mode.** It is the ranking behaviour of
+`docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`:
+one vector on a 512-token embedder represents a document's first ~2,048
+characters and no more. Two things differ from that defect and **neither recovers
+the ranking** — the whole body is stored as one `artifact_chunk` row, so `matched`
+reports the document's real span instead of a wrong one, and a larger-context
+embedder would improve it for free. It is a hardware concession. Anyone reading
+this to decide a default for their own project should read it as "off means you
+keep the 2026-09-02 defect's ranking, on purpose, to save 20x the vectors".
+
+**What this entry does NOT claim.** That 3/12 (the run below) justifies the 20x.
+Twelve hand-written queries against prose entries is the first honest read of
+whether chunk grain earns its cost, and 25% is not encouraging — but it bounds
+nothing tightly, and the switch shipped so that the trade can be made per machine
+rather than resolved by that number. A larger suite is owed before anyone quotes
+3/12 as a verdict on the feature.
+
+**One silent failure mode, recorded because nothing reports it.**
+`.codescout/project.toml` is gitignored, so the opt-in is **machine-local** — the
+same is already true of its sibling `[librarian] vector_backend`. A clone on a
+second machine reindexes at artifact grain until someone sets the key there too,
+and both grains produce a populated index and a plausible ranking. The difference
+shows up only as worse retrieval, which reads like a model problem.
+
 ### 2026-09-03 (late) — the first genuine RANKING measurement: 3/12
 
 **hits@5 3/12, MRR 0.1875, `search_live=true`**, on a fully populated chunk-grain
