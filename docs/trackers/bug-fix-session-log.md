@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 111
+entry_high_water_F: 112
 entry_high_water_W: 103
 ---
 
@@ -52,6 +52,7 @@ entry_high_water_W: 103
 |----|------|---------:|----------|--------|-------|
 | F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
 | F-111 | 2026-09-04 | med | self-friction | open | **A similarity test cited as a content test.** I archived two bug files with `doc(action="move")`, saw one `R` line in `git status --short` — the confirmation the tool's own `stage_hint` prescribes — and reported the move verified, twice. `R` pairs a delete with an add on SIMILARITY, so a destination holding a STALE copy of its source produces the identical `R`. The archives turned out fine; my evidence for saying so an hour earlier was worthless, and I only learned it by grepping the bytes after a peer filed a (misattributed) bug that made the question live. **Third instance of the recon skill's own Phase 3 law** after `R-125` and `F-78`, and like both of those it happened in a session that had invoked the skill — this one about an hour earlier. Nastier than its siblings in one respect: they substituted a proxy the author chose, this substituted the **tool's own suggested confirmation**, which reads as the vendor's verification step rather than as a ritual. Natural home for a fix: the `stage_hint` already names the `R` check and could name a content check beside it |
+| F-112 | 2026-09-04 | low | self-friction | open | **Both build-identification instruments answer a neighbouring question in the same words.** `git_dirty` is `git status --porcelain` non-empty, which counts untracked files — permanently 1 on this checkout, so it can never be observed false. And a cargo fingerprint probe keyed on DIRECTORY mtime said the last build was 2026-09-01 while the binary was linked 2026-09-04 00:53:39; `-type f` matches the link to the tenth of a second. Caught by a positive control, not by care. |
 | F-109 | 2026-09-03 | med | self-friction | promoted-to-bug-tracker | **Corrected a peer's conclusion and inherited its premise.** `codescout-7e` read a low-CPU sleeping process during my 12-minute `reindex(reembed=true)` as a **leaked lock guard**; I replaced the consequent (I/O-bound embed loop, with a 9760 → 10518 progress delta as evidence) and carried the antecedent — *a lock is held across the run* — into a queued bug file titled "reindex holds the catalog write lock for 12 minutes". The code refutes it: `ToolContext.catalog` is an in-process `Arc<parking_lot::Mutex<Catalog>>` (`tools/mod.rs:85`) with no lock file anywhere; cross-process safety is `PRAGMA busy_timeout = 5000` over WAL (`catalog/mod.rs:481`); and the mutex is **dropped** before the embed loop (`tools/reindex.rs:346-357`), which awaits the embedder holding nothing and re-takes it per upsert — ~27,762 acquisitions, never a long hold. **Supplying the correct half of a diagnosis is what makes the other half feel checked**: disagreeing about the ending presents the beginning as shared ground rather than as a claim. The surviving bug is real and differently shaped — no caller or observer can distinguish a working long reindex from a wedged one, the gap `index` closed on 2026-08-24 with `running_elsewhere` + `holder_pid` (`05a0548d57664984`) and `librarian` never got |
 | F-108 | 2026-09-03 | med | shared-state | open | **A rebuild plus `/mcp` upgraded 1 MCP server of 15, and I reported the fix as live.** Measured 00:44:02 by `readlink /proc/<pid>/exe` over processes matching `codescout start --debug`: **1** on the image built at 00:42:44, **14** still mapping a deleted pre-fix binary. All 15 share one catalog. `embed_queue_items` writes `artifact_chunk` rows as a side effect of QUEUEING, so any stale server reindexing a **changed** artifact rewrites its rows at body-relative coordinates and silently reverts `36afd405`'s migration for it — which already happened once this session, through my own reindex on the old image (`added: 2, updated: 1`). **The obvious instrument cannot see it:** "did I rebuild and reconnect?" is truthfully yes, and `/mcp` reports success accurately about the one server it owns — the population that matters is per-MACHINE while the instrument is per-SESSION, the same scope error `CLAUDE.md` records for `ListAgents`. Unit stated because a first pass counted the `mux --socket` LSP multiplexers too and got 22. Damage is to reproducibility rather than data: a later benchmark run could move for a reason neither the code nor the catalog explains. Ship the probe, not the resolve — `(deleted)` in `/proc/<pid>/exe` is the whole test and needs no cooperation from the peer |
 | F-106 | 2026-09-02 | high | plan-drift | fixed-verified | **A plan named the wrong file in BOTH the places that name it, so the natural check — does the plan contradict itself? — passed cleanly.** Task 10's Files list said `artifact.rs` for the response builder and its Step 6 staged `artifact.rs src/server.rs`; the builder is in `tools/find.rs`, which that `git add` names nowhere. Only the schema description was where the plan said. **The second mention reads as corroboration of the first** — internal consistency is not evidence of external correctness, and two expressions of one fact fail together because they share an author and one mistake. The shipped failure would have been the expensive shape, not a loud one: a tool schema advertising `matched` (line range, entry token, snippet) beside a build emitting none of it, with `tools/find.rs` simply unmodified and untested, so **the gate stays green**. Caught by one `grep` for `semantic_find` before the first edit, run only because Task 8 had touched a file the plan did not name. Owed by any plan step naming both a file and a `git add`: re-derive the staging line from where the symbol lives. Sibling of `F-105` — same plan, same root, different mechanism, neither catchable from inside the document |
@@ -11026,6 +11027,60 @@ collection written the same session carries `/home/marius/work/claude/prompt-eng
 
 **Status:** validated
 **Severity:** would have been high — silent destruction of the production semantic index
+
+## F-112 — both build-identification instruments answer a neighbouring question in the same words
+
+**Valid:** dated 2026-09-03
+
+**Observed:** Asked to confirm a rebuild, I reached for two instruments and both
+returned a plausible wrong answer rather than an error.
+
+1. **`git_dirty` is stuck at 1 on this checkout.** `build.rs::bake_git_sha` computes it
+   from `git status --porcelain` being non-empty — which counts **untracked** files. This
+   tree permanently carries untracked in-flight bug files, plans and `@ack_*` handles (9
+   untracked entries at the moment of measurement, 14 porcelain lines total). A flag that
+   can never be observed false carries zero bits, so `git_dirty: true` beside
+   `git_sha: 28de2827` reads as "this build has uncommitted changes" and actually says
+   nothing at all. This is `CLAUDE.md` § *Testing Discipline*'s **loudness is a property
+   of a PATH** applied to a *field* rather than a guard: nothing reaches the false branch.
+
+2. **A cargo fingerprint probe keyed on DIRECTORY mtime reports the wrong build.**
+   `find target/release/.fingerprint -maxdepth 1 -name 'codescout-*'` sorted by mtime said
+   the newest was **2026-09-01 21:50** while `target/release/codescout` had been linked
+   **2026-09-04 00:53:39**. Cargo rewrites the files *inside* an existing fingerprint dir
+   without creating or removing one, so the dir mtime records when that fingerprint was
+   first created, not when it last verified. `-type f` gives the right answer — 14 files
+   written today, newest `codescout-f6212a5b31ece1c7/bin-codescout` at `00:53:39.702`,
+   matching the link to the tenth of a second. (Mechanism inferred; the *observable* —
+   files newer than their own parent directories — is measured.)
+
+**How it was caught:** not by care. The dir-mtime reading was internally consistent and
+I was one sentence from writing "no build since 2026-09-01." It only fell over because
+the positive control (drop the time filter, does the pattern match anything?) returned
+**2026-09-01 as the newest of 106**, which is impossible next to a binary linked today.
+The control was run to rule out an empty-result artefact and caught a wrong-result one.
+
+**Cost:** low this time — no wrong claim shipped. Both would have produced a confident,
+checkable-looking sentence in a recon report.
+
+**Fix idea:** `git_dirty` should either exclude untracked files (`git status
+--porcelain --untracked-files=no`) so it discriminates, or be renamed to say what it
+measures. Do **not** just document it: the field is consumed by four call sites
+(`main.rs:419`, `index_state.rs:143`, `usage/db.rs:151`, `tools/config/mod.rs:447`) and
+`project_status_declares_the_binary_that_answered` asserts on it, so a reader meets the
+value long before any prose about it. For the fingerprint trap, the durable form is a row
+in `docs/PROBES.md` — "last release build" with `-type f` and the dir-mtime failure named
+as its blind spot — since that page exists precisely so a number is not re-derived by
+whoever needs it next.
+
+**Generalisable:** F-110 was corrected an hour ago for proposing an instrument that
+already ships. This is the adjacent error and the one that costs more — the instrument
+ships, answers, and answers a **neighbouring question in the same words**. "Does it
+exist" is cheap to check and I got it wrong once; "does it answer the question I am
+asking" has no failure mode that looks like an error.
+
+**Severity:** low
+**Status:** open
 
 ## Template for new entries
 
