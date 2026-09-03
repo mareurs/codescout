@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 112
+entry_high_water_F: 113
 entry_high_water_W: 103
 ---
 
@@ -52,6 +52,7 @@ entry_high_water_W: 103
 |----|------|---------:|----------|--------|-------|
 | F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
 | F-111 | 2026-09-04 | med | self-friction | open | **A similarity test cited as a content test.** I archived two bug files with `doc(action="move")`, saw one `R` line in `git status --short` — the confirmation the tool's own `stage_hint` prescribes — and reported the move verified, twice. `R` pairs a delete with an add on SIMILARITY, so a destination holding a STALE copy of its source produces the identical `R`. The archives turned out fine; my evidence for saying so an hour earlier was worthless, and I only learned it by grepping the bytes after a peer filed a (misattributed) bug that made the question live. **Third instance of the recon skill's own Phase 3 law** after `R-125` and `F-78`, and like both of those it happened in a session that had invoked the skill — this one about an hour earlier. Nastier than its siblings in one respect: they substituted a proxy the author chose, this substituted the **tool's own suggested confirmation**, which reads as the vendor's verification step rather than as a ritual. Natural home for a fix: the `stage_hint` already names the `R` check and could name a content check beside it |
+| F-113 | 2026-09-04 | med | test-rigor | open | **A mutation matrix returned a plausible wrong answer twice, and neither time an error.** Once reporting all 7 mutations SURVIVED — the failure parser keyed on `startswith("FAILED")` and pytest colours that token, so the match never fired; once mis-attributing a kill, because two mutants were **byte-identical in length** (23,472) and written in the same second, and CPython invalidates `.pyc` on `(mtime, size)`, so one run executed the other's cached bytecode. Both outputs are individually plausible, which is what separates this from a crash — and the first arrived while I was already primed to believe my suite was decorative, having just found two assertions that were. What caught them was **not care**: trap 1 fell to a deliberately absurd mutation whose survival was not believable, trap 2 to reading the killer's NAME rather than the 7/7 tally. A mutation run therefore owes an absurd mutation as a positive control **on the runner**, a green control row, per-mutation killer names, and `-B` — equal-length mutants are likely, not rare, among mutations of one function |
 | F-112 | 2026-09-04 | low | self-friction | open | **Both build-identification instruments answer a neighbouring question in the same words.** `git_dirty` is `git status --porcelain` non-empty, which counts untracked files — permanently 1 on this checkout, so it can never be observed false. And a cargo fingerprint probe keyed on DIRECTORY mtime said the last build was 2026-09-01 while the binary was linked 2026-09-04 00:53:39; `-type f` matches the link to the tenth of a second. Caught by a positive control, not by care. |
 | F-109 | 2026-09-03 | med | self-friction | promoted-to-bug-tracker | **Corrected a peer's conclusion and inherited its premise.** `codescout-7e` read a low-CPU sleeping process during my 12-minute `reindex(reembed=true)` as a **leaked lock guard**; I replaced the consequent (I/O-bound embed loop, with a 9760 → 10518 progress delta as evidence) and carried the antecedent — *a lock is held across the run* — into a queued bug file titled "reindex holds the catalog write lock for 12 minutes". The code refutes it: `ToolContext.catalog` is an in-process `Arc<parking_lot::Mutex<Catalog>>` (`tools/mod.rs:85`) with no lock file anywhere; cross-process safety is `PRAGMA busy_timeout = 5000` over WAL (`catalog/mod.rs:481`); and the mutex is **dropped** before the embed loop (`tools/reindex.rs:346-357`), which awaits the embedder holding nothing and re-takes it per upsert — ~27,762 acquisitions, never a long hold. **Supplying the correct half of a diagnosis is what makes the other half feel checked**: disagreeing about the ending presents the beginning as shared ground rather than as a claim. The surviving bug is real and differently shaped — no caller or observer can distinguish a working long reindex from a wedged one, the gap `index` closed on 2026-08-24 with `running_elsewhere` + `holder_pid` (`05a0548d57664984`) and `librarian` never got |
 | F-108 | 2026-09-03 | med | shared-state | open | **A rebuild plus `/mcp` upgraded 1 MCP server of 15, and I reported the fix as live.** Measured 00:44:02 by `readlink /proc/<pid>/exe` over processes matching `codescout start --debug`: **1** on the image built at 00:42:44, **14** still mapping a deleted pre-fix binary. All 15 share one catalog. `embed_queue_items` writes `artifact_chunk` rows as a side effect of QUEUEING, so any stale server reindexing a **changed** artifact rewrites its rows at body-relative coordinates and silently reverts `36afd405`'s migration for it — which already happened once this session, through my own reindex on the old image (`added: 2, updated: 1`). **The obvious instrument cannot see it:** "did I rebuild and reconnect?" is truthfully yes, and `/mcp` reports success accurately about the one server it owns — the population that matters is per-MACHINE while the instrument is per-SESSION, the same scope error `CLAUDE.md` records for `ListAgents`. Unit stated because a first pass counted the `mux --socket` LSP multiplexers too and got 22. Damage is to reproducibility rather than data: a later benchmark run could move for a reason neither the code nor the catalog explains. Ship the probe, not the resolve — `(deleted)` in `/proc/<pid>/exe` is the whole test and needs no cooperation from the peer |
@@ -11081,6 +11082,65 @@ asking" has no failure mode that looks like an error.
 
 **Severity:** low
 **Status:** open
+
+## F-113 — A mutation matrix returned a plausible wrong answer twice — an ANSI-coloured token and a byte-identical mutant reusing cached bytecode
+
+**Valid:** dated 2026-09-03
+
+**Observed:** Mutation-testing the eval-arm cleanup code (7 mutations, 7 guarded sites) the
+harness returned a **wrong answer twice**, and neither time an error.
+
+1. **All seven SURVIVED.** The runner collected failures with
+   `l.startswith("FAILED")`. pytest colours that token, so every line begins with an ANSI
+   escape and the match never fires. An earlier draft had a looser fallback
+   (`"::" in l and "FAILED" in l`); tightening it during a rewrite silently removed the
+   only thing that worked. **Reads as "my tests are all decorative" — a conclusion I was
+   already primed to accept**, having just found two genuinely decorative assertions.
+2. **M6 killed by the wrong test.** The matrix attributed the `finally` mutation to the
+   *sanitizer's* test. Run alone, M6 reds the right test with the right message. Cause:
+   the M5 and M6 mutants are **byte-identical in length** (23,472) and written in the same
+   second, and CPython invalidates `.pyc` on `(mtime, size)` — so the M6 subprocess
+   executed **M5's cached bytecode**. Not a collision anyone would design for; it happens
+   because both mutations delete the same number of characters.
+
+**Why both are the same defect:** the instrument's failure is a **number in the shape of a
+result**. Nothing raised, nothing warned, and both outputs are individually plausible — a
+suite with no coverage, and a mutation killed by an over-broad test. Neither is absurd on
+sight, which is what separates this from a crash.
+
+**What actually caught them:** not care, and not re-reading the runner. Trap 1 fell to
+**M7, a deliberately absurd mutation** (`delete every collection, ignore the prefix`).
+Its surviving was not believable, and one manual run showed the truth immediately. Trap 2
+fell to **reading the killer's NAME, not the kill count** — the tally was 7/7, correct;
+only the attribution column was wrong, and a summary reporting "all killed" would have
+been accepted.
+
+**Lesson — two things a mutation run owes, neither of which is the kill count:**
+
+- **An absurd mutation as a positive control on the RUNNER.** Every mutation in a matrix
+  tests the suite; one must test the harness. If a mutation that guts the function's
+  entire purpose "survives", the instrument is broken, not the test. This is the
+  cheapest possible check and it is the one that fired.
+- **A green CONTROL row and per-mutation KILLER NAMES.** A bare kill count is an
+  aggregate, and cannot verify the per-member claim *"site N is guarded by test N"* —
+  CLAUDE.md § *Testing Discipline* names exactly this. Printing the killer's name turns a
+  7/7 into seven checkable claims, and is what exposed the bytecode reuse.
+- **`-B` / `PYTHONDONTWRITEBYTECODE=1` when mutating Python in place.** Not hygiene: two
+  same-length mutants written within one second are indistinguishable to the import
+  system, and equal length is *likely* among mutations of one function, not rare.
+
+**Rests on:** measured 2026-09-04 in `prompt-engineering`, mutating
+`src/prompt_tdd/adapters/_shared.py` against `tests/test_eval_vector_isolation.py`.
+Length equality confirmed by computing both mutants (`len(m5) == len(m6) == 23472`,
+`len(orig) == 23502`); M6's true killer confirmed by an isolated run showing
+`test_teardown_runs_when_the_arm_raises` failing on
+`assert 0 >= 1  teardown never ran on the exception path`. Final matrix: control green,
+7/7 killed, each by its own site's test. Fix committed as `prompt-engineering:ffd0e6b`.
+
+**Status:** open
+**Severity:** med — cost one wrong conclusion about my own suite and one mis-attributed
+kill; both were caught inside the same session, but the first was believed long enough to
+start rewriting correct tests.
 
 ## Template for new entries
 
