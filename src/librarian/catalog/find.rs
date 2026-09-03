@@ -287,6 +287,20 @@ pub struct SemanticPage {
     /// corpus that simply had nothing else — the same silent-partial defect
     /// this whole change exists to fix, one level up.
     pub cap_suppressed: usize,
+    /// Candidates the store returned that resolved to NO `artifact_chunk` row,
+    /// and were therefore dropped before hydration.
+    ///
+    /// A store holding ids at a grain this reader cannot resolve is invisible
+    /// without this: the page comes back short and correct-looking, and the
+    /// only other signal, `exhausted`, says "the corpus ran out" — which is a
+    /// different and reassuring claim. Measured 2026-09-03 on the live Qdrant
+    /// collection: 2476 of 5388 points (46%) were artifact-grain, discarded on
+    /// every query, and nothing anywhere counted them. See
+    /// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+    ///
+    /// Reset per widening pass, like `cap_suppressed` — it describes the pass
+    /// that produced `hits`, not the loop's history.
+    pub unresolved: usize,
 }
 
 /// Project-scoped semantic artifact search: iterative-K backfill over a vector
@@ -357,8 +371,14 @@ pub async fn semantic_find(
             std::collections::HashMap::new();
         let mut ordered: Vec<(ChunkHit, String, f32)> = Vec::new();
         let mut cap_suppressed = 0usize;
+        let mut unresolved = 0usize;
         for (chunk_id, distance) in &candidates {
             let Some(row) = chunk_rows.get(chunk_id) else {
+                // Counted, not merely skipped. The skip itself is right — a
+                // stale vector is not an error — but an UNCOUNTED skip makes a
+                // store holding ids at a grain this reader cannot resolve look
+                // like a small corpus. See `SemanticPage::unresolved`.
+                unresolved += 1;
                 continue;
             };
             let n = seen_per_artifact
@@ -438,6 +458,7 @@ pub async fn semantic_find(
                 // exhaustion.
                 exhausted: !enough,
                 cap_suppressed,
+                unresolved,
             });
         }
 
@@ -527,9 +548,9 @@ mod tests {
             one_chunk(&cat, "c"),
         );
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", &ca, &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", &cb, &[0.8, 0.2]).await.unwrap();
-        store.upsert("proj", &cc, &[0.0, 1.0]).await.unwrap();
+        store.upsert("proj", &ca, "a", &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", &cb, "b", &[0.8, 0.2]).await.unwrap();
+        store.upsert("proj", &cc, "c", &[0.0, 1.0]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
         let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 1, 10, 0, 0)
@@ -537,6 +558,72 @@ mod tests {
             .unwrap();
         let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b", "c"], "KNN distance order");
+    }
+
+    #[tokio::test]
+    async fn a_candidate_with_no_chunk_row_is_counted_not_silently_dropped() {
+        // The instrument whose absence hid a 46% loss for a whole session.
+        // `semantic_find` resolves every id the store returns through
+        // `artifact_chunk` and skips the misses. That skip is correct — a stale
+        // vector is not an error — but it was UNCOUNTED, so a store holding ids
+        // at a grain this reader cannot resolve produced a short, healthy-looking
+        // page. Measured on the live Qdrant collection 2026-09-03: 2476 of 5388
+        // points were artifact-grain and were discarded on every query.
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        let ca = one_chunk(&cat, "a");
+
+        let store = InMemoryArtifactStore::default();
+        store.upsert("proj", &ca, "a", &[1.0, 0.0]).await.unwrap();
+        // LOAD-BEARING: a 16-hex id, which is exactly the shape of an
+        // ARTIFACT id and therefore can never be an `artifact_chunk.chunk_id`
+        // (those are UUID v4). This is what an artifact-grain point looks like
+        // to a chunk-grain reader — the real defect, not an invented one. Give
+        // it a vector CLOSE to the query so it is genuinely a candidate; a
+        // distant one would be dropped by ranking and prove nothing.
+        // Both ids are the SAME 16-hex value, which is precisely what a
+        // pre-2026-09-03 point looks like: written when `upsert` had one slot,
+        // so the artifact id was stored as the vector's identity too.
+        store
+            .upsert(
+                "proj",
+                "0123456789abcdef",
+                "0123456789abcdef",
+                &[0.99, 0.01],
+            )
+            .await
+            .unwrap();
+
+        let cat = parking_lot::Mutex::new(cat);
+        // LOAD-BEARING `limit = 1`, not 10. `exhausted` means "the page came back
+        // SHORT", so at limit=10 a two-point corpus sets it for a perfectly
+        // legitimate reason and the last assertion below cannot discriminate.
+        // At limit=1 the page is FULL and a candidate was still discarded, which
+        // is the case that separates the two signals.
+        let page = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 1, 1, 0, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            page.hits.len(),
+            1,
+            "only the resolvable candidate may hydrate"
+        );
+        assert_eq!(
+            page.unresolved, 1,
+            "the unresolvable candidate must be COUNTED, not silently dropped"
+        );
+        // The two states are distinct and must not be conflated: the page is
+        // FULL, so nothing ran out — a candidate was discarded. Asserting only
+        // `unresolved` would pass a change that also set `exhausted`, which
+        // tells the caller the opposite thing.
+        assert!(
+            !page.exhausted,
+            "a discarded candidate on a full page is not corpus exhaustion"
+        );
     }
 
     #[tokio::test]
@@ -550,8 +637,8 @@ mod tests {
 
         let (ca, cb) = (one_chunk(&cat, "a"), one_chunk(&cat, "b"));
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", &ca, &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", &cb, &[0.9, 0.1]).await.unwrap();
+        store.upsert("proj", &ca, "a", &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", &cb, "b", &[0.9, 0.1]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
         let filter: FilterNode = serde_json::from_value(json!({"kind": {"eq": "spec"}})).unwrap();
@@ -908,8 +995,14 @@ mod tests {
 
         let (c_live, c_old) = (one_chunk(&cat, "live"), one_chunk(&cat, "old"));
         let store = InMemoryArtifactStore::default();
-        store.upsert("proj", &c_live, &[1.0, 0.0]).await.unwrap();
-        store.upsert("proj", &c_old, &[0.9, 0.1]).await.unwrap();
+        store
+            .upsert("proj", &c_live, "live", &[1.0, 0.0])
+            .await
+            .unwrap();
+        store
+            .upsert("proj", &c_old, "old", &[0.9, 0.1])
+            .await
+            .unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
         let cutoff = 1000i64;
@@ -983,7 +1076,7 @@ mod tests {
             crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
         for (i, r) in rows.iter().enumerate() {
             store
-                .upsert("proj", &r.chunk_id, &unit(i, rows.len()))
+                .upsert("proj", &r.chunk_id, &r.artifact_id, &unit(i, rows.len()))
                 .await
                 .unwrap();
         }
@@ -1029,13 +1122,13 @@ mod tests {
         // 45° away, so every `big` chunk outranks it.
         for (i, r) in big.iter().enumerate() {
             store
-                .upsert("proj", &r.chunk_id, &[1.0, 0.01 * i as f32])
+                .upsert("proj", &r.chunk_id, &r.artifact_id, &[1.0, 0.01 * i as f32])
                 .await
                 .unwrap();
         }
         for r in &small {
             store
-                .upsert("proj", &r.chunk_id, &[0.5, 0.5])
+                .upsert("proj", &r.chunk_id, &r.artifact_id, &[0.5, 0.5])
                 .await
                 .unwrap();
         }
@@ -1132,8 +1225,11 @@ mod tests {
         );
 
         let store = InMemoryArtifactStore::default();
-        for (id, _, _) in &queue {
-            store.upsert("proj", id, &[1.0, 0.0]).await.unwrap();
+        for item in &queue {
+            store
+                .upsert("proj", &item.chunk_id, &item.artifact_id, &[1.0, 0.0])
+                .await
+                .unwrap();
         }
 
         let cat = parking_lot::Mutex::new(cat);
@@ -1181,11 +1277,14 @@ mod tests {
         let store = SqliteVecArtifactStore::new(shared.clone());
         // Write through the PRODUCTION writer, read through the PRODUCTION
         // reader. Nothing in this test names a table.
-        for (i, (id, _, _)) in queue.iter().enumerate() {
+        for (i, item) in queue.iter().enumerate() {
             // 768-dim: `artifact_vec_v2` is declared `vec0(id, embedding
             // FLOAT[768])`, so a shorter vector is rejected by SQL rather than
             // by anything this test is about.
-            store.upsert("proj", id, &unit(i, 768)).await.unwrap();
+            store
+                .upsert("proj", &item.chunk_id, &item.artifact_id, &unit(i, 768))
+                .await
+                .unwrap();
         }
 
         let page = semantic_find(

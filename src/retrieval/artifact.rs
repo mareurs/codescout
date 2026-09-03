@@ -19,7 +19,7 @@
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
     Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
-    Distance, FieldType, Filter, PointId, PointStruct, PointsIdsList, Query, QueryPointsBuilder,
+    Distance, FieldType, Filter, PointId, PointStruct, Query, QueryPointsBuilder,
     UpsertPointsBuilder, Value, VectorInput, VectorParamsBuilder, VectorsConfigBuilder,
 };
 use std::collections::HashMap;
@@ -67,28 +67,53 @@ impl QdrantWrap {
             .await
             .context("create_field_index(project_id)")?;
 
+        // Needed by `artifact_delete`, which matches on this key rather than on
+        // a derived point id. Without the index Qdrant full-scans the whole
+        // collection per delete; `code_chunks` has no payload index and paid
+        // 37.29s vs 0.57s for exactly that (see qdrant.rs:46).
+        self.client
+            .create_field_index(CreateFieldIndexCollectionBuilder::new(
+                name,
+                "artifact_id",
+                FieldType::Keyword,
+            ))
+            .await
+            .context("create_field_index(artifact_id)")?;
+
         Ok(())
     }
 
-    /// Insert or update a single artifact's embedding. The point ID is derived
-    /// from the artifact id, so a second call overwrites in place (and updates
-    /// `project_id` if the artifact moved roots). Payload carries `project_id`
-    /// (KNN scope) and `artifact_id` (the catalog key the KNN returns).
+    /// Insert or update a single CHUNK's embedding.
+    ///
+    /// The point id is derived from `chunk_id`, so a second call with the same
+    /// chunk overwrites in place. The payload carries **both** ids:
+    /// `chunk_id` (what `artifact_knn_scored` returns, and what the caller
+    /// resolves through `artifact_chunk`) and `artifact_id` (what
+    /// `artifact_delete` matches on, and the catalog key the hit belongs to).
+    ///
+    /// Until 2026-09-03 this took ONE id and spent it twice — as the point id
+    /// and as `payload["artifact_id"]` — because the trait had only one slot.
+    /// That is what made a chunk id indistinguishable from an artifact id
+    /// downstream. See
+    /// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
     pub async fn artifact_upsert(
         &self,
         collection: &str,
         project_id: &str,
-        id: &str,
+        chunk_id: &str,
+        artifact_id: &str,
         dense: Vec<f32>,
     ) -> Result<()> {
         let mut payload: HashMap<String, Value> = HashMap::new();
         payload.insert("project_id".into(), Value::from(project_id.to_string()));
-        payload.insert("artifact_id".into(), Value::from(id.to_string()));
+        payload.insert("artifact_id".into(), Value::from(artifact_id.to_string()));
+        payload.insert("chunk_id".into(), Value::from(chunk_id.to_string()));
 
         let mut named: HashMap<String, qdrant_client::qdrant::Vector> = HashMap::new();
         named.insert("dense".to_string(), dense.into());
 
-        let point = PointStruct::new(artifact_point_id(id), named, payload);
+        // Keyed on the CHUNK id: one point per chunk, N per artifact.
+        let point = PointStruct::new(artifact_point_id(chunk_id), named, payload);
 
         self.client
             .upsert_points(UpsertPointsBuilder::new(collection, vec![point]).wait(true))
@@ -97,19 +122,54 @@ impl QdrantWrap {
         Ok(())
     }
 
-    /// Delete a single artifact's embedding by id. No-op if it doesn't exist.
-    pub async fn artifact_delete(&self, collection: &str, id: &str) -> Result<()> {
+    /// Delete EVERY point belonging to `artifact_id`.
+    ///
+    /// By payload FILTER, not by derived point id. Points are keyed on
+    /// `chunk_id` now, so one artifact owns N of them and
+    /// `artifact_point_id(artifact_id)` names none of them — the old form would
+    /// have been a silent no-op that left the whole artifact's vectors behind.
+    /// Requires the `artifact_id` keyword index created in
+    /// [`Self::ensure_artifacts_collection`]; without it Qdrant full-scans.
+    pub async fn artifact_delete(&self, collection: &str, artifact_id: &str) -> Result<()> {
         self.client
             .delete_points(
                 DeletePointsBuilder::new(collection)
-                    .points(PointsIdsList {
-                        ids: vec![artifact_point_id(id)],
-                    })
+                    .points(Filter::must(vec![Condition::matches(
+                        "artifact_id",
+                        artifact_id.to_string(),
+                    )]))
                     .wait(true),
             )
             .await
             .context("delete_points(artifact)")?;
         Ok(())
+    }
+
+    /// Every artifact-chunk collection currently in Qdrant, by name prefix.
+    ///
+    /// Artifact vectors live one collection per project, so the cross-project
+    /// scopes (`repo` / `umbrella` / `all`) need the list to fan out over.
+    /// Enumerating by PREFIX rather than from the workspace registry is
+    /// deliberate: a project indexed earlier and since de-registered still has
+    /// vectors, and a store that could not see them would return a short page
+    /// with no indication anything was missing.
+    ///
+    /// Returns them sorted, so a fan-out's collection order is deterministic and
+    /// two runs of the same query cannot differ by tie-break.
+    pub async fn artifact_collections(&self, prefix: &str) -> Result<Vec<String>> {
+        let resp = self
+            .client
+            .list_collections()
+            .await
+            .context("list_collections(artifact)")?;
+        let mut names: Vec<String> = resp
+            .collections
+            .into_iter()
+            .map(|c| c.name)
+            .filter(|n| n.starts_with(prefix))
+            .collect();
+        names.sort();
+        Ok(names)
     }
 
     /// Dense KNN → ranked `(artifact_id, distance)` pairs, closest first.
@@ -160,8 +220,16 @@ impl QdrantWrap {
             .into_iter()
             .filter_map(|pt| {
                 let distance = 1.0 - pt.score;
+                // Read the CHUNK id: it is the vector's identity and what
+                // `semantic_find` resolves through `artifact_chunk`. Reading
+                // `artifact_id` here — which this did until 2026-09-03 — returns
+                // a key the caller cannot resolve, and the caller's response to
+                // an unresolvable id is to skip it, so the whole page silently
+                // shrinks. A point written before that date has no `chunk_id`
+                // key and is dropped here; `SemanticPage::unresolved` is where
+                // the caller-side equivalent is now counted.
                 pt.payload
-                    .get("artifact_id")
+                    .get("chunk_id")
                     .and_then(|v| v.as_str().map(|s| (s.as_str().to_owned(), distance)))
             })
             .collect())

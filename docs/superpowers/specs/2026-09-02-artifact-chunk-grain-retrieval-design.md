@@ -352,9 +352,29 @@ them is a number, not an error — 25 scores, all of them about code.
 3. **278 MB of vectors.** If unacceptable, the levers are quantization or a
    chunk-eligibility rule — **not** the chunk budget, which is spent on ranking
    quality (D4).
-4. **Qdrant parity.** This design is written against the sqlite-vec backend.
-   `artifact_store.rs:216` is the Qdrant write path and needs the same
-   chunk-keyed treatment; whether both backends migrate together is undecided.
+4. **Qdrant parity — DECIDED 2026-09-03, implemented.** This design was written
+   against the sqlite-vec backend. Qdrant now has the same chunk-keyed
+   treatment: `ArtifactVectorStore::upsert` carries **both** ids (`chunk_id` as
+   the vector's identity, `artifact_id` as the catalog key), the Qdrant payload
+   carries both, `knn` returns the chunk id, and `delete` matches on the
+   `artifact_id` payload field so an artifact's N points go together. Both
+   backends migrated together.
+
+   *Two corrections to the original text of this item, kept because each was
+   load-bearing and wrong.* It cited `artifact_store.rs:216` as "the Qdrant
+   write path" — `:216` was inside `SqliteVecArtifactStore::upsert`; Qdrant's
+   was `:161`. And it read as though Qdrant would keep working artifact-grain
+   until this landed. It did not: `semantic_find` resolves every returned id
+   through `artifact_chunk` with no artifact-id fallback, so the collection's
+   artifact-grain half was discarded on every query — 2476 of 5388 points, 46%,
+   uncounted. Editing any artifact then re-minted its chunk ids and the write of
+   the new ones was refused, so the artifact left search permanently. See
+   `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+
+   Vectors are written to a **new collection, `artifact_chunks`**. The old
+   `artifacts` collection is left intact rather than rewritten: it is shared
+   across 14 `project_id`s on a live host, two of them unrelated real projects,
+   so wiping it would have destroyed their vectors with no way back.
 
 ## Prerequisites
 

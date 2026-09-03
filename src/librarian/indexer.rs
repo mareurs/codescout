@@ -36,9 +36,31 @@ pub struct IndexReport {
     pub unknown_ids: Vec<String>,
 }
 
-/// Items queued for embedding: `(chunk_id, title, chunk_text)`. One per CHUNK,
-/// not per artifact — `chunk_id` keys `artifact_vec_v2`.
-pub type EmbedQueueItem = (String, Option<String>, String);
+/// One item queued for embedding — one per CHUNK, not per artifact.
+///
+/// **Both ids travel together, and that is the whole point of this being a
+/// struct rather than the `(String, Option<String>, String)` tuple it used to
+/// be.** A vector needs two identities: `chunk_id` is what it IS (the key
+/// `artifact_vec_v2` and the Qdrant point are keyed on, and what `knn` returns),
+/// while `artifact_id` is what it BELONGS TO (the catalog key every filter,
+/// scope and hydration step downstream is expressed in).
+///
+/// Carrying only one of them is the defect this shape exists to prevent. Before
+/// 2026-09-03 the queue carried the chunk id alone, so `ArtifactVectorStore::upsert`
+/// had a single `id` slot; sqlite-vec survived because it can recover the
+/// artifact id by joining `artifact_chunk`, and Qdrant could not — it has no
+/// join, so it spent the one id twice, as both the point id and the payload
+/// field named `artifact_id`. See
+/// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+#[derive(Debug, Clone)]
+pub struct EmbedQueueItem {
+    /// UUID v4, minted by `replace_chunks`. The identity of the vector itself.
+    pub chunk_id: String,
+    /// `sha256(abs_path)` hex[..16]. The catalog key this chunk belongs to.
+    pub artifact_id: String,
+    pub title: Option<String>,
+    pub text: String,
+}
 
 /// Return the text of the first H1 in a markdown body, or `None` if none is
 /// found. Handles both ATX (`# Title`) and setext (`Title\n=====`) headings.
@@ -137,7 +159,15 @@ pub(crate) fn embed_queue_items(
                 }
                 _ => r.content,
             };
-            (r.chunk_id, title.clone(), text)
+            EmbedQueueItem {
+                chunk_id: r.chunk_id,
+                // `id` is the artifact this whole call is about. It was being
+                // dropped here; carrying it is what lets a backend with no join
+                // (Qdrant) key the point by chunk and still say what it belongs to.
+                artifact_id: id.to_string(),
+                title: title.clone(),
+                text,
+            }
         })
         .collect())
 }
@@ -689,6 +719,21 @@ pub fn write_embeddings_with(
     Ok(())
 }
 
+/// Drop the artifact id from a `(chunk_id, artifact_id, vector)` batch for the
+/// sqlite-vec fallback, which is chunk-keyed and recovers the artifact id by
+/// joining `artifact_chunk`.
+///
+/// The clone is deliberate and cheap next to what produced these vectors: one
+/// batch is 100 x 768 f32, and every element of it just came back from an HTTP
+/// embedding call. Threading a borrowed form through `write_embeddings_v2`
+/// would mean re-shaping its two-pass dimension guard for no measurable gain.
+fn pairs_for_sqlite(batch: &[(String, String, Vec<f32>)]) -> Vec<(String, Vec<f32>)> {
+    batch
+        .iter()
+        .map(|(chunk_id, _artifact_id, vector)| (chunk_id.clone(), vector.clone()))
+        .collect()
+}
+
 /// Write pre-computed CHUNK vectors into `artifact_vec_v2`.
 ///
 /// The v2 table is keyed by `chunk_id`, not `artifact_id` — one row per chunk.
@@ -932,9 +977,11 @@ pub async fn backfill_chunk_vectors(
                 continue;
             }
 
-            let futures_iter = items.into_iter().map(|(chunk_id, t, text)| async move {
-                let vec = svc.embed_artifact(t.as_deref(), &text).await?;
-                anyhow::Ok((chunk_id, vec))
+            let futures_iter = items.into_iter().map(|item| async move {
+                let vec = svc
+                    .embed_artifact(item.title.as_deref(), &item.text)
+                    .await?;
+                anyhow::Ok((item.chunk_id, vec))
             });
             let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
             while let Some(res) = s.next().await {
@@ -1062,23 +1109,25 @@ pub async fn index_repo(
         index_repo_sync(cat, rules, abs_root, ignore, want, false, false)?;
 
     if let Some(svc) = embedding {
-        let futures_iter = embed_queue
-            .into_iter()
-            .map(|(id, title, chunk_text)| async move {
-                let vec = svc.embed_artifact(title.as_deref(), &chunk_text).await?;
-                anyhow::Ok((id, vec))
-            });
+        let futures_iter = embed_queue.into_iter().map(|item| async move {
+            let vec = svc
+                .embed_artifact(item.title.as_deref(), &item.text)
+                .await?;
+            anyhow::Ok((item.chunk_id, item.artifact_id, vec))
+        });
         let mut stream = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
-        let mut batch: Vec<(String, Vec<f32>)> = Vec::with_capacity(100);
+        // (chunk_id, artifact_id, vector) — both ids ride to the store, because
+        // a backend with no join cannot recover the second one.
+        let mut batch: Vec<(String, String, Vec<f32>)> = Vec::with_capacity(100);
         while let Some(res) = stream.next().await {
             batch.push(res?);
             if batch.len() >= 100 {
                 if let Some(s) = store {
-                    for (id, vec) in &batch {
-                        s.upsert(project_id, id, vec).await?;
+                    for (chunk_id, artifact_id, vec) in &batch {
+                        s.upsert(project_id, chunk_id, artifact_id, vec).await?;
                     }
                 } else {
-                    write_embeddings_v2(cat, &batch)?;
+                    write_embeddings_v2(cat, &pairs_for_sqlite(&batch))?;
                 }
                 report.embedded += batch.len();
                 batch.clear();
@@ -1087,11 +1136,11 @@ pub async fn index_repo(
         if !batch.is_empty() {
             report.embedded += batch.len();
             if let Some(s) = store {
-                for (id, vec) in &batch {
-                    s.upsert(project_id, id, vec).await?;
+                for (chunk_id, artifact_id, vec) in &batch {
+                    s.upsert(project_id, chunk_id, artifact_id, vec).await?;
                 }
             } else {
-                write_embeddings_v2(cat, &batch)?;
+                write_embeddings_v2(cat, &pairs_for_sqlite(&batch))?;
             }
         }
     }
@@ -1665,12 +1714,12 @@ kind = "memory"
 
         // Phase 2: embed
         let mut computed: Vec<(String, Vec<f32>)> = Vec::new();
-        for (id, title, chunk_text) in &embed_queue {
+        for item in &embed_queue {
             let vec = svc
-                .embed_artifact(title.as_deref(), chunk_text)
+                .embed_artifact(item.title.as_deref(), &item.text)
                 .await
                 .unwrap();
-            computed.push((id.clone(), vec));
+            computed.push((item.chunk_id.clone(), vec));
         }
 
         // Phase 3: write
@@ -2032,7 +2081,7 @@ kind = "memory"
             .conn
             .query_row(
                 "SELECT artifact_id FROM artifact_chunk WHERE chunk_id = ?1",
-                [&queue[0].0],
+                [&queue[0].chunk_id],
                 |r| r.get(0),
             )
             .unwrap();
@@ -2062,7 +2111,7 @@ kind = "memory"
             "preamble + two entries, got {}",
             items.len()
         );
-        let texts: Vec<&str> = items.iter().map(|(_, _, t)| t.as_str()).collect();
+        let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
         assert!(
             texts.iter().any(|t| t.contains("alpha")),
             "W-1's body must be embedded"
@@ -2085,7 +2134,8 @@ kind = "memory"
         )
         .unwrap();
         let items = embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nx\n").unwrap();
-        for (chunk_id, _, _) in &items {
+        for item in &items {
+            let chunk_id = &item.chunk_id;
             let n: i64 = cat
                 .conn
                 .query_row(
@@ -2210,7 +2260,7 @@ kind = "memory"
         let items = embed_queue_items(&cat, "a", None, body).unwrap();
         assert!(!items.is_empty(), "the real chunks survive");
         assert!(
-            items.iter().all(|(_, _, t)| !t.trim().is_empty()),
+            items.iter().all(|i| !i.text.trim().is_empty()),
             "no empty text may reach the embedder"
         );
         assert_eq!(
@@ -2256,7 +2306,7 @@ kind = "memory"
         // actually exercised rather than just mentioned in a comment.
         // `artifact_vec_v2` is keyed by chunk_id, not artifact_id — see
         // src/librarian/catalog/mod.rs:285.
-        let (seeded_chunk_id, _, _) = &seeded[0];
+        let seeded_chunk_id = &seeded[0].chunk_id;
         cat.conn
             .execute(
                 "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",

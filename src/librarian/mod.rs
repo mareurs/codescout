@@ -175,12 +175,28 @@ pub async fn build_tool_context_with(
                     let config = crate::retrieval::config::RetrievalConfig::from_env()?;
                     let qdrant =
                         crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
-                    anyhow::Ok((qdrant, config.collection("artifacts")))
+                    // ONE COLLECTION PER PROJECT, `artifact_chunks_<base>_<hash>`.
+                    // The old shared `artifacts` collection is ARTIFACT-grain
+                    // and this reader is chunk-grain, so none of its points
+                    // resolve here; it is superseded rather than migrated.
+                    // Per-project rather than one collection scoped by a
+                    // `project_id` payload, because that scoping was already
+                    // broken: `reindex` derives the id from
+                    // `containing_root(...).unwrap_or_default()`, which returned
+                    // None for codescout itself, so 4395 of 5388 live points
+                    // carried an EMPTY project_id. A collection name derived
+                    // from the active project's path is always known.
+                    // Cross-project scopes fan out; see QdrantArtifactStore::knn.
+                    anyhow::Ok((qdrant, config.collection("artifact_chunks_")))
                 }
                 .await;
                 match connected {
-                    Ok((qdrant, collection)) => Some(std::sync::Arc::new(
-                        artifact_store::QdrantArtifactStore::new(qdrant, collection),
+                    Ok((qdrant, prefix)) => Some(std::sync::Arc::new(
+                        artifact_store::QdrantArtifactStore::new(
+                            qdrant,
+                            prefix,
+                            project_path.as_deref().unwrap_or_default(),
+                        ),
                     )),
                     Err(err) => {
                         tracing::warn!(
@@ -443,9 +459,23 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
                          CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend"
                         ),
                     };
-                let collection = config.collection("artifacts");
+                // See the note at the sibling call in `build_tool_context_with`
+                // — the two must derive collection names the SAME way or the CLI
+                // and the MCP server read different stores.
+                //
+                // This path walks EVERY root, so there is no single active
+                // project. The default below is a fallback that is never
+                // reached: `upsert` routes by the `project_id` computed just
+                // downstream from `containing_root(&root_paths, &root.path)`,
+                // and `root.path` is itself a member of `root_paths`, so that
+                // lookup always matches and the id is always non-empty here.
+                let prefix = config.collection("artifact_chunks_");
+                let fallback_root = root_paths
+                    .first()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 Some(std::sync::Arc::new(
-                    artifact_store::QdrantArtifactStore::new(qdrant, collection),
+                    artifact_store::QdrantArtifactStore::new(qdrant, prefix, &fallback_root),
                 ))
             }
             #[cfg(not(feature = "server-stack"))]

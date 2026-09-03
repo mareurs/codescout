@@ -373,13 +373,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let project_id = crate::librarian::tools::containing_root(&root_paths, abs_root)
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            for (id, title, chunk_text) in &embed_queue {
-                match svc.embed_artifact(title.as_deref(), chunk_text).await {
-                    Ok(vec) => match store.upsert(&project_id, id, &vec).await {
+            for item in &embed_queue {
+                match svc.embed_artifact(item.title.as_deref(), &item.text).await {
+                    Ok(vec) => match store
+                        .upsert(&project_id, &item.chunk_id, &item.artifact_id, &vec)
+                        .await
+                    {
                         Ok(()) => total_embedded += 1,
-                        Err(e) => embed_errors.push(format!("{id}: upsert failed: {e}")),
+                        Err(e) => {
+                            embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id))
+                        }
                     },
-                    Err(e) => embed_errors.push(format!("{id}: embed failed: {e}")),
+                    Err(e) => embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id)),
                 }
             }
         }

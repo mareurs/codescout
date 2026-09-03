@@ -82,20 +82,82 @@ impl ArtifactBackend {
     }
 }
 
+/// Qdrant collection name for one project's artifact chunk vectors.
+///
+/// `prefix` already carries `RetrievalConfig`'s benchmark-isolation prefix — the
+/// callers build it as `config.collection("artifact_chunks_")`, so a
+/// `CODESCOUT_QDRANT_COLLECTION_PREFIX` still isolates a bench run.
+///
+/// **Basename AND hash, not either alone.** The basename is what makes the name
+/// readable in the Qdrant UI, and it is not unique: a worktree, a clone, or
+/// `work/foo` beside `archive/foo` all share one. Two projects silently sharing
+/// a collection is the failure this exists to prevent, and it would look exactly
+/// like working software. The hash is [`artifact_id_from_abs`] — the same
+/// derivation artifact ids use, reused rather than re-invented so there is one
+/// path-hashing rule in this codebase and not two.
+///
+/// Non-alphanumeric bytes in the basename become `_`: Qdrant collection names
+/// admit no `/`, `.` or spaces, and a directory name may hold all three.
+pub fn artifact_collection_name(prefix: &str, project_root: &str) -> String {
+    let path = std::path::Path::new(project_root);
+    let base = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    let sanitized: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let hash = crate::librarian::ids::artifact_id_from_abs(path);
+    format!("{prefix}{sanitized}_{hash}")
+}
+
 /// Backend-agnostic artifact vector store. Implementations:
 /// - [`QdrantArtifactStore`] — default.
 /// - [`SqliteVecArtifactStore`] — the daemon-free escape hatch.
+///
+/// **Grain, stated once because the two ids are easy to swap and nothing
+/// downstream would notice.** Vectors are CHUNK-grain: one per `artifact_chunk`
+/// row. Everything the catalog then does with a result — filtering, project
+/// scope, hydration — is ARTIFACT-grain. So `upsert` takes both ids, `knn`
+/// returns the chunk id, and `delete` takes the artifact id and removes every
+/// chunk vector under it.
+///
+/// Until 2026-09-03 `upsert` had a single `id` slot holding, in practice, a
+/// chunk id — while `delete`'s held an artifact id, and these docs called both
+/// "an artifact's embedding". sqlite-vec tolerated the ambiguity because it can
+/// recover the artifact id by joining `artifact_chunk`; Qdrant has no join and
+/// silently spent its one id twice. See
+/// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
 #[async_trait]
 pub trait ArtifactVectorStore: Send + Sync {
-    /// Upsert an artifact's embedding tagged with its `project_id`. Idempotent
-    /// on id — a second call with the same id overwrites the vector in place.
-    async fn upsert(&self, project_id: &str, id: &str, vector: &[f32]) -> Result<()>;
+    /// Upsert one CHUNK's embedding. `chunk_id` is the vector's identity;
+    /// `artifact_id` is the catalog key it belongs to and is what `delete`
+    /// later matches on. Idempotent on `chunk_id` — a second call with the same
+    /// one overwrites the vector in place.
+    async fn upsert(
+        &self,
+        project_id: &str,
+        chunk_id: &str,
+        artifact_id: &str,
+        vector: &[f32],
+    ) -> Result<()>;
 
-    /// Delete an artifact's embedding by id. Idempotent — a missing id is a
-    /// no-op.
-    async fn delete(&self, id: &str) -> Result<()>;
+    /// Delete EVERY chunk vector belonging to `artifact_id`. Idempotent — an
+    /// artifact with no vectors is a no-op.
+    ///
+    /// Artifact-grain on purpose: an artifact owns N chunk vectors, so a
+    /// chunk-grain delete would leave N−1 orphans that no sweep collects.
+    async fn delete(&self, artifact_id: &str) -> Result<()>;
 
-    /// Dense KNN → ranked `(artifact_id, distance)` pairs, closest first.
+    /// Dense KNN → ranked `(chunk_id, distance)` pairs, closest first.
+    ///
+    /// **The returned id is a CHUNK id**, which the caller resolves to its
+    /// artifact through `artifact_chunk` — see `semantic_find`. (This doc
+    /// promised `artifact_id` until 2026-09-03, a claim the sqlite backend had
+    /// already stopped honouring.)
+    ///
     /// `project_id = Some` narrows to one project (single-project scope); `None`
     /// searches all (the catalog's scoped filter narrows after hydration either
     /// way).
@@ -126,92 +188,158 @@ pub trait ArtifactVectorStore: Send + Sync {
 #[cfg(feature = "server-stack")]
 pub struct QdrantArtifactStore {
     qdrant: QdrantWrap,
-    collection: String,
-    ensured: tokio::sync::OnceCell<()>,
+    /// `{config_prefix}artifact_chunks_` — every artifact collection starts with
+    /// this, which is also how the cross-project fan-out enumerates them.
+    prefix: String,
+    /// The active project's collection. Every write and every project-scoped
+    /// read goes here.
+    default_collection: String,
+    /// Collections already bootstrapped in this process. Was a `OnceCell<()>`
+    /// when there was exactly one collection; a set, now that there is one per
+    /// project and a single reindex can touch a sub-project's.
+    ensured: tokio::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 #[cfg(feature = "server-stack")]
 impl QdrantArtifactStore {
-    /// Construct over a connected Qdrant. The collection is bootstrapped
-    /// lazily on the first upsert (dim taken from the first vector), so a
-    /// remote embedder whose dimension is only known after the first embed
-    /// still works.
-    pub fn new(qdrant: QdrantWrap, collection: impl Into<String>) -> Self {
+    /// Construct over a connected Qdrant, for one active project.
+    ///
+    /// `prefix` is `config.collection("artifact_chunks_")`; `project_root` is
+    /// the active project's absolute path. Collections are bootstrapped lazily
+    /// on first write (dim taken from the first vector), so a remote embedder
+    /// whose dimension is only known after the first embed still works.
+    pub fn new(qdrant: QdrantWrap, prefix: impl Into<String>, project_root: &str) -> Self {
+        let prefix = prefix.into();
+        let default_collection = artifact_collection_name(&prefix, project_root);
         Self {
             qdrant,
-            collection: collection.into(),
-            ensured: tokio::sync::OnceCell::new(),
+            prefix,
+            default_collection,
+            ensured: tokio::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
-    async fn ensure(&self, dim: u64) -> Result<()> {
-        self.ensured
-            .get_or_try_init(|| {
-                self.qdrant
-                    .ensure_artifacts_collection(&self.collection, dim)
-            })
-            .await
-            .map(|_| ())
+    /// Which collection a write for `project_id` belongs in.
+    ///
+    /// An EMPTY `project_id` falls back to the active project rather than
+    /// deriving a name from `""`. That case is real, not defensive: `reindex`
+    /// computes it as `containing_root(...).unwrap_or_default()`, and on this
+    /// host that returned `None` for codescout itself — 4395 of the 5388 live
+    /// points in the old shared collection carry an empty `project_id`.
+    /// Deriving from `""` would file them under a collection named after
+    /// nothing; the active project is the right answer and is always known.
+    fn collection_for(&self, project_id: &str) -> String {
+        if project_id.is_empty() {
+            self.default_collection.clone()
+        } else {
+            artifact_collection_name(&self.prefix, project_id)
+        }
+    }
+
+    async fn ensure(&self, collection: &str, dim: u64) -> Result<()> {
+        if self.ensured.lock().await.contains(collection) {
+            return Ok(());
+        }
+        self.qdrant
+            .ensure_artifacts_collection(collection, dim)
+            .await?;
+        self.ensured.lock().await.insert(collection.to_string());
+        Ok(())
     }
 }
 
 #[cfg(feature = "server-stack")]
 #[async_trait]
 impl ArtifactVectorStore for QdrantArtifactStore {
-    async fn upsert(&self, project_id: &str, id: &str, vector: &[f32]) -> Result<()> {
+    async fn upsert(
+        &self,
+        project_id: &str,
+        chunk_id: &str,
+        artifact_id: &str,
+        vector: &[f32],
+    ) -> Result<()> {
         if vector.is_empty() {
             anyhow::bail!("artifact embedding dim is 0 (embedder returned an empty vector)");
         }
-        // Chunk-grain Qdrant is DEFERRED, and a deferral is only honest if the
-        // deferred path refuses the input it cannot represent. `upsert` carries
-        // exactly one id, so a chunk id arriving here is written as BOTH the
-        // point id and the payload's claimed `artifact_id` (retrieval/artifact.rs),
-        // indistinguishable downstream from a real one — no error, no log line,
-        // no observer.
-        //
-        // The two id spaces are shape-distinguishable, so this is exact rather
-        // than a heuristic. Artifact ids are `sha256(abs_path)` hex[..16] —
-        // 16 chars (librarian/ids.rs). Chunk ids are UUID v4 — 36 chars with
-        // four dashes (catalog/chunk.rs) — and cannot satisfy the predicate.
-        //
-        // The observer is real: `index_repo`'s `s.upsert(project_id, id, vec)`
-        // reaches here whenever `ArtifactBackend::resolve` returns Qdrant, which
-        // is the default on the server build, and the error surfaces through
-        // `index_repo`'s `?` into the reindex report.
-        if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            anyhow::bail!(
-                "QdrantArtifactStore is artifact-grain and was handed a non-artifact id {id:?}. \
-                 Chunk-grain retrieval is implemented on the sqlite-vec backend only; \
-                 set the artifact backend to sqlite-vec, or implement chunk-grain Qdrant."
-            );
-        }
-        self.ensure(vector.len() as u64).await?;
+        // The 16-hex grain guard that stood here until 2026-09-03 is GONE, and
+        // its absence is the fix rather than a relaxation. It existed because
+        // this backend could not represent a chunk id — one id slot, spent as
+        // both the point id and the payload's `artifact_id`. Now that both ids
+        // travel, the input it refused is exactly the input this path is for.
+        let collection = self.collection_for(project_id);
+        self.ensure(&collection, vector.len() as u64).await?;
         self.qdrant
-            .artifact_upsert(&self.collection, project_id, id, vector.to_vec())
+            .artifact_upsert(
+                &collection,
+                project_id,
+                chunk_id,
+                artifact_id,
+                vector.to_vec(),
+            )
             .await
     }
 
-    async fn delete(&self, id: &str) -> Result<()> {
-        if !self.qdrant.collection_exists(&self.collection).await? {
-            return Ok(());
+    async fn delete(&self, artifact_id: &str) -> Result<()> {
+        // Fans out over EVERY artifact collection, because the trait's `delete`
+        // carries no project and an artifact id does not say which project it
+        // belongs to. Scanning them all is affordable precisely because this has
+        // no production caller today — it exists for an explicit vector purge —
+        // and being wrong in the other direction would silently strand vectors.
+        for collection in self.qdrant.artifact_collections(&self.prefix).await? {
+            // Delete by payload FILTER, not by derived point id: an artifact
+            // owns N chunk points now, and the old form would remove at most one
+            // and leave the rest as orphans no sweep collects.
+            self.qdrant
+                .artifact_delete(&collection, artifact_id)
+                .await?;
         }
-        self.qdrant.artifact_delete(&self.collection, id).await
+        Ok(())
     }
 
+    /// `project_id = Some` reads the active project's collection; `None` fans
+    /// out across every artifact collection and merges.
+    ///
+    /// **`None` is not "no filter" here, it is "all projects", and that
+    /// distinction is what per-project collections would otherwise have eaten.**
+    /// `Find::call` passes `Some` only for `Scope::Project` and `None` for
+    /// `repo` / `umbrella` / `all` — the scopes CLAUDE.md documents as reaching
+    /// across repos. With one collection per project, honouring `None` by
+    /// dropping a payload filter would have silently narrowed those scopes to
+    /// the active project, returning a plausible short page and no error.
+    ///
+    /// Merging is sound because every artifact collection is created by
+    /// `ensure_artifacts_collection` with the same `Distance::Cosine`, so the
+    /// distances compare directly. A future collection on another metric would
+    /// break that silently — which is why the metric lives in one place.
     async fn knn(
         &self,
         project_id: Option<&str>,
         query: &[f32],
         k: usize,
     ) -> Result<Vec<(String, f32)>> {
-        if !self.qdrant.collection_exists(&self.collection).await? {
-            return Ok(vec![]);
+        let collections: Vec<String> = match project_id {
+            Some(pid) => vec![self.collection_for(pid)],
+            None => self.qdrant.artifact_collections(&self.prefix).await?,
+        };
+
+        let mut merged: Vec<(String, f32)> = Vec::new();
+        for collection in collections {
+            if !self.qdrant.collection_exists(&collection).await? {
+                continue;
+            }
+            // `artifact_knn_scored` performs the similarity→distance flip; see
+            // its doc comment for why that conversion lives there and not here.
+            // Each collection is asked for the full `k`: a project holding all
+            // the best hits must be able to supply all of them.
+            merged.extend(
+                self.qdrant
+                    .artifact_knn_scored(&collection, None, query.to_vec(), k)
+                    .await?,
+            );
         }
-        // `artifact_knn_scored` performs the similarity→distance flip; see its doc
-        // comment for why that conversion lives there and not here.
-        self.qdrant
-            .artifact_knn_scored(&self.collection, project_id, query.to_vec(), k)
-            .await
+        merged.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        merged.truncate(k);
+        Ok(merged)
     }
 }
 
@@ -231,7 +359,19 @@ impl SqliteVecArtifactStore {
 
 #[async_trait]
 impl ArtifactVectorStore for SqliteVecArtifactStore {
-    async fn upsert(&self, _project_id: &str, id: &str, vector: &[f32]) -> Result<()> {
+    async fn upsert(
+        &self,
+        _project_id: &str,
+        chunk_id: &str,
+        // ACCEPTED AND DELIBERATELY UNUSED — do not "clean this up" by dropping
+        // it from the trait. `artifact_vec_v2` is keyed by `chunk_id`, and this
+        // backend recovers the artifact id whenever it needs one by joining
+        // `artifact_chunk` (see `delete` below, and `semantic_find`). Qdrant has
+        // no join, so the trait must carry both; that this impl can ignore one
+        // is a property of sqlite, not a redundancy in the signature.
+        _artifact_id: &str,
+        vector: &[f32],
+    ) -> Result<()> {
         // Delegate to the catalog's batch writer — reuses its dimension
         // validation and the BUG-045 DELETE-then-INSERT idempotency contract
         // verbatim (so the sqlite-vec backend behaves exactly as before).
@@ -239,7 +379,10 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         // Chunk-grain: the embed queue is keyed by `chunk_id` (see
         // `indexer::embed_queue_items`), so vectors belong in the chunk-keyed
         // `artifact_vec_v2`, never the artifact-keyed v1 table.
-        crate::librarian::indexer::write_embeddings_v2(&cat, &[(id.to_string(), vector.to_vec())])
+        crate::librarian::indexer::write_embeddings_v2(
+            &cat,
+            &[(chunk_id.to_string(), vector.to_vec())],
+        )
     }
 
     async fn delete(&self, id: &str) -> Result<()> {
@@ -291,12 +434,17 @@ pub mod test_support {
     use super::*;
     use std::collections::HashMap;
 
-    /// Brute-force cosine KNN over an in-memory map. Honors `project_id`
-    /// filtering so coordinator tests exercise the same scoping as Qdrant.
+    /// `(project_id, artifact_id, vector)`, keyed by chunk id.
+    ///
+    /// `artifact_id` is not bookkeeping: `delete` is artifact-grain by contract,
+    /// so without it this fixture could only ever remove one point and would
+    /// silently pass a chunk-grain delete that leaves orphans — the exact defect
+    /// the Qdrant filtered delete exists to avoid.
+    type StoredPoint = (String, String, Vec<f32>);
+
     #[derive(Default)]
     pub struct InMemoryArtifactStore {
-        // id -> (project_id, vector)
-        points: parking_lot::Mutex<HashMap<String, (String, Vec<f32>)>>,
+        points: parking_lot::Mutex<HashMap<String, StoredPoint>>,
     }
 
     fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -312,15 +460,32 @@ pub mod test_support {
 
     #[async_trait]
     impl ArtifactVectorStore for InMemoryArtifactStore {
-        async fn upsert(&self, project_id: &str, id: &str, vector: &[f32]) -> Result<()> {
-            self.points
-                .lock()
-                .insert(id.to_string(), (project_id.to_string(), vector.to_vec()));
+        async fn upsert(
+            &self,
+            project_id: &str,
+            chunk_id: &str,
+            artifact_id: &str,
+            vector: &[f32],
+        ) -> Result<()> {
+            self.points.lock().insert(
+                chunk_id.to_string(),
+                (
+                    project_id.to_string(),
+                    artifact_id.to_string(),
+                    vector.to_vec(),
+                ),
+            );
             Ok(())
         }
 
-        async fn delete(&self, id: &str) -> Result<()> {
-            self.points.lock().remove(id);
+        async fn delete(&self, artifact_id: &str) -> Result<()> {
+            // Artifact-grain: remove EVERY chunk point under this artifact, which
+            // is what the trait promises and what the Qdrant filtered delete and
+            // sqlite's `delete_chunk_vectors` both do. Removing by key would make
+            // this fixture agree with a one-point delete and hide the orphan bug.
+            self.points
+                .lock()
+                .retain(|_, (_, aid, _)| aid != artifact_id);
             Ok(())
         }
 
@@ -332,16 +497,17 @@ pub mod test_support {
         ) -> Result<Vec<(String, f32)>> {
             let pts = self.points.lock();
             // Cosine SIMILARITY internally, converted to the trait's
-            // lower-is-closer distance on the way out — the same flip the
-            // Qdrant backend does, so a test fixture cannot accidentally
-            // encode the opposite polarity from production.
+            // lower-is-closer distance on the way out — the same flip the Qdrant
+            // backend does, so a test fixture cannot accidentally encode the
+            // opposite polarity from production.
             let mut scored: Vec<(String, f32)> = pts
                 .iter()
-                .filter(|(_, (pid, _))| project_id.is_none_or(|p| p == pid))
-                .map(|(id, (_, v))| (id.clone(), 1.0 - cosine(query, v)))
+                .filter(|(_, (pid, _, _))| project_id.is_none_or(|p| p == pid))
+                .map(|(id, (_, _, v))| (id.clone(), 1.0 - cosine(query, v)))
                 .collect();
             scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            Ok(scored.into_iter().take(k).collect())
+            scored.truncate(k);
+            Ok(scored)
         }
     }
 }
@@ -371,11 +537,49 @@ mod backend_tests {
         assert_eq!(ArtifactBackend::parse("nonsense"), None);
     }
 
+    /// Two projects sharing a basename get DIFFERENT collections.
+    ///
+    /// This is the whole reason the name carries a hash as well as a basename.
+    /// `work/foo` beside `archive/foo`, a clone, or a git worktree all share a
+    /// directory name, and two projects silently sharing one collection would
+    /// look exactly like working software: queries return, results are
+    /// plausible, and one project's artifacts answer the other's questions.
+    #[test]
+    fn two_projects_sharing_a_basename_get_different_collections() {
+        let a = artifact_collection_name("pfx_", "/home/u/work/foo");
+        let b = artifact_collection_name("pfx_", "/home/u/archive/foo");
+        assert_ne!(a, b, "same basename must not collapse to one collection");
+        // Both still READ as `foo`, which is the point of keeping the basename:
+        // the hash disambiguates without making the name opaque.
+        assert!(a.starts_with("pfx_foo_"), "got {a}");
+        assert!(b.starts_with("pfx_foo_"), "got {b}");
+    }
+
+    /// The name is stable across calls and legal as a Qdrant collection name.
+    #[test]
+    fn a_collection_name_is_deterministic_and_has_no_illegal_characters() {
+        let root = "/home/u/my project.v2/repo-name";
+        let first = artifact_collection_name("pfx_", root);
+        assert_eq!(first, artifact_collection_name("pfx_", root), "not stable");
+        assert!(
+            first.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "Qdrant admits no '/', '.' or space in a collection name, and a \
+             directory may hold all three: {first}"
+        );
+        // The prefix is what the cross-project fan-out enumerates on, so it has
+        // to survive verbatim — sanitising it away would make `knn(None)` find
+        // nothing while every single-project query kept working.
+        assert!(
+            first.starts_with("pfx_"),
+            "prefix must be verbatim: {first}"
+        );
+    }
+
     #[tokio::test]
     async fn knn_filters_by_project_id() {
         let store = InMemoryArtifactStore::default();
-        store.upsert("p1", "a", &[1.0, 0.0]).await.unwrap();
-        store.upsert("p2", "b", &[1.0, 0.0]).await.unwrap();
+        store.upsert("p1", "a", "art-a", &[1.0, 0.0]).await.unwrap();
+        store.upsert("p2", "b", "art-b", &[1.0, 0.0]).await.unwrap();
 
         // Scoped to p1 → only "a".
         let scoped: Vec<String> = store
@@ -411,8 +615,14 @@ mod backend_tests {
     #[tokio::test]
     async fn knn_returns_lower_is_closer_distance() {
         let store = InMemoryArtifactStore::default();
-        store.upsert("p", "near", &[1.0, 0.0]).await.unwrap();
-        store.upsert("p", "far", &[0.0, 1.0]).await.unwrap();
+        store
+            .upsert("p", "near", "art-near", &[1.0, 0.0])
+            .await
+            .unwrap();
+        store
+            .upsert("p", "far", "art-far", &[0.0, 1.0])
+            .await
+            .unwrap();
 
         let hits = store.knn(Some("p"), &[1.0, 0.0], 10).await.unwrap();
         assert_eq!(hits.len(), 2);
@@ -431,10 +641,45 @@ mod backend_tests {
     #[tokio::test]
     async fn delete_is_idempotent() {
         let store = InMemoryArtifactStore::default();
-        store.upsert("p", "a", &[1.0]).await.unwrap();
-        store.delete("a").await.unwrap();
-        store.delete("a").await.unwrap(); // missing id → no-op
+        // `delete` is ARTIFACT-grain: the id it takes is deliberately NOT the id
+        // `upsert` keyed the point on. Using one value for both here would let a
+        // chunk-grain delete pass this test unchanged.
+        store.upsert("p", "chunk-a", "art-a", &[1.0]).await.unwrap();
+        store.delete("art-a").await.unwrap();
+        store.delete("art-a").await.unwrap(); // already gone → no-op
         assert!(store.knn(None, &[1.0], 10).await.unwrap().is_empty());
+    }
+
+    /// `delete` removes EVERY chunk point under one artifact, not just one.
+    ///
+    /// The failure this exists for is silent: an artifact owns N points, so a
+    /// delete that removes one leaves N-1 orphans that still answer queries and
+    /// that no sweep collects. A single-chunk fixture cannot express it — one
+    /// point behaves identically under "delete all" and "delete first" — so the
+    /// THREE chunks below are load-bearing, and so is the fourth point under a
+    /// DIFFERENT artifact, which is what stops a delete-everything from passing.
+    #[tokio::test]
+    async fn deleting_an_artifact_removes_every_one_of_its_chunk_points() {
+        let store = InMemoryArtifactStore::default();
+        for c in ["c1", "c2", "c3"] {
+            store.upsert("p", c, "art-a", &[1.0, 0.0]).await.unwrap();
+        }
+        store.upsert("p", "c9", "art-b", &[1.0, 0.0]).await.unwrap();
+
+        store.delete("art-a").await.unwrap();
+
+        let left: Vec<String> = store
+            .knn(None, &[1.0, 0.0], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            left,
+            vec!["c9".to_string()],
+            "every chunk of art-a must go, and art-b's must stay"
+        );
     }
 
     #[tokio::test]
@@ -477,12 +722,21 @@ mod backend_tests {
 
         let cat = std::sync::Arc::new(parking_lot::Mutex::new(cat));
         let store = SqliteVecArtifactStore::new(cat.clone());
-        for (id, _, _) in &queue {
-            store.upsert("proj", id, &vec![0.5f32; 768]).await.unwrap();
+        for item in &queue {
+            store
+                .upsert(
+                    "proj",
+                    &item.chunk_id,
+                    &item.artifact_id,
+                    &vec![0.5f32; 768],
+                )
+                .await
+                .unwrap();
         }
 
         let guard = cat.lock();
-        for (id, _, _) in &queue {
+        for item in &queue {
+            let id = &item.chunk_id;
             let n: i64 = guard
                 .conn
                 .query_row(
@@ -501,61 +755,5 @@ mod backend_tests {
             .query_row("SELECT COUNT(*) FROM artifact_vec", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v1, 0, "no chunk id may reach the artifact-keyed v1 table");
-    }
-
-    #[cfg(feature = "server-stack")]
-    #[tokio::test]
-    async fn qdrant_store_refuses_a_chunk_id_and_lets_an_artifact_id_through() {
-        // Both fixtures are REAL shapes taken from their mint sites, never
-        // hand-typed look-alikes: change either constructor and this test must
-        // be re-derived rather than quietly keeping its old fixture.
-        let chunk_like = uuid::Uuid::new_v4().to_string();
-        let artifact_like =
-            crate::librarian::ids::artifact_id_from_abs(std::path::Path::new("/test/a.md"));
-        assert_eq!(
-            artifact_like.len(),
-            16,
-            "artifact id shape moved — re-derive the guard in QdrantArtifactStore::upsert"
-        );
-        assert_ne!(
-            chunk_like.len(),
-            16,
-            "chunk id shape moved — the guard's length discriminator no longer separates them"
-        );
-
-        // Points at a port nothing listens on. The guard runs BEFORE `ensure`,
-        // so the REFUSAL direction never reaches the network and is
-        // deterministic; the ACCEPT direction is expected to get past the guard
-        // and fail at connect, which is this test's pass condition.
-        let store = QdrantArtifactStore::new(
-            crate::retrieval::qdrant::QdrantWrap {
-                client: qdrant_client::Qdrant::from_url("http://127.0.0.1:1")
-                    .skip_compatibility_check()
-                    .build()
-                    .expect("building a client must not require a server"),
-            },
-            "artifacts_test",
-        );
-
-        let refused = store
-            .upsert("proj", &chunk_like, &[0.1f32; 8])
-            .await
-            .expect_err("a chunk id must be refused");
-        assert!(
-            refused.to_string().contains("artifact-grain"),
-            "the refusal must name the GRAIN, not fail incidentally at the network: {refused}"
-        );
-
-        // LOAD-BEARING, and the half that makes the pair non-vacuous: without
-        // it the accept direction is satisfied by ANY error — including the
-        // guard wrongly firing on a valid artifact id — so the test would be
-        // monotone in exactly the direction it exists to check.
-        let passed_guard = store.upsert("proj", &artifact_like, &[0.1f32; 8]).await;
-        if let Err(e) = passed_guard {
-            assert!(
-                !e.to_string().contains("artifact-grain"),
-                "an artifact id must reach the network, not be refused by the guard: {e}"
-            );
-        }
     }
 }

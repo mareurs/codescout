@@ -803,11 +803,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Whoever raises it owns restructuring this into one record per HIT; the
         // failure mode is a wrong `matched` span on a plausible-looking item, not
         // an error.
-        let (semantic_rows, distance_by_id, chunk_by_id, starvation, cap_suppressed) =
+        let (semantic_rows, distance_by_id, chunk_by_id, starvation, cap_suppressed, unresolved) =
             match semantic_page {
                 Some(page) => {
                     let starvation = (page.widenings, page.exhausted);
                     let cap_suppressed = page.cap_suppressed;
+                    let unresolved = page.unresolved;
                     let mut d = std::collections::HashMap::new();
                     let mut c = std::collections::HashMap::new();
                     let mut r = Vec::with_capacity(page.hits.len());
@@ -818,13 +819,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         }
                         r.push(hit.row);
                     }
-                    (Some(r), d, c, Some(starvation), cap_suppressed)
+                    (Some(r), d, c, Some(starvation), cap_suppressed, unresolved)
                 }
                 None => (
                     None,
                     std::collections::HashMap::new(),
                     std::collections::HashMap::new(),
                     None,
+                    0usize,
                     0usize,
                 ),
             };
@@ -988,6 +990,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                          single artifact answering the query several times appears once. Read \
                          the whole thing with doc(action=\"get\", id=…), or narrow the \
                          query if you wanted breadth."
+                    )),
+                );
+            }
+            // Also silent at zero, and for a DIFFERENT reason than the cap above:
+            // zero here is the healthy steady state, so a hint that fired anyway
+            // would be noise on every well-formed query. When it fires it names a
+            // store/reader GRAIN MISMATCH, which is not something the caller can
+            // fix by rephrasing — it is an operator-facing fact, so the hint says
+            // where to look rather than what to retype.
+            if unresolved > 0 {
+                h.insert("unresolved".into(), json!(unresolved));
+                h.insert(
+                    "unresolved_hint".into(),
+                    json!(format!(
+                        "{unresolved} vector(s) the store returned resolved to no chunk row and \
+                         were discarded before ranking. Retrying will not change this: the \
+                         vectors are stale, or the store holds ids at a grain this reader \
+                         cannot resolve. Re-index to refresh them -- \
+                         librarian(action=\"reindex\", reembed=true)."
                     )),
                 );
             }

@@ -1172,7 +1172,10 @@ mod tests {
             ledger_chunks.len()
         );
         for c in &ledger_chunks {
-            store.upsert("p", &c.chunk_id, &[1.0, 0.0]).await.unwrap();
+            store
+                .upsert("p", &c.chunk_id, &c.artifact_id, &[1.0, 0.0])
+                .await
+                .unwrap();
         }
         for c in &chunk::replace_chunks(
             &cat,
@@ -1181,7 +1184,10 @@ mod tests {
         )
         .unwrap()
         {
-            store.upsert("p", &c.chunk_id, &[0.0, 1.0]).await.unwrap();
+            store
+                .upsert("p", &c.chunk_id, &c.artifact_id, &[0.0, 1.0])
+                .await
+                .unwrap();
         }
 
         let ctx = TestToolContextBuilder::new(cat)
