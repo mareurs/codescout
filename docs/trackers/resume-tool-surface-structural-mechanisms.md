@@ -433,33 +433,200 @@ pre-registered eval result, not a snapshot. Re-derive the headroom before quotin
 
 ## SM-4 — Run the A/B nobody has run: enum-dispatched `doc` vs split per-action tools
 
-**Status:** open — the highest-value item, and the only one that produces new knowledge
+**Status:** **PRE-REGISTERED 2026-09-03, not yet run.** Everything below was written
+before any arm existed. Committed first, deliberately — `prompt-hamsa-audit-log:A-28`
+records its own rule as *"committed to codescout's hamsa ledger … BEFORE this arm ran"*,
+and that ordering is the only thing separating a pre-registration from a rationalisation.
 
 No published benchmark varies tool **shape** holding operations constant. We are unusually
 well positioned: the `prompt-engineering` repo is an eval harness that puts codescout's own
 prompts under TDD against headless `claude -p`.
 
-Score **two** error classes separately, because the literature says consolidation trades
-one for the other:
-- **action-selection** error (did it pick the right operation?)
-- **parameter-construction** error (did it build valid args?)
+### What decision this informs — stated first, because "produces knowledge" is not enough
 
-A design that improves the first and worsens the second is the predicted outcome, and a
-single blended accuracy number would hide it.
+**It evaluates a change already shipped.** The 2026-09-02 collapse multiplexed five tools
+into action-dispatched mega-tools; `doc` now carries 17 actions and 60 params. If splitting
+measurably improves action selection, that is evidence the collapse **cost accuracy**, and
+the finding is actionable about a decision already taken rather than a hypothetical one.
 
-This is also the eval `prompt-surface-compaction-session-log:W-2`'s `Promote-when` has been
-waiting for — *"a third compaction decision scoped by this arithmetic rather than by byte
-count"*.
+**No ship rides on the result, and that is pre-registered too.** Splitting `doc` back out is
+refuted on byte grounds independently (§ SM-1–SM-3), so `ΔS > 0` must **not** be read as a
+mandate to split. Recording that here is what stops a favourable number acquiring a
+conclusion it was never scoped to support.
 
-**Before running:** read `prompt-engineering:docs/trackers/prompt-tdd-operating-guide.md`.
-It is a ledger of ways that harness does what you asked in a way that reads as something
-else, and the failure mode is a **number**, not an error.
+### Design — stub MCP servers, not a rendered fixture
 
-**Valid:** invariant — the absence of a shape-isolating benchmark is a fact about the
-published literature as of 2026-09-03; a new benchmark would supersede this entry rather
-than falsify it
+A-28 rendered the surface as text in a `CLAUDE.md` and asked the model to *name* the call.
+That is sound when the unit is one sentence **inside** a description. **It is not sound
+here**, because SM-4's unit is the *structure of the tool list*, and a text rendering
+replaces "selecting from a tool list" with "reading a document about tools" — destroying
+exactly the variable. A-28 logged this as a caveat; for SM-4 it would be the whole result.
 
-**Rests on:** the 2026-09-03 research pass recorded above; `W-2`'s cost arithmetic.
+`mcp_command` is supported (15 scenario files use it), so each arm gets a **stub MCP
+server** whose tools return `{"ok": true}` and whose only job is to be *selected from*:
+
+| arm | surface | role |
+|---|---|---|
+| **enum** | one `doc` tool, the real 17-action schema | base — P-3 makes it binding |
+| **split** | N per-action tools (`doc_append_entry`, `doc_update`, …), each carrying only its own action's params | treatment |
+| **control-positive** | the `split` surface + a mandatory directive naming a wrong tool | must drive `S` to ≤ 2/10 |
+
+**There is deliberately no `control-null`.** A-28's null was "description removed" — a
+meaningful midpoint on a deletion. A *shape* comparison has no null shape, and adding an arm
+for symmetry would cost 10 runs to answer nothing. The positive control alone discharges the
+validity gate, which is what the operating guide actually requires.
+
+The split surface is **generated** from the live `tools/list` capture by `gen_fixtures.py`,
+which refuses to write unless it emitted one tool per action and the union of the split
+tools' params equals the enum tool's params. Hand-writing it would test a manipulation that
+never arrived.
+
+### Prior art — surveyed 2026-09-03 BEFORE building, and it falsified the first draft
+
+`prompt-engineering` holds 26 scenarios. Two bear directly on this entry, and reading them
+changed the design rather than confirming it. **Read both before writing a line of scenario.**
+
+**`scenarios/ledger-vs-tracker` — the stimulus this entry first proposed is MEASURED
+TAUTOLOGICAL.** Its `append-shape` scenario is the same task (seed a session log carrying one
+`F-N` heading, ask to add an observation) and it scored **10/10 on all four cells**, with
+`--ablate` — guide stripped — *also* 10/10. Recorded verdict: *"tautological for sonnet … the
+scenario has NO POWER for a capable model."* The first draft of SM-4 would have spent 30 runs
+rediscovering that ceiling.
+
+It also supplies the escape, and it is not "use more runs": an **ambiguous** artifact with no
+correct action, where the checker **classifies** each run (append / update-in-place / clobber)
+and tallies a distribution. That is the only design in the file that produced a signal —
+0/10 vs 2/10 — and its own caveat is honest (Fisher ≈ 0.47, needs n≈30–50).
+
+And it establishes the build path: **two frozen aliased binaries** (`codescout-tracker` /
+`codescout-ledger`, differing in tool descriptions and one action name) driven via
+`registry: anthropic-mcp`. SM-4's "two real surfaces" is a pattern already executed here, not
+a new capability — which makes stub servers the *fallback*, not the plan.
+
+**`scenarios/surface-budget` — the measurement unit is not what § *The unit* above assumes.**
+Measured 2026-08-23 with `eval-bins/calibrate_attach.py`, reproducible to the token across
+three runs: **Claude Code 2.1.241 DEFERS MCP tool schemas.** Attaching codescout raises the
+prompt by **1,175 tokens**, 7.3% of the surface's token weight. Only tool **names** are
+injected; the ~85% that is JSON schema arrives later via `ToolSearch`, and only if the model
+reaches for it. That README also records the consequence this queue has not absorbed: *"the
+K* = 12.5 break-even analysis needs redoing — it assumed the tool surface sits in the cached
+prefix and is re-read every turn. It does not."*
+
+**That cuts FOR this experiment, not against it.** Under deferral the resident payload is
+exactly the **tool-name list**, and enum-vs-split is precisely a difference in names. SM-4
+therefore varies the one thing that is definitely resident. It does mean parameter
+construction costs a `ToolSearch` hop, which must be scored as part of `P`, not excluded.
+
+Three more from that README, each already paid for: the tool surface is **project-state
+dependent** (23 / 26 / 27 tools by fixture), so every arm must untar the fixture project or it
+measures 6.5% under production while silently dropping four tools; prompts must say *"use the
+codescout MCP tools"* or the model answers with `Bash` and scores a confident PASS having
+measured nothing; and `run_arms.py` **scores every arm with the FIRST arm's checker**, warning
+only on stderr — hence one config dir per task.
+
+**An obligation is outstanding there, and it blocks publication rather than work.**
+surface-budget's own pre-registration is *owed and unwritten* — it was scoped not to modify
+the codescout repo, and its README states the `-base` table **must not be published until the
+entry exists**. That entry belongs in this repo. It is a separate task from SM-4 and should
+not be bundled into it.
+
+### The stimulus — revised, because the first choice is known to ceiling
+
+**Rejected:** *"add a new entry to tracker X"* as a pass/fail task. Documented-real confusion
+(CLAUDE.md's ⚠ that `augment` **replaces** a collection, which took a queue from 19 entries to
+1 on 2026-08-16), but `ledger-vs-tracker` measured that exact shape at the ceiling with and
+without its guide. A confusion being real in the field does not make it reachable by a
+stimulus.
+
+**Two stimuli, scoring the two classes where each can actually move:**
+
+- **`P` — parameter construction, unambiguous, param-heavy.** One operation, a call needing
+  `id_prefix` + `anchor_heading` + `title` + `body` together. Selection ceilings for a capable
+  model; *building* a five-field call correctly is where the enum/split difference should bite,
+  and it is the half the literature predicts consolidation **helps** and splitting **hurts**.
+- **`S` — action selection, AMBIGUOUS, classified not scored.** An artifact that legitimately
+  invites either an append or an in-place update, and a neutral instruction. No correct answer;
+  the checker tallies a **distribution** per arm. Shape matters iff the distribution shifts.
+
+### MANDATORY POWER PROBE, before the matrix — the lesson `ledger-vs-tracker` paid full price for
+
+It discovered *no power* **after** running the whole matrix and the ablation. So:
+
+> Run **base only, n=5**, on each stimulus first. If `P` returns 5/5 or 0/5, or `S` returns a
+> single class 5/5, that stimulus **has no power and the matrix must not run on it**. Fix the
+> stimulus or pin a weaker model (their own recommended escape) and re-probe. A ceiling found
+> at n=5 costs 5 runs; found at the matrix it costs 30 and reads like a tie.
+
+This probe is **not** the validity gate below — it asks whether the *task* can move at all,
+before any arm claims the *manipulation* did or did not move it.
+
+### The two scores, and why they must not be blended
+
+- **`S` — action-selection**: did the call name the intended operation? (`action="append_entry"`
+  in enum; tool `doc_append_entry` in split.)
+- **`P` — parameter-construction**: do the args validate against the real schema **for the
+  operation actually invoked**?
+
+`P` is scored against the chosen operation, **not** conditioned on `S` being right. Valid
+args for the wrong action is a construction success and a selection failure, and that
+decomposition is the whole experiment — the literature's claim is that consolidation trades
+one for the other, and a single blended accuracy number cannot express it.
+
+### Pre-registered decision rule
+
+1. **Validity gate, binding and first.** If `enum` and `split` return the same `S` **and**
+   the same `P`, the run is **VOID** until control-positive moves `S` to ≤ 2/10. Identical
+   arms are equally the signature of a manipulation that never reached the model — which is
+   what happened in `A-27`, and the gate is what stopped a tie being published.
+2. Non-void: report **both** deltas with their failure classes. **Predicted direction,
+   committed now: `ΔS > 0` and `ΔP < 0`** (split helps selection, hurts construction).
+   Pre-registering the direction is what stops a confirmation being retrofitted to whichever
+   way it lands.
+3. **`ΔS > 0` is not a mandate to split** — see § *What decision this informs*.
+4. n=10 separates **large** gaps only. Anything under 3/10 apart is **INDETERMINATE** and
+   needs n ≥ 30, which is a **new pre-registration, not a re-run** — re-running until a
+   threshold flips is fishing.
+
+### Harness constraints this design must honour — each one has already cost someone a run
+
+From `prompt-engineering:prompt-tdd-operating-guide` (22 entries; read it, do not trust this
+list to stay complete):
+
+- **OP-22** — checkers must be `script:` files. An **inline** checker makes `run_arms.py`
+  print *"No custom checker in any arm's scenario.yaml"* and silently skip re-scoring, the
+  per-run log and the distinct-count. Cost 70 runs / $11.50. `grep -c 'script:'` before running.
+- **OP-5** — a checker without the exec bit reports a clean `0/N`, character-identical to a
+  real floor. `chmod +x`, and mutation-test the checker **before** any arm, in two layers:
+  that it runs at all, and that it splits pass / fail / absent.
+- **OP-21** — `--disallowedTools` **removes** an MCP tool rather than denying it, so a leak
+  leaves no `<tool_use_error>` and is undetectable in the transcript. Each arm must expose
+  **only its own server**; never rely on denial to isolate a surface.
+- **OP-7** — `mcp_command` is the binary on `PATH`, not the working tree. Absolute paths.
+- **OP-20** — one scenario per pytest invocation; two scenario dirs sharing a module basename
+  cross-bind imports and report false failures in untouched code.
+- **OP-16** — `max_cost_per_scenario` resets **per arm**, so the real ceiling is n× the
+  number of arms; the suite total is unguarded.
+- **OP-11 / OP-3 / OP-2** — a spend-limited subscription returns a clean `0/N` on every arm
+  and reads as a tie; `pass_threshold` defaults to 1.0; `1/1 passed` is the *scenario* count.
+  Read the rate from `run_arms.py`, never the PASS verdict.
+
+### Known limits, recorded before the run
+
+- **One task.** This measures the `append_entry` / `update` / `augment` confusion set, **not
+  "tool shape" in general**. A second task set is a separate pre-registration.
+- **Stub servers are not codescout.** They reproduce the *surface*, not the behaviour, so
+  nothing here speaks to what happens after a call lands.
+- **The split surface is synthetic** — it has never shipped, so its descriptions are
+  generated rather than authored, and an authored split surface might score differently.
+- `prompt-engineering` is **outside this session's working directories**; building the arms
+  needs write access there, which is a permission decision, not a technical one.
+
+**Valid:** conditional — until the arms run and a verdict is recorded below
+
+**Rests on:** `prompt-engineering:prompt-tdd-operating-guide` (OP-1…OP-22);
+`prompt-hamsa-audit-log:A-28` for the arm shape and the validity gate;
+`prompt-surface-compaction-session-log:W-2`'s cost arithmetic, whose `Promote-when` this
+discharges; the 2026-09-02 tool-surface collapse as the change under evaluation.
 
 ## Template for new entries
 
