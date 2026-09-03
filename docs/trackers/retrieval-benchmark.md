@@ -209,6 +209,47 @@ relative — known gap.
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
 
+### 2026-09-04 (later) — `max_per_artifact` 1 → 2: **4/12 → 6/12**, and the class breakdown is the evidence
+
+`998f64d3` (patch-id `5eb59d0d5ac2ffed`). `BL-72` shipped. Harness `limit=5`,
+`target/release/codescout`, corpus **35,561 chunk rows / 1,852 artifacts**.
+
+| | hits@5 | file-hits@5 | MRR | classes |
+|---|---|---|---|---|
+| `cap=1` | 4/12 | 7/12 | 0.2708 | hit=4 **preamble=3** wrong_file=5 |
+| `cap=2` | **6/12** | 7/12 | **0.3194** | hit=6 **preamble=1** wrong_file=5 |
+
+**Read the classes, not the scalar — and this is the run that shows why the classes
+were worth building.** `preamble` went 3 → 1 and `hit` 4 → 6 while `wrong_file` and
+`file-hits@5` held **exactly** constant. That is the mechanism's own signature: the
+same seven files were being retrieved before and after, and the cap was simply
+showing the wrong chunk of three of them. A scalar moving 4 → 6 on a live shared
+corpus is suggestive; four numbers moving in exactly the predicted pattern, two of
+them not moving at all, is not something 28 chunk rows of drift can produce.
+
+The surviving `preamble` case is an artifact whose target entry is its third-best
+chunk or lower. `cap=3` reaches it and scores worse overall — which is what makes
+`cap=2` an optimum rather than a point on a ramp, and why "raise it further" is not
+the follow-up.
+
+**What this does NOT change: `wrong_file` is still 5, and at least three of those
+five are the suite's fault rather than retrieval's.** AE-8's query is near-verbatim
+the TITLE of the bug file returned at rank 1, while the suite expects the work-queue
+entry that records the same defect; AE-4 returns
+`docs/architecture/augmented-artifacts.md` and AE-10 returns `docs/RELEASE.md`, both
+plausibly correct. This project deliberately records one fact in several places — a
+bug file, a queue entry, a cluster file, a session-log entry — and the suite has
+**single-target** ground truth over a **multi-answer** corpus. So the absolute score
+understates quality by an unknown margin and must not be read as "finds half of what
+it should"; the relative comparisons in this tracker are unaffected, because every
+arm here holds ground truth fixed.
+
+**Withdrawn from `BL-72` in the same commit:** the "page limit 5 → 10" half named no
+product setting. `find.rs` has `default_limit() = 50`; the `5` is
+`run-artifact-bench.py`'s own `--limit`. The sweep's axis and a product constant
+shared a word (`F-115`). Every `limit=5` / `limit=10` figure in this tracker is a
+measurement choice, not a deployment.
+
 ### 2026-09-04 (late) — the harness now says WHY a case missed, and one case could never have passed
 
 **The score was understating retrieval by a full point, for a reason that is not

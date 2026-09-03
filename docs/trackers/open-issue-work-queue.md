@@ -113,7 +113,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-69 | 1 | Repair the 3 files with an unterminated fence | **done** 2026-09-01 — all three were one defect: a nested fence closing its enclosing ```markdown block early. Two widened to ````, one stray trailing delimiter deleted. `unterminated_fence` 3 → 0 | — |
 | BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | **done** 2026-09-01 — three, not six (the rest are in the whatsapp / eduplanner-ui repos). One was a NO-ACTION by the finding's own instruction: provenance-subsystem's missing headings are the compaction ladder's supported end state, and adding one would make the token ambiguous. I-8's params row written by whole-array rewrite (8/8 survive, catalog-only so it does not travel in git); claim-decay DC-2's body Status corrected to `check-shipped` | — |
 | BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | **done** 2026-09-01, both halves. The 14 `cited_prefix_with_no_definer` are 8 non-citations and the top four by volume are all noise — filed as `9b67295c125cfcb6`, tagged IC-2, and **now FIXED** at `d44a4409` (patch-id `f37ae73ffe72846ca0cceae19b9649f8c24b6a08`) by gating on DISPERSION rather than volume — 13 findings → 7, six noise prefixes suppressed, zero real ones lost. Two of its original four options were circular (`prefix_is_known` is false for exactly this check's population, so reusing it would zero the check), so the shipped remedy was a fifth. The 13 `entry_cited_from_outside_but_undeclared` → 0 at `40c53197`: 4 invariant, 7 dated, 2 conditional, every date read from the record; BL-58 needed only relocating a mid-line declaration | `9b67295c125cfcb6` |
-| BL-72 | 1 | Raise `max_per_artifact` 1→2 and the semantic page limit 5→10 | **open** 2026-09-04 — measured **+4/12** on the artifact-entry suite (3/12 → 7/12), with `cap=1 limit=5` reproducing the shipped 3/12 exactly as a positive control. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page — AE-5's target sits at raw kNN rank 3 and is discarded. **BLOCKED, deliberately:** `find.rs:800-805` warns that both side maps are keyed by artifact id and whoever raises the cap owns restructuring them. Not a two-constant change | — |
+| BL-72 | 1 | Raise `max_per_artifact` 1→2 (the "page limit 5→10" half is WITHDRAWN — see below) | **done** 2026-09-04 `998f64d3` — measured **+2/12** at harness `limit=5` (4/12 → 6/12, MRR 0.2708 → 0.3194). The class breakdown is the evidence, not the scalar: `preamble` 3→1 and `hit` 4→6 while `wrong_file` and `file-hits@5` held EXACTLY constant — the same files were always being found and the cap was showing the wrong chunk of them. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page. **The blocker — `find.rs`'s two artifact-keyed side maps — is resolved** by `PageItem`, one record per HIT, guarded by `two_chunks_of_one_artifact_keep_their_own_matched_span` (observed RED first). **WITHDRAWN:** "page limit 5→10" named no product setting — `default_limit()` is 50 and the 5 is the benchmark harness's `--limit`; see `F-115` | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1413,6 +1413,57 @@ score. That half of the instruction stands.
 reindexed, and two runs twenty minutes apart returned 2/12 and 3/12 while three
 back-to-back runs agreed exactly. Pin a comparison to one run window, or record
 the chunk-row count beside the score.
+
+
+**DONE 2026-09-04 (`998f64d3`, patch-id `5eb59d0d5ac2ffed`) — the cap half. The
+limit half was a category error and is withdrawn.**
+
+Measured on the artifact suite at harness `limit=5`, corpus 35,561 chunk rows:
+
+| | hits@5 | file-hits@5 | MRR | classes |
+|---|---|---|---|---|
+| `cap=1` | 4/12 | 7/12 | 0.2708 | hit=4 **preamble=3** wrong_file=5 |
+| `cap=2` | **6/12** | 7/12 | **0.3194** | hit=6 **preamble=1** wrong_file=5 |
+
+**The class breakdown is the evidence, not the scalar.** `preamble` went 3 → 1 and
+`hit` 4 → 6 while `wrong_file` and `file-hits@5` held **exactly** constant — the
+same files were being found all along and the cap was showing the wrong chunk of
+them. That is the signature this entry's mechanism paragraph predicts, and corpus
+drift between the two runs (28 chunk rows, one artifact) cannot produce it. The
+one surviving `preamble` case is an artifact whose target entry is its third-best
+chunk or lower; `cap=3` would reach it and is worse overall, which is what makes
+`cap=2` an optimum rather than a step on a ramp.
+
+**The blocker, resolved.** `distance_by_id` and `chunk_by_id` are gone, replaced by
+`PageItem` — one record per HIT, carrying its own distance and matched chunk.
+Carrying them ON the record rather than beside it also survives the
+worktree-overlay `retain` by construction, where a parallel `Vec` would desync one
+refactor later. `overlay_ids` and `augmentation_by_id` stay artifact-keyed
+deliberately: two chunks of one ledger genuinely share those. Guarded by
+`two_chunks_of_one_artifact_keep_their_own_matched_span`, observed RED against the
+pre-fix code with both items reporting `start_line: 5` / `W-1`.
+
+**Two stale surfaces the RED exposed, both of which would have shipped**, and
+neither is reachable from the code being changed: `hints.cap_suppressed_hint`
+still told callers *"this page is ONE chunk per artifact, so a single artifact
+answering the query several times appears once"* — the exact text a caller reads
+when deciding whether a page is complete — and `doc`'s `semantic` parameter
+description made the same promise to every agent. Both rewritten;
+`TOOL_SURFACE_CHAR_BUDGET` raised 56_513 → 56_574 with its log entry, 24 of the 85
+gross paid back by compression. **A behaviour change owes a sweep of every surface
+that DESCRIBES the behaviour, and those surfaces are found by grepping the claim,
+not by following the call graph.**
+
+**Withdrawn: "and the page limit to 10".** There is no such product setting.
+`find.rs` has `default_limit() = 50` and `MAX_LIMIT = 500`; the `5` and `10` in the
+sweep above are `scripts/run-artifact-bench.py`'s hardcoded `--limit 5`, a
+measurement choice that makes the benchmark strict. The row annotated *"reproduces
+the real harness exactly"* is true and reads as *"reproduces the shipped
+configuration"*, which it does not — the shipped page is ten times larger. Recorded
+as `F-115`: when a sweep shares a word with a product constant, name the file and
+symbol beside each axis, because a table's column header is exactly where the
+distinction is invisible and exactly where a reader forms the intent to change
+something.
 
 ## Phase descriptions
 

@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 113
-entry_high_water_W: 103
+entry_high_water_F: 115
+entry_high_water_W: 104
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,8 +50,10 @@ entry_high_water_W: 103
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-114 | 2026-09-04 | med | self-friction | open | **A bug's own `## Resume` named the source repo — the one axis that reads green in the broken world.** The IL-4 hook's enforcement surface is the version-pinned install under `<profile>/plugins/cache/…/<version>/hooks/`, one per profile; the Resume said to confirm it in the source checkout. Following it, my first check printed `(absent)` for a *missing directory* — a string indistinguishable from a removed hook, and it would have been right by accident. Source-deleted ≠ retired, source-present ≠ firing, and `mtime` adjudicates neither (installed `1.20.4` stats two days BEFORE the commit that created 1.20.4) |
 | F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
 | F-111 | 2026-09-04 | med | self-friction | open | **A similarity test cited as a content test.** I archived two bug files with `doc(action="move")`, saw one `R` line in `git status --short` — the confirmation the tool's own `stage_hint` prescribes — and reported the move verified, twice. `R` pairs a delete with an add on SIMILARITY, so a destination holding a STALE copy of its source produces the identical `R`. The archives turned out fine; my evidence for saying so an hour earlier was worthless, and I only learned it by grepping the bytes after a peer filed a (misattributed) bug that made the question live. **Third instance of the recon skill's own Phase 3 law** after `R-125` and `F-78`, and like both of those it happened in a session that had invoked the skill — this one about an hour earlier. Nastier than its siblings in one respect: they substituted a proxy the author chose, this substituted the **tool's own suggested confirmation**, which reads as the vendor's verification step rather than as a ritual. Natural home for a fix: the `stage_hint` already names the `R` check and could name a content check beside it |
+| F-115 | 2026-09-04 | med | plan-drift | fixed-verified | **A sweep's axis and a product constant shared a name, so half of BL-72 named a setting that does not exist.** The entry reads "raise `max_per_artifact` 1→2 and the semantic page limit 5→10" — two constants side by side. `find.rs` has `default_limit() = 50` and `MAX_LIMIT = 500`; the 5 and 10 are `run-artifact-bench.py`'s hardcoded `--limit 5`, a measurement choice. The sweep row annotated "reproduces the real harness exactly" is true, and reads as "reproduces the shipped configuration", which is not. Caught by recon before the edit; the plausible next step was raising a default that is already ten times larger — a no-op that looks like a completed task. Remedy: name the file and symbol beside each swept axis, which makes the category error unwritable. |
 | F-113 | 2026-09-04 | med | test-rigor | open | **A mutation matrix returned a plausible wrong answer twice, and neither time an error.** Once reporting all 7 mutations SURVIVED — the failure parser keyed on `startswith("FAILED")` and pytest colours that token, so the match never fired; once mis-attributing a kill, because two mutants were **byte-identical in length** (23,472) and written in the same second, and CPython invalidates `.pyc` on `(mtime, size)`, so one run executed the other's cached bytecode. Both outputs are individually plausible, which is what separates this from a crash — and the first arrived while I was already primed to believe my suite was decorative, having just found two assertions that were. What caught them was **not care**: trap 1 fell to a deliberately absurd mutation whose survival was not believable, trap 2 to reading the killer's NAME rather than the 7/7 tally. A mutation run therefore owes an absurd mutation as a positive control **on the runner**, a green control row, per-mutation killer names, and `-B` — equal-length mutants are likely, not rare, among mutations of one function |
 | F-112 | 2026-09-04 | low | self-friction | open | **Both build-identification instruments answer a neighbouring question in the same words.** `git_dirty` is `git status --porcelain` non-empty, which counts untracked files — permanently 1 on this checkout, so it can never be observed false. And a cargo fingerprint probe keyed on DIRECTORY mtime said the last build was 2026-09-01 while the binary was linked 2026-09-04 00:53:39; `-type f` matches the link to the tenth of a second. Caught by a positive control, not by care. |
 | F-109 | 2026-09-03 | med | self-friction | promoted-to-bug-tracker | **Corrected a peer's conclusion and inherited its premise.** `codescout-7e` read a low-CPU sleeping process during my 12-minute `reindex(reembed=true)` as a **leaked lock guard**; I replaced the consequent (I/O-bound embed loop, with a 9760 → 10518 progress delta as evidence) and carried the antecedent — *a lock is held across the run* — into a queued bug file titled "reindex holds the catalog write lock for 12 minutes". The code refutes it: `ToolContext.catalog` is an in-process `Arc<parking_lot::Mutex<Catalog>>` (`tools/mod.rs:85`) with no lock file anywhere; cross-process safety is `PRAGMA busy_timeout = 5000` over WAL (`catalog/mod.rs:481`); and the mutex is **dropped** before the embed loop (`tools/reindex.rs:346-357`), which awaits the embedder holding nothing and re-takes it per upsert — ~27,762 acquisitions, never a long hold. **Supplying the correct half of a diagnosis is what makes the other half feel checked**: disagreeing about the ending presents the beginning as shared ground rather than as a claim. The surviving bug is real and differently shaped — no caller or observer can distinguish a working long reindex from a wedged one, the gap `index` closed on 2026-08-24 with `running_elsewhere` + `holder_pid` (`05a0548d57664984`) and `librarian` never got |
@@ -168,6 +170,7 @@ entry_high_water_W: 103
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
 | W-103 | 2026-09-04 | high | **A schema field is not a value — when a predicate's safety rests on a payload being populated, scroll the real store before writing the predicate.** Post-rebuild recon on the vector-routing seam sampled 200 points of the live codescout collection and found `project_id: ''` on **200 of 200**: every pre-fix vector carries the empty payload that `99558134` fixed, and the fix is not retroactive | The planned GC backstop drops a collection when its recorded path "no longer exists on disk". An empty string is not a path that exists, so the predicate evaluates TRUE for codescout's collection and destroys the whole semantic index — **29,154 vectors** — while doing exactly what it was specified to do. It would have shipped green: a fresh fixture writes through the *fixed* path, so its payloads are populated and the orphan branch never fires. The plan cited the field from `src/retrieval/artifact.rs:46,64`, where it is genuinely declared — reading the source confirms the field exists; only reading the data shows what is in it | validated |
 | W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
 | W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
@@ -11141,6 +11144,133 @@ Length equality confirmed by computing both mutants (`len(m5) == len(m6) == 2347
 **Severity:** med — cost one wrong conclusion about my own suite and one mis-attributed
 kill; both were caught inside the same session, but the first was believed long enough to
 start rewriting correct tests.
+
+## W-104 — Probing the SERVED plugin copy, not the source repo, showed a `severity: high` "will deadlock" bug had been fixed 7h35m after it was filed
+
+**Valid:** dated 2026-09-04
+
+**Observed:** Took `docs/issues/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`
+(artifact `7f544aaa28c9c869`, `severity: high`), whose `## Fix` reads *"Not applied here. Task 12 of
+the tool-surface collapse owns the companion plugin"* and whose prediction is that markdown reads have
+**no working path at all** once the fold ships. The fold has shipped — this session's tool surface has
+no `read_markdown`, and it sits in `DEPRECATED_TOOL_NAMES` (`src/prompts/mod.rs:1956`). Rather than
+starting Task 12, probed the copy that actually serves: `read_file("README.md")` at 2026-09-04 01:33
+EEST returned a heading map plus `@file_6965d813` — no deny. Version-diffing the *installed* plugin
+then showed `1.20.3 → 1.20.4` removed exactly two files, `il4-deny-hook.mjs` and
+`il4-deny-hook.test.sh`, and all three profiles are pinned to 1.20.4.
+
+**Why it matters:** the timeline is only visible from the other repo. `aff08b09` folds `read_markdown`
+2026-09-02 21:15; the bug file is committed at `99cc3313` 09-03 01:05; `bb24b7f` retires IL-4 09-03
+08:40; `34f5da6` bumps to 1.20.4 09-03 09:13. The bug was **correct when filed** — the deny it quotes
+did fire — and was fixed 7h35m later, in `claude-plugins`, by exactly the cross-repo ordering it had
+flagged as *"a decision someone has to make rather than a thing that happens."* Nothing on the
+codescout side records that it happened, so the file still reads as a live high-severity capability
+loss.
+
+**Counterfactual:** a `## Fix` deferral is a claim about current state, and the least-audited kind
+(`seam-classes` line 31; `R-95` + `R-92`). Accepting it at face value sends this session to delete a
+hook that no longer exists in source (`git ls-files | grep -c il4` → **0**), to re-decide a shipped
+ship-ordering, and to report a live capability loss to the user that no session on this machine can
+reproduce. The deferral was accurate for 7h35m and has been wrong for ~41h.
+
+**Lesson:** when a bug's two halves live in different repos, the defect's liveness is a property of
+the **served** copy on each side, and neither repo's git history answers it alone. `R-89`'s three
+axes — build, process, distribution — are all cross-repo here, and the bug named none of them. Probe
+the consumer's copy first; it is one call and it reorders the whole task.
+
+**Rests on:** live probe 2026-09-04 01:33 EEST, one path, one profile (`~/.claude-sdd`) — a positive
+identification (the call reached the server and returned), not an elimination. Corroborated on the
+distribution axis by content, not mtime: `diff` of the 1.20.3 and 1.20.4 hook file lists,
+`installed_plugins.json` reading 1.20.4 in all three profiles, and no `settings*.json` in any profile
+registering the hook directly.
+
+**Status:** validated
+**Severity:** would have been med — redundant cross-repo work plus a false live-defect report to the user
+
+## F-114 — A bug's own re-probe instruction named the source repo — the one axis that reads green in the broken world
+
+**Valid:** dated 2026-09-04
+
+**Observed:** The bug's `## Resume` reads *"Confirm the hook file's presence and matcher in
+`../claude-plugins/codescout-companion/` (`hooks/il4-deny-hook.mjs` per the inventory)"*. That
+directory is the **source checkout**. Enforcement reads a different copy entirely — the version-pinned
+install at `<profile>/plugins/cache/sdd-misc-plugins/codescout-companion/<version>/hooks/`, one per
+profile. Following the Resume literally, my first check ran
+`ls <dir> | grep -i il4 || echo "(absent)"` against `~/.claude-sdd/plugins/marketplaces/sdd-misc-plugins/`,
+a clone that has **no `codescout-companion/` subdirectory at all** — so it printed `(absent)` for a
+missing *directory*, a string indistinguishable from a removed hook.
+
+**Why it matters:** the two axes disagree in both directions, so the Resume can be followed correctly
+and still yield the wrong verdict. Source-deleted ≠ retired: each profile keeps serving its pinned
+version until that version advances, which is the exact cross-repo ordering hazard the same bug file
+flags one section earlier. Source-present ≠ firing. And `mtime` adjudicates neither — the installed
+`1.20.4` directories stat as `2026-09-01 04:17` in two profiles, two days *before* the `34f5da6`
+commit that created 1.20.4 (2026-09-03 09:13). Three would-be shortcuts, three green readings in a
+broken world.
+
+**Counterfactual:** caught only because the `(absent)` line was re-checked against the question it was
+supposed to answer. The corrected probe — `ls | wc -l` returning a single *error* line, and
+`.claude-plugin/plugin.json` reported missing — showed the clone is stale at 2026-02-15 and was never
+the publishing source. Uncorrected, that `(absent)` is the whole evidentiary basis for closing a
+`severity: high` bug, and it would have been right by accident: the hook *is* gone, from a directory
+that never held it.
+
+**Lesson:** a bug file's `## Resume` is a re-probe recipe, so it inherits `R-89` — name the copy the
+consumer loads, not the repo the change was authored in. The failure is `seam-classes` line 19 in its
+purest form (*"a search that finds nothing is evidence about the search"*), and it landed inside a
+session that had the law loaded, on the first command after loading it. Concretely: the fix is one
+sentence in the Resume naming `<profile>/plugins/cache/.../<version>/hooks/` and `installed_plugins.json`
+as the surfaces to read.
+
+**Rests on:** `ls -1 <marketplace>/codescout-companion/hooks/ 2>&1 | wc -l` → 1 (an error line);
+`grep '"version"' <marketplace>/codescout-companion/.claude-plugin/plugin.json` → *No such file or
+directory*; `git -C <marketplace> log -1 --date=short` → 2026-02-15. Contrast with the real source
+`~/work/claude/claude-plugins`, HEAD 2026-09-03, `plugin.json` version 1.20.4.
+
+**Status:** open — the Resume line is unchanged, and the same wording is reachable by anyone re-probing this bug
+**Severity:** med — one uninformative negative away from closing a high-severity bug on evidence about the wrong directory
+
+## F-115 — a sweep's axis and a product constant shared a name, so half of BL-72 named a setting that does not exist
+
+**Valid:** dated 2026-09-03
+
+**Observed:** `BL-72` is titled *"Raise `max_per_artifact` to 2 **and the page limit
+to 10**"*, and its index row reads *"Raise `max_per_artifact` 1→2 and the semantic page
+limit 5→10"*. Both halves read as product constants sitting next to each other in one
+file. I went to change them and the second one does not exist.
+
+`src/librarian/tools/find.rs` has `fn default_limit() -> usize { 50 }` and
+`const MAX_LIMIT: usize = 500`. The `5` and `10` in BL-72's sweep are
+`scripts/run-artifact-bench.py`'s hardcoded `--limit 5` — a **measurement**
+parameter, chosen to make the benchmark strict. The shipped page is ten times
+the size the entry's own table calls "shipped", and its row for `cap=1 limit=5`
+is annotated *"reproduces the real harness exactly"*, which is true and reads as
+*"reproduces the shipped configuration"*, which is not.
+
+**Cost:** none, because recon caught it before the edit. Had it not, the plausible
+next step was raising `default_limit` 5→10 — a no-op on a constant that is 50,
+which would have looked like a completed task, produced no measurable change,
+and left the real +2/12 unclaimed. The failure would have been a **silent
+absence of effect**, not an error.
+
+**Why the entry reads that way, and it is not carelessness:** a simulation and the
+product share a vocabulary. `limit` is the honest name for the sweep's axis AND
+the name of the tool's parameter, so writing the sweep down produces a sentence
+that is true of the simulation and false of the deployment, using the identical
+words. This is the sibling of `F-112` from earlier tonight — there an instrument
+answered a neighbouring question in the same words; here a **plan** did.
+
+**Generalisable:** when a measurement sweeps a parameter, record whether each axis
+is a **product constant** or a **harness argument**, at the point of the number.
+A sweep table's column headers are exactly where that distinction is invisible and
+exactly where the reader forms the intent to change something. The cheap habit:
+name the file and symbol beside the axis — `cap` = `find.rs:763` argument,
+`limit` = `run-artifact-bench.py --limit`, product default `default_limit() = 50`
+— which takes one line and makes the category error unwritable.
+
+**Severity:** med — one wrong edit to a shipped default, avoided.
+**Status:** fixed-verified — `BL-72` corrected in the same commit; the cap half is
+done and measured at `998f64d3`.
 
 ## Template for new entries
 
