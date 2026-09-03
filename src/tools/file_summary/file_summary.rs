@@ -7,6 +7,13 @@ use crate::tools::RecoverableError;
 pub struct SectionResult {
     pub content: String,
     pub line_range: (usize, usize), // 1-indexed, inclusive
+    /// The heading actually BOUND, which is not always the one queried — tiers 3-4 of
+    /// `resolve_section_range` are fuzzy. A caller that reports the query back to its user
+    /// cannot distinguish an exact hit from a substring hit on some other section, which is
+    /// how `doc(action="get")` came to echo `body_meta.heading` while `read_file` disclosed
+    /// the real bind. Report this, not the request.
+    /// docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+    pub heading_text: String,
     pub breadcrumb: Vec<String>,
     pub siblings: Vec<String>,
     pub format: String,
@@ -516,6 +523,7 @@ pub fn extract_markdown_section<'q, Q: Into<HeadingQuery<'q>>>(
     Ok(SectionResult {
         content: section_content,
         line_range: (range.heading_line, range.end_line),
+        heading_text: range.heading_text.clone(),
         breadcrumb,
         siblings,
         format: "markdown".to_string(),
@@ -1138,6 +1146,7 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
             return Ok(SectionResult {
                 content: section_content,
                 line_range: (line, end_line),
+                heading_text: matched["key"].as_str().unwrap_or("?").to_string(),
                 breadcrumb: vec![matched["key"].as_str().unwrap_or("?").to_string()],
                 siblings,
                 format: "toml".to_string(),
@@ -1176,6 +1185,11 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     Ok(SectionResult {
         content: pretty,
         line_range: (1, content.lines().count()),
+        heading_text: segments
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join("."),
         breadcrumb: segments.iter().map(|s| s.to_string()).collect(),
         siblings: Vec::new(),
         format: "toml".to_string(),
@@ -1215,6 +1229,7 @@ pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, Recov
         return Ok(SectionResult {
             content: section_content,
             line_range: (line, end_line),
+            heading_text: key.to_string(),
             breadcrumb: vec![key.to_string()],
             siblings,
             format: "yaml".to_string(),

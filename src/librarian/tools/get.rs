@@ -30,11 +30,18 @@ fn resolve_file_path(
 /// `heading_missing` for both — naming the false one, in a response whose own
 /// `preview.headings` array listed the heading twice.
 /// docs/issues/archive/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+/// Returns `(section_text, bound_heading)`. The bound heading is NOT always the query:
+/// `resolve_section_range`'s tiers 3-4 are fuzzy, so a caller that reports the query back to
+/// its user cannot distinguish an exact hit from a substring hit on some other section. That
+/// is the silent half of the defect below — the call succeeds, the body is real, and only the
+/// heading tells you it is not the one you named.
+/// docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
 fn find_heading_section<'q>(
     body: &str,
     query: impl Into<crate::tools::file_summary::HeadingQuery<'q>>,
-) -> Result<String, crate::tools::RecoverableError> {
-    crate::tools::file_summary::extract_markdown_section(body, query).map(|r| r.content)
+) -> Result<(String, String), crate::tools::RecoverableError> {
+    crate::tools::file_summary::extract_markdown_section(body, query)
+        .map(|r| (r.content, r.heading_text))
 }
 
 /// Describe a heading that did not resolve, distinguishing ABSENT from AMBIGUOUS.
@@ -644,7 +651,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let query =
                     crate::tools::file_summary::HeadingQuery::new(name.as_str(), a.occurrence);
                 match find_heading_section(body, query) {
-                    Ok(section) => (section, None, json!({ "heading": name })),
+                    Ok((section, bound)) => (section, None, json!({ "heading": bound })),
                     Err(e) => {
                         // Missing AND ambiguous both land here (see `heading_miss_meta`) —
                         // neither is "the caller got what they asked for", so both restore the
@@ -667,7 +674,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let mut missing_hint: Option<String> = None;
                 for name in list {
                     match find_heading_section(body, name.as_str()) {
-                        Ok(s) => parts.push(s),
+                        Ok((s, _)) => parts.push(s),
                         Err(e) if e.extra.contains_key("occurrences") => {
                             ambiguous.push(json!({
                                 "heading": name,
@@ -1731,6 +1738,41 @@ mod tests {
 
         assert_eq!(v["preview"]["shape"], "memory");
         assert_eq!(v["preview"]["observation_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn body_meta_heading_reports_the_bound_heading_not_the_query() {
+        // The read-path half of the disclosure fix:
+        // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+        //
+        // This is the SILENT half of the defect. The write path errors and merely names the
+        // wrong cause; here the call SUCCEEDS, returns a real section, and echoes the query
+        // back — so nothing signals that the section was chosen rather than named.
+        //
+        // FIXTURE DETAIL IS LOAD-BEARING: "slug" matches no heading exactly, so it binds
+        // through tier 4 (substring) and the bound heading DIFFERS from the query. Rename
+        // the `###` so it no longer contains "slug", or query an exact heading, and the two
+        // coincide — the assertion is then satisfied by echoing the request and proves
+        // nothing.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# Title\n\n### One slug, two spellings\n\nbody\n\n## Index\n\nindex body\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "slug"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["body_meta"]["heading"].as_str().unwrap(),
+            "### One slug, two spellings",
+            "body_meta.heading must name the heading actually BOUND; echoing the query \
+             makes a fuzzy bind indistinguishable from an exact one"
+        );
     }
 
     #[tokio::test]

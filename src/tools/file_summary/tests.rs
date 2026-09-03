@@ -1339,3 +1339,25 @@ fn extract_unsupported_syntax_distinguished_from_not_found() {
     );
     assert!(!err.to_string().contains("not found"), "got: {}", err);
 }
+
+#[test]
+fn extract_markdown_section_reports_the_heading_it_bound() {
+    // The read-path half of the disclosure fix:
+    // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+    // `doc(action="get")` builds body_meta.heading from the caller's REQUEST, so a fuzzy
+    // bind is invisible there while `read_file` shows it. Exposing the bound heading on
+    // SectionResult is what lets get.rs report the resolved value instead of the query.
+    //
+    // FIXTURE DETAIL IS LOAD-BEARING: "slug" matches no heading exactly, so it binds
+    // through tier 4 and the bound heading DIFFERS from the query. If they coincide the
+    // assertion is satisfied by echoing the request and tests nothing.
+    let content = "# Title\n## Alpha\n### One slug, two spellings\nbody\n## Index\nindex body\n";
+
+    let r = extract_markdown_section(content, "slug").unwrap();
+
+    assert_eq!(
+        r.heading_text, "### One slug, two spellings",
+        "the result must name the heading actually bound, so a caller can tell a fuzzy \
+         bind from an exact one"
+    );
+}

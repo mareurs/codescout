@@ -1283,6 +1283,33 @@ fn scoped_edit_preamble_sentinel_not_found_reports_closest_match() {
 }
 
 #[test]
+fn scoped_edit_miss_names_the_heading_it_actually_bound() {
+    // The disclosure half of
+    // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md.
+    // Tiers 3-4 stay for convenience, so a fuzzy bind still happens after that fix; what
+    // must not remain is the caller being unable to SEE it. Reported by a second session
+    // whose miss message named the wrong cause with a similarity score attached, sending
+    // them to re-read an `old_string` that was correct all along.
+    //
+    // FIXTURE DETAIL IS LOAD-BEARING: "slug" matches no heading exactly, so it resolves
+    // through tier 4 (substring) and the heading BOUND differs from the string typed. Give
+    // the `###` a title containing no "slug", or query an exact heading, and the two
+    // coincide -- the test then passes for a reason unrelated to the property it names.
+    let content =
+        "# Title\n## Alpha\n### One slug, two spellings\nbody here\n## Index\nindex body\n";
+
+    let err = perform_scoped_edit(content, "slug", "NO-SUCH-TEXT", "x", false).unwrap_err();
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("### One slug, two spellings"),
+        "a fuzzy bind must name the heading it ACTUALLY bound, not echo the query back -- \
+         otherwise the caller reads a true statement about a section they did not ask for \
+         as a false one about the section they did: {msg}"
+    );
+}
+
+#[test]
 fn scoped_edit_preamble_sentinel_with_no_headings_targets_whole_content() {
     let content = "just prose\nno headings at all\n";
     let result = perform_scoped_edit(content, "^", "prose", "text", false).unwrap();

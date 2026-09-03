@@ -765,17 +765,28 @@ pub(crate) fn plan_scoped_edit<'q, Q: Into<crate::tools::file_summary::HeadingQu
             .first()
             .map(|h| off.line_start(h.line - 1))
             .unwrap_or(content.len());
-        (0, sec_end, PREAMBLE_LABEL)
+        (0, sec_end, PREAMBLE_LABEL.to_string())
     } else {
         let range = resolve_section_range(content, query).map_err(|e| anyhow::anyhow!("{}", e))?;
         let lines: Vec<&str> = content.split('\n').collect();
         let heading_idx = range.heading_line - 1;
         let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
-        (
-            off.line_start(heading_idx),
-            off.line_start(end_idx),
-            heading_query,
-        )
+        // Name the heading the resolver actually BOUND, and disclose the query when the two
+        // differ. Tiers 3-4 are fuzzy and first-match-wins, so a query can bind a section the
+        // caller never named -- and every diagnostic below is then a TRUE statement about the
+        // bound section that reads as a FALSE one about the intended section. Measured: a
+        // caller who queried "Index" got `not found in section 'Index'` for a section that was
+        // never Index, and re-read their own `old_string` twice before questioning the heading.
+        // docs/issues/2026-09-03-a-bare-heading-query-cannot-reach-the-exact-match-tiers.md
+        let label = if range.heading_text == heading_query {
+            range.heading_text.clone()
+        } else {
+            format!(
+                "{} (resolved from \"{}\")",
+                range.heading_text, heading_query
+            )
+        };
+        (off.line_start(heading_idx), off.line_start(end_idx), label)
     };
     let section = &content[sec_start..sec_end];
 
@@ -812,7 +823,7 @@ pub(crate) fn plan_scoped_edit<'q, Q: Into<crate::tools::file_summary::HeadingQu
             return Ok(edits);
         }
 
-        return Err(diagnose_scoped_miss(section, old_string, diag_label).into());
+        return Err(diagnose_scoped_miss(section, old_string, &diag_label).into());
     }
 
     // AMBIGUITY GATE. Without it the loop below takes the FIRST match and the call
