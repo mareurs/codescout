@@ -410,6 +410,37 @@ impl ArtifactVectorStore for QdrantArtifactStore {
 // sqlite-vec backend (escape hatch)
 // ---------------------------------------------------------------------------
 
+/// ⚠ **The compile error you may be reading this because of is LOAD-BEARING. It is a
+/// deadlock guard.**
+///
+/// `parking_lot`'s mutex is not reentrant, so a caller that enters these methods
+/// while already holding the catalog lock deadlocks outright. `mv` did exactly that
+/// in 2026-09 — held the guard and called `refile` — and what stopped it shipping was
+/// `error: future cannot be sent between threads safely`. The fix is to **end the
+/// guard's scope before the await** (`049c6c97`), never to relax the bound.
+///
+/// **Two independent things produce that error, and silencing either one leaves the
+/// deadlock:**
+///
+/// | change | what it removes |
+/// |---|---|
+/// | `parking_lot::Mutex` → `tokio::sync::Mutex` | the guard stops being `!Send` |
+/// | `#[async_trait]` → `#[async_trait(?Send)]`, or dropping `: Send + Sync` from `ArtifactVectorStore` (:134) | the requirement that the future BE `Send` |
+///
+/// **The second is the dangerous one, and the asymmetry is worth naming.** The first
+/// is a stray bullet: someone tidying lock types, who never reads this code. The
+/// second is what a developer reaches for *when they hit this very error and want it
+/// to stop* — so the guard hands them the tool to disable it, at the moment it fires,
+/// phrased as the obvious fix. Correct behaviour and the disabling change are
+/// prompted by the same event.
+///
+/// No test covers any of this: no `mv` test drives this backend at all. And note the
+/// shape a `?Send` "fix" would have had, because one of the two dead ends on the way
+/// to `049c6c97` already had it — dropping the guard inside the `if` branch compiles,
+/// and then deadlocks only on the `new_id == a.id` path, the quiet one nobody
+/// exercises. Green, shipped, waiting.
+///
+/// If you must change either, replace the protection rather than remove it.
 pub struct SqliteVecArtifactStore {
     catalog: Arc<parking_lot::Mutex<Catalog>>,
 }
