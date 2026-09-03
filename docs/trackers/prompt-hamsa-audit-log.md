@@ -2179,6 +2179,35 @@ The practical consequence for any later arm: **hold turns comparable, or do not 
 `prompt_per_turn` at all.** Turn count dominates it by nearly three orders of magnitude over
 everything else measured here.
 
+**RESOLVED same day, and the answer is worse than the question.** The capture gap was fixed
+(`prompt-engineering:90283fd`) and one `nullctl` arm re-run against real envelopes ($1.10,
+20 runs, `scope=main` throughout). Across the **15 three-turn runs**: `prompt` spreads **65
+tokens (0.038%)** while `cache_created` spreads **3.77×** and `cost_usd` spreads **2.67×**.
+
+```
+turns  prompt   cache_read  created  per_turn   cost    created%
+    3  171198       111880    58049   57066.0  0.2595     34.2%
+```
+
+That run has the **lowest `prompt` of the fifteen and the lowest `prompt_per_turn`** —
+57,066.0, the exact bottom of the "stable to 0.026%" band reported above — and it cost
+**2.67× its neighbours**. A cold cache pays cache *creation* (~1.25× base) where the others
+pay cache *read* (~0.1× base); `prompt_tokens` prices them identically.
+
+So the registration above is superseded in the sharper direction: `prompt_per_turn` is not
+only confounded by turn count, it is **anti-correlated with cost within a fixed turn
+count**. The tightness this entry cited as the metric's virtue was the metric failing to see
+a 2.67× spread. **Use `COST_USD`, which is persisted and price-weighted.**
+
+And the divisor puzzle needs nothing exotic: `created%` falls monotonically with path length
+(**9.1% at 3 turns, 7.4% at 4, 4.7% at 9**) because extra turns are cheap reads against one
+creation, so more turns dilute a fixed creation cost the sum prices as a read. That is the
+whole of "5.14 prefix-equivalents over 6 turns".
+
+**The 40 runs of the matrix above still lack this and always will** — a fix cannot repair a
+log that never recorded the field. Their `prompt_per_turn` figures are reported as measured
+and should not be re-read as cost.
+
 ### A-38 — Addendum, same day: `tracker-base` repaired, and rule 3 is now MET at 9/10
 
 The Outcome above records `tracker-base` as **not evaluable**. It has since been repaired
