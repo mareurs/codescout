@@ -61,6 +61,35 @@ path does not exist at all, and anything walking the tree sees a hole.
 by session `9f839a8e` — same shape, an `edit_file(frontmatter=…)` write sitting unstaged when
 the rename ran.
 
+**4. A WRITE reports success and is silently undone** — reported by `66523284`, and the worst
+of the four. `cargo fmt` ran, reported success, and formatted a tree that `pre-commit` then
+restored out from under it; a later `cargo fmt --check` disagreed with the `fmt` that had just
+"succeeded", leaving behind a double blank line `fmt` had fixed seconds earlier.
+
+**Nothing failed.** The first three symptoms are a bad *read* — you get wrong bytes, or an
+error. This one is a bad *write*: the tool's own success return is the lie. A session that
+formats, sees success, and commits through a path without a `rustfmt --check` hook — or with
+`--no-verify` — ships an unformatted tree and never learns. It also means **running the gate's
+`cargo fmt` inside someone else's stash window is a silent no-op**, which is a second and
+quieter failure mode of
+`docs/issues/2026-09-03-the-gates-first-step-reformats-every-peers-uncommitted-rust.md`: that
+file records `fmt` doing too much to other people, this records it doing nothing at all and
+saying otherwise.
+
+**Direct confirmation that a REFUSED commit stashes**, same session, from the hook's own output
+rather than decoded from patch epochs:
+
+```
+rustfmt --check (staged files)...........Failed
+[INFO] Restored changes from /home/marius/.cache/pre-commit/patch1788470003-1659508
+```
+
+Three independent routes to that conclusion now — `2cb44cd3`'s two-window epoch decode,
+`66523284`'s refusal above, and this session's own `ledger-counts` refusal. The hook says it out
+loud, which makes `66523284`'s the cheapest to cite. They then took the predicted retry
+(`cargo fmt`, re-stage, commit again), opening window two voluntarily — the mitigation failing
+exactly as predicted, by the party who had just read the prediction.
+
 ## Reproduction
 
 Not deterministic — it is a race, and reproducing it means winning one:

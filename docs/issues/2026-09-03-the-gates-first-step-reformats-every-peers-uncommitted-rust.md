@@ -77,6 +77,28 @@ inferred from `.pre-commit-config.yaml:144-171` and the two observations above �
 whole-workspace behaviour of `cargo fmt` is documented upstream and was not separately measured
 here.
 
+### A second, opposite failure mode: `fmt` doing NOTHING and saying otherwise
+
+Added 2026-09-04. Everything above is `cargo fmt` doing too much — reaching files it was not
+asked about. The inverse also happens and is harder to catch: **`cargo fmt` can format a tree
+that `pre-commit` then restores out from under it, report success, and have changed nothing.**
+Observed by `66523284`: `fmt` succeeded, a later `cargo fmt --check` disagreed with it, and a
+double blank line `fmt` had fixed seconds earlier was back. The only reason it surfaced at all
+is that a `rustfmt --check` hook refused the next commit.
+
+So step 1 of the gate has two opposite failure modes on a shared checkout, and they want
+different remedies. **Scoping `fmt` to changed paths addresses the first and not the second** —
+a scoped `fmt` inside a peer's stash window is still a no-op that returns success. The second is
+the stash race
+(`docs/issues/2026-09-03-artifact-move-writes-a-stale-snapshot-and-leaves-the-source.md`,
+symptom 4), and its precondition is checkable in advance: `git status --porcelain` on your
+inputs before running the gate.
+
+Worth stating explicitly, because a fix for one reads as a fix for both. A session that scopes
+`fmt`, sees success, and commits through a path with no `rustfmt --check` ships an unformatted
+tree and never learns — the failure is in the **success return**, which no amount of scoping
+repairs.
+
 ## Evidence
 
 ### The damage is non-destructive but unattributable
@@ -144,4 +166,3 @@ belongs), and `src/prompts/mod.rs`'s pinning test must move together.
 - Class note: filed `IC-1` on the remedy test — the blast radius of a write is wider than the
   set of peers the writer can see, and the remedy is an ownership/scoping protocol over the
   shared resource rather than a provenance channel after the fact (which would be `IC-10`).
-
