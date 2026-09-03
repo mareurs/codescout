@@ -1,14 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/accepted-parameter-silently-dropped
-closed: null
+closed: 2026-09-04
 opened: 2026-09-03
 owner: marius
 related: []
 severity: high
-unverified: 'the misfiled points were not read back out of codescout''s collection — the payload carries no path, so ownership is inferred from the absent collection plus the derivation, not observed directly. The ROOT CAUSE section was corrected after filing: the store is not pinned; the caller derives an empty project_id.'
 ---
 
 # BUG: per-project vector collections follow the server's cwd, so a `workspace=`-scoped reindex files another project's vectors under the active project and reports success
@@ -41,7 +40,7 @@ $ curl -s localhost:6333/collections
   code_chunks / memories / bench_coderank_code_chunks
 
 $ python3 -c "import hashlib; print(hashlib.sha256(b'/home/marius/work/claude/prompt-engineering').hexdigest()[:16])"
-f6504bfff91be097          # artifact_chunks_prompt-engineering_f6504bfff91be097 — ABSENT
+f6504bfff91be097          # artifact_chunks_prompt_engineering_f6504bfff91be097 — ABSENT
 ```
 
 Reading back, a query quoting a document's own title near-verbatim does not return it:
@@ -175,6 +174,55 @@ them. They are identifiable only by the chunk-row join, which is catalog-local a
 only checkable from the catalog that owns the collection. Path-existence reaps abandoned
 *projects*; it does not reap misfiled *points* inside a live one. Both are wanted; only the
 first is planned.
+## Verified fixed, 2026-09-04
+
+Against the **deployed** binary, not a scratch build: `/home/marius/.cargo/bin/codescout` →
+`target/release/codescout`, built 00:53:39, after `99558134` became an ancestor of HEAD.
+Provenance established positively rather than by mtime — `strings` finds the fix's own error
+text (`artifact vector write/read with an EMPTY project_id`) in the shipped binary, with a
+negative control string returning 0 so the probe is known to discriminate.
+
+| # | check | before | after |
+|---|---|---|---|
+| 1 | `artifact_chunks_prompt_engineering_f6504bfff91be097` exists | **absent** | **2100 points** |
+| 2 | PE semantic find returns the document, `unresolved` falls | 846 unresolved | rank **#1** @ 0.176 (next 0.480); **no `unresolved` key at all** |
+| 3 | codescout's collection intact and not renamed | 29154 | **29154**, delta **+0** |
+| 4 | `scope="umbrella"` fan-out survives | — | 50 hits from PE |
+
+The reindex that produced row 1 reported `vectorless: 0`, `embed_error_count: 0` — **byte-for
+byte what it reported while misfiling**. That report is not evidence and was not read as any;
+the collection list is. Row 3 is the guard that makes row 1 mean something: PE's 2100 vectors
+appearing *without* codescout's count moving is what distinguishes "filed correctly" from
+"filed twice".
+
+A fifth check, unplanned and stronger than the four: the payload now **discriminates**.
+Sampling 200 points of each collection returns `project_id: ''` on 200/200 of codescout's
+legacy rows and `'/home/marius/work/claude/prompt-engineering'` on 200/200 of the rows the
+fixed path just wrote. The empty string is the bug's own fingerprint, still in the data.
+
+### Residue — the fix is not retroactive
+
+The open question the *Resume* section could not settle is now answered by joining every
+`artifact_id` in codescout's collection against the catalog. Full scan, not a sample:
+
+| owning project | points | distinct artifacts | points/artifact |
+|---|---:|---:|---:|
+| codescout | 28,970 (99.37%) | 1,460 | 19.8 |
+| **prompt-engineering** | **87 (0.30%)** | **87** | **1.0** |
+| not in catalog | 97 (0.33%) | 6 | 16.2 |
+
+So **yes** — prompt-engineering's artifacts are physically in codescout's collection, as
+suspected. The ratio dates them: 1.0 point per artifact is **artifact grain**, the default
+before `63fae4ea` flipped it, so these were misfiled under the old routing *and* the old grain
+and nothing has rewritten them since. A codescout reindex will not remove them either — those
+87 artifacts still exist in the shared catalog, merely under a different project, so the
+`orphans_removed` path does not consider them orphans.
+
+Practical cost is small and one-directional: a codescout project-scoped find filters them out
+as out-of-scope, which is exactly the `unresolved: 3` seen in the control run — the mirror of
+PE's 846, at 1/280th the size. Recorded, not swept: deleting points from a live collection is
+a separate change with its own blast radius, and 0.30% does not justify bundling it into a
+fix that is otherwise clean.
 ## Hypotheses tried
 
 1. **Hypothesis:** this is the already-filed grain mixture,
@@ -195,35 +243,53 @@ first is planned.
 
 ## Fix
 
-Not attempted — this is a peer's commit from the same day and the design call is theirs.
+Fixed in `99558134` — *fix(librarian): file artifact vectors under the project being indexed*.
+patch-id `f742cf305a160e67292efdd21e737d08edeac064` (recorded at fix time; the SHA dies at the
+next `experiments` rebase, the patch-id does not).
 
-The shape of it: the collection name has to be derived per call from the same project the
-catalog resolved for that call, rather than captured at context-build time. `knn`'s
-cross-project fan-out already enumerates by name prefix, so the read side may need nothing;
-it is the write side that is pinned.
+Three changes, write side and read side and the guard:
 
-And `.unwrap_or_default()` on the project path deserves to become a hard error. A collection
-named from `sha256("")` is indistinguishable from a working one at every observation the
-caller can make, which is the property this whole class turns on.
+- **`src/librarian/tools/reindex.rs`** — the write side now derives `project_id` from
+  `abs_root` itself, the target being indexed, rather than looking the target up in
+  `ctx.workspace.roots` and falling through `.unwrap_or_default()` to `""`. The registry
+  lookup was the whole defect: both projects here are `[[umbrella]]` **members**, never
+  `[[roots]]` entries, so `containing_root` returned `None` for both and codescout was right
+  only by accident.
+- **`src/librarian/tools/find.rs`** — the read side scopes to the call's own project rather
+  than the process's `current_project`, and passes `None` only when the scope is genuinely
+  wider than one project, so the cross-project fan-out `6f032dbd` protects still works.
+- **`src/librarian/artifact_store.rs`** — `collection_for` returns `Result` and bails on an
+  empty `project_id`; the `default_collection` fallback field is **deleted** rather than left
+  unused, so there is no second path back to the old behaviour. This is the half the record
+  above asked for: a collection named from `sha256("")` is indistinguishable from a working
+  one at every observation the caller can make.
 
+Note the fix is **not retroactive** — see *Residue* below.
 ## Tests added
-None yet. The regression guard should assert the collection NAME a `workspace=`-scoped
-reindex writes to, not that the reindex succeeded — success is what it already reports while
-misfiling. A test asserting only `embed_error_count == 0` passes today.
 
+`embedded_vectors_are_filed_under_the_target_not_the_workspace_registry`
+(`src/librarian/tools/reindex.rs`). It asserts `store.project_ids() == vec![proj_path]` — the
+collection the write **landed in** — and deliberately registers **no root containing the
+target**, which is the condition that produced the bug. A test asserting `embed_error_count
+== 0` passes on the broken code, which is why that is not the assertion.
+
+The guard direction matters: this is an *existence* assertion over a one-element vector, so
+it is not monotone under widening — a second, wrong collection appearing fails it.
 ## Workarounds
 Run the reindex from a server whose cwd is the project being indexed. On the CLI path
 (`reindex_cli`, `src/librarian/mod.rs:472`) the prefix is derived separately and may not
 share the defect — untested.
 
 ## Resume
-Read `QdrantArtifactStore::new` and `knn` (`src/librarian/artifact_store.rs:191-207`) to
-confirm the write path uses the captured `project_root` and the read path enumerates by
-prefix. Then decide whether the store should take the project per call or be rebuilt per
-call. Settle the open question this record could not: scroll
-`artifact_chunks_codescout_dc6a871595179329` and join `artifact_id` against the two projects'
-catalogs to see whether prompt-engineering's artifacts are physically in there.
 
+Nothing owed on the fix itself. Two follow-ups, both recorded rather than pending on this
+file:
+
+1. **Residue cleanup** (see below) — 87 misfiled points survive in codescout's collection.
+2. **Eval-arm collection cleanup** — the harness teardown + GC backstop, plan step 4. Its
+   design constraint is now `bug-fix-session-log:W-103`: legacy vectors carry `project_id:
+   ''`, so a GC that reads "path not on disk" as the orphan test destroys codescout's entire
+   index. Empty must mean *legacy, never touch*.
 ## References
 - `src/librarian/mod.rs:78-233` — `build_tool_context_with`
 - `src/librarian/artifact_store.rs:191-207` — `QdrantArtifactStore`

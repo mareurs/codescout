@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 111
-entry_high_water_W: 102
+entry_high_water_W: 103
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -166,6 +166,7 @@ entry_high_water_W: 102
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-103 | 2026-09-04 | high | **A schema field is not a value — when a predicate's safety rests on a payload being populated, scroll the real store before writing the predicate.** Post-rebuild recon on the vector-routing seam sampled 200 points of the live codescout collection and found `project_id: ''` on **200 of 200**: every pre-fix vector carries the empty payload that `99558134` fixed, and the fix is not retroactive | The planned GC backstop drops a collection when its recorded path "no longer exists on disk". An empty string is not a path that exists, so the predicate evaluates TRUE for codescout's collection and destroys the whole semantic index — **29,154 vectors** — while doing exactly what it was specified to do. It would have shipped green: a fresh fixture writes through the *fixed* path, so its payloads are populated and the orphan branch never fires. The plan cited the field from `src/retrieval/artifact.rs:46,64`, where it is genuinely declared — reading the source confirms the field exists; only reading the data shows what is in it | validated |
 | W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
 | W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
 | W-99 | 2026-09-02 | med | **A safety measure adopted by REASONING about a mechanism, rather than by reading it, is a hypothesis — and `git commit -- <paths>` is the one that fails.** A pathspec commit ignores the index — true, and where the reasoning stops — and reads the **working tree** at those paths, which is the half that matters on a shared checkout: it commits whatever a concurrent session wrote to the same file since you last looked. Staging is what satisfies the `unreviewed-content` hook; the pathspec is not | The hook refused a commit from a session that had reasoned about index safety explicitly across several windows and reached the wrong form **by** that reasoning — care was the instrument, and care is what failed. **Not an averted capture:** all 34 deleted lines were verified mine, so the refused commit would in fact have been clean. What was prevented is the *belief* persisting, and it emits no symptom until the one time a peer has touched the same file. The situation was real — 7 paths staged, 6 the peer's — so only the remedy was wrong, which is why nothing about the situation could have flagged it | validated |
@@ -10982,6 +10983,49 @@ content check beside the `R` check it already names.
 **Rests on:** commits `c8447014` and `81416a3e` (the two moves); the archive greps run
 2026-09-04; `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`
 § *2026-09-04* for the mechanism that made the question live.
+
+## W-103 — Post-rebuild recon read the payload the planned GC keys on, and found it empty in every legacy vector
+
+**Valid:** dated 2026-09-03
+
+**Observed:** After `cargo rb` + `/mcp`, scouting the vector-routing seam before writing the
+eval-arm cleanup (plan step 4) meant scrolling the live Qdrant collections rather than only
+re-reading the plan. Sampling 200 points of `artifact_chunks_codescout_dc6a871595179329`
+returned `project_id: ''` for **200 of 200** — every pre-fix vector carries an empty payload,
+because writing an empty `project_id` is precisely the bug `99558134` fixed. The collection
+holds 29,154 points.
+
+**Why it matters:** the planned GC backstop keys on exactly that payload — *"scroll one point
+per collection, read the project path, drop the collection only if that path no longer exists
+on disk."* An empty string is not a path that exists on disk. Run against today's data, the
+GC's own predicate evaluates TRUE for codescout's collection and drops the entire semantic
+index — 29,154 vectors — while doing what it was specified to do. The plan's constraint
+("keys on evidence, not registration") is satisfied; the defect is that the evidence field
+was only *specified* as populated, never *observed* as populated, and the fix that populates
+it is not retroactive.
+
+**Counterfactual:** the plan was written the same day, by me, citing the payload's existence
+from `src/retrieval/artifact.rs:46,64` — where the field and its Qdrant keyword index are
+genuinely declared. Reading the source confirms the field exists; only reading the *data*
+shows what is in it. Without this scout the GC would have shipped with a passing test suite
+(a fresh test fixture writes vectors through the fixed path, so its payloads are populated
+and the orphan branch never fires) and destroyed the production index on first run against
+real legacy data.
+
+**Lesson:** a schema field is not a value. When a predicate's safety rests on a payload being
+populated, scroll the real store before writing the predicate — the fixture writes through
+today's code path and therefore cannot exhibit yesterday's data. Remedy carried into the
+implementation: empty `project_id` means **legacy, never touch**, and only a non-empty path
+absent from disk is an orphan. The two must be separate branches, not one `!exists()` test.
+
+**Rests on:** live Qdrant scroll 2026-09-04 against the deployed binary
+(`/home/marius/.cargo/bin/codescout` → `target/release/codescout`, built 00:53:39, carrying
+`99558134`; string-probed for the fix's error text with a negative control). Post-fix PE
+collection written the same session carries `/home/marius/work/claude/prompt-engineering` on
+200 of 200 sampled points, so the discriminator is real and only the legacy rows are empty.
+
+**Status:** validated
+**Severity:** would have been high — silent destruction of the production semantic index
 
 ## Template for new entries
 
