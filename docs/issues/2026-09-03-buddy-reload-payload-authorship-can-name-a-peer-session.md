@@ -5,6 +5,8 @@ status: open
 title: buddy plugin's reload-payload from= field can name an unrelated peer session, via last-writer-wins .buddy/.current_session_id
 owners:
 - marius
+tags:
+- cluster/transient-shared-state-lies-to-readers
 opened: 2026-09-03
 severity: low
 ---
@@ -54,12 +56,11 @@ A session using `buddy`'s reload payload for an authorship decision should indep
 ## Resume
 
 1. Independently reproduce or further trace the mechanism if pursuing this (would require reading the `buddy` plugin's own source, which is outside this repository).
-2. Decide whether this belongs in this repo's `issue-clusters.md` ledger at all, since the defective artifact (`.buddy/.current_session_id`) is plugin state rather than codescout source. If yes, classify against `IC-1` (`blast-radius-exceeds-visibility`) or `IC-12` (`transient-shared-state-lies-to-readers`) — both were candidates at filing time but not checked against this specific shape before this bug was opened.
-3. **No cluster tag applied at filing time, deliberately.** `docs/trackers/issue-clusters.md`'s shared Members line was already contended by multiple concurrent sessions this same session (see `bug-fix-session-log` / this session's own cross-session exchange, 2026-09-03) and `scripts/pre-commit-ledger-counts.py` refuses any commit until a newly-tagged bug's cluster gains a matching `+1:` entry. Adding a tag now would re-trigger that shared-checkout gate on a low-urgency, informational finding the reporting peer explicitly flagged as "no rush." Tag and append the ledger pair together, in one commit, once classification (step 2) is settled.
+2. **Classified 2026-09-03 as `IC-12` (`cluster/transient-shared-state-lies-to-readers`)**, per a peer session's discriminator (`ffb95976`): the remedy here is to stop trusting a piece of shared state, not to build a new reporting instrument for an unreported event, which rules out `IC-1`. Tag applied through the catalog and `+1:` appended to `IC-12`'s Members field in the same commit.
+3. No further ledger action owed for this bug.
 
 ## References
 
 - Peer session report: codescout session `66523284-814b-49b8-b8f8-820dc2b00be2`, PID 2363194, profile `.claude`, 2026-09-03
 - `docs/conventions/shared-checkout-commit-sequence.md` — the general discipline this instance is a specific case of (identify authorship positively, never by inference)
 - `docs/trackers/issue-clusters.md` — candidate home once classified (see Resume step 2)
-
