@@ -447,19 +447,32 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/context.rs --
     ProbeRow {
-        // Verified: 32 total call(&ctx, json!(...)) sites in context.rs; 11 pass an
-        // explicit max_tokens override (values 15, 300, 400, 900, 5000), 21 omit it and
-        // exercise DEFAULT_MAX_TOKENS=4000 (char_cap = max_tokens * 4 = 16000,
-        // context.rs:585) — so the reviewer's "every context test supplies an explicit
-        // override" claim was false. The corrected reason: no fixture in the omitting 21
-        // approaches that 4000-token/16000-char ceiling, so none of them would notice the
-        // default cap being raised or removed.
+        // Recounted directly against source (fix round 2 — the prior round's 21/11 split
+        // was received as given fact from the dispatcher, not counted): of 32 total
+        // call(&ctx, json!(...)) sites, exactly 7 pass an explicit max_tokens override
+        // (lines 1202, 1354, 1387, 1414, 1491, 2126, 2258 — five distinct values, two
+        // repeated), and 25 omit it, exercising DEFAULT_MAX_TOKENS=4000
+        // (char_cap = max_tokens * 4 = 16000, context.rs:584-585).
+        //
+        // The qualitative half — "none of the omitting fixtures approach the ceiling" —
+        // does NOT hold: `a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped`
+        // (context.rs:2284, call site context.rs:2312, no max_tokens override) seeds six
+        // ~3000-byte neighbours (18000 bytes total) against the 16000-byte default
+        // char_cap threaded straight into `pack_entry_anchor` (context.rs:599-608), and
+        // asserts `v["overflow"]["packing"] == "excerpted"` — a value `pack_entry_anchor`
+        // itself writes at context.rs:521 (`if excerpted { "excerpted" } else { "whole" }`),
+        // not a test-side reconstruction. If DEFAULT_MAX_TOKENS were raised enough to fit
+        // 18000 bytes under budget, or the cap bypassed, `packing` would read "whole" and
+        // this assertion would fail — so the default value is in fact caller-visibly
+        // mutation-sensitive through this one fixture. The other 24 omitting call sites
+        // were checked (every `.repeat(`/`push_str`/`for i in` content-building site in
+        // this file cross-referenced against call-site line) and build content far under
+        // the 16000-byte ceiling — this is the one exception, not the rule.
         id: "context.max_tokens",
-        coverage: Coverage::Deferred(
-            "21 of 32 call sites omit max_tokens and exercise DEFAULT_MAX_TOKENS=4000 \
-             (char_cap=16000), but none of their fixtures approach that ceiling, so no \
-             assertion would notice the default cap being raised or removed",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.overflow.packing"),
+            mutation: Mutation::NotYet(NOT_MUTATED_YET),
+        },
     },
     ProbeRow {
         id: "context.attestation_exposure",
