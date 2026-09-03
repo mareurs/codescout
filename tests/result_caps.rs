@@ -1132,7 +1132,8 @@ fn line_field(chunk: &str, prefix: &str) -> Option<String> {
 /// opens with exactly that text, and so does the `ProbeRow` struct's own
 /// definition earlier in the file — so the FIRST chunk kept after
 /// `.skip(1)` is that struct's tail (its remaining fields, `Tally`,
-/// `tally()`, `NOT_MUTATED_YET`), not a row. That chunk DOES contain the
+/// `tally()`, and the Task 6 mutation-sweep comment block), not a row. That
+/// chunk DOES contain the
 /// literal `"Coverage::Probed {"` — `tally()`'s own two `matches!` calls
 /// put it there, both AFTER `struct ProbeRow {`'s own line, not before it
 /// as an earlier version of this comment claimed (verified 2026-09-02:
