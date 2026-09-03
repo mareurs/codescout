@@ -633,8 +633,8 @@ discharges; the 2026-09-02 tool-surface collapse as the change under evaluation.
 **Built:** `prompt-engineering:scenarios/tool-shape/` — `fixtures/gen_fixtures.py` (derives
 both surfaces from one live capture at `e5307ba2` and refuses to write on drift),
 `stub_server.py` (one stdio MCP server, arms differ only in `MCP_STUB_TOOLS`),
-`check_append_shape.py` (arm-agnostic, scores S and P separately),
-`test_check_append_shape.py` (11 layer-0 tests), and per-arm configs.
+`check_append_shape.py` (scoring is arm-agnostic; the surface guard below is not),
+`test_check_append_shape.py` (25 layer-0 tests), and per-arm configs.
 
 **Probe result — both arms at ceiling:**
 
@@ -664,6 +664,32 @@ that read exactly like the ceiling above.
 The structural cause is one `surface-budget` already documented from the other side: its
 README records that `run_arms.py` takes the **first arm's checker** and scores every arm with
 it. Same sharing, different field, same remedy — **one config per arm**, now in place.
+
+**The habit is now a mechanism** — `prompt-engineering:ff33482`, patch-id
+`bb8932cfa9a0b15f5feb496c5e95c345dbff759b`. Each arm's predicate derives the SERVED surface
+from the calls the server **accepted** and returns `wrong-surface:<served>` without scoring,
+so a mis-served arm now produces a `0/N` whose class names the cause instead of the `5/5`
+that read as a ceiling. Three of the new tests check CONFIGURATION rather than code — each
+arm points at its own checker, names its own serve script, serves its own fixture — because
+the void probe was a config defect that a predicate-only suite stays green through.
+
+Two things that design cost, both worth carrying to the next A/B of this shape:
+
+- **The guard needs arm knowledge and the scoring must not have it.** `expect` reaches the
+  guard and nothing else; `score()` still takes no arm. That is not left to convention —
+  `both_arms_score_identical_semantics_identically` asserts the two arms return the same
+  verdict for the same semantics, so a leak reds instead of shipping a difference
+  **indistinguishable from the effect the eval measures**.
+- **A DENIED call is not evidence of the served surface — it is the opposite evidence.** A
+  split-arm model may guess `doc` and be *refused*; counting that would make a correctly
+  configured arm accuse itself. Denials are dropped once, in `normalise()`, which also stops
+  a refused guess being scored as the model's selection. Arm identity itself cannot come
+  from the environment at all: `run_arms.py` builds one env for every arm and
+  `PROMPT_TDD_SCENARIO_DIR`, though set, always resolves to `os.getcwd()`.
+
+Nine mutations, zero survivors, each killed by the test written for it — including the arm
+leaking into scoring, `was_denied` blinded to the real refusal text, and the guard removed
+as seen through the harness path rather than the predicate.
 
 ### What this establishes, and what it does not
 
