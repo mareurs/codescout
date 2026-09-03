@@ -249,7 +249,7 @@ stay flat or rise. If writes fall instead, the spool has added friction rather t
 
 - `docs/trackers/issue-clusters.md` — the head; first candidate
 - `docs/trackers/bug-fix-session-log.md` — second
-- `src/librarian/tools/artifact/append_entry.rs` — id allocation moves to the fold
+- `src/librarian/tools/append_entry.rs` — id allocation moves to the fold
 - `scripts/pre-commit-ledger-counts.py`, `scripts/pre-commit-foreign-index.sh`,
   `scripts/pre-commit-unreviewed-content.sh` — populations shrink
 - `.git/session-stage-log` — the layer-2 model to copy
