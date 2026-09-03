@@ -1,7 +1,7 @@
 ---
-id: '3d1349b4e4ed225c'
+id: 7eacbdf17fc6f1eb
 kind: bug
-status: open
+status: fixed
 title: doc's id parameter routing omits the augment action, which requires one
 owners:
 - marius
@@ -13,7 +13,6 @@ tags:
 topic: tool schemas
 opened: 2026-09-03
 severity: medium
-unverified: the runtime acceptance of id by action=augment is established from CLAUDE.md and get_guide("librarian")'s documented call forms, not from reading the handler or making the call
 ---
 
 ## Summary
@@ -104,6 +103,23 @@ binding is prose-only on a 17-action tool**, so this class of drift is silent by
 and cannot be gated. A per-action derivation like `gen_fixtures.py`'s, run as a test, would
 turn it into a failing build instead of a reading error.
 
+
+**Fixed 2026-09-03.** Added `augment` to `id`'s routing prefix, and reordered `augment`'s own
+description to lead with `augment:` instead of `create:`. Also added a narrow regression test
+(`id_param_routing_names_augment`) pinning both. Left the wider question — a per-action
+derivation gate in codescout's own test suite — unaddressed, as this bug's own Resume section
+separated it from the one-line repair.
+
+**Hit `tool_surface_under_budget` on the first attempt** (56499 vs. budget 56476, 23 over): my
+first wording added `named by \`id\`` to `augment`'s description, which cost more bytes than
+necessary. Reordering without that addition nets **-1 char** vs. the original — the budget
+pressure caught a description that was carrying the wrong emphasis anyway, so the fix stayed
+under budget without raising it.
+
+Committed at `7ee62dff`, patch-id `f00716189d547cef9913399580c64278491a063d`. Gate green on
+`experiments`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features
+local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test
+--workspace` — exit 0 on all four.
 ## Tests added
 
 None — not fixed. A regression test is the derivation above: assert every action's derived
@@ -126,4 +142,3 @@ gate. The derivation already exists and refuses on drift:
   its `MANUAL_ROUTE_FIXUPS` override naming this exact gap
 - `docs/trackers/resume-tool-surface-structural-mechanisms.md` § SM-4 — found while building
   the split-surface arm; left unfixed there it would have biased the experiment
-
