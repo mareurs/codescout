@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 109
+entry_high_water_F: 110
 entry_high_water_W: 102
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 102
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
 | F-109 | 2026-09-03 | med | self-friction | promoted-to-bug-tracker | **Corrected a peer's conclusion and inherited its premise.** `codescout-7e` read a low-CPU sleeping process during my 12-minute `reindex(reembed=true)` as a **leaked lock guard**; I replaced the consequent (I/O-bound embed loop, with a 9760 → 10518 progress delta as evidence) and carried the antecedent — *a lock is held across the run* — into a queued bug file titled "reindex holds the catalog write lock for 12 minutes". The code refutes it: `ToolContext.catalog` is an in-process `Arc<parking_lot::Mutex<Catalog>>` (`tools/mod.rs:85`) with no lock file anywhere; cross-process safety is `PRAGMA busy_timeout = 5000` over WAL (`catalog/mod.rs:481`); and the mutex is **dropped** before the embed loop (`tools/reindex.rs:346-357`), which awaits the embedder holding nothing and re-takes it per upsert — ~27,762 acquisitions, never a long hold. **Supplying the correct half of a diagnosis is what makes the other half feel checked**: disagreeing about the ending presents the beginning as shared ground rather than as a claim. The surviving bug is real and differently shaped — no caller or observer can distinguish a working long reindex from a wedged one, the gap `index` closed on 2026-08-24 with `running_elsewhere` + `holder_pid` (`05a0548d57664984`) and `librarian` never got |
 | F-108 | 2026-09-03 | med | shared-state | open | **A rebuild plus `/mcp` upgraded 1 MCP server of 15, and I reported the fix as live.** Measured 00:44:02 by `readlink /proc/<pid>/exe` over processes matching `codescout start --debug`: **1** on the image built at 00:42:44, **14** still mapping a deleted pre-fix binary. All 15 share one catalog. `embed_queue_items` writes `artifact_chunk` rows as a side effect of QUEUEING, so any stale server reindexing a **changed** artifact rewrites its rows at body-relative coordinates and silently reverts `36afd405`'s migration for it — which already happened once this session, through my own reindex on the old image (`added: 2, updated: 1`). **The obvious instrument cannot see it:** "did I rebuild and reconnect?" is truthfully yes, and `/mcp` reports success accurately about the one server it owns — the population that matters is per-MACHINE while the instrument is per-SESSION, the same scope error `CLAUDE.md` records for `ListAgents`. Unit stated because a first pass counted the `mux --socket` LSP multiplexers too and got 22. Damage is to reproducibility rather than data: a later benchmark run could move for a reason neither the code nor the catalog explains. Ship the probe, not the resolve — `(deleted)` in `/proc/<pid>/exe` is the whole test and needs no cooperation from the peer |
 | F-106 | 2026-09-02 | high | plan-drift | fixed-verified | **A plan named the wrong file in BOTH the places that name it, so the natural check — does the plan contradict itself? — passed cleanly.** Task 10's Files list said `artifact.rs` for the response builder and its Step 6 staged `artifact.rs src/server.rs`; the builder is in `tools/find.rs`, which that `git add` names nowhere. Only the schema description was where the plan said. **The second mention reads as corroboration of the first** — internal consistency is not evidence of external correctness, and two expressions of one fact fail together because they share an author and one mistake. The shipped failure would have been the expensive shape, not a loud one: a tool schema advertising `matched` (line range, entry token, snippet) beside a build emitting none of it, with `tools/find.rs` simply unmodified and untested, so **the gate stays green**. Caught by one `grep` for `semantic_find` before the first edit, run only because Task 8 had touched a file the plan did not name. Owed by any plan step naming both a file and a `git add`: re-derive the staging line from where the symbol lives. Sibling of `F-105` — same plan, same root, different mechanism, neither catchable from inside the document |
@@ -352,6 +353,85 @@ not held, and the resulting change would pass review by matching the file.
 **Rests on:** the reindex embed loop staying outside the `ctx.catalog.lock()`
 scope at `src/librarian/tools/reindex.rs:346-390`. If that loop is ever moved
 inside the guard, the premise becomes true and this entry inverts.
+
+## F-110 — "Started after the commit" is not "has the commit" — the build is the boundary, and it left a 10-minute window
+
+**Valid:** dated 2026-09-03
+
+**Observed:** 2026-09-03 23:30, recon after `cargo rb` + `/mcp` following `4f172f70`
+
+**When:** Verifying that the new `[librarian] chunk_grain` opt-in was actually
+live, and that the stale-server population `F-108` names could not undermine it.
+
+**Expected:** `F-108`'s probe — `(deleted)` in `/proc/<pid>/exe` — to answer
+*"does this server have my change?"*
+
+**Got:** Two findings, and the second is the reusable one.
+
+**1. The feature is live and correct.** My server is pid 938147, `/proc/exe` →
+`target/release/codescout` with **no** `(deleted)`, started 23:30:10 against a
+23:28:11 build that contains the `chunk_grain` string. Functionally confirmed
+rather than inferred: `doc(action="find", semantic=…)` returned `F-109` ranked 1
+with `matched.start_line: 290, end_line: 325, entry_token: "F-109"` — a 36-line
+span inside a 10,752-line file. Artifact grain would have returned `1..10752`
+with a null token, so the two grains are distinguishable from the response alone.
+The new `unresolved` counter is also live, reporting `4`.
+
+**2. `(deleted)` is still not the sound predicate, and the one I reached for
+instead is also not.** I wrote the probe as *"did this process start after my
+COMMIT (23:18:27)?"*. That is wrong: the binary carrying the commit was not built
+until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot
+contain it. Ten minutes of window in which the natural predicate returns the
+confident opposite of the truth. It gave the right answer today only because no
+server happened to start inside that window — which is luck, and reads exactly
+like correctness.
+
+The sound tests, both of which I then ran:
+
+- **Positive:** `/proc/<pid>/exe` NOT `(deleted)` **and** the file currently at
+  that path contains the change. Then the process maps that file, by definition —
+  no timing arithmetic at all. Verified for 6 servers.
+- **Negative:** `(deleted)` **and** started before the BUILD. Verified for 9,
+  the oldest from 2026-09-02 11:57.
+
+**Probable cause:** A commit and the artifact that carries it are separated by a
+build, and every instinct here reaches for the commit — it is the thing you just
+did, it has a timestamp, and it is what you would cite. The build has no
+ceremony, so it does not come to mind as the boundary even though it is the only
+one a running process can be on the far side of. Same family as this ledger's
+earlier amendment to `F-108` (`(deleted)` means *predates the current binary*,
+not *predates the fix*) — third refinement of one probe, each time by narrowing
+what its result is evidence *about*.
+
+**Workaround:** State the predicate as *"maps a file that contains the change"*,
+never as a time comparison, and fall back to timing only for the negative leg —
+where the boundary is the BUILD.
+
+**Not concluded:** what the 4 `unresolved` vectors are. The count is small,
+expected after a grain-capable reader meets points written before the re-embed,
+and its own hint prescribes `reembed=true`. Not investigated; recorded so the
+number is not read as zero later.
+
+**Consequence worth naming, because the obvious place to look cannot show it.**
+9 of 15 live servers cannot contain `chunk_grain` and always write the old
+always-chunk behaviour into the shared catalog. For **codescout itself this is
+invisible** — this project is opted IN, so old and new binaries agree exactly.
+The divergence can only appear in projects that did NOT opt in, which is
+precisely where nobody is running a verification. `F-108` covers the mechanism;
+this is a different payload with inverted visibility, and the same remedy is
+unavailable: there is nothing to notice here.
+
+**Severity:** med — the wrong predicate would have shipped a confident
+"9 servers are stale" claim resting on a comparison that is unsound for a
+10-minute window, in a session whose whole subject is probes that return a
+plausible number rather than an error.
+
+**Status:** mitigated
+
+**Fix idea / Pointer:** `F-108`; `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. A durable version would have the server report the git SHA it was built from, so the question stops being answerable only by inference.
+
+**Rests on:** `/proc/<pid>/exe` continuing to mark a replaced inode `(deleted)`,
+and `target/release/codescout` being the path every server is launched from.
 
 ## F-N entry template
 
