@@ -39,7 +39,7 @@ The librarian classifier auto-recognizes the file on next reindex.
 a raw frontmatter edit does not reach it (BL-48):
 
 ```
-artifact(action="update", id=…,
+doc(action="update", id=…,
          patch={"status": "taken",
                 "extra": {"claimed_by": "<sessionId>", "claimed_at": "YYYY-MM-DD"}})
 ```

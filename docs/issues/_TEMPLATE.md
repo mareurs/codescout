@@ -41,7 +41,7 @@ Status field semantics:
   open          — Logged, investigation not started or paused.
   taken         — A live session holds this right now. Requires
                   claimed_by: <sessionId> in frontmatter — set it through
-                  artifact(action="update", id=..., extra={"claimed_by":
+                  doc(action="update", id=..., extra={"claimed_by":
                   "<sessionId>"}), never by hand-editing the frontmatter:
                   a raw file edit does not reach the catalog (BL-48), so
                   the claim sits on disk while every find() reports the

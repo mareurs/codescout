@@ -3319,20 +3319,6 @@ mod tests {
     /// correctness fix — the weaker kind of payback, recorded so a later sweep does
     /// not count it as one of the good ones.
     ///
-    /// **Raised 2026-09-03, 56_735 → 56_833 (+98) — `librarian`'s `doctor` clause
-    /// now names `claim_liveness`, the check this feature adds.**
-    ///
-    /// `doctor` already runs it; the check added immediately before this one,
-    /// `non_terminal_status_with_fix_anchor`, shipped on none of the three prose
-    /// surfaces that describe `doctor`, so an agent had no way to learn it existed
-    /// short of reading the `scan_*` functions directly
-    /// (`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`).
-    /// Naming `claim_liveness` here is exactly "an action no agent could discover"
-    /// from the policy below. There was zero headroom before this change too, so a
-    /// raise was unavoidable once the clause was trimmed as far as it would go
-    /// without losing the fact that the remedy differs by outcome (dead session vs
-    /// unresolvable host).
-    ///
     /// **RAISING THIS IS ALLOWED — it is a ratchet, not a ceiling.** The assertion
     /// says "find the bytes" because that is the right FIRST move, not because a
     /// raise is forbidden; two of the entries above are raises and both were
@@ -3399,7 +3385,28 @@ mod tests {
     /// Set to the exact measured total, per the rule above — the 2_223 of headroom
     /// this pass created is removed rather than banked, because headroom is precisely
     /// what stops the ratchet biting on the next added byte.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_421;
+    /// **Raised 2026-09-03, 55_421 → 55_519 (+98) — `librarian`'s `doctor` clause
+    /// now names `claim_liveness`, the check this feature adds.**
+    ///
+    /// The +98 was first measured against the PRE-collapse 56_735 surface and is
+    /// re-measured here against the post-collapse 55_421 one, because the two are
+    /// different sums and a carried-forward delta is arithmetic on a number that no
+    /// longer exists. It happens to be 98 both times — `librarian`'s description is
+    /// the only thing this feature touches and the collapse did not move it — but
+    /// that is a measured result, not a derivation. Report run 2026-09-03:
+    /// TOTAL (21 tools) = 55_519.
+    ///
+    /// `doctor` already runs it; the check added immediately before this one,
+    /// `non_terminal_status_with_fix_anchor`, shipped on none of the three prose
+    /// surfaces that describe `doctor`, so an agent had no way to learn it existed
+    /// short of reading the `scan_*` functions directly
+    /// (`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`).
+    /// Naming `claim_liveness` here is exactly "an action no agent could discover"
+    /// from the policy below. There was zero headroom before this change too, so a
+    /// raise was unavoidable once the clause was trimmed as far as it would go
+    /// without losing the fact that the remedy differs by outcome (dead session vs
+    /// unresolvable host).
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_519;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
