@@ -82,6 +82,128 @@ pub fn build_chunks(
         .collect()
 }
 
+/// Which grain artifact vectors are written at, decided per project.
+///
+/// **Off by default; opt in with `[librarian] chunk_grain = true`.** Chunk grain
+/// multiplies embedding cost by the mean chunk count per artifact. Measured on
+/// this repo 2026-09-03: 1,457 artifacts became 28,612 chunks (mean 19.6, median
+/// 16, max 565), and a full re-embed wrote 27,762 vectors in ~12m10s at ~38/sec.
+/// The distribution is BROAD rather than skewed — the top six artifacts are 6% of
+/// the cost — so there is no targeting rule that makes it cheap for a subset. It
+/// is the right trade with a fast embedder and the wrong one on modest hardware,
+/// which makes it the project's call rather than ours.
+///
+/// **[`ChunkGrain::Artifact`] is not a neutral cheap mode — it is the ranking
+/// behaviour of the defect in
+/// `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`.**
+/// One vector per artifact, on a 512-token embedder, represents only the
+/// document's first ~2,048 characters; every later section is unsearchable. Two
+/// things differ from that defect and neither recovers the ranking: the whole
+/// body is stored as ONE chunk row, so `matched` reports the document's real span
+/// instead of a wrong one, and a larger-context embedder would improve it for
+/// free. Treat this as a hardware concession, not a recommendation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChunkGrain {
+    /// One vector per chunk — [`build_chunks`].
+    Chunk,
+    /// One vector per artifact — [`build_single_chunk`]. The default.
+    Artifact,
+}
+
+impl ChunkGrain {
+    /// Resolve the grain for the project rooted at `project_path`:
+    /// `[librarian] chunk_grain = true|false` in `<project>/.codescout/project.toml`,
+    /// defaulting to [`ChunkGrain::Artifact`].
+    ///
+    /// Absent file / unparseable TOML / missing key all resolve to the default,
+    /// like [`crate::librarian::indexer`]'s `read_force_include`: this is an
+    /// opt-in, and a config typo must not fail a reindex.
+    ///
+    /// Mirrors `ArtifactBackend::resolve`'s raw-TOML-read pattern — librarian's
+    /// `ToolContext` does not carry the main server's parsed config (see
+    /// `ProjectConfig`'s `force_include` note), so the file is read fresh rather
+    /// than threaded through.
+    ///
+    /// **The opt-in does not travel.** `.codescout/project.toml` is gitignored,
+    /// so this is a machine-local decision — the same is already true of
+    /// `[librarian] vector_backend`, which this sits beside. A clone on a second
+    /// machine reindexes at [`ChunkGrain::Artifact`] until someone sets the key
+    /// there too, and nothing reports the difference: both grains produce a
+    /// populated index and a plausible ranking. If that becomes a problem the fix
+    /// is a tracked config surface, not a louder default.
+    ///
+    /// **Deliberately has no env override, unlike its sibling `ArtifactBackend`.**
+    /// That sibling's env branch is reachable in tests only because `EnvGuard`
+    /// lives behind `#[cfg(feature = "server-stack")]`, whose own comment says
+    /// *"Do NOT copy this pattern into a default-feature test"* — env mutation is
+    /// UB-racy against non-serial writers. This flag decides what gets written to
+    /// every vector store, so an untestable branch on that path costs more than
+    /// the convenience is worth. If an override is ever needed, it needs a
+    /// serialisation story first, not a `var()` call.
+    pub fn resolve(project_path: Option<&str>) -> Self {
+        let Some(root) = project_path else {
+            return ChunkGrain::Artifact;
+        };
+        let cfg = std::path::Path::new(root)
+            .join(".codescout")
+            .join("project.toml");
+        let Ok(text) = std::fs::read_to_string(&cfg) else {
+            return ChunkGrain::Artifact;
+        };
+        let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
+            return ChunkGrain::Artifact;
+        };
+        match parsed
+            .get("librarian")
+            .and_then(|t| t.get("chunk_grain"))
+            .and_then(|v| v.as_bool())
+        {
+            Some(true) => ChunkGrain::Chunk,
+            _ => ChunkGrain::Artifact,
+        }
+    }
+}
+
+/// The [`ChunkGrain::Artifact`] builder: ONE row spanning the whole `body`.
+///
+/// Not expressible as [`build_chunks`] with a large `chunk_size`, and the reason
+/// is worth stating because it is the natural first attempt:
+/// `split_markdown_with_depth` starts a new section at **every** heading of level
+/// ≤ depth before it ever consults the character budget, so a 1 MB `chunk_size`
+/// still returns one chunk per heading. The budget bounds a section, it does not
+/// merge them.
+///
+/// `line_offset` means what it means in [`build_chunks`] — lines above `body` in
+/// the file — and is applied for the same reason: these numbers leave the process
+/// through `doc(action="find", semantic=)`'s `matched` block as FILE lines.
+///
+/// `entry_token` is `None` by construction, not by omission. A whole-document
+/// chunk belongs to no single entry, and naming the first one would make
+/// `matched.entry` assert an entry the vector mostly is not about — a wrong
+/// answer where `None` is a true one.
+///
+/// An empty `body` yields no rows, matching [`build_chunks`] (whose
+/// `split_markdown_with_depth` early-returns on empty). Whitespace-only content
+/// is left to the caller's `content.trim().is_empty()` filter, again matching.
+pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> Vec<ChunkRow> {
+    if body.is_empty() {
+        return Vec::new();
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(body.as_bytes());
+    vec![ChunkRow {
+        // Placeholder — replace_chunks assigns or preserves the real id.
+        chunk_id: String::new(),
+        artifact_id: artifact_id.to_string(),
+        chunk_ix: 0,
+        entry_token: None,
+        start_line: 1 + line_offset,
+        end_line: body.lines().count() + line_offset,
+        content: body.to_string(),
+        content_hash: format!("{:x}", hasher.finalize()),
+    }]
+}
+
 /// Replace an artifact's chunk rows with a targeted diff, preserving `chunk_id`
 /// wherever `(chunk_ix, content_hash)` is unchanged so untouched chunks keep
 /// their vectors. Returns the rows as stored.
@@ -386,6 +508,146 @@ mod tests {
             assert_eq!(f.content, z.content);
             assert_eq!(f.content_hash, z.content_hash);
         }
+    }
+
+    fn write_project_toml(dir: &std::path::Path, body: &str) {
+        let cfg = dir.join(".codescout");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("project.toml"), body).unwrap();
+    }
+
+    #[test]
+    fn chunk_grain_is_off_unless_a_project_opts_in() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(
+            ChunkGrain::resolve(None),
+            ChunkGrain::Artifact,
+            "no project at all"
+        );
+        assert_eq!(
+            ChunkGrain::resolve(d.path().to_str()),
+            ChunkGrain::Artifact,
+            "a project with no .codescout/project.toml"
+        );
+        write_project_toml(d.path(), "[project]\nname = \"x\"\n");
+        assert_eq!(
+            ChunkGrain::resolve(d.path().to_str()),
+            ChunkGrain::Artifact,
+            "a project.toml with no [librarian] section"
+        );
+        write_project_toml(d.path(), "[librarian]\nvector_backend = \"qdrant\"\n");
+        assert_eq!(
+            ChunkGrain::resolve(d.path().to_str()),
+            ChunkGrain::Artifact,
+            "a [librarian] section that does not mention chunk_grain"
+        );
+    }
+
+    #[test]
+    fn only_a_literal_true_opts_in_and_every_near_miss_stays_off() {
+        let d = tempfile::tempdir().unwrap();
+        write_project_toml(d.path(), "[librarian]\nchunk_grain = true\n");
+        assert_eq!(
+            ChunkGrain::resolve(d.path().to_str()),
+            ChunkGrain::Chunk,
+            "the positive leg — without it every assertion below is satisfied \
+             by a resolve() that returns Artifact unconditionally"
+        );
+
+        // Each row is a plausible way to write "on" that is not `= true`. They
+        // are all silently ignored, and that is safe ONLY because the default is
+        // OFF: a typo costs the writer the feature, never a 20x embedding bill.
+        // If the default is ever flipped, this silence stops being acceptable
+        // and these rows become the argument for validating the key.
+        for (label, text) in [
+            ("explicit false", "[librarian]\nchunk_grain = false\n"),
+            ("a quoted string", "[librarian]\nchunk_grain = \"true\"\n"),
+            ("an integer 1", "[librarian]\nchunk_grain = 1\n"),
+            ("the wrong section", "[project]\nchunk_grain = true\n"),
+            ("unparseable TOML", "[librarian\nchunk_grain = true\n"),
+        ] {
+            write_project_toml(d.path(), text);
+            assert_eq!(
+                ChunkGrain::resolve(d.path().to_str()),
+                ChunkGrain::Artifact,
+                "{label} must not opt in"
+            );
+        }
+    }
+
+    #[test]
+    fn a_huge_chunk_size_still_splits_build_chunks_at_every_heading() {
+        // LOAD-BEARING, and the reason `build_single_chunk` exists as code rather
+        // than as a number. `split_markdown_with_depth` starts a section at every
+        // heading of level <= depth BEFORE consulting the character budget, so the
+        // budget bounds a section and can never merge two. The shortcut this reds
+        // is "artifact grain is just build_chunks with a big chunk_size", which
+        // compiles, runs, and silently keeps chunk-grain costs at every heading.
+        let body = "# A\n\nx\n\n## B\n\ny\n\n### C\n\nz\n";
+        let rows = build_chunks("a", body, 1_000_000, 0);
+        assert_eq!(
+            rows.len(),
+            3,
+            "headings split regardless of the character budget"
+        );
+    }
+
+    #[test]
+    fn a_single_chunk_spans_the_whole_body_and_claims_no_entry() {
+        let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
+
+        // The CONTRAST is the assertion. Without this leg, a build_single_chunk
+        // that returned the first section only would satisfy everything below on
+        // a fixture that happened to be single-section anyway.
+        let chunked = build_chunks("a", body, 2048, 0);
+        assert!(
+            chunked.len() >= 3,
+            "fixture must be multi-chunk at chunk grain or this test proves nothing (got {})",
+            chunked.len()
+        );
+
+        let rows = build_single_chunk("a", body, 0);
+        assert_eq!(rows.len(), 1, "artifact grain is exactly one row");
+        let r = &rows[0];
+        assert_eq!(r.content, body, "the WHOLE body, not its first section");
+        assert_eq!(
+            (r.start_line, r.end_line),
+            (1, 11),
+            "the range brackets the entire document"
+        );
+        assert_eq!(
+            r.entry_token, None,
+            "a whole-document chunk belongs to no single entry — None is the true \
+             answer, and naming W-1 would be a wrong one"
+        );
+        assert_eq!(r.chunk_ix, 0);
+    }
+
+    #[test]
+    fn a_single_chunks_range_is_file_relative_like_every_other_chunk_row() {
+        // Same coordinate space as build_chunks, for the same reason: these
+        // numbers leave the process as FILE lines through `matched`. A grain
+        // switch must not change what a line number means.
+        let body = "# A\n\nx\n"; // 3 lines
+        let rows = build_single_chunk("a", body, 7);
+        assert_eq!(
+            (rows[0].start_line, rows[0].end_line),
+            (8, 10),
+            "1+offset ..= lines+offset"
+        );
+    }
+
+    #[test]
+    fn an_empty_body_yields_no_rows_at_either_grain() {
+        // Absence assertions, so the sibling call is what makes them mean
+        // anything: the claim is that the two grains AGREE on empty, and a
+        // build_single_chunk that returned a row for "" would break the
+        // `items.is_empty()` contract indexer.rs's empty-body test relies on.
+        assert!(build_single_chunk("a", "", 0).is_empty());
+        assert!(
+            build_chunks("a", "", 2048, 0).is_empty(),
+            "the behaviour being matched"
+        );
     }
 
     #[test]

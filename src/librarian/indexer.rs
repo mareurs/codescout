@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use crate::librarian::catalog::artifact::ArtifactRow;
+use crate::librarian::catalog::chunk::ChunkGrain;
 use crate::librarian::catalog::{artifact, Catalog};
 use crate::librarian::classify::{classify, CompiledRule};
 use crate::librarian::frontmatter;
@@ -123,11 +124,19 @@ pub fn first_h1(body: &str) -> Option<String> {
 /// path and the forced-re-embed path through the unchanged-row early return —
 /// and by [`backfill_chunk_vectors`]. Keeping it in one place is what stops
 /// those three from drifting apart.
+///
+/// `grain` decides how many vectors this artifact costs — see [`ChunkGrain`],
+/// which is `Artifact` unless the project opted in. It is an explicit parameter
+/// at every call site, with no defaulting overload, for the same reason
+/// [`crate::librarian::catalog::chunk::build_chunks`]'s `line_offset` is: a
+/// caller that forgets it silently writes the wrong thing, and the version of
+/// this argument that defaults is the version nobody notices is wrong.
 pub(crate) fn embed_queue_items(
     cat: &Catalog,
     id: &str,
     title: Option<String>,
     doc: &str,
+    grain: ChunkGrain,
 ) -> Result<Vec<EmbedQueueItem>> {
     // 2048 chars = 512 tokens. Do NOT swap this for chunk_size_for_model:
     // that returns a CEILING (2048 tokens for CodeRankEmbed), and this project
@@ -142,7 +151,17 @@ pub(crate) fn embed_queue_items(
     let (_, body) = frontmatter::parse(doc).unwrap_or((None, doc));
     let line_offset = frontmatter::body_line_offset(doc, body);
 
-    let built = crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS, line_offset);
+    let built = match grain {
+        ChunkGrain::Chunk => {
+            crate::librarian::catalog::chunk::build_chunks(id, body, CHUNK_CHARS, line_offset)
+        }
+        // One row spanning the whole body. NOT `build_chunks` with a huge
+        // budget: headings start a section before the budget is consulted, so
+        // that returns one chunk per heading however large the number is.
+        ChunkGrain::Artifact => {
+            crate::librarian::catalog::chunk::build_single_chunk(id, body, line_offset)
+        }
+    };
     let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
     Ok(stored
         .into_iter()
@@ -209,6 +228,11 @@ pub fn index_repo_sync(
 
     let mut seen_ids: Vec<String> = Vec::new();
     let mut embed_queue: Vec<EmbedQueueItem> = Vec::new();
+
+    // Resolved ONCE per walk, not per file: it is a `.codescout/project.toml`
+    // read, and every artifact under this root shares the answer. Same
+    // raw-TOML-read pattern as `read_force_include` below, for the same reason.
+    let grain = ChunkGrain::resolve(abs_root.to_str());
 
     // Candidate .md files: the normal ignore-respecting walk, PLUS a
     // supplemental scan for any `[ignored_paths] force_include` patterns
@@ -345,7 +369,7 @@ pub fn index_repo_sync(
             // path instead would rewrite every row and misreport them as
             // `updated`.
             if want_embeddings && force_embed {
-                embed_queue.extend(embed_queue_items(cat, &id, title, &content)?);
+                embed_queue.extend(embed_queue_items(cat, &id, title, &content, grain)?);
             }
             seen_ids.push(id);
             report.unchanged += 1;
@@ -378,7 +402,7 @@ pub fn index_repo_sync(
         // project). Re-classification alone, without either signal, does not
         // require recomputing the embedding.
         if want_embeddings && (!content_unchanged || force_embed) {
-            embed_queue.extend(embed_queue_items(cat, &id, title, &content)?);
+            embed_queue.extend(embed_queue_items(cat, &id, title, &content, grain)?);
         }
 
         seen_ids.push(id.clone());
@@ -525,6 +549,47 @@ fn read_force_include(abs_root: &Path) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Resolve the [`ChunkGrain`] for one artifact FILE, memoized by its containing
+/// directory.
+///
+/// [`index_repo_sync`] does not need this — it resolves once from its walk root,
+/// because every file it touches is under one project. [`backfill_chunk_vectors`]
+/// does: the catalog is machine-global, so a single page of rows can span several
+/// projects, and one grain applied across them would silently write one project's
+/// setting into another project's vectors. That failure has no symptom at write
+/// time and reads, later, as a project whose opt-in did not take.
+///
+/// The root is the nearest ancestor holding `.codescout/project.toml` — the same
+/// file [`ChunkGrain::resolve`] reads, so "which directory decides" and "which
+/// file decides" cannot drift apart. A file with no such ancestor gets the
+/// default, exactly like an unconfigured project.
+///
+/// Memoized on the file's PARENT rather than on the resolved root, so a directory
+/// of 200 bug files costs one upward walk instead of 200.
+fn chunk_grain_for_file(
+    abs_path: &Path,
+    cache: &mut std::collections::HashMap<std::path::PathBuf, ChunkGrain>,
+) -> ChunkGrain {
+    let Some(dir) = abs_path.parent() else {
+        return ChunkGrain::Artifact;
+    };
+    if let Some(hit) = cache.get(dir) {
+        return *hit;
+    }
+    let mut cur = Some(dir);
+    let grain = loop {
+        match cur {
+            Some(d) if d.join(".codescout").join("project.toml").is_file() => {
+                break ChunkGrain::resolve(d.to_str());
+            }
+            Some(d) => cur = d.parent(),
+            None => break ChunkGrain::Artifact,
+        }
+    };
+    cache.insert(dir.to_path_buf(), grain);
+    grain
 }
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the
@@ -927,6 +992,10 @@ pub async fn backfill_chunk_vectors(
 
     let mut pending: Vec<(String, Vec<f32>)> = Vec::with_capacity(flush);
 
+    // One entry per directory seen, not per artifact — see `chunk_grain_for_file`.
+    let mut grain_cache: std::collections::HashMap<std::path::PathBuf, ChunkGrain> =
+        std::collections::HashMap::new();
+
     loop {
         // One page of vectorless artifacts past the cursor. Re-queried each round
         // rather than collected up front: the page is small, and holding a
@@ -968,9 +1037,10 @@ pub async fn backfill_chunk_vectors(
             // The whole file, frontmatter included — embed_queue_items owns
             // the split now, so this path and index_repo_sync's cannot land
             // chunks in two different coordinate spaces.
+            let grain = chunk_grain_for_file(std::path::Path::new(&abs_path), &mut grain_cache);
             let items = {
                 let cat = catalog.lock();
-                embed_queue_items(&cat, &id, title, &content)?
+                embed_queue_items(&cat, &id, title, &content, grain)?
             };
             if items.is_empty() {
                 report.skipped_empty += 1;
@@ -1219,6 +1289,107 @@ kind = "memory"
         );
     }
 
+    #[test]
+    fn embed_queue_items_honours_the_grain_it_is_given() {
+        // Guarded site 1 of 2 for the flag: the BRANCH. chunk.rs proves the two
+        // builders differ; nothing there would notice if this function ignored
+        // its `grain` argument and always called `build_chunks`.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
+
+        let chunked = embed_queue_items(&cat, "a", None, body, ChunkGrain::Chunk).unwrap();
+        assert!(
+            chunked.len() >= 3,
+            "chunk grain: preamble + two entries, got {}",
+            chunked.len()
+        );
+
+        let whole = embed_queue_items(&cat, "a", None, body, ChunkGrain::Artifact).unwrap();
+        assert_eq!(
+            whole.len(),
+            1,
+            "artifact grain: one vector, whatever the shape"
+        );
+        assert!(
+            whole[0].text.contains("W-2"),
+            "the single item must carry the WHOLE document — a build that returned \
+             the first section only would also produce exactly one item, which is \
+             why the count alone is not the assertion"
+        );
+
+        // The rows follow the queue. A grain switch that ADDED rows instead of
+        // replacing them would leave the old chunk ids in artifact_chunk with no
+        // vector, and `semantic_find` would count them as `unresolved` forever.
+        let n: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = 'a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "the chunk rows were replaced, not appended to");
+    }
+
+    #[test]
+    fn the_project_flag_reaches_the_walk_and_decides_what_an_artifact_costs() {
+        // Guarded site 2 of 2, and the one that matters most: whether the flag is
+        // WIRED. Every other test in this change passes against an
+        // `index_repo_sync` that never calls `ChunkGrain::resolve` at all —
+        // which is exactly how `ListFunctions` and `ListDocs` carried a green
+        // suite for months while registered nowhere.
+        let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
+
+        let run = |opt_in: bool| -> usize {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+            std::fs::write(root.join("docs/trackers/log.md"), body).unwrap();
+            if opt_in {
+                std::fs::create_dir_all(root.join(".codescout")).unwrap();
+                std::fs::write(
+                    root.join(".codescout/project.toml"),
+                    "[librarian]\nchunk_grain = true\n",
+                )
+                .unwrap();
+            }
+            let cat = Catalog::open_in_memory().unwrap();
+            let rules = load_rules(
+                "[[rule]]\nglob = \"**/docs/trackers/*.md\"\nkind = \"tracker\"\nstatus = \"active\"\n",
+            )
+            .unwrap();
+            let ignore = globset::GlobSet::empty();
+            let (report, queue) =
+                index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
+            assert_eq!(
+                report.added, 1,
+                "fixture must index exactly one artifact, or the queue length below \
+                 is a statement about the walk rather than about the grain"
+            );
+            queue.len()
+        };
+
+        let default_cost = run(false);
+        let opted_in_cost = run(true);
+        assert_eq!(
+            default_cost, 1,
+            "default is OFF: one vector for the whole artifact"
+        );
+        assert!(
+            opted_in_cost >= 3,
+            "[librarian] chunk_grain = true must reach the walk: expected one vector \
+             per chunk, got {opted_in_cost}"
+        );
+    }
+
     /// A working embedder for the backfill tests. Constant vector — the
     /// backfill's contract is *which rows it reaches*, never ranking. 768 dims
     /// because `artifact_vec_v2` is declared `FLOAT[768]` and sqlite-vec rejects
@@ -1266,6 +1437,19 @@ kind = "memory"
         std::fs::write(
             tmp.path().join("ledger.md"),
             "# L\n\nintro\n\n## W-1 — a\n\nalpha\n\n## W-2 — b\n\nbeta\n",
+        )
+        .unwrap();
+        // LOAD-BEARING: chunk grain is OFF by default, so without this file the
+        // backfill correctly writes ONE vector and the `>= 3` assertion below
+        // fails — it is a claim about chunk grain, and the fixture has to declare
+        // the grain it is claiming about. It also makes this the only test that
+        // exercises `chunk_grain_for_file`, the backfill's per-file resolver:
+        // unlike index_repo_sync, the backfill pages a machine-global catalog and
+        // has no walk root to resolve from.
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        std::fs::write(
+            tmp.path().join(".codescout/project.toml"),
+            "[librarian]\nchunk_grain = true\n",
         )
         .unwrap();
 
@@ -2105,7 +2289,8 @@ kind = "memory"
         )
         .unwrap();
         let body = "# Log\n\npreamble\n\n## W-1 — first\n\nalpha\n\n## W-2 — second\n\nbeta\n";
-        let items = embed_queue_items(&cat, "a", Some("Log".into()), body).unwrap();
+        let items =
+            embed_queue_items(&cat, "a", Some("Log".into()), body, ChunkGrain::Chunk).unwrap();
         assert!(
             items.len() >= 3,
             "preamble + two entries, got {}",
@@ -2133,7 +2318,14 @@ kind = "memory"
                 .build(),
         )
         .unwrap();
-        let items = embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nx\n").unwrap();
+        let items = embed_queue_items(
+            &cat,
+            "a",
+            None,
+            "# T\n\n## W-1 — t\n\nx\n",
+            ChunkGrain::Chunk,
+        )
+        .unwrap();
         for item in &items {
             let chunk_id = &item.chunk_id;
             let n: i64 = cat
@@ -2173,7 +2365,7 @@ kind = "memory"
                 .build(),
         )
         .unwrap();
-        embed_queue_items(&cat, "a", None, doc).unwrap();
+        embed_queue_items(&cat, "a", None, doc, ChunkGrain::Chunk).unwrap();
 
         let file_lines: Vec<&str> = doc.lines().collect();
         let mut stmt = cat
@@ -2257,7 +2449,7 @@ kind = "memory"
             empties, 1,
             "fixture must contain exactly one empty chunk or this test proves nothing"
         );
-        let items = embed_queue_items(&cat, "a", None, body).unwrap();
+        let items = embed_queue_items(&cat, "a", None, body, ChunkGrain::Chunk).unwrap();
         assert!(!items.is_empty(), "the real chunks survive");
         assert!(
             items.iter().all(|i| !i.text.trim().is_empty()),
@@ -2288,8 +2480,14 @@ kind = "memory"
         .unwrap();
 
         // Seed non-empty chunks first, so there is something for an empty body to delete.
-        let seeded =
-            embed_queue_items(&cat, "a", None, "# T\n\n## W-1 — t\n\nsome content\n").unwrap();
+        let seeded = embed_queue_items(
+            &cat,
+            "a",
+            None,
+            "# T\n\n## W-1 — t\n\nsome content\n",
+            ChunkGrain::Chunk,
+        )
+        .unwrap();
         assert!(!seeded.is_empty(), "sanity: the seed body produced chunks");
         let before: i64 = cat
             .conn
@@ -2324,7 +2522,7 @@ kind = "memory"
         assert_eq!(vec_before, 1, "sanity: the vector row was seeded");
 
         // Now reindex with an empty body.
-        let items = embed_queue_items(&cat, "a", None, "").unwrap();
+        let items = embed_queue_items(&cat, "a", None, "", ChunkGrain::Chunk).unwrap();
         assert!(
             items.is_empty(),
             "an empty body queues nothing for embedding"

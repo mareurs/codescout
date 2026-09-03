@@ -1215,6 +1215,7 @@ mod tests {
             "a",
             Some("T".into()),
             "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+            crate::librarian::catalog::chunk::ChunkGrain::Chunk,
         )
         .unwrap();
         // Without >1 chunk the grain bug is UNREPRESENTABLE by this fixture.
@@ -1269,6 +1270,7 @@ mod tests {
             "a",
             Some("T".into()),
             "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+            crate::librarian::catalog::chunk::ChunkGrain::Chunk,
         )
         .unwrap();
         assert!(queue.len() > 1, "fixture must yield >1 chunk");
