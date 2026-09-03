@@ -975,7 +975,12 @@ async fn perform_edit(
     if match_count > 1 && !replace_all {
         let line_numbers: Vec<usize> = content
             .match_indices(old_string)
-            .map(|(byte_offset, _)| content[..byte_offset].lines().count() + 1)
+            // NOT `.lines().count() + 1`: `lines()` counts a partial trailing line, so a
+            // match starting mid-line reported N+1. Counting newlines is correct at every
+            // offset. Same expression as the markdown grammar's gate in
+            // `src/tools/markdown/edit_markdown.rs::plan_scoped_edit`, so the two halves of
+            // this tool give one answer to "which line" rather than two.
+            .map(|(byte_offset, _)| content[..byte_offset].matches('\n').count() + 1)
             .collect();
         let lines_str = line_numbers
             .iter()

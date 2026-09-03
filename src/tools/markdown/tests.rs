@@ -453,6 +453,34 @@ fn batch_edit_action_requires_new_string() {
     );
 }
 
+/// The ambiguity gate lives in `plan_scoped_edit`; this asserts it REACHES a caller
+/// with the offending entry located. That is not free: `prefix_scoped_error` must
+/// downcast and preserve the `RecoverableError`, and a plain `anyhow` would lose the
+/// count and the line list to the generic fallback hint. An alarm nothing reaches is
+/// exactly as informative as no alarm.
+#[test]
+fn batch_edit_ambiguous_old_string_is_refused_and_located() {
+    let doc = "## A\n\nrow one\nrow one\n";
+    let edits = json!([{
+        "heading": "## A",
+        "action": "edit",
+        "old_string": "row one",
+        "new_string": "row X",
+    }]);
+    let err = super::edit_markdown::plan_batch(doc, edits.as_array().unwrap(), false)
+        .expect_err("an ambiguous old_string must be refused in batch mode too")
+        .to_string();
+    assert!(err.contains("found 2 times"), "{err}");
+    assert!(
+        err.contains("lines 3, 4"),
+        "must survive prefixing intact; got: {err}"
+    );
+    assert!(
+        err.contains("edits[0]"),
+        "batch errors must locate the offending entry; got: {err}"
+    );
+}
+
 /// Synthesize markdown content with `lines` total lines and `sections` H2 sections.
 fn synth_md(lines: usize, sections: usize) -> String {
     let mut out = String::from("# Title\n\n");
@@ -1136,12 +1164,61 @@ fn invalid_action() {
 // ── perform_scoped_edit tests (action="edit") ────────────────────────
 
 #[test]
-fn scoped_edit_first_occurrence() {
+fn scoped_edit_refuses_an_ambiguous_old_string_and_names_every_line() {
+    // Was a test that the edit silently took the FIRST of three matches. That was the
+    // defect, not the contract. The INPUT is kept deliberately — the old behaviour is
+    // what a reader needs to see is gone.
     let content = "# Title\n## Setup\nfoo bar foo\nmore foo\n## Next\nfoo\n";
-    let result = perform_scoped_edit(content, "## Setup", "foo", "baz", false).unwrap();
+    let err = perform_scoped_edit(content, "## Setup", "foo", "baz", false).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("found 3 times"), "must name the count: {msg}");
+    assert!(msg.contains("lines 3, 3, 4"), "must name every line: {msg}");
+    // `## Next`'s `foo` is on line 6 and must NOT be counted: the tally is
+    // section-scoped because the edit is.
+    assert!(
+        !msg.contains(", 6"),
+        "must not reach the ## Next section: {msg}"
+    );
+}
+
+#[test]
+fn scoped_edit_refuses_the_dash_anchor_that_corrupted_a_live_tracker() {
+    // The archived bug's shape, reduced: a GFM table whose separator row CONTAINS
+    // `---`, in the same section as a `---` horizontal rule. The caller means the
+    // rule; first-match took the separator and split the table header from it — and
+    // the result still renders as valid markdown, which is why nothing downstream
+    // noticed.
+    //
+    // FIXTURE NOTE — the `|---|` on line 5 is load-bearing TWICE, and a tidy-up erases
+    // either without failing anything. (1) Its `---` is what makes the anchor ambiguous
+    // at all: widening to `|----|` keeps that, but `|:-:|` silently stops testing the
+    // gate. (2) That match starts MID-LINE at column 2, which is the ONLY reason this
+    // test can tell the two line-number formulas apart — `.lines().count()+1` counts the
+    // partial `|` as a line and reports 6, counting newlines reports 5. Move the table
+    // to a line start and the formula regression becomes invisible here.
+    let content = "# T\n## S\n\n| a |\n|---|\n| 1 |\n\n---\n\n## Next\n";
+    let err = perform_scoped_edit(content, "## S", "---", "===", false).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("found 2 times"), "{msg}");
+    assert!(
+        msg.contains("lines 5, 8"),
+        "mid-line match must report 5, not 6 (see FIXTURE NOTE): {msg}"
+    );
+
+    // The escape hatch still works, and is what makes refusing affordable.
+    let all = perform_scoped_edit(content, "## S", "---", "===", true).unwrap();
+    assert_eq!(all, "# T\n## S\n\n| a |\n|===|\n| 1 |\n\n===\n\n## Next\n");
+}
+
+#[test]
+fn scoped_edit_still_edits_when_the_anchor_is_unique() {
+    // Anti-vacuity floor: a gate that refused everything would satisfy both tests
+    // above, and this is the only one that can tell that apart.
+    let content = "# Title\n## Setup\nfoo bar\nmore qux\n## Next\nfoo\n";
+    let result = perform_scoped_edit(content, "## Setup", "qux", "baz", false).unwrap();
     assert_eq!(
         result,
-        "# Title\n## Setup\nbaz bar foo\nmore foo\n## Next\nfoo\n"
+        "# Title\n## Setup\nfoo bar\nmore baz\n## Next\nfoo\n"
     );
 }
 
@@ -3108,15 +3185,46 @@ fn plan_section_edit_insert_after_last_section_matches_legacy() {
 }
 
 #[test]
-fn plan_scoped_edit_first_only_matches_legacy() {
+fn plan_scoped_edit_and_legacy_agree_on_refusal_and_on_edit() {
+    // Parity between the planner and the legacy wrapper. "first-only" is no longer a
+    // mode — an ambiguous old_string is refused — so parity is asserted on BOTH sides
+    // of the new contract, not just the surviving one.
     let content = "## A\nrow one\nrow one\n## B\n";
-    let legacy =
-        super::edit_markdown::perform_scoped_edit(content, "## A", "row one", "row X", false)
-            .unwrap();
     let off = super::edit_markdown::LineOffsets::new(content);
-    let planned =
+
+    // Ambiguous: both paths refuse, and refuse identically.
+    let legacy_err =
+        super::edit_markdown::perform_scoped_edit(content, "## A", "row one", "row X", false)
+            .unwrap_err();
+    let planned_err =
         super::edit_markdown::plan_scoped_edit(content, &off, "## A", "row one", "row X", false, 0)
-            .unwrap();
+            .unwrap_err();
+    assert_eq!(legacy_err.to_string(), planned_err.to_string());
+    assert!(
+        legacy_err.to_string().contains("found 2 times"),
+        "{legacy_err}"
+    );
+
+    // Unambiguous: both paths edit, to the same bytes. Without this half the test
+    // would still pass if the planner had been changed to refuse everything.
+    let legacy = super::edit_markdown::perform_scoped_edit(
+        content,
+        "## A",
+        "row one\nrow one",
+        "row X",
+        false,
+    )
+    .unwrap();
+    let planned = super::edit_markdown::plan_scoped_edit(
+        content,
+        &off,
+        "## A",
+        "row one\nrow one",
+        "row X",
+        false,
+        0,
+    )
+    .unwrap();
     assert_eq!(
         super::edit_markdown::apply_planned_edits(content, planned),
         legacy

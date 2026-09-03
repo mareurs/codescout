@@ -6,7 +6,7 @@ title: scoped markdown edit silently takes the first of several old_string match
 owners:
 - marius
 tags:
-- cluster/addressing-without-an-escape-hatch
+- cluster/guard-narrower-than-its-name
 - edit_file
 - markdown
 - data-loss
@@ -71,19 +71,66 @@ Deterministic — no timing or environment dependency.
 
 ## Root cause
 
-Text replacement inside a scoped markdown edit resolves `old_string` by first occurrence
-and does not check uniqueness. The addressing scheme therefore has **no disambiguator** for
-a repeated `old_string`: `replace_all` changes *how many* are replaced, never *which one*,
-and `occurrence` is documented as *"1-indexed selector when `heading` matches several
-sections"* — the heading axis, not this one.
+**Established at the code 2026-09-03 (scout), and it is narrower and worse than the
+symptom suggested.** `plan_scoped_edit` (`src/tools/markdown/edit_markdown.rs:744-847`)
+resolves `old_string` by first occurrence:
 
-`---` is a token this repo's own markdown makes ambiguous by construction: it is a GFM
-horizontal rule, a frontmatter delimiter, and a substring of every table separator row.
-That is the `cluster/addressing-without-an-escape-hatch` disambiguator half, in a tool that
-**writes** rather than one that parses.
+```rust
+while let Some(rel) = section[search_from..].find(old_string) {
+    edits.push(PlannedEdit { span: mstart..mend, ... });
+    search_from += rel + old_string.len().max(1);
+    if !replace_all { break; }        // first match, no count, no warning
+}
+```
 
-*Measured 2026-09-03: the call above, run once against the live tracker; corrupted state
-read back with `awk 'NR>=85 && NR<=90'` and repaired in the same session.*
+**The guard this needs already exists in the same tool, and this grammar bypasses it.**
+`edit_file`'s TEXT grammar refuses an ambiguous `old_string` in two places
+(`src/tools/edit_file/mod.rs`, the single-edit path ~`:975` and the batch path ~`:610`),
+and the single-edit one already produces exactly the remedy this file proposed:
+
+```rust
+if match_count > 1 && !replace_all {
+    let line_numbers: Vec<usize> = content.match_indices(old_string)
+        .map(|(byte_offset, _)| content[..byte_offset].lines().count() + 1).collect();
+    return Err(RecoverableError::with_hint(
+        format!("old_string found {match_count} times (lines {lines_str}). ..."), ...));
+}
+```
+
+**And `plan_scoped_edit` states the principle in its own body, 30 lines above the defect.**
+Its CRLF-tolerant fallback carries:
+
+> *"only kicks in when the exact match failed and there's exactly one tolerant match (same
+> conservative uniqueness gate edit_file uses), so it never silently picks among ambiguous
+> candidates"*
+
+`if crlf_ranges.len() == 1` enforces that for the **fallback** path. The **primary**
+exact-match path immediately below does the thing the comment says it never does. So the
+rule is known, cited, and applied to the rarer branch.
+
+**One site, three entry points.** `plan_scoped_edit` is the single funnel for the markdown
+grammar: `perform_scoped_edit` → it, `plan_batch` → it, `edit_file`'s `action="edit"` →
+`perform_scoped_edit` → it, and `doc(action="update", patch={body_edits})`
+(`src/librarian/tools/update.rs:277`) → `perform_scoped_edit` → it. One fix covers all four
+callers, and the "mutate once per guarded SITE" law is satisfied by one mutation because
+there is genuinely one site.
+
+**The two bugs filed today COMPOSE, and that is why this was reachable at all.** On a
+stamped or augmented artifact the text grammar — the one that HAS the gate — is refused
+(`docs/issues/2026-09-03-librarian-guard-refuses-text-grammar-while-promising-it-works.md`).
+So for every guarded tracker in `docs/trackers/`, the only available grammar is the one
+missing the ambiguity check. The guard bug is not merely adjacent; it **routes callers into
+the ungated path**, which is exactly how this session reached it while editing a guarded
+ledger.
+
+**Reclassified `IC-6` → `IC-14` on this finding.** Filed from the symptom as
+`cluster/addressing-without-an-escape-hatch` (*"no disambiguator exists"*); the code says the
+disambiguator exists in this tool and covers a subset of the tool's grammars. That is
+`cluster/guard-narrower-than-its-name` verbatim: *"the uncovered remainder is protected by
+nothing, and the guard's own green result is what conceals the gap."*
+
+*Measured 2026-09-03: the corrupting call run once against the live tracker; corrupted state
+read back with `awk`; the three call sites read at the bytes during the scout.*
 
 ## Evidence
 
@@ -107,20 +154,70 @@ replacing characters 1–3 (`---`) with `<row>\n---` yields `|` + row + `\n---` 
 
 ## Fix
 
-Not fixed. Two candidate remedies, in preference order:
+**Shipped: refuse, do not resolve.** `plan_scoped_edit` now counts matches within the
+section before planning any edit, and when `replace_all` is false and the count exceeds
+one it returns a `RecoverableError` naming the count, the section, and every match's
+**file-relative** line. The count is section-scoped because the edit is; the lines are
+file-relative because that is the coordinate a caller navigates to.
 
-1. **Refuse an ambiguous `old_string`** the way Claude Code's native `Edit` does, naming
-   the match count and the line of each — the caller then re-anchors on something unique.
-   This is the disambiguator the class asks for and needs no new parameter.
-2. Accept an `occurrence`-style selector on the text axis. Weaker: it lets a caller who
-   *has not noticed* the ambiguity keep writing to the wrong place.
+One site covers all four callers (`perform_scoped_edit`, `plan_batch`, `edit_file`'s
+heading form, `doc(action="update", patch={body_edits})`), so the *mutate once per guarded
+site* rule is satisfied by one mutation — there is genuinely one site.
 
-`replace_all=true` is not a fix — it would have written the row into *both* sites.
+**`occurrence`-style selection was considered and rejected.** It lets a caller who has not
+*noticed* the ambiguity keep writing to the wrong place; it preserves the defect for
+exactly the population that has it. `replace_all: true` remains the escape hatch, and
+expanding the anchor is the other. Refusal is also the only remedy with no silent failure
+direction: it cannot break a call that currently succeeds correctly.
+
+**Two documented contracts were updated, because the behaviour they describe is gone.**
+`plan_scoped_edit`'s *"first-only, or one per non-overlapping match"* and
+`perform_scoped_edit`'s *"otherwise only the first"* would have become fresh doc-vs-code
+drift (`IC-11`) the moment this shipped.
+
+**A second, adjacent defect was fixed in the same commit**, because shipping it would have
+left one tool giving two answers to "which line": `edit_file`'s existing text-grammar gate
+computed `content[..offset].lines().count() + 1`, which is correct only when the match
+starts at a line start — Rust's `lines()` counts a partial trailing line, so a mid-line
+match reported N+1. Both sites now count newlines. No test pinned the old numbers.
+
+Fix commit: *(recorded on archive)*
 
 ## Tests added
 
-None — not fixed. The reproduction above is deterministic and needs no fixture beyond a
-markdown section holding a table and a rule.
+Four, in `src/tools/markdown/tests.rs`, and **every one was verified by an observed RED
+against the production path**, not by its own existence.
+
+- `scoped_edit_refuses_an_ambiguous_old_string_and_names_every_line` — the former
+  `scoped_edit_first_occurrence`, keeping its input deliberately so the retired contract
+  stays visible. Asserts the count, every line, and that the neighbouring section's match
+  is **not** counted.
+- `scoped_edit_refuses_the_dash_anchor_that_corrupted_a_live_tracker` — the real shape
+  reduced: a GFM table separator containing `---` beside a `---` rule. Also asserts
+  `replace_all: true` still edits both.
+- `scoped_edit_still_edits_when_the_anchor_is_unique` — the **anti-vacuity floor**. A gate
+  that refused everything would satisfy both tests above; this is the only one that can
+  tell those apart, and it is the one that stayed green under the disabling mutation.
+- `batch_edit_ambiguous_old_string_is_refused_and_located` — the refusal REACHES a caller
+  with `edits[0]` located and the line list intact. `prefix_scoped_error` has to downcast
+  and preserve the `RecoverableError`; a plain `anyhow` would drop the count and lines to
+  a generic hint. An alarm nothing reaches is as informative as no alarm.
+
+`plan_scoped_edit_first_only_matches_legacy` became
+`plan_scoped_edit_and_legacy_agree_on_refusal_and_on_edit` — parity between planner and
+legacy wrapper still matters, but "first-only" is no longer a mode, so parity is asserted
+on **both** sides of the new contract rather than only the surviving one.
+
+**The two mutations, and what each proved:**
+
+| mutation | result |
+|---|---|
+| line formula reverted to `.lines().count() + 1` | RED — `lines 6, 8` instead of `5, 8`. Proves the fixture's mid-line match actually discriminates the two formulas, which is the claim its FIXTURE NOTE makes. |
+| `hits.len() > 1` → `> 1_000_000` (gate disabled) | RED on all three refusal tests; the anti-vacuity test stayed **green**. That asymmetry is the point. |
+
+The `|---|` fixture line is annotated **on the fixture line** with what breaks if it is
+tidied: widening the cell is safe, changing it to `|:-:|` silently stops testing the gate,
+and moving the table to a line start makes the formula regression invisible.
 
 ## Workarounds
 
@@ -140,4 +237,3 @@ cannot corrupt anything it currently writes. The text-replacement path is in
 - `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md`
 - `docs/trackers/prompt-surface-compaction-session-log.md` — the file corrupted and repaired
 - CLAUDE.md § *Parsers Over a Namespace — owe an escape and a disambiguator*
-

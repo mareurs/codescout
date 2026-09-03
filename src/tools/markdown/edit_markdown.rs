@@ -729,8 +729,11 @@ const PREAMBLE_LABEL: &str = "(preamble)";
 /// Plan the byte-span edit(s) that a heading-scoped `old_string` -> `new_string`
 /// replacement would produce, without applying them. Finds the section identified
 /// by `heading_query`, locates `old_string` within its byte range, and emits one
-/// `PlannedEdit` per match (first-only, or one per non-overlapping match when
-/// `replace_all` is true). Behavior-identical to the historical `perform_scoped_edit`
+/// `PlannedEdit` per match. An ambiguous `old_string` -- more than one match in the
+/// section, with `replace_all` false -- is REFUSED rather than resolved to the first,
+/// because picking silently writes to a well-formed wrong target (see the ambiguity
+/// gate below for the measured cost). `replace_all` true emits one edit per
+/// non-overlapping match. Behavior-identical to the historical `perform_scoped_edit`
 /// (see that function's doc comment) -- `perform_scoped_edit` is now a thin wrapper
 /// delegating here + `apply_planned_edits`.
 ///
@@ -812,6 +815,50 @@ pub(crate) fn plan_scoped_edit<'q, Q: Into<crate::tools::file_summary::HeadingQu
         return Err(diagnose_scoped_miss(section, old_string, diag_label).into());
     }
 
+    // AMBIGUITY GATE. Without it the loop below takes the FIRST match and the call
+    // returns `status: "ok"`, so a short anchor performs a well-formed write to the
+    // wrong target with nothing for the caller to notice. This is the same conservative
+    // uniqueness rule the CRLF fallback directly above already cites -- "so it never
+    // silently picks among ambiguous candidates" -- and that `edit_file`'s text grammar
+    // enforces (`src/tools/edit_file/mod.rs`). The markdown grammar arrived beside that
+    // guard without inheriting it; `doc(action="update", patch={body_edits})` and
+    // `edit_file`'s heading form both funnel here, so this is the one site.
+    //
+    // Measured cost of its absence: `old_string="---"` is a horizontal rule, a
+    // frontmatter delimiter AND a substring of every GFM table separator row, so the
+    // first match split a table's header from its separator row in a live tracker.
+    // docs/issues/archive/2026-09-03-scoped-edit-silently-takes-the-first-of-several-old-string-matches.md
+    //
+    // The count is SECTION-scoped because the edit is; the reported lines are
+    // FILE-relative because that is the coordinate the caller navigates to.
+    if !replace_all {
+        let hits: Vec<usize> = section
+            .match_indices(old_string)
+            .map(|(rel, _)| sec_start + rel)
+            .collect();
+        if hits.len() > 1 {
+            let lines = hits
+                .iter()
+                // NOT `content[..off].lines().count() + 1`: `lines()` counts a partial
+                // trailing line, so a match starting mid-line reports N+1. Counting
+                // newlines is correct at every offset.
+                .map(|&off| (content[..off].matches('\n').count() + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "old_string found {} times in {diag_label} (lines {lines}) — refusing \
+                     rather than editing the first",
+                    hits.len()
+                ),
+                "Expand old_string with a neighbouring line so exactly one match remains, \
+                 or set replace_all: true to change every occurrence. A short anchor like \
+                 \"---\" also matches every table separator row.",
+            )
+            .into());
+        }
+    }
+
     let mut edits = Vec::new();
     let mut search_from = 0usize;
     let mut order = edit_index * 1_000; // headroom so multi-span edits keep global order
@@ -869,8 +916,10 @@ pub(crate) fn prefix_scoped_error(
 /// Perform a heading-scoped string replacement within a markdown file.
 ///
 /// Finds the section identified by `heading_query`, locates `old_string` within it,
-/// and replaces with `new_string`. If `replace_all` is true, replaces all occurrences
-/// within the section; otherwise only the first.
+/// and replaces with `new_string`. If `replace_all` is true, replaces every occurrence
+/// within the section; otherwise the match must be UNIQUE within the section -- two or
+/// more is an error naming the count and each match's file-relative line, never a
+/// silent edit of the first.
 ///
 /// Returns the full modified file content.
 ///
