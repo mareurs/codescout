@@ -49,6 +49,7 @@ JSON tree. `{"and":[...]}` / `{"or":[...]}` / `{"not":{...}}` compose nodes.
 Examples: `{"rel_path": {"contains": "docs/trackers"}}`, `{"kind": {"eq": "spec"}}`, `{"tags": {"in": ["foo"]}}`.
 Ops: `eq ne in nin gt lt gte lte contains prefix`.
 `contains` on strings = `LIKE '%v%'` (title, rel_path, etc.); `prefix` = `LIKE 'v%'`; `contains` on `tags`/`owners` = array membership. Times = ms-epoch.
+`rel_path` values are **repo-relative** (`docs/trackers`, never an absolute path) and anchored at a `/` boundary onto the stored absolute path; its four ordering ops (`gt lt gte lte`) are refused, not answered.
 Allowed fields: `id, kind, status, repo, title, topic, time_scope, tags, owners, rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
 ## Default scope (project, archived hidden)
 

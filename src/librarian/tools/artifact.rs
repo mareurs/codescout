@@ -92,7 +92,7 @@ impl Tool for Artifact {
                 },
                 "filter": {
                     "type": "object",
-                    "description": "find: filter AST. Compose with {\"and\":[...]}, {\"or\":[...]}, {\"not\":{...}}. Leaf format: {\"field_name\": {\"op\": value}}, e.g. {\"rel_path\": {\"contains\": \"docs/trackers\"}}, {\"kind\": {\"eq\": \"spec\"}}, {\"tags\": {\"in\": [\"foo\",\"bar\"]}}. Ops: eq ne in nin gt lt gte lte contains prefix. contains on strings = LIKE '%v%' (works on title, rel_path, etc.); prefix = LIKE 'v%'. contains on tags/owners = array membership."
+                    "description": "find: filter AST. Compose with {\"and\":[...]}, {\"or\":[...]}, {\"not\":{...}}. Leaf format: {\"field_name\": {\"op\": value}}, e.g. {\"rel_path\": {\"contains\": \"docs/trackers\"}}, {\"kind\": {\"eq\": \"spec\"}}, {\"tags\": {\"in\": [\"foo\",\"bar\"]}}. Ops: eq ne in nin gt lt gte lte contains prefix. contains = substring (strings) / membership (tags, owners); prefix = starts-with. rel_path is repo-relative (docs/trackers, not /abs/path); its gt/lt/gte/lte are refused."
                 },
                 "kind": {
                     "type": "string",

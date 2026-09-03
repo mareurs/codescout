@@ -94,6 +94,12 @@ Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"
 - `contains` on strings → `LIKE '%v%'`; on tag/owner arrays → array membership.
 - `prefix` → `LIKE 'v%'`.
 
+**`rel_path` values are repo-relative** — `docs/trackers`, never an absolute path. The
+catalog stores one absolute path per artifact and anchors `rel_path` filters onto it at a
+`/` boundary: `eq` = this file, `prefix` = under this directory, `contains` = anywhere in
+the path. Its `gt`/`lt`/`gte`/`lte` are **refused**, not answered — ordering a relative
+value against an absolute column compares a string you did not write.
+
 **Scope:**
 - `scope="project"` (default) — active project only (artifacts under its path)
 - `scope="repo"` — widen to the active project's enclosing git repo

@@ -211,6 +211,111 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         }
     }
 
+    // `rel_path` is a caller-facing ALIAS, not a column: `abs_path` holds an
+    // ABSOLUTE forward-slash path (`/root/docs/x.md`) while every documented
+    // filter value is repo-relative (`docs/x.md`). Remapping the field NAME
+    // alone left the two in different coordinate systems, so nine of the ten
+    // ops silently compared unrelated strings — `eq`/`in`/`prefix` matched
+    // nothing, `ne`/`nin` matched everything including the rows they named.
+    // That is the same failure BL-47 fixed for `tags`/`owners` directly above,
+    // and it takes the same shape of remedy: gate on the COLUMN, let the op
+    // pick the form. Anchoring each comparison at a `/` boundary makes it
+    // root-agnostic, so it stays correct for an umbrella query spanning several
+    // repos — where no single root exists to normalise against.
+    //
+    // Residual imprecision, stated rather than hidden: `%/docs/trackers%` also
+    // matches a nested `…/vendor/docs/trackers/…`. Under the default
+    // `scope="project"` the AND'd scope clause already pins the root, so this
+    // needs a second `docs/trackers` deeper in the same tree to bite.
+    if field == "rel_path" {
+        let as_str = |v: &Value| -> Result<String> {
+            v.as_str().map(str::to_owned).ok_or_else(|| {
+                RecoverableError::with_hint(
+                    format!("`{op_name}` on `rel_path` expects a string"),
+                    "Provide a repo-relative path, e.g. `{\"eq\": \"docs/plans/x.md\"}`.",
+                )
+                .into()
+            })
+        };
+        // Matches a row whose repo-relative path IS `s` — i.e. whose absolute
+        // path ends with `/s`.
+        let suffix_like = |s: &str| -> (String, rusqlite::types::Value) {
+            let escaped = crate::librarian::util::escape_like_pattern(s);
+            (
+                "abs_path LIKE ? ESCAPE '\\'".to_string(),
+                rusqlite::types::Value::Text(format!("%/{escaped}")),
+            )
+        };
+
+        match op {
+            // Already correct: a substring match is position-independent, so it
+            // never depended on where the relative part begins.
+            LeafOp::Contains => {}
+            LeafOp::Gt | LeafOp::Lt | LeafOp::Gte | LeafOp::Lte => {
+                return Err(RecoverableError::with_hint(
+                    format!("`{op_name}` is not meaningful on `rel_path`"),
+                    "`rel_path` is an alias for the absolute `abs_path` column, so ordering \
+                     a repo-relative value against it compares a different string than the \
+                     one you wrote. Use `prefix` for a directory, `eq` for one file, \
+                     `contains` for a fragment — or order on `updated_at` / `created_at` \
+                     if a range was what you meant.",
+                )
+                .into());
+            }
+            LeafOp::Prefix => {
+                let escaped = crate::librarian::util::escape_like_pattern(&as_str(value)?);
+                return Ok(SqlFragment {
+                    sql: "abs_path LIKE ? ESCAPE '\\'".to_string(),
+                    params: vec![rusqlite::types::Value::Text(format!("%/{escaped}%"))],
+                });
+            }
+            LeafOp::Eq | LeafOp::Ne => {
+                let (sql, param) = suffix_like(&as_str(value)?);
+                return Ok(SqlFragment {
+                    sql: if op == LeafOp::Eq {
+                        sql
+                    } else {
+                        format!("NOT ({sql})")
+                    },
+                    params: vec![param],
+                });
+            }
+            LeafOp::In | LeafOp::Nin => {
+                let items = value.as_array().ok_or_else(|| -> anyhow::Error {
+                    RecoverableError::with_hint(
+                        format!("`{op_name}` on `rel_path` expects an array"),
+                        "e.g. `{\"in\": [\"docs/a.md\", \"docs/b.md\"]}`.",
+                    )
+                    .into()
+                })?;
+                if items.is_empty() {
+                    return Err(RecoverableError::with_hint(
+                        format!("`{op_name}` on `rel_path` requires a non-empty array"),
+                        "An empty list matches nothing (`in`) or everything (`nin`); say \
+                         which you meant.",
+                    )
+                    .into());
+                }
+                let mut clauses = Vec::with_capacity(items.len());
+                let mut params = Vec::with_capacity(items.len());
+                for item in items {
+                    let (sql, param) = suffix_like(&as_str(item)?);
+                    clauses.push(sql);
+                    params.push(param);
+                }
+                let any = format!("({})", clauses.join(" OR "));
+                return Ok(SqlFragment {
+                    sql: if op == LeafOp::In {
+                        any
+                    } else {
+                        format!("NOT {any}")
+                    },
+                    params,
+                });
+            }
+        }
+    }
+
     match op {
         LeafOp::In | LeafOp::Nin => {
             let params = in_list_params(value)?;
@@ -835,6 +940,111 @@ mod tests {
         );
     }
 
+    /// The catalog stores an ABSOLUTE path; every documented `rel_path` filter
+    /// value is repo-relative. This test runs real queries and asserts on the
+    /// ROWS returned, because the sibling test above asserts on the generated
+    /// SQL string and neither live failure is expressible that way.
+    ///
+    /// Both directions are load-bearing and they fail oppositely: `prefix`/`eq`
+    /// over-exclude to nothing, `ne`/`nin` under-exclude and return the rows
+    /// they were asked to drop. A test carrying only the first half is monotone
+    /// under a fix that repairs nothing about the second.
+    #[test]
+    fn rel_path_filter_matches_rows_whose_stored_path_is_absolute() {
+        use rusqlite::Connection;
+
+        // LOAD-BEARING: these paths are absolute, exactly as `artifact.abs_path`
+        // stores them. Rewriting them as repo-relative deletes the coordinate
+        // mismatch this test exists to catch — it would still pass, and would no
+        // longer discriminate.
+        let rows: &[(&str, &str)] = &[
+            ("t1", "/home/u/repo/docs/trackers/issue-clusters.md"),
+            ("t2", "/home/u/repo/docs/trackers/bug-fix-session-log.md"),
+            ("b1", "/home/u/repo/docs/issues/2026-09-04-x.md"),
+        ];
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE e (id TEXT, abs_path TEXT)", [])
+            .unwrap();
+        for (id, abs_path) in rows {
+            conn.execute(
+                "INSERT INTO e (id, abs_path) VALUES (?1, ?2)",
+                rusqlite::params![id, abs_path],
+            )
+            .unwrap();
+        }
+
+        let run = |fj: Value| -> Vec<String> {
+            let frag = compile(&parse(fj)).unwrap();
+            let sql = format!("SELECT id FROM e WHERE {} ORDER BY id", frag.sql);
+            let mut stmt = conn.prepare(&sql).unwrap();
+            stmt.query_map(rusqlite::params_from_iter(frag.params.iter()), |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+
+        // Over-exclusion. This exact call is the worked example served from
+        // `src/prompts/guides/librarian.md:77`.
+        assert_eq!(
+            run(json!({"rel_path": {"prefix": "docs/trackers"}})),
+            vec!["t1", "t2"],
+            "`prefix` on rel_path must reach the rows under that directory"
+        );
+        assert_eq!(
+            run(json!({"rel_path": {"eq": "docs/issues/2026-09-04-x.md"}})),
+            vec!["b1"],
+            "`eq` on rel_path must name exactly one row"
+        );
+        assert_eq!(
+            run(json!({"rel_path": {"in": ["docs/issues/2026-09-04-x.md"]}})),
+            vec!["b1"],
+            "`in` on rel_path is the list form of `eq`"
+        );
+
+        // Under-exclusion — the more dangerous half: the excluded row comes back.
+        assert_eq!(
+            run(json!({"rel_path": {"ne": "docs/trackers/issue-clusters.md"}})),
+            vec!["b1", "t2"],
+            "`ne` on rel_path must drop the row it names"
+        );
+        assert_eq!(
+            run(json!({"rel_path": {"nin": ["docs/trackers/issue-clusters.md"]}})),
+            vec!["b1", "t2"],
+            "`nin` on rel_path is the list form of `ne`"
+        );
+
+        // Regression anchor: `contains` is the one op that was already correct,
+        // and must stay correct. Without this line a fix could repair the others
+        // by breaking the op every caller currently relies on.
+        assert_eq!(
+            run(json!({"rel_path": {"contains": "docs/trackers"}})),
+            vec!["t1", "t2"],
+            "`contains` was already correct and must remain so"
+        );
+    }
+
+    /// The four ordering ops compare a repo-relative string against an absolute
+    /// stored path lexicographically, which is not so much a wrong answer to the
+    /// caller's question as an answer to a different one. Refuse rather than
+    /// return it.
+    #[test]
+    fn rel_path_rejects_the_ordering_ops_it_cannot_mean() {
+        for op in ["gt", "lt", "gte", "lte"] {
+            let node = parse(json!({"rel_path": {op: "docs/trackers"}}));
+            let err = match compile(&node) {
+                Ok(_) => panic!("`{op}` on rel_path must be refused"),
+                Err(e) => e.to_string(),
+            };
+            assert!(
+                err.contains("rel_path"),
+                "`{op}` refusal must name the field: {err}"
+            );
+        }
+    }
+
     #[test]
     fn repo_filter_rejected() {
         let node = parse(json!({"repo": {"eq": "codescout"}}));
@@ -963,6 +1173,12 @@ mod tests {
             json!({"title": {"contains": "lotus"}}),
             json!({"title": {"prefix": "50%"}}), // %-escape parity
         ];
+
+        // `rel_path` is deliberately absent, and adding it here would fail: it
+        // is a catalog alias that `compile` anchors onto the absolute
+        // `abs_path` column, while `eval` runs over augmentation params rows
+        // where `rel_path` would be an ordinary user-defined field. The two
+        // engines answer different questions for that one name, on purpose.
 
         for fj in filters {
             let node = parse(fj.clone());

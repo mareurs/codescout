@@ -3497,7 +3497,18 @@ mod tests {
     /// prose it could retire — an `@ack_*`-style handle is minted per call, not per session,
     /// and at session grain `server_instructions` already does the job for free. Report run
     /// 2026-09-03: TOTAL (21 tools) = 56_476 (desc 6_997 / schema 48_722 / annot 757).
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_476;
+    ///
+    /// 2026-09-04, +37 → 56_513 (desc 6_997 / schema 48_759 / annot 757). `doc`'s `filter`
+    /// description gained the `rel_path` contract: values are repo-relative, and the four
+    /// ordering ops are refused rather than answered. The bytes buy a correctness
+    /// statement, not a convenience — `rel_path` is an alias onto the absolute `abs_path`
+    /// column, so before `b0d5ea33`'s fix nine of its ten ops compared unrelated strings
+    /// and returned a clean, error-free, wrong result in BOTH directions (`eq`/`prefix`
+    /// matched nothing, `ne`/`nin` returned the rows they excluded). The gross addition was
+    /// 180; 143 of it was paid for on the spot by compressing the same description's
+    /// `LIKE '%v%'` / `LIKE 'v%'` SQL idioms — which were verbose AND, for `rel_path`
+    /// specifically, describing a comparison that no longer happens.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_513;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
