@@ -582,5 +582,13 @@ is not in git. After the restore the two disagreed — `append_entry` reported
 must never be reissued. A reverted file cannot un-reserve an id.
 
 **The tell was three numeric fields disagreeing in a success response.** Nothing
-errored and nothing warned; the call returned a valid new id. Filed as
-`docs/issues/2026-09-03-a-reverted-ledger-burns-an-entry-id-with-no-warning.md`.
+errored and nothing warned; the call returned a valid new id. Investigated as
+`docs/issues/archive/2026-09-03-a-reverted-ledger-burns-an-entry-id-with-no-warning.md`
+and **closed `wontfix` the same day** — reading the allocator showed the burn is an
+accepted, documented trade-off (`src/librarian/catalog/augmentation.rs:932`: *"a
+reserved-but-never-written id leaks an integer. Deliberate: integers are cheap, and
+every ledger convention in this repo already forbids reuse"*), and that the missing
+warning is reasoned rather than absent — a burned id **cannot** be repaired, so an
+alarm would only train agents to attempt one.
+
+So this gap is permanent **by design**, not by oversight. Nothing is owed here.

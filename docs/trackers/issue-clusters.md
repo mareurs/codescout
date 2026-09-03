@@ -499,6 +499,24 @@ CHECK 2 (`scripts/pre-commit-ledger-counts.py`) runs against it.
 
 **Members:** `classify-conflates-two-malformed-reasons-under-one-message` (2026-09-03) — `result-cap-marker-gate` branch's `classify()`/`unclassified_decls()` return one `MalformedReason` message for two distinct defects (a `NOT_A_CAP` with no stated reason, and a `RESULT_CAP` with a malformed id), so the second case's message names a token absent from the annotated line. Looked at `IC-16` (`assertion-that-cannot-fail`, wrong shape — the gate still reds, it just misdirects) and `IC-14` (`guard-narrower-than-its-name`, also wrong — the guard's coverage is right, only its message is ambiguous); neither fits without forcing the claim, so filed under the escape hatch instead. +1: `a-corrected-ceiling-reds-within-minutes-on-a-shared-checkout` (2026-09-02), `chunk-line-ranges-are-body-relative-but-published-as-file-lines` (2026-09-02); +1: `doc-tool-refs-counts-call-param-pairs-as-documents` (2026-09-02); +1: `markdown-grammar-librarian-guard-has-zero-test-coverage` (2026-09-03); +1: `worktree-guard-word-boundary-blocks-read-only-git-plumbing` (2026-09-03) — filed HERE rather than forced into `IC-14`, and the reason is that `IC-14` is its exact inverse. `git-worktree-guard.mjs:65` ends each destructive verb with `\b`, and a hyphen is a word boundary, so `merge\b` matches `git merge-base` and `commit\b` matches `git commit-tree`: six read-only plumbing commands are refused as destructive mutations. `IC-14` is a guard whose coverage is NARROWER than its name — this one's is WIDER, refusing work rather than missing it, so tagging it there would corrupt the count that class's promotion reads. Worth recording for whoever meets the second instance: codescout's own IL-3 refusal text names `merge-base` in its list of "single-line plumbing … always bounded", so two guards in one process classify the same string in opposite directions. The candidate class, once a second instance exists, is *"a guard's trigger matches a superset of what its name claims"*. Note also what the guard's PRIOR hardening pass could not have caught: three earlier fixes all concerned WHICH TEXT the verbs are matched against (heredoc stripping, per-segment splitting, forward-only `cd`), and none concerned what the verb pattern itself matches. All derivations below — **on continuation lines, which `scripts/pre-commit-ledger-counts.py` does not read.** Its `members_fields` keys on the single line beginning `**Members:**`, so a member named only in the prose beneath satisfies nothing; put the stem up here and the reasoning down there. +1: `a-reverted-ledger-burns-an-entry-id-with-no-warning` (2026-09-03).
 
+`a-reverted-ledger-burns-an-entry-id-with-no-warning` — **filed here, then closed
+`wontfix` the same day; do not count it as a live defect instance.** `append_entry`
+allocates from `max(body_max, reserved_max, frontmatter_max) + 1` while the reservation
+lives in the catalog and the entry lives in the file, so a `git checkout -- <ledger>`
+reverts one half, cannot reach the other, and the next allocation silently skips the
+orphaned id (burned `GG-10` in `resume-get-guide-section-grain-phases-2-3`). Reading the
+allocator overturned the defect claim: `augmentation.rs:932` accepts the leak in terms
+(*"Deliberate: integers are cheap"*) and `append_entry.rs:236` reasons explicitly that
+only one of the three relations earns words, because a warning would train agents to
+repair a state that **cannot** be repaired. Eleven classes were checked before the hatch
+was used; `IC-21` was closest and still fails, since what is withheld is the *meaning* of
+the three counts rather than a magnitude — and it is withheld on purpose. Candidate class
+for a second instance: *an undo covers one of two stores that jointly hold one fact*,
+provisional slug `partial-undo-across-split-stores`, which would be a class about the
+**surprise** rather than about a defect. Kept tagged so this line and the `**Members:**`
+field stay consistent; `cluster/unclassified` drives no promotion threshold, so a
+by-design member distorts nothing.
+
 `markdown-grammar-librarian-guard-has-zero-test-coverage` — the guard on `edit_file`'s
 markdown-grammar write path can be **deleted outright** with zero failures in either lane,
 while the identical deletion at the raw-text call site reds immediately. Looked at `IC-16`
