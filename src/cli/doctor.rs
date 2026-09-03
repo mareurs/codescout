@@ -16,9 +16,10 @@ pub struct DoctorArgs {
     pub common: CommonOpts,
 
     /// Exit 1 when the scanner reports any DEFECT — `summary.defects`, which is
-    /// `summary.total` minus the rows the scanner itself declares informational
-    /// (today: `claim_held_by_live_session`, which fires when a bug is correctly
-    /// claimed by a session that is still running). An informational-only report
+    /// `summary.total` minus the rows the scanner itself declares informational (today:
+    /// `claim_held_by_live_session`, a bug correctly claimed by a session that is still
+    /// running, and `claim_unresolvable_here`, a claim whose session cannot be resolved
+    /// on this host at all — see `Check::is_informational`). An informational-only report
     /// exits 0: a healthy repo must not fail a gate. Default is to exit 0
     /// regardless — useful for monitoring without breaking CI.
     #[arg(long = "fail-on-violations")]

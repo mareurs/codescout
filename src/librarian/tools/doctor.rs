@@ -192,20 +192,42 @@ impl Check {
     /// shape is read by other consumers, so the informational/defect split lives here,
     /// beside the check names, rather than as a new field on every row.
     ///
-    /// Exactly one check qualifies today. `claim_held_by_live_session` fires on the
-    /// feature's *success* state — a bug correctly claimed by a session that is still
-    /// running — and exists only to carry the paste-ready `SendMessage` address. Counting
-    /// it as drift made `codescout doctor --fail-on-violations` exit 1 on a healthy repo,
-    /// i.e. the gate reporting the intended outcome as a failure.
+    /// Two checks qualify today.
+    ///
+    /// `claim_held_by_live_session` fires on the feature's *success* state — a bug
+    /// correctly claimed by a session that is still running — and exists only to carry
+    /// the paste-ready `SendMessage` address. Counting it as drift made `codescout doctor
+    /// --fail-on-violations` exit 1 on a healthy repo, i.e. the gate reporting the
+    /// intended outcome as a failure.
+    ///
+    /// `claim_unresolvable_here` fires when a `taken` bug's claimant sessionId resolves
+    /// in none of the registries visible on this host — the ordinary case on a second
+    /// machine, a CI runner, or a container, where the claim may be held by a live
+    /// session whose registry this checkout cannot see. No edit to this repo can resolve
+    /// that session, so it is not this repo's defect to report as one — per the design
+    /// (`docs/superpowers/plans/2026-09-02-bug-claim-liveness-design.md` § *Three buckets,
+    /// not two*), the row still fires and still names the scope it searched; only the
+    /// exit code changes. The counter-argument — an unresolvable claim has a local
+    /// remedy, demote it if abandoned — is real but conditional: it requires the reader
+    /// to go check another host first, which is the tell for informational rather than
+    /// defect.
+    ///
+    /// `claim_held_by_dead_session` (this host resolved the sessionId and found the
+    /// process gone) and `claim_without_claimant` (the record itself is malformed) both
+    /// stay defects: this host can already tell the claim is stale or broken, and fixing
+    /// either is a local, repo-internal edit — the opposite of the bar above.
     ///
     /// Adding a variant here silently changes two published numbers (`summary.defects`
     /// and the CLI's exit code), and neither the compiler nor
     /// `summary_total_partitions_by_check` can notice — `total` still partitions
-    /// `by_check` either way. So the bar is the one this check meets: the emitted row's
-    /// own first word tells a reader it is not a defect, and there is no edit to the
-    /// repo that would make it stop firing.
+    /// `by_check` either way. So the bar is the one each check above meets: the emitted
+    /// row's own first word tells a reader it is not a defect, and there is no edit to
+    /// the repo that would make it stop firing.
     pub fn is_informational(self) -> bool {
-        matches!(self, Check::ClaimHeldByLiveSession)
+        matches!(
+            self,
+            Check::ClaimHeldByLiveSession | Check::ClaimUnresolvableHere
+        )
     }
 }
 
@@ -14445,7 +14467,11 @@ body
     ///
     /// Runs the REAL scan and the REAL `defect_count`, so a mutation to either is red.
     /// The dead claim is the positive control: without it, `defect_count` hardwired to
-    /// `0` would pass.
+    /// `0` would pass. It must be an actual DEAD claim — a session ROW that resolves but
+    /// whose process the probe reports gone — not an unresolvable one: `claim_unresolvable_here`
+    /// is informational too (per `Check::is_informational`), so a positive control built
+    /// from an unresolvable sessionId would silently stop pinning anything the moment that
+    /// check joined the informational bucket.
     #[tokio::test]
     async fn a_live_claim_is_informational_and_a_dead_one_is_a_defect() {
         let (_tmp, root, _live) = git_fixture_with_commit();
@@ -14478,27 +14504,40 @@ body
              defect — counting it made `--fail-on-violations` exit 1 on a healthy repo"
         );
 
-        // Positive control: add a claim whose session is not in the registry.
+        // Positive control: a session ROW that resolves (unlike an unresolvable
+        // sessionId, which is informational after the fix above and would not exercise
+        // this bucket at all) but whose process the probe reports gone — pid 9999 is
+        // never the probe's `live_pid`, so `starttime(9999)` is `None` and `resolve_one`
+        // returns `Dead { reason: ProcessGone, .. }` before it ever looks at `procStart`.
         {
             let guard = ctx.catalog.lock();
             seed_live_bug(
                 &guard,
                 &root,
-                "orphan",
+                "dead",
                 "taken",
-                "claimed_by: sid-nowhere\n",
+                "claimed_by: sid-dead\n",
                 "body\n",
             );
         }
+        seed_session(&root, "sid-dead", 9999, "111");
         let both = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(both.len(), 2, "{both:#?}");
+        let dead = both
+            .iter()
+            .find(|v| v.artifact_id.as_deref() == Some("dead"))
+            .unwrap_or_else(|| panic!("no violation for the dead claim's own artifact: {both:#?}"));
+        assert_eq!(
+            dead.check, "claim_held_by_dead_session",
+            "the resolved-but-dead claim must fire its own check: {both:#?}"
+        );
         assert_eq!(
             defect_count(&both),
             1,
-            "the informational row is excluded and the real one is not: {both:#?}"
+            "a resolved-but-dead claim IS a defect and must be counted as one: {both:#?}"
         );
     }
 
@@ -14506,10 +14545,24 @@ body
     /// needs `total`; one asking "is anything wrong?" needs `defects`. Neither is
     /// derivable from the other, so redefining `total` in place would have traded one
     /// wrong number for another.
+    ///
+    /// Seeds one row of each kind and asserts membership by check name, not just the
+    /// aggregate counts: `informational := total - defect_count(...)` and
+    /// `defects := total - informational` make `defects + informational == total` true
+    /// for every possible implementation of either — an identity, not a check, so a
+    /// prior version of this test asserted exactly that and could not be reddened by any
+    /// mis-partition. `claim_without_claimant` (malformed, locally repairable) stays a
+    /// defect; `claim_unresolvable_here` (a foreign-host sessionId) is informational
+    /// after the design-doc fix — see `Check::is_informational`.
     #[tokio::test]
     async fn summary_publishes_defects_and_informational_beside_total() {
         let (_tmp, root, _live) = git_fixture_with_commit();
         let cat = Catalog::open_in_memory().unwrap();
+        // Defect: `taken` with no readable `claimed_by:` at all — malformed, and locally
+        // repairable, so it stays a defect regardless of what registries exist on this host.
+        seed_live_bug(&cat, &root, "malformed", "taken", "", "body\n");
+        // Informational: a sessionId no local registry can resolve — a foreign-host claim
+        // this repo cannot check, not this repo's defect to report as one.
         seed_live_bug(
             &cat,
             &root,
@@ -14521,19 +14574,32 @@ body
         let ctx = ctx_rooted_at(cat, &root);
 
         let out = call(&ctx, json!({})).await.unwrap();
+        let violations = out["violations"].as_array().expect("violations array");
+        let named =
+            |check: &str| -> usize { violations.iter().filter(|v| v["check"] == check).count() };
+        assert_eq!(
+            named("claim_without_claimant"),
+            1,
+            "the malformed record must fire its own defect: {violations:#?}"
+        );
+        assert_eq!(
+            named("claim_unresolvable_here"),
+            1,
+            "the foreign sessionId must fire its own informational row: {violations:#?}"
+        );
+
         let s = &out["summary"];
         let total = s["total"].as_u64().expect("summary.total");
         let defects = s["defects"].as_u64().expect("summary.defects");
         let informational = s["informational"].as_u64().expect("summary.informational");
-
+        assert_eq!(total, 2, "exactly the two seeded rows: {s:#?}");
         assert_eq!(
-            defects + informational,
-            total,
-            "the two must partition `total`, or a reader cannot recover either: {s:#?}"
+            defects, 1,
+            "only the malformed claim is a defect, by bucket membership: {s:#?}"
         );
-        assert!(
-            defects >= 1,
-            "an unresolvable claim IS a defect and must be counted as one: {s:#?}"
+        assert_eq!(
+            informational, 1,
+            "only the unresolvable claim is informational, per the corrected partition: {s:#?}"
         );
     }
 
