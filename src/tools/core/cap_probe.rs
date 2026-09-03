@@ -51,7 +51,13 @@ pub(crate) enum Coverage {
     /// A behavioural test drives this cap past its bound and asserts the
     /// marker arrives, through the tool's real call surface or a shared
     /// primitive whose output composes unmodified into that surface's
-    /// response.
+    /// response. Bounded: the marker check is a byte-level scan of the cited
+    /// test's assertions, not a Rust tokenizer, so a cited assertion whose
+    /// condition carries an unbalanced `(` in non-code text (a string
+    /// literal, raw string, char literal, or trailing comment) can be
+    /// certified on message text instead — see `condition_args`' doc
+    /// comment in `tests/result_caps.rs` for the measured vector and what a
+    /// new row's `cited_test` must therefore avoid.
     Probed {
         marker: Marker,
         mutation: Mutation,
