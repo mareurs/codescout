@@ -3,7 +3,7 @@ kind: bug
 status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
-closed: null
+closed: 2026-09-03
 opened: 2026-09-03
 owner: marius
 related: []
