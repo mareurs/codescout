@@ -173,7 +173,34 @@ firing inside the ledger that defines `IC-6`, twice in one day, on two different
 
 ## Fix
 
-Not yet fixed. Two candidate directions, and they are not equivalent:
+**Primary defect FIXED on `experiments`. The disclosure half is NOT, so this file stays open** —
+see *Still owed* below. Archiving requires both.
+
+- **SHA** `205a04d4818c4f1ab3a1979fa9783f920c1a05b8` (on `experiments`)
+- **patch-id** `37615c490a973b822fa41eab49d56492904b4d04`
+
+**What shipped — direction 1 of the two below, and it cost nothing.** The trade-off this section
+originally described turned out not to exist. Normalising is confined to **tier 2**: a new
+`strip_heading_marker` (`src/tools/file_summary/file_summary.rs`, beside `heading_level`) strips
+the `#` prefix from both the stored heading text and the query before the tier-2 comparison, so
+a bare `Index` reaches an *exact* tier. **Tier 1 is untouched**, and because it runs first, a
+caller who writes `## Foo` still selects by level and `### Foo` cannot answer it — which is the
+level-sensitivity this file worried about losing. Where both `## Foo` and `### Foo` exist, a
+bare `Foo` now matches both at tier 2 and raises the **existing** duplicate error naming each
+line, the same contract two byte-identical headings already get. That is strictly better than
+the silent document-order pick it replaces.
+
+Direction 2 (rank tiers 3/4 by match quality) was **not** taken and is not needed for this
+defect. Left recorded because it remains the answer if level-sensitivity ever has to move.
+
+### Still owed — the third remedy, and it survives this fix
+
+When resolution goes through tier 3 or 4, **name the heading that was actually bound** — in the
+error as well as on the success path. Tiers 3 and 4 remain for convenience, so a fuzzy bind can
+still happen and is still silent on `doc(action="get")`, whose `body_meta.heading` echoes the
+*request*. `read_file` already discloses it. This is what the second instance under `## Evidence`
+argues for, and it is a second **remedy**, not a second claim — so it belongs here rather than in
+a new file.
 
 - **Normalise the query and the heading text** — strip leading `#`+space from both sides
   before the tier-1/2 comparisons. This makes `Index` an *exact* match for `## Index` and the
@@ -188,10 +215,33 @@ The first is the real repair; the second is what you take if level-sensitivity m
 
 ## Tests added
 
-None yet. A regression test must assert **both** directions on one fixture: that
-`heading="Index"` resolves to the `## Index` line and *not* to an earlier heading containing
-the word. Asserting only that it resolves to line N is monotone under widening — a resolver
-that returns the first heading in the file satisfies it whenever `## Index` is first.
+Three, in `src/tools/file_summary/tests.rs`, and **each has an observed RED from mutating the
+production path** — not merely an assertion that exists:
+
+| test | mutation | observed failure |
+|---|---|---|
+| `resolve_section_range_bare_query_reaches_the_exact_tier` | revert tier-2 normalisation | bound `### One slug …` instead of `## Index` |
+| `resolve_section_range_bare_query_matching_two_levels_is_ambiguous_not_silent` | same | returned `Ok(SectionRange { heading_text: "## Fix" })` — the silent pick, verbatim |
+| `resolve_section_range_prefixed_query_keeps_exact_level_semantics` | disable tier 1's early return | `## Fix` became ambiguous across `## Fix` / `### Fix` |
+
+The third mutation established a fact previously only reasoned about: **tier 1 is the sole
+level-aware step in the cascade.** Nothing else distinguishes `##` from `###`.
+
+**Both fixtures annotate the detail that makes them discriminate**, on the fixture, because a
+tidy-up that removes it leaves the test passing and no longer testing anything — a change no
+assertion can catch. For the first: the `###` must both PRECEDE `## Index` and contain "Index" as
+a substring.
+
+**And the pre-existing bare-form assertion did not cover this.**
+`resolve_section_range_finds_last_heading` already asserted that a bare `Resume` resolves to
+`## Resume`, and was green throughout — because its fixture holds no earlier heading containing
+"Resume", so tier 4's first-match-wins happens to land correctly. It documented the contract and
+was structurally unable to detect its violation: green for the wrong reason, and monotone under
+exactly this defect. That is the reason the bug survived to be found by hand twice in one day.
+
+The ambiguity test asserts on `err.extra["heading_ambiguous"]` — the named discriminant a caller
+one frame up actually reads — rather than on message text, which would still pass if the extra
+were dropped and the error collapsed into a plain miss.
 
 ## Workarounds
 
