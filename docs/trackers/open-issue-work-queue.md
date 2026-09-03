@@ -113,6 +113,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-69 | 1 | Repair the 3 files with an unterminated fence | **done** 2026-09-01 — all three were one defect: a nested fence closing its enclosing ```markdown block early. Two widened to ````, one stray trailing delimiter deleted. `unterminated_fence` 3 → 0 | — |
 | BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | **done** 2026-09-01 — three, not six (the rest are in the whatsapp / eduplanner-ui repos). One was a NO-ACTION by the finding's own instruction: provenance-subsystem's missing headings are the compaction ladder's supported end state, and adding one would make the token ambiguous. I-8's params row written by whole-array rewrite (8/8 survive, catalog-only so it does not travel in git); claim-decay DC-2's body Status corrected to `check-shipped` | — |
 | BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | **done** 2026-09-01, both halves. The 14 `cited_prefix_with_no_definer` are 8 non-citations and the top four by volume are all noise — filed as `9b67295c125cfcb6`, tagged IC-2, and **now FIXED** at `d44a4409` (patch-id `f37ae73ffe72846ca0cceae19b9649f8c24b6a08`) by gating on DISPERSION rather than volume — 13 findings → 7, six noise prefixes suppressed, zero real ones lost. Two of its original four options were circular (`prefix_is_known` is false for exactly this check's population, so reusing it would zero the check), so the shipped remedy was a fifth. The 13 `entry_cited_from_outside_but_undeclared` → 0 at `40c53197`: 4 invariant, 7 dated, 2 conditional, every date read from the record; BL-58 needed only relocating a mid-line declaration | `9b67295c125cfcb6` |
+| BL-72 | 1 | Raise `max_per_artifact` 1→2 and the semantic page limit 5→10 | **open** 2026-09-04 — measured **+4/12** on the artifact-entry suite (3/12 → 7/12), with `cap=1 limit=5` reproducing the shipped 3/12 exactly as a positive control. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page — AE-5's target sits at raw kNN rank 3 and is discarded. **BLOCKED, deliberately:** `find.rs:800-805` warns that both side maps are keyed by artifact id and whoever raises the cap owns restructuring them. Not a two-constant change | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1304,6 +1305,77 @@ Steps: triage the 14 into real vs acronym; check whether `TC-N` (106 citations) 
 then decide between reusing the resolver's suppression and adding a shape rule. Handle
 `entry_cited_from_outside_but_undeclared` (12) separately — that one is a real worklist and
 should not be swept up in a check fix.
+
+### BL-72 — Raise `max_per_artifact` to 2 and the page limit to 10 — the largest measured retrieval win available, blocked on the side maps
+
+**Status:** open. **Valid:** dated 2026-09-04
+
+Found while debugging why the artifact-entry benchmark scored 3/12
+(`docs/trackers/retrieval-benchmark.md`, 2026-09-04 entry). The page policy, not
+the embedder or the grain, is the single largest recoverable loss.
+
+**Measured by simulation over raw kNN**, with the shipped policy reproduced
+exactly as a positive control — without that row the others are worthless,
+because a simulator that disagrees with the harness is measuring its own
+re-implementation:
+
+| policy | entry-level hits@5 |
+|---|---|
+| cap=1 limit=5 **(shipped)** | **3/12** ← reproduces the real harness exactly |
+| cap=1 limit=10 | 5/12 |
+| cap=2 limit=5 | 5/12 |
+| **cap=2 limit=10** | **7/12** |
+| cap=3 limit=10 | 6/12 |
+| cap=∞ limit=10 | 5/12 |
+
+**`cap=2` is an optimum and both directions are worse.** That is the
+non-obvious result and the reason this is not "raise the cap": uncapping lets a
+single artifact flood the page and crowd out other documents, so *more chunks per
+artifact* is not monotonically better. The cap is load-bearing, not a legacy
+artifact — which also means the two 5/12 rows reach their score by different
+routes (`cap=1 limit=10` gains AE-8 and AE-10 through page depth; `cap=2 limit=5`
+gains AE-3 and AE-5 through per-artifact allowance), so the two levers are
+independent and both are needed for 7/12.
+
+**Mechanism.** In a ledger the preamble/index section is a *broad-spectrum
+attractor*: it summarises every entry, so it matches any query about that file
+moderately well and beats each specific entry. At `max_per_artifact = 1` it
+always wins, and the entry the query is actually about never reaches the page.
+AE-5's target chunk sits at raw kNN **rank 3** — comfortably inside any top-5
+page — and is discarded in favour of a preamble chunk that resolves to no entry
+at all. This is a structural interaction between chunking and deduplication:
+chunk grain creates per-entry vectors, and the cap then collapses each document
+back to the representative that matches *broadly* rather than *specifically*.
+
+**Why this is queued rather than done.** `src/librarian/tools/find.rs:800-805`
+carries a standing warning that both side maps are keyed by artifact id, and that
+whoever raises the cap owns restructuring them. A page holding two chunks of one
+artifact breaks that keying assumption. The measurement licenses the *direction*,
+not an edit to two constants — and the restructuring needs its own guards, since
+nothing currently tests a page containing two chunks of the same artifact.
+
+**What it does NOT fix, stated so a future run does not credit it wrongly.** At
+`cap=2 limit=10` the residual five misses are:
+
+- **AE-9 — unscorable.** It wants `IC-16`, and `issue-clusters.md` defines `IC`
+  entries as Index table rows plus per-class files under
+  `docs/trackers/issue-clusters/`, never as a `## IC-16 — ` heading. The scorer's
+  regex can never match it, at any policy.
+- **AE-11, AE-12 — mis-specified ground truth.** Both point at 256- and
+  372-byte *evidence stubs* (a tool-call dump and a config table) rather than the
+  prose that answers the query. For AE-11 the correct FILE already ranks 1, so
+  retrieval is arguably right and the suite is wrong.
+- **AE-4, AE-7 — genuine ranking losses.** AE-7 is the odd one: near-verbatim
+  overlap with its query, embedded, and still below rank 300, with the flattest
+  similarity spread of the twelve (0.0647 vs a 0.1479 mean).
+
+**Re-point or retire those three before quoting this suite again**, or a policy
+change will be measured against cases it structurally cannot reach.
+
+**Two hypotheses rejected on the way**, recorded so they are not re-run: the
+targets all *do* have vectors (checked against Qdrant, 11/11 scorable), and the
+embedder is *not* flat on prose — its rank1−rank500 spread on artifact prose is
+**0.1479** against **0.1384** on `code_chunks`, the domain it was benchmarked for.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
