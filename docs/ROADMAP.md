@@ -57,10 +57,10 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 memory `research/loadbearing-mcp-guidance`.
 
 - **Server-computed provenance envelope keys** (`refreshed_at_commit`, `commits_behind_head`)
-  on `artifact(get)` — **SHIPPED 0de733aa (2026-07-04), live-verified.** Emits a
+  on `doc(get)` — **SHIPPED 0de733aa (2026-07-04), live-verified.** Emits a
   server-computed `provenance` block and activates the freshness engine's stale-by-commit-
   distance path (`commit_refresh` records HEAD; distance drives `commits_behind_head` +
-  `freshness`); the co-located G5 bug (augmentation fields omitted from `artifact(get)`) is
+  `freshness`); the co-located G5 bug (augmentation fields omitted from `doc(get)`) is
   fixed in the same projection. (KEY-PRIORITY 6/6 across two models; CALIBRATE 9-10/10 at
   n=10 pinned Sonnet.) Optional follow-ups: extend provenance to the `context.rs` `[LIVE]`
   bundle + `state_at` time-travel surfaces (deferred by design).
@@ -379,7 +379,7 @@ it's about beyond whatever's typed in prose.
    response envelope with a cheap, indexed lookup: "N tracker(s) reference this file/symbol"
    — a hint line, not a forced fetch, matching the existing `_guide_hint`/progressive-disclosure
    convention. Backed by an index on `code_refs.file_path` (+ optional symbol column).
-3. **Tracker → code surfacing.** Extend `artifact(get)` to render a "Referenced code"
+3. **Tracker → code surfacing.** Extend `doc(get)` to render a "Referenced code"
    block from the same table, and reuse `audit_doc_refs`'s existing filesystem/LSP-symbol
    staleness check to flag drift inline (e.g. "`src/foo.rs:42` — symbol `Bar::baz` not
    found, likely moved/renamed") instead of requiring a separate `audit_doc_refs` run.
@@ -396,7 +396,7 @@ it's about beyond whatever's typed in prose.
 - Hook code→tracker surfacing into the existing hint-injection path (`src/tools/output.rs` /
   progressive-disclosure envelope), gated so it doesn't fire when zero refs exist — no hint
   spam on files nobody's ever filed a bug against
-- Tracker→code surfacing: new rendered section in `artifact(get)`'s body, or a queryable
+- Tracker→code surfacing: new rendered section in `doc(get)`'s body, or a queryable
   field, reusing `audit_doc_refs`'s resolver for live staleness
 
 **Related:** `link_scan` (`src/librarian/tools/link_scan/`) — the shipped artifact↔artifact

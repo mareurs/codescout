@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-03
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: investigating
 tags:
 - cluster/selector-narrower-than-its-population
-kind: bug
+closed: null
+opened: 2026-09-03
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: the second file template still propagates retired call forms — the fix covered `_TEMPLATE.md` and not `docs/templates/session-log.md`
@@ -161,6 +161,27 @@ When copying `docs/templates/session-log.md`, translate by hand:
 
 Treat a green `reader_docs_contain_no_retired_call_forms` as covering 153 of 1519 markdown
 files; read `src/prompts/mod.rs:2041-2073` for which.
+
+## Fix applied 2026-09-03
+
+All 15 occurrences swept:
+
+- `docs/templates/session-log.md:12,240` — `artifact(action="append_entry", …)` → `doc(action="append_entry", …)`
+- `docs/TEAM-ONBOARDING.md` — 9 sites, all `artifact(` → `doc(` (find/get/append_entry/move/update)
+- `docs/ROADMAP.md` — 4 sites, all `artifact(get)` → `doc(get)`
+
+`reader_docs_contain_no_retired_call_forms`'s `FILES` list (`src/prompts/mod.rs`) extended with
+`docs/ROADMAP.md`, `docs/TEAM-ONBOARDING.md`, and `docs/templates/session-log.md` — the latter
+following the same "prescriptive, copied verbatim" reasoning as the bug-file template already
+in that list.
+
+**Verified:** zero remaining `artifact(`/`artifact_event(`/`artifact_augment(`/`artifact_refresh(`/
+`read_markdown(`/`edit_markdown(` occurrences in all three files (grep, post-fix). Full gate
+green: `cargo fmt --check`, `cargo clippy --workspace --all-targets --features local-embed -- -D
+warnings` (exit 0), `cargo test --workspace --no-default-features` (exit 0), `cargo test
+--workspace` (exit 0) — no failures in either lane.
+
+**Not committed yet** — SHA and patch-id pending; archive after commit per convention.
 
 ## Resume
 

@@ -2061,6 +2061,8 @@ mod tests {
             "docs/PROGRESSIVE_DISCOVERABILITY.md",
             "docs/PROBES.md",
             "docs/RELEASE.md",
+            "docs/ROADMAP.md",
+            "docs/TEAM-ONBOARDING.md",
             "src/prompts/source.md",
             "src/prompts/README.md",
             // The bug-file template, and ONLY the template — never `docs/issues/` as a root.
@@ -2070,6 +2072,10 @@ mod tests {
             // the opposite: it is prescriptive, copied verbatim into every new bug file, so
             // a stale call form in it propagates itself once per bug.
             "docs/issues/_TEMPLATE.md",
+            // The session-log template — same "prescriptive, copied verbatim" reasoning as
+            // the bug template above, and it was missed the first time this gate was written
+            // (docs/issues/archive/2026-09-03-two-file-templates-propagate-retired-call-forms-into-new-files.md).
+            "docs/templates/session-log.md",
         ];
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -2099,9 +2105,9 @@ mod tests {
             assert!(
                 paths.len() > before,
                 "ROOTS entry '{r}' matched no .md files — the scan is not reading what it claims. \
-             A renamed or moved directory silently empties this gate, and both assertions \
-             below are `is_empty()`, which is monotone under removal: an empty corpus \
-             produces exactly the silence they assert."
+                 A renamed or moved directory silently empties this gate, and both assertions \
+                 below are `is_empty()`, which is monotone under removal: an empty corpus \
+                 produces exactly the silence they assert."
             );
         }
         for f in FILES {
@@ -2129,15 +2135,15 @@ mod tests {
         assert!(
             bad.is_empty(),
             "{} retired call form(s) in reader-facing docs:\n{}\n\n\
-         These say \"this is how you invoke the tool\", and the tool does not exist. \
-         `artifact(` → `doc(`; `artifact_event(action=\"list\")` → \
-         `doc(action=\"event_list\")`; `artifact_augment(id, params=…)` → \
-         `doc(action=\"augment\", id, augment={{params: …}})`; \
-         `artifact_refresh(action=\"gather\")` → `doc(action=\"gather\")`; \
-         `read_markdown(` → `read_file(`; `edit_markdown(` → `edit_file(`.\n\n\
-         To MENTION a retired form (a translation note, a migration record), write it \
-         without the paren — `read_markdown`, not `read_markdown(`. That is the escape \
-         hatch, and it is deliberate: this gate is about invocation claims, not vocabulary.",
+             These say \"this is how you invoke the tool\", and the tool does not exist. \
+             `artifact(` → `doc(`; `artifact_event(action=\"list\")` → \
+             `doc(action=\"event_list\")`; `artifact_augment(id, params=…)` → \
+             `doc(action=\"augment\", id, augment={{params: …}})`; \
+             `artifact_refresh(action=\"gather\")` → `doc(action=\"gather\")`; \
+             `read_markdown(` → `read_file(`; `edit_markdown(` → `edit_file(`.\n\n\
+             To MENTION a retired form (a translation note, a migration record), write it \
+             without the paren — `read_markdown`, not `read_markdown(`. That is the escape \
+             hatch, and it is deliberate: this gate is about invocation claims, not vocabulary.",
             bad.len(),
             bad.join("\n")
         );

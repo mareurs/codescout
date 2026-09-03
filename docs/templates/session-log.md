@@ -9,7 +9,7 @@
 > entries with:
 >
 > ```
-> artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+> doc(action="append_entry", id="<artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
 >          title="<one-line title>", body="**Observed:** ...")
 > ```
@@ -237,7 +237,7 @@ Codified so the Index column means the same thing across sessions.
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
 
-     artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+     doc(action="append_entry", id="<artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
               title="<one-line title>", body="**Observed:** ...")
 

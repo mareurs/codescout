@@ -122,9 +122,9 @@ indexed by the librarian. Enter through the catalog, not the filesystem:
 
 ```
 doc(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})
-artifact(action="find", kind="tracker")
-artifact(action="get", id="<id>")                    # read
-artifact(action="get", id="<id>", heading="## Foo")  # one section
+doc(action="find", kind="tracker")
+doc(action="get", id="<id>")                    # read
+doc(action="get", id="<id>", heading="## Foo")  # one section
 ```
 
 **Ledgers** — some trackers own numbered entries (`F-N`, `W-N`, `T-N`, `IC-N`, …). The full map
@@ -132,10 +132,10 @@ of every prefix is one page: `docs/TAXONOMY.md`. Two hard rules:
 
 - **Never hand-edit a managed ledger.** The server allocates entry ids; hand-editing races
   peer sessions and corrupts the counter. Append with
-  `artifact(action="append_entry", id=…, id_prefix="F", anchor_heading=…, title=…, body=…)` —
+  `doc(action="append_entry", id=…, id_prefix="F", anchor_heading=…, title=…, body=…)` —
   one call, the server writes the heading and assigns the id. The guard will refuse direct
   edits; that refusal is protecting you.
-- **Archive through the catalog** — `artifact(action="move", …)`, never bare `git mv`. Identity
+- **Archive through the catalog** — `doc(action="move", …)`, never bare `git mv`. Identity
   is currently derived from the file path, so a hand-move orphans the document's history.
 
 **Citations.** Writing an entry id in prose (`IC-6` for a prefix with one ledger, or qualified
@@ -150,11 +150,11 @@ It runs on capture. The three habits that matter, in order:
 
 1. **Open a bug file the moment you notice a bug** — including bugs in codescout's own tools,
    bugs you won't fix, and misleading errors. Copy `docs/issues/_TEMPLATE.md`, one claim per
-   file, add the `cluster/` tag through the catalog (`artifact(action="update", id=…,
+   file, add the `cluster/` tag through the catalog (`doc(action="update", id=…,
    patch={tags:[…]})`). Not for typos or feature ideas.
 2. **When you fix something, record the SHA and its patch-id**
    (`git show <sha> | git patch-id --stable`) in the bug file, then archive it via
-   `artifact(action="move")`. The patch-id survives rebases; the SHA alone does not.
+   `doc(action="move")`. The patch-id survives rebases; the SHA alone does not.
 3. **When a tool annoys you, write it down** — skill frictions go to
    `docs/trackers/skill-frictions.md`, tool-usage observations to the Tool Usage Patterns
    tracker (see CLAUDE.md for the exact append calls). This feels like bureaucracy the first
@@ -171,7 +171,7 @@ of trusting a stale cell.
 codescout errors are designed to name the remedy. Examples you will actually meet:
 
 - *"is a librarian-managed artifact — do not read or edit it directly"* → use
-  `artifact(action="get", id=…)`; the error includes the id.
+  `doc(action="get", id=…)`; the error includes the id.
 - *"IL3 violation — piped unbounded output"* → run the command bare, query the `@cmd_*` buffer.
 - *"entry_filter set but this artifact is not augmented"* → the tracker's structured rows live
   in a machine-local augmentation your catalog doesn't have — see the cross-machine resume page,
@@ -191,7 +191,7 @@ first-class citizens in the defect taxonomy here.
 | How do I add or change a tool? | `docs/PROGRESSIVE_DISCOVERABILITY.md` |
 | Build/test gate, release flow | `CLAUDE.md`, `docs/RELEASE.md` |
 | Known bugs before I re-discover one | `doc(action="find", kind="bug", filter={"status": {"in": ["open","taken","investigating","zombie"]}})` |
-| What defect classes exist? | `docs/trackers/issue-clusters.md` (via `artifact(get)`) |
+| What defect classes exist? | `docs/trackers/issue-clusters.md` (via `doc(get)`) |
 | Fresh machine / big pull | `docs/conventions/cross-machine-catalog-resume.md` |
 | This guide's origin and the honest system critique | `docs/trackers/2026-09-01-fable-system-review.md` |
 | The improvement backlog that critique feeds | `docs/trackers/system-retrospective-improvements.md` |
