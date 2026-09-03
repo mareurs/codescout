@@ -434,6 +434,40 @@ plausible number rather than an error.
 **Rests on:** `/proc/<pid>/exe` continuing to mark a replaced inode `(deleted)`,
 and `target/release/codescout` being the path every server is launched from.
 
+
+**CORRECTION 2026-09-04, one hour later.** The *Fix idea* above says a durable
+version "would have the server report the git SHA it was built from, so the
+question stops being answerable only by inference". **It already does.**
+`codescout version` is a shipped subcommand — listed in `--help` as *"Print the
+codescout git SHA, full SHA, and dirty status baked into this binary at build
+time"* — and on the very next rebuild it answered the question directly:
+
+```
+{"version":"0.15.0","git_sha":"28de2827","git_sha_full":"28de2827...","git_dirty":true}
+```
+
+So the entry proposed building an instrument that exists, in a session that had
+**already read that subcommand's description** while checking whether a CLI
+reindex existed. The description was in my context and I did not connect it,
+because I was reasoning about `/proc` and process identity and the answer was in
+the tool surface. Worth more than the original finding: *the durable-fix section
+of a friction entry is exactly where an unchecked "someone should build X"
+survives*, since nothing downstream ever verifies a proposal the way it would
+verify a claim.
+
+**The instrument is better than inference and still bounded** — `git_dirty: true`
+says the build carried uncommitted changes, so the SHA identifies the committed
+half and nothing identifies the rest. On a shared checkout with several sessions
+holding unstaged work, that is the normal case rather than the exception. So the
+correct predicate becomes: `codescout version` answers *"which commits are in
+this binary"* exactly (confirm with `git merge-base --is-ancestor <sha>
+<built_sha>`), and answers *"is my uncommitted work in it"* not at all. Both
+questions were live tonight; only the first is now cheap.
+
+**Verified against this build:** all four of the session's commits
+(`eec03606`, `81f7f923`, `63fae4ea`, `da78f3fa`) are ancestors of `28de2827` — a
+check that took one command and no timing arithmetic, replacing the whole
+start-time-versus-build-time apparatus this entry was written about.
 ## F-N entry template
 
 Copy this block when appending a new friction. Allocate the next free
