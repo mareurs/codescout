@@ -63,6 +63,11 @@ fn probe_rows_are_well_formed() {
     use super::cap_probe::{Coverage, Marker, Mutation, PROBE_ROWS};
     use std::collections::HashSet;
 
+    assert!(
+        !PROBE_ROWS.is_empty(),
+        "PROBE_ROWS must not be empty — an empty table would pass every check below vacuously"
+    );
+
     let banned = ["deferred", "later", "hard to test", "todo", "tbd", "n/a"];
     let is_placeholder = |reason: &str| {
         let trimmed = reason.trim();
@@ -126,30 +131,13 @@ fn probe_rows_are_well_formed() {
 /// whose `mutation` is `NotYet` is not a defect this test polices.
 #[test]
 fn print_mutation_tally() {
-    use super::cap_probe::{Coverage, Mutation, PROBE_ROWS};
+    use super::cap_probe::{tally, PROBE_ROWS};
 
-    let total = PROBE_ROWS.len();
-    let probed = PROBE_ROWS
-        .iter()
-        .filter(|r| matches!(r.coverage, Coverage::Probed { .. }))
-        .count();
-    let deferred = total - probed;
-    let mutation_verified = PROBE_ROWS
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.coverage,
-                Coverage::Probed {
-                    mutation: Mutation::Killed,
-                    ..
-                }
-            )
-        })
-        .count();
+    let t = tally(PROBE_ROWS);
 
     println!(
-        "IC-13 probe rows: {total} total, {probed} probed, {deferred} deferred, \
-         {mutation_verified} mutation-verified"
+        "IC-13 probe rows: {} total, {} probed, {} deferred, {} mutation-verified",
+        t.total, t.probed, t.deferred, t.mutation_verified
     );
 }
 
@@ -157,12 +145,13 @@ fn print_mutation_tally() {
 /// classification-only scope), so [`print_mutation_tally`]'s `mutation_verified`
 /// count is otherwise checked only against an all-`NotYet` population — a
 /// counting bug that always reports 0 would pass that silently. This pins
-/// the counting logic itself against a synthetic fixture that DOES mix
-/// `Killed` with `NotYet` and `Deferred`, so a mis-count has somewhere to
-/// fail before the real table ever grows a `Killed` row.
+/// `cap_probe::tally` — the SAME function `print_mutation_tally` calls — against
+/// a synthetic fixture that DOES mix `Killed` with `NotYet` and `Deferred`, so a
+/// mis-count in the shared counting logic has somewhere to fail before the real
+/// table ever grows a `Killed` row.
 #[test]
 fn tally_distinguishes_killed_from_not_yet_and_deferred() {
-    use super::cap_probe::{Coverage, Marker, Mutation, ProbeRow};
+    use super::cap_probe::{tally, Coverage, Marker, Mutation, ProbeRow};
 
     let rows = [
         ProbeRow {
@@ -185,26 +174,11 @@ fn tally_distinguishes_killed_from_not_yet_and_deferred() {
         },
     ];
 
-    let probed = rows
-        .iter()
-        .filter(|r| matches!(r.coverage, Coverage::Probed { .. }))
-        .count();
-    let mutation_verified = rows
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.coverage,
-                Coverage::Probed {
-                    mutation: Mutation::Killed,
-                    ..
-                }
-            )
-        })
-        .count();
+    let t = tally(&rows);
 
-    assert_eq!(probed, 2, "both Probed rows should count as probed");
+    assert_eq!(t.probed, 2, "both Probed rows should count as probed");
     assert_eq!(
-        mutation_verified, 1,
+        t.mutation_verified, 1,
         "only the Killed row should count as mutation-verified"
     );
 }

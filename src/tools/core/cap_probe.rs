@@ -65,6 +65,49 @@ pub(crate) struct ProbeRow {
     pub coverage: Coverage,
 }
 
+/// Aggregate counts over a set of [`ProbeRow`]s, computed once so the report line
+/// and its own regression test can never drift into disagreement with each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Tally {
+    pub total: usize,
+    pub probed: usize,
+    pub deferred: usize,
+    pub mutation_verified: usize,
+}
+
+/// Count `rows` into a [`Tally`]. The one and only place this arithmetic is
+/// written — `print_mutation_tally` and
+/// `tally_distinguishes_killed_from_not_yet_and_deferred` both call this
+/// function rather than each keeping their own copy of the `matches!` pair, so
+/// a mutation to the counting logic itself has one site to break, not two that
+/// can silently diverge.
+pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
+    let total = rows.len();
+    let probed = rows
+        .iter()
+        .filter(|r| matches!(r.coverage, Coverage::Probed { .. }))
+        .count();
+    let deferred = total - probed;
+    let mutation_verified = rows
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.coverage,
+                Coverage::Probed {
+                    mutation: Mutation::Killed,
+                    ..
+                }
+            )
+        })
+        .count();
+    Tally {
+        total,
+        probed,
+        deferred,
+        mutation_verified,
+    }
+}
+
 const NOT_MUTATED_YET: &str =
     "Task 5a is classification-only scope; no mutation run has been performed for this id";
 
@@ -97,16 +140,30 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // Verified: `ReadMarkdown::output_form()` (`read_markdown.rs:592-594`) is
+        // `OutputForm::Text`, so a `JsonPath` marker is unreachable — the primary
+        // block is never the raw JSON. `many_headings_escalates_to_map_shape_even_when_bytes_fit`
+        // (`tests.rs`) drives HEADINGS_HARD_CAP past its bound through ReadMarkdown's real
+        // call surface and confirms the escalation to MAP shape (`headings` + `file_id`
+        // fields). `format_read_markdown`'s MAP-shape branch (`read_markdown.rs:660-661`)
+        // embeds `file_id` literally into the rendered text
+        // (`format!("{} lines  {}\n\n", lines, file_id)`), and
+        // `format_compact_map_shape_renders_indented_headings` (`tests.rs`) asserts the
+        // rendered text `contains("@file_xyz")` — the composed pair is real evidence for
+        // the text surface a caller actually reads. Note: `read_file.rs` is NOT a second
+        // consumer of this cap — its `.md`-open path refuses outright
+        // (`read_file.rs:108-115`, "Use read_markdown for markdown files"), and its
+        // `markdown_coverage` helper never references HEADINGS_HARD_CAP.
         id: "markdown.headings_hard_cap",
         coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.file_id"),
+            marker: Marker::TextContains("@file_"),
             mutation: Mutation::NotYet(NOT_MUTATED_YET),
         },
     },
     ProbeRow {
         id: "tool_output.compact_summary_bytes",
         coverage: Coverage::Deferred(
-            "the only candidate fixture drives content past both the soft cap and its \
+            "the two candidate fixtures each drive content past both the soft cap and its \
              sibling hard cap in the same call, so no assertion isolates the soft cap \
              specifically from tool_output.compact_summary_hard_bytes",
         ),
@@ -134,11 +191,25 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // Verified against `Symbols::output_form()` (`src/tools/symbol/symbols.rs:356`,
+        // pinned by `symbols_declares_output_form_text`): the primary block is TEXT, so a
+        // `JsonPath` marker is unreachable regardless of nesting — and the nesting was
+        // also wrong (`by_file_overflow` lives at `$.overflow.by_file_overflow`, not
+        // `$.by_file_overflow`; see `OutputGuard::overflow_json`). Worse, no compact-text
+        // renderer reads it back: `format_search_symbols` groups the CAPPED matches by
+        // file for the "N matches in M files" header, and `overflow_head`/`format_overflow`
+        // only echo `shown`/`total`/`hint` — neither touches `by_file` or
+        // `by_file_overflow`. The only existing tests (`build_by_file_sorts_desc_and_caps_at_15`,
+        // `build_by_file_no_overflow_under_cap`) call the pure `build_by_file` function
+        // directly, not through Symbols's real call surface, so they say nothing about
+        // what a caller actually sees. No marker is reachable today.
         id: "symbols.by_file",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.by_file_overflow"),
-            mutation: Mutation::NotYet(NOT_MUTATED_YET),
-        },
+        coverage: Coverage::Deferred(
+            "BY_FILE_CAP's overflow count is computed and JSON-embedded at \
+             $.overflow.by_file_overflow, but Symbols renders via OutputForm::Text and no \
+             compact-text renderer surfaces by_file or by_file_overflow; the only tests \
+             drive build_by_file directly, not the tool's real call surface",
+        ),
     },
     ProbeRow {
         id: "symbols.per_lang_budget",
@@ -180,9 +251,12 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         id: "symbols.overview_single_file_flat",
         coverage: Coverage::Deferred(
-            "the only related test re-implements the greedy-capping loop locally instead \
-             of calling list_overview, so a break in the production capping logic would \
-             not fail this test",
+            "two related tests exist, and neither exercises the shipped list_overview \
+             capping path: symbols_overview_flat_cap_triggers_on_symbol_with_many_children \
+             re-implements the greedy-capping loop locally instead of calling \
+             list_overview, so a break in the production logic would not fail it, and \
+             symbols_overview_flat_cap_not_triggered_for_leaf_heavy_symbols only confirms \
+             a fixture safely under the cap",
         ),
     },
     ProbeRow {
@@ -230,11 +304,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
+        // TASK_TEXT_MAX=100 and asserts <=, which DOES red if truncation is removed
+        // outright — it is monotone under TIGHTENING (over-truncation), not removal. The
+        // real IC-13 gap is different: truncate_task_text appends no ellipsis or other
+        // marker at the caller-visible surface, so a genuinely-cut task and a genuinely-
+        // short one are indistinguishable to the caller reading the result.
         id: "preview.plan_task_text",
         coverage: Coverage::Deferred(
-            "truncate_task_text appends no ellipsis or other marker, so no assertion can \
-             distinguish a working cap from a removed one; the only candidate test's \
-             assertion is monotone under cap removal",
+            "truncate_task_text appends no ellipsis or other marker at the caller's \
+             surface, so a caller cannot tell a cut task from a genuinely short one; the \
+             length-cap itself is tested (task_text_truncated_to_limit), but that is \
+             orthogonal to the marker gap IC-13 is about",
         ),
     },
     // -- src/librarian/tools/doctor.rs --
@@ -269,10 +350,26 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // Verified: `the_generic_fallback_describes_the_payload_instead_of_the_envelope`
+        // (format.rs) DOES drive this cap past its bound — it seeds a 20,000-char `body`
+        // against MAX_SCALAR_LEN=60 and asserts `!shape.contains("xxxxxxxxxx")` (the raw
+        // value is never inlined) and `shape.len() < 600`; raising or removing the cap
+        // reds both. But `describe_payload_shape`'s scalars filter (`format.rs`) SKIPS an
+        // over-length string from the `scalars:` line entirely — it emits no "+N more" or
+        // any other marker that arrives when the cap fires, unlike MAX_KEYS's "… +{} more".
+        // `Coverage::Probed`'s contract (this file, `Marker` doc comment) requires "a
+        // behavioural test... asserts the marker arrives" — a positive, present signal.
+        // This cap's only real test evidence is an ABSENCE assertion, which does not fit;
+        // inventing a `TextContains` value here would claim something never arrives as
+        // though it does. Reclassifying to `Deferred` with the honest reason, not `Probed`.
         id: "format.shape_scalar_len",
         coverage: Coverage::Deferred(
-            "no test drives a scalar value long enough to exercise the per-scalar length \
-             cap; existing describe_payload_shape tests use short fixture values",
+            "the_generic_fallback_describes_the_payload_instead_of_the_envelope drives a \
+             20,000-char scalar past MAX_SCALAR_LEN=60 and asserts the raw value is never \
+             inlined, but describe_payload_shape emits no marker that arrives when the cap \
+             fires (an over-length scalar is silently dropped from the scalars: line, \
+             unlike MAX_KEYS's '… +N more'); the only test evidence is an absence \
+             assertion, which Coverage::Probed's marker contract does not cover",
         ),
     },
     ProbeRow {
@@ -312,13 +409,15 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `src/librarian/tools/audit_doc_refs/mod.rs`: exceeding this cap is a LOUD
         // `RecoverableError` refusal, not a silent truncation — the opposite of the
         // false-zero failure mode `audit_doc_refs.basename_index` names below. The
-        // existing `glob_explosion_returns_recoverable` test already drives the cap
-        // past its bound and asserts the message names "glob matched" and the count;
-        // that assertion composes unmodified into `call()`'s response via `?`, so it
-        // is real evidence through a shared primitive (`get_guide("error-handling")`).
+        // existing `glob_explosion_returns_recoverable` test drives the cap past its
+        // bound (`enforce_file_cap(5, 1)`) and asserts `msg.contains("cap") &&
+        // msg.contains('5')` — NOT "glob matched" (that phrase is unasserted
+        // production text at `mod.rs:930`; a prior version of this row cited it in
+        // error). "cap" is the only substring the test actually pins; it composes
+        // unmodified into `call()`'s response via `?` (`get_guide("error-handling")`).
         id: "audit_doc_refs.files",
         coverage: Coverage::Probed {
-            marker: Marker::TextContains("glob matched"),
+            marker: Marker::TextContains("cap"),
             mutation: Mutation::NotYet(NOT_MUTATED_YET),
         },
     },
@@ -348,10 +447,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/context.rs --
     ProbeRow {
+        // Verified: 32 total call(&ctx, json!(...)) sites in context.rs; 11 pass an
+        // explicit max_tokens override (values 15, 300, 400, 900, 5000), 21 omit it and
+        // exercise DEFAULT_MAX_TOKENS=4000 (char_cap = max_tokens * 4 = 16000,
+        // context.rs:585) — so the reviewer's "every context test supplies an explicit
+        // override" claim was false. The corrected reason: no fixture in the omitting 21
+        // approaches that 4000-token/16000-char ceiling, so none of them would notice the
+        // default cap being raised or removed.
         id: "context.max_tokens",
         coverage: Coverage::Deferred(
-            "every context test supplies an explicit max_tokens override; none omit the \
-             param to exercise the shipped default budget",
+            "21 of 32 call sites omit max_tokens and exercise DEFAULT_MAX_TOKENS=4000 \
+             (char_cap=16000), but none of their fixtures approach that ceiling, so no \
+             assertion would notice the default cap being raised or removed",
         ),
     },
     ProbeRow {
@@ -390,7 +497,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "artifact.get_overflow_headings",
         coverage: Coverage::Deferred(
             "no test drives the top-level-heading list inside the overflow hint past its \
-             own cap; existing overflow tests use a two-heading fixture",
+             own cap; existing overflow tests use a three-heading fixture",
         ),
     },
     // -- src/librarian/tools/link_scan/mod.rs --
@@ -547,9 +654,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/lsp/mod.rs --
     ProbeRow {
+        // Verified: `Symbols::output_form()` is OutputForm::Text (symbols.rs:356), so a
+        // JsonPath marker on "$.lsp" is unreachable — the primary block is never the raw
+        // JSON. `display.rs:252-256` pushes `[lsp warming] {hint}` into the rendered text
+        // whenever `val["lsp"] == "warming"`, and
+        // `format_overview_symbols_file_mode_warming_marker` (display.rs:548-565) asserts
+        // `result.contains("[lsp warming]")` — a real, currently-passing assertion on the
+        // literal text marker.
         id: "lsp.first_call_budget",
         coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.lsp"),
+            marker: Marker::TextContains("[lsp warming]"),
             mutation: Mutation::NotYet(NOT_MUTATED_YET),
         },
     },

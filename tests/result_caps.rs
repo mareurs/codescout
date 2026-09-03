@@ -1063,12 +1063,18 @@ fn truncation_sites_reach_the_real_corpus() {
 
     // A real, unambiguous `.truncate(` cap site must be found by exact
     // file:line — proof this instrument reaches production code, not only
-    // its own test fixtures.
+    // its own test fixtures. NOTE: `real_line` is a literal line number in
+    // `symbols.rs`, which drifts with unrelated edits to that file — if this
+    // assertion starts failing after such an edit, re-check the current line
+    // of its `.truncate(` call before assuming the instrument regressed.
     let (real_file, real_line, real_op) = ("src/tools/symbol/symbols.rs", 48usize, ".truncate(");
     assert!(
         all_sites
             .iter()
             .any(|s| s.file == real_file && s.line == real_line && s.op == real_op),
-        "expected {real_file}:{real_line} (`{real_op}`) in the real corpus scan, got: {all_sites:#?}"
+        "expected to find {real_file}:{real_line} (`{real_op}`) in the real corpus scan, but \
+         it was not among the {} sites found — if symbols.rs was edited, its `.truncate(` \
+         call may have moved off line {real_line}",
+        all_sites.len()
     );
 }
