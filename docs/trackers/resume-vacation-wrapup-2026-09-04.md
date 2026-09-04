@@ -65,7 +65,7 @@ prevent. Measured 2026-09-04 05:40 UTC:
 
 | repo | branch | unpushed | pushing is |
 |---|---|---|---|
-| MRV-poc | `dev` | **58–68** (two sessions read different values — see below) | **gated** — triggers a GKE rollout; operator requires explicit confirmation |
+| MRV-poc | `dev` | **58–68** — **RESOLVED 2026-09-04: sweep first, then push.** Marius was asked directly by the session holding the work and chose the erasure sweep BEFORE the push; all 58 land immediately after | — |
 | codescout | `master` | **139** | routine |
 | mirela/backend-kotlin | `master` | **13** | routine |
 | codescout | `experiments` | 1 | routine |
@@ -87,6 +87,32 @@ ledger's own commits are unpushed, so four tracker filings are written out in a 
 but cannot be filed. The unpushed state is not only a transport problem; it has already stopped
 work.
 
+### MRV-poc resolved: sweep first — and the broadcast answer was not the final one
+
+A coordinator broadcast asked Marius "what should be pushed?" and the answer was **push
+everything, including MRV-poc**. The session actually holding that work put the same question to
+him directly, carrying two facts it had verified first, and he chose **sweep first, then push**.
+
+Both answers were his. The second is the one that governs, and the difference is not that he
+changed his mind — it is that **the second question was askable only by the party holding the
+domain knowledge**. What that session added:
+
+- **The erasure endpoints have no frontend caller.** The only `del()` in the data facade is
+  `/api/reviewer/chat/conversations/{id}`, so erasure is API-only and cannot be triggered by a
+  reviewer clicking around. The realistic exposure is narrower than *"a data-retention bug
+  reachable in production"* implies — which is how the coordinator had put it, without knowing.
+- **The real gate is not the deploy.** It is *before the first erasure REQUEST against a
+  pre-relayout document*. Their own runbook states the stronger *"at the deploy that first ships
+  C1"*, deliberately left stronger because that is the form which survives being skim-read.
+
+He chose the safe sequencing anyway: the sweep is two commands against
+`sp-mrv-chat-readiness-dev` and removes the residual entirely, against carrying a
+known-incomplete erasure through a vacation with nobody available to run it.
+
+**The transferable rule: a relayed decision is information, and the party holding the work is the
+only one who can ask the question properly.** The coordinator relayed rather than instructed,
+explicitly, and stated its own dissent once and dropped it. That is what made the better question
+reachable. Had the relay been framed as authorization, the broadcast answer would have executed.
 ## Gitignored-but-real state — the failure `git status` cannot report
 
 Raised by `3d806b09-79ae-482b-b362-ab526e9c189a` after the original brief missed it, and it
@@ -130,6 +156,29 @@ Recorded rather than resolved because the honest claim is the disjunction. **The
 file is a count of SOCKETS, which is what the instrument measures** — read it as that, and do not
 re-use it as a count of independent work streams without re-deriving it. Raised by the session
 itself, against its own row, which is the only vantage from which it was visible at all.
+**Re-enumerated 2026-09-04 06:06:33 UTC, and the proposed reconciliation is FALSIFIED.** The
+hypothesis offered was that PID 1689215 could report `3d806b09` as its current identity, while
+3737053's reload header names that id as its *predecessor*, only if 1689215 had outlived the
+compaction. Start times rule that out: **3737053 started 11:52:35 and 1689215 started 14:59:47** —
+the process naming `3d806b09` as its predecessor is the OLDER one by three hours. A later process
+cannot be an earlier one's ancestor.
+
+What fits the evidence instead: **a sessionId can be resumed into a NEW process after it has
+already been compacted into a successor.** `3d806b09` compacted into `8f9907a3` at or before
+11:52, and was then resumed at 14:59 into a fresh PID which reports it as current. Both run
+concurrently — one holding the id, one naming it as lineage.
+
+So the roster double-counts a **lineage**, never a process, and the correction stands for a
+different reason than the one proposed. Consequence for any future enumeration: a socket count is
+exact, and any attempt to derive *independent work streams* from it will over-count by however
+many sessions have been compacted-then-resumed. Neither `ListAgents` nor the socket walk carries
+the lineage field that would resolve it; only the session's own reload header does.
+
+**And one non-responder has EXITED rather than gone silent.** PID 4020515 (MRV-poc, `.claude`,
+started 2026-09-02 23:34:49) was live in the 05:38:40 enumeration and absent from the 06:06:33
+one. Its state was never collected and cannot now be. That is a materially different roster entry
+from "did not reply", and it is exactly why `*awaiting*` is defined in this file as *state never
+collected* rather than *confirmed clean*.
 ### A session's REACH is not its cwd — the boundary no enumeration draws
 
 Found at the close of the sweep, by a correction that was itself an inference. `4d30fbb4-f68c-4ae1-b38d-0e037ea28efc`
