@@ -1,14 +1,13 @@
 ---
 kind: bug
-status: mitigated
+status: fixed
 tags:
 - cluster/declared-not-wired
-closed: null
+closed: 2026-09-04
 opened: 2026-09-04
 owner: marius
 related: []
 severity: medium
-unverified: 'the ARCHIVE path is fixed and gate-verified (049c6c97); the title''s claim is still literally true for the other two. `doc(action="delete")` and a file removed from disk both still drop a catalog row without touching Qdrant, and `ArtifactVectorStore::delete` still has no production caller. Kept out of the archive folder for that reason. Also not retroactive: the 7 orphan artifacts / 126 points measured here remain.'
 ---
 
 # BUG: the artifact vector `delete` has no production caller, so every `doc(action="move")` and every catalog-row removal strands that artifact's vectors
@@ -147,6 +146,88 @@ it to *"a type that `impl Tool` but that no agent can reach"* — **family 1**. 
 with no production caller is a different family, and `issue-clusters:IC-3`'s row already
 records `2 of 3 families open`.
 
+## Closed 2026-09-04 — all three paths
+
+The class is complete. Two commits, because the right answer differs by path:
+
+| path | commit | patch-id | behaviour |
+|---|---|---|---|
+| `doc(action="move")` | `049c6c97` | `747f9f72143f21f3d35ce24e5b421b1e9ccb9e33` | **re-file** onto the new id |
+| `doc(action="delete")` | `a5bbc22d` | `95daa6c3d894ec7d1279558d94e49811d426c974` | **delete** |
+| reindex's vanished-file sweep | `a5bbc22d` | same | **delete** |
+
+A move is a *re-key* and the bytes are unchanged, so deleting there would trade a silent
+orphan for a silent hole in the index until the next `reembed`. A delete is a delete.
+
+### What made the class invisible, in one sentence
+
+**sqlite was already correct and Qdrant was not.** `artifact_chunk.artifact_id` is
+`ON DELETE CASCADE` and `artifact_vec_v2_cascade_delete` fires on that cascade, so the catalog
+delete already took the vectors on the escape-hatch backend. Qdrant has no foreign keys and
+kept every point. One code path, correct on the backend the tests exercise and leaking on the
+default one — which is why `delete.rs`'s own doc comment could assert *"no orphaned rows
+remain"* and be believed. **That is a test-population defect as much as a code one**, and it is
+why the new tests assert about the STORE: no assertion about the catalog can express it.
+
+### Mutation results, both commits
+
+12 mutations across the two, control green on every run, all killed. The four findings that
+came out of the runs rather than the code are worth more than the kills:
+
+1. **A matrix printed a clean table while SKIPPING its two most important mutations** —
+   `cargo fmt` had re-indented the anchors. A skip is not a kill, and a summary line does not
+   distinguish them.
+2. **A mutation "killed" by a COMPILE failure is not a kill.** The first *never call refile*
+   mutation failed to type-check; re-typed, it reds the right test.
+3. **"Sweep only the first id" SURVIVED** because the fixture removed a single file, which is
+   indistinguishable from correct. Fixed by adding a second doomed file, and the fixture line
+   says so.
+4. **A mutation that looked like an ordering test was M3 in different clothing** — and
+   noticing that is what caught a false justification in the shipped comment (below).
+
+### A correction to this record's own fix, made before shipping
+
+The `index_repo` ordering comment claimed a file deleted and re-added under one path could
+appear in **both** `removed_ids` and the embed queue in one walk, making the ordering
+load-bearing. **It cannot.** Removal candidates are selected as `id NOT IN (seen_ids)`
+(`src/librarian/indexer.rs:493`), so an artifact walked this run is excluded by construction.
+The ordering stands for two ordinary reasons — the sweep must run whether or not embedding is
+enabled, and a sweep failure should abort before spending embedder round-trips — and the
+comment now records what the ordering does **not** buy, because the plausible version invites
+a future reader to preserve it for a reason that was never true.
+
+### Still not retroactive
+
+The 7 orphan artifacts / 126 points measured here **remain**. This stops new ones. A peer
+session separately measured **418 orphan points in the old shared `artifacts` collection**,
+which is a different scope and still undropped — corroborating, not contradicting, and worth
+folding into the denominator if anyone sweeps.
+
+### …and this record's own archive made it 8
+
+**Fixed in the tree is not fixed in the process.** Archiving this file — the very move
+`049c6c97` teaches to re-file — stranded **22 points** under `cbb5f6f70fe0d437` and re-filed
+**0** onto `12a03cb985d84f64`. The code is right and gate-verified; the running MCP server is
+not it.
+
+```
+readlink /proc/<pid>/exe
+  → /home/marius/work/claude/codescout/target/release/codescout (deleted)   ← 13 of 14 servers
+```
+
+`cargo rb` replaces the binary's inode, and every already-running server keeps executing the
+old image until it restarts. `/mcp` is what restarts it. So the whole population of live
+sessions goes on stranding vectors after the fix lands, with no signal, until each one
+reconnects — and a session that *checks the source* will confirm the fix is present and
+conclude it is running.
+
+The tell is one command, and it is cheap: `readlink /proc/<pid>/exe` printing a `(deleted)`
+suffix. Reported by `codescout-7e` (session `12dee32b`), who hit it three times in one evening
+before naming it; recorded here because this record demonstrated it against itself within a
+minute of being written.
+
+**Deploy step, owed by whoever ships this:** `cargo rb`, then `/mcp` in each live session.
+Until then the two fixes are committed and inert.
 ## Hypotheses tried
 
 1. **Hypothesis:** `reindex`'s `orphans_removed` already sweeps stale vectors.
@@ -256,19 +337,13 @@ catalog, never against `project_id`.
 
 ## Resume
 
-N/A — fixed and gate-verified.
+N/A — all three paths fixed and gate-verified. See *Closed 2026-09-04* above.
 
-Two things deliberately **not** done here, recorded so nobody reads them as oversights:
-
-- **The 126 pre-existing orphan points are not swept.** This fix is not retroactive: it stops
-  new orphans, and the 7 artifacts already stranded stay until something removes them. 0.43% of
-  the collection, and deleting from a live collection is a separate change with its own blast
-  radius.
-- **`ArtifactVectorStore::delete` still has no production caller.** `refile` covers `move`,
-  which is the path with a measured, growing population. `doc(action="delete")` and a
-  removed-from-disk file both still drop a catalog row without touching Qdrant. That is the
-  remaining half of this class and wants its own record rather than being quietly folded in
-  here.
+One piece of cleanup is deliberately left undone and is **not** owed by this record: the 126
+already-orphaned points, plus the 418 in the old shared `artifacts` collection. Deleting from
+live collections is a separate change with its own blast radius, and the predicate must key on
+the catalog, never on `project_id` — every pre-`99558134` vector carries `project_id: ''`, so
+an "unresolvable path" test matches the entire legacy index (`bug-fix-session-log:W-103`).
 ## References
 
 - `src/librarian/artifact_store.rs:152` (trait), `:307-313` (the comment naming the gap),
