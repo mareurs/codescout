@@ -1,7 +1,7 @@
 ---
-id: '361d91da2f3a1490'
+id: '64270d0be99ffe70'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: onboarding(force=true, refresh_prompt=true) silently discards refresh_prompt and runs full onboarding instead'
 owners:
 - marius
@@ -10,9 +10,13 @@ tags:
 - onboarding
 - tool-surface
 topic: onboarding flag precedence
+closed: 2026-09-04
+fix_branch: experiments
+fix_patch_id: 5a671249d5543de999512714d9ebebe3c916efdf
+fix_sha: c79c629d99abc2736324b7a49d10804e6922dc28
 opened: 2026-09-04
 related:
-- docs/issues/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md
+- docs/issues/archive/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md
 severity: medium
 ---
 
@@ -91,9 +95,9 @@ Nothing there implies precedence.
 The failure mode is a **no-op that reads as success**, and it composes badly with the sibling
 defect: a caller who asks for both, gets the full-onboarding path, then retries with
 `refresh_prompt` alone, has now triggered
-`docs/issues/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md` — the version is
-stamped current while the prompt is still stale. That is how the two defects were found: in
-sequence, by a caller doing the obvious thing.
+`docs/issues/archive/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md` — the
+version is stamped current while the prompt is still stale. That is how the two defects were
+found: in sequence, by a caller doing the obvious thing.
 
 Full onboarding also has side effects the caller did not scope: this call rewrote two **tracked**
 memory files, `.codescout/memories/onboarding.md` (a factual repair) and
@@ -101,7 +105,6 @@ memory files, `.codescout/memories/onboarding.md` (a factual repair) and
 Kotlin / Python / TypeScript sections). That deletion is a live instance of
 `resume-cross-machine-catalog-restore.md`'s open `CM-6` — *"`memory(write)` has no shrink
 guard"* — reached here through a flag the caller did not know was in control.
-
 ## Suggested direction (not a plan — reproduce first)
 
 Three candidates, in preference order:
@@ -123,7 +126,43 @@ This file covers the **dropped parameter**. The eager version stamp in the same 
 filed separately, per `issue-clusters.md` § *Index*: *"if a finding satisfies a second class's
 claim, it is a second bug file."*
 
+## Fix
+
+Fixed on `experiments` at `c79c629d` — patch-id `5a671249d5543de999512714d9ebebe3c916efdf`
+(the SHA orphans on the next rebase; the patch-id does not). Same commit as the sibling
+eager-stamp bug, because both live in `Onboarding::call`'s twenty lines.
+
+**The reproduction changed the fix direction: report, do not refuse.** `force`
+genuinely *is* a superset of `refresh_prompt` — `perform_full_onboarding` re-explores
+the project *and* regenerates the system prompt, gated by
+`onboarding_prompts_write_system_prompt_to_root_not_memory`. So the combination does
+strictly more work rather than less, and refusing it would break a reasonable call
+(*"give me everything fresh"*). The defect was never the precedence — it was accepting
+a parameter, honouring a different one, and returning a well-formed payload that never
+mentioned the substitution.
+
+`call` now sets `refresh_prompt_subsumed` plus a note naming the lightweight
+alternative. **And it says so on the compact line, not only in the JSON**
+(`format_onboarding`), because a field no surface renders is decoration however
+correctly written — CLAUDE.md § *Testing Discipline*, *loudness is a property of a
+PATH*. The test asserts on the compact string for exactly that reason, and also that
+the note is **absent** without the flag, since a marker always present distinguishes
+nothing.
+
+**Incidental find in the same surface, fixed here.** `build_activation_response` was
+telling every session to run `onboarding(action="refresh_prompt")`. There is no
+`action` parameter — `input_schema` declares only the booleans `force` and
+`refresh_prompt`, and `call` reads `parse_bool_param(&input["refresh_prompt"])`. It
+appeared to work only because the ignored flag fell through to `handle_already_onboarded`,
+which instructed a refresh by a *different* route. That is why it survived: the wrong
+call produced the right outcome, so nobody had a reason to look. Corrected to
+`onboarding(refresh_prompt=true)`.
+
+**Verification.** Gate green both lanes (`LEAN exit=0`, `DEFAULT exit=0`).
+`onboarding_force_reports_that_it_subsumed_refresh_prompt` observed RED under a
+mutation that emptied the compact note — it reported `"[rust]"` — confirming the
+assertion reaches the rendered surface and not merely the JSON field.
+
 ## Resume
 
-Not started.
-
+Nothing outstanding.

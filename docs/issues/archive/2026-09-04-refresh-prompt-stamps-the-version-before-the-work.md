@@ -1,7 +1,7 @@
 ---
-id: '15e370080b595b11'
+id: '0922dae6ee072f5a'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: refresh_prompt stamps onboarding_version and returns version_stale:false before the prompt is regenerated, permanently consuming the staleness signal'
 owners:
 - marius
@@ -11,8 +11,13 @@ tags:
 - prompt-surfaces
 - observer-blindness
 topic: onboarding version staleness signal
+closed: 2026-09-04
+fix_branch: experiments
+fix_patch_id: 5a671249d5543de999512714d9ebebe3c916efdf
+fix_sha: c79c629d99abc2736324b7a49d10804e6922dc28
 opened: 2026-09-04
-related: []
+related:
+- docs/issues/archive/2026-09-04-force-silently-discards-refresh-prompt.md
 severity: high
 ---
 
@@ -122,9 +127,67 @@ silently discarding `refresh_prompt=true` at `:293` — satisfies a different cl
 `issue-clusters.md` § *Index*: *"if a finding satisfies a second class's claim, it is a second
 bug file."*
 
+## Fix
+
+Fixed on `experiments` at `c79c629d` — patch-id `5a671249d5543de999512714d9ebebe3c916efdf`
+(the SHA orphans on the next rebase; the patch-id does not).
+
+**Shape: a hash witness**, which is neither of the two directions suggested above.
+`ProjectSection` gains `system_prompt_sha256` — the prompt's hash at *request* time,
+i.e. the content the pending regeneration must supersede. `system_prompt_stale()`
+treats a current hash that differs from that baseline as positive evidence the
+regeneration happened, and `stamp_witnessed_refresh()` persists a fired witness. The
+version is no longer written when a refresh is merely requested.
+
+**Three corrections to this file's own analysis, all from the reproduction:**
+
+1. **Four stamp sites, not two.** § *Mechanism* named `:497` and `:582`. It missed
+   `perform_full_onboarding`'s tail — whose comment read *"Optimistic version write
+   for full onboarding"* — and the fresh-config literal at `:925`. Full onboarding
+   returns a `subagent_prompt` too, so it defers the prompt write exactly as the
+   lightweight path does. A fix at the two named sites would have shipped this defect
+   twice more, behind a passing test.
+2. **Suggested direction 2 was unavailable as a mechanism.** It proposed stamping the
+   version into `.codescout/system-prompt.md` itself. But **no production code writes
+   that file** — every write is prose instructing a subagent to `create_file` it
+   (`src/prompts/builders.rs:701`, `:909`), and the only `std::fs::write` calls to that
+   path in the tree are in tests. A marker there would depend on subagent compliance:
+   a policy, not a mechanism.
+3. **The witness must PERSIST, or it is a slower form of the same defect.** A
+   witnessed-but-unstamped regeneration reads correctly today and wrongly after the
+   next `ONBOARDING_VERSION` bump — the stale baseline still differs from the current
+   file, so the witness keeps vouching for a regeneration that predates the new
+   templates. Both readers (the tool's re-entry and `build_activation_response`) now
+   stamp, so it closes on whichever runs first.
+
+**A trap avoided, recorded because it is this defect inverted.** § *Why this is
+invisible…* notes that `project.toml` is gitignored while `system-prompt.md` is
+tracked. That means a fresh clone arrives with **no baseline beside a present file**.
+Reading that absence as a difference would have reported another machine's stale v29
+prompt as current — the same false certification, relocated to clone time. A `None`
+baseline is therefore *no evidence* rather than change, and the repo's pre-existing
+`onboarding_triggers_refresh_when_version_stale` independently guards that line.
+
+**Verification.** Gate green both lanes (`LEAN exit=0`, `DEFAULT exit=0`), with the 10
+new tests read out of the run by name rather than inferred from a total. Mutation-
+tested in three rounds, 16 observed REDs: `None => false` (the clone trap) reds 2 new +
+2 pre-existing; inverting the witness reds 2 new + 2 pre-existing; disabling it in the
+onboarding path reds exactly 7 — the six repaired fixtures plus the end-to-end witness
+test, which is what establishes those fixtures are coupled to the mechanism rather than
+cosmetically patched.
+
+**Not exercised against a live MCP server.** This host's `.codescout/project.toml`
+already stores version 30 == `ONBOARDING_VERSION`, so the witness short-circuits and
+the stale path cannot be observed here without mutating that file. Coverage is
+end-to-end through `Onboarding::call` / `call_content`, the real entry point; a live
+check needs `cargo rb` plus an MCP reconnect.
+
+**Six pre-existing fixtures had to be repaired**, and what they contained is worth
+naming: they reported a fully-onboarded project while `.codescout/system-prompt.md` had
+never been written — this very defect, sitting inside the fixtures meant to describe a
+*completed* onboarding, because site 4 stamped at config creation. Repaired by
+completing the flow (`simulate_subagent_prompt_write`), not by relaxing the assertions.
+
 ## Resume
 
-Not started. The v29→v30 content gap on this machine was repaired separately in the same
-session (a subagent regenerated `.codescout/system-prompt.md`), so the *instance* is closed
-while the *defect* is open — do not read a current prompt here as evidence the bug is fixed.
-
+Nothing outstanding.

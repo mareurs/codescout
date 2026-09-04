@@ -40,7 +40,7 @@ pub struct ProjectSection {
     /// This records a **completed** regeneration, witnessed via
     /// `system_prompt_sha256` below. It used to be written when a refresh was
     /// merely requested, which certified work that had not happened yet — see
-    /// `docs/issues/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md`.
+    /// `docs/issues/archive/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md`.
     #[serde(default)]
     pub onboarding_version: Option<u32>,
     /// SHA-256 of `.codescout/system-prompt.md` as it stood when a refresh was last
