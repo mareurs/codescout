@@ -87,10 +87,26 @@ in its own header; they don't need slots here.
 - **D-NN** — Design decisions inside a spec. Example: a multi-decision
   spec uses D-1 through D-N for the decisions enumerated in that document.
 
-**Resume queues (opened 2026-08-28).** Six declared ledgers, one per
-partially-implemented work stream, each pickable by a fresh session. Filename
-class marker is `docs/trackers/resume-*.md`; all five are **prose ledgers** —
-`entry_prefix` + `entry_high_water_<PREFIX>` in committed frontmatter, entries as
+**Resume queues (opened 2026-08-28).** One declared ledger per
+partially-implemented work stream, each pickable by a fresh session. **This section
+stores no count** — derive it, because three stored ones rotted here simultaneously
+(2026-09-04: *"Six declared ledgers"* and *"all five are prose ledgers"* sat in
+consecutive clauses, and *"five of the six are live"* followed the table; the *five*
+never matched its own six-row table, so it shipped wrong rather than decayed):
+
+```sh
+# every declared ledger and its prefix — this is the population
+grep -l '^entry_prefix:' docs/trackers/resume-*.md
+```
+
+**The filename glob is NOT the membership test** — `resume-*.md` over-matches. The real
+marker is a declared `entry_prefix`, and at least one file matches the glob without
+being a ledger (`resume-vacation-wrapup-2026-09-04.md` is prose: no prefix, no
+`## PREFIX-N` sections, nothing in it citable). A count taken from the glob reads high,
+which is how the last one broke.
+
+Every ledger here is a **prose ledger** — `entry_prefix` +
+`entry_high_water_<PREFIX>` in committed frontmatter, entries as
 `## PREFIX-N — <title>` body sections, **no augmentation** (rationale:
 `docs/conventions/cross-machine-catalog-resume.md` — a queue meant for another
 session or machine cannot keep its state in a git-ignored catalog).
@@ -103,10 +119,18 @@ session or machine cannot keep its state in a git-ignored catalog).
 | **ET-N** | `resume-embedding-transport-stages-1-3.md` | Embedding transport consolidation: Stages 1–3 |
 | **CM-N** | `resume-cross-machine-catalog-restore.md` (`f4923e5e894de62f`) | Work left after a cross-machine catalog resume — what was restored, what was decided against, what is permanently lost. 9 entries, prose. Opened by a concurrent session the same day; row added here per its own `CM-9`, which specified it rather than editing this file while a peer held it |
 | **TB-N** | `resume-tool-surface-budget.md` | Tool Surface Budget — **archived same day**: the stream had shipped in full on 2026-08-18 and the queue was opened on a false-negative grep. Kept as the only documentation of the live `TOOL_SURFACE_CHAR_BUDGET` gate |
+| **SM-N** | `resume-tool-surface-structural-mechanisms.md` (`25633146506bd8b3`) | Tool Surface — structural mechanisms. **Row missing from this table until 2026-09-04**, which is the defect that exposed the three stale counts above |
+| **AC-N** | `resume-artifact-chunk-grain-retrieval.md` (`9ba8a7a553b7a097`) | Artifact chunk-grain retrieval. `AC-1` states what a **wrong** result looks like alongside a right one — a stale MCP server returns *"changed nothing"* as a plausible number rather than an error, so its pre-flight is `readlink /proc/<pid>/exe` |
+| **RQ-N** | `resume-queue-index.md` (`ea6e212a549f9972`) | **tracker → remaining work**, across all repos. The index *of* the queues rather than one of them; restates none of them by design, and carries its own known holes as declared holes |
 
-**Five of the six are live queues; `TB-N` is a closed record.** It is listed here
+**`TB-N` is the only closed record here; every other row is a live queue.** It is listed
 because its prefix is declared and its entries are citable, not because there is work in
-it.
+it. **No count is given deliberately** — run the `grep -l` above.
+
+**Three sibling resume surfaces exist, answering different questions.** This table is
+**prefix → file**, permanent, codescout only. `RQ-N` is **tracker → remaining work**, all
+repos. `docs/trackers/resume-vacation-wrapup-2026-09-04.md` is **session → status** at
+one instant, all repos — prose, not a ledger, which is why it has no row above.
 
 Append to any of them with
 `doc(action="append_entry", id=…, id_prefix="<PREFIX>", anchor_heading="## Template for new entries", title=…, body=…)`
