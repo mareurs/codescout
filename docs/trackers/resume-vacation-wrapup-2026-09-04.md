@@ -65,7 +65,7 @@ prevent. Measured 2026-09-04 05:40 UTC:
 
 | repo | branch | unpushed | pushing is |
 |---|---|---|---|
-| MRV-poc | `dev` | **58–68** — **RESOLVED 2026-09-04: sweep first, then push.** Marius was asked directly by the session holding the work and chose the erasure sweep BEFORE the push; all 58 land immediately after | — |
+| MRV-poc | `dev` | **CLEARED** — sweep run, then **85** commits pushed `8448f4c2..90eb00b8`, ahead 0 | done |
 | codescout | `master` | **139** | routine |
 | mirela/backend-kotlin | `master` | **13** | routine |
 | codescout | `experiments` | 1 | routine |
@@ -113,6 +113,34 @@ known-incomplete erasure through a vacation with nobody available to run it.
 only one who can ask the question properly.** The coordinator relayed rather than instructed,
 explicitly, and stated its own dissent once and dropped it. That is what made the better question
 reachable. Had the relay been framed as authorization, the broadcast answer would have executed.
+**OUTCOME, and the measurement is the point.** The session verified the gate at the bytes before
+asking anything: C1's endpoints and `_sweep_legacy_ocr_cache.py` are present on HEAD and **absent
+on `origin/dev`**, so the push genuinely was the deploy that first ships C1 — the exact deploy
+`docs/ops/erasure.md` gates. It then ran the sweep's report-only step to turn *"there may be a
+problem"* into a number:
+
+```
+live entries 0 · legacy (unreachable by erasure) 97 · unrecognised 0
+```
+
+**97 of 97.** Every OCR memo entry in the deployed bucket was pre-relayout. Not a partial gap: a
+customer erasure would have returned `200 {"memo_entries_evicted": 1}` while **100% of the cached
+text remained**. The runbook's own safety precondition (`unrecognised` MUST be 0) was satisfied,
+so applying the sweep was unambiguous. Applied, then the dry run was **re-run rather than trusting
+the apply's own report** — `legacy: 0` — and only then pushed: `8448f4c2..90eb00b8`, ahead 0.
+
+**The count was 85, not 58 or 68.** Other MRV-poc sessions committed 17 more between the flag and
+the push. `behind: 0`, clean fast-forward, nothing clobbered. Three readings of one branch across
+one morning — 58, 68, 85 — none wrong, all instants. **In a checkout this busy an ahead-count is a
+fact about a moment, not a property of a branch**, and this roster carried two of the three as
+though they bracketed a range.
+
+**A stale line in THIS file was an active hazard, not merely wrong.** Until this edit the blocker
+table read *"58–68 unpushed, gated"*, and a peer session was still relaying *"dev is at c53aa06c,
+58 unpushed, do not push"* after the push had landed — an instruction to preserve a state that no
+longer existed. Corrected here and directly by the session that pushed. This is the same
+tracked-and-stale class the roster documents two sections down, occurring inside the roster,
+within an hour of it warning about the class.
 ## Gitignored-but-real state — the failure `git status` cannot report
 
 Raised by `3d806b09-79ae-482b-b362-ab526e9c189a` after the original brief missed it, and it
@@ -318,6 +346,48 @@ none is a half-finished change sitting in the tree.
 - **Status and severity vocabulary drift** — `status: done` and `status: archived` sit outside
   the documented set and are invisible to both the open-query and any "what got fixed" reading;
   `severity: med` ×16 against `medium` ×272, absent on 102. Real, nearly cosmetic.
+
+## What in this roster is VERIFIED, and what is a self-report
+
+Raised by `66523284-814b-49b8-b8f8-820dc2b00be2` against this file's method, and it is correct:
+**a roster is a collection of instrument reports, and this one asked every session for its claim
+and none of them for a control.** That session measured, the same evening, **eight instrument
+reports that returned a plausible WRONG value rather than erroring** — 0 of 8 caught by care or by
+knowing the class, 8 of 8 caught by a cheap artifact in the output that a broken run cannot
+fabricate. **Four of the eight had a summary line identical to a healthy run's.** Two happened to
+parties who had just been taught that exact class, one mid-writeup of the previous instance.
+
+So the honest split, rather than a uniform-looking table:
+
+**Independently verified by the coordinator, at the bytes:**
+- Every push range in the blocker table — run here, output read, `rev-list --count` confirmed 0.
+- The backend-kotlin push attribution — push output matched against `git reflog show origin/master`.
+- PID 4020515's exit — present at 05:38:40, absent at 06:06:33, two enumerations.
+- The lineage start times that falsified the compaction hypothesis.
+- Fast-forward safety on all three pushes, before pushing.
+
+**Taken on the reporting session's word, and correctly so — they hold the context:**
+- Every `UNCOMMITTED: no`.
+- Every commit list.
+- The DVC md5 divergence and the 35/42-vs-36/42 consequence.
+- The `97 of 97` sweep reading (though that one arrived *with* its control — a re-run dry run
+  after the apply, rather than the apply's own report).
+
+**A number that moved between two reports, which is the tell this section exists for:** running
+codescout servers on `(deleted)` inodes read **11 of 14** at 03:07 and **8 of 14** at 06:06. Both
+from the same instrument, neither wrong. A roster that quoted either as *the* figure would have
+been publishing an instant as a property — the same error as the 58/68/85 ahead-counts, in a
+different measurement.
+
+**And the caveat that reaches every other number here:** a session running a REPLACED binary
+reports evidence about the build it LOADED, not the tree on disk. Start time, cwd and a correct
+`~/.cargo/bin` symlink all read healthy while this is true, so nothing else surfaces it. **8 of 14
+live sessions were in that state at 06:06.** Any figure in this roster sourced from one of them
+inherits that caveat.
+
+The transferable instruction, and it is cheap: **ask for the control alongside the claim.** An
+absurd mutation that must die, a control row that must stay green, a `truncated: true` flag, a
+per-row label instead of a tally. Recorded as `bug-fix-session-log:W-106` (`f543cc4a`).
 
 ## Notes for whoever picks this up
 
