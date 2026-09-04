@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 180
+entry_high_water_R: 181
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -8240,6 +8240,57 @@ So the law's remedy is right and its stated reason is incomplete. Re-costing a d
 **Status:** open — 1 datapoint for the cross-session-quotation half; the unit law it instantiates is already in CLAUDE.md § *Testing Discipline*, and the independence law in § *Reaching a Peer Session*.
 
 **Kin:** `R-179` (the entry whose own number this corrects, filed 30 minutes earlier); `R-177` (an instrument's most persuasive output is the one confirming the hypothesis it was built to test — this adds that a *replacement* instrument inherits the bias of the claim it checks); `R-178` (a count valid only at its instant — invoked here and correctly rejected); `R-3`/`R-113` (a search result is evidence about the search); `R-5` (a check computed from the thing it judges cannot fail); CLAUDE.md § *Observer Blindness* on shipping a claim's derivation **and** its population together — this is the population half failing across a session boundary. Peer `codescout-ae` supplied the independent predicate.
+
+## R-181 — enumerate by the field name, not the feature name — two bug files shared a line neither cited
+
+**Status:** open — not yet promoted into the served skill.
+**Valid:** dated 2026-09-04
+**Rests on:** the four sites are enumerated in `c79c629d`'s diff; the "no production code
+writes `system-prompt.md`" claim rests on `src/prompts/builders.rs:701` and `:909` being
+prose, and on the only `std::fs::write` calls to that path in the tree being in tests.
+
+Two open bug files prescribed fixes for `src/tools/onboarding.rs`. Reconnaissance run
+*before* reading either plan — per CLAUDE.md § *Bug Tracking* — changed both.
+
+1. **Site count was wrong by 2x.** The eager-stamp file named `:497` and `:582`. One
+   `grep onboarding_version` found **four**: also `perform_full_onboarding`'s tail, whose
+   comment read *"Optimistic version write for full onboarding"*, and the fresh-config
+   literal. All four return a `subagent_prompt`, so all four defer the work they certify.
+   A fix at the two named sites would have shipped the defect twice more, behind a
+   passing suite — the `mutate once per guarded SITE` law arriving as a live case.
+
+2. **The preferred remedy was unavailable as a mechanism.** The file wanted the version
+   stamped into `.codescout/system-prompt.md` itself, so the certification would travel
+   with the artifact. One grep for that path settled it: **no production code writes that
+   file.** Every write is prose instructing a subagent to `create_file` it. The remedy
+   would have rested on subagent compliance — a policy, prescribed by a file arguing for
+   mechanisms. Ask *who writes this artifact* before designing anything that marks it.
+
+**Why the third site hid — the transferable part.** It is not in `handle_refresh_prompt`
+nor the already-onboarded path, the two places a reader thinking about *"refresh"* looks.
+It sits at the tail of a 220-line function doing something else, and its comment names
+the **other** bug's flag combination (`force=true on existing project`). The two bug
+files shared a line neither cited. **So enumerate by the FIELD name, not the feature
+name**: `grep onboarding_version` returned all four in one call; reading the two
+functions the files named would have returned two, and read as complete.
+
+**The fixture layer held the same defect, which is why no test caught it.** Six
+pre-existing tests reported a fully onboarded project while
+`.codescout/system-prompt.md` had never been written, because site 4 stamped at config
+creation. The tests did not miss the defect — they **encoded** it, inside the fixtures
+meant to describe a *completed* onboarding. Repaired by completing the flow, not by
+relaxing assertions; disabling the new witness reds exactly those six plus the
+end-to-end test, which is what establishes the repair is load-bearing.
+
+**Same-day third instance of `R-180`'s class, in a different tool.** Verifying that my
+10 new tests ran, `grep -E "(system_prompt_stale_|records_a_baseline_without_stamping|…) \.\.\. ok$"`
+reported **2 of 10** — every alternative but one continues past the fragment matched, so
+the ` \.\.\.` anchor could not follow it. A plausible number, not an error. What
+localised it was a **denominator**, not care: `^test .* ok$` counted 8949, matching the
+run's own total, and a known-existing test appeared exactly 2x (once per lane), which
+proved the buffer complete and moved the fault to the pattern. `R-180`'s `\b`-vs-
+`LibToolContext` miss and this one are independent instances of *a measuring predicate
+silently excluding its own target*, hours apart, in `grep` and in Python.
 
 ## Template for new entries
 
