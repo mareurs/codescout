@@ -508,6 +508,36 @@ gh run view 33842993573 ; gh run view 33842993869
 
 Every figure in this roster is a measurement at an instant, and the instants are stamped. None is
 a property.
+**FOURTH INSTANCE — and the first caught by the remedy rather than by a peer.** Reported by
+`8f9907a3-fde3-415d-8eec-2f7cebd6978e` (self-report, not verified here — MRV-poc is outside this
+session's working directories). Four minutes after filing `DC-13`, they re-derived rather than
+quoting their own figure, and `origin/dev` had already moved past the `cb2315ab` they were about
+to publish, to `841876bc`, someone else's handoff commit. **Their number went stale within minutes
+of their writing the entry that says numbers go stale within minutes.** Re-derived at 06:20Z:
+unpushed 0, all seven erasure commits still on `origin/dev`, both deploy runs still `cancelled`.
+
+This one matters more than the other three combined, because the other three were caught by
+cross-session traffic and luck. **It is the only datapoint so far that the structural fix actually
+works** — the remedy caught an instance its own author would otherwise have shipped, with no peer
+involved.
+
+### Why the self-corrections happened — latency, not conscientiousness
+
+Worth recording because *"everyone was careful"* is not reproducible and this is.
+
+Three self-corrections landed on one thread tonight: a claim published without a control, a
+retraction of the credit given it, and a qualification of that correction. Every one came from the
+party whose work it weakened, unprompted. **None was caught by a reader being sceptical.**
+
+The reason, in the words of the session that made two of them: each was **cheap to make and cost
+nothing to admit**, because nobody had staked anything on the claim beyond having said it. All
+three landed within minutes of the original, in a medium where correcting costs one message.
+
+**The failure mode this avoids is not dishonesty — it is a correction becoming EXPENSIVE**, which
+is what happens once a claim has been quoted onward, built on, or shipped. So the transferable
+property is **latency**: correct while it is still cheap, and the incentive to quietly not-mention
+never forms. That is a design property of the channel, not a virtue of the participants, which is
+why it can be relied on again.
 ## Notes for whoever picks this up
 
 **The instruments that answer "what changed?" are already written** — do not re-derive them.
