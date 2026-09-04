@@ -543,6 +543,53 @@ Left alone deliberately, per the shared-checkout sequence's step 6 — no reset,
 cherry-pick. The work is intact and mislabelled, and on a live tree the repair is the more expensive
 of the two states.
 
+### Confirmed by the capturing session — and its blind spot is partly MANUFACTURED by compaction
+
+Recorded 2026-09-04 at the capturing session's explicit request, after it verified the claim at the
+bytes rather than from memory. It is filed as **mechanism, not error**: the class predicts exactly
+this, and a demonstrated blind party is worth more than an argued one.
+
+The capturer is `Session-Id: ffb95976-dc89-4cca-87aa-c026544faf2f`, carried in `f35591b7`'s trailer.
+`git show f35591b7 -- docs/trackers/bug-fix-session-log.md | grep '^+## '` adds **three** entry
+headings — `W-104`, `F-114` and `F-115` — while the subject line names only `F-115`, which was the
+only one that session wrote. All three are intact in `HEAD`.
+
+**The demonstration.** That session and the captured one then corresponded for roughly three hours
+about attribution on this very checkout, both invoking *identify positively, never by elimination*,
+and **neither connected the capturer to the capture** — with the identifier sitting in a trailer
+either could have read at any moment. The capturing session's own opening claim was a complete-sounding
+enumeration of its writes that named one of `f35591b7`'s three files and not the swept one.
+
+**The precise shape is better than "did not notice", and it is the transferable part.** The
+enumeration was **window-scoped and presented under a session-scoped label**: the words were *"my
+complete write list **this session**"*, while the scope was *since my context was compacted*. Every
+item in it was true. Nothing in it reads as partial. That session had, in the same hour, cited the
+governing law at peers **twice** — *a windowed instrument's zero is scoped to its window, and
+re-running it silently moves the window* — applying it to `ListAgents` and not to its own memory.
+Knowing the class prevented nothing, which is `OB-1`'s claim about itself.
+
+**The mechanism underneath, which this record could not previously make.** Compaction summarised that
+session mid-run, and the summary **preserved commit SHAs while dropping their file lists** —
+`f35591b7` survived as an identifier with no contents attached. So afterwards the capturing party can
+enumerate *that* it committed and not *what* the commit contained, at undiminished confidence,
+because an enumeration has quietly become a summary of a summary. **The capture is therefore not
+merely unobserved at the time but unrecoverable from the inside afterwards.** Self-audit is
+structurally unavailable to the one party in a position to correct the record: the only durable
+witness is the `Session-Id` trailer, and a trailer is read by third parties, never by its author.
+
+Aggravating rather than mitigating, in that session's own account: it *had* gestured at pre-compaction
+work to a third session (naming an `IC-6` edit from outside the window), so it knew the window was
+partial, named a file from beyond it, and still called the list complete.
+
+**Two consequences for this file's remedy set.** First, detection of a capture cannot be assigned to
+the capturing side at all — not as a matter of diligence but of available evidence — so every
+workable check is third-party or trailer-derived, which is what `## Detection`'s `--stat` check and
+Instance 9's `git add`-then-`diff --cached` probe already are. Second, the cheap convention this
+incident argues for is **volunteer your sessionId unasked when contributing something a peer will
+write down**: the capturing session held the only identifier that resolves this and had no reason to
+publish it, so the id reached the record three hours late and by an unrelated route. Had it arrived
+in the first message, this instance would have closed on the spot.
+
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
