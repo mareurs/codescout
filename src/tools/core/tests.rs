@@ -920,7 +920,7 @@ async fn guard_worktree_write_allows_when_no_worktrees_exist() {
     );
 }
 
-/// docs/issues/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md
+/// docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md
 ///
 /// A per-call `workspace=` pin names the write target explicitly — which is the
 /// very ambiguity this guard exists to resolve — and it is the remedy
