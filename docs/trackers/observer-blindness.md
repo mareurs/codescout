@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 17
+entry_high_water_OB: 18
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-18 | 2026-08-31 | a comment in repo A asserting a fact about repo B goes stale silently — and manufactures a plausible design (inverse of OB-4: a **liveness** marker read as **event history**) | anyone designing from the comment's own repo | wrong instrument | **none yet** — worklist |
 | OB-17 | 2026-09-04 | **a gate that enforces a coupling by requiring two files in ONE commit turns any uncommitted edit to the shared half into a mutual-exclusion lock over everyone else's use of it** — emergent: nobody declares it, nobody acquires it, and the holder is doing nothing wrong | **the session holding the uncommitted class file.** Nothing in the act of editing a file surfaces a gate that couples *other people's* commits to it — their own tree is clean and green, and the coupling fires in someone else's process on someone else's commit. Measured: four dirty issue-cluster files blocked bug filing across most of the taxonomy, and the holder had no way to know | wrong instrument on BOTH sides — the holder cannot check a condition no surface reports, and the blocked party's *careful* move (satisfy the gate) is the harmful one | none yet — cheapest candidate is a **read**, not a rule: on refusal, report whether the named class file is currently dirty and by whom. `ledger-counts` already reads the index, so the worktree check is one more call, and it turns "add your line" into "add your line, but this file is held". **Sharp end:** staging the class file clears `ledger-counts` and is exactly what makes `unreviewed-content` green, so the action satisfying gate A disarms gate B and a peer's prose rides in under the wrong Session-Id having passed every check. 1 incident, 4 sessions |
 | OB-16 | 2026-09-04 | **a redirect, hint or guard in repo A names a capability registered in repo B** — correct when written, decaying when B changes, and no gate in *either* repo can evaluate the pair, because neither repo holds both halves at the moment its own gate runs | **both repos' gates, each for its own reason and neither for carelessness** — codescout's three surface gates enumerate `DEPRECATED_TOOL_NAMES` against codescout's own text at test time, and a version-pinned plugin in a per-profile cache is not in that tree; the plugin holds no copy of the tool registry and runs with no server, so it can check that a hook *fires* but never that what it *names* still exists. The missing thing is a corpus, not attention | wrong instrument — the filing session read the deny message and the doc inventory, and neither can answer *"does the named tool still exist?"*; reading the hook source would not have helped either, since the source was correct-and-obsolete and only the installed copy's absence settles it | none yet — candidate is a smoke check in the plugin's own suite asserting every tool named in a hook redirect is one the currently-installed server advertises, which must run where both halves co-exist rather than in either repo's CI. **Fails closed**, and that sets the blast radius: a stale advisory costs a round-trip, a stale `permissionDecision: deny` removes the capability. 1 instance, 1 session |
 | OB-15 | 2026-09-02 | **a mechanism that is GATED OFF and one that was never BUILT produce identical observations** — no output, every call, forever. The diagnostician's evidence cannot discriminate, and the two have opposite remedies. Runs in both directions: *no output ⇒ no mechanism*, and *a published limitation ⇒ this instance is covered by it* | **anyone diagnosing a missing output from the output.** Not carelessness — they hold the *complete* observation, which is what disqualifies a care-based remedy. The discriminator is in the code, never in the absence | wrong instrument, and **asymmetrically pulled**: *build it* is actionable and ends in a plan, *ungate it* asks you to believe in something you have no evidence for — so the tie breaks toward building predictably rather than randomly, which is what earns a standing check | none yet — candidate is one line in reconnaissance Phase 1: *an output you have never seen is not evidence that nothing emits it; grep the emitter.* 3 instances, 2 substrates, 3 sessions; instance 3 argues it should reach **records** too, not only emitters (`.git/session-stage-log` answered in one command a question three sessions were answering from memory) |
@@ -1756,6 +1757,71 @@ turn that touches the repo, instead of waiting to be told.
 
 Promote on a third, or immediately if the composition half recurs: a capture that passes every gate
 is the expensive direction, and it lands under an innocent session's name.
+
+## OB-18 — a comment in repo A asserting a fact about repo B goes stale silently, and manufactures a design
+
+**Valid:** conditional — closes when a mechanism links a cross-repo behavioural claim to the code that could falsify it
+
+**Rests on:** `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`; comment corrected at `94164ebb`; measured 2026-08-31.
+
+**Class:** the inverse of OB-4. There, a *structural* marker was read as *liveness*. Here a
+**liveness marker is read as event history**, and the thing that licenses the misreading is a
+doc comment in a *different repository* from the code that falsified it.
+
+**Blind party:** anyone designing against `Rendezvous::Entry.hook_at` from inside codescout.
+`inherited_stamp`'s doc comment asserted *"the ONLY writer of `hook_at` is the companion's
+`SessionStart` hook — which does not fire on a reconnect."* True when written. Falsified when
+`codescout-companion` gained a throttled liveness refresher (`hooks/lib.mjs`,
+`LIVENESS_THROTTLE_MS = 60_000`) for the still-open latches-open bug. **Nothing in codescout
+changed**, so no diff, no test, no review and no lint could surface it: the repo holding the
+claim never saw the commit that made it false.
+
+**Who can see it:** someone reading the companion's implementation, or anyone who *measures the
+field* instead of reading about it. Both cross a repo boundary the comment does not mention.
+
+**Plausible-answer property — and it is worse than a wrong fact.** The stale comment did not
+merely fail to help; it **actively produced a design**. Reading it, I proposed gating
+`workspace(post_compact=true)` on `hook_at` age, pitched it as *"small, uses existing
+machinery"*, and was wrong in a way that would have shipped a guard firing at random. The
+refutation already existed, in prose, in `lib.mjs:333`: *"`hook_at` gets old — was refuted by
+measurement… `hook_at` age becomes time-since-last-proof-of-life."* Someone had measured this
+exact idea and written the result down where the designer would never look.
+
+Measured the same day: a live slot reported `hook_at` **0 minutes old** with no `SessionStart`
+for hours. One command falsifies the comment; nothing prompts anyone to run it.
+
+**Why the refresher makes this subtle rather than sloppy.** It deliberately never stamps an
+*unstamped* slot, so it cannot flip a session onto the surgical path — the **presence** test
+`Rendezvous::poll` performs stays exactly as correct as before. Only the **age** became
+meaningless. So the field kept one true meaning and silently lost another, and no consumer of
+the surviving meaning had any reason to notice.
+
+**Mechanism status:** none yet — worklist row.
+
+- **Practice, effective immediately:** a comment asserting *when* or *how often* a field is
+  written, where the writer lives in another repo, is a claim about foreign behaviour. Verify it
+  by reading the field at runtime before designing on it — cheap here (`cat` one slot JSON).
+- **Candidate `H-N`:** a cross-repo doc-claim marker — a `<!-- claims: <repo>:<path> -->`-style
+  annotation that `audit_doc_refs` could resolve, so a claim about a sibling repo is at least
+  *listed* somewhere a sweep can reach. Today `audit_doc_refs` checks paths, symbols and links
+  within one workspace; a prose claim about another repo's behaviour is none of those, the same
+  blind spot `docs/PROBES.md` names for its own dangling section pointer.
+- **Cheapest structural fix:** state the *invariant the consumer needs* rather than the
+  *implementation that currently supplies it*. "Non-null ⇒ a companion is present; age is
+  meaningless" survives any number of new writers. "The only writer is X" is a claim with a
+  maintenance obligation in a repo that cannot discharge it.
+
+**The correction models the remedy.** `94164ebb` records the stale wording and what it caused,
+rather than deleting it — because deletion leaves the next reader free to re-derive the same
+guard from the same silence. See `reconnaissance-patterns:R-122` for the sibling shape, where
+writing the lesson down was itself the act that broke the instrument.
+
+**Instances:** `inherited_stamp`'s `hook_at` comment (corrected `94164ebb`). The `Entry.hook_at`
+field doc immediately above it is narrower — *"written by the companion hook"* — and stayed
+true, which is why it was not the one that misled.
+
+**Status:** validated — comment verified against `lib.mjs:333` and `:348`, against a live slot's
+`hook_at` age, and against the companion's `session-start.mjs:76` stamping site.
 
 ## Template for new entries
 

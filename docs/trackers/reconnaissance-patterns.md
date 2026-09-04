@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 176
+entry_high_water_R: 178
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-178 | 2026-08-31 | miss → rule (3 instances, one session) | **`origin/<branch>` is a LOCAL cache, so "N unpushed" without a fetch is a claim about your last fetch.** Reported "2 unpushed", then "1", then "3" from `git rev-list --count origin/experiments..HEAD`; a fetch showed **ahead 0, behind 18** — a peer had already pushed the branch, carrying my commits, because `push` sends the whole branch ref not one session's work. Two consequences followed within the hour: a peer **rebase orphaned 3 of my 6 commits** minutes after I cited them by SHA (recovered by patch-id — byte-identical diffs under new SHAs, which is the SHA+patch-id rule paying off inside one afternoon rather than across a release), and "I committed it" proved a different claim from "it is still at that SHA". **Runnable:** `git fetch` before quoting any ahead/behind number; `git ls-remote origin refs/heads/<branch>` when it matters. Temporal row of PROBES rule 6 — an instrument reporting perfectly on an instant that has passed; it fired twice this session, here and on a frozen 106-session frame that had lost 76 members to disk cleanup in four days. | this session, caught only when the user said "push"; kin R-136, R-146 |
+| R-177 | 2026-08-31 | miss → rule (4 defects, one instrument) | **A new instrument's most persuasive output is the one that confirms the hypothesis you built it to test.** A probe written to decide whether to split `tracker-conventions` reported, before any positive control, **31% of the topic never engaged** — exactly what a would-be splitter wants, and fabricated: a fenced worked example teaching the `## <ID> — <title>` syntax was parsed as a real heading, inventing a 12,124 B phantom section and STEALING those bytes from the real one (17,323 → 5,116). The control found three more: signature strings matched against any tool input made the `create_file` that wrote the probe score all six sections 100%; `tags: [append_entry, …]` on a bug filed *about* the librarian credited untouched sections; and blending two populations gave 71.7%, coincidentally matching a prior study's **71%** and reading as cross-instrument convergence — **a spurious corroboration is worse than a spurious number, because it recruits a second instrument as a witness**. Split, the populations are 45% and 92%. All four returned plausible, well-formatted, wrong answers, and three pointed the author's way: defects producing implausible numbers get caught by reading the output, so the survivors are SELECTED for plausibility. **Runnable:** run the positive control before the first real run, not after the first surprising one; cross-check a derived count against an independent artefact's structural invariant (the phantom was localised by a 7-vs-8 section-COUNT disagreement, not by re-reading the parser); and when the remedy is "remember to split", put the split in the instrument. | this session; instrument `scripts/probe_guide_section_use.py`, defects recorded at the lines that fix them; kin R-138, PROBES rules 4 and 6 |
 | R-176 | 2026-09-02 | miss, self-caught on a re-run — and it nearly cost a correct peer report (1 instance; a second session hit the same thing and was saved by a guard) | **A pipeline's `$?` is the LAST stage's status.** Verifying a peer's claim that a pre-commit hook was failing, I ran `python3 hook.py 2>&1 \| tail -15; echo "exit=$?"` and got `exit=0`. The hook was exiting **1** the whole time — `$?` reported `tail`'s status. **Severity is that I almost dismissed an accurate report on it:** the green was not a weak signal to weigh but a confident, specific, wrong answer, arriving attached to real output that made it look corroborated. **Sibling of `CLAUDE.md`'s `&&` gate ruling** — a composition operator silently changing *which command's status you read*, failing in the direction that reads as "nothing wrong". `\|` is the worse of the two: `&&` at least visibly skips a command, whereas a pipeline runs everything and hands you a status belonging to a different program, so there is no missing output to notice. **The tell is that the exit code and the printed text disagree**, and a reader who checks only the code never sees the text contradicting it. **Remedy is structural:** redirect and read `$?` directly, or `set -o pipefail` (preferred over `${PIPESTATUS[0]}` — no index to go stale when a stage is added). **The non-obvious half:** the peer's own check came out RIGHT, not from care but because codescout's IL-3 guard refused their unbounded pipe and forced a redirect. That guard is documented as **context economy**; nobody would look in it for exit-code integrity, and a guard whose second benefit is undocumented gets removed for failing to justify its first. | `R-171` twin (a bound cutting the payload; this cuts the *status*), `R-174` (instruments in different worlds), `OB-1` § *the third position*; peer `codescout-5e` supplied the guard observation |
 | R-175 | 2026-09-02 | near-miss, caught by a pre-implementation scout of the write sites (1 instance) | **A gate quantified over a population you never enumerated is a hypothesis in gate's clothing.** A spec written ~1 hour earlier, same session and author, specified a gate as *"no registered `ledger_prefix` is a prefix of another"*. Two `grep`s over every `GuideLedger` mutation returned **six** production writers where the spec assumed two — and the session opener stamps `SESSION_OPENING_GUIDE`, a bare topic name `guide-sections` also owns, an overlap argued deliberately at the site. **The spec contained no wrong fact**; every sentence was true of the two engines it had examined. The error was generalising a rule over *all* engines from a population never counted. **It would have red on correct code the day it landed**, and the cheap repairs at that moment — delete the overlapping registration, or widen to a negative predicate — both erase the finding and one makes the gate permanently unfalsifiable. **Second-order:** the same enumeration surfaced a **seventh engine**, invisible to the prompt-surface inventory the roster had walked; the discriminator was sound and the *instrument* was narrow, so "six" was a count of what one instrument could see rather than of a closed set. | spec `0021bead4e5a01e2` § *Gates*, which carries the correction inline rather than shipping the fixed form silently; `64a0a64c`; kin the `serves:`-coverage gate built as a finite 88-row checklist for the same reason |
 | R-174 | 2026-09-02 | near-miss, caught by an instrument DISAGREEMENT run for an unrelated reason (1 instance) | **A line number is a coordinate in a WORLD, and on a shared checkout the tools do not share one.** Writing a spec closure whose whole argument is two call sites, I cited `types.rs:1076-1083` and `:1063-1066` from codescout's `grep`/`read_file`. Chasing an unrelated question I ran `symbols` and `git show HEAD:` on the same file and got **1484** where `grep` said **1278**: the file was `M` and **206 lines shorter than HEAD** (1321 vs 1527), a peer mid-refactor extracting `guide_emit.rs`. `grep`/`read_file` read the **worktree**, `symbols` the **AST/LSP index**, `git show HEAD:` the **commit** — three instruments, two worlds, **no error from any of them**; the numbers described code that exists in no commit and may never. **Not simply the promoted substrate law — its REMEDY fails here.** That law says to read the instrument's `loaded N from X` preamble and reconcile it; codescout's navigation tools print no preamble and no N, so the prescribed check is a **no-op** against the tool this project uses most — `OB-1`'s *supplied-and-unread* shape, where a remedy that cannot apply is worse than none because it reads as covered. **And the catch INVERTS the usual worry:** agreement would have been the failure (`grep` and `read_file` share a world, so they corroborate perfectly while both describe uncommitted code) and the *disagreement* with a differently-scoped instrument carried the information. **Remedy, unconditional and cheap:** resolve any line ref against `git show HEAD:<path>` before it enters a spec, bug file, tracker or commit message, and say which world it names — HEAD is the only one of the three that is stable and shared with the reader. **Second-order:** a normal stale ref is *decay* (`audit_doc_refs`, `DC-N` cover it); this one is **false at the moment of writing** and no freshness check catches it, because re-running the citation's own instrument reproduces the same number. | `07a808c0`; kin `R-89` (a fourth freshness axis — the copy that ANSWERS you, not the one that serves you), `R-170`, `OB-1` § *the third position* |
@@ -8099,6 +8101,101 @@ A third instance of an operator silently redirecting which command's status is r
 `|`, `&&`, `;`, a subshell, `time`, or a wrapper like `timeout` — at which point this
 stops being two shell gotchas and becomes a rule about composition operators, and
 belongs in `CLAUDE.md` next to the `&&` sentence rather than here.
+
+## R-177 — A new instrument's most persuasive output is the one that confirms the hypothesis you built it to test
+
+**Status:** validated — four defects, one instrument, one afternoon (2026-08-31)
+**Valid:** invariant
+
+**Observed.** Built `scripts/probe_guide_section_use.py` to answer *"which sections of
+`tracker-conventions` do sessions actually engage?"* — the probe gating a decision to split
+that guide. Its first run, before any positive control, reported: **31% of the topic never
+engaged**. Exactly the shape a would-be splitter wants.
+
+It was fabricated. A fenced worked example inside the guide — the one that *teaches* the
+entry-heading syntax, `## <ID> — <title>` — was parsed as a real heading by a line-start
+split. That invented a 12,124 B phantom section, **stole those bytes from the real
+`Entry-level standard`** (17,323 → 5,116), and, having no signature rules, scored the
+phantom as never engaged. Three separate errors composing into one number pointing the
+author's way.
+
+The positive control found three more in the same pass:
+
+| defect | symptom before the control |
+|---|---|
+| phantom section from an unfenced parse | fabricated "31% dead" |
+| signature strings matched against **any** tool input | the `create_file` that wrote the probe scored all six sections 100% |
+| `tags: [append_entry, …]` on a bug filed *about* the librarian | credited sections never touched |
+| **main and subagent populations blended** | 71.7%, which coincidentally matched a prior study's **71%** and read as cross-instrument convergence |
+
+**The blend is the sharpest one.** Split, the populations are ~45% and ~92% — nothing alike.
+Blended, they produced a number that agreed with an independent 2026-08-27 agent-scored study
+to within a point. I said that agreement out loud as a finding before checking, and it was an
+artifact of the mix. **A spurious corroboration is worse than a spurious number**, because it
+recruits a second instrument as a witness.
+
+**The general shape.** Every one of the four returned a *plausible, well-formatted, wrong*
+answer, and three of the four pointed the direction the author already expected. That is not
+coincidence: a defect that produced an implausible number would have been caught by reading
+the output. The ones that survive to publication are selected for plausibility, and
+plausibility for a hypothesis-holder means *agreement*.
+
+**Next / practice.**
+
+- **Run the positive control before the first real run, not after the first surprising one.**
+  On a case whose answer you already know. PROBES rule 4 says this; what this entry adds is
+  that the danger is concentrated in the runs that go *well*.
+- **Cross-check a derived count against an independent artefact of the same object.** The
+  phantom was localised not by re-reading the parser but by disagreeing with a frozen
+  `guide_sections.json` on the **section count** — 7 vs 8. A structural invariant is cheaper
+  to check than a value and fails louder.
+- **When a defect's remedy is "remember to split", put the split in the instrument.**
+  `report()` now refuses to print a blended figure and `--split-at` prints a stratification
+  warning with the measured numbers. Both were added *after* the same class bit twice in one
+  session, which is the evidence that discipline was not the missing ingredient.
+- **Sibling:** `docs/PROBES.md` § *Before you trust any probe*, rules 4 and 6; the
+  instrument's own module docstring records each defect at the line that fixes it.
+
+## R-178 — Miss: `origin/<branch>` is a local cache, so "N unpushed" without a fetch is a claim about your last fetch
+
+**Status:** validated — reported wrong three times in one session before a fetch was run (2026-08-31)
+**Valid:** invariant
+
+**Observed.** I reported *"2 unpushed commits"*, then *"1"*, then *"3 unpushed commits"* across
+one session, each read from `git rev-list --count origin/experiments..HEAD`. All three were
+true statements about a remote-tracking ref that had not been refreshed. When the user finally
+said "push", a `git fetch` showed **ahead 0, behind 18** — a peer had already pushed the branch,
+carrying my commits with it, because `git push` sends the whole branch ref rather than one
+session's work.
+
+`origin/<branch>` is a **local file** (`.git/refs/remotes/…`). It records where the remote was
+at the last fetch. Nothing updates it in the background, and in a checkout shared by four or
+five concurrent sessions it goes stale in minutes. The number it yields is well-formed,
+plausible, and answers *"what did the remote look like when I last looked?"*
+
+**Two consequences that followed immediately, both worth knowing.**
+
+1. **A peer rebase orphaned 3 of my 6 commits.** `c79481c9`, `4a946adb`, `df02a157` stopped
+   being reachable — not from a release, from routine peer work minutes after I cited them.
+   Recovered by patch-id (`git show <sha> > /tmp/p.patch; git patch-id --stable < /tmp/p.patch`),
+   matched against a patch-id map of the last 40 commits on HEAD: all three landed under new
+   SHAs with byte-identical diffs. **This is the SHA+patch-id rule earning its keep inside one
+   afternoon**, not across a release cycle — and it is why a SHA written into a file needs its
+   patch-id beside it.
+2. **"I committed it" and "it is still at that SHA" are different claims**, and the gap can be
+   minutes. Check in-file SHA citations after any peer rebase; here the older ones survived
+   because only the tip commits were replayed.
+
+**Next / practice.**
+
+- **`git fetch` before quoting any ahead/behind number**, and say so when you do. One command,
+  and it converts a local fact into a shared one.
+- **`git ls-remote origin refs/heads/<branch>` is the ground truth** when it matters — it asks
+  the remote rather than the cache, and it is what settled this.
+- **Generalise:** the same shape as `docs/PROBES.md` rule 6's *temporal* row — an instrument
+  reporting perfectly on an instant that has passed. It appeared twice in this session: this,
+  and the frozen `corpus-frame.json` whose 106-session population had lost 76 members to disk
+  cleanup within four days. Neither returns an error; both return a number.
 
 ## Template for new entries
 
