@@ -65,7 +65,7 @@ prevent. Measured 2026-09-04 05:40 UTC:
 
 | repo | branch | unpushed | pushing is |
 |---|---|---|---|
-| MRV-poc | `dev` | **CLEARED** — sweep run, then **85** commits pushed `8448f4c2..90eb00b8`, ahead 0 | done |
+| MRV-poc | `dev` | **CLEARED** — sweep run, then **85** commits pushed `8448f4c2..90eb00b8`, ahead 0. **Deploys CANCELLED by Marius; C1 not live, resting state clean — see below** | done |
 | codescout | `master` | **139** | routine |
 | mirela/backend-kotlin | `master` | **13** | routine |
 | codescout | `experiments` | 1 | routine |
@@ -141,6 +141,35 @@ table read *"58–68 unpushed, gated"*, and a peer session was still relaying *"
 longer existed. Corrected here and directly by the session that pushed. This is the same
 tracked-and-stale class the roster documents two sections down, occurring inside the roster,
 within an hour of it warning about the class.
+### MRV-poc IS NOT DEPLOYED — and the resting state is CLEAN, not interrupted
+
+**Read this before touching anything in MRV-poc.** Both deploy runs were **cancelled by Marius**:
+`gh run view 33842993573` (flow-readiness) and `33842993869` (flow-stage) each annotate *"The run
+was canceled by @mareurs."* The `docker` and `deploy` stages never started. C1's endpoints are
+**not live** and both services run the previous image. An earlier line in this file said the
+deploys were *in progress* — true when written, stale within the hour, and exactly the class this
+roster documents.
+
+**Nothing is half-done, and that is the part worth propagating so nobody "repairs" it.** The
+sweep ran **before** the push, so the cache is already correct on its own terms; holding the
+rollout only means the feature is not reachable yet. There is no partial migration, no
+half-applied schema, no dangling state. **Shipping it needs a `workflow_dispatch`, not a code
+change.** CI was green on the erasure commit before the cancel — flow-readiness preflight, vitest
+and pytest all passed; flow-stage's pytest was cut mid-run *by the cancel*, not failed. A reader
+who sees two cancelled runs and starts diagnosing is fixing something that is not broken.
+
+**The `97 of 97` now stands confirmed from a second vantage, by a different session and a
+different instrument** — which is what the retraction above asked for and did not have at the
+time. `gcloud storage ls gs://sp-mrv-chat-readiness-dev/_ocr_cache/` returns *"matched no
+objects"*, **paired with a positive control**: the bucket root lists 12+ workspace prefixes,
+proving the empty result is a real measurement rather than an auth artifact. Push independently
+re-verified too: `origin/dev..HEAD` = 0, all seven erasure commits on `origin/dev`.
+
+**And the blocked filings are unblocked and filed.** `append_entry` refused while the ledger's own
+commits were unpushed — exactly as designed — and cleared the moment `dev` reached origin: `F-102`,
+`F-103` (detached-app log), `U-3` (codescout frictions), `II-30` (ingestion defects), committed and
+pushed at `c0592846` / `a3b99b04`. The refusal was never a defect; it was a coupling gate doing its
+job, and it resolved without anyone editing it.
 ## Gitignored-but-real state — the failure `git status` cannot report
 
 Raised by `3d806b09-79ae-482b-b362-ab526e9c189a` after the original brief missed it, and it
