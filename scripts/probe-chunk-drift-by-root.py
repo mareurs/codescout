@@ -17,7 +17,7 @@ import re
 import sqlite3
 
 DB = os.path.expanduser("~/.local/share/librarian/catalog.db")
-CODESCOUT = "/home/marius/work/claude/codescout"
+CODESCOUT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 NAMED = ("bug-fix-session-log.md", "open-issue-work-queue.md")
 HEAD = re.compile(r"^(#{1,6})\s+([A-Z]{1,3}-\d+)\s+[—–-]\s+(.+)$")
 
