@@ -11444,6 +11444,84 @@ durable wrong documentation.** The control is the same shape: **re-run the cheap
 publish time rather than trusting the value you already wrote down.** That is also what the
 `11 of 14` → `8 of 14` correction above is an instance of, arriving from a second direction.
 
+### Row 15 — the class measured from the inside, and the argument that the artifact must be MECHANICAL
+
+`add4873b` generalised one observation into a universal three times in about twenty minutes,
+on the same claim:
+
+1. To me: *"`/mcp` is not the clearing action; only a restart is"* — from n=1.
+2. **Softened while writing it up** to *"`/mcp` is a reconnect, not a restart"* — still a
+   universal, still n=1, and now **committed to a tracked file**.
+3. My reply: it respawned here. Both forms wrong.
+
+Step 2 is the entry. They had just committed a record whose entire subject is a four-minute-
+stale claim they published (row 11), and were writing an entry whose own fix-idea reads *"a
+tool call that succeeds is not evidence the tool exists"* — and wrote a fresh unverified
+universal into that same paragraph. **Knowing the class, while writing about the class, in the
+file about the class.** Note what step 2 actually was: they *softened the wording and kept the
+error*, which is what care produces here — hedged phrasing, unchanged epistemics.
+
+Their conclusion is the strongest argument in this entry and is why the remedy has to be a
+**mechanism** rather than a habit: **the attention that would notice is exactly the attention
+already fully spent on the writing.** Care is not merely weak against this class; it is
+*structurally unavailable* at the moment the error is made, because the error is made while
+carefully doing something else.
+
+### Row 16 — two surfaces can disagree and both return success
+
+Same session: `codescout`'s `artifact(…)` tool was renamed to `doc(…)`, and for a whole
+context window **the harness tool list advertised `doc` while the server still served
+`artifact`.** So a session is told the correct name by its own tool list, keeps successfully
+calling the dead one, and gets success payloads throughout. Nothing distinguishes that state
+from a healthy one **except comparing the two surfaces directly** — neither surface is wrong
+about itself. The rename then landed *between two turns*; one turn earlier and it lands
+mid-write.
+
+Downstream, and verified here rather than relayed: `mirela/backend-kotlin/CLAUDE.md` still
+instructs `artifact(…)` at lines 44, 84, 85 and 113 plus `artifact_refresh(gather, …)`, so its
+next session is told to make a call that errors on first contact. **codescout's own CLAUDE.md
+is clean, and not by luck** — `src/server.rs:4155` asserts `find_tool("artifact").is_none()`,
+and `prompt_surfaces_reference_only_real_tools` gates the surfaces. That is the row-12 lesson
+again: the guard is a mechanism in the repo that owns the name, and a repo that merely
+*documents* someone else's tool has no such guard (`OB-16`). Left for its owner rather than
+swept during a wrap-up.
+
+### Rows 12–14 — the two obvious alternative remedies both fail, and my own advice was one of them
+
+**Row 12 kills the remedy every reader will reach for first.** Told that a process may be on a
+stale build, the natural check is *compare versions*. `add4873b`'s session had a rebuild land
+mid-write, which turned it into a controlled experiment:
+
+```
+codescout --version    0.15.0  ->  0.15.0          UNCHANGED
+librarian doc tool     artifact(…) -> doc(…)      RENAMED
+bug status vocabulary  gained `taken`
+```
+
+**The version string did not move across a rebuild that renamed a tool.** So this is not the
+weak claim that `--version` spawns fresh and cannot see a stale parent — it is that a version
+comparison aimed correctly at *both* sides still reads `0.15.0 == 0.15.0` and concludes "same
+build". Local builds do not bump it. The only thing that discriminates is `readlink
+/proc/<pid>/exe`, **a property of the process rather than a string the build prints about
+itself** — which is the general form: prefer the artifact the subject cannot author.
+
+**Row 13.** *A rebuild does not reap long-lived children.* After the restart, pid `481057`
+(started 09-02) still read `(deleted)` alongside three clean new pids. **"I restarted" and
+"nothing here is stale" are different propositions**, and the first is the one people report.
+
+**Row 14, and it is mine.** I broadcast `git rev-list --count origin/<branch>..HEAD` to twelve
+sessions as the check that a push landed. **That reads a LOCAL cache.** A stale tracking ref
+and a current one both return a confident small number, so the check I handed out shares the
+exact defect it was meant to catch — the second time tonight my remedy was an instance (see row
+10). `backend-kotlin-15` used `git ls-remote origin <branch>` instead, *because* of this
+entry's control-artifact point: the remote's own answer is the row a stale local ref cannot
+fabricate. My own state checked clean both ways — but only because I had just pushed, which is
+precisely the condition under which the broken instrument agrees with the working one.
+
+**Correct form:** `git ls-remote origin <branch>` against `git rev-parse HEAD`, or a `fetch`
+immediately before the count. The count alone is fine only when you can say why the ref is
+fresh.
+
 ### The stale-binary warning has an exemption, and it narrows usefully
 
 > **First, the number is an INSTANT, not a property, and I published it twice as though it
