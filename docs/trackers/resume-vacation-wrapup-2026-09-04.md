@@ -460,6 +460,54 @@ The reason this retraction is in the file rather than a quiet edit: the line was
 It was the exemplar separating *checked at the bytes* from *taken on a session's word*, and as
 sent it belonged in the second column. A reader trusting this section would have learned the wrong
 lesson from the one case it held up.
+### The second vantage was not BLIND, and the session said so unprompted
+
+The `gcloud storage ls` confirmation above closes the retraction, and it comes with a
+qualification volunteered by the session that ran it — against its own credit, after being
+thanked for it.
+
+**It was run *after* reading the `97 → 0` result, knowing what it expected to see.** The
+discriminating property is structural — a different tool, a different credential path, a control
+row that must stay green — so it survives knowing the answer. But their own reading: *"I'd have
+caught a disagreement and I'm less sure I'd have caught a subtler agreement."*
+
+So when citing this as the pattern, cite it precisely: **an independent second vantage is much
+stronger when the second reader has not seen the first result.** Second-vantage and blind are
+different properties, and the cheap one to lose is the second. That makes this thread three layers
+deep — a claim published without a control, a retraction of the credit given to it, and then a
+qualification of the correction itself — and every layer came from the party whose work it
+weakened.
+
+### The remedy for stale live-state: write the COMMAND, not the value
+
+Recorded as `DC-13` in [`claim-decay.md`](claim-decay.md) (`cb2315ab`), and it is the actionable
+form of the three stale-instant instances in this file.
+
+**"Check more often" is not the fix.** Two of the three were false within *minutes*, and the
+ahead-count was never true for longer than a single instant. No polling interval catches that. So:
+carry the reasoning, and where a live field is genuinely needed, **write the command that
+re-measures it rather than the value.** `git rev-list --count origin/dev..HEAD` stays true; `58`
+never was.
+
+Applied to this file, so it is not merely quoted — **re-derive rather than trust any number
+above:**
+
+```sh
+# unpushed work, per repo
+git -C <repo> rev-list --count origin/<branch>..<branch>
+
+# live sessions, their profiles and cwds (NOT ListAgents — per-profile, under-reports)
+bash scripts/peer-sessions.sh
+
+# sessions running a replaced binary — their numbers describe the build they LOADED
+readlink /proc/<pid>/exe
+
+# MRV-poc deploy state
+gh run view 33842993573 ; gh run view 33842993869
+```
+
+Every figure in this roster is a measurement at an instant, and the instants are stamped. None is
+a property.
 ## Notes for whoever picks this up
 
 **The instruments that answer "what changed?" are already written** — do not re-derive them.
