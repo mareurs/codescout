@@ -1,7 +1,7 @@
 ---
-id: '633ded4a1dfa2cf8'
+id: 0f957214c8ad9164
 kind: bug
-status: open
+status: fixed
 title: 'BUG: scripts/probe-chunk-drift-by-root.py hardcodes a personal home path, recurrence of the sweep-scripts pattern'
 owners:
 - marius
@@ -9,7 +9,7 @@ tags:
 - scripts
 - machine-specific
 - cluster/config-propagation-is-additive
-closed: ''
+closed: 2026-09-04
 opened: 2026-09-04
 owner: marius
 severity: low
@@ -42,7 +42,7 @@ Same as the archived sibling bug: a machine-specific convenience default committ
 
 ## Fix
 
-Not yet applied — same shape as the archived fix: derive the repo root, e.g. `CODESCOUT = str(Path(__file__).resolve().parent.parent)`.
+Fixed at `13679cd8` (patch-id `ba68dcd2ffcd5ff034710231eb51f96ceb23f868`, experiments). `CODESCOUT` now derives from the script's own location: `os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))`, matching how the script is used elsewhere (as a plain string, not a `Path`).
 
 ## Tests added
 
@@ -50,11 +50,10 @@ None yet — `tests/committed_paths.rs` already covers this class; no new test n
 
 ## Resume
 
-Open. One-line fix, same pattern as `86d0794657b1ab62`.
+Closed. `cargo test --test committed_paths` green; verified against the full workspace gate (fmt/clippy/both test lanes) at `13679cd8`.
 
 ## References
 
 - `scripts/probe-chunk-drift-by-root.py`
 - `docs/issues/archive/2026-08-14-sweep-scripts-hardcode-dead-machine-specific-paths.md` — the sibling instance and the gate's origin
 - `tests/committed_paths.rs`
-
