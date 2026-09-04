@@ -11357,6 +11357,18 @@ gives 11 and answers a different question.
 the failure class. 8 of 8 were caught by an artifact in the output that a broken run cannot
 fabricate** — a control, a flag, or a per-row label.
 
+> **Read that ratio correctly, because as first written it invited the opposite remedy.**
+> `0 of 8` is a count over a population **where care was never the instrument on offer**: in
+> every one of the eight, the wrong value was *indistinguishable from the right one at the
+> point of use*, so there was nothing for carefulness to bite on. Row 1's summary line, row
+> 3's control, row 5's clean table and row 8's "no moves" are each exactly what a healthy run
+> prints. Stated bare, `0 of 8` reads as eight people being insufficiently careful and argues
+> for looking harder. Stated properly it is eight cases where **carefulness was the wrong
+> instrument**, which is both the stronger claim and the one that argues for the cheap output
+> artifact. Correction owed to `ffb95976`, who caught it before the number hardened — and it
+> is the same failure mode as the entry's own subject: a true number that a reader converts
+> into a false conclusion.
+
 **And knowing the class demonstrably did not help, twice, in the strongest available form.**
 Row 2 happened *while I was writing up row 1*. `ffb95976` produced row 8 an hour after being
 filed, in writing, about themselves, for exactly that window-vs-population error
@@ -11384,6 +11396,62 @@ comparison, a positive control beside every zero, and read per-row labels rather
 tally. **A tally is an aggregate and cannot verify the per-member claim it appears to
 support** — CLAUDE.md § *Testing Discipline* already states this for tests; rows 2, 4 and 5
 are the same law holding against the *instrument*.
+
+### Row 9, and it is the strongest one — reported, not independently verified
+
+Held apart from the table above because its evidence is a peer's report rather than output
+quoted in a commit this session can re-read. It is recorded because of what it is, not despite
+it: `mrv-poc-3b` wrote a one-liner **specifically to check for the stale-binary hazard**, and
+ended it with an unconditional
+
+```
+echo "(no STALE lines above = every claude process is running its on-disk binary)"
+```
+
+which printed that reassurance **directly beneath the STALE line it had just found**. A label
+that reads healthy regardless of the result — written minutes after reading a warning about
+exactly that class, by an author actively hunting for it, inside the check built to catch it.
+
+So the corpus now has the class defeating: an author writing about it (CLAUDE.md § *Observer
+Blindness*, n=4), an author mid-writeup of the previous instance (row 2), an author filed in
+writing about themselves an hour earlier (row 8), and an author **actively looking for this
+specific class with the warning in front of them** (row 9). Vigilance was at its maximum in
+row 9 and bought nothing. Their own remedy is the one this entry argues for and is sharper
+than the general form: **derive the label from the count, never print it alongside.**
+
+### The stale-binary warning has an exemption, and it narrows usefully
+
+> **First, the number is an INSTANT, not a property, and I published it twice as though it
+> were one.** `11 of 14` at 03:07 and `8 of 14` at 06:06 are the same instrument, three hours
+> apart, and **neither reading is wrong** — sessions exit and reconnect continuously. Caught by
+> `f2ab55f8`, who had made the same error twice the same morning in an unrelated unit (a branch
+> count read 58, then 68, then 85, two of which their roster carried as though they bracketed a
+> range). This is the entry's own subject one level up: a true number a reader converts into a
+> false standing claim. **Quote a population count with its instant or not at all** — CLAUDE.md
+> § *Reaching a Peer Session* says exactly this for peer counts, and it holds for any
+> enumeration of a live population.
+
+Row 9's session also corrected the scope of the *other* thing measured tonight (8 of 14 live
+sessions on a replaced binary). A stale binary corrupts what the **process loaded**;
+measurements that shell out to a subprocess (`git`, `gcloud`, `uv run`, `vitest`) or fetch
+over the wire against a deployed service are **immune**, because each spawns fresh from disk.
+They confirmed a `(deleted)` binary in their own session and were nonetheless unaffected, for
+that reason. **The at-risk population is sessions quoting in-process results**, not every
+session with a stale inode — a materially smaller set, and worth stating so the warning is not
+discounted wholesale by someone who checks one shelled-out number and finds it fine.
+
+### The same test caught a live production defect, which is the counterfactual
+
+Also row 9's session, and the reason this entry is a `W` rather than an `F`: they had swept 97
+objects from a production bucket and verified it by re-running the script's own dry run for
+`legacy: 0`, describing that to three parties as independent because it re-ran rather than
+trusting the apply. Applying this entry's test — *what would a broken instrument's summary
+line look like?* — a sweep pointed at the wrong bucket, or whose list call returned empty on a
+transient fault, prints `live 0 · legacy 0 · unrecognised 0` — **byte-identical**. They closed
+it with a control a broken run cannot fabricate: list with a **different tool**, and require
+both that the other prefixes still enumerate *and* that the swept prefix is empty. A broken
+lister returns nothing for both, so the control discriminates. The published number had
+already gone out.
 
 **Rests on:** measured 2026-09-03/04 across two sessions on one checkout. Every row's output
 is quoted in a commit or bug file listed above, so the population is re-countable rather than
