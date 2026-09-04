@@ -370,8 +370,8 @@ So the honest split, rather than a uniform-looking table:
 - Every `UNCOMMITTED: no`.
 - Every commit list.
 - The DVC md5 divergence and the 35/42-vs-36/42 consequence.
-- The `97 of 97` sweep reading (though that one arrived *with* its control — a re-run dry run
-  after the apply, rather than the apply's own report).
+- The `97 of 97` sweep reading, **including its `legacy: 0` confirmation** — see the correction
+  immediately below, which retracts this file's earlier claim that it arrived with a control.
 
 **A number that moved between two reports, which is the tell this section exists for:** running
 codescout servers on `(deleted)` inodes read **11 of 14** at 03:07 and **8 of 14** at 06:06. Both
@@ -389,6 +389,48 @@ The transferable instruction, and it is cheap: **ask for the control alongside t
 absurd mutation that must die, a control row that must stay green, a `truncated: true` flag, a
 per-row label instead of a tally. Recorded as `bug-fix-session-log:W-106` (`f543cc4a`).
 
+### RETRACTION: the exemplar this section held up did not have a control
+
+This file previously credited `3d806b09-79ae-482b-b362-ab526e9c189a`'s `97 → 0` as the one figure
+of the night that arrived with its control. **That was wrong, and the session corrected it against
+itself after the line was committed and pushed.**
+
+What was actually sent: apply the sweep, then re-run *the same script's* dry run and read
+`legacy: 0`. Described as independent because it re-ran rather than trusting the apply's own
+report. **It is not independent — it is W-106's case 4.** Same script, same code path, same
+credentials, same bucket argument. A sweep pointed at the wrong bucket, or one whose list call
+returned empty on a transient fault, prints:
+
+```
+live 0 · legacy 0 · unrecognised 0    ->  "Nothing to sweep."
+```
+
+Byte-identical to a healthy post-sweep run. The re-run cannot distinguish *the cache is empty*
+from *I cannot see the cache*. At the moment that contract was published, 97 production objects
+had been deleted and verified by an instrument that would have said the same thing had it been
+broken.
+
+**The real control, added an hour later and only because a third peer relayed W-106:** list the
+bucket with a **different tool** (`gcloud storage ls`) and check two things at once — the OTHER
+prefixes must still enumerate, and `_ocr_cache/**` must be empty. **12 workspace prefixes
+returned; `_ocr_cache/**` matched no objects.** A broken lister returns nothing for both, so that
+pair discriminates and the re-run does not. The conclusion held. It was not established when it
+was published.
+
+**So the discriminator was never "re-run it."** It is *use a different instrument, and include a
+row that must stay green.* The re-run had neither half.
+
+**And the count is 0 of 9, not 0 of 8.** That session had the class in front of it, was actively
+applying it, and shipped the weaker check first — then, in the very command written to test this
+roster's own point 1, ended with an unconditional `echo "(no STALE lines above ...)"` that printed
+directly beneath the STALE line it had just found. Two instances in one session, both after
+reading the warning. Which is the W-106 result restated rather than contradicted: **knowing the
+class prevents none of them; a cheap artifact in the output catches all of them.**
+
+The reason this retraction is in the file rather than a quiet edit: the line was **load-bearing**.
+It was the exemplar separating *checked at the bytes* from *taken on a session's word*, and as
+sent it belonged in the second column. A reader trusting this section would have learned the wrong
+lesson from the one case it held up.
 ## Notes for whoever picks this up
 
 **The instruments that answer "what changed?" are already written** — do not re-derive them.
