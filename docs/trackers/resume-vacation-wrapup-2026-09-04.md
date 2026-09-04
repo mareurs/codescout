@@ -1,8 +1,8 @@
 ---
 id: '770d75c364a466d5'
 kind: tracker
-status: draft
-title: Resume queue — vacation wrap-up roster, 2026-09-04 (VW-N)
+status: active
+title: Resume roster — vacation wrap-up, 2026-09-04 (prose, not a ledger)
 owners:
 - marius
 tags:
@@ -15,7 +15,15 @@ topic: cross-machine handoff and session wrap-up
 time_scope: '2026-09-04'
 ---
 
-# Resume queue — vacation wrap-up roster, 2026-09-04 (VW-N)
+# Resume roster — vacation wrap-up, 2026-09-04 (prose, not a ledger)
+> **This file is PROSE, not a ledger.** It was titled `(VW-N)` until 2026-09-04 and declared no
+> `entry_prefix`, while defining **zero** `## VW-N` sections — so `VW-3` was never citable from
+> anywhere, including from `resume-queue-index.md`, and `link_scan` correctly saw no ledger. The
+> title promised a mechanism the file never had. **Resolved by dropping the prefix rather than
+> adding one**: there are no entries, and minting a prefix to satisfy a title would create the
+> citable tokens after the fact rather than fix the claim. Found by
+> `ffb95976-dc89-4cca-87aa-c026544faf2f` while counting `resume-*.md` files for `RQ-4`.
+
 
 **Read this first on the laptop.** It is the only artifact that spans every repo, and it is
 deliberately prose in git rather than catalog state, because the catalog does not travel.
@@ -289,11 +297,20 @@ the durable identifier.
 | mirela/backend-kotlin | **finalize** | `add4873b-9b69-4011-9ca1-bbc6fff9d33f` | `its-integration-index.md` + `innovaplan-live-contract.md`; 5 commits |
 | MRV-poc | **resume-tracker** | `3d806b09-79ae-482b-b362-ab526e9c189a` | `docs/trackers/ingest-roadmap.md` § *Resume — Phase 3 gold re-authoring* |
 | MRV-poc | **finalize** | `8f9907a3-fde3-415d-8eec-2f7cebd6978e` | `docs/handoffs/2026-09-04-readiness-erasure-merged-not-deployed.md` |
-| MRV-poc × 4 | *awaiting* | — | two started 2026-08-31 and are 4 days idle |
+| MRV-poc × 3 | **EXITED, never asked** | — | PIDs 4020515, 1888063, 1998425 — confirmed gone from `/proc` at 06:35 UTC. Holes now PERMANENT |
+| MRV-poc × 1 | *awaiting* | — | PID 3939042, live and silent. The only hole still closable |
 
-**`*awaiting*` means the reply had not arrived when this file was committed, not that the session
-is unresponsive.** A row still reading `*awaiting*` is a session whose state was never collected —
-check that repo's own `git status` and trackers rather than assuming it was clean.
+**`*awaiting*` and `EXITED` are different facts, and the distinction was invisible until it was
+checked.** `*awaiting*` means the reply had not arrived — the session is live and the hole can
+still be closed by asking. `EXITED` means the process is gone: **the hole is permanent**, and the
+only remaining evidence is whatever that session committed plus that repo's own `git status`.
+
+When this file was first written all four were `*awaiting*`. Three had exited by 06:35 UTC —
+verified against `/proc`, not inferred from silence. **A roster row records the reply that did not
+arrive; it can never record the process that stopped being able to send one**, so those rows stayed
+correct while silently becoming a different kind of true. *Uncollected* implies a pending action —
+ask them. *Exited unasked* has none. Raised by `ffb95976-dc89-4cca-87aa-c026544faf2f` on one
+session; checking all four found three.
 
 ### A stale tracked file is worse than a missing one
 
@@ -545,7 +562,7 @@ copy of a live document that decays while reading identical to the original.
 
 | surface | the axis it answers | scope |
 |---|---|---|
-| **this file** (`VW-N`) | **session → status** — who held what, at one instant | all repos, point-in-time |
+| **this file** (prose — no `entry_prefix`, nothing here is citable) | **session → status** — who held what, at one instant | all repos, point-in-time |
 | [`resume-queue-index.md`](resume-queue-index.md) (`RQ-N`, `ea6e212a549f9972`) | **tracker → remaining work** | all repos |
 | [`../TAXONOMY.md`](../TAXONOMY.md) § resume-queue table | **prefix → file** — permanent | codescout only |
 
