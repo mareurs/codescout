@@ -1,5 +1,5 @@
 ---
-id: '3e02f30a7b6a2ab3'
+id: b86ba0380dc36436
 kind: bug
 status: open
 title: 'BUG: a peer''s pre-commit stash window makes another session''s atomic file read/rename operate on the wrong bytes — or on no file at all'
@@ -204,11 +204,41 @@ is a failed move, not a staging mistake.
 
 ## Resume
 
-Fold into `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` or
-supersede it. That file records the *loss* half; this adds that the window also feeds **wrong
-bytes to concurrent readers**, that **failed commits open it too**, and that a tracked file can
-report **ENOENT** rather than merely older content.
+**Slug corrected 2026-09-04.** This file was opened as
+`artifact-move-writes-a-stale-snapshot-and-leaves-the-source`, a claim retracted in
+§ *Evidence* the same night: `move` is innocent, `src/librarian/tools/mv.rs:75` is a plain
+`fs::rename`, and the retraction was broadcast to five peers. The title had already been
+corrected; the filename had not, and a slug is what a reader sees first in a directory
+listing. Renamed to match the title, deliberately deferred until the checkout was quiet —
+renaming means a `doc(action="move")`, and a move during a peer commit is the very race
+this file documents. Done at 03:11 with four peers idle.
 
+**Fold question, resolved: keep both, cross-linked — do NOT supersede.** The earlier
+Resume offered *"fold into `2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`
+or supersede it"*. Neither, on inspection:
+
+- A `supersedes` edge is side-effectful — it flips the destination to `superseded`, which
+  **hides it from the default query**. The 2026-09-01 record holds the *loss* half with its
+  own evidence, and that half is still open and still unfixed. Hiding it to tidy a slug
+  would trade a naming defect for a discoverability one, which is the worse of the two.
+- Folding would merge two victim classes into one record. One mechanism, yes — `pre-commit`
+  stashing all unstaged work repo-wide — but two distinct observers: the session whose work
+  **vanishes** (2026-09-01) and the session that **reads or writes the wrong bytes** during
+  the window (here). They are noticed differently, reproduced differently, and read
+  differently.
+
+Both carry `cluster/transient-shared-state-lies-to-readers`, which is the thing that makes
+them one query rather than one file — exactly what the cluster tag is for. Cross-links now
+run both ways: this file's § *References* already cited 2026-09-01, and 2026-09-01 now cites
+this one.
+
+**Still open, and this is the actual work.** No fix is proposed for the mechanism itself.
+The four symptoms are recorded in § *Symptom*; the remedy space is in § *Fix* and none of it
+has been attempted. The cheapest partial mitigation observed in practice is **staging**:
+`pre-commit` stashes *unstaged* changes, so a staged file is untouched by the window — used
+deliberately at 02:0x this session to protect in-flight work through a peer's edit cycle
+without committing behind a gate that could not run. That is a workaround for one session,
+not a fix for the tree.
 ## References
 
 - `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — same

@@ -90,7 +90,7 @@ So step 1 of the gate has two opposite failure modes on a shared checkout, and t
 different remedies. **Scoping `fmt` to changed paths addresses the first and not the second** —
 a scoped `fmt` inside a peer's stash window is still a no-op that returns success. The second is
 the stash race
-(`docs/issues/2026-09-03-artifact-move-writes-a-stale-snapshot-and-leaves-the-source.md`,
+(`docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`,
 symptom 4), and its precondition is checkable in advance: `git status --porcelain` on your
 inputs before running the gate.
 

@@ -295,6 +295,16 @@ so — see `IC-12`'s `Mechanism status`.
 
 ## References
 
+- `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md` —
+  **the other half of this same mechanism, and deliberately a separate file.** This record
+  covers the session whose work *vanishes*; that one covers the session that *reads or writes
+  the wrong bytes* during the window — HEAD content served to a concurrent reader, `ENOENT` on
+  a tracked file, the window opening on **failed** commits too, and a `cargo fmt` that
+  reported success and changed nothing because the tree was restored underneath it. One
+  mechanism, two observers, noticed and reproduced differently. Not folded and not superseded:
+  a `supersedes` edge would flip one of them to `superseded` and hide it from the default
+  query while both halves are still open. The shared `cluster/` tag is what makes them one
+  query rather than one file.
 - `IC-12` (`cluster/transient-shared-state-lies-to-readers`) in
   `docs/trackers/issue-clusters.md` — this is the class's first tagged member; it had stood
   at n=0 *on evidence*, after an archive pass that looked and found nothing transient.
