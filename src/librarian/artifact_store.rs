@@ -323,9 +323,16 @@ impl ArtifactVectorStore for QdrantArtifactStore {
     async fn delete(&self, artifact_id: &str) -> Result<()> {
         // Fans out over EVERY artifact collection, because the trait's `delete`
         // carries no project and an artifact id does not say which project it
-        // belongs to. Scanning them all is affordable precisely because this has
-        // no production caller today — it exists for an explicit vector purge —
-        // and being wrong in the other direction would silently strand vectors.
+        // belongs to. Deriving one here instead would be a second call site
+        // reasoning about the project independently, which is what `99558134`
+        // fixed — so the fan-out is the design, not a placeholder.
+        //
+        // Cost is now real rather than hypothetical: as of 2026-09-04 this has
+        // two production callers (`doc(action="delete")` and reindex's
+        // removed-file sweep), where it previously had none. Still affordable —
+        // `delete` runs ~15 times per 30 days, the sweep only fires for files
+        // that actually vanished, and `artifact_id` carries a keyword index, so
+        // each probe is an index lookup rather than a scan.
         for collection in self.qdrant.artifact_collections(&self.prefix).await? {
             // Delete by payload FILTER, not by derived point id: an artifact
             // owns N chunk points now, and the old form would remove at most one

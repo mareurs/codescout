@@ -35,6 +35,25 @@ pub struct IndexReport {
     /// external store, and for the neighbouring state it deliberately excludes.
     pub vectorless: Option<usize>,
     pub unknown_ids: Vec<String>,
+    /// Artifact ids whose file vanished from disk, so their catalog row was
+    /// dropped by this walk. Carried out to the async caller so it can drop
+    /// their VECTORS too.
+    ///
+    /// The ids and not just a count, because the vector store needs the id to
+    /// delete by. This exists at all because [`index_repo_sync`] is sync and the
+    /// store's `delete` is async — a removal here cannot reach the store from
+    /// inside the walk, and the previous behaviour was simply to leave the
+    /// vectors behind.
+    ///
+    /// **The sqlite backend does not need this and Qdrant does**, which is why
+    /// the gap survived: `artifact_chunk.artifact_id` is `ON DELETE CASCADE` and
+    /// `artifact_vec_v2_cascade_delete` fires on that cascade, so on sqlite the
+    /// `DELETE FROM artifact` below already takes the vectors. Qdrant has no
+    /// foreign keys, so the same delete leaves points that answer KNN and resolve
+    /// to nothing. One code path, correct on the backend the tests use and
+    /// leaking on the default one.
+    /// `docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
+    pub removed_ids: Vec<String>,
 }
 
 /// One item queued for embedding — one per CHUNK, not per artifact.
@@ -493,6 +512,11 @@ pub fn index_repo_sync(
                 "DELETE FROM artifact WHERE id = ?1",
                 rusqlite::params![cand_id],
             )?;
+            // Recorded for the async caller to drop the vectors with. On sqlite
+            // the DELETE above already took them via the artifact_chunk cascade
+            // and its trigger; Qdrant has no FK and keeps them, so this id is
+            // the only thing that can reach them.
+            report.removed_ids.push(cand_id.clone());
             removed += 1;
         }
     }
@@ -1196,6 +1220,33 @@ pub async fn index_repo(
     let want = embedding.is_some();
     let (mut report, embed_queue) =
         index_repo_sync(cat, rules, abs_root, ignore, want, false, false)?;
+
+    // Drop the vectors of artifacts whose file vanished.
+    //
+    // The sync walk dropped their catalog rows and cannot reach the store (its
+    // `delete` is async), so without this the points survive their artifact:
+    // returned by KNN, unresolvable at hydration, and consuming result slots
+    // silently. Only Qdrant is affected — sqlite's `artifact_chunk` cascade plus
+    // `artifact_vec_v2_cascade_delete` already handled it, which is exactly why
+    // this went unnoticed on the backend the tests use.
+    //
+    // Placed before the embed loop for two ordinary reasons: the sweep must run
+    // whether or not embedding is enabled (it sits outside the `if let Some(svc)`
+    // below), and a sweep failure should abort before spending embedder round-trips.
+    //
+    // It is NOT ordered here to avoid a delete/re-add collision, which was this
+    // comment's claim until it was checked. `index_repo_sync` selects removal
+    // candidates as `id NOT IN (seen_ids)` (:493), so an artifact walked this run is
+    // excluded from `removed_ids` by construction — a path is in the embed queue or
+    // in the removal set, never both, and the ordering carries no correctness weight
+    // on that axis. Left as documentation of what the ordering does NOT buy, because
+    // the plausible-sounding version invites a future reader to preserve it for a
+    // reason that was never true.
+    if let Some(s) = store {
+        for id in &report.removed_ids {
+            s.delete(id).await?;
+        }
+    }
 
     if let Some(svc) = embedding {
         let futures_iter = embed_queue.into_iter().map(|item| async move {
@@ -2992,6 +3043,95 @@ kind = "memory"
             )
             .unwrap();
         assert_eq!(count_a, 1, "surviving file keeps embedding");
+    }
+
+    /// A file that vanished takes its CHUNK VECTORS with it, through the store.
+    ///
+    /// The sibling test above covers sqlite's `artifact_vec` trigger and is annotated
+    /// inert for the current write path. This one covers what production actually
+    /// does: an external store, reached from `index_repo` (async) because
+    /// `index_repo_sync` cannot await one.
+    ///
+    /// **Why the gap survived so long is the point.** On sqlite the catalog
+    /// `DELETE FROM artifact` already took the vectors, via `artifact_chunk`'s
+    /// `ON DELETE CASCADE` and `artifact_vec_v2_cascade_delete`. Qdrant has no
+    /// foreign keys, so the identical delete left every point behind. One code path,
+    /// correct on the backend the tests exercised and leaking on the default one — so
+    /// no assertion about the CATALOG can express this, and this test asserts about
+    /// the STORE.
+    ///
+    /// `embedding: None` deliberately: the removal sweep runs outside the embed
+    /// branch, and driving it without an embedder proves that rather than assuming it.
+    #[tokio::test]
+    async fn a_vanished_file_has_its_vectors_dropped_from_the_store() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\n").unwrap();
+        std::fs::write(root.join("docs/specs/b.md"), "# b\n").unwrap();
+        // TWO doomed files, not one. With a single removal a sweep that stops after
+        // the first id is byte-for-byte indistinguishable from a correct one --
+        // measured, that mutation SURVIVED this test until `c.md` existed.
+        std::fs::write(root.join("docs/specs/c.md"), "# c\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+
+        let id_a = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
+        let id_b = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/b.md"));
+        let id_c = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/c.md"));
+
+        // Seed vectors as a prior embedding run would have. THREE chunks for the
+        // doomed artifact: a sweep that removed only the first would be invisible
+        // against a single-chunk fixture, which behaves identically under both.
+        let store = InMemoryArtifactStore::default();
+        for c in ["b1", "b2", "b3"] {
+            store.upsert("p", c, &id_b, &[1.0, 0.0]).await.unwrap();
+        }
+        store.upsert("p", "c1", &id_c, &[1.0, 0.0]).await.unwrap();
+        store.upsert("p", "a1", &id_a, &[1.0, 0.0]).await.unwrap();
+
+        std::fs::remove_file(root.join("docs/specs/b.md")).unwrap();
+        std::fs::remove_file(root.join("docs/specs/c.md")).unwrap();
+        let report = index_repo(&cat, &rules, root, &ignore, None, Some(&store), "p")
+            .await
+            .unwrap();
+
+        assert_eq!(report.removed, 2);
+        let mut got = report.removed_ids.clone();
+        got.sort();
+        let mut want = vec![id_b.clone(), id_c.clone()];
+        want.sort();
+        assert_eq!(
+            got, want,
+            "the ids are what reaches the store; a count cannot delete anything"
+        );
+        assert_eq!(
+            store.chunks_under(&id_b),
+            0,
+            "vectors survived their artifact -- returned by KNN, unresolvable at hydration"
+        );
+        assert_eq!(
+            store.chunks_under(&id_c),
+            0,
+            "the SECOND removal was skipped -- a sweep that stops after one id"
+        );
+        // The surviving artifact is load-bearing: a sweep that dropped its
+        // artifact_id filter, or one keyed on the wrong id, satisfies the assertion
+        // above and silently empties the index.
+        assert_eq!(
+            store.chunks_under(&id_a),
+            1,
+            "a surviving file lost its vectors"
+        );
     }
 
     #[tokio::test]
