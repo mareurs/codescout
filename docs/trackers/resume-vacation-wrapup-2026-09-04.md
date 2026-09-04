@@ -555,6 +555,34 @@ is what happens once a claim has been quoted onward, built on, or shipped. So th
 property is **latency**: correct while it is still cheap, and the incentive to quietly not-mention
 never forms. That is a design property of the channel, not a virtue of the participants, which is
 why it can be relied on again.
+### ENUMERATE THE POPULATION, don't trust the report — twice in one hour, 3× both times
+
+The most transferable finding of this sweep, named by
+`ffb95976-dc89-4cca-87aa-c026544faf2f` after it happened twice:
+
+| question | reasoning from the report | enumerating the population |
+|---|---|---|
+| how many silent sessions have exited? | **1** (the one case relayed) | **3** — `/proc` checked for all four |
+| how many rows is `TAXONOMY.md` missing? | **1** (`SM-N`, from reading the table) | **3** — `resume-*.md` counted on disk |
+
+**Both times the reported figure was a FLOOR presented in a sentence that read like a total, and
+both times the correction was 3×.** Neither report was wrong; both were answers to a narrower
+question than the one being asked of them.
+
+**Understating a hole is not the safe direction.** A reader of the earlier version would have
+chased three sessions that can never answer, and treated one closable hole as three. The error
+makes remaining work look *reachable*, which is the direction that costs.
+
+So: **when a count is about to become an instruction, enumerate the population — including when
+the report is your own.** Both instances above were corrected by someone re-deriving a figure they
+had themselves published minutes earlier.
+
+**And the mechanism behind why counting works, which is worth more than the rule:** a count forces
+you to touch every member, and *touching* is what finds things. A query returns only what you
+already knew to ask for. That is why counting surfaced three defects tonight that no query *for*
+those defects would have found — this file's `status: draft` (wrong since creation, found while
+counting `resume-*.md`), `TAXONOMY.md`'s missing rows, and the three exited PIDs. None was the
+thing anyone was looking for.
 ## Notes for whoever picks this up
 **This file is one of three resume surfaces, and it answers only one question.** They are
 deliberately non-overlapping — none summarises another, because a summary in an index is a second
