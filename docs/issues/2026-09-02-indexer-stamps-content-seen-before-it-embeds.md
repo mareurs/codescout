@@ -3,12 +3,13 @@ kind: bug
 status: open
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
 opened: 2026-09-02
 owner: marius
-related: []
+related:
+- docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
+- docs/issues/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
 severity: high
-unverified: The ENTRY path is not established — measurement proves 729 artifacts are trapped and cannot leave, but not which run stamped each one. Candidate entries (a run with no embedder, a per-artifact embed error, an artifact predating embeddings) are not distinguished; the catalog keeps no per-artifact embed-attempt record, so they may not be distinguishable after the fact.
+unverified: 'The ENTRY path is still not established -- which run stamped each artifact is not distinguishable after the fact, since the catalog keeps no per-artifact embed-attempt record. AND the title''s n=729 is now known to be mis-scoped, not merely unproven: it comes from a join on artifact_vec_rowids, the legacy v1 sqlite-vec table that the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1 shows is no longer written, so on a Qdrant-backend host it counts a table nothing populates. Re-measured 2026-09-04 against the live store: 0 artifacts unsearchable, 7 embed failures, all oversized input. The MECHANISM reproduced exactly; the population size did not. Fix (c) in this file''s plan is already shipped -- see the Correction section before starting work.'
 ---
 
 # BUG: the indexer stamps content as seen before it embeds it, trapping 729 artifacts permanently unembeddable
@@ -324,6 +325,72 @@ doc comment at `:105-114`.
 
 SHA and patch-id to be recorded here at fix time.
 
+
+### Correction 2026-09-04 — three of this file's claims have moved, measured on a second host
+
+Read this before acting on the plan above. Nothing here retracts the *mechanism*, which
+reproduced exactly; what moved is the line refs, the remaining work, and the size of the
+problem.
+
+**1. The line refs drifted.** `:302` / `:309` were correct at `de434ca5`. On `0b20709c` the
+same two sites are `src/librarian/indexer.rs:435` (`artifact::upsert_and_mint_slug`, which
+commits `file_sha256`) and `:442` (`if want_embeddings && (!content_unchanged ||
+force_embed)`).
+
+**2. Fix (c) is ALREADY SHIPPED — do not re-implement it.** This file calls it *"the part
+that must ship"*. It has: `IndexReport::vectorless` is summed into `total_vectorless`
+(`src/librarian/tools/reindex.rs:358`), returned as `vectorless` with a `vectorless_note`
+that names the absorbing state and its escape in prose, and paired with `embed_errors`.
+There is also a **durable** half this file does not mention —
+`last_reindex_embed_error_count` and `last_reindex_embed_errors_sample` (20 samples) are
+written to `catalog_meta` via `gc::set_meta` whenever `want_embeddings`, so the count
+survives the call that produced it.
+
+**3. `n=729` is not measurable by the query in § Reproduction on a Qdrant host, and the
+number that matters is 0.** The E2 query joins `artifact_vec_rowids` — the **legacy v1**
+sqlite-vec table. `the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1`
+(`src/librarian/artifact_store.rs`) shows v1 is no longer written, and
+`ArtifactBackend::resolve` defaults to **Qdrant** on a `server-stack` build. So on such a
+host that query counts rows in a table nothing populates, and reports every artifact as
+trapped whatever the truth is. Measured here 2026-09-04 it returned 838 of 1494 — while
+the live store held vectors for all of them.
+
+**What a run actually costs, measured after `librarian(action="reindex", reembed=true)` on
+this host (codescout repo, 1494 artifacts, 29,144 chunk rows):**
+
+| measure | value |
+|---|---|
+| chunk vectors written | 28,267 |
+| embed failures (`last_reindex_embed_error_count`) | **7** |
+| artifacts short by ≥1 chunk | 869 (861 by exactly 1, 8 by 2) |
+| **artifacts with ZERO vectors — i.e. unsearchable** | **0** |
+
+All 7 failures are oversized input against the embedder's hard limits — `n_ctx` 2048,
+physical batch 4096 — at 2079, 2912, 3495, 3734, 4860, 5084 and 7177 tokens. All 8 of the
+double-short artifacts are `docs/trackers/issue-clusters/IC-*.md`, whose `**Members:**`
+field is a single multi-KB line: IC-14's is 11,559 chars ≈ 2,890 tokens, consistent with
+the 2,912-token refusal. **The ledger's one-line-field design is therefore both a parser
+trap (`IC-14`'s own documented shape) and an embedding failure**, from one decision.
+
+**Three readings, one population, and only the third answers the question this bug asks:**
+`7` (embed calls that failed), `877` (chunks lacking a vector), `0` (documents that lost
+searchability). Stopping at 877 reports a corpus-scale emergency; stopping at 7 reports a
+triviality. The per-member check is what separates them, and it is the one this file's
+Evidence section does not compute.
+
+**4. Fix (b) needs a detail this file could not have known.** The embed queue is
+**chunk**-grained (~19.7 chunks/artifact here) while `embedded_sha256` is
+**artifact**-grained, and the drain loop in `reindex.rs` reports success per chunk. Stamping
+on the first successful chunk rebuilds this exact trap one level down. (b) must group by
+`artifact_id` and stamp only when *every* chunk of that artifact succeeded.
+
+**5. (b)'s migration is guarded, so it is safer than "larger change" implies.** Adding a
+column to `artifact` requires carrying it in `migrate_v6.rs`'s table copy (`:191`) — the
+hazard memory `catalog-sql-hazards` names. `every_schema_sql_artifact_column_survives_every_migration_path`
+(`migrate_v6.rs:632`) parses the column list out of `SCHEMA_SQL` and asserts every column
+exists on both the fresh and the legacy-v3→v6 path, so forgetting the second edit REDs
+rather than silently dropping the column. It carries a `contains("slug")` sanity assertion
+so it cannot pass by parsing zero columns.
 ## Tests added
 
 None yet — bug is `open`, no fix written. The regression test this needs is a
