@@ -263,3 +263,13 @@ required-features = ["librarian"]
 name = "cli_doc"
 path = "tests/cli_doc.rs"
 required-features = ["librarian"]
+
+# The harness for tests/librarian/. Declared rather than auto-discovered because
+# cargo only auto-discovers tests/*.rs -- these files were real targets at
+# crates/librarian-mcp/tests/*.rs until d48bf992 (2026-05-16) moved them one
+# directory deeper, and cargo silently stopped compiling them. See
+# tests/librarian/main.rs, which is also where new modules must be declared.
+[[test]]
+name = "librarian"
+path = "tests/librarian/main.rs"
+required-features = ["librarian"]

@@ -10,7 +10,7 @@ artifacts. Both live in the same workspace; reach for whichever fits the questio
 ## When to reach for librarian
 
 - Looking for a plan, spec, ADR, runbook, tracker — **across all repos**.
-- "What did we decide about X" / "is there a doc on Y" — `librarian_context`.
+- "What did we decide about X" / "is there a doc on Y" — `librarian` with `action=context`.
 - Auditing plan lifecycle: which plans are draft / shipped / superseded.
 - Cross-repo doc graph: "what supersedes this", "what implements that".
 
@@ -21,26 +21,26 @@ ephemeral session state (don't persist).
 
 | Want                                          | Use                     |
 |-----------------------------------------------|-------------------------|
-| List artifacts of one kind                    | `artifact` with `action=find`, `kind` param |
-| Multi-field filter (and/or/not)               | `artifact` with `action=find`  |
-| Read one artifact + previews + observations   | `artifact` with `action=get`   |
-| Edges from a node (filtered by direction/rel) | `artifact` with `action=get`, `include_links=true`, `links_direction`, `links_rel` |
-| BFS around a node (depth 1–3)                 | `artifact` with `action=graph` |
+| List artifacts of one kind                    | `doc` with `action=find`, `kind` param |
+| Multi-field filter (and/or/not)               | `doc` with `action=find`  |
+| Read one artifact + previews + observations   | `doc` with `action=get`   |
+| Edges from a node (filtered by direction/rel) | `doc` with `action=get`, `include_links=true`, `links_direction`, `links_rel` |
+| BFS around a node (depth 1–3)                 | `doc` with `action=graph` |
 | Topic → packed markdown bundle                | `librarian` with `action=context` |
-| Write new artifact                            | `artifact` with `action=create` |
-| Write tracker artifact with augmentation      | `artifact` with `action=create`, `kind=tracker`, `status=active`, `augment={prompt,params}` |
-| Patch frontmatter or body                     | `artifact` with `action=update` |
-| Patch frontmatter + record refresh in one call | `artifact` with `action=update`, `commit_refresh=true` |
-| Add relation edge (supersedes, implements …)  | `artifact` with `action=link`  |
-| Append observation note                       | `artifact_event` with `action=create`, `kind=note` |
+| Write new artifact                            | `doc` with `action=create` |
+| Write tracker artifact with augmentation      | `doc` with `action=create`, `kind=tracker`, `status=active`, `augment={prompt,params}` |
+| Patch frontmatter or body                     | `doc` with `action=update` |
+| Patch frontmatter + record refresh in one call | `doc` with `action=update`, `commit_refresh=true` |
+| Add relation edge (supersedes, implements …)  | `doc` with `action=link`  |
+| Append observation note                       | `doc` with `action=event_create`, `kind=note` |
 | Manual re-scan                                | `librarian` with `action=reindex` |
 | Attach/replace prompt+params on artifact      | `doc` with `action=augment`      |
-| Merge-patch params on existing augmentation   | `doc` with `action=augment`, `merge=true`, or `artifact(update, patch={params:{...}})` |
+| Merge-patch params on existing augmentation   | `doc` with `action=augment`, `merge=true`, or `doc(update, patch={params:{...}})` |
 | Gather context for refresh (read-only)        | `doc` with `action=gather` |
-| List/find augmented artifacts                 | `artifact` with `action=find`, `augmented: true` |
+| List/find augmented artifacts                 | `doc` with `action=find`, `augmented: true` |
 | Discover stale augmented artifacts            | `doc` with `action=list_stale` |
 
-Example: `artifact {action: "find", kind: "tracker"}` — live trackers in the
+Example: `doc {action: "find", kind: "tracker"}` — live trackers in the
 **active project** (default scope). Pass `scope: "all"` to widen.
 ## Filter AST (one-liner)
 
@@ -53,7 +53,7 @@ Ops: `eq ne in nin gt lt gte lte contains prefix`.
 Allowed fields: `id, kind, status, repo, title, topic, time_scope, tags, owners, rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
 ## Default scope (project, archived hidden)
 
-Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
+Listing tools (`doc` with `action=find`, `librarian` with `action=context`)
 default to **the active project's path** and **hide archived/superseded**
 rows. The active project is whatever `workspace(action="activate", path=...)`
 has set on the host.
@@ -102,7 +102,7 @@ projects. Use `repo`.
 
 ## Gotchas
 
-- **No file watcher.** Files added/moved outside `artifact` `action=create`/`action=update` are
+- **No file watcher.** Files added/moved outside `doc` `action=create`/`action=update` are
   invisible until `librarian` with `action=reindex`. On busy workspaces, reindex once at the
   start of a session.
 - **`librarian` with `action=reindex` is project-scoped by default** (matching read tools).
@@ -115,5 +115,5 @@ projects. Use `repo`.
 - **File is source of truth.** Catalog is a derived index; writes round-trip
   through frontmatter on disk.
 - **Status flow:** `unknown → draft → active → (blocked ↔ active) → done →
-  archived`. `superseded` is set automatically by `artifact_link rel="supersedes"`
+  archived`. `superseded` is set automatically by `doc` with `action=link`, `rel="supersedes"`
   on the dst.
