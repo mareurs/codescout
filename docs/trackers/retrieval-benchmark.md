@@ -244,7 +244,7 @@ docs/trackers/bug-fix-session-log.md      resolvable=150  drift=0
 docs/trackers/open-issue-work-queue.md    resolvable= 98  drift=0
 ```
 
-The two files the bug file named at −2 and −1 report **positively** — 150 and 98 resolvable chunks, zero drift each — so this is not an absence-from-a-truncated-list argument. Probe: `chunk-coord-drift.py` / `drift-by-root.py` (job tmp, not committed; the counting rule is `published start_line < the line of the heading that DEFINES the chunk's own token`).
+The two files the bug file named at −2 and −1 report **positively** — 150 and 98 resolvable chunks, zero drift each — so this is not an absence-from-a-truncated-list argument. Probe: [`scripts/probe-chunk-coord-drift.py`](../../scripts/probe-chunk-coord-drift.py) / [`scripts/probe-chunk-drift-by-root.py`](../../scripts/probe-chunk-drift-by-root.py) (committed 2026-09-04 so this stays reproducible; the counting rule is `published start_line < the line of the heading that DEFINES the chunk's own token`). **Re-run them rather than quoting these figures** — measured again five hours later the treated root had regressed to 16/2940 while the untreated one held exactly at 143/632, so the number is valid only at its instant.
 
 **Three defensible numbers, all correct, none interchangeable:** 143/632 = 22.63% of resolvable entry-bearing chunks *in non-reindexed repos*; 0/2940 *in codescout*; 143/3572 = 4.00% *corpus-wide*. Quote the population or quote nothing.
 

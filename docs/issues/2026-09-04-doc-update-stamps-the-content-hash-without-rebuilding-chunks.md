@@ -82,7 +82,7 @@ So the writer updates the *sentinel* for a state it does not update. The reindex
 
 ### The natural experiment (2026-09-04 03:40)
 
-`librarian(reindex, reembed=true, scope="project")` reindexed codescout and nothing else, leaving the catalog holding a treated group and an untreated control. Probe: `chunk-coord-drift.py` / `drift-by-root.py`, counting rule = *published `start_line` < the line of the heading that DEFINES that chunk's own token*:
+`librarian(reindex, reembed=true, scope="project")` reindexed codescout and nothing else, leaving the catalog holding a treated group and an untreated control. Probe: [`scripts/probe-chunk-coord-drift.py`](../../scripts/probe-chunk-coord-drift.py) and [`scripts/probe-chunk-drift-by-root.py`](../../scripts/probe-chunk-drift-by-root.py), promoted out of scratch space and committed so this evidence stays reproducible; counting rule = *published `start_line` < the line of the heading that DEFINES that chunk's own token*:
 
 ```
 codescout    drift    0 of 2940 resolvable (0.00%)   across 0 files
@@ -100,6 +100,22 @@ The two files `7695ad877b44e96a` named at −2 and −1 are reported **positivel
 
 Quoted verbatim under *Symptom* above. Note the recursion: the 68 invisible lines are the benchmark section documenting this very defect, so the record of the bug was itself unindexed by the bug.
 
+
+### The defect re-accumulates, measured five hours later (2026-09-04 08:48)
+
+The treated root did not stay repaired. Same probe, same rule, no intervening reindex:
+
+```
+codescout    drift   16 of 2940 resolvable (0.54%)   across 1 file
+  docs/trackers/observer-blindness.md    CONSTANT {-1: 16}
+OTHER-REPOS  drift  143 of  632 resolvable (22.63%)  across 10 files   [unchanged]
+```
+
+So `reembed=true` is a **repair with a half-life**, not a fix: five hours of ordinary tracker editing through `doc(action="update")` put 16 chunks of one file back into the defect, at a per-file constant of `-1`, while the untreated roots sat exactly still. That the untreated figure is byte-identical across five hours is the control — it rules out probe drift and corpus churn, leaving the treated root's regression attributable to writes.
+
+**Do not cite a stored figure from this file; re-run the probe.** A number from this defect is valid only at its instant, and the direction of decay is always upward.
+
+**The file is `docs/trackers/observer-blindness.md`** — the tracker cataloguing defect classes the right party structurally cannot see, made unobservable to its own readers by the mechanism it catalogues. Every `matched.start_line` it publishes now resolves one line early, so a consumer re-deriving the entry from `(path, line)` lands on the preceding `OB-N`. Nothing reports this; the file reads correctly on disk and wrongly through retrieval. Cause not attributed — several sessions wrote to it in that window, including this one at `edc0087f` — and attributing it is not needed for the finding, which is the **rate**, not the author.
 ## Hypotheses tried
 
 1. **Hypothesis:** the frontmatter height is mis-measured, so `line_offset` is short by a constant.
@@ -155,4 +171,3 @@ Then re-run `drift-by-root.py` against a non-codescout root to confirm the corpu
 - `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md` (`823d9ccaa13e2def`) — why the prescribed workaround is expensive.
 - `docs/trackers/retrieval-benchmark.md` § *2026-09-04 (dawn)* — the natural experiment and its numbers.
 - `src/librarian/indexer.rs:184`, `:395`, `:409`; `src/librarian/tools/update.rs:633`, `:661`, `:664`; `src/librarian/frontmatter.rs:118`.
-
