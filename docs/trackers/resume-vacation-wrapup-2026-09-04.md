@@ -146,7 +146,7 @@ the durable identifier.
 | codescout | **stop** | `ffb95976-dc89-4cca-87aa-c026544faf2f` | `d5897c73`, `edc0087f`, `24c55642`; state in `retrieval-benchmark.md` § *2026-09-04 (dawn)* |
 | codescout | **stop** | `08a2785b-94a2-463d-b70a-60a62fb4f8f6` | 4 commits; `d73ee203` carries its own Resume |
 | codescout | **stop** | `66523284-814b-49b8-b8f8-820dc2b00be2` | 11 commits; stranded-vector class closed on all three paths, verified live at `f008e74f` |
-| claude-plugins + prompt-engineering + codescout | **finalize** | `78f179a8-3cf7-4ab1-bbca-266d93e1efe4` | `prompt-engineering/docs/trackers/eval-runbook.md`; `17c3a07`, `6ac368a5`, `583bd9d` |
+| claude-plugins + prompt-engineering + codescout | **stop** | `78f179a8-3cf7-4ab1-bbca-266d93e1efe4` | `prompt-engineering/docs/trackers/eval-runbook.md`; `17c3a07` + `583bd9d` **pushed** after confirming directly with Marius; `6ac368a5` went out with the codescout push — all three repos zero ahead |
 | mirela/backend-kotlin | **stop** | `f2f73e7a-0f3f-44d5-aa08-dab4742c4fb7` | `tracker-hygiene-log.md`; next sweep due 2026-10-02 |
 | mirela/backend-kotlin | **stop** | `4d30fbb4-f68c-4ae1-b38d-0e037ea28efc` | 9 commits; **`innovaplan-live-contract.md` (IPC-N, 14 entries) is the authority for ITS/Innovaplan** |
 | mirela/backend-kotlin | **stop** | `c3f2ceb3-f8ca-47a0-8fbc-c5a00982be3f` | read-only session, no edits; codescout MCP was disconnected there |
@@ -183,6 +183,30 @@ servers were executing `(deleted)` inodes.** `cargo rb` replaces the binary; eve
 process keeps the old image until `/mcp` restarts it. A session that archives an artifact before
 reconnecting still strands its vectors — **and will confirm the fix is present by reading the
 source**, which is the wrong instrument. The tell is one command: `readlink /proc/<pid>/exe`.
+### The general form: committed is not in effect, and the author is the worst-placed observer
+
+Sharpened by `78f179a8-3cf7-4ab1-bbca-266d93e1efe4`, whose framing is better than the two
+instances it generalises.
+
+Two failures were found tonight from unrelated directions. A `SKILL.md` edit is committed and
+pushed and still reaches **no profile**, because skills load from `installPath` and nothing moves
+until `release.sh` seeds a cache and repoints three install records. And 11 of 14 running
+codescout servers were executing `(deleted)` inodes, so a fix present in the source was absent
+from every running process.
+
+The shared mechanism is not merely *the artifact in git is not the artifact in effect*. It is that
+**the editing session is the observer most certain the change shipped, and the one structurally
+least able to check** — it can see the diff and cannot see `installPath`; a process cannot see its
+own `(deleted)` inode. Both are invisible from the inside and cheap from outside.
+
+So the remedy in both cases is a **third-party probe, never a re-read**: served bytes against
+`installPath`; `ls -l /proc/<pid>/exe`. Reading the source again is the instrument that returns
+the wrong answer with the most confidence, and it is the one the author will reach for. That is
+an `OB` admission test passed cleanly, from two subsystems at once.
+
+**Concretely for whoever resumes:** the pushed `SKILL.md` sentence is `committed`, not `in
+effect`. `release.sh` was deliberately not run at wrap-up — it runs the full suite and cold-restarts
+three instances.
 ## Open items in codescout, none blocking
 
 Carried from the session that coordinated this wrap-up. All still true, all cheap to file later;
