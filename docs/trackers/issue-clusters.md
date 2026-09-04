@@ -751,3 +751,14 @@ model that survives and gets repeated. The rule was already written down — ins
 being refused. That is `OB-1`'s third position, a bound published to an audience that never reads it,
 so this is a **move to the read surface** rather than a second copy: an author adding a member to any
 other class never had cause to open `unclassified`.
+
+**The one-line shape is deliberate, so do not "fix" it by wrapping.**
+`docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md:166-171`
+records the constraint from the other side: a `**Members:**` field whose members sat on continuation
+lines *would* chunk normally — which is wanted, because a single line cannot be split and a long one
+exceeds the embedder's input budget — but *"the one-line form is load-bearing for the gate as
+written, and any wrapping change must move the parser with it."* So the shape is a live trade-off
+between the gate and the chunker, not an oversight, and the two halves have to move together. That
+is a **second** place the constraint was already documented, and neither is where an author adding a
+member stands — which is the whole argument for this paragraph existing here rather than a third
+restatement existing somewhere else.
