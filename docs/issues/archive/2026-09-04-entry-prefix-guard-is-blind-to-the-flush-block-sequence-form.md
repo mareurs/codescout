@@ -230,10 +230,9 @@ passed **before and after** this fix — so on the lean lane the broken parser a
 indistinguishable. This file is a datapoint for CLAUDE.md § *Development Commands*, whose
 lean-lane-vacuity rule was added the same day.
 
-**Scope of the verification, stated because it is narrower than "fixed" sounds.** The parser and the
-two readers' agreement are verified, in the default lane. The live end-to-end effect named under
-*Resume* — that `append_entry` now refuses on an unpushed `bug-fix-session-log.md` — is **not**: the
-running MCP server predates this commit, so confirming it needs `cargo rb` and an `/mcp` reconnect.
+**Scope of the verification.** The parser and the two readers' agreement are verified in the default
+lane, and the live tool-surface effect is verified too — see *Resume*. Both commits are on
+`origin/experiments` (pushed by a peer alongside their own work, not by this session).
 ## Workarounds
 
 Re-indent the five files' sequence items by two spaces — a whitespace-only change that restores both
@@ -242,12 +241,25 @@ ledgers as unguarded: do not hand-write `## PREFIX-N` headings into them, and pu
 
 ## Resume
 
-Done: fixture added, RED observed, indentation arm deleted, gate green, committed at `56f3d0bb`.
+Done, including the live check. Fixture added, RED observed, indentation arm deleted, gate green,
+committed at `56f3d0bb`, archived at `79b8a3d9`; both are on `origin/experiments`.
 
-Remaining, and only this — `cargo rb`, then `/mcp` reconnect, then confirm the live effect on a
-ledger using the flush form: commit a change to `docs/trackers/bug-fix-session-log.md` without
-pushing and check `append_entry` refuses with *"Push this ledger's commits, then allocate."* Until
-that runs, the fix is verified at the parser and unverified at the tool surface.
+**Live verification, 2026-09-04, after `cargo rb` + an `/mcp` reconnect.** `edit_file` on
+`docs/trackers/bug-fix-session-log.md` is now refused with *"is a librarian-managed artifact (a
+ledger — it declares an entry_prefix, and its PREFIX-N ids are allocated by the server)"*. That file
+is the discriminating case: flush form, **no** stamped `id:`, **no** `expects_augmentation:` — so the
+ledger predicate is its only possible reason to be guarded, and before this fix
+`declared_entry_prefixes` returned `[]` for it and the arm could not fire.
+`docs/trackers/shell-gating-session-log.md` — indented form, same absence of both other reasons — was
+the positive control and refuses identically. Both probes targeted a heading that does not exist, so
+neither could write whichever way the guard went.
+
+**Not exercised live: `append_entry`'s cross-host high-water arm.** It reads the same
+`declared_entry_prefixes` call (`src/librarian/tools/append_entry.rs:155`), so it sees the same value
+proven above — but its refusal fires only when the ledger carries unpushed commits, and
+`experiments` had none at the time. The only way to observe it was to manufacture a throwaway commit
+on a ledger four other sessions were actively writing to, which costs more than the observation is
+worth. Recorded as unobserved rather than inferred as passing.
 ## References
 
 - `src/util/librarian_guard.rs:293-335` — `declared_entry_prefixes`, the mis-parse.
