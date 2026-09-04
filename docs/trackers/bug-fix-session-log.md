@@ -11486,6 +11486,120 @@ again: the guard is a mechanism in the repo that owns the name, and a repo that 
 *documents* someone else's tool has no such guard (`OB-16`). Left for its owner rather than
 swept during a wrap-up.
 
+### Row 19 — SCOPE, not health: a correct instrument answering truthfully about the wrong subject
+
+The only row on a different axis, and `add4873b` is the one who named it. Every other row is an
+instrument that was **stale, non-independent, or blind** — wrong about a state. This one was
+correct, correctly run, and answered **truthfully about a different file.**
+
+Told that `mirela/backend-kotlin/CLAUDE.md` instructs the renamed `artifact(…)`, I ran
+`grep -cE '\bartifact\(' CLAUDE.md` from my own cwd and got **0** — which reads exactly like
+*"your claim is false"*. Their file has 4 hits at the lines they named. **`grep -c` on a
+relative path cannot fail; it just resolves somewhere, and nothing in the digit `0` carries the
+cwd it was measured in.**
+
+**The remedy is different from every other row's**, which is why this is not a duplicate: not a
+control row, not a second method, not a paired non-empty read. **Make the subject explicit —
+absolute path in the command — so the answer names what it answered about.** A control does not
+help here; a control run in the same wrong directory agrees perfectly.
+
+General form: **an instrument reports on the subject it was pointed at, and the report does not
+carry the pointing.** Ask *what did this measure*, not only *is this measurement healthy*.
+
+### Row 20 — two queries against one cache are not corroboration, and feel like it
+
+`add4873b` reported *"0 ahead, origin contains 8454d97d3"* believing they had corroborated,
+because they ran **two** commands: `git rev-list --count origin/master..HEAD` and
+`git branch -r --contains`. **Both read the same local remote-tracking ref.** One instrument
+queried twice, wearing the shape of independent confirmation.
+
+Their framing is the sharp part: this is **worse than a single check**, because a single check
+leaves you knowing you have one, while the pair manufactures the *feeling* of having
+corroborated. Re-run against `ls-remote`, the claim held — so it was **true, established by an
+instrument that could not have contradicted it**, which is not the same as verified.
+
+This is CLAUDE.md § *Reaching a Peer Session*'s **"check independence, not agreement"** — *"two
+per-profile instruments agreeing is one blind spot counted twice, which at the point of use is
+indistinguishable from corroboration"* — arriving in an unrelated subsystem, from a session that
+reached it by measurement rather than by reading the rule. The cheap test: **name the substrate
+each check reads.** Two names, or it is one check.
+
+### The one promoted rule — an emptiness result is never self-certifying
+
+The entry's general form (*"ask what a broken instrument's summary line would look like"*) is a
+question, and a question needs a person to ask it. `mrv-poc-65` extracted the mechanical
+special case that covers a large share of the rows above, and it needs nobody to be suspicious:
+
+> **An emptiness result is never self-certifying. It always needs a paired non-empty read
+> through the same credential and the same path.**
+
+A zero has two preimages that no amount of care separates — *the thing is absent* and *I could
+not see the thing* — and they print identically. `gcloud storage ls gs://…/_ocr_cache/`
+returning "matched no objects" is what a completed deletion looks like AND what an
+unauthorised or misdirected listing looks like. The separating control cost one call: `ls` the
+bucket root, get 12+ prefixes, and you have proved you can read the bucket at all.
+
+**This subsumes row 6** — `doc(find, semantic=…)` returning 0 hits for prompt-engineering,
+where the paired non-empty read (the same binary returning 50 hits on codescout) is what
+turned it from "the store is empty" into "the embedder is absent". Same shape, different
+substrate, and I had the instance without the rule. **Rows 5 and 8 are the same rule against a
+zero-shaped answer rather than a literal zero** — an empty SKIP-filled table, a "no moves" over
+a window.
+
+It also states *why* the paired read must go through **the same credential and the same path**:
+a control that authenticates differently, or reads a different prefix, tests a different
+proposition and licenses nothing.
+
+### ⚠ THE DENOMINATOR — read before citing any count above
+
+**Every row in this entry is a CATCH, and until 2026-09-04 06:2x the entry contained no
+confirmations at all.** That is the defect CLAUDE.md § *Testing Discipline* names directly:
+*"when a re-derivation confirms, publish the confirmation. That is a **denominator**, never a
+catch — absorbing it as one makes the population look self-correcting."* Sixteen hits and no
+misses reads as *the class fires every time*, and nothing here licenses that.
+
+**First confirmation, and it is currently the whole denominator (n=1):** `claude-plugins-e6`
+applied this entry's test *before* publishing a number — a paired eval sweep, 03:09:29–03:58:25,
+spawning a fresh codescout binary per run, where a rebuild mid-window would have silently split
+treatment from control **with both arms still reporting plausibly**. They asked what a broken
+run's summary would look like, got "identical", and reached for the control: the binary's mtime
+is 03:07:40 — before the window opened and unchanged since — so all **90 runs** loaded one
+build. **Clean.** The instrument was fine and the check said so.
+
+**So the honest rate is 16 catches over an unknown base**, and the base is unknown because
+nobody was recording confirmations — including me, for the entire evening this entry documents.
+Do not quote 16 as a frequency. It is a count of *how often this class was found when looked
+for*, and the looking was not systematic. **Add a line here whenever the test comes back
+clean**; that is the only thing that turns this into a rate rather than a scare.
+
+### Row 17 — a guard conditioned on a file the breaking class never touches
+
+A different shape from the rest: not an instrument that lied, but a correct guard **that the
+breaking commit could not reach**. `claude-plugins-e6` pushed a docs-only commit that grew a
+shipped `SKILL.md` past `test-recon-skill-split.sh`'s 14,056 B cap, **red, to `main`**. Nothing
+in between saw it — the pre-push guard gates version-bump parity rather than tests, and fires
+only when the pushed range touches a `plugin.json`, which a docs commit does not. The only
+thing that caught it was `release.sh` step 0, which is not CI and runs at release time.
+
+**A content-budget gate on a shipped prompt surface is breakable by exactly the class of commit
+nobody expects to need a test run, and the guard that would catch it is conditioned on a file
+that class never touches.** This is CLAUDE.md's *"loudness is a property of a PATH"* meeting
+`OB-16`'s checkability hole, and it widens `OB-16` past the tool-registry axis. Fixed by
+trimming, not by raising the cap.
+
+### Row 18 — the misleading party is the OBSERVER, not the artifact
+
+`claude-plugins-e6`'s sharpening of the `(deleted)`-inode finding, and it generalises the whole
+entry. A committed `SKILL.md` reaches no profile until `release.sh` seeds a cache and repoints
+three install records — so hooks resolve from the working tree while skills resolve from
+`installPath`. **The editing session is simultaneously the party most certain the change
+shipped and the one structurally least able to check** — exactly as a process cannot read its
+own `(deleted)` exe.
+
+That reframes every remedy in this entry: the control works **because it is a third party**,
+not because it is clever. A re-read cannot help, at any level of care, because the re-reader is
+the party whose belief is the thing in question. Committed at `codescout:058bedc5`.
+
 ### Rows 12–14 — the two obvious alternative remedies both fail, and my own advice was one of them
 
 **Row 12 kills the remedy every reader will reach for first.** Told that a process may be on a
