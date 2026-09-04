@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 115
-entry_high_water_W: 105
+entry_high_water_W: 106
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -172,6 +172,7 @@ entry_high_water_W: 105
 |----|------|-------:|---------|----------------|--------|
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
 | W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
+| W-106 | 2026-09-04 | high | **Eight instrument reports returned a plausible wrong value rather than erroring, in one evening across two sessions. 0 of 8 were caught by care, suspicion, or knowing the class; 8 of 8 by a cheap artifact in the output that a broken run cannot fabricate** — an absurd mutation that must die, a control row that must stay green, a `truncated: true` flag, a per-row KILLED/SKIP label. Unit: one invocation of a measuring apparatus whose output is quoted in a commit or bug file (`2685fcd1`, `a5bbc22d`, `96574516`, `f008e74f`, `F-113`, peer `24c55642`), so the count is re-countable rather than asserted | Knowing the class prevented nothing, twice, in the strongest form available: row 2 happened *while writing up row 1*, and the peer produced row 8 an hour after being filed in writing about themselves for that exact window-vs-population error. Same shape CLAUDE.md § *Observer Blindness* measured at n=4 on 2026-08-30, arriving independently at n=8 — and with the **remedy side** measured, which that entry did not have. **Checkable in advance:** ask what a BROKEN instrument's summary line would look like; in rows 1, 3, 5 and 8 it is identical to the healthy one, and that is the condition for needing a control | validated |
 | W-103 | 2026-09-04 | high | **A schema field is not a value — when a predicate's safety rests on a payload being populated, scroll the real store before writing the predicate.** Post-rebuild recon on the vector-routing seam sampled 200 points of the live codescout collection and found `project_id: ''` on **200 of 200**: every pre-fix vector carries the empty payload that `99558134` fixed, and the fix is not retroactive | The planned GC backstop drops a collection when its recorded path "no longer exists on disk". An empty string is not a path that exists, so the predicate evaluates TRUE for codescout's collection and destroys the whole semantic index — **29,154 vectors** — while doing exactly what it was specified to do. It would have shipped green: a fresh fixture writes through the *fixed* path, so its payloads are populated and the orphan branch never fires. The plan cited the field from `src/retrieval/artifact.rs:46,64`, where it is genuinely declared — reading the source confirms the field exists; only reading the data shows what is in it | validated |
 | W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
 | W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
@@ -11323,6 +11324,75 @@ callers before editing).
 
 **Severity of the averted miss:** high — a scope-specific silent wrong answer in the same
 class as the bug being fixed, shipped behind a passing project-scoped test.
+
+## W-106 — Eight instruments lied plausibly in one evening; none was caught by care and all eight by a cheap artifact a broken run cannot fabricate
+
+**Valid:** dated 2026-09-04
+
+**Observed:** Over one evening's work on this checkout, **8 instrument reports returned a
+plausible wrong value rather than erroring.** Unit: *one instrument report* — a single
+invocation of a measuring apparatus (test runner, mutation matrix, gate command, audit query,
+semantic probe) that produced a readable answer which was false. Not defects in the code under
+test; defects in the thing doing the measuring. Two sessions, `66523284` and `ffb95976`.
+
+| # | instrument | what it reported | what was true | what caught it |
+|---|---|---|---|---|
+| 1 | mutation runner (Python) | all 7 mutations SURVIVED | all 7 killed | an **absurd mutation** whose survival was not believable |
+| 2 | same runner, second run | M6 killed by the *sanitizer's* test | killed by the teardown test | reading the **killer's name**, not the 7/7 tally |
+| 3 | mutation runner (Rust) | **control** RED | control green | the **control row** — it cannot legitimately fail |
+| 4 | same runner | M1 KILLED | killed by a *compile error*, which is no kill | the per-row **killer label** |
+| 5 | same runner | clean table, 7 rows | 2 rows silently **SKIPPED** on stale anchors | the per-row **SKIP label** |
+| 6 | `doc(find, semantic=…)` | 0 hits from prompt-engineering | embedder absent (`LIBRARIAN_EMBED_MODEL=""` passes the presence check) | a **positive control** — the same binary returned 50 hits on codescout |
+| 7 | gate run | `exit 0`, `0 passed` | 3,525 + 5,113 passed | re-running to capture **every** `test result:` line |
+| 8 | `librarian(audit_log)` | "no moves" | window of 40 of 1,727 rows | the **`truncated: true`** flag in the output |
+
+**Derivation of the 8:** every row is one invocation this session or `ffb95976` ran and whose
+output is quoted in a commit message or a bug file from 2026-09-03/04 — `2685fcd1`,
+`a5bbc22d`, `96574516`, `f008e74f`, `bug-fix-session-log:F-113`, and the peer's `24c55642`.
+Excluded, deliberately: my two fabricated patch-ids (an assertion, not an instrument) and the
+one false justification in a shipped comment (a claim, not a measurement). Counting those
+gives 11 and answers a different question.
+
+**The result, and it is the entry:** **0 of 8 were caught by care, by suspicion, or by knowing
+the failure class. 8 of 8 were caught by an artifact in the output that a broken run cannot
+fabricate** — a control, a flag, or a per-row label.
+
+**And knowing the class demonstrably did not help, twice, in the strongest available form.**
+Row 2 happened *while I was writing up row 1*. `ffb95976` produced row 8 an hour after being
+filed, in writing, about themselves, for exactly that window-vs-population error
+(`2026-08-31-peer-commit-captures-another-sessions-working-tree.md`). Two sessions, two
+classes each party had just been taught, repeated anyway. This is the same shape CLAUDE.md
+§ *Observer Blindness* measured at n=4 on 2026-08-30 — *"every one was committed by an author
+actively writing about that class"* — arriving independently at n=8 with the **remedy side**
+measured, which that entry did not have.
+
+**What the catchers have in common** is cheaper than vigilance and is the reusable half: each
+is a **cheap thing in the output whose value a broken run could not have produced.** An absurd
+mutation must die. A control must stay green. A `truncated` flag is either present or not. A
+per-row label is either KILLED or SKIP. None requires the reader to be suspicious; each fails
+loudly when the instrument is wrong, including when nobody is looking for it.
+
+**The tell for a missing one:** if a run's summary line is the only thing you read, ask what a
+*broken* instrument's summary would look like. In rows 1, 3, 5 and 8 it looks **identical** to
+the healthy one. That is the condition for needing a control, and it is checkable in advance
+rather than in hindsight.
+
+**Lesson:** when adding a measuring apparatus, spend the first unit of effort on **one input
+whose correct output is known and cannot be produced by a broken run** — not on making the
+apparatus careful. Concretely: an absurd mutation in every matrix, a control row on every
+comparison, a positive control beside every zero, and read per-row labels rather than the
+tally. **A tally is an aggregate and cannot verify the per-member claim it appears to
+support** — CLAUDE.md § *Testing Discipline* already states this for tests; rows 2, 4 and 5
+are the same law holding against the *instrument*.
+
+**Rests on:** measured 2026-09-03/04 across two sessions on one checkout. Every row's output
+is quoted in a commit or bug file listed above, so the population is re-countable rather than
+asserted. Corroborates and extends CLAUDE.md § *Observer Blindness* (n=4, 2026-08-30) with the
+first measurement of what actually does the catching.
+
+**Status:** validated
+**Severity:** high — the remedy this displaces ("know the class, look harder") was the default,
+and is measured here at 0 for 8
 
 ## Template for new entries
 
