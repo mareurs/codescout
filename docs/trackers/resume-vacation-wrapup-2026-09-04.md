@@ -539,6 +539,34 @@ property is **latency**: correct while it is still cheap, and the incentive to q
 never forms. That is a design property of the channel, not a virtue of the participants, which is
 why it can be relied on again.
 ## Notes for whoever picks this up
+**This file is one of three resume surfaces, and it answers only one question.** They are
+deliberately non-overlapping — none summarises another, because a summary in an index is a second
+copy of a live document that decays while reading identical to the original.
+
+| surface | the axis it answers | scope |
+|---|---|---|
+| **this file** (`VW-N`) | **session → status** — who held what, at one instant | all repos, point-in-time |
+| [`resume-queue-index.md`](resume-queue-index.md) (`RQ-N`, `ea6e212a549f9972`) | **tracker → remaining work** | all repos |
+| [`../TAXONOMY.md`](../TAXONOMY.md) § resume-queue table | **prefix → file** — permanent | codescout only |
+
+**Start at `RQ-N` if the question is "what work is left?"** and here only if it is "what was each
+session holding when the machine was left?" This roster is a snapshot and goes stale by
+construction; the tracker-level view does not.
+
+Two cautions its author built in and which apply when reading it: its per-tracker entry count is a
+**total** heading count, not an open-work count, so reading it as backlog size overstates every
+row; and a ✅ there means *the file was opened from this machine*, never *the work is still
+outstanding* — a distinction this roster's § *A stale tracked file is worse than a missing one*
+exists to explain. Its MRV-poc section carries this roster's four unanswered sessions as a
+declared **hole** rather than omitting them: a floor that says so, which is the one row there
+reporting absence of evidence as absence of evidence.
+
+Also new and committed: [`resume-artifact-chunk-grain-retrieval.md`](resume-artifact-chunk-grain-retrieval.md)
+(`AC-N`, `9ba8a7a553b7a097`), three open items that previously had no committed home. `AC-1` states
+what a **wrong** result looks like alongside a right one, because a stale MCP server returns
+*"changed nothing"* as a plausible number rather than an error — and cites this file's
+deleted-inode finding as its pre-flight.
+
 
 **The instruments that answer "what changed?" are already written** — do not re-derive them.
 `scripts/probe-cluster-census.py` for per-class membership, `scripts/probe-caveat-density.py` for
