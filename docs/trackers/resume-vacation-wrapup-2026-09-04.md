@@ -130,6 +130,36 @@ Recorded rather than resolved because the honest claim is the disjunction. **The
 file is a count of SOCKETS, which is what the instrument measures** — read it as that, and do not
 re-use it as a count of independent work streams without re-deriving it. Raised by the session
 itself, against its own row, which is the only vantage from which it was visible at all.
+### A session's REACH is not its cwd — the boundary no enumeration draws
+
+Found at the close of the sweep, by a correction that was itself an inference. `4d30fbb4-f68c-4ae1-b38d-0e037ea28efc`
+observed backend-kotlin's 15 commits arrive at origin at 08:57:08 without having pushed them, and
+attributed it to *"another session in this checkout"* — eliminating over the four sessions whose
+**cwd** is backend-kotlin, all of which it held subscriptions on and all of which reported clear.
+
+The elimination was sound over its population and the population had the wrong boundary. The push
+was made by the coordinator session (`f2ab55f8-e3ac-4e0a-9eef-3b92d77bac20`), whose cwd is
+**codescout** and which reaches backend-kotlin only because `/home/marius/work/mirela` is an
+**additional working directory** on it. Confirmed by matching the push's own output
+(`356afc7c3..ba967b313`) against `git reflog show origin/master`.
+
+**Every instrument used in this sweep reports where a session IS. What mattered was where it can
+WRITE.** `scripts/peer-sessions.sh` prints exactly one cwd per session; the additional-working-directories
+list is not enumerated anywhere. This is the profile-scoped `ListAgents` blind spot one level out —
+not *the list is short*, but *the list is answering a different question than the one being asked
+of it*.
+
+**A count correction owed in the same breath, and recorded rather than quietly fixed.** This
+roster first recorded backend-kotlin as **13** unpushed; the session read **15**; the push moved
+**15**. Both readings were correct at their instants — the roster's at 05:40 UTC, before
+`1a3e6fbc6` and `ba967b313` landed. The row carried the value without its timestamp, which is the
+failure this repo has a standing rule against, committed inside the artifact warning about it.
+
+**The shared-index race, now measured five times in one morning across two repos.** Three in the
+codescout tree and two in backend-kotlin within the same minute — one session with a peer's file
+one second from its commit, another with that session's file appearing between its `git add` and
+its verification call. Every one committed by pathspec; none swept another. The window is roughly
+one second wide and the mitigation works.
 ## Roster
 
 Status vocabulary, as briefed to every session: **stop** = nothing outstanding;
