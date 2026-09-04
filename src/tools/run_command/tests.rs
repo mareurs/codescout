@@ -506,6 +506,10 @@ async fn onboarding_returns_status_when_already_done() {
     // First call does full onboarding
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
     assert!(result.get("languages").is_some()); // full onboarding result
+                                                // …then the step it only instructs: a subagent writing the system prompt. The
+                                                // version stamp is witnessed against that file now, so a project with memories and
+                                                // no prompt correctly reports a refresh rather than "already onboarded".
+    simulate_subagent_prompt_write(dir.path());
 
     // Second call (no force) returns status instead
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -597,10 +601,14 @@ async fn onboarding_errors_without_project() {
 
 #[tokio::test]
 async fn onboarding_status_includes_memories_and_message() {
-    let (_dir, ctx) = project_ctx().await;
+    let (dir, ctx) = project_ctx().await;
 
     // Run onboarding first
     Onboarding.call(json!({}), &ctx).await.unwrap();
+    // …then the step onboarding only *instructs*: a subagent writing the prompt.
+    // Without it the project has memories but no `.codescout/system-prompt.md`, and is
+    // legitimately not yet fully onboarded.
+    simulate_subagent_prompt_write(dir.path());
 
     // Status call returns guidance message and memories
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -611,10 +619,12 @@ async fn onboarding_status_includes_memories_and_message() {
 
 #[tokio::test]
 async fn onboarding_status_includes_private_memories_when_present() {
-    let (_dir, ctx) = project_ctx().await;
+    let (dir, ctx) = project_ctx().await;
 
     // Run full onboarding first (creates config + onboarding memory)
     Onboarding.call(json!({}), &ctx).await.unwrap();
+    // …plus the deferred subagent write, which the version stamp is witnessed against.
+    simulate_subagent_prompt_write(dir.path());
 
     // Seed a private memory
     ctx.agent
@@ -632,10 +642,12 @@ async fn onboarding_status_includes_private_memories_when_present() {
 
 #[tokio::test]
 async fn onboarding_status_omits_private_memories_field_when_empty() {
-    let (_dir, ctx) = project_ctx().await;
+    let (dir, ctx) = project_ctx().await;
 
     // Run full onboarding first (creates config + onboarding memory), no private memory
     Onboarding.call(json!({}), &ctx).await.unwrap();
+    // …plus the deferred subagent write, which the version stamp is witnessed against.
+    simulate_subagent_prompt_write(dir.path());
 
     // Fast-path status call should NOT include private_memories field
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -646,10 +658,12 @@ async fn onboarding_status_omits_private_memories_field_when_empty() {
 
 #[tokio::test]
 async fn onboarding_call_content_delivers_message_when_already_done() {
-    let (_dir, ctx) = project_ctx().await;
+    let (dir, ctx) = project_ctx().await;
 
     // First call does full onboarding (creates config + writes memory)
     Onboarding.call(json!({}), &ctx).await.unwrap();
+    // …plus the deferred subagent write, which the version stamp is witnessed against.
+    simulate_subagent_prompt_write(dir.path());
 
     // Second call (no force) — call_content must deliver the message, not "[?]"
     let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
@@ -759,6 +773,8 @@ async fn onboarding_status_includes_per_project_memories_for_workspace() {
 
     // Full workspace onboarding — writes per-project onboarding memories
     Onboarding.call(json!({}), &ctx).await.unwrap();
+    // …plus the deferred subagent write, which the version stamp is witnessed against.
+    simulate_subagent_prompt_write(root);
 
     // Second call hits the already-onboarded fast path
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -4228,6 +4244,9 @@ async fn onboarding_triggers_refresh_when_version_stale() {
             system_prompt: None,
             tool_timeout_secs: 60,
             onboarding_version: None, // pre-versioning → stale
+            // No recorded baseline, which is NOT read as a witnessed regeneration:
+            // without one there is no evidence either way, so the version decides.
+            system_prompt_sha256: None,
         },
         embeddings: Default::default(),
         ignored_paths: Default::default(),
@@ -4270,6 +4289,281 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         "must be lightweight refresh"
     );
 }
+/// Seed a fully-onboarded temp project. `version` and `baseline` seed the two fields
+/// the system-prompt witness reads; `prompt` seeds `.codescout/system-prompt.md`
+/// (`None` leaves it absent). Kept separate from `ctx_over` so a test can re-enter the
+/// same project without overwriting what the previous call recorded — the whole point
+/// of the witness is what survives between two calls.
+fn seed_onboarded_project(
+    dir: &std::path::Path,
+    version: Option<u32>,
+    baseline: Option<String>,
+    prompt: Option<&str>,
+) {
+    let config_dir = dir.join(".codescout");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(dir.join("main.rs"), "fn main() {}").unwrap();
+
+    let config = crate::config::project::ProjectConfig {
+        project: crate::config::project::ProjectSection {
+            name: "test".into(),
+            languages: vec!["rust".into()],
+            encoding: "utf-8".into(),
+            system_prompt: None,
+            tool_timeout_secs: 60,
+            onboarding_version: version,
+            system_prompt_sha256: baseline,
+        },
+        embeddings: Default::default(),
+        ignored_paths: Default::default(),
+        security: Default::default(),
+        memory: Default::default(),
+        libraries: Default::default(),
+        lsp: Default::default(),
+    };
+    std::fs::write(
+        config_dir.join("project.toml"),
+        toml::to_string_pretty(&config).unwrap(),
+    )
+    .unwrap();
+
+    if let Some(body) = prompt {
+        std::fs::write(config_dir.join("system-prompt.md"), body).unwrap();
+    }
+
+    let mem_dir = config_dir.join("memories");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    std::fs::write(mem_dir.join("onboarding.md"), "Languages: rust").unwrap();
+}
+
+async fn ctx_over(dir: &std::path::Path) -> ToolContext {
+    let agent = Agent::new(Some(dir.to_path_buf())).await.unwrap();
+    ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+/// Read the two witness fields back off disk, bypassing any in-memory config — the
+/// defect being guarded is what a *later session* finds on disk.
+fn stored_witness(dir: &std::path::Path) -> (Option<u32>, Option<String>) {
+    let config = crate::config::project::ProjectConfig::load_or_default(dir).unwrap();
+    (
+        config.project.onboarding_version,
+        config.project.system_prompt_sha256,
+    )
+}
+/// Simulate the one step `onboarding()` defers: a subagent writing the system prompt.
+///
+/// Every "the second call returns status" test needs this, and none of them used to.
+/// A fresh config was stamped as current at creation, so those tests reported a fully
+/// onboarded project while `.codescout/system-prompt.md` had never been written — the
+/// certification-without-the-artifact defect, sitting inside the fixtures that were
+/// supposed to describe a completed onboarding. The stamp is now witnessed against the
+/// file, so the fixture has to produce what the real flow produces.
+fn simulate_subagent_prompt_write(dir: &std::path::Path) {
+    let config_dir = dir.join(".codescout");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("system-prompt.md"),
+        "# Test project system prompt\n",
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn onboarding_refresh_prompt_records_a_baseline_without_stamping_the_version() {
+    // Site 1 of four: `handle_refresh_prompt`. Its response only *instructs* a
+    // subagent, so a version stamped here certifies work that has not happened.
+    let dir = tempdir().unwrap();
+    seed_onboarded_project(
+        dir.path(),
+        Some(ONBOARDING_VERSION - 1),
+        None,
+        Some("v-old prompt"),
+    );
+    let ctx = ctx_over(dir.path()).await;
+
+    let result = Onboarding
+        .call(json!({ "refresh_prompt": true }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result.get("subagent_prompt").is_some(),
+        "the regeneration is deferred to a subagent, which is why the stamp cannot precede it"
+    );
+
+    let (version, baseline) = stored_witness(dir.path());
+    assert_eq!(
+        version,
+        Some(ONBOARDING_VERSION - 1),
+        "the version must NOT be stamped before the regeneration runs"
+    );
+    assert!(
+        baseline.is_some(),
+        "the baseline the regeneration must supersede has to be recorded, or the \
+         completion can never be witnessed"
+    );
+}
+
+#[tokio::test]
+async fn onboarding_stale_version_records_a_baseline_without_stamping_the_version() {
+    // Site 2 of four: `handle_already_onboarded`, reached by a bare call. Its write
+    // was commented "prevents re-trigger across sessions" — which is precisely the
+    // signal that had to survive.
+    let dir = tempdir().unwrap();
+    seed_onboarded_project(
+        dir.path(),
+        Some(ONBOARDING_VERSION - 1),
+        None,
+        Some("v-old prompt"),
+    );
+    let ctx = ctx_over(dir.path()).await;
+
+    let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+    assert_eq!(result["version_stale"].as_bool(), Some(true));
+
+    let (version, baseline) = stored_witness(dir.path());
+    assert_eq!(
+        version,
+        Some(ONBOARDING_VERSION - 1),
+        "the version must NOT be stamped before the regeneration runs"
+    );
+    assert!(baseline.is_some(), "the baseline has to be recorded");
+}
+
+#[tokio::test]
+async fn onboarding_force_records_a_baseline_without_stamping_the_version() {
+    // Site 3 of four: `perform_full_onboarding`'s tail, whose own comment called the
+    // write "optimistic". Full onboarding also returns a `subagent_prompt`, so the
+    // prompt file is no more written on this path than on the lightweight one — the
+    // site a fix aimed only at "refresh" would have left writing the same falsehood.
+    let dir = tempdir().unwrap();
+    seed_onboarded_project(
+        dir.path(),
+        Some(ONBOARDING_VERSION - 1),
+        None,
+        Some("v-old prompt"),
+    );
+    let ctx = ctx_over(dir.path()).await;
+
+    let result = Onboarding
+        .call(json!({ "force": true }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result.get("subagent_prompt").is_some(),
+        "full onboarding defers the prompt write too"
+    );
+
+    let (version, baseline) = stored_witness(dir.path());
+    assert_eq!(
+        version,
+        Some(ONBOARDING_VERSION - 1),
+        "force must not stamp the version before the regeneration runs either"
+    );
+    assert!(baseline.is_some(), "the baseline has to be recorded");
+}
+
+#[tokio::test]
+async fn onboarding_force_reports_that_it_subsumed_refresh_prompt() {
+    // The sibling defect: both flags accepted, `force` honoured, `refresh_prompt`
+    // silently dropped. `force` genuinely is a superset, so the fix is to say so
+    // rather than to refuse — and to say it on the compact line the caller reads,
+    // not only in a JSON field nothing renders.
+    let dir = tempdir().unwrap();
+    seed_onboarded_project(dir.path(), Some(ONBOARDING_VERSION), None, Some("prompt"));
+    let ctx = ctx_over(dir.path()).await;
+
+    let result = Onboarding
+        .call(json!({ "force": true, "refresh_prompt": true }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["refresh_prompt_subsumed"].as_bool(),
+        Some(true),
+        "the substitution must be reported, not silent"
+    );
+    let compact = Onboarding.format_compact(&result).unwrap_or_default();
+    assert!(
+        compact.contains("refresh_prompt subsumed"),
+        "and must reach the compact surface, not only the JSON: got {compact:?}"
+    );
+
+    // Without the flag, no note — otherwise the field says nothing.
+    let plain = Onboarding
+        .call(json!({ "force": true }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        plain.get("refresh_prompt_subsumed").is_none(),
+        "a note that is always present distinguishes nothing"
+    );
+}
+
+#[tokio::test]
+async fn onboarding_stamps_the_version_once_the_prompt_content_has_moved() {
+    // The whole loop the fix exists for. A refresh is requested (baseline recorded,
+    // version untouched), a subagent then rewrites the prompt, and the next call
+    // witnesses the change and stamps. No production code path writes
+    // `.codescout/system-prompt.md`, so the content moving is the only evidence
+    // available that the deferred work ever happened.
+    let dir = tempdir().unwrap();
+    seed_onboarded_project(
+        dir.path(),
+        Some(ONBOARDING_VERSION - 1),
+        None,
+        Some("v-old prompt"),
+    );
+    let ctx = ctx_over(dir.path()).await;
+
+    Onboarding
+        .call(json!({ "refresh_prompt": true }), &ctx)
+        .await
+        .unwrap();
+    let (version_after_request, baseline) = stored_witness(dir.path());
+    assert_eq!(
+        version_after_request,
+        Some(ONBOARDING_VERSION - 1),
+        "still behind — nothing has regenerated yet"
+    );
+
+    // The subagent does its job.
+    std::fs::write(
+        dir.path().join(".codescout").join("system-prompt.md"),
+        "v-new prompt",
+    )
+    .unwrap();
+
+    // Re-enter over the same project, without reseeding what the first call recorded.
+    let ctx2 = ctx_over(dir.path()).await;
+    let result = Onboarding.call(json!({}), &ctx2).await.unwrap();
+    assert!(
+        result.get("subagent_prompt").is_none(),
+        "a witnessed regeneration must not ask for another one"
+    );
+
+    let (version, new_baseline) = stored_witness(dir.path());
+    assert_eq!(
+        version,
+        Some(ONBOARDING_VERSION),
+        "the witness must stamp the version it can now certify"
+    );
+    assert_ne!(
+        new_baseline, baseline,
+        "and re-record the content that earned it — leaving the old baseline would keep \
+         vouching for this regeneration after the next ONBOARDING_VERSION bump"
+    );
+}
+
 #[test]
 fn tee_path_is_safe_accepts_real_platform_temp_paths() {
     use super::inner::tee_path_is_safe;
@@ -4384,6 +4678,9 @@ async fn onboarding_fast_path_when_version_current() {
             system_prompt: None,
             tool_timeout_secs: 60,
             onboarding_version: Some(ONBOARDING_VERSION),
+            // A current version short-circuits the witness entirely, so the baseline
+            // is irrelevant here — `None` keeps that explicit rather than incidental.
+            system_prompt_sha256: None,
         },
         embeddings: Default::default(),
         ignored_paths: Default::default(),

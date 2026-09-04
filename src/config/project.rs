@@ -34,10 +34,29 @@ pub struct ProjectSection {
     /// This field is still read as a fallback if the file doesn't exist.
     #[serde(default)]
     pub system_prompt: Option<String>,
-    /// Tracks which ONBOARDING_VERSION was used to generate the system prompt.
+    /// The ONBOARDING_VERSION a system-prompt regeneration was last *stamped* for.
     /// `None` means pre-versioning — treated as stale.
+    ///
+    /// This records a **completed** regeneration, witnessed via
+    /// `system_prompt_sha256` below. It used to be written when a refresh was
+    /// merely requested, which certified work that had not happened yet — see
+    /// `docs/issues/2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md`.
     #[serde(default)]
     pub onboarding_version: Option<u32>,
+    /// SHA-256 of `.codescout/system-prompt.md` as it stood when a refresh was last
+    /// requested — the content the pending regeneration is expected to supersede.
+    /// A hash that has since moved is positive evidence the regeneration happened,
+    /// which is the only signal available: nothing in this process writes that file,
+    /// so a subagent does it later, or never. An absent file hashes as empty content
+    /// so a project whose prompt is not yet written still records a baseline.
+    ///
+    /// `None` means no request has ever been recorded on this machine, and is
+    /// deliberately NOT read as a difference. `project.toml` is gitignored while
+    /// `system-prompt.md` is tracked, so `None` beside a present file is exactly the
+    /// state a fresh clone arrives in — treating that as a witnessed regeneration
+    /// would report another machine's stale prompt as current.
+    #[serde(default)]
+    pub system_prompt_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,6 +571,7 @@ impl ProjectConfig {
                 tool_timeout_secs: default_timeout(),
                 system_prompt: None,
                 onboarding_version: None,
+                system_prompt_sha256: None,
             },
             embeddings: EmbeddingsSection::default(),
             ignored_paths: IgnoredPathsSection::default(),

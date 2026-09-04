@@ -46,6 +46,119 @@ pub(crate) fn onboarding_version_stale(stored: Option<u32>) -> bool {
         Some(v) => v < ONBOARDING_VERSION,
     }
 }
+/// Hash `.codescout/system-prompt.md` — the artifact `onboarding_version` certifies.
+///
+/// An absent file hashes as empty content (see `hash_file_or_empty`), so a project
+/// whose prompt has not been written yet still yields a comparable baseline.
+pub(crate) fn hash_system_prompt(root: &std::path::Path) -> String {
+    crate::memory::hash::hash_file_or_empty(&root.join(".codescout").join("system-prompt.md"))
+}
+
+/// Returns true if the stored system prompt is behind the compiled templates.
+///
+/// A stale `onboarding_version` is necessary but **not sufficient**. Nothing in this
+/// process writes `.codescout/system-prompt.md`: every write is a subagent following
+/// the instructions this tool returns, and that step may never run. So the version
+/// alone can only ever record that a refresh was *requested*.
+///
+/// `certified` is the prompt's hash as recorded at request time. A current hash that
+/// differs from it is positive evidence the regeneration happened, and outranks the
+/// version — which is what lets the request-time record stay honest instead of
+/// certifying work in advance.
+///
+/// `certified == None` is **not** a difference. Without a recorded baseline there is
+/// no evidence in either direction, and reading absence as change would report a
+/// freshly cloned prompt as current: `project.toml` is gitignored while
+/// `system-prompt.md` is tracked, so `None` beside a present file is precisely the
+/// state a clone arrives in.
+pub(crate) fn system_prompt_stale(
+    stored_version: Option<u32>,
+    certified: Option<&str>,
+    current: &str,
+) -> bool {
+    if !onboarding_version_stale(stored_version) {
+        return false;
+    }
+    match certified {
+        Some(c) => c == current,
+        None => true,
+    }
+}
+
+/// Record the prompt's current content as the baseline a requested refresh must
+/// supersede, **without** stamping the version.
+///
+/// The version deliberately stays put: it is the only signal that the prompt is
+/// behind, and the regeneration this call is about has not happened yet. Writing it
+/// here is the defect this replaced — following the instruction disarmed the detector
+/// before the repair ran, and the stamp landed in a gitignored file while the artifact
+/// it certified was tracked, so no reviewer and no `git status` could see the gap.
+async fn record_refresh_request(ctx: &ToolContext) -> anyhow::Result<()> {
+    let config_path = ctx
+        .agent
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            let config_path = p.root.join(".codescout").join("project.toml");
+            if config_path.exists() {
+                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                config.project.system_prompt_sha256 = Some(hash_system_prompt(&p.root));
+                let toml_str = toml::to_string_pretty(&config)?;
+                std::fs::write(&config_path, &toml_str)?;
+            }
+            Ok(config_path)
+        })
+        .await?;
+    ctx.agent
+        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+        .await;
+    Ok(())
+}
+
+/// Stamp a **witnessed** regeneration: the version, plus the content that earned it.
+/// Returns true if a stamp was written.
+///
+/// This is what closes the witness, and omitting it would be a slower version of the
+/// original defect rather than a smaller one. A witnessed-but-unstamped regeneration
+/// reads correctly today and wrongly after the next `ONBOARDING_VERSION` bump: the old
+/// baseline still differs from the current file, so the witness would keep firing on
+/// evidence that predates the new templates. Re-recording `certified = current` is what
+/// makes the next bump's comparison start level.
+///
+/// Called from both readers — the tool's own re-entry and the activation response — so
+/// the stamp lands on whichever runs first rather than depending on a session calling
+/// `onboarding()` again.
+pub(crate) async fn stamp_witnessed_refresh(ctx: &ToolContext) -> anyhow::Result<bool> {
+    let (config_path, stamped) = ctx
+        .agent
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            let config_path = p.root.join(".codescout").join("project.toml");
+            if !config_path.exists() {
+                return Ok((config_path, false));
+            }
+            let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+            let current = hash_system_prompt(&p.root);
+            let stored = config.project.onboarding_version;
+            let witnessed = onboarding_version_stale(stored)
+                && !system_prompt_stale(
+                    stored,
+                    config.project.system_prompt_sha256.as_deref(),
+                    &current,
+                );
+            if witnessed {
+                config.project.onboarding_version = Some(ONBOARDING_VERSION);
+                config.project.system_prompt_sha256 = Some(current);
+                let toml_str = toml::to_string_pretty(&config)?;
+                std::fs::write(&config_path, &toml_str)?;
+            }
+            Ok((config_path, witnessed))
+        })
+        .await?;
+    if stamped {
+        ctx.agent
+            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+            .await;
+    }
+    Ok(stamped)
+}
 
 pub struct Onboarding;
 
@@ -300,7 +413,25 @@ impl Tool for Onboarding {
             }
         }
 
-        perform_full_onboarding(root, ctx).await
+        let mut result = perform_full_onboarding(root, ctx).await?;
+
+        // `force` legitimately subsumes `refresh_prompt`: full onboarding re-explores
+        // the project AND regenerates the system prompt (gated by
+        // `onboarding_prompts_write_system_prompt_to_root_not_memory`), so the
+        // combination does strictly more work rather than less. The defect was never
+        // the precedence — it was accepting a parameter, honouring a different one,
+        // and returning a well-formed payload that never mentioned the substitution.
+        if refresh_prompt {
+            result["refresh_prompt_subsumed"] = json!(true);
+            result["refresh_prompt_note"] = json!(
+                "refresh_prompt was subsumed by force. Full onboarding re-explores the \
+                 project and regenerates the system prompt, a superset of what \
+                 refresh_prompt does — so this response is the full-onboarding one. For \
+                 the lightweight template-only rebuild, call \
+                 onboarding(refresh_prompt=true) without force."
+            );
+        }
+        Ok(result)
     }
 
     async fn call_content(
@@ -488,28 +619,18 @@ async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
         })
         .await?;
 
-    let config_path = ctx
-        .agent
-        .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            let config_path = p.root.join(".codescout").join("project.toml");
-            if config_path.exists() {
-                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
-            }
-            Ok(config_path)
-        })
-        .await?;
-    ctx.agent
-        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
-        .await;
+    // Record the baseline the regeneration must supersede. The version is NOT
+    // stamped here: the work this call describes has not happened yet, and stamping
+    // it would consume the only signal that the prompt is behind.
+    record_refresh_request(ctx).await?;
 
     let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
 
     Ok(json!({
         "onboarded": true,
-        "version_stale": false,
+        // Reports the stored version's own state, not the outcome of the
+        // regeneration this call merely requests.
+        "version_stale": onboarding_version_stale(stored_version),
         "explicit_refresh": true,
         "stored_version": stored_version,
         "current_version": ONBOARDING_VERSION,
@@ -543,6 +664,15 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
     }
 
     // --- Version check: refresh system prompt if stale ---
+    // The stored version records a *request*, not a completed regeneration — nothing
+    // in this process writes `.codescout/system-prompt.md`. So witness the artifact
+    // before trusting the version: a prompt whose content has moved since the request
+    // was recorded has demonstrably been regenerated, and what is owed is the stamp,
+    // not another refresh. Stamping first means the read below sees the settled value.
+    if let Err(e) = stamp_witnessed_refresh(ctx).await {
+        tracing::warn!("could not stamp a witnessed system-prompt refresh: {e}");
+    }
+
     let (stored_version, config_languages) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
@@ -571,26 +701,12 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
             ONBOARDING_VERSION
         );
 
-        // Optimistic version write to disk (prevents re-trigger across sessions)
-        let config_path = ctx
-            .agent
-            .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                let config_path = p.root.join(".codescout").join("project.toml");
-                if config_path.exists() {
-                    let mut config =
-                        crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                    config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                    let toml_str = toml::to_string_pretty(&config)?;
-                    std::fs::write(&config_path, &toml_str)?;
-                }
-                Ok(config_path)
-            })
-            .await?;
-        // Reload in-memory config so subsequent calls in the same session
-        // see the updated version (prevents re-trigger within session)
-        ctx.agent
-            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
-            .await;
+        // Record the baseline this refresh must supersede. The version is NOT
+        // stamped here — it is the only signal that the prompt is behind, and the
+        // regeneration is still owed by a subagent that may never run. It used to
+        // be stamped ("optimistic version write"), which suppressed the re-trigger
+        // this comment claimed to want and certified work that had not happened.
+        record_refresh_request(ctx).await?;
 
         let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
 
@@ -922,7 +1038,13 @@ async fn perform_full_onboarding(
                 encoding: "utf-8".into(),
                 system_prompt: None,
                 tool_timeout_secs: 60,
-                onboarding_version: Some(ONBOARDING_VERSION),
+                // Neither the version nor the baseline is stamped at creation: the
+                // prompt this config would certify has not been written yet. The tail
+                // of this function records the baseline once the file exists, which is
+                // what lets a fresh project's first re-entry witness the regeneration
+                // instead of finding itself already certified.
+                onboarding_version: None,
+                system_prompt_sha256: None,
             },
             embeddings: crate::config::project::EmbeddingsSection {
                 model: recommended_model,
@@ -1077,19 +1199,11 @@ async fn perform_full_onboarding(
         sp
     };
 
-    // Optimistic version write for full onboarding (force=true on existing project)
-    ctx.agent
-        .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            let config_path = p.root.join(".codescout").join("project.toml");
-            if config_path.exists() {
-                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
-            }
-            Ok(())
-        })
-        .await?;
+    // Record the baseline this onboarding's regeneration must supersede — the third
+    // site that used to stamp the version optimistically. Full onboarding returns a
+    // `subagent_prompt` too, so the prompt file is no more written by the time we
+    // reach here than on the lightweight refresh path.
+    record_refresh_request(ctx).await?;
 
     Ok(json!({
         "languages": lang_list,
@@ -1127,7 +1241,14 @@ fn format_onboarding(result: &Value) -> String {
     } else {
         String::new()
     };
-    format!("[{langs}]{config_note}{workspace_note}")
+    // Surfaced on the compact line, not only in the JSON: the substitution is only
+    // reported if it reaches the surface the caller actually reads.
+    let subsumed_note = if result["refresh_prompt_subsumed"].as_bool().unwrap_or(false) {
+        " · refresh_prompt subsumed by force (full onboarding regenerates the prompt too)"
+    } else {
+        ""
+    };
+    format!("[{langs}]{config_note}{workspace_note}{subsumed_note}")
 }
 
 #[cfg(test)]
@@ -1155,6 +1276,92 @@ mod tests {
         assert!(
             !onboarding_version_stale(Some(ONBOARDING_VERSION + 1)),
             "downgrade (stored > current) should not be treated as stale"
+        );
+    }
+    #[test]
+    fn system_prompt_stale_is_true_while_the_prompt_has_not_moved_since_the_request() {
+        // Version behind, and the file is byte-identical to the baseline recorded
+        // when the refresh was requested: the work was asked for and has not
+        // happened. This is the state the old eager stamp reported as current.
+        assert!(
+            system_prompt_stale(Some(ONBOARDING_VERSION - 1), Some("abc"), "abc"),
+            "an unmoved prompt with a behind version is stale"
+        );
+    }
+
+    #[test]
+    fn system_prompt_stale_is_false_once_the_prompt_content_has_moved() {
+        // The only positive evidence available that a subagent did the work: nothing
+        // in-process writes the file, so its content changing is the whole signal.
+        assert!(
+            !system_prompt_stale(Some(ONBOARDING_VERSION - 1), Some("abc"), "def"),
+            "content moving since the recorded baseline witnesses the regeneration"
+        );
+    }
+
+    #[test]
+    fn system_prompt_stale_treats_an_absent_baseline_as_no_evidence_not_as_change() {
+        // A fresh clone arrives in exactly this state: `project.toml` is gitignored so
+        // nothing is stored, while `system-prompt.md` is tracked and present. Reading
+        // the missing baseline as a difference would report another machine's stale
+        // prompt as current — the original defect, reintroduced at clone time.
+        assert!(
+            system_prompt_stale(None, None, "def"),
+            "no stored version and no baseline is stale, not witnessed"
+        );
+        assert!(
+            system_prompt_stale(Some(ONBOARDING_VERSION - 1), None, "def"),
+            "a behind version with no baseline is stale, not witnessed"
+        );
+    }
+
+    #[test]
+    fn system_prompt_stale_is_false_when_the_version_is_current_whatever_the_hashes_say() {
+        // Once stamped, the version is authoritative. The witness exists only to
+        // rescue a version that is behind; it must never invalidate a current one, or
+        // an ordinary hand-edit to the prompt would read as a regression.
+        assert!(!system_prompt_stale(
+            Some(ONBOARDING_VERSION),
+            Some("abc"),
+            "abc"
+        ));
+        assert!(!system_prompt_stale(
+            Some(ONBOARDING_VERSION),
+            Some("abc"),
+            "def"
+        ));
+        assert!(
+            !system_prompt_stale(Some(ONBOARDING_VERSION + 1), None, "def"),
+            "a downgrade stays current, matching onboarding_version_stale"
+        );
+    }
+
+    #[test]
+    fn hash_system_prompt_treats_an_absent_prompt_as_empty_content() {
+        // Load-bearing: a fresh project records its baseline at the tail of full
+        // onboarding, BEFORE any subagent has written the prompt. If this errored or
+        // returned a distinct sentinel for absence, that project would have no
+        // comparable baseline and its first regeneration could never be witnessed.
+        let dir = tempfile::tempdir().unwrap();
+        let absent = hash_system_prompt(dir.path());
+
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(dir.path().join(".codescout").join("system-prompt.md"), b"").unwrap();
+        assert_eq!(
+            absent,
+            hash_system_prompt(dir.path()),
+            "absent and empty must hash alike — the baseline has to exist before the file does"
+        );
+
+        std::fs::write(
+            dir.path().join(".codescout").join("system-prompt.md"),
+            b"# prompt",
+        )
+        .unwrap();
+        assert_ne!(
+            absent,
+            hash_system_prompt(dir.path()),
+            "writing content must move the hash, or no regeneration is ever witnessed"
         );
     }
 }

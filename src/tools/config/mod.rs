@@ -1,7 +1,10 @@
 //! Configuration and project management tools.
 
 use super::{optional_bool_param, parse_bool_param, Tool, ToolContext};
-use crate::tools::onboarding::{onboarding_version_stale, ONBOARDING_VERSION};
+use crate::tools::onboarding::{
+    hash_system_prompt, onboarding_version_stale, stamp_witnessed_refresh, system_prompt_stale,
+    ONBOARDING_VERSION,
+};
 use crate::util::fs::to_forward_slash;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -866,6 +869,7 @@ async fn build_activation_response(
         memories,
         security_profile,
         stored_onboarding_version,
+        stored_prompt_sha256,
     ) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
@@ -886,6 +890,7 @@ async fn build_activation_response(
                 memories,
                 security_profile,
                 p.config.project.onboarding_version,
+                p.config.project.system_prompt_sha256.clone(),
             ))
         })
         .await?;
@@ -911,7 +916,27 @@ async fn build_activation_response(
     let has_index = check_has_index_cached(&project_name, &project_root_path).await;
     timer.lap("check_has_index");
 
-    let version_stale = onboarding_version_stale(stored_onboarding_version);
+    // The stored version records that a refresh was *requested*, not that one
+    // completed — nothing in this process writes `.codescout/system-prompt.md`, a
+    // subagent does, later or never. So witness the artifact: a prompt whose content
+    // has moved since the baseline was recorded has demonstrably been regenerated.
+    let current_prompt_sha = hash_system_prompt(&project_root_path);
+    let version_stale = system_prompt_stale(
+        stored_onboarding_version,
+        stored_prompt_sha256.as_deref(),
+        &current_prompt_sha,
+    );
+    // Persist the witness here as well as in the tool's own re-entry path. A
+    // witnessed-but-unstamped regeneration reads correctly until the next
+    // ONBOARDING_VERSION bump, at which point the stale baseline still differs from
+    // the current file and would keep vouching for a regeneration that predates the
+    // new templates. Activation runs constantly, so this is the reader that reliably
+    // closes it; a failure here must never fail the activation.
+    if !version_stale && onboarding_version_stale(stored_onboarding_version) {
+        if let Err(e) = stamp_witnessed_refresh(ctx).await {
+            tracing::warn!("could not stamp a witnessed system-prompt refresh: {e}");
+        }
+    }
 
     let index = if has_index {
         json!({"status": "indexed"})
@@ -1110,7 +1135,12 @@ async fn build_activation_response(
         result["system_prompt_stale"] = json!({
             "stored_version": stored_onboarding_version,
             "current_version": ONBOARDING_VERSION,
-            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
+            // `refresh_prompt` is a boolean parameter, not an `action` value — the tool
+            // declares only `force` and `refresh_prompt` in its schema. The old text
+            // named a parameter that does not exist and appeared to work only because
+            // the ignored flag fell through to the already-onboarded path, which
+            // instructed a refresh by a different route.
+            "action": "Run onboarding(refresh_prompt=true) — tool names or signatures have changed."
         });
     }
 

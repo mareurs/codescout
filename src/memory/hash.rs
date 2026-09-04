@@ -14,6 +14,23 @@ pub fn hash_file(path: &Path) -> Result<String> {
     let digest = Sha256::digest(&bytes);
     Ok(hex::encode(digest))
 }
+/// Hash a file's content for change detection, treating an unreadable file as
+/// empty content.
+///
+/// Change detection needs a **total** function. A caller recording "what the
+/// content was when I asked for this to be rewritten" has to be able to record a
+/// baseline before the file exists, and `hash_file`'s `Err` gives it nothing to
+/// store — so the absent case would have to be encoded as a sentinel by every
+/// caller separately. Absent and empty are the same state for this purpose.
+///
+/// This deliberately absorbs a permission error into the same value as absence.
+/// That is safe only for change detection, where the consequence is a hash that
+/// fails to move and therefore reports "not yet regenerated" — the conservative
+/// direction. Do not use it where the distinction carries meaning.
+pub fn hash_file_or_empty(path: &Path) -> String {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    hex::encode(Sha256::digest(&bytes))
+}
 
 #[cfg(test)]
 mod tests {
