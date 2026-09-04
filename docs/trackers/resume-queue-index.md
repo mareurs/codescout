@@ -133,21 +133,47 @@ than trusting either this index or the roster to have spanned it.
 **This is the one row where absence of evidence is being reported as absence of evidence.**
 Every other row asserts something checked.
 
+
+**Update, same day, verified rather than relayed:** at least one of the four is now **permanently** unrecoverable, not merely uncollected. `codescout-69` reports PID 4020515 exited without ever replying; I verified `/proc/4020515` is gone and that **three** MRV-poc sessions remain live (1689215, 3737053, 3939042) against the four the roster was waiting on. So one session's state left with the process.
+
+That changes what this row means. "Uncollected" implies a pending action — ask them. "Exited unasked" has no action attached: the only remaining evidence is whatever that session committed, plus MRV-poc's own `git status`. **A hole that can still be closed and a hole that cannot are different facts, and only the second one is final.** Nothing in the roster distinguishes them, because a roster row records the reply that did not arrive and not the process that stopped being able to send one.
 ## RQ-4 — `TAXONOMY.md`'s resume-queue table is missing `SM-N`
 
-**Valid:** conditional — the row is added
+**Valid:** conditional — the paragraph and table are reconciled
 
-**Status:** open
+**Status:** open — **two defects, not one**, and a third layer neither author caused.
 
-`docs/TAXONOMY.md` carries the canonical prefix→file table for codescout's resume queues and
-lists `SV`, `GG`, `WP`, `ET`, `CM`, `TB`. It does **not** list `SM`
-(`docs/trackers/resume-tool-surface-structural-mechanisms.md`, 4 entries, `status: active`), and
-its surrounding prose says "all five" — a count that was true when written and is now one short.
+`docs/TAXONOMY.md:90-92` contradicts itself **inside one paragraph**, before its table is reached:
 
-Not fixed here on purpose: `TAXONOMY.md` is a different surface with its own owner and its own
-conventions, and a drive-by row added from an index that is itself new is how two indexes start
-disagreeing. Raised so it is a decision rather than a discovery. Detector class: `D1`
-index-drift, in `/codescout-companion:tracker-hygiene` terms.
+> **Resume queues (opened 2026-08-28).** **Six** declared ledgers, one per partially-implemented
+> work stream… Filename class marker is `docs/trackers/resume-*.md`; **all five** are prose ledgers
+
+Six, then five, in consecutive clauses. The table below carries **six** rows (`SV GG WP ET CM TB`),
+so *five* was already wrong on the day it was written — this is not decay, it is an error that
+shipped. Found by `codescout-69` (sessionId `f2ab55f8-e3ac-4e0a-9eef-3b92d77bac20`) after I filed
+the narrower version below; I verified both clauses at the bytes.
+
+**The second defect is the one I filed:** `SM-N`
+(`docs/trackers/resume-tool-surface-structural-mechanisms.md`, 4 entries, `status: active`) is in
+neither the prose count nor the table.
+
+**The third layer is decay proper, and nobody caused it.** Counted on disk 2026-09-04 09:2x —
+**9** files matching `docs/trackers/resume-*.md` declare an `entry_prefix`, **8** of them
+non-archived. Three are absent from the table: `SM` (pre-existing), plus `AC` and `RQ`, both
+created within the hour by this same wrap-up. So the table was one short before today and is three
+short now.
+
+**Still not fixed here, and the reason is stronger than before.** Neither `codescout-69` nor I
+knows whether *six* or *five* was the intended figure, so any repair picks a side by guessing —
+and a guess written into a canonical index is worse than a contradiction, because a contradiction
+announces itself to the next reader while a confident wrong number does not. Recorded, not
+actioned. Detector class: `D1` index-drift in `/codescout-companion:tracker-hygiene` terms, though
+the self-contradicting clause is not drift at all — it never matched its own table.
+
+**Note for whoever does reconcile it:** the roster `docs/trackers/resume-vacation-wrapup-2026-09-04.md`
+titles itself `VW-N` but declares **no** `entry_prefix` in frontmatter, so its entries are not
+citable by token and it is not a declared ledger. Whether it belongs in that table is part of the
+same decision.
 
 ## Template for new entries
 
@@ -169,4 +195,3 @@ Created because neither existing surface answers *"which trackers hold remaining
 roster is per-session and point-in-time, `TAXONOMY.md` is per-prefix and codescout-only. Rows
 derived by reading each file from this machine at 09:1x; the four uncollected MRV-poc sessions
 (RQ-3) were the hole at creation and are recorded as such rather than omitted.
-
