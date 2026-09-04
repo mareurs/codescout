@@ -195,6 +195,42 @@ pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
         .optional()
         .map_err(Into::into)
 }
+/// The content hash as of this artifact's last SUCCESSFUL embed — `None` when it
+/// has never been embedded, or predates the v11 column.
+///
+/// Deliberately NOT a field on [`ArtifactRow`], for the reason `slug` and
+/// `missing_since` are not: it is lifecycle state owned by a different
+/// subsystem rather than part of the row's content, so it is read and written
+/// on its own instead of through every construction site.
+///
+/// This is the stamp the embed decision reads. `file_sha256` means only "this
+/// content was written to the catalog" — reading that as "embedded" is the
+/// defect in
+/// docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md,
+/// because the row write is unconditional while the embed is not.
+pub fn embedded_sha256(cat: &Catalog, id: &str) -> Result<Option<String>> {
+    cat.conn
+        .prepare("SELECT embedded_sha256 FROM artifact WHERE id = ?1")?
+        .query_row(params![id], |r| r.get::<_, Option<String>>(0))
+        .optional()
+        .map(|v| v.flatten())
+        .map_err(Into::into)
+}
+
+/// Record that `sha` is embedded for `id`.
+///
+/// **Call this only once EVERY chunk of the artifact has been stored.** The
+/// embed queue is chunk-grained — ~20 chunks per artifact on this corpus — so
+/// stamping after the first successful chunk would rebuild the very trap this
+/// column closes, one level down: the artifact would read as embedded while
+/// most of its chunks had no vector, and no ordinary run would ever retry them.
+pub fn set_embedded_sha256(cat: &Catalog, id: &str, sha: &str) -> Result<()> {
+    cat.conn.execute(
+        "UPDATE artifact SET embedded_sha256 = ?2 WHERE id = ?1",
+        params![id, sha],
+    )?;
+    Ok(())
+}
 
 /// Lowercase, non-alphanumeric runs -> single '-', trimmed of leading/trailing '-'.
 pub fn slugify(s: &str) -> String {

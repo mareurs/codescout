@@ -16,7 +16,18 @@ CREATE TABLE IF NOT EXISTS artifact (
   file_sha256   TEXT NOT NULL,
   confidence    REAL NOT NULL DEFAULT 1.0,
   slug          TEXT,
-  missing_since INTEGER -- v10: catalog GC lifecycle (epoch-ms; NULL = present)
+  missing_since INTEGER, -- v10: catalog GC lifecycle (epoch-ms; NULL = present)
+  -- v11: the content hash as of the last SUCCESSFUL embed of this artifact.
+  -- NULL = never embedded. Deliberately SEPARATE from file_sha256, which means
+  -- only "this content was written to the catalog": the indexer used to read
+  -- that as "this content has been embedded", and since the row write is
+  -- unconditional while the embed is not, the write manufactured the very
+  -- "unchanged" condition the embed decision then declined on. Written by the
+  -- code that actually embeds, and only once every chunk of the artifact has
+  -- been stored -- the queue is chunk-grained, so stamping on the first
+  -- success would rebuild the same trap one level down.
+  -- docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
+  embedded_sha256 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artifact_link (

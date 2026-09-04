@@ -382,18 +382,65 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // delete.
             // docs/issues/2026-09-03-per-project-vector-collections-follow-the-server-cwd-not-the-workspace-param.md
             let project_id = abs_root.to_string_lossy().into_owned();
+
+            // The queue is CHUNK-grained and `artifact.embedded_sha256` is
+            // ARTIFACT-grained, so the stamp needs both halves of a per-artifact
+            // tally. Stamping on the first successful chunk would rebuild the
+            // trap this column exists to close, one level down: the artifact
+            // would read as embedded while most of its chunks had no vector,
+            // and no ordinary run would ever retry them. ~20 chunks per
+            // artifact on this corpus, so that is not a corner case.
+            let mut queued: std::collections::HashMap<&str, (usize, Option<&str>)> =
+                std::collections::HashMap::new();
+            for item in &embed_queue {
+                let entry = queued
+                    .entry(item.artifact_id.as_str())
+                    .or_insert((0, item.file_sha256.as_deref()));
+                entry.0 += 1;
+            }
+            let mut landed: std::collections::HashMap<&str, usize> =
+                std::collections::HashMap::new();
+
             for item in &embed_queue {
                 match svc.embed_artifact(item.title.as_deref(), &item.text).await {
                     Ok(vec) => match store
                         .upsert(&project_id, &item.chunk_id, &item.artifact_id, &vec)
                         .await
                     {
-                        Ok(()) => total_embedded += 1,
+                        Ok(()) => {
+                            total_embedded += 1;
+                            *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+                        }
                         Err(e) => {
                             embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id))
                         }
                     },
                     Err(e) => embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id)),
+                }
+            }
+
+            // Record what is now embedded. An artifact short even one chunk is
+            // deliberately left unstamped, so the next ordinary run retries it:
+            // re-embedding the chunks that already landed is wasted work, not
+            // wrong work, because `upsert` is keyed by `chunk_id`. Under-claiming
+            // costs a re-embed; over-claiming costs a permanent hole, and this
+            // whole column exists because the two were confused.
+            {
+                let cat = ctx.catalog.lock();
+                for (artifact_id, (n_queued, sha)) in &queued {
+                    if landed.get(*artifact_id).copied().unwrap_or(0) != *n_queued {
+                        continue;
+                    }
+                    // No hash means the caller never established which content
+                    // these vectors represent — see `EmbedQueueItem::file_sha256`.
+                    let Some(sha) = sha else { continue };
+                    if let Err(e) = crate::librarian::catalog::artifact::set_embedded_sha256(
+                        &cat,
+                        artifact_id,
+                        sha,
+                    ) {
+                        embed_errors.push(format!("{artifact_id}: embed stamp failed: {e}"));
+                    }
                 }
             }
         }

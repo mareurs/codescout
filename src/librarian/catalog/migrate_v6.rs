@@ -191,12 +191,19 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
           file_sha256   TEXT NOT NULL,
           confidence    REAL NOT NULL DEFAULT 1.0,
           slug          TEXT,
-          missing_since INTEGER
+          missing_since INTEGER,
+          -- v11. Carried here for the reason `slug` is: the ALTER blocks in
+          -- apply_migrations_in_txn run BEFORE this rebuild, so the source table
+          -- already has the column and omitting it from either the DDL or the
+          -- SELECT would silently drop it on the legacy path only.
+          -- `every_schema_sql_artifact_column_survives_every_migration_path`
+          -- is the guard that catches exactly that.
+          embedded_sha256 TEXT
           );
           INSERT INTO artifact_new
           SELECT id, abs_path, kind, status, title, owners, tags, topic,
                  time_scope, source, created_at, updated_at, file_mtime,
-                 file_sha256, confidence, slug, missing_since
+                 file_sha256, confidence, slug, missing_since, embedded_sha256
           FROM artifact;
 
           -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.

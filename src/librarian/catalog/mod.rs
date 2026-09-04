@@ -219,6 +219,16 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
     if !column_exists(conn, "artifact", "missing_since")? {
         conn.execute("ALTER TABLE artifact ADD COLUMN missing_since INTEGER", [])?;
     }
+    // v11: embed lifecycle — the content hash at the last SUCCESSFUL embed.
+    // NULL on every pre-existing row, which is the correct reading rather than a
+    // lossy default: this catalog has no per-artifact embed record, so "was this
+    // content ever embedded?" is genuinely unknown for rows written before the
+    // column existed. NULL means "not known to be embedded", so the next run
+    // with an embedder configured queues them once and stamps the answer.
+    // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
+    if !column_exists(conn, "artifact", "embedded_sha256")? {
+        conn.execute("ALTER TABLE artifact ADD COLUMN embedded_sha256 TEXT", [])?;
+    }
     // Entry-id reservations for ledgers. DELIBERATELY separate from
     // `artifact_augmentation`: a ledger's identity (`entry_prefix` in frontmatter)
     // is committed and portable, while a reservation is transient, local, and
@@ -1215,8 +1225,9 @@ mod tests {
                     "confidence",
                     "slug",
                     "missing_since",
-                ],
-                "parse_create_table_columns must return every artifact column schema.sql declares, in order"
+                    "embedded_sha256",
+                    ],
+                    "parse_create_table_columns must return every artifact column schema.sql declares, in order"
             );
     }
 

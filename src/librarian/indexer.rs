@@ -80,6 +80,22 @@ pub struct EmbedQueueItem {
     pub artifact_id: String,
     pub title: Option<String>,
     pub text: String,
+    /// The artifact's content hash at the moment this item was queued, so the
+    /// drain can stamp `artifact.embedded_sha256` with what it ACTUALLY
+    /// embedded rather than with whatever is on disk when the drain finishes.
+    ///
+    /// `Option` because `embed_queue_items` cannot know it — the hash belongs to
+    /// the walk, not to the chunking — so the indexer fills it in at its two
+    /// production call sites. `None` means "do not stamp": a caller that did
+    /// not supply a hash has not established which content these vectors
+    /// represent, and stamping a guess would re-create the very false
+    /// "embedded" claim this field exists to prevent.
+    ///
+    /// Reading `artifact.file_sha256` back at drain time would be wrong under
+    /// concurrency: a peer session re-indexing the same artifact between this
+    /// walk and this drain would leave us stamping a hash we never embedded.
+    /// Several sessions share this checkout, so that race is live.
+    pub file_sha256: Option<String>,
 }
 
 /// Return the text of the first H1 in a markdown body, or `None` if none is
@@ -224,9 +240,25 @@ pub(crate) fn embed_queue_items(
                 artifact_id: id.to_string(),
                 title: title.clone(),
                 text,
+                // Filled in by the caller that knows the walk's hash; see the
+                // field's doc comment for why it is not derived here.
+                file_sha256: None,
             }
         })
         .collect())
+}
+/// Stamp every queued chunk with the artifact hash the walk computed.
+///
+/// Exists so the two production call sites in [`index_repo_sync`] cannot
+/// disagree about it, and so [`embed_queue_items`] keeps its signature — it has
+/// sixteen callers, most of them tests that have no walk and therefore no hash
+/// to supply. The hash travels with the item rather than being re-read at drain
+/// time; `EmbedQueueItem::file_sha256` says why.
+fn with_walk_hash(mut items: Vec<EmbedQueueItem>, sha: &str) -> Vec<EmbedQueueItem> {
+    for item in &mut items {
+        item.file_sha256 = Some(sha.to_string());
+    }
+    items
 }
 
 /// Synchronous part of indexing: walk files, upsert artifact rows, collect embedding queue.
@@ -392,6 +424,25 @@ pub fn index_repo_sync(
             })
             .unwrap_or(false);
 
+        // Does this content still need a vector? Read the stamp written by the
+        // code that actually EMBEDS — never `file_sha256`, which
+        // `upsert_and_mint_slug` below writes unconditionally and so can
+        // manufacture the "unchanged" condition on content that was never
+        // embedded. That substitution is the defect in
+        // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+        //
+        // Subsumes the old `!content_unchanged` test rather than sitting beside
+        // it: changed content has a stale stamp, so it still queues.
+        //
+        // Queried only when an embedder is configured. On the no-embedder path
+        // the answer cannot change what happens, and this is one indexed
+        // lookup per file.
+        let needs_embed = if want_embeddings {
+            artifact::embedded_sha256(cat, &id)?.as_deref() != Some(sha.as_str())
+        } else {
+            false
+        };
+
         if !force_rewalk && content_unchanged && meta_unchanged {
             // A forced re-embed must still queue the file even though the row
             // itself needs no rewrite. `force_embed` is documented as being
@@ -406,8 +457,16 @@ pub fn index_repo_sync(
             // only its vector needs recomputing. Falling through to the upsert
             // path instead would rewrite every row and misreport them as
             // `updated`.
-            if want_embeddings && force_embed {
-                embed_queue.extend(embed_queue_items(cat, &id, title, &content, grain)?);
+            // `needs_embed`, not just `force_embed`: this is the branch an
+            // ORDINARY reindex takes for an already-indexed file, and gating it
+            // on the force lever alone is what made the trap absorbing —
+            // `index_repo` hardcodes both levers false, so no automatic caller
+            // could ever supply the escape.
+            if want_embeddings && (needs_embed || force_embed) {
+                embed_queue.extend(with_walk_hash(
+                    embed_queue_items(cat, &id, title, &content, grain)?,
+                    &sha,
+                ));
             }
             seen_ids.push(id);
             report.unchanged += 1;
@@ -439,8 +498,13 @@ pub fn index_repo_sync(
         // embeddings were just enabled/reconfigured for an already-indexed
         // project). Re-classification alone, without either signal, does not
         // require recomputing the embedding.
-        if want_embeddings && (!content_unchanged || force_embed) {
-            embed_queue.extend(embed_queue_items(cat, &id, title, &content, grain)?);
+        if want_embeddings && (needs_embed || force_embed) {
+            // `row.file_sha256`, not `sha` — the row literal above moved it, and
+            // this is the same value by construction.
+            embed_queue.extend(with_walk_hash(
+                embed_queue_items(cat, &id, title, &content, grain)?,
+                &row.file_sha256,
+            ));
         }
 
         seen_ids.push(id.clone());
@@ -1552,17 +1616,35 @@ kind = "memory"
         load_rules("[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n").unwrap()
     }
 
-    /// **The backfill's whole reason to exist: it escapes a state the indexer
-    /// cannot.**
+    /// **The backfill reaches artifacts with no chunk rows without a walk, and
+    /// writes a vector PER CHUNK.**
     ///
-    /// The absorbing state is REPRODUCED, not simulated — index with embeddings
-    /// off (stamps `file_sha256`, writes nothing), then on (the row is now
-    /// `content_unchanged`, so the early return skips the embed). The test then
-    /// runs `index_repo_sync` once more and asserts it STILL refuses, in the same
-    /// test: without that control, a backfill doing exactly what an ordinary
-    /// reindex would have done looks identical and is not worth a function.
+    /// Reframed on 2026-09-04, and renamed from
+    /// `the_backfill_embeds_what_the_indexer_permanently_refuses_to`. That premise —
+    /// that the indexer refuses these artifacts forever — was true of the code and
+    /// is now false: fix (b) in
+    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
+    /// makes the embed decision read `artifact.embedded_sha256` instead of
+    /// `content_unchanged`, so an ordinary run queues them too. Keeping the old
+    /// name would have left a test whose NAME asserts a defect the tree no longer
+    /// has, which is `IC-14` in miniature.
+    ///
+    /// **The backfill is not thereby redundant, and the closing control now says so
+    /// in the other direction.** What it still does that no walk does: it pages a
+    /// machine-global catalog by cursor, resumably, selecting on `NOT EXISTS
+    /// artifact_chunk` rather than by walking one project root. What it no longer
+    /// is, is the ONLY escape — worth knowing, because its own doc comment cites
+    /// the unclosed ordering defect as the reason Task 11's swap stays blocked, and
+    /// that reason is now discharged.
+    ///
+    /// One thing this test cannot see, noted rather than asserted:
+    /// `write_embeddings_v2` writes `artifact_vec_v2` (sqlite-vec), so on a
+    /// Qdrant-backed host the vectors it writes are inert. That is precisely why the
+    /// backfill must NOT stamp `embedded_sha256` — stamping would claim
+    /// embeddedness for vectors nothing reads, which is the very false claim fix
+    /// (b) exists to remove.
     #[tokio::test]
-    async fn the_backfill_embeds_what_the_indexer_permanently_refuses_to() {
+    async fn the_backfill_embeds_artifacts_with_no_chunk_rows_without_a_walk() {
         let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
         let rules = md_rules();
         let ignore = globset::GlobSet::empty();
@@ -1582,11 +1664,11 @@ kind = "memory"
         // would be inert, and an inert fixture that looks load-bearing is how a
         // test gets credited with coverage it does not provide.
 
+        // Embeddings OFF only. That is what leaves an artifact row with no chunk
+        // rows, which is the backfill's selection predicate. A second run with
+        // embeddings ON would now queue it and write those rows, so the backfill
+        // would correctly find nothing to do — that is the fix, not a fixture bug.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
-        let (trapped, q) =
-            index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
-        assert_eq!(trapped.vectorless, Some(1), "fixture must be in the trap");
-        assert!(q.is_empty(), "and the indexer must be refusing it");
 
         let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
             .await
@@ -1597,7 +1679,7 @@ kind = "memory"
         assert!(
             report.embedded >= 3,
             "the ledger has a preamble plus two entries; the backfill must write a \
-             vector PER CHUNK, not one per artifact — got {}",
+         vector PER CHUNK, not one per artifact — got {}",
             report.embedded
         );
 
@@ -1611,15 +1693,19 @@ kind = "memory"
             "the report must not overstate what landed"
         );
 
-        // The control: the indexer is STILL refusing. The backfill emptied the
-        // hole; it did not close it — which is exactly why the swap stays blocked.
+        // The control, INVERTED by fix (b): an ordinary run now also queues this
+        // artifact. It has chunk rows, so the hole is empty — but the backfill did
+        // not stamp `embedded_sha256` (it cannot honestly, see above), so the
+        // indexer still considers it unembedded and offers to do the work. That is
+        // the correct reading on a Qdrant host, where the backfill's v2 vectors are
+        // unreachable, and merely wasteful on a sqlite-vec one.
         let (after, q2) =
             index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
         assert_eq!(after.vectorless, Some(0), "the hole is empty");
         assert!(
-            q2.is_empty(),
-            "and the indexer still declines to queue it — the ORDERING defect is \
-             untouched, so a new artifact can still fall in"
+            !q2.is_empty(),
+            "an ordinary run no longer declines — the ORDERING defect is closed, so \
+         a new artifact can no longer fall in"
         );
     }
 
@@ -1650,10 +1736,16 @@ kind = "memory"
         )
         .unwrap();
 
-        // Same absorbing state as the sibling test: index with embeddings off so
-        // the content is stamped seen, then on so the early return skips it.
+        // Embeddings OFF only — that is what leaves an artifact row with no chunk
+        // rows, the backfill's selection predicate.
+        //
+        // A second run with embeddings ON used to be here, to build the absorbing
+        // state. Since fix (b) that run QUEUES the artifact and writes its chunk
+        // rows, so the backfill would then select nothing and this test's own
+        // `report.artifacts == 1` sanity assertion would red — which is how the
+        // fix announced itself. The state this fixture needs is "no chunk rows",
+        // and one embeddings-off run is the whole of it.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
-        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, true, false, false).unwrap();
 
         let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
             .await
@@ -1740,25 +1832,30 @@ kind = "memory"
         assert!(second.embedded >= 2, "and it must actually re-embed them");
     }
 
-    /// **The absorbing state, reproduced end to end and then COUNTED.**
+    /// **A run with no embedder measures nothing, and an ordinary run afterwards
+    /// escapes on its own.**
     ///
-    /// Run 1 indexes with embeddings OFF: `file_sha256` is stamped and no vector
-    /// is written. Run 2 turns embeddings ON — and the artifact is now
-    /// `content_unchanged`, so the unchanged-row early return skips the embed
-    /// (its branch is gated on `force_embed`, which every automatic caller passes
-    /// as `false`). Nothing errors, nothing warns, and no ordinary reindex will
-    /// ever give this artifact a vector.
+    /// Run 1 indexes with embeddings OFF: `file_sha256` is stamped and no vector is
+    /// written. Run 2 turns embeddings ON, with both force levers false — exactly
+    /// how `index_repo` calls it — and the artifact is queued.
     ///
-    /// That is the trap in
-    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`,
-    /// entered through its first candidate path — a run with no embedder. Before
-    /// fix (c) the only difference between this catalog and a healthy one was
-    /// INVISIBLE: both report `unchanged: 1`, both report no error.
+    /// **This test's run-2 assertions INVERTED on 2026-09-04, and that inversion is
+    /// the fix.** They previously read `q2.is_empty()` and `vectorless == Some(1)`
+    /// with the comment *"this IS the trap"*: the embed decision consulted
+    /// `content_unchanged`, which the unconditional row write had just made true,
+    /// so no ordinary reindex would ever give this artifact a vector. It now
+    /// consults `artifact.embedded_sha256` — written only by code that actually
+    /// embedded — so a stamp from a non-embedding run no longer suppresses the
+    /// embed. See fix (b) in
+    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
+    ///
+    /// What the test still guards, and why it is kept rather than deleted:
     ///
     /// LOAD-BEARING that run 1 asserts `None` and not `Some(0)`. A run with
     /// embeddings off has measured nothing, and a bare `usize` would report `0` —
-    /// indistinguishable from a clean corpus, which is the exact confusion this
-    /// field exists to prevent.
+    /// indistinguishable from a clean corpus, which is the exact confusion the
+    /// field exists to prevent. That half is untouched by fix (b) and is the
+    /// reason `vectorless` is an `Option`.
     #[test]
     fn an_artifact_stamped_without_a_vector_is_counted_rather_than_silent() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1775,43 +1872,38 @@ kind = "memory"
         assert_eq!(
             r1.vectorless, None,
             "a run that did not want embeddings measured nothing, and must not report \
-             a number that reads as a clean corpus"
+         a number that reads as a clean corpus"
         );
 
-        // Run 2 — embeddings on. The row is unchanged, so the early return skips
-        // the embed and the artifact is now permanently unembeddable.
+        // Run 2 — embeddings on, NO force levers. The row is unchanged on disk, but
+        // it has never been embedded, and those are now different questions.
         let (r2, q2) =
             index_repo_sync(&cat, &rules, tmp.path(), &ignore, true, false, false).unwrap();
-        assert_eq!(r2.unchanged, 1);
+        assert_eq!(r2.unchanged, 1, "the row itself still needs no rewrite");
         assert!(
-            q2.is_empty(),
-            "this IS the trap: unchanged content is not queued, so the artifact stays \
-             vectorless and nothing says so"
+            !q2.is_empty(),
+            "an ordinary run must queue content that no run has embedded — this is \
+         the assertion that inverted, and gating it on `force_embed` alone is \
+         what made the state absorbing, since `index_repo` passes false"
         );
         assert_eq!(
             r2.vectorless,
-            Some(1),
-            "the hole must be counted — it is the only observable difference between \
-             this catalog and a healthy one"
+            Some(0),
+            "queueing IS the escape, and the count says so: `embed_queue_items` writes \
+         the chunk rows, so the artifact has left the absorbing state. Whether the \
+         vector then lands is a separate, RECOVERABLE failure that `reindex` \
+         reports through `embed_errors` — conflating the two would make a \
+         transient embedder outage look permanent."
         );
 
-        // Run 3 — the documented escape hatch (`reembed=true` sets `force_embed`)
-        // queues the trapped artifact, which is what makes the count actionable
-        // rather than merely alarming.
-        let (r3, q3) =
+        // Run 3 — `force_embed` still queues, and still matters: it is the lever for
+        // re-embedding content that IS already stamped (a model or grain change),
+        // which no amount of correct gating can detect from the hash alone.
+        let (_r3, q3) =
             index_repo_sync(&cat, &rules, tmp.path(), &ignore, true, false, true).unwrap();
         assert!(
             !q3.is_empty(),
-            "force_embed must queue the trapped artifact"
-        );
-        assert_eq!(
-            r3.vectorless,
-            Some(0),
-            "queueing IS the escape, and the count says so: `embed_queue_items` writes \
-             the chunk rows, so the artifact has left the absorbing state. Whether the \
-             vector then lands is a separate, RECOVERABLE failure that `reindex` \
-             reports through `embed_errors` — conflating the two would make a \
-             transient embedder outage look permanent."
+            "force_embed remains the escape hatch for already-embedded content"
         );
     }
 
@@ -2299,10 +2391,25 @@ kind = "memory"
 
     #[test]
     fn index_repo_sync_force_embed_requeues_unchanged_content() {
-        // Without force_embed, content_unchanged short-circuits the embed
+        // Without force_embed, ALREADY-EMBEDDED content does not re-enter the embed
         // queue even when want_embeddings=true — the "embeddings were just
-        // enabled/reconfigured for an already-indexed project" gap this
-        // parameter exists to close.
+        // enabled/reconfigured for an already-indexed project" gap `force_embed`
+        // exists to close.
+        //
+        // The predicate under test changed on 2026-09-04 and the difference is the
+        // point. This test used to index once with no embedder and then assert an
+        // empty queue, calling the content "unchanged" — but content stamped by a
+        // run that never embedded it is not "already embedded", it is content with
+        // NO VECTOR, and declining to queue it is the absorbing trap in
+        // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+        // The assertion was true of the code and wrong about the world.
+        //
+        // So the setup now establishes the state the assertion NAMES: a completed
+        // embed, stamped the way the drain stamps it. The guarantee this test
+        // protects — no pointless re-embedding of content that already has vectors
+        // — is unchanged and still asserted; only its premise is now real. The
+        // un-stamped case it used to cover by accident has its own test,
+        // `index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`.
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("docs/specs")).unwrap();
@@ -2321,17 +2428,29 @@ kind = "memory"
         assert_eq!(r1.added, 1);
         assert!(q1.is_empty());
 
+        // Stand in for a drain that succeeded: every chunk landed, so the artifact
+        // is stamped with the content that was embedded. This is what the real
+        // drain does in `reindex.rs`, and without it the file below has no vector.
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
+        let sha = crate::librarian::catalog::artifact::get(&cat, &id)
+            .unwrap()
+            .expect("row must exist after the first pass")
+            .file_sha256;
+        crate::librarian::catalog::artifact::set_embedded_sha256(&cat, &id, &sha).unwrap();
+
         // Second pass: embeddings now wanted, force_rewalk=true (bypasses the
-        // unchanged-row skip), but force_embed=false — content is unchanged
-        // on disk, so the file must NOT be queued for embedding.
+        // unchanged-row skip), but force_embed=false — the content is unchanged on
+        // disk AND already embedded, so it must NOT be queued.
         let (r2, q2) = index_repo_sync(&cat, &rules, root, &ignore, true, true, false).unwrap();
         assert_eq!(r2.updated, 1, "force_rewalk must still process the row");
         assert!(
             q2.is_empty(),
-            "unchanged content must not be queued without force_embed"
+            "already-embedded content must not be queued without force_embed"
         );
 
-        // Third pass: force_embed=true must queue it despite unchanged content.
+        // Third pass: force_embed=true must queue it despite unchanged, embedded
+        // content — the lever overrides the stamp, which is what makes it an
+        // escape hatch rather than an optimisation.
         let (r3, q3) = index_repo_sync(&cat, &rules, root, &ignore, true, true, true).unwrap();
         assert_eq!(r3.updated, 1);
         assert_eq!(
@@ -2353,6 +2472,13 @@ kind = "memory"
         // proved force_embed works GIVEN force_rewalk and never covered the
         // combination the `reindex(reembed=true)` tool call actually produces.
         // See docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md.
+        //
+        // The final pass's premise was corrected on 2026-09-04 for the reason given
+        // in the sibling test: returning a queue is not the same event as draining
+        // it, so after pass two the content still has no vector and an ordinary run
+        // must queue it. The no-op this pass protects is real, but it is a no-op
+        // over ALREADY-EMBEDDED content, so the stamp has to exist for the
+        // assertion to mean what it says.
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("docs/specs")).unwrap();
@@ -2379,22 +2505,84 @@ kind = "memory"
             q2.len(),
             1,
             "force_embed alone must queue unchanged content — it is documented \
-             as independent of force_rewalk"
+         as independent of force_rewalk"
         );
         assert_eq!(
             r2.unchanged, 1,
             "a re-embed pass must not claim the row was updated — nothing about \
-             the row changed, only its vector needs recomputing"
+         the row changed, only its vector needs recomputing"
         );
         assert_eq!(r2.updated, 0);
 
-        // Neither flag: still a true no-op, nothing queued.
+        // Stand in for the drain completing on that queue. Until this happens the
+        // chunks have no vectors, and pass three below SHOULD re-queue them —
+        // covered by `index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`.
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
+        let sha = crate::librarian::catalog::artifact::get(&cat, &id)
+            .unwrap()
+            .expect("row must exist")
+            .file_sha256;
+        crate::librarian::catalog::artifact::set_embedded_sha256(&cat, &id, &sha).unwrap();
+
+        // Neither flag, and the content is now genuinely embedded: a true no-op.
         let (r3, q3) = index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
         assert!(
             q3.is_empty(),
-            "no flags: unchanged content must not be re-queued"
+            "no flags and already embedded: content must not be re-queued"
         );
         assert_eq!(r3.unchanged, 1);
+    }
+    /// Content stamped by a run that did not embed it must still be embeddable by
+    /// an ORDINARY run — no force levers.
+    ///
+    /// This is the un-forced path, and until this test it had no coverage at all.
+    /// The two sibling tests above both pass `force_embed=true`, so they exercise
+    /// only the escape hatch — and they are **monotone under the defect**, because
+    /// the trap state is precisely the state in which `force_embed` still works. A
+    /// green suite there was never evidence about this path.
+    ///
+    /// Why it matters that the levers are `false`: `index_repo` hardcodes
+    /// `index_repo_sync(.., want, false, false)`, so **no automatic caller can
+    /// supply the lever that escapes the trap.** An artifact that lands in this
+    /// state is unembeddable by every path the system takes on its own, forever,
+    /// and a metadata-only edit does not release it either — that only refreshes
+    /// `updated_at`, making the row look freshly processed while the embed
+    /// decision still declines.
+    ///
+    /// The assertion is about the SEQUENCE, not either run's outcome: run one
+    /// commits `file_sha256` with `want_embeddings=false`, so run two sees
+    /// `content_unchanged == true` for content that has no vector.
+    #[test]
+    fn index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\nbody\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+
+        // Run A — indexed with no embedder. Commits `file_sha256`; queues nothing.
+        let (r1, q1) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+        assert_eq!(r1.added, 1);
+        assert!(q1.is_empty(), "no embedder: nothing to queue");
+
+        // Run B — an embedder is now configured. Both force levers false, exactly
+        // as `index_repo` calls it. The content has NEVER been embedded, so it must
+        // be queued; `file_sha256` matching disk says only that the row was
+        // written, never that a vector exists.
+        let (_r2, q2) = index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
+        assert_eq!(
+            q2.len(),
+            1,
+            "content stamped by a non-embedding run must be queued by an ordinary \
+         run — `file_sha256` means 'written to the catalog', and reading it as \
+         'embedded' is what makes this state absorbing"
+        );
     }
 
     #[test]
