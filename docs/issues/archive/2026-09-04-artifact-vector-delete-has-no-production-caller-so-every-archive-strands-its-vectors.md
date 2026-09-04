@@ -248,8 +248,23 @@ minute of being written.
 >
 > **Still true for other sessions:** at that moment 11 of 14 running codescout servers were
 > still on `(deleted)` inodes. A rebuild fixes new processes only; each live session must
-> `/mcp` for itself, and until it does it keeps stranding vectors while its source tree shows
+> restart its server, and until it does it keeps stranding vectors while its source tree shows
 > the fix.
+>
+> ⚠ **CORRECTION, 2026-09-04 06:1x — `/mcp` is NOT reliably the clearing action, and this
+> record said it was.** `backend-kotlin-bb` (session `add4873b`) ran `/mcp`, received
+> `Reconnected to codescout`, and **reattached to the same pid** — still on the deleted inode,
+> still running the old build. It worked in this session (new pids appeared and the new code
+> string-probed present), so `/mcp` sometimes respawns and sometimes reattaches.
+>
+> **The message is identical either way**, which makes it one more instance of the class in
+> `bug-fix-session-log:W-106`: a summary line a broken run produces byte-for-byte. Do not treat
+> `Reconnected to codescout` as evidence. **Compare the pid and the inode across the
+> reconnect** — `readlink /proc/<pid>/exe` before and after — and if the pid is unchanged and
+> still `(deleted)`, only a genuine restart of the server process will clear it.
+>
+> This correction was broadcast to ten sessions in the false form first. Recorded rather than
+> quietly amended, because the false form is what several of them acted on.
 ## Hypotheses tried
 
 1. **Hypothesis:** `reindex`'s `orphans_removed` already sweeps stale vectors.

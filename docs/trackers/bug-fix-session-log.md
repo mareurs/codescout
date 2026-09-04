@@ -11419,6 +11419,31 @@ specific class with the warning in front of them** (row 9). Vigilance was at its
 row 9 and bought nothing. Their own remedy is the one this entry argues for and is sharper
 than the general form: **derive the label from the count, never print it alongside.**
 
+### Rows 10 and 11 — the remedy I broadcast was itself an instrument of this class
+
+**Row 10.** `/mcp` prints `Reconnected to codescout` whether it **respawns** the server or
+**reattaches to the existing process**. It respawned here (new pids, new code string-probed
+present) and reattached for `add4873b`, who ran it, read the same success line, and stayed on
+the deleted inode running the old build. **The message is byte-identical in both cases**, so
+it is exactly this entry's subject — and it was the remedy I broadcast to ten sessions as the
+fix. Several acted on the false form. The discriminator is free and nobody reaches for it:
+compare the pid and `readlink /proc/<pid>/exe` **across** the reconnect. Corrected at the
+record that carried it rather than quietly amended.
+
+**Row 11, and it generalises the class past instruments to STORED VALUES.** `add4873b`
+committed a warning into a tracked file at 08:53 — *"master is 13 commits ahead of origin, a
+laptop pull sees none of it"* — and the push landed at 08:57. **False in four minutes,
+committed, confidently phrased.** The value was correct when read and wrong when published;
+they caught it only by re-running the count instead of reusing the number from earlier in
+their own session.
+
+Their generalisation is the sharpest statement of this entry and belongs in it: **a stale
+number and a broken instrument produce the same artifact — a plausible summary line — but the
+stale one is worse in a handoff, because committing it converts a transient wrong reading into
+durable wrong documentation.** The control is the same shape: **re-run the cheap query at
+publish time rather than trusting the value you already wrote down.** That is also what the
+`11 of 14` → `8 of 14` correction above is an instance of, arriving from a second direction.
+
 ### The stale-binary warning has an exemption, and it narrows usefully
 
 > **First, the number is an INSTANT, not a property, and I published it twice as though it
