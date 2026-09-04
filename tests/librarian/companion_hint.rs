@@ -40,7 +40,7 @@ fn real_tools() -> HashSet<&'static str> {
 /// scanned over the WHOLE document — deliberately **not** backtick-scoped.
 ///
 /// The surface this file mirrors is backtick-scoped and has a filed bug for it
-/// (`docs/issues/2026-09-02-the-prompt-surface-gate-is-backtick-scoped.md`).
+/// (`docs/issues/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`).
 /// Inheriting that would have mattered here: `artifact_link` occurs in this very
 /// prompt **unbackticked**, so a backtick-scoped extractor reports it clean.
 fn compound_tool_tokens(s: &str) -> Vec<&str> {

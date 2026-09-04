@@ -13,7 +13,7 @@
 //! Adding a `.rs` here without a `mod` line re-creates the exact defect this
 //! harness was written to end.
 //!
-//! See docs/issues/2026-09-02-a-test-file-in-no-cargo-target-asserts-nothing-and-is-a-tautology-anyway.md
+//! See docs/issues/archive/2026-09-02-a-test-file-in-no-cargo-target-asserts-nothing-and-is-a-tautology-anyway.md
 
 mod companion_hint;
 
