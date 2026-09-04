@@ -733,3 +733,21 @@ were left in `IC-3` as genuinely arguable rather than moved on a coin-flip.
 <Two or three paragraphs: what the instances share, what a fix would have to change, and
 what would falsify the claim.>
 ```
+
+**`**Members:**` is ONE LINE, and the gate reads only that line.**
+`scripts/pre-commit-ledger-counts.py:376` keys on `line.startswith("**Members:**")`, so every
+`+1: <slug>` stem must sit on *that* line. Derivation paragraphs beneath it render as part of the
+field and are **invisible to the check** — a member named only in the prose below satisfies nothing.
+The refusal text does not discriminate either: *"expected the field to change and to contain one of:
+<slug>"* is equally true of an edit that changed exactly that prose, so it is accurate and
+under-determines the fix.
+
+Measured 2026-09-04, and it is the **accidental passes** rather than the refusals that argue for
+writing it here. Three sessions satisfied this gate without knowing what it checks — each appended
+to the end of a class (`IC-2`, `IC-6`, `IC-14`) whose entire membership happens to occupy one long
+line, so the stem landed on the line by luck. A refusal teaches; an accidental pass installs a wrong
+model that survives and gets repeated. The rule was already written down — inside
+`cluster/unclassified`'s own `**Members:**` line, which is the one place a reader reaches *after*
+being refused. That is `OB-1`'s third position, a bound published to an audience that never reads it,
+so this is a **move to the read surface** rather than a second copy: an author adding a member to any
+other class never had cause to open `unclassified`.
