@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-02-artifact-chunk-grain-retrieval-design.md` (committed `47ac0937`, patch-id `e4a55730ced544ba355c5b4281722ca132e05b14`)
 
-**Bug:** `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (artifact `7a37f1179d2f0e21`)
+**Bug:** `docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (artifact `154848bbd55e7768`)
 
 ## Execution status — read this before dispatching any task
 

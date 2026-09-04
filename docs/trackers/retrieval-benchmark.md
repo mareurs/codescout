@@ -391,6 +391,25 @@ retire those three before quoting any number from this suite again.
 
 ### 2026-09-03 — the ruling: chunk grain ships OFF by default, opt in per project
 
+> **SUPERSEDED by `63fae4ea`** — *"chunk grain becomes the default; artifact grain is a degraded
+> mode, not a cheap one"*. This section records the 2026-09-03 ruling shipped at `4f172f70`
+> (*"chunk-grain artifact vectors become an opt-in, default off"*), and that ruling was **reversed**.
+> As of 2026-09-04 the code reads `src/librarian/catalog/chunk.rs:139` — *"On by default; opt OUT
+> with `[librarian] chunk_grain = false`"* — pinned by `chunk_grain_is_on_unless_a_project_opts_out`,
+> and `.codescout/project.toml:22` agrees (*"intentionally NOT set here. It defaults to ON"*).
+>
+> **So the `chunk_grain = true` line below is now a no-op**, and that is the part that costs a
+> reader something: `only_a_literal_false_opts_out_and_every_near_miss_stays_on` pins a literal
+> `false` as the only value that changes anything, so a project following this section writes a line
+> believing it opted *in* to something it never touched — and does not write the line that would opt
+> it *out*.
+>
+> `63fae4ea` **touched this file** and left the section standing, which is the mechanism rather than
+> an oversight: nothing points from a new section back to the one it falsifies. Kept and dated rather
+> than deleted — everything below was measured under this ruling and remains true of what it
+> measured (the cost distribution, the 12m10s full re-embed); only the default it prescribes moved.
+> `observer-blindness:OB-12`.
+
 **Shipped** `4f172f70` (patch-id `991386342baded3dccbc6f59b7b578fb114851db`), on `experiments`, gate green including the `--features server-stack` lane.
 
 `[librarian] chunk_grain = true` in `<project>/.codescout/project.toml` opts in.
@@ -418,7 +437,7 @@ available lever is per-project on/off, which is what shipped. Carry the
 retraction, not the original claim.
 
 **Artifact grain is not a neutral cheap mode.** It is the ranking behaviour of
-`docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`:
+`docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`:
 one vector on a 512-token embedder represents a document's first ~2,048
 characters and no more. Two things differ from that defect and **neither recovers
 the ranking** — the whole body is stored as one `artifact_chunk` row, so `matched`

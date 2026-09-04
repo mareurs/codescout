@@ -1,5 +1,5 @@
 ---
-id: '7a37f1179d2f0e21'
+id: 154848bbd55e7768
 kind: bug
 status: fixed
 title: 'BUG: an artifact is embedded from its first chunk only — a 189-entry ledger is represented by its preamble'
@@ -15,7 +15,6 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: high
-unverified: 'Chunk-grain retrieval has never been exercised end-to-end on this deployment. The code fix and its regression tests are verified on experiments and green, but the live backend is Qdrant, where Task 7''s guard refuses chunk ids outright (reindex 2026-09-03: embedded 0, embed_error_count 59). The plan''s Deferred section names this as an undecided open question, not a defect. What IS established: every chunk is queued and its artifact_chunk row written; what is NOT: that a chunk vector is ever stored or retrieved on the default server-build backend.'
 ---
 
 # BUG: an artifact is embedded from its FIRST CHUNK only — a 189-entry ledger is represented by its preamble
@@ -295,15 +294,61 @@ Do not rely on `semantic_search` / `semantic=` to find an entry inside a large
 tracker. Use `grep` for exact tokens, `link_scan`-derived citations, or
 `artifact(action="get", heading=…)` when the heading is known.
 
+## Verified live 2026-09-04 — chunk vectors are stored AND retrieved on the Qdrant backend
+
+The `unverified:` caveat named exactly one thing as unestablished: *"that a chunk vector is ever
+stored or retrieved on the default server-build backend"*, citing `reindex 2026-09-03: embedded 0,
+embed_error_count 59`. Both halves are now established, against the deployed binary after a
+`cargo rb` + `/mcp` reconnect. **The caveat is discharged and the field cleared.**
+
+**Stored.** The live Qdrant instance holds `artifact_chunks_codescout_dc6a871595179329` with
+**31,548 points** — up from the 29,154 measured 2026-09-03 (`bug-fix-session-log:W-103`), so it is
+growing rather than frozen. A sibling collection exists for the `prompt-engineering` project (2,100
+points), so this is not one project's accident.
+
+**Retrieved, by positive control rather than by a count.** The symptom this bug names is *"a
+189-entry ledger is represented by its preamble"*, so the discriminating test is whether content
+deep inside a large artifact is reachable. Queried for a phrase whose location was known **in
+advance** — entries written into `docs/trackers/bug-fix-session-log.md` (11,000+ lines) earlier the
+same session:
+
+| returned | lines |
+|---|---|
+| `bug-fix-session-log.md` — `F-114` body | **11191–11206** |
+| `bug-fix-session-log.md` — `W-104` body | **11149–11163** |
+| `docs/issues/archive/2026-08-28-post-compact-flush-…md` | 284–303 |
+
+Entry-grain chunks from line 11,149 of an 11,000-line file, ranked above that file's preamble. A
+first-chunk-only index cannot produce this result, which is what makes it evidence rather than
+reassurance: had the defect survived, the same query returns the ledger's header.
+
+**The grain fix is visible in the data, not only in retrieval.** `select count(*) from
+artifact_chunk where artifact_id='2dd9d90bc83f9f49'` → **594** chunks for that one ledger. The
+defect was one chunk per artifact.
+
+### What is NOT discharged, and is deliberately not folded in
+
+`## Resume` (a) asked why 3,095 of 4,495 artifacts had no vector, and warned that the number *"may
+be an unrelated coverage bug and should not be folded into this one without measuring"*. That
+warning holds and the metric has moved underneath it: `artifact_vec_rowids` now reads **1,403 of
+4,672** artifacts, but that table is the **legacy sqlite-vec artifact-grain** store, superseded by
+the Qdrant chunk-grain collections above (`artifact_vec_v2_rowids` is **0**). Comparing 1,403 to
+3,095 compares across a backend change and would be a number with no question attached.
+
+The live coverage gap, stated in the units that now apply: **31,548 Qdrant points against 35,794
+`artifact_chunk` rows — 4,246 chunks (11.9%) carry no vector.** That is a real and separate
+mechanism, already filed, and it is not this bug's grain defect:
+`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` (the absorbing
+stamped-as-seen state) and
+`docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+(observed again in tonight's reindex as one `input is too large to process` failure). Neither is
+reopened by this record and neither is closed by it.
+
 ## Resume
 
-Two separable next actions. (a) Establish why **3,095 of 4,495** artifacts have
-no vector — run `librarian(action="reindex", reembed=true)` on a scratch copy
-and re-count `artifact_vec_rowids`; that number may be an unrelated coverage
-bug and should not be folded into this one without measuring. (b) For the grain
-fix, start at `src/librarian/catalog/schema.sql:49-58` — the compound key is the
-gating change; `indexer.rs:69` is one line once the schema allows it.
-
+N/A — fixed, and the caveat discharged 2026-09-04 by live probe (§ *Verified live*). The two
+residuals are separately filed and are not resumptions of this bug: the 11.9% chunk-vector coverage
+gap, and the oversized-artifact embed failure.
 ## References
 
 - `src/librarian/indexer.rs:66-75`, `:479`

@@ -12,8 +12,8 @@ tags:
 
 # Design — chunk-grain retrieval for librarian artifacts
 
-Addresses `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`
-(artifact `7a37f1179d2f0e21`, severity high).
+Addresses `docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md`
+(artifact `154848bbd55e7768`, severity high).
 
 ## Decisions taken
 
@@ -383,7 +383,7 @@ them is a number, not an error — 25 scores, all of them about code.
 
 ## References
 
-- `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (`7a37f1179d2f0e21`)
+- `docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (`154848bbd55e7768`)
 - `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md` — the budget decision, and the precedent for this spec's retraction
 - `docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md` — the mechanism P1 most likely instantiates
 - `docs/issues/archive/2026-05-17-reindex-embedding-dim-mismatch.md` — why empty inputs abort a batch

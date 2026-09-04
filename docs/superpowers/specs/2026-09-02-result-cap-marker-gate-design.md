@@ -354,7 +354,7 @@ it would re-create the complaint in a new file.
   open; the mistake the tracked-files rule avoids.
 - `docs/issues/2026-09-02-overflow-summary-promotes-the-count-and-elides-its-caveat.md` —
   the one member open in both its file and its code.
-- `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (fixed at
+- `docs/issues/archive/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (fixed at
   `488192e8`, file stale) and
   `docs/issues/archive/2026-09-02-symbols-renders-a-wrapped-signature-truncated-at-the-paren.md`
   (fix in flight in a peer session) — **not** reconciled by this spec; both belong to their
