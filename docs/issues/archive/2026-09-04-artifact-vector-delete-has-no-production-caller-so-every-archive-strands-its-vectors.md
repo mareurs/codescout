@@ -227,7 +227,29 @@ before naming it; recorded here because this record demonstrated it against itse
 minute of being written.
 
 **Deploy step, owed by whoever ships this:** `cargo rb`, then `/mcp` in each live session.
-Until then the two fixes are committed and inert.
+
+> **Done and verified live, 2026-09-04 03:07.** Rebuilt binary (mtime 03:07:40, after
+> `a5bbc22d` at 03:04:06), string-probed for `set_payload(artifact_refile)` and
+> `count(artifact_refile)` with a nonsense negative control returning 0, so the probe is known
+> to discriminate.
+>
+> End-to-end on the live server, reading Qdrant directly rather than trusting the tool
+> responses: a scratch artifact with 2 chunks, moved then deleted.
+>
+> | step | reported | observed in Qdrant |
+> |---|---|---|
+> | `move` | `vectors_refiled: 2` | old id **0**, new id **2** |
+> | `delete` | `vectors_deleted: true` | deleted id **0** |
+>
+> **The load-bearing assertion is that the CHUNK IDS were unchanged across the move**, not the
+> count. A delete-then-re-embed yields the same 2 points under the same new artifact id and
+> satisfies every count-based check, while burning an embedder pass and minting chunk ids the
+> catalog's `artifact_chunk` rows no longer name. Only the correct mechanism preserves the keys.
+>
+> **Still true for other sessions:** at that moment 11 of 14 running codescout servers were
+> still on `(deleted)` inodes. A rebuild fixes new processes only; each live session must
+> `/mcp` for itself, and until it does it keeps stranding vectors while its source tree shows
+> the fix.
 ## Hypotheses tried
 
 1. **Hypothesis:** `reindex`'s `orphans_removed` already sweeps stale vectors.
