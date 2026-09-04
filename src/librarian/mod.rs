@@ -110,9 +110,15 @@ pub async fn build_tool_context_with(
         )
         .await
         {
-            Ok(e) => Some(std::sync::Arc::new(embedding::EmbeddingService::new(
-                std::sync::Arc::from(e),
-            ))),
+            // Budget derived from the configured model, never a literal: the backend
+            // REJECTS oversized input rather than truncating it, and the rejection is
+            // absorbing — the artifact lands vectorless with no error downstream.
+            Ok(e) => Some(std::sync::Arc::new(
+                embedding::EmbeddingService::with_budget(
+                    std::sync::Arc::from(e),
+                    codescout_embed::chunk_size_for_model(model),
+                ),
+            )),
             Err(err) => {
                 tracing::warn!("embedding service unavailable: {err:#}");
                 None
@@ -394,7 +400,11 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
         let url = env.embed_url.clone();
         let api_key = env.embed_api_key.clone();
         match codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await {
-            Ok(e) => Some(embedding::EmbeddingService::new(std::sync::Arc::from(e))),
+            // Same model-derived budget as the primary construction site above.
+            Ok(e) => Some(embedding::EmbeddingService::with_budget(
+                std::sync::Arc::from(e),
+                codescout_embed::chunk_size_for_model(model),
+            )),
             Err(err) => {
                 eprintln!("warn: embedding service unavailable: {err:#}");
                 None
