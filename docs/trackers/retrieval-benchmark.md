@@ -205,6 +205,55 @@ relative — known gap.
 
 ## History
 
+### 2026-09-04 (dawn) — (a) title-in-embedding, measured in isolation: **hits@5 5 → 7**, MRR +25% at BOTH limits
+
+**Config.** `python3 scripts/run-artifact-bench.py --suite scripts/tc-suites/artifact-entries.json --bin target/release/codescout --limit {5,50}`, both limits run before and after a single `librarian(reindex, reembed=true, scope="project")`. **No file edit landed between the two pairs** — the write lock was held by the reindex throughout, which is the only reason that claim is checkable rather than asserted.
+
+**Binary freshness verified positively, not inferred.** `find src crates tests Cargo.* -newer target/release/codescout` returned **zero** files, and the serving process (pid 124937, started 03:24:40, 17 min after the 03:07:40 build) has a live inode rather than `(deleted)`. Both halves matter: a fresh binary that a stale server is not running produces a measurement reading "(a) changed nothing", and this session had already been bitten by the `(deleted)` form three times.
+
+| | baseline | post-reindex | Δ |
+|---|---|---|---|
+| `--limit 5` hits | 5/12 | **7/12** | **+2** |
+| `--limit 5` file-hits | 7/12 | 8/12 | +1 |
+| `--limit 5` MRR | 0.3125 | **0.3958** | +26.7% |
+| `--limit 5` classes | hit=5 preamble=2 wrong_file=5 | hit=7 preamble=1 wrong_file=4 | |
+| `--limit 50` hits | 9/12 | 9/12 | **0** |
+| `--limit 50` file-hits | 10/12 | 10/12 | **0** |
+| `--limit 50` MRR | 0.3264 | **0.4078** | **+24.9%** |
+| `--limit 50` classes | hit=9 preamble=1 wrong_file=2 | hit=9 preamble=1 wrong_file=2 | **identical** |
+
+**The `--limit 50` row is the whole argument, and it is a signature rather than a score.** Class counts came back *byte-identical* while MRR rose a quarter. That is a pure **ranking** improvement: retrieval returned the same set of correct answers and ordered them better, and two of them crossed the depth-5 cutoff — which is the entire `--limit 5` gain. Corpus drift cannot produce this shape. Drift changes *which* documents return, so it moves `file-hits` and shuffles class membership; here membership is frozen and only position moved. Same discipline that made BL-72 legible (`preamble` 3→1 with `wrong_file` exactly constant).
+
+**What (a) actually is, and why the terminator fix is not a co-treatment to be isolated from it.** `embed_queue_items` now prepends `TOKEN — title` to a chunk that carries an entry token and does not already open with its own heading. Before `919da0cb` it prepended a bare `W-81` — an opaque identifier with no semantic content for a query to match, so the mechanism was wired and carrying a payload that could not do its job. The scope terminator shipped in the same commit because it is a **precondition**: without it, thousands of trailing-section chunks inherit an earlier entry's token and would have been prefixed with the *wrong* title. "(a) with broken scoping" is a configuration nobody would ship, so measuring it would answer no question.
+
+**The confound, stated rather than buried.** This reindex also re-embedded everything, repairing any stale vectors, so the gain is (a) + staleness-repair and this run cannot decompose them. Two things bound it. First, `wrong_entry` was **0 at both limits in the baseline**, so stale *coordinates* cost no bench points to begin with. Second, stale *vectors* would change top-50 membership, not merely order — a document embedded from superseded text lands somewhere else in the ranking, it does not politely hold its slot. Frozen membership with moved order is the shape of better signal on the same corpus. That is evidence, not proof; the clean decomposition needs a second build with the prefix disabled (~12 min build + ~7 min reindex) and has not been run.
+
+**Known-unfixed, unchanged by this run:** `wrong_file=2` at limit 50 is at least partly the suite's own fault — AE-8's query is near-verbatim the title of the bug file retrieval returns at rank 1, single-target ground truth over a multi-answer corpus. Do not read the remaining 3/12 as pure retrieval loss.
+
+**Reindex envelope:** 1,472 unchanged, 2 updated, **28,140 chunks embedded**, 3 embed errors (all HTTP 500 `input is too large to process. increase the physical batch size` from the embedder on `127.0.0.1:48081`), 10 vectorless. Start 03:32, finish 03:39.
+
+#### The side finding: `7695ad877b44e96a`'s root cause, and a prior refutation that could not have been valid
+
+The same run resolved the open coordinate-drift bug, by accident of scoping. `scope="project"` reindexed codescout and nothing else, so the catalog was left holding a treated group and a control:
+
+```
+codescout    drift    0 of 2940 resolvable (0.00%)   across 0 files
+OTHER-REPOS  drift  143 of  632 resolvable (22.63%)  across 10 files
+
+docs/trackers/bug-fix-session-log.md      resolvable=150  drift=0
+docs/trackers/open-issue-work-queue.md    resolvable= 98  drift=0
+```
+
+The two files the bug file named at −2 and −1 report **positively** — 150 and 98 resolvable chunks, zero drift each — so this is not an absence-from-a-truncated-list argument. Probe: `chunk-coord-drift.py` / `drift-by-root.py` (job tmp, not committed; the counting rule is `published start_line < the line of the heading that DEFINES the chunk's own token`).
+
+**Three defensible numbers, all correct, none interchangeable:** 143/632 = 22.63% of resolvable entry-bearing chunks *in non-reindexed repos*; 0/2940 *in codescout*; 143/3572 = 4.00% *corpus-wide*. Quote the population or quote nothing.
+
+**The mechanism, traced in code before the numbers arrived.** `replace_chunks` has exactly **one** production caller — `embed_queue_items` (`src/librarian/indexer.rs:184`); every other reference is a test fixture. `index_repo_sync`'s unchanged-row early return (`:395`) reaches it only under `force_embed`. And `doc(action="update")` writes the new body (`src/librarian/tools/update.rs:633`) *and* stamps the matching `file_sha256` (`:661`), while containing zero references to `indexer`, `embed` or `chunk`. So a `doc(update)` body edit leaves the row saying "unchanged" and the chunks holding the old body's line numbers, tokens and vectors — **permanently**, since every later ordinary reindex correctly agrees nothing changed. `append_entry` does *not* stamp the hash, so its edits self-heal on the next reindex. The conscientious path breaks; the sloppy one recovers.
+
+**The prior refutation was invalid, and that is the transferable part.** This bug file records that a forced re-walk of all 1,471 artifacts "left it in place, and got worse", which reads as having ruled staleness out. But `force=true` bypasses the unchanged-**row** skip without ever reaching `replace_chunks`, so that re-walk rebuilt **zero** chunks. It was an instrument that could not express the hypothesis it was aimed at, and it returned a plausible "still there" rather than an error — striking a correct hypothesis for four days. Before citing a re-run as a refutation, name the write the re-run was supposed to perform and check that it performed it.
+
+**And a heuristic of my own, corrected in the same breath:** the probe labels a per-file *constant* delta the staleness signature and a *mixed* one the arithmetic signature. That is wrong. Insertions at several points in one file shift entries below each one by different amounts, so staleness produces `MIXED` too — and every `MIXED` file here is in the untreated group, i.e. pure staleness. The delta shape does not discriminate; the treated/untreated split does.
+
 ### 2026-09-02 — artifact-path baseline
 
 First instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. `search_live: true` (positive control — at least one query returned non-empty `items`, so the 0/12 reflects the missing line-range field, not a dead search path). Suite: `scripts/tc-suites/artifact-entries.json`.
