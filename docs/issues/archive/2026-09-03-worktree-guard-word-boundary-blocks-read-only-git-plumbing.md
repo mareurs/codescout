@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-03
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-09-04
+opened: 2026-09-03
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: the worktree guard's `merge\b` matches `git merge-base`, so six read-only plumbing commands are blocked as destructive mutations
@@ -158,26 +158,20 @@ does not apply to the command it is rescuing.
 
 ## Fix
 
-Anchor the verb at a real command boundary — whitespace or end-of-segment — rather than `\b`:
+Anchored the verb at a real command boundary — whitespace or end-of-segment — instead of `\b`:
 
 ```js
-const TRIGGER = /git\s+(commit|push|reset\s+--hard|rebase|merge|checkout\s+-b)(\s|$)/;
+if (!/git\s+(commit|push|reset\s+--hard|rebase|merge|checkout\s+-b)(\s|$)/.test(cmd)) process.exit(0);
 ```
 
-`reset\s+--hard` and `checkout\s+-b` already end in a token that cannot be a stem, so only
-`commit`, `push`, `merge` and `rebase` change behaviour, and only for hyphenated successors.
+**Correction to this file's own line citations, found while fixing (verify-at-the-bytes, not from belief):** the live file is 60 lines, not the `:65`/`:67`/`:93`/`:99` this bug cited, and defines no `TRIGGER`/`EXPLICIT_C` named constants — the trigger regex is an inline literal at line 20 (`git-worktree-guard.mjs:20`), the `-C` allow-regex at line 23, the carve-out and refusal text further down. The regex bug itself was exactly as described and reproduced identically against the current file; only the cited line numbers/names had drifted (or were imprecise from the start). `reset --hard`, `push` and `checkout -b` had no hyphenated collision so only `commit`/`merge` changed behavior, matching the original diagnosis.
 
-**Verify with a table, not a spot check** — the six rows above must pass and the four bare
-verbs must still block. A single `git merge-base` probe would go green under a regex that had
-broken `git merge` entirely, which is the mutation that matters here.
+Fixed at `claude-plugins:492c47e987c30064a53500edd8e0ff78189a9429`, patch-id `9a947f2a214b544cdc96a629076297c22fc8d078`.
 
-SHA: *pending.* patch-id: *pending.*
-
+Verified with a table, not a spot check — see § *Tests added*.
 ## Tests added
 
-None yet. The hook has no test harness in this repo; the fix should carry the six-plus-four
-table as a fixture wherever the companion plugin's tests live.
-
+`claude-plugins/codescout-companion/hooks/git-worktree-guard.test.sh` (new) — the six over-matched plumbing rows from § *Root cause* (`merge-base`, `merge-tree`, `merge-file`, `merge-index`, `commit-tree`, `commit-graph`) plus the six bare mutating verbs (`commit`, `push`, `reset --hard`, `rebase`, `merge`, `checkout -b`) as a regression sentinel. Sandbox is a real git repo with 2 extra worktrees (clears the `wtCount < 2` carve-out) and feeds each command through the actual hook binary via stdin JSON, same pattern as the repo's existing `worktree-write-guard.test.sh`. 12/12 pass; ran the full `*.test.sh` suite in that directory (16 files) after the fix — no regressions.
 ## Workarounds
 
 Use the documented escape — `git -C <abs path> merge-base …` — or call the command through
@@ -186,20 +180,7 @@ Use the documented escape — `git -C <abs path> merge-base …` — or call the
 
 ## Resume
 
-Apply the one-character-class fix at
-`claude-plugins/codescout-companion/hooks/git-worktree-guard.mjs:65` and verify against the
-six-row table above plus the four bare verbs. Note the repo boundary: the fix lands in
-`claude-plugins`, not codescout, so it needs that repo's own gate and its SHA cited with the
-`<repo>:<sha>` prefix.
-
-**Cluster:** filed `cluster/unclassified` deliberately. `IC-14`
-(`guard-narrower-than-its-name`) is the nearest class and is its **inverse** — this guard's
-coverage is *wider* than its name, refusing work rather than missing it. Forcing it into
-`IC-14` would corrupt the count that class's promotion reads, which the ledger explicitly warns
-against. If a second over-matching guard turns up, the candidate class is *"a guard's trigger
-matches a superset of what its name claims"*, and that is when to declare it — not now, at
-n=1.
-
+Done. Fixed and verified on `claude-plugins` main at `492c47e987c30064a53500edd8e0ff78189a9429` (patch-id `9a947f2a214b544cdc96a629076297c22fc8d078`); regression test added and the full companion-plugin hook test suite re-run green.
 ## References
 
 - `claude-plugins/codescout-companion/hooks/git-worktree-guard.mjs` — `:1` intent, `:65`
