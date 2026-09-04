@@ -1,13 +1,15 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - librarian
 - worktree
 - write-guard
 - codescout-tool
 - cluster/guard-narrower-than-its-name
-closed: null
+claimed_at: 2026-09-04
+claimed_by: 4a2f34f7-0669-487d-9ce9-39b77881642f
+closed: 2026-09-04
 opened: 2026-09-03
 owner: marius
 related:
@@ -150,31 +152,22 @@ cover the tool that causes it.
 
 ## Fix
 
-*Plan only.*
+**Chosen (deliberately, by the project owner, not by whoever picked up the bug): extend the gate.** Every `doc` write now needs `activate` first in a worktree-bearing repo, consistent with the five file-write tools — accepting the broadened friction over resolving `doc`'s ambiguity by trusting it.
 
-Two coherent answers, and the bug is that neither has been chosen:
+**Real cost found while scouting, materially bigger than "wire the existing function into one more call site":** `guard_worktree_write(ctx: &ToolContext)` reads `ctx.agent` — but `doc()`'s dispatch (`Artifact::call` in `artifact.rs`) receives a COMPLETELY DIFFERENT `ToolContext` type (`crate::librarian::tools::ToolContext`, defined in `src/librarian/tools/mod.rs`), which has no `agent` field at all. It's built once at server boot (`crate::librarian::build_tool_context`) and shared read-only across every session (`Arc<LibToolContext>`), not derived per-call from session state the way the core `ToolContext` is. So the guard could not simply be called from `Artifact::call`.
 
-- **Extend the gate.** Call `guard_worktree_write` from the librarian mutation
-  entry point. Cost: every `doc` write in a worktree-bearing repo now needs an
-  `activate` first, including in sessions that never touch a worktree.
-- **Retire the ambiguity instead.** If `doc`'s resolution is correct without
-  activation, then `edit_file`'s refusal is over-strict for the same reason, and
-  the fix is to make the file-write tools resolve the way `doc` does and report
-  `wrote_to` rather than refuse.
+The actual seam: `LibrarianAdapter::call` (`src/librarian/adapter.rs`) is the ONE place that receives BOTH the core `crate::tools::ToolContext` (with `.agent`, as its own `ctx` parameter) and the raw `input` JSON (with the `action` string) before deriving the librarian's own per-call `ToolContext` via `self.derive_ctx(...)`. The guard now runs there, gated on `self.inner.name() == "doc"` and a new `is_mutating_doc_action(action)` classifier covering exactly the ten actions this bug named (`create`, `update`, `move`, `delete`, `graft`, `link`, `append_entry`, `update_entry`, `event_create`, `augment`). The seven read actions (`find`, `get`, `graph`, `state_at`, `event_list`, `gather`, `list_stale`) are exempt and verified not to be gated (see § *Tests added*).
 
-Do not "fix" this by adding a `doc`-specific message. The value at stake is that
-one file has one write target regardless of which tool addresses it.
-
-SHA: *(not fixed)*
-patch-id: *(not fixed)*
-
+Fixed at `05b785ac445130a4facfeae5fe5cdd3dc8cf87f3` on `codescout` `experiments`, patch-id `d2f60345d6a21d278e9dc03f8fb71257fb78afb3`.
 ## Tests added
 
-None yet. When fixed, the discriminating test is **cross-tool**: same path, same
-session, no activation, assert `doc` and `edit_file` agree — either both refuse
-or both write to the same resolved root. A per-tool test on either side passes
-today and is what let the two drift.
+Three new `#[tokio::test]`s in `src/librarian/adapter.rs`'s own `tests` module (mirroring `guard_worktree_write_refuses_when_only_resolved_at_startup` / `..._allows_after_explicit_activate` in `src/tools/core/tests.rs`, and `adapter_for_test()` for the `LibrarianAdapter` construction):
 
+- `doc_mutation_is_blocked_when_worktrees_exist_and_not_activated` — `doc(action="create")` through `LibrarianAdapter::call` with linked worktrees and no `activate()` must fail with `"Write blocked"` specifically (not some other validation error).
+- `doc_mutation_allowed_after_explicit_activate` — the same call succeeds once `ctx.agent.activate(root, None)` has run.
+- `doc_read_is_not_blocked_by_worktree_guard` — `doc(action="find")` under the same worktree/no-activate conditions must never be refused by this guard.
+
+All three ran RED first (2 of 3 failing for the expected reason: the guard did not exist and the fixture-payload gap on `body`), then GREEN after the fix. Full workspace gate (fmt, clippy -D warnings, both test lanes) run clean for this file; two unrelated failures seen in the same `cargo test --workspace` run (`parse_create_table_columns_extracts_artifact_columns`, `index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`) belong to a concurrent peer session's uncommitted work on a766aad35b0b7610 in `catalog/*.rs` and `indexer.rs` — confirmed via `git status` before committing, and this commit stages only `src/librarian/adapter.rs`.
 ## Workarounds
 
 Call `workspace(action="activate", path="<main repo abs path>")` at session
@@ -184,10 +177,7 @@ the state.
 
 ## Resume
 
-`src/tools/core/guards.rs:20-47` (the gate), its five call sites, and
-`src/librarian/tools/` (which has none). `src/usage/db.rs:2298` records the
-population the gate was measured against.
-
+Done. Fixed and verified on `codescout` `experiments` at `05b785ac445130a4facfeae5fe5cdd3dc8cf87f3` (patch-id `d2f60345d6a21d278e9dc03f8fb71257fb78afb3`). Direction chosen: extend the gate (not retire it) — see § *Fix* for why the actual wiring point is `LibrarianAdapter::call`, not the `Artifact::call` dispatch this bug originally pointed at.
 ## References
 
 - `docs/trackers/bug-fix-session-log.md` § `F-110` — the recon pass that hit this
