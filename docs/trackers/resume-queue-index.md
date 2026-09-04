@@ -134,9 +134,19 @@ than trusting either this index or the roster to have spanned it.
 Every other row asserts something checked.
 
 
-**Update, same day, verified rather than relayed:** at least one of the four is now **permanently** unrecoverable, not merely uncollected. `codescout-69` reports PID 4020515 exited without ever replying; I verified `/proc/4020515` is gone and that **three** MRV-poc sessions remain live (1689215, 3737053, 3939042) against the four the roster was waiting on. So one session's state left with the process.
+**Update, same day, verified rather than relayed — THREE of the four are permanent, not one.** I first recorded "at least one" on the single PID `codescout-69` reported. They then checked all four; I re-checked every PID myself at **06:29:56Z**:
 
-That changes what this row means. "Uncollected" implies a pending action — ask them. "Exited unasked" has no action attached: the only remaining evidence is whatever that session committed, plus MRV-poc's own `git status`. **A hole that can still be closed and a hole that cannot are different facts, and only the second one is final.** Nothing in the roster distinguishes them, because a roster row records the reply that did not arrive and not the process that stopped being able to send one.
+```
+4020515  GONE      1888063  GONE      1998425  GONE      3939042  LIVE (state S)
+```
+
+Independent cross-check — three sessions are live in MRV-poc (`1689215`, `3737053`, `3939042`), and only `3939042` is one of the four the roster was waiting on; the other two are the sessions that *did* reply.
+
+So: **3 holes permanent, 1 still closable.** My earlier "at least one" was true and understated by 3×, and understated in the direction that costs — a laptop reader would have chased three sessions that can never answer.
+
+That changes what this row means, and the distinction is the durable part. **"Uncollected" implies a pending action — ask them. "Exited unasked" has none:** the only remaining evidence is whatever that session committed, plus MRV-poc's own `git status`. A hole that can still be closed and a hole that cannot are different facts, and **nothing in a roster distinguishes them**, because a roster row records the reply that did not arrive and never the process that stopped being able to send one. The row stays accurate while the action it implies silently evaporates — no value changes, only what the value *means*, so re-deriving the field cannot detect it.
+
+**And note how the number was found, because it is the second instance in one hour.** Reasoning from the report gave one; enumerating the population gave three. `RQ-4` has the identical shape — reasoning from `TAXONOMY.md`'s table gave one missing row, counting `resume-*.md` on disk gave three. **Both times the reported figure was a floor presented in a sentence that read like a total.** When a count is about to become an instruction, enumerate the population rather than trusting the report, including your own.
 ## RQ-4 — `TAXONOMY.md`'s resume-queue table is missing `SM-N`
 
 **Valid:** conditional — the paragraph and table are reconciled
