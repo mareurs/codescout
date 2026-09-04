@@ -920,6 +920,78 @@ async fn guard_worktree_write_allows_when_no_worktrees_exist() {
     );
 }
 
+/// docs/issues/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md
+///
+/// A per-call `workspace=` pin names the write target explicitly — which is the
+/// very ambiguity this guard exists to resolve — and it is the remedy
+/// `get_guide("workspace-state")` prefers OVER `activate`, because activation is
+/// process-wide and flipping it moves the substrate under a peer mid-task. The
+/// guard read `workspace_override` only to build its refusal message, so a
+/// caller who followed that advice on a write was refused, and the only
+/// satisfiable remedy left was the one the docs warn against.
+///
+/// Driven through a real write tool rather than the guard alone, deliberately:
+/// the guard is one `?` at the top of `CreateFile::call`, so an `Ok(())` in
+/// isolation would not prove the pin also reaches the resolver that decides
+/// WHERE the bytes land. The `.exists()` assertion on the pinned root is what
+/// makes that a claim about the write and not about the guard's return value.
+///
+/// The unpinned half is not symmetry for its own sake: without it, a
+/// `guard_worktree_write` gutted to `Ok(())` satisfies the pinned assertion —
+/// the two halves are monotone in opposite directions and only the pair
+/// discriminates.
+#[tokio::test]
+async fn create_file_pinned_to_its_tree_is_allowed_while_the_same_call_unpinned_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let mut ctx = rooted_ctx(&root).await;
+    assert!(
+        !ctx.agent.is_project_chosen_this_session().await,
+        "fixture precondition: startup resolution is not a choice, so the guard \
+         is armed for both halves below"
+    );
+
+    // Half 1 — nothing names a tree, so the write is refused.
+    let unpinned = crate::tools::create_file::CreateFile
+        .call(
+            serde_json::json!({"path": "unpinned.txt", "content": "x"}),
+            &ctx,
+        )
+        .await;
+    let err = unpinned.expect_err("an unpinned write with worktrees present must be refused");
+    assert!(
+        err.to_string().contains("Write blocked"),
+        "must be refused BY THIS GUARD, not by some later resolver — otherwise \
+         half 2 proves nothing about the guard. Got: {err}"
+    );
+    assert!(
+        !root.join("unpinned.txt").exists(),
+        "a refused write must have no side effect"
+    );
+    assert!(
+        !ctx.agent.is_project_chosen_this_session().await,
+        "the refused call must not have flipped the session flag — otherwise \
+         half 2 passes for the wrong reason"
+    );
+
+    // Half 2 — same context, same tool, pin naming the tree.
+    ctx.workspace_override = Some(root.clone());
+    crate::tools::create_file::CreateFile
+        .call(
+            serde_json::json!({"path": "pinned.txt", "content": "x"}),
+            &ctx,
+        )
+        .await
+        .expect("a write pinned to its own tree names the target; it must be allowed");
+    assert!(
+        root.join("pinned.txt").exists(),
+        "the pin must resolve the write INTO the pinned tree, not merely satisfy \
+         the guard"
+    );
+}
+
 #[tokio::test]
 async fn call_content_passthrough_small_output() {
     let ctx = bare_ctx().await;
