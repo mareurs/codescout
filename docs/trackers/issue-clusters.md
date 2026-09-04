@@ -762,3 +762,13 @@ between the gate and the chunker, not an oversight, and the two halves have to m
 is a **second** place the constraint was already documented, and neither is where an author adding a
 member stands — which is the whole argument for this paragraph existing here rather than a third
 restatement existing somewhere else.
+
+**And expect a third and a fourth, because the two prior records are not two accidents.** A
+constraint gets written down by whoever it **bites**, at whatever surface they happened to be
+standing on when it bit them — here, a class's own member field and an embedder-budget bug file —
+and that is never where the *next* author will be standing. The accretion point is the injury site;
+the authoring surface is somewhere else by construction. So for this class the remedy is always a
+**move** to the authoring surface and never another copy: a copy written at the point of injury is
+the failure repeating itself one address further along, which is what a third restatement of this
+very rule would have been. (Generalisation contributed by a peer session, 2026-09-04, from the two
+datapoints above.)
