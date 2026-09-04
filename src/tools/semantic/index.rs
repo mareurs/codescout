@@ -1000,7 +1000,7 @@ impl crate::tools::Tool for IndexVerify {
         // The hint names the ONE next action for this verdict. A report that lists
         // problems without saying which command addresses them gets read as noise.
         let hint = if verdict == "complete" {
-            "Index is level with HEAD and covers every eligible file.".to_string()
+            complete_hint(&collection)
         } else if verdict == "stale" {
             format!(
                 "Index is {behind} commit(s) behind HEAD; the {} missing file(s) are \
@@ -1135,6 +1135,28 @@ fn integrity_verdict(
     } else {
         "complete"
     }
+}
+/// The `complete` verdict's hint.
+///
+/// Extracted so its CLAIM can be pinned by a test, for the same reason
+/// [`integrity_verdict`] was: the sentence is what readers act on, and it was
+/// wrong in a way no field in the report was.
+///
+/// **What this tool actually verifies is two lanes, not the index.** It opens
+/// `code_chunks` for the project and the shared memory store, and nothing else.
+/// The librarian's artifact chunk vectors live in a *separate* per-project
+/// store (`artifact_chunks_<base>_<hash>` on Qdrant, or the sqlite-vec
+/// `artifact_vec_v2` escape hatch) which this tool never constructs — the core
+/// `ToolContext` carries no catalog and no artifact store, so it cannot.
+///
+/// Measured 2026-09-04: this surface returned `verdict: "complete"`,
+/// `memories: 23/23`, `chunks_without_vectors: 0` and *"covers every eligible
+/// file"* on a host where `doc(action="find", semantic=…)` returned **zero
+/// results for every query**, because the per-project artifact collection had
+/// never been built there. Every field was accurate. The sentence was the
+/// defect, and it was quoted back as evidence the catalog was fully restored.
+fn complete_hint(collection: &str) -> String {
+    format!("Index is level with HEAD and covers every eligible file in `{collection}`, plus the shared memory store. NOT covered: the librarian's artifact vectors, which live in a separate per-project store this tool never opens and can be wholly absent while every field above reads clean. Check that lane separately — `doc(action=\"find\", semantic=\"…\")` returning results is the cheapest positive test; `librarian(action=\"reindex\", reembed=true)` builds it.")
 }
 
 /// The one next action for a memory-coverage result.
@@ -1423,5 +1445,37 @@ mod integrity_verdict_tests {
     #[test]
     fn a_level_fully_covered_index_is_complete() {
         assert_eq!(integrity_verdict(0, 0, 0, 0), "complete");
+    }
+    /// `complete` is a claim about TWO lanes, and the hint must say which.
+    ///
+    /// This pins the CLAIM, not the prose. Both directions matter: a hint that
+    /// merely stopped saying "every eligible file" would satisfy a `!contains`
+    /// check while still telling the reader nothing about where the uncovered
+    /// lane lives — and that silence is the half that cost a day.
+    ///
+    /// The negative assertion is the one that fails against the superseded
+    /// wording (`"Index is level with HEAD and covers every eligible file."`),
+    /// observed RED before this shipped.
+    #[test]
+    fn the_complete_hint_names_the_lanes_it_checked_and_the_one_it_did_not() {
+        let h = super::complete_hint("code_chunks");
+        assert!(
+            h.contains("code_chunks"),
+            "must name the collection it actually opened: {h}"
+        );
+        assert!(
+            h.contains("artifact"),
+            "must name the lane it does NOT cover — silence about it is what made a \
+         broken artifact search read as a clean index: {h}"
+        );
+        assert!(
+            !h.contains("covers every eligible file."),
+            "must not assert whole-index coverage: this tool opens code_chunks and the \
+         memory store, never the artifact vector store: {h}"
+        );
+        assert!(
+            h.contains("semantic=") || h.contains("reembed=true"),
+            "a scope disclaimer with no positive test to run is not actionable: {h}"
+        );
     }
 }
