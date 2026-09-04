@@ -104,11 +104,16 @@ and it hits the same rejection.
 >
 > So the failure is not confined to `chunk_grain = false`. Full derivation, and the reason the
 > affected files keep growing (a pre-commit gate mandates appending to one line):
-> `docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`.
+> `docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`.
 >
-> The Fix section below is unaffected and is now the shared one: clipping at the embed
-> boundary closes both records, because both fail for the same reason — **the embedder rejects
-> rather than truncates, so the caller must bound what it sends.**
+> **Updated 2026-09-04:** that record is fixed at `8acec9c7`, and the shared remedy turned out
+> to be *segmenting*, not clipping. `src/embed/document.rs` already held
+> `segment_for_budget` + `mean_pool_normalized`, so the caller can bound what it sends
+> without discarding the tail — which clipping would have done to every oversized input.
+> The premise below is still right and only the verb changes: **the embedder rejects rather
+> than truncates, so the caller must bound what it sends.** This record's own grain is
+> unfixed; `EmbeddingService::embed_artifact` now segments, and whatever sends whole
+> documents on the artifact-grain path still does not.
 
 ## Evidence
 

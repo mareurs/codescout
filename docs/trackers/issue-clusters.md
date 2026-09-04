@@ -753,7 +753,7 @@ so this is a **move to the read surface** rather than a second copy: an author a
 other class never had cause to open `unclassified`.
 
 **The one-line shape is deliberate, so do not "fix" it by wrapping.**
-`docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md:166-171`
+`docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md:166-171`
 records the constraint from the other side: a `**Members:**` field whose members sat on continuation
 lines *would* chunk normally — which is wanted, because a single line cannot be split and a long one
 exceeds the embedder's input budget — but *"the one-line form is load-bearing for the gate as
@@ -762,6 +762,13 @@ between the gate and the chunker, not an oversight, and the two halves have to m
 is a **second** place the constraint was already documented, and neither is where an author adding a
 member stands — which is the whole argument for this paragraph existing here rather than a third
 restatement existing somewhere else.
+
+*Updated 2026-09-04: that record is fixed at `8acec9c7`, and it changes what this trade-off costs
+rather than removing it. `EmbeddingService::embed_artifact` now segments and mean-pools above the
+model's budget, so an over-long line no longer loses its vector outright — the clause above about
+exceeding the embedder's input budget is now historical. What remains is that a 26 KB line pools to
+one blurry vector, so the class grows progressively less findable instead of abruptly unfindable.
+The gate-vs-chunker tension stands; only its severity dropped, from data loss to retrieval quality.*
 
 **And expect a third and a fourth, because the two prior records are not two accidents.** A
 constraint gets written down by whoever it **bites**, at whatever surface they happened to be

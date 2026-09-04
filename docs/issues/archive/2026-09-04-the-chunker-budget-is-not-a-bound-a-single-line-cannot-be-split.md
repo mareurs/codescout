@@ -1,13 +1,17 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
-closed: null
+closed: 2026-09-04
+fix_branch: experiments
+fix_patch_id: de0b0990236e69bf18ef2cbff041cbaa3d565652
+fix_sha: 8acec9c76bf519d01cf04c6faf683804be3c5f7f
 opened: 2026-09-04
 owner: marius
 related: []
-severity: medium
+severity: high
+unverified: 'The 7 artifacts are still vectorless on disk: the code no longer produces the failure, but repairing the existing rows needs `cargo rb` plus a reindex, which has not been run. And the second half this file asks for -- a wrapping form for the `**Members:**` line -- is NOT done; it is now a vector-quality concern (a 26 KB line pools to one blurry vector) rather than the data-loss one it was.'
 ---
 
 # BUG: the chunker's 2,048-char budget is not a bound — an unbreakable single line exceeds it by 12x, and the cluster ledger is falling out of semantic search line by line
@@ -157,19 +161,99 @@ commit rather than left for a reader to hit.
 
 ## Fix
 
-Not attempted. Two independent halves, and both are wanted:
+Fixed on `experiments` at `8acec9c7` — patch-id `de0b0990236e69bf18ef2cbff041cbaa3d565652`.
 
-- **Clip at the embed boundary.** The caller must bound what it sends, since the embedder
-  rejects rather than truncates. This is the sibling record's fix too, so one change closes
-  both — the reason to state them together.
-- **Give the ledger convention a wrapping form.** A `**Members:**` field whose members sit on
-  continuation lines would chunk normally. Note the constraint that produced the current
-  shape: `scripts/pre-commit-ledger-counts.py`'s `members_fields` keys on *the single line
-  beginning* `**Members:**`, and `IC-unclassified` documents this explicitly — *"All
-  derivations below — **on continuation lines, which the script does not read.**"* So the
-  one-line form is load-bearing for the gate as written, and any wrapping change must move
-  the parser with it. That is the whole of why this is not a five-minute fix.
+**Segmented, not clipped**, which is better than this section asked for and cost less.
+`src/embed/document.rs` already had `segment_for_budget` + `mean_pool_normalized`, built
+for this identical failure on the memory-migration path, and `segment_for_budget` already
+hard-splits a line longer than the budget — the whole of this defect — with the comment
+*"no boundary can help, and dropping it would be the silent loss this exists to stop."*
+So `EmbeddingService` gained `budget_chars` from `chunk_size_for_model(&model_spec)` at
+both production sites, and `embed_artifact` routes through those two helpers. Clipping
+would have discarded the tail of every oversized line; pooling keeps it.
 
+`new` retains today's behaviour via `usize::MAX`, matching `HttpMigrationEmbedder::new`'s
+opt-out convention, so the ~20 existing callers — all tests with ceiling-less mocks — are
+untouched.
+
+**This record is the third instance of one shape**, which is the part worth carrying
+forward: an embed path lacking the segmentation a sibling path already has. The tool path
+had it; the migration path lacked it and was fixed 2026-08-26
+(`docs/issues/archive/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`);
+the librarian's artifact path lacked it until now. Three paths, one helper, adopted one at
+a time by whoever next hit the failure.
+
+### Three corrections to this file's own analysis
+
+1. **The population is 7, not 3 — and this file predicted it.** § *Evidence* listed six
+   cluster files over 8 KB and said the other three were *"on the same trajectory, and
+   nothing reports the distance to it."* All six now fail, plus `IC-13`. Three of the
+   original chunks also grew 1.5–2.2 KB since filing (IC-18 24,382→25,859; IC-2
+   16,451→18,432; IC-11 15,390→17,595). **`IC-17` is byte-identical at 10,468 and now
+   fails anyway**, so growth alone does not explain 3→7 — see correction 2.
+2. **The binding limit is `n_ctx = 2048`, not the 4096 physical batch, and Hypothesis 3
+   is wrong about which failures it would address.** This file only ever observed HTTP 500
+   `too large to process`, because at filing time only chunks above 4096 existed. Four of
+   today's seven fail at **HTTP 400 `exceed_context_size_error`**, with the server
+   reporting `"n_ctx":2048` in its own payload. So raising `--ubatch-size` would have
+   fixed 3 of 7 and merely changed the other 4 from a 500 into a 400. The server's error
+   message names a remedy that is not the fix — and it is the remedy this file recorded,
+   on the server's authority.
+3. **The mechanism is exact rather than statistical.** All 7 failures are `chunk_ix = 2`,
+   `entry_part = 2` of N, with `start_line == end_line`. IC-18's parts 1 and 3–7 are
+   205–1889 bytes; part 2 is 25,859 and is one line. So it is not "chunks that happen to
+   be large" but *always the part the splitter dumps the unbreakable line into*, which is
+   a sharper statement of this file's own 68-of-68 finding.
+
+### Found while reproducing, filed separately, deliberately NOT fixed here
+
+`embed_artifact` reaches the embedder through `embed_query` — the **query** seam — for
+stored content, and the librarian's constructor path lands on `QueryPrefix::Derive`, the
+state ET-9 D1 rules out. Every artifact vector on a CodeRankEmbed deployment therefore
+carries the query prefix.
+`docs/issues/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md`.
+
+It is one line from the fix above and was left alone on purpose: correcting the seam
+invalidates every vector already stored, so it and a full `reembed` are a single
+operation, and shipping it alone would split the collection across two incompatible
+spaces.
+
+### The ledger half is still open
+
+§ *Fix* asked for two things and one shipped. The `**Members:**` wrapping form is not
+done, and `scripts/pre-commit-ledger-counts.py`'s single-line requirement is still why.
+What changed is its severity: an unbounded line is no longer *data loss* (the artifact
+gets a vector now) but *vector quality* — a 26 KB line pools to one blurry vector, so the
+class becomes progressively less findable rather than abruptly unfindable. Filing this
+very record required appending ~1 KB to `IC-14`'s line, which the `ledger-counts` gate
+correctly refused to let me skip.
+
+## Tests added
+
+Five, in `src/librarian/embedding.rs`, against a `CeilingEmbedder` double that **refuses**
+oversized input rather than truncating — annotated as load-bearing, because a truncating
+double would let all five pass against the unsegmented code.
+
+The fixture is the shape this file said was needed: *"the fixture must contain a single
+line longer than the limit."* It asserts on that, too — a newline in the fixture gives the
+splitter a boundary and silently stops the test discriminating.
+
+Mutation-tested, 4 rounds, **6 observed REDs**:
+
+| mutation | reds |
+|---|---|
+| drop the budget check (`<= usize::MAX`) | 2 — segmentation + unit-norm |
+| hand-roll the mean instead of `mean_pool_normalized` | exactly 1 — at norm 0.582 against the 0.577 the assertion predicts |
+| revert one production site to `new` | exactly 1 — the source-level wiring guard, while the other four stay green |
+
+That last row is the one worth reading. Every other test constructs the service directly,
+so all four pass with the real callers reverted — the `declared-not-wired` shape. The guard
+is a source-level pin on `src/librarian/mod.rs`, paired with a positive assertion because
+the primary one is an absence and therefore monotone under removal: deleting both
+construction sites would satisfy it while embedding nothing.
+
+And read those names out of the **default** lane. `LEAN exit=0` is vacuous here — measured
+on this run, **0** `librarian::` tests before the lean marker against 1056 after it.
 ## Tests added
 
 None — not fixed. The regression guard should assert **no chunk exceeds the embedder's input

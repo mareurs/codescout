@@ -13,7 +13,7 @@ tags:
 topic: librarian artifact embedding seam
 opened: 2026-09-04
 related:
-- docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md
+- docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md
 - docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 severity: high
 unverified: The prefix is established by reading every link in the chain, not by observing a live request. The RED test named in the Verification-owed section is still owed, and is what would turn this from a sound derivation into an observation.
@@ -107,22 +107,25 @@ this to the reindex-progress work.
 
 ## Suggested direction (not a plan — reproduce first)
 
-One change closes this **and** the segmentation half of
-`docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`:
-route `embed_artifact` through `crate::embed::document::embed_document_pooled`, exactly as
-`HttpMigrationEmbedder::embed` does (`src/migrate/memories.rs:87`). That function takes
-`&dyn DenseEmbedder` and calls `embed_document`, never `embed` — its doc comment states
-this is precisely to avoid re-creating the query-prefix defect — and it segments and
-mean-pools above `budget_chars`, which is the other bug's fix.
+**The segmentation half has shipped** — `8acec9c7`, patch-id
+`de0b0990236e69bf18ef2cbff041cbaa3d565652`, closing
+`docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`.
+That commit routes `embed_artifact` through `segment_for_budget` +
+`mean_pool_normalized` but deliberately keeps `embed_query`, so this record's defect is
+untouched and the code now carries a comment saying so.
 
-`budget_chars` should come from `chunk_size_for_model(&model_spec)`, whose CodeRankEmbed
-arm returns 2048 tokens → 5222 chars, measured against this very llama-server on
-2026-08-26. `EmbeddingService` currently holds no model spec and would need one, as
-`HttpMigrationEmbedder::new` does.
+What remains is one line: call the **document** side instead. The sanctioned route is
+`crate::embed::document::embed_document_pooled`, as `HttpMigrationEmbedder::embed` does
+(`src/migrate/memories.rs:87`) — it takes `&dyn DenseEmbedder` and calls `embed_document`,
+never `embed`, and its doc comment states this is precisely to avoid re-creating the
+query-prefix defect. Reaching it needs `CodeDenseAdapter`, the sanctioned bridge, because
+`CodeEmbedder` deliberately does not have `DenseEmbedder` as a supertrait.
 
-The two halves are **separable, and should be separated**: segmentation is safe to ship
-alone and fixes 7 permanently-unembeddable artifacts today. The seam is not safe alone —
-it needs the re-embed.
+Fixing the **default** as well as the seam is the belt-and-braces version: have the
+librarian construct through a builder that applies the ET-9 D1 mapping rather than calling
+`create_embedder_with_config` directly, so a future caller of the wrong seam is harmless.
+One of the two is sufficient to stop the prefix; both are wanted, because the class here
+is that either alone leaves the other still loaded.
 ## Verification owed
 
 The chain above is verified by reading every link, which is strong but is not an observed
@@ -140,12 +143,16 @@ the one outcome to avoid.
 
 ## References
 
-- `docs/issues/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`
-  — the sibling; one change fixes both halves
+- `docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md`
+  — the sibling, now fixed at `8acec9c7`; that commit is where this defect was found
+- `docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md`
+  — the other grain, still open
 - `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md` — the same
   defect, closed for memories
 - `docs/issues/archive/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
-  — the same *shape*: an embed path lacking what a sibling path has. This record is the
-  third occurrence
+  — the same *shape*: an embed path lacking what a sibling path has
 - `docs/adrs/2026-07-25-embedding-transport-boundary.md` § *The three contracts*, and
   `resume-embedding-transport-stages-1-3:ET-9` D1 — the ruling this path does not reach
+- `crates/codescout-embed/src/remote.rs:1276`
+  (`derive_is_still_the_constructor_default_and_still_prefixes_coderank`) — a pre-existing
+  test that independently corroborates links 3 and 4 of the chain above
