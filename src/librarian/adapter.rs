@@ -234,6 +234,23 @@ impl crate::tools::Tool for LibrarianAdapter {
     }
 
     async fn call(&self, input: Value, ctx: &crate::tools::ToolContext) -> Result<Value> {
+        // `doc()` bundles read and write actions under one tool name. Only the
+        // mutating ones need the same worktree-activation choice edit_file /
+        // edit_code / edit_markdown / create_file / approve_write already
+        // require — otherwise doc(append_entry) writes silently to a tree
+        // edit_file on the same path would refuse. This is the one place that
+        // sees BOTH the core ToolContext (`.agent`, which the guard reads) and
+        // the tool's `action` argument. See
+        // docs/issues/archive/2026-09-03-the-worktree-write-guard-covers-file-writes-and-no-doc-action.md.
+        if self.inner.name() == "doc" {
+            let action = input.get("action").and_then(Value::as_str).unwrap_or("");
+            if is_mutating_doc_action(action) {
+                crate::tools::guard_worktree_write(ctx)
+                    .await
+                    .map_err(bridge_recoverable_error)?;
+            }
+        }
+
         // Honor the per-request `workspace=` pin the dispatcher stashed in
         // `ctx.workspace_override` — resolve the pinned workspace's focused root
         // (resident-on-demand) exactly as every other pinnable tool does, rather
@@ -861,6 +878,27 @@ fn ellipsize(s: &str, max: usize) -> String {
     }
     let kept: String = s.chars().take(max.saturating_sub(1)).collect();
     format!("{kept}…")
+}
+
+/// `doc()` actions that mutate the catalog or its backing files — the set
+/// [`LibrarianAdapter::call`] must run `guard_worktree_write` against before
+/// dispatch. Read actions (`find`, `get`, `graph`, `state_at`, `event_list`,
+/// `gather`, `list_stale`) resolve the same tree regardless of activation and
+/// are exempt.
+fn is_mutating_doc_action(action: &str) -> bool {
+    matches!(
+        action,
+        "create"
+            | "update"
+            | "move"
+            | "delete"
+            | "graft"
+            | "link"
+            | "append_entry"
+            | "update_entry"
+            | "event_create"
+            | "augment"
+    )
 }
 
 /// Bridge a librarian-side `RecoverableError` into the host `RecoverableError`
@@ -1681,6 +1719,129 @@ mod tests {
                 .next()
                 .expect("at least one librarian tool registered"),
             ctx,
+        }
+    }
+
+    /// Mirrors `seed_linked_worktree` in `src/tools/core/tests.rs`: makes `root`
+    /// look like a checkout with one linked worktree, the way
+    /// `list_git_worktrees` reads it.
+    fn seed_linked_worktree_for_guard(root: &std::path::Path, name: &str) {
+        let wt_root = root.parent().unwrap().join(format!("wt-{name}"));
+        std::fs::create_dir_all(&wt_root).unwrap();
+        let entry = root.join(".git").join("worktrees").join(name);
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::write(
+            entry.join("gitdir"),
+            format!("{}/.git\n", wt_root.display()),
+        )
+        .unwrap();
+    }
+
+    /// A core `crate::tools::ToolContext` rooted at `root`, not yet activated
+    /// this session — mirrors `rooted_ctx` in `src/tools/core/tests.rs`. Needed
+    /// here (not shared with that module) because `LibrarianAdapter::call`
+    /// takes the CORE `ToolContext` (the one with `.agent`), not the
+    /// librarian's own.
+    async fn core_ctx_for_guard(root: &std::path::Path) -> crate::tools::ToolContext {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        crate::tools::ToolContext {
+            agent: crate::agent::Agent::new(Some(root.to_path_buf()))
+                .await
+                .unwrap(),
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
+            workspace_override: None,
+        }
+    }
+
+    /// Closes docs/issues/archive/2026-09-03-the-worktree-write-guard-covers-file-writes-and-no-doc-action.md:
+    /// a `doc` mutation must be refused exactly like `edit_file` would be, when
+    /// worktrees exist and this session never chose one via `activate`.
+    #[tokio::test]
+    async fn doc_mutation_is_blocked_when_worktrees_exist_and_not_activated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        let adapter = adapter_for_test();
+
+        let input = json!({
+            "action": "create",
+            "kind": "bug",
+            "title": "x",
+            "rel_path": "docs/issues/x.md",
+            "body": "# x",
+        });
+        let result = adapter.call(input, &ctx).await;
+
+        assert!(
+            result.is_err(),
+            "a doc mutation with worktrees present and no activate() must be refused"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("Write blocked"),
+            "must be the worktree-activation refusal specifically, not some other failure"
+        );
+    }
+
+    /// The other half: once `activate` has been called this session, the same
+    /// mutation must go through (mirrors
+    /// `guard_worktree_write_allows_after_explicit_activate` in
+    /// `src/tools/core/tests.rs`).
+    #[tokio::test]
+    async fn doc_mutation_allowed_after_explicit_activate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        ctx.agent.activate(root.clone(), None).await.unwrap();
+        let adapter = adapter_for_test();
+
+        let input = json!({
+            "action": "create",
+            "kind": "bug",
+            "title": "x",
+            "rel_path": "docs/issues/x.md",
+            "body": "# x",
+        });
+        let result = adapter.call(input, &ctx).await;
+
+        assert!(
+            result.is_ok(),
+            "the caller chose this session; the doc mutation must be allowed: {:?}",
+            result.err()
+        );
+    }
+
+    /// A read action (`find`) must never be gated by the worktree-activation
+    /// guard — only the ten mutating actions the bug names.
+    #[tokio::test]
+    async fn doc_read_is_not_blocked_by_worktree_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        let adapter = adapter_for_test();
+
+        let input = json!({"action": "find"});
+        let result = adapter.call(input, &ctx).await;
+
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("Write blocked"),
+                "a read action must never be refused by the worktree-write guard: {e}"
+            );
         }
     }
 
