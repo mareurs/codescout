@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 16
+entry_high_water_OB: 17
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-17 | 2026-09-04 | **a gate that enforces a coupling by requiring two files in ONE commit turns any uncommitted edit to the shared half into a mutual-exclusion lock over everyone else's use of it** — emergent: nobody declares it, nobody acquires it, and the holder is doing nothing wrong | **the session holding the uncommitted class file.** Nothing in the act of editing a file surfaces a gate that couples *other people's* commits to it — their own tree is clean and green, and the coupling fires in someone else's process on someone else's commit. Measured: four dirty issue-cluster files blocked bug filing across most of the taxonomy, and the holder had no way to know | wrong instrument on BOTH sides — the holder cannot check a condition no surface reports, and the blocked party's *careful* move (satisfy the gate) is the harmful one | none yet — cheapest candidate is a **read**, not a rule: on refusal, report whether the named class file is currently dirty and by whom. `ledger-counts` already reads the index, so the worktree check is one more call, and it turns "add your line" into "add your line, but this file is held". **Sharp end:** staging the class file clears `ledger-counts` and is exactly what makes `unreviewed-content` green, so the action satisfying gate A disarms gate B and a peer's prose rides in under the wrong Session-Id having passed every check. 1 incident, 4 sessions |
 | OB-16 | 2026-09-04 | **a redirect, hint or guard in repo A names a capability registered in repo B** — correct when written, decaying when B changes, and no gate in *either* repo can evaluate the pair, because neither repo holds both halves at the moment its own gate runs | **both repos' gates, each for its own reason and neither for carelessness** — codescout's three surface gates enumerate `DEPRECATED_TOOL_NAMES` against codescout's own text at test time, and a version-pinned plugin in a per-profile cache is not in that tree; the plugin holds no copy of the tool registry and runs with no server, so it can check that a hook *fires* but never that what it *names* still exists. The missing thing is a corpus, not attention | wrong instrument — the filing session read the deny message and the doc inventory, and neither can answer *"does the named tool still exist?"*; reading the hook source would not have helped either, since the source was correct-and-obsolete and only the installed copy's absence settles it | none yet — candidate is a smoke check in the plugin's own suite asserting every tool named in a hook redirect is one the currently-installed server advertises, which must run where both halves co-exist rather than in either repo's CI. **Fails closed**, and that sets the blast radius: a stale advisory costs a round-trip, a stale `permissionDecision: deny` removes the capability. 1 instance, 1 session |
 | OB-15 | 2026-09-02 | **a mechanism that is GATED OFF and one that was never BUILT produce identical observations** — no output, every call, forever. The diagnostician's evidence cannot discriminate, and the two have opposite remedies. Runs in both directions: *no output ⇒ no mechanism*, and *a published limitation ⇒ this instance is covered by it* | **anyone diagnosing a missing output from the output.** Not carelessness — they hold the *complete* observation, which is what disqualifies a care-based remedy. The discriminator is in the code, never in the absence | wrong instrument, and **asymmetrically pulled**: *build it* is actionable and ends in a plan, *ungate it* asks you to believe in something you have no evidence for — so the tie breaks toward building predictably rather than randomly, which is what earns a standing check | none yet — candidate is one line in reconnaissance Phase 1: *an output you have never seen is not evidence that nothing emits it; grep the emitter.* 3 instances, 2 substrates, 3 sessions; instance 3 argues it should reach **records** too, not only emitters (`.git/session-stage-log` answered in one command a question three sessions were answering from memory) |
 | OB-14 | 2026-09-02 | **the sampling frame — what the corpus contains, what one row means, how rows were selected — is the premise every number rests on and the one no downstream check reads.** A frame error moves numerator and denominator together, so every consistency check passes | **the analyst**, whose entire access to the population runs *through* the frame; auditing it needs a view of the population that does not come through it | wrong instrument, and uniquely so for the **review** half: 13 rounds plus a sustained adversarial review that reversed 4 conclusions, and none of five parties questioned the frame — `OB-4`'s shared-substrate law applied to reviewers rather than instruments | **designed** — show the data owner the corpus census and the sampling frame *before* the findings; census is 3 queries plus a per-producer byte share. Not promoted: 2 instances, 1 work stream |
@@ -1705,6 +1706,39 @@ emitters.
 **Instances:** `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`; `bug-fix-session-log:W-104` (the probe that established the fix had landed); `bug-fix-session-log:F-114` (the re-probe instruction naming the source repo rather than the served copy — the same two-copy confusion, one layer up).
 
 **Status:** open — 1 instance, 1 session (2026-09-04). Promote on a second: the shape to watch is any hook, skill or guide in `claude-plugins` naming a codescout tool, since the fold retired six names at once and only this one was wired to a deny.
+
+## OB-17 — a coupling gate plus an uncommitted shared file is a mutual-exclusion lock nobody knows they hold
+
+**Valid:** conditional — `ledger-counts` stops requiring the class file in the same commit as its member
+
+**Rests on:** `docs/conventions/shared-checkout-commit-sequence.md` and the `ledger-counts` refusal text, which anticipates the wait (*"If the ledger is contended right now: it is a WAIT, not a re-derivation"*) without naming who is held or that they are many.
+
+**Class:** a gate that enforces a coupling **by requiring two files in one commit** turns any uncommitted edit to the shared half into a **mutual-exclusion lock over everyone else's use of that half**. The lock is emergent: no one declares it, no one acquires it, and the party holding it is doing nothing wrong.
+
+**Blind party:** the session holding the uncommitted class file, and the reason is that **nothing in the act of editing a file surfaces a gate that couples other people's commits to it**. Their own workflow is clean and green; the coupling lives in a pre-commit hook that fires in *someone else's* process, on *someone else's* commit. Measured 2026-09-04: one session held four issue-cluster files across a cross-cluster adjudication pass. With `issue-clusters.md`, `IC-5`, `IC-11` and `IC-14` all dirty, **bug filing was blocked for most of the taxonomy** — `cluster/unclassified` is the worst case, because it is the bucket every "looked, nothing fits" bug routes to and it always needs the shared index file. The holder had no way to know, and did not.
+
+**Who can see it:** only a session that **hits the refusal** — and that session cannot identify the holder, which is the second half. Tonight it took three sessions, a socket enumeration across four profiles (18 live sessions, 5 in this checkout), and finally the holder quoting its own scratchpad-derived sessionId. Two of the three had already answered "not me", which is elimination over a population neither had proven complete; the close came from a **positive** identification, not from the eliminations.
+
+**Plausible-answer property:** the blocked party gets a **correct, well-written, actionable** refusal naming *their own* bug file and *their own* missing `**Members:**` line. Nothing in it says "another session is holding this." It reads as an ordinary personal to-do, and the obvious next action — edit the class file and stage it — is the harmful one.
+
+### The sharp end: satisfying gate A disarms gate B
+
+Two independently correct guards compose into a capture path.
+
+- `ledger-counts` refuses until the class file is staged **in the same commit**.
+- `unreviewed-content` refuses a pathspec commit **carrying unstaged content**.
+
+Staging the class file is what clears the first — and staging is *exactly* what makes the second green. So the one action that satisfies gate A is the action that disarms gate B, and the peer's ~2.4 KB of uncommitted prose rides into the commit having passed **every** check, attributed to the wrong `Session-Id`. Neither guard is wrong; the hole is in their composition, and it is invisible from inside either one.
+
+The escape exists and is documented, in the gate's own text: leave the bug file **untracked** — `git ls-files` is the population, so an untracked file is invisible to `ledger-counts`. It is also lossy, and the gate says so: *"the evidence stays off the corpus until you stage it, and nothing will remind you."* Taken 2026-09-04 for `docs/issues/2026-09-04-patch-must-be-a-json-object-refusal-is-unreproduced.md`, which is untracked for this reason and for no other.
+
+**Vigilance:** wrong instrument, on both sides. The holder cannot check for a condition no surface reports. The blocked party *can* be careful — and being careful is what produces the capture, because the careful move is to satisfy the gate.
+
+**Mechanism status:** none yet. The cheapest candidate is a **read**, not a rule: have `ledger-counts` report, on refusal, whether the class file it names is currently dirty and by whom — it already reads the index (`git show :path`), so the working-tree check is one more call, and it converts *"add your line"* into *"add your line, but this file is held; wait."* That reframes the refusal without changing what it enforces. A second, independent candidate is to let the two halves land in **either order** within a short window rather than the same commit, which dissolves the lock at the cost of a transient red state.
+
+**Instances:** the 2026-09-04 hold (this entry); `docs/issues/2026-09-04-patch-must-be-a-json-object-refusal-is-unreproduced.md`, untracked as a direct consequence; `bug-fix-session-log:F-114` and the peer-commit capture recorded as Instance 9 in `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`, which is the same shared-index substrate reached by a different route.
+
+**Status:** open — 1 incident, 4 sessions, 2026-09-04. Promote on a second, or immediately if the composition half recurs: a capture that passes every gate is the expensive direction, and it lands under an innocent session's name.
 
 ## Template for new entries
 
