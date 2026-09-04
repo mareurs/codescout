@@ -1,3 +1,3 @@
-Languages: 
+Languages: markdown, rust
 Root: .
-Manifest: none
+Manifest: Cargo.toml

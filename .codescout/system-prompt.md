@@ -33,7 +33,6 @@
 4. Before any refactor → `call_graph(symbol, path, direction="callers")` for blast radius; `direction="callees"` to trace flow
 5. Bug or regression work → `doc(action="find", kind="bug", filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})` before filing anything new — `status="open"` alone hides `taken` (a live session holds it; check before starting), `investigating` (worked, no live owner) and `zombie` (recurring-but-unconfirmed — a "has this come back?" check, not a task to pick up)
 6. Markdown → `read_file` (heading-addressed) / `edit_file` (heading+action); librarian-managed trackers refuse direct edits, use `doc(action="update", patch={body_edits: [...]})`
-7. Cross-cutting change → check all 4 prompt surfaces (`src/prompts/source.md` ×2 slices + `builders.rs` + `.codescout/system-prompt.md`)
 
 ## Project Rules
 
