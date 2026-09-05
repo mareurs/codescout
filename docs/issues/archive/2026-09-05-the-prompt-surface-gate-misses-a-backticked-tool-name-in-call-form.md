@@ -1,7 +1,7 @@
 ---
-id: ea06b203079bcbdb
+id: ab6b2f115c1f36ef
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the prompt-surface gate misses a backticked tool name in call form, and one has been served for four months'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -103,7 +103,7 @@ Three things this sweep does **not** establish, named here so nobody credits it 
    **Verdict:** rejected, and the probe was the defect. The file writes `` `doc` with `action=find` ``;
    the pattern had been reconstructed from memory rather than read off the file. A positive control
    against the source killed it. (`R-3`: a search that finds nothing is evidence about the search.)
-2. **Hypothesis:** this is a rediscovery of `6ccfcc15423f2ae5` (same regex, filed open).
+2. **Hypothesis:** this is a rediscovery of `4e4762b735deb392` (same regex, filed open).
    **Verdict:** rejected. That file is about tokens written **without** backticks — its Summary
    frames the population as *"tool names the author happened to backtick"*. This token **is**
    backticked and escapes anyway, so that sentence is incomplete rather than merely narrow. The two
@@ -128,17 +128,55 @@ Then repair the instance: `src/prompts/source.md:352`
 +  5. `librarian(action="context", topic=…)` → …
 ```
 
-and regenerate `tests/fixtures/prompt_surfaces/onboarding_prompt.md`. Check whether
-`ONBOARDING_VERSION` needs a bump (`src/prompts/README.md`) and whether the 1900-character slice cap
-still holds after the substitution — the replacement is longer than the token it replaces.
+and regenerate `tests/fixtures/prompt_surfaces/onboarding_prompt.md`.
+
+**Done 2026-09-05.** The substitution landed as `librarian(action=context, topic="...")`, matching
+the style of `doc(action=find, semantic="...")` already on that line. Three follow-on obligations,
+all discharged:
+
+- **`ONBOARDING_VERSION` 30 → 31.** Required, not optional: the changed line is in the
+  `onboarding_prompt` slice, which produces the **stored per-project** system prompt, so
+  already-onboarded projects keep serving the cached v30 text without a bump. A pin test
+  (`tools::run_command::tests::system_prompt_points_to_tool_guide_resource`) asserts the literal
+  value precisely so the bump cannot be silent; it moved with it.
+- **The 1900-character cap was never at risk** — it governs the `server_instructions` slice, and
+  this edit is in `onboarding_prompt`. Confirmed by `source_md_under_cap` staying green. The
+  rendered onboarding surface grew 19119 → 19133 bytes, exactly the +14 of the substitution, which
+  is also the check that no second change rode along.
+- **The scoping decision.** The pass is `cfg!(feature = "librarian")`-gated; see § Tests added for
+  the measurement that forced it.
+
+**Not done, and deliberately so:** `.codescout/system-prompt.md`, this repo's own fourth surface, is
+still v30. Regenerating it requires `cargo rb` + `/mcp` FIRST — `onboarding(refresh_prompt=true)`
+read `v30 → v30` while the running server was the 10:39 binary, because `source.md` is
+`include_str!`'d and therefore frozen at build time and again at process start. Refreshing before
+the rebuild would have produced a plausible, committed, wrong artifact generated from the
+pre-fix templates, with nothing to flag it.
+
+Fix SHA: `bc2ea2ae35db0a1f6aedeed2dbe33698f8b0e628`
+Patch-id: `28f808a00b3e53fc70f0b127ea5186190add4a13`
 
 ## Tests added
 
-None yet. Acceptance is an **observed RED**, not the existence of an assertion: revert
-`source.md:352` to `` `librarian_context(topic)` `` with the call-form pass wired, and watch the gate
-fail naming that surface. A green run against the repaired line proves nothing on its own — it is
-the same output a gate that still cannot see call form produces.
+None new. The repair is a second extraction pass inside the existing
+`prompt_surfaces_reference_only_real_tools`, and what makes it evidence is an **observed RED on the
+production path**, taken twice, in opposite directions:
 
+| lane | `source.md:352` | result |
+|---|---|---|
+| default | stale token restored | **FAILED** — `onboarding_prompt.md: ``librarian_context(`` is written as a tool CALL but names no registered tool`, and nothing else |
+| default | repaired | ok |
+| lean (`--no-default-features`) | stale token restored | ok — the pass is `cfg!(feature = "librarian")`-scoped, so this is the scoping working, not the guard missing |
+
+The second row of that table is the one that would have been skipped, and it is the one that proves
+the `cfg!` wrapper did not quietly disable the guard in the lane that matters. A green default lane
+after the repair proves nothing on its own — it is the identical output of a gate that still cannot
+see call form.
+
+The lean row is a deliberate, named vacuity rather than coverage: under `--no-default-features` the
+librarian tools are unregistered while the surfaces stay one `include_str!`'d constant, so the lean
+registry is a strict subset of what the prose describes. Measured before scoping: **4 false
+findings** (`doc(` ×2, `librarian(` ×2), **0 true ones**.
 ## Workarounds
 
 When retiring a tool, sweep for the call form as well as the bare and unbackticked forms:
@@ -155,8 +193,13 @@ gate. Then re-read `6ccfcc15423f2ae5` § Summary — its population sentence nee
 
 ## References
 
-- Sibling escape through the same regex, opposite direction: `6ccfcc15423f2ae5`
+- Sibling escape through the same regex, opposite direction: `4e4762b735deb392`
   (`docs/issues/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`).
+  **Cite that id, not the one printed in the file's own frontmatter.** That file says
+  `id: '6ccfcc15423f2ae5'`, which resolves to nothing — it is a worktree-minted id that survived the
+  merge into the main checkout, and `doctor` reports it as one of 8 `frontmatter_id_mismatch` rows
+  (all dated 2026-09-02, all worktree-born). `fix="repair_frontmatter_id"` is the wired repair; it
+  rewrites each file's own `id:` line and does **not** reach prose elsewhere citing the dead value.
 - Retirement that stranded the token: `docs/superpowers/plans/2026-05-02-librarian-tools-collapse.md:971`
   — `` `librarian_context` → `librarian(context)` ``.
 - `CLAUDE.md` § *Parsers Over a Namespace* — a parser is correct on every input it accepts; the
@@ -165,4 +208,3 @@ gate. Then re-read `6ccfcc15423f2ae5` § Summary — its population sentence nee
 - `CLAUDE.md` § *Testing Discipline* — "Ask which direction each test is monotone under, and mutate
   the *other* way." Both gates were mutated in the direction each already covered.
 - Found 2026-09-05 during a post-rebuild freshness scout, from a probe that was itself wrong first.
-
