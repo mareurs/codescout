@@ -271,7 +271,7 @@ impl crate::tools::Tool for LibrarianAdapter {
                 let inner = ctx.agent.inner.read().await;
                 inner.active_project().map(|p| p.root.clone())
             };
-        let lib_ctx = self.derive_ctx(active_root.as_deref());
+        let lib_ctx = self.derive_ctx(active_root.as_deref(), ctx.progress.clone());
         // Best-effort, throttled (24h) catalog GC reconcile — piggybacks on the
         // first librarian call per session/interval rather than the literal
         // `workspace(activate)` call, since the shared catalog handle only
@@ -460,7 +460,11 @@ impl LibrarianAdapter {
     /// Build a fresh `LibToolContext` for a single tool call, using the
     /// host's currently-active project to derive `current_project`. The
     /// catalog/workspace/rules/embedding stay shared with the boot-time ctx.
-    fn derive_ctx(&self, active: Option<&std::path::Path>) -> Arc<LibToolContext> {
+    fn derive_ctx(
+        &self,
+        active: Option<&std::path::Path>,
+        progress: Option<Arc<crate::tools::progress::ProgressReporter>>,
+    ) -> Arc<LibToolContext> {
         let current_project = active.and_then(|p| match std::fs::canonicalize(p) {
             Ok(abs_path) => {
                 let git_root = crate::librarian::current_project::lookup_git_root(&abs_path)
@@ -509,6 +513,10 @@ impl LibrarianAdapter {
             // the long-lived one, and re-reading the environment here would reintroduce
             // the ambient dependency the field exists to remove.
             temp_guard: self.ctx.temp_guard.clone(),
+            // Comes from the CORE context, not `self.ctx` — this is the one place the two
+            // context types meet, and the progress reporter is per-call state that only
+            // the core side receives. `None` when the client sent no progress token.
+            progress,
         })
     }
 }
@@ -1608,7 +1616,7 @@ mod tests {
             ctx,
         };
 
-        let derived = adapter.derive_ctx(Some(&wt));
+        let derived = adapter.derive_ctx(Some(&wt), None);
         let cp = derived
             .current_project
             .as_deref()
@@ -1639,7 +1647,7 @@ mod tests {
             ctx,
         };
 
-        let derived = adapter.derive_ctx(Some(tmp.path()));
+        let derived = adapter.derive_ctx(Some(tmp.path()), None);
         let cp = derived
             .current_project
             .as_deref()
@@ -1689,7 +1697,7 @@ mod tests {
             ctx,
         };
 
-        let derived = adapter.derive_ctx(Some(&wt));
+        let derived = adapter.derive_ctx(Some(&wt), None);
         let cp = derived
             .current_project
             .as_deref()
@@ -1720,6 +1728,55 @@ mod tests {
                 .expect("at least one librarian tool registered"),
             ctx,
         }
+    }
+    /// `derive_ctx` is the only place the core and librarian `ToolContext` types meet,
+    /// so it is the only place a per-call progress reporter can cross. If it stops
+    /// carrying one, every librarian tool silently loses the ability to tell its caller
+    /// it is alive — and `reindex`'s own progress test would NOT catch that, because it
+    /// sets `ctx.progress` directly rather than going through the adapter.
+    ///
+    /// That gap is the `declared-not-wired` shape the field was added to close, so it
+    /// gets a test at the seam rather than only at the consumer.
+    /// `docs/issues/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
+    #[test]
+    fn derive_ctx_carries_the_callers_progress_reporter_across_the_boundary() {
+        struct NullSink;
+        #[async_trait::async_trait]
+        impl crate::tools::progress::ProgressSink for NullSink {
+            async fn emit_progress(
+                &self,
+                _step: f64,
+                _total: Option<f64>,
+                _token: &rmcp::model::NumberOrString,
+            ) {
+            }
+            async fn emit_text(&self, _text: &str) {}
+        }
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let adapter = adapter_for_test();
+
+        let reporter = crate::tools::progress::ProgressReporter::with_sink(
+            Arc::new(NullSink),
+            rmcp::model::NumberOrString::Number(7),
+        );
+        let derived = adapter.derive_ctx(Some(tmp.path()), Some(reporter));
+        assert!(
+            derived.progress.is_some(),
+            "derive_ctx must carry the caller's progress reporter onto the librarian \
+             context — without it every librarian tool is structurally unable to report"
+        );
+
+        // The other direction, and it is not symmetry for its own sake: a reporter
+        // appearing when the client sent no progress token is an unsolicited
+        // notification, which crashed Claude Code 2.x. `None` in must stay `None` out —
+        // never synthesized from the request id.
+        // docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md
+        let derived_none = adapter.derive_ctx(Some(tmp.path()), None);
+        assert!(
+            derived_none.progress.is_none(),
+            "a caller that sent no progress token must yield no reporter"
+        );
     }
 
     /// Mirrors `seed_linked_worktree` in `src/tools/core/tests.rs`: makes `root`

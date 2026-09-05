@@ -40,6 +40,7 @@ fn mk_ctx(root: std::path::PathBuf) -> ToolContext {
         }),
         rules: Arc::new(vec![]),
         temp_guard: codescout::librarian::tools::TempGuardEnv::from_env(),
+        progress: None,
         embedding: None,
         artifact_store: None,
         current_project: Some(Arc::new(CurrentProject {

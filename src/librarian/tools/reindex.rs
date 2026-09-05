@@ -401,6 +401,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let mut landed: std::collections::HashMap<&str, usize> =
                 std::collections::HashMap::new();
 
+            // Report progress to the CALLER as the loop runs. Without this a large
+            // re-embed emitted nothing for many minutes, the client's idle timeout
+            // aborted the call, and this loop kept going regardless — the caller paying
+            // for work whose result it then discarded.
+            //
+            // Per-item is correct and needs no batching of its own: `report()` throttles
+            // itself to 2 Hz and silently drops calls inside the window. And `progress`
+            // is `None` whenever the client sent no `_meta.progressToken`, which makes
+            // every call below a no-op — the required behaviour, since an unsolicited
+            // notification crashed Claude Code 2.x. Never synthesize a token.
+            // docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md
+            let embed_total = embed_queue.len() as u32;
+            let mut embed_done: u32 = 0;
+
             for item in &embed_queue {
                 match svc.embed_artifact(item.title.as_deref(), &item.text).await {
                     Ok(vec) => match store
@@ -416,6 +430,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         }
                     },
                     Err(e) => embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id)),
+                }
+
+                // Counted per item PROCESSED, not per item embedded: a run that is
+                // failing every embed is still making progress through the queue, and a
+                // counter that stalled on failure would report a working-but-erroring
+                // run as wedged — the exact confusion this exists to remove.
+                embed_done += 1;
+                if let Some(p) = ctx.progress.as_ref() {
+                    p.report(embed_done, Some(embed_total)).await;
                 }
             }
 
@@ -838,6 +861,123 @@ mod tests {
              here is the original defect: it routed the write to the ACTIVE project's \
              collection while reporting success."
         );
+    }
+    /// A long re-embed must tell its CALLER it is alive.
+    ///
+    /// Before the librarian `ToolContext` carried a progress reporter this was not a
+    /// missing call but an unreachable one: `ProgressReporter`'s own doc says *"Tools
+    /// call `ctx.progress.as_ref()`"*, which was true of core tools and impossible here,
+    /// so `grep progress src/librarian/tools/reindex.rs` returned zero matches. A large
+    /// `reindex(reembed=true)` therefore emitted nothing for many minutes, the client's
+    /// idle timeout aborted the call, and the loop kept running — the caller paying for
+    /// work whose result it discarded.
+    /// `docs/issues/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
+    ///
+    /// **Asserts `>= 1` rather than one-per-item, and that is not laziness.**
+    /// `report()` throttles to one emission per 500 ms and silently drops the rest; a
+    /// test whose embeds complete in microseconds delivers exactly the first call, so
+    /// `== queue_len` would be asserting the throttle away. What discriminates instead is
+    /// the reported **total**: it can only be right if the real queue length was passed.
+    ///
+    /// The `progress: None` path needs no test of its own — every other reindex test in
+    /// this module runs it, and would panic on any `.unwrap()` added to that field.
+    #[tokio::test]
+    async fn a_reindex_reports_progress_to_a_caller_that_asked_for_it() {
+        struct OkEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for OkEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+
+        /// Records the values, not just a count — the count alone cannot tell a correct
+        /// `total` from a wrong one, and the total is the half a fast test can check.
+        #[derive(Default)]
+        struct RecordingSink {
+            events: std::sync::Mutex<Vec<(f64, Option<f64>)>>,
+        }
+        #[async_trait::async_trait]
+        impl crate::tools::progress::ProgressSink for RecordingSink {
+            async fn emit_progress(
+                &self,
+                step: f64,
+                total: Option<f64>,
+                _token: &rmcp::model::NumberOrString,
+            ) {
+                self.events.lock().unwrap().push((step, total));
+            }
+            async fn emit_text(&self, _text: &str) {}
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        // Three, so the reported total is a value that could be wrong. With one
+        // artifact `total == 1` is also what an off-by-one or a hardcoded literal
+        // produces, and the assertion would not discriminate.
+        for name in ["a", "b", "c"] {
+            std::fs::write(
+                proj.join(format!("docs/specs/{name}.md")),
+                format!("# {name}\nbody\n"),
+            )
+            .unwrap();
+        }
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let sink = std::sync::Arc::new(RecordingSink::default());
+        let mut ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_rules(rules)
+            .with_current_project(std::sync::Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: proj.clone(),
+                    git_root: proj.clone(),
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(OkEmbedder)),
+            ))
+            .with_artifact_store(std::sync::Arc::new(
+                crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default(),
+            ))
+            .build();
+        ctx.progress = Some(crate::tools::progress::ProgressReporter::with_sink(
+            sink.clone(),
+            rmcp::model::NumberOrString::Number(1),
+        ));
+
+        let v = call(&ctx, json!({"scope": "project"})).await.unwrap();
+
+        let embedded = v["embedded"].as_u64().unwrap();
+        assert_eq!(
+            embedded, 3,
+            "test setup: all three artifacts must reach the embed loop, or the progress \
+             assertions below are vacuous"
+        );
+
+        let events = sink.events.lock().unwrap().clone();
+        assert!(
+            !events.is_empty(),
+            "a reindex that embedded {embedded} artifacts reported no progress at all — \
+             which is exactly what the caller saw before this field existed"
+        );
+        for (step, total) in &events {
+            assert_eq!(
+                *total,
+                Some(embedded as f64),
+                "every emission must carry the real queue length as its total, got {total:?}"
+            );
+            assert!(
+                *step >= 1.0 && *step <= embedded as f64,
+                "step {step} outside 1..={embedded}"
+            );
+        }
     }
 
     /// Step 2 of docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
@@ -1549,6 +1689,7 @@ mod tests {
             workspace: ctx_all.workspace.clone(),
             rules: ctx_all.rules.clone(),
             temp_guard: ctx_all.temp_guard.clone(),
+            progress: None,
             embedding: None,
             artifact_store: None,
             current_project: Some(Arc::new(

@@ -239,6 +239,11 @@ pub async fn build_tool_context_with(
         current_project,
         lsp,
         temp_guard: tools::temp_write_guard::TempGuardEnv::from_env(),
+        // The long-lived context holds none: a progress reporter is PER-CALL state,
+        // built from that request's `_meta.progressToken`. `derive_ctx` supplies it
+        // per call from the core context, so a reporter cached here would belong to
+        // whichever request happened to construct this one.
+        progress: None,
     })
 }
 

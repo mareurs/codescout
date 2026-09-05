@@ -112,6 +112,22 @@ pub struct ToolContext {
     /// under temp. See
     /// `docs/issues/archive/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
     pub temp_guard: crate::librarian::tools::temp_write_guard::TempGuardEnv,
+    /// The caller's MCP progress reporter, carried across the adapter boundary by
+    /// `LibrarianAdapter::derive_ctx`.
+    ///
+    /// `None` when the client sent no `_meta.progressToken`, and then every `report()`
+    /// is a no-op — which is required rather than merely tolerated: emitting progress a
+    /// client never requested is an unsolicited notification that crashed Claude Code
+    /// 2.x. Never synthesize a token.
+    /// `docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md`
+    ///
+    /// The field exists because a librarian action can run for many minutes. Without it
+    /// a large `reindex(reembed=true)` emitted nothing at all, the client's idle timeout
+    /// aborted the call, and the server carried on regardless — the caller paying for
+    /// work whose result it then discarded. `ProgressReporter`'s own doc says *"Tools
+    /// call `ctx.progress.as_ref()`"*, which was true of core tools and impossible here
+    /// until this field existed.
+    pub progress: Option<Arc<crate::tools::progress::ProgressReporter>>,
 }
 #[cfg(test)]
 pub(crate) struct TestToolContextBuilder {
@@ -227,6 +243,10 @@ impl TestToolContextBuilder {
             temp_guard: self
                 .temp_guard
                 .unwrap_or_else(crate::librarian::tools::temp_write_guard::TempGuardEnv::from_env),
+            // Tests that want to observe progress build the reporter themselves with
+            // `ProgressReporter::with_sink` and set this field; the ~100 that do not
+            // care get the production shape for a client that sent no token.
+            progress: None,
         }
     }
 }

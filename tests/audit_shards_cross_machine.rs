@@ -61,6 +61,7 @@ fn ctx_for(
         }),
         rules: Arc::new(vec![]),
         temp_guard: codescout::librarian::tools::TempGuardEnv::from_env(),
+        progress: None,
         embedding: None,
         artifact_store: None,
         current_project: Some(Arc::new(CurrentProject {
