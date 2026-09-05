@@ -43,6 +43,19 @@ impl EmbeddingService {
         }
     }
 
+    /// Embed one text on the **document** side.
+    ///
+    /// `Embedder::embed` is the document seam and never prefixes; `embed_query` is the
+    /// query seam and applies an asymmetric model's query instruction. Artifact bodies are
+    /// stored content, so they belong here — using the query seam stranded every stored
+    /// vector in query-space, which is what this replaced.
+    async fn embed_document_one(&self, text: &str) -> Result<Vec<f32>> {
+        let mut batch = self.embedder.embed(&[text]).await?;
+        batch
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("embedder returned an empty batch for one input"))
+    }
+
     /// Embed an artifact, segmenting and mean-pooling when it exceeds the budget.
     ///
     /// Below the budget this is exactly one call — the common case is untouched. Above it,
@@ -57,17 +70,22 @@ impl EmbeddingService {
     /// above 4096 merely trip the batch check first, which is why raising `--ubatch-size`
     /// would have fixed 3 of 7 and only changed the other 4 from HTTP 500 to HTTP 400.
     ///
-    /// **Deliberately still `embed_query`, which is the wrong seam for stored content.**
-    /// Correcting it invalidates every vector already in the store — they are all
-    /// query-prefixed and new ones would not be — so the seam change and a full
-    /// `reindex(reembed=true)` are one operation, and shipping the seam alone would leave
-    /// the collection split across two incompatible spaces. Filed separately as
-    /// `docs/issues/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md`.
-    /// Segmentation is separable and safe alone, so it ships alone.
+    /// Goes through the **document** seam ([`Self::embed_document_one`]). It used to use
+    /// `embed_query`, which prefixes on an asymmetric model — so on a CodeRankEmbed
+    /// deployment every stored artifact vector carried a query instruction, and the
+    /// librarian reached `QueryPrefix::Derive` (the state ET-9 D1 rules out) by calling the
+    /// crate constructor directly rather than `EmbedderHttp::remote_dense`. Two independent
+    /// wrongs were needed, which is why neither alone was caught.
+    /// `docs/issues/archive/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md`
+    ///
+    /// One deliberate consequence: `Embedder::embed` refuses an all-whitespace batch, and
+    /// the old prefix made an empty body non-empty. An artifact whose composed text is
+    /// blank now surfaces as a named error in the reindex's `embed_errors` instead of
+    /// quietly embedding a prefix that carried none of its content.
     pub async fn embed_artifact(&self, title: Option<&str>, body: &str) -> Result<Vec<f32>> {
         let text = format!("{}\n\n{}", title.unwrap_or(""), body);
         if text.chars().count() <= self.budget_chars {
-            return self.embedder.embed_query(&text).await;
+            return self.embed_document_one(&text).await;
         }
 
         let segments = crate::embed::document::segment_for_budget(&text, self.budget_chars);
@@ -80,7 +98,7 @@ impl EmbeddingService {
 
         let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(segments.len());
         for seg in &segments {
-            vectors.push(self.embedder.embed_query(seg).await?);
+            vectors.push(self.embed_document_one(seg).await?);
         }
         crate::embed::document::mean_pool_normalized(&vectors)
     }
@@ -269,6 +287,64 @@ mod tests {
             src.contains("EmbeddingService::with_budget("),
             "and the service must still be constructed — a file with neither form passes \
              the absence check above while the librarian embeds nothing"
+        );
+    }
+    /// Stored content must not go through the QUERY seam.
+    ///
+    /// `embed_query` is where `RemoteEmbedder` applies an asymmetric model's query
+    /// instruction, so an artifact embedded through it is stored in query-space. The bug
+    /// file called this observation owed: the chain had been verified link by link by
+    /// reading, and nothing had ever watched a call take the right seam.
+    ///
+    /// The double records inside its **override of `embed_query`**, and that is the whole
+    /// discriminator. `Embedder::embed_query` has a default implementation that delegates
+    /// to `embed`, so a recorder counting only `embed` calls cannot tell the two seams
+    /// apart — both arrive there. Overriding the query side is what makes the wrong seam
+    /// observable at all.
+    #[tokio::test]
+    async fn an_artifact_is_embedded_on_the_document_seam_never_the_query_seam() {
+        #[derive(Default)]
+        struct SeamRecorder {
+            via_query: std::sync::atomic::AtomicBool,
+        }
+
+        #[async_trait::async_trait]
+        impl Embedder for SeamRecorder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0]).collect())
+            }
+            async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
+                self.via_query.store(true, Ordering::SeqCst);
+                let mut b = self.embed(&[text]).await?;
+                Ok(b.pop().expect("non-empty batch"))
+            }
+        }
+
+        // The single-call path.
+        let emb = Arc::new(SeamRecorder::default());
+        EmbeddingService::new(emb.clone())
+            .embed_artifact(Some("IC-18"), "a stored body")
+            .await
+            .unwrap();
+        assert!(
+            !emb.via_query.load(Ordering::SeqCst),
+            "an artifact body reached the query seam — on an asymmetric model that stores \
+             it in query-space, which is the defect this replaced"
+        );
+
+        // And the SEGMENTED path, which is a second call site of the same helper: a change
+        // that restored `embed_query` in only one of the two would leave the other green.
+        let emb2 = Arc::new(SeamRecorder::default());
+        EmbeddingService::with_budget(emb2.clone(), 50)
+            .embed_artifact(None, &"x".repeat(500))
+            .await
+            .unwrap();
+        assert!(
+            !emb2.via_query.load(Ordering::SeqCst),
+            "a segmented artifact reached the query seam"
         );
     }
 }
