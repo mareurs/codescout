@@ -1,14 +1,15 @@
 ---
 kind: bug
-status: fixed
+status: zombie
 tags:
 - cluster/gate-keyed-on-unobservable-event
 closed: 2026-09-04
 opened: 2026-09-03
 owner: marius
 related: []
+reopened: 2026-09-05
+reopened_by: 4a2f34f7-0669-487d-9ce9-39b77881642f
 severity: high
-unverified: no regression guard exists in either repo, so nothing prevents a plugin hook from naming a retired tool again; the fix was established by a live probe on one profile at one instant, never by a test
 ---
 
 # BUG: the companion plugin's IL-4 hook will deadlock every markdown read once the fold ships
@@ -108,6 +109,63 @@ which is what makes three prompt-surface gates refuse to mention it.
    **Test:** the hook is `PreToolUse`; it decides before the server is reached.
    **Verdict:** rejected — the server never sees the call.
 
+## CORRECTION 2026-09-05 — this was archived on evidence that names artifacts which do not exist, and the defect was live until today
+
+**Everything in `## Fix` below is false**, and it was falsified by hitting the defect: an unrelated
+session called `read_file(path="docs/PROBES.md", heading="## Related")`, was denied by
+`il4-deny-hook.mjs`, and was told to use `read_markdown` — the exact deadlock this file predicted,
+**14 months of hook history and 2 days after this file was archived as fixed**.
+
+Four independently checkable claims, all wrong:
+
+| claim in `## Fix` | verified 2026-09-05 |
+|---|---|
+| fix landed as `claude-plugins:bb24b7f7d351b27b…` | **that object does not exist** — `git cat-file -t` returns *fatal: could not get object info* |
+| `git ls-files \| grep -c il4` returns **0** | returned **2**; both files were tracked at `HEAD` and had to be `git rm`'d today |
+| shipped as **1.20.4** | all three profiles record **1.19.9**, and the repo's newest bump commit is 1.19.9 (2026-08-31) |
+| *"the only surviving `read_file` matcher routes to `cs-liveness.mjs`"* | `hooks.json` carried a `mcp__.*__read_file` matcher routing to `il4-deny-hook.mjs`, removed today |
+
+`il4-deny-hook.mjs`'s **entire git history is one commit** — `c27ae1e` (2026-07-13), the original
+port. It was never deleted, on any branch, at any time.
+
+### Why the live probe reported success, and why it is the interesting part
+
+The probe was real and its *result* was probably read correctly; what it could not establish is the
+thing it was quoted for. The `## Fix` text reasons carefully about repo-source vs installed-cache
+freshness — `installed_plugins.json`, the `1.20.3 → 1.20.4` diff, mtime-vs-content — and lands on
+the wrong side of a fact neither copy reveals: **`sdd-misc-plugins` is a `"source": "directory"`
+marketplace whose `installLocation` is `/home/marius/work/claude/claude-plugins` itself.** The
+plugin is served straight from the working tree. The `plugins/cache/…/1.19.{7,8,9}/` directories
+are stale leftovers that nothing loads, and they are what the archiving session inspected.
+
+So this is `R-89`'s freshness law failing in the direction the law does not warn about. `R-89` says
+*probe the copy the consumer actually loads, because the installed copy can be staler than source*.
+Here it was **inverted**: the consumer loads **source**, and the *cache* was the misleading copy.
+Every upstream proxy agreed with the wrong answer — an install record, a version number, a cache
+diff — and the one artifact that would have settled it, `known_marketplaces.json`, was not consulted
+because nothing suggests a version-numbered cache is inert.
+
+**Its own `unverified` field called the shot** and was archived anyway: *"no regression guard exists
+in either repo … the fix was established by a live probe on one profile at one instant, never by a
+test."* That sentence is the whole lesson. A live probe is a measurement of an instant; an archive
+is a claim about a state. The gap between them is where this file lived for two days.
+
+### Status now
+
+The defect is **actually** fixed as of 2026-09-05, by deletion rather than by rewording — which is
+what this file prescribed in the first place. `il4-deny-hook.mjs`, `il4-deny-hook.test.sh` and the
+`hooks.json` matcher are gone from the serving copy, and the removal is verified live in the same
+way the defect was: a bare markdown `read_file` now returns a heading map plus an `@file_*` handle,
+a 159-byte markdown file returns full content inline, and a librarian-managed artifact is refused
+with a hint naming live tools. The pre-call gate was redundant with the server's own
+after-the-fact sizing the entire time.
+
+Marked `zombie` rather than re-opened: nothing is left to do, but the archived record asserted a
+fix that never existed, and `zombie` is this repo's word for *"has this come back?"* — which here
+means *"was it ever gone?"*. The real fix is cited in
+`docs/issues/archive/2026-09-04-companion-tool-name-gate-skips-every-mjs-hook.md` —
+codescout `1dacd204` (patch-id `037ce550126c46ca6569843e7a8ef1133dcc35d1`) and
+`claude-plugins:677fb6c9` (patch-id `ecf9efa7a9202f8f613fef23f42ad070949a41ab`).
 ## Fix
 
 Applied in the **plugin** repo, not here. The prescribed fix was *"delete the hook, not update its message"* — after the fold there is no wrong tool to redirect away from, so the rule it enforced no longer exists — and that is what landed.

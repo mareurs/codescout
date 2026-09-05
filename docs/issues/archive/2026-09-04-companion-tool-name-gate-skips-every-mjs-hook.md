@@ -1,7 +1,7 @@
 ---
-id: dd487faf8140b79f
+id: 581a1a6378878fef
 kind: bug
-status: open
+status: fixed
 title: 'BUG: companion_surfaces_reference_only_real_tools reads no .mjs and checks a pre-collapse stale list, so every hook message is unguarded'
 owners:
 - marius
@@ -12,6 +12,11 @@ tags:
 - tool-surface-collapse
 - hooks
 topic: companion plugin hook prescribes a retired tool name
+fix_patch_id: 037ce550126c46ca6569843e7a8ef1133dcc35d1
+fix_patch_id_plugin: ecf9efa7a9202f8f613fef23f42ad070949a41ab
+fix_sha: 1dacd204ddd593fe2187fe6a18f18a0bc7eb6848
+fix_sha_plugin: claude-plugins:677fb6c9433477b921c8620e94323b2d41d2c490
+fixed: 2026-09-05
 opened: 2026-09-04
 related:
 - docs/issues/archive/2026-09-03-retired-tool-names-survive-in-the-surfaces-that-actually-reach-agents.md
@@ -160,21 +165,136 @@ sentinels"* — so this is correctly excluded and must stay. Recorded so it is n
 It is worth noting what it asserts, though: that a `read_markdown` call is **allowed** through,
 which encodes the retired name as a live tool in the hook's own test expectations. Whoever fixes
 the hook text will need to decide what that case should assert instead.
-## Suggested direction (not a plan — enumerate first)
+## Fix
 
-1. **Widen the extension filter to `mjs`** and re-run. Expect it to red; the reds are the
-   worklist.
-2. **Derive `stale_names` from the registry's own dead list** rather than restating it.
-   `the_registry_is_exactly_the_post_collapse_surface` (`server.rs:4137`) already holds the six
-   retired names as a literal; two hand-maintained copies of one list is the mechanism that
-   produced this bug. Extract it to a shared `const` both tests read, so retiring a tool updates
-   one place.
-3. **Fix `il4-deny-hook.mjs`'s remedy text** to `read_file(path)` / `read_file(path, heading=…)`
-   and delete the false in-server-gate claim.
-4. The general mechanizable shape is `IC-11`'s open note — a registry-keyed check over
-   *everything delivered to a model*, not a scanner over a path set. This instance is a
-   known-answer fixture for it.
+**Fixed 2026-09-04/05.** All four suggested steps taken, and step 1's prediction (*"expect it to
+red; the reds are the worklist"*) was right: widening to `.mjs` produced **14 drift items across 10
+files**.
 
+### The gate (codescout)
+
+1. **`mjs` added to the extension filter.** Measured before: the gate walked **3 of 41** files in
+   the hooks directory and **0 of the 20 `.mjs`** that carry every message body it exists to
+   police.
+2. **`scrub_js_comments`**, the `.mjs` twin of the existing `scrub_shell_comments`. Not optional:
+   the hooks cross-reference codescout's *Rust* symbols in comments (`guide_ledger.rs`'s
+   `read_entries`, `src/util/fs.rs`'s `state_dir_from()`). Measured: scrubbing removes **7 of the
+   8** non-tool snake_case identifiers, and all seven are such cross-references.
+3. **`RETIRED_TOOL_NAMES`, shared.** Exactly as this file proposed — the six names in
+   `the_registry_is_exactly_the_post_collapse_surface` and the five here were two hand-maintained
+   copies of one list, and their **union of 11** is the real population. Both tests now read it, so
+   retiring a tool is one edit and both directions follow: *must not be registered* and *must not
+   be named in companion text*.
+
+### One thing this file could not have predicted, and it is a real flaw in the obvious fix
+
+Merging the lists put **`artifact`** into a `\b`-anchored scan — and `artifact` is this domain's
+most common noun. The first green-to-red run flagged *"For a librarian-managed **artifact**
+(docs/trackers)"* as drift, in a message this very fix had just written. The old five names
+(`replace_symbol`, `insert_code`, …) are not English words, so the problem could not arise before.
+
+So entries carry a third field, `ambiguous_as_english`. Exactly one is true. An ambiguous name
+matches only in a **tool-reference context** — adjacent to `` ` ``, `'`, `"`, `|`, `_`, `(`, or
+introduced by `codescout ` — while unambiguous names keep matching as bare words, which is what
+catches un-delimited drift like `read_markdown/edit_markdown` in a bullet list.
+
+**The limitation is documented at the refusal site rather than left to be discovered:** bare prose
+of the form *"run artifact find"* with no delimiter and no `codescout ` prefix is not caught. That
+is the price of not redding the build on the word "artifact", and it is the right trade only
+because every *mechanical* reference — an argv entry, a matcher alternation, a call form, a
+backticked mention — carries a delimiter by construction.
+
+### The hooks (claude-plugins)
+
+10 files. The two that matter most were not stale prose:
+
+- **`goal-stop-hook.mjs` was broken at runtime.** It shells out to `codescout artifact find`,
+  `artifact get`, and `artifact-event list --artifact-id`. Verified positively with a control:
+  `codescout artifact find` → *"error: unrecognized subcommand 'artifact'"*, exit 2, while
+  `codescout doc find` → exit 0. Its own error branch logs *"failed or returned empty"*, so three
+  dead subprocess calls presented as "no active goal" and the hook silently did nothing. A second
+  latent break on the same line: `--artifact-id` is now `--id`.
+- **`il4-deny-hook.mjs` was a total capability outage** — see its own section below.
+
+The rest: `subagent-guidance.mjs` (`artifact(action=…)` → `doc`, plus the `status="open"` query
+that hides `taken`/`investigating`/`zombie`), `hooks.json` matcher, and five files carrying
+`edit_markdown`/`read_markdown` in tool lists, matcher regexes and guidance text — including two
+copies of a line that had become **exactly inverted**: *"Markdown: read_markdown/edit_markdown, NOT
+read_file/edit_file"*, which now names the dead tools as correct and the live ones as wrong.
+
+### `il4-deny-hook.mjs` — deleted, not reworded
+
+This file's step 3 said to fix the remedy text to `read_file(path, heading=…)`. Text alone could not
+work: the hook **denies** `mcp__*__read_file` on every `.md`, so corrected text would have denied a
+call and then instructed the reader to make that same call.
+
+An intermediate fix narrowed the predicate so an **addressed** read (`heading`, `headings`, a line
+range, `force`) passed and only a bare whole-file read was nudged. **The operator then directed the
+simpler answer: remove the hook entirely**, on the grounds that codescout already computes the
+output after it arrives and buffers only when needed — so a pre-call gate was redundant from the
+start, not merely mis-worded.
+
+Verified after removal, all three regimes:
+
+| input | result |
+|---|---|
+| 159-byte markdown | full content inline |
+| 57 KB markdown, bare read | heading map + line numbers + an `@file_*` handle + a slice recipe |
+| librarian-managed artifact | refused, with a hint naming live `doc(…)` tools |
+
+So the adaptivity the hook was written to enforce is a property of the server, and had been all
+along. `il4-deny-hook.mjs`, `il4-deny-hook.test.sh` and the `hooks.json` matcher are gone.
+
+**Reproduced live before the fix and re-verified after**, which is the only reason the incoherence
+of the text-only fix was noticed at all: `read_file(path="docs/PROBES.md", heading="## Related")`
+was denied outright, and now returns the section list.
+
+### The archived bug that said this was already fixed
+
+`docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-after-the-fold.md`
+(`13382b706c9c77b0`) **predicted this exact deadlock, was archived as fixed on 2026-09-04, and every
+checkable claim in its `## Fix` is false.** The commit SHA it cites does not exist in the plugin
+repo; `il4-deny-hook.mjs`'s whole history is one commit and it was never deleted; both files were
+tracked at `HEAD`; it claims a 1.20.4 ship while all three profiles record 1.19.9.
+
+The mechanism is the part worth keeping. `sdd-misc-plugins` is a `"source": "directory"` marketplace
+whose `installLocation` is the **working tree itself**, so the plugin is served from source and the
+version-numbered `plugins/cache/…/1.19.x/` directories are inert leftovers — which is what the
+archiving session inspected. That is `reconnaissance-patterns:R-89` **inverted**: the law warns the
+installed copy can be staler than source, and here the consumer loads source while the *cache*
+misleads. Every upstream proxy — install record, version number, cache diff — agreed with the wrong
+answer, and the single artifact that settles it (`known_marketplaces.json`) is not one anybody
+thinks to read, because nothing suggests a version-numbered cache is inert.
+
+That file now carries the full correction and is marked `zombie`. `docs/architecture/companion-plugin.md`
+carried the same false retirement — and had **struck through a line that was correct** (*"It still
+fires (observed this session)"*) in order to assert it — and is corrected too.
+### Fix SHAs — two repos, cite both
+
+The gate and the hooks it polices live apart, and either half alone leaves a defect: the gate
+without the hook fixes reds the build, the hook fixes without the gate go unguarded again.
+
+| repo | SHA | patch-id |
+|---|---|---|
+| codescout | `1dacd204ddd593fe2187fe6a18f18a0bc7eb6848` | `037ce550126c46ca6569843e7a8ef1133dcc35d1` |
+| claude-plugins | `677fb6c9433477b921c8620e94323b2d41d2c490` | `ecf9efa7a9202f8f613fef23f42ad070949a41ab` |
+
+**Gate:** `cargo fmt` scoped to `src/server.rs` (a peer held uncommitted Rust, and workspace-wide
+`fmt` would have rewritten it — `2fc50a3d46aa77a9`); clippy `-D warnings` exit 0; lean lane exit 0;
+default lane exit 0.
+
+Read by **test name, not lane total**: `companion_surfaces_reference_only_real_tools`,
+`the_registry_is_exactly_the_post_collapse_surface`, and
+`retired_name_matching_discriminates_tool_references_from_prose` all pass. The last is the one that
+makes the other two mean anything — it shares `retired_name_regex` with the gate rather than
+re-implementing it, so it cannot be green while the gate is broken.
+
+**One honest note on the clippy reading.** The first run was **red**, with four errors in
+`src/librarian/tools/reindex.rs` — a file this change never touches. Attributed to a peer by
+`git status` rather than assumed, reported as *"red, attributed to a peer"* rather than as clean,
+and re-run to exit 0 after they reverted. It turned out to be a deliberate mutation-test mid-round,
+which from outside is indistinguishable from work left broken. A clippy reading, like a peer count,
+is valid only at its instant.
 ## Resume
 
 Not started. **The fix is two-sided:** the gate widening is `src/server.rs` and lands on
