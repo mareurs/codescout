@@ -871,7 +871,7 @@ mod tests {
     /// `reindex(reembed=true)` therefore emitted nothing for many minutes, the client's
     /// idle timeout aborted the call, and the loop kept running — the caller paying for
     /// work whose result it discarded.
-    /// `docs/issues/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
+    /// `docs/issues/archive/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
     ///
     /// **Asserts `>= 1` rather than one-per-item, and that is not laziness.**
     /// `report()` throttles to one emission per 500 ms and silently drops the rest; a

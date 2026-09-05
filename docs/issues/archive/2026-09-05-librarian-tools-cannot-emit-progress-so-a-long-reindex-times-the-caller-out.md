@@ -1,7 +1,7 @@
 ---
-id: '2b5fc16fb0a0ef7c'
+id: 1b261cfd3f810254
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian ToolContext carries no progress reporter, so a long reindex emits nothing to its caller and the client aborts the call while the server keeps working'
 owners:
 - marius
@@ -11,6 +11,16 @@ tags:
 - reindex
 - mcp
 topic: librarian progress reporting
+closed: 2026-09-05
+fix_branch: experiments
+fix_patch_id: 4a53afba7ebc96e43f594846a42d74d3548e5006
+fix_sha: a47940832adde865857e117a073deb9ecf6d0e68
+opened: 2026-09-05
+related:
+- docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md
+- docs/issues/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md
+severity: high
+unverified: Not verified against a live MCP client. The guards prove the notifications are emitted with the right total; nothing here proves the client's idle timeout actually stops firing on a real multi-minute reindex, which needs `cargo rb`, a reconnect, and a full reembed. That run is also the one that would repair the 7 artifacts left vectorless before 8acec9c7 -- so the live check and the outstanding data repair are the same action.
 ---
 
 ## Summary
@@ -113,8 +123,58 @@ multi-item reindex emits **more than one** progress event — and, in the other 
 that a reindex with no progress token emits **none**, since an unsolicited notification
 is what BUG-038 was.
 
+## Fix
+
+Fixed on `experiments` at `a4794083` — patch-id `4a53afba7ebc96e43f594846a42d74d3548e5006`.
+
+`LibrarianAdapter::derive_ctx` now carries the caller's reporter across the boundary, and
+the reindex embed loop calls `report()` per item. Per-item needs no batching of its own:
+`report()` throttles to 2 Hz and drops calls inside the window. `None` in stays `None`
+out, so a client that sent no `_meta.progressToken` still receives nothing — required
+rather than tolerated, and asserted in both directions.
+
+The counter advances per item **processed**, not per item embedded. A run failing every
+embed is still moving through the queue, and a counter that stalled on failure would
+report a working-but-erroring run as wedged — the exact confusion this removes.
+
+### The site count was wrong, and the way it was wrong is the lesson
+
+§ *Suggested direction* said **5** construction sites, citing a partition measured
+2026-09-04. The real number is **10**: 1 production + 9 test.
+
+`cargo check --all-targets` reports per **target**, and a target that fails stops its own
+compilation. The first run named 5 (lib + lib-test); fixing those revealed five more in
+integration targets — `tests/audit_shards_cross_machine.rs`, `tests/link_scan.rs`, and
+three under `tests/librarian/audit_doc_refs/`. The first error batch is a **floor wearing
+the shape of a total**, and only iterating to a clean build establishes the number.
+
+Third instance in two days of a measuring predicate silently excluding its own target,
+all three returning a plausible number rather than an error, and in all three the remedy
+was a denominator rather than more care — see `reconnaissance-patterns:R-181` and `R-180`.
+
+### Two guards, because neither can see the other
+
+- `a_reindex_reports_progress_to_a_caller_that_asked_for_it` (`reindex.rs`) — the
+  consumer. Sets `ctx.progress` **directly**, so it stays green if the adapter stops
+  carrying the field. That is this bug's own class reappearing inside its fix.
+- `derive_ctx_carries_the_callers_progress_reporter_across_the_boundary` (`adapter.rs`) —
+  the seam, asserting both directions.
+
+Mutation-tested, 3 rounds, 4 REDs, each attributed to one guard: dropping the `report()`
+call reds the consumer only (the seam test correctly staying green); passing `None` as the
+total reds the total assertion only; making `derive_ctx` drop the reporter reds the seam
+only.
+
+The consumer test asserts `>= 1` emission rather than one-per-item, deliberately: the 2 Hz
+throttle means a test whose embeds finish in microseconds delivers exactly the first call,
+so `== queue_len` would be asserting the throttle away. The discriminator is the reported
+**total**, which can only be right if the real queue length was passed — three artifacts,
+so a hardcoded 1 or an off-by-one fails it.
+
 ## Resume
 
-Not started. Read `src/librarian/adapter.rs` around `derive_ctx` first — that is the one
-place the two context types meet, and it is where the field has to cross.
-
+The live check is outstanding and is the same action as the outstanding data repair:
+`cargo rb`, reconnect, then `librarian(action="reindex", reembed=true)`. That run both
+demonstrates the timeout no longer fires and re-embeds the 7 artifacts left vectorless
+before `8acec9c7`. Until it runs, this fix is verified by construction and not by
+observation.

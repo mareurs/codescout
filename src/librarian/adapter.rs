@@ -1737,7 +1737,7 @@ mod tests {
     ///
     /// That gap is the `declared-not-wired` shape the field was added to close, so it
     /// gets a test at the seam rather than only at the consumer.
-    /// `docs/issues/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
+    /// `docs/issues/archive/2026-09-05-librarian-tools-cannot-emit-progress-so-a-long-reindex-times-the-caller-out.md`
     #[test]
     fn derive_ctx_carries_the_callers_progress_reporter_across_the_boundary() {
         struct NullSink;
