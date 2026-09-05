@@ -3683,6 +3683,25 @@ mod tests {
         ];
 
         let re = regex::Regex::new(r"`([a-z][a-z_0-9]{2,})`").unwrap();
+        // Call form — `name(` — the shape that says "this is how you invoke it", and so
+        // the costlier half to get wrong. The bare-form regex above cannot see it: it
+        // requires the closing backtick to follow the identifier IMMEDIATELY, so
+        // `librarian_context(topic)` matched nothing and a tool retired on 2026-05-02 sat
+        // in the rendered onboarding prompt for four months with this gate green.
+        //
+        // No allowlist of its own, and that is measured rather than hoped: `(` is
+        // self-anchoring — English prose does not put an open paren flush against a
+        // snake_case word — so over `source.md` this pass sees 16 tokens and every one but
+        // the defect resolves to a live tool. Deliberately NOT backtick-scoped: the
+        // backticked variant sees only 11 and buys nothing, and anchoring on markup is the
+        // mistake the bare-form regex already makes (`4e4762b735deb392`).
+        //
+        // `allowlist_hits` is deliberately NOT incremented here, so the two-way tripwire
+        // below keeps measuring bare-form presence only. Safe because no allowlist entry
+        // appears in call form today; if one ever does, this pass lets it through and the
+        // tripwire still reports it unused.
+        // docs/issues/2026-09-05-the-prompt-surface-gate-misses-a-backticked-tool-name-in-call-form.md
+        let call_re = regex::Regex::new(r"\b([a-z][a-z_0-9]{2,})\(").unwrap();
         let mut drift = Vec::<String>::new();
         for (surface, body) in surfaces {
             for cap in re.captures_iter(body) {
@@ -3699,6 +3718,31 @@ mod tests {
                      registered — rename the reference to a real tool, or add \
                      it to the allowlist in this test if it's a non-tool token"
                 ));
+            }
+            // Default-features only, and the reason is a real asymmetry rather than a
+            // convenience: `real_tools` comes from the live registry, which
+            // `--no-default-features` shrinks by every librarian tool, while the surfaces
+            // are ONE `include_str!`'d constant that does not vary by feature. So in the
+            // lean lane the denominator is a strict subset of what the prose describes,
+            // and `doc(` / `librarian(` are reported as drift when the prose is correct.
+            // Measured 2026-09-05: 4 such false findings, 0 true ones.
+            //
+            // The same hole sits under the bare-form pass above — it simply never trips,
+            // because the surfaces write `doc` and `librarian` only in call form. Left as
+            // it is rather than widened here: nothing is currently wrong there, and a
+            // guard that is only exercised by hypotheticals is worse than the gap.
+            if cfg!(feature = "librarian") {
+                for cap in call_re.captures_iter(body) {
+                    let ident = cap.get(1).unwrap().as_str();
+                    if real_tools.contains(ident) || allowlist.contains(ident) {
+                        continue;
+                    }
+                    drift.push(format!(
+                        "{surface}: `{ident}(` is written as a tool CALL but names no \
+                         registered tool — that is an instruction to invoke something \
+                         that does not exist. Rename it to the live tool."
+                    ));
+                }
             }
         }
 

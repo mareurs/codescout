@@ -35,7 +35,15 @@ use super::{parse_bool_param, Tool, ToolContext};
 // projects keep handing agents a call naming a tool the server no longer registers.
 // (`server_instructions` changes alone would NOT warrant a bump — that surface is injected
 // fresh per session. See src/prompts/README.md.)
-pub(crate) const ONBOARDING_VERSION: u32 = 30;
+// Bumped 2026-09-05 (call-form gate): the onboarding slice's artifact-tracking step read
+// `librarian_context(topic)` — a tool retired by the 2026-05-02 librarian-tools-collapse, so for
+// four months every onboarded project cached a prompt instructing its agents to invoke a name the
+// server does not register. It survived because `prompt_surfaces_reference_only_real_tools` needed
+// the closing backtick to follow the identifier immediately and so could not see a CALL; a
+// call-form pass now closes that. Same reasoning as the 2026-09-03 bump: already-onboarded
+// projects cache the rendered prompt, so the fix does not reach them without this.
+// docs/issues/2026-09-05-the-prompt-surface-gate-misses-a-backticked-tool-name-in-call-form.md
+pub(crate) const ONBOARDING_VERSION: u32 = 31;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

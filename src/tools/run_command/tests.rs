@@ -2529,9 +2529,10 @@ fn system_prompt_points_to_tool_guide_resource() {
     // ONBOARDING_VERSION so a bump cannot be silent — it must be paired with an edit here.
     // Bumping is required when the `onboarding_prompt` surface changes, because already-
     // onboarded projects cache the rendered prompt; see src/prompts/README.md. Last moved
-    // to 30 on 2026-09-03, when the tool-surface collapse changed that surface's
-    // CLAUDE.md-memories recipe from `edit_markdown` to `edit_file`.
-    assert_eq!(ONBOARDING_VERSION, 30);
+    // to 31 on 2026-09-05, when the surface's artifact-tracking step stopped naming
+    // `librarian_context(topic)` — retired 2026-05-02, and invisible to the prompt-surface
+    // gate for four months because that gate could not see a name written in CALL form.
+    assert_eq!(ONBOARDING_VERSION, 31);
 }
 
 #[test]
