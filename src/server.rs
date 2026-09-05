@@ -3859,6 +3859,209 @@ mod tests {
         );
     }
 
+    /// Every tool name this project has retired, with why — the single source of
+    /// truth for both tests that care about dead names.
+    ///
+    /// **Why it is shared rather than restated.** Two hand-maintained copies of
+    /// this list already existed and had drifted apart:
+    /// `the_registry_is_exactly_the_post_collapse_surface` held the six names the
+    /// 2026-09-02 collapse retired, while `companion_surfaces_reference_only_real_tools`
+    /// held five *older* ones and none of the six. So the companion gate would pass
+    /// a hook that told the model to call `read_markdown`, which is exactly what it
+    /// existed to prevent and exactly what shipped
+    /// (docs/issues/2026-09-04-companion-tool-name-gate-skips-every-mjs-hook.md).
+    /// Retiring a tool is now one edit here, and both directions — "must not be
+    /// registered" and "must not be named in companion text" — follow from it.
+    ///
+    /// The two lists were *both* correct for their own author's moment, which is
+    /// the tell for this class: neither is stale in isolation, and only their
+    /// union is the real population.
+    /// `(name, note, ambiguous_as_english)`.
+    ///
+    /// `ambiguous_as_english` marks a retired name that is also an ordinary word in
+    /// this codebase's own vocabulary. Exactly one qualifies — `artifact` — and it
+    /// is the domain's most common noun ("a librarian-managed artifact"), so a bare
+    /// `\bartifact\b` match reds the build on correct prose. Ambiguous names are
+    /// matched only in a *tool-reference* context (adjacent to a backtick, quote,
+    /// `|`, `_`, `(`, or preceded by `codescout `); unambiguous ones match as bare
+    /// words, which is what catches un-delimited drift like
+    /// `read_markdown/edit_markdown` in a bullet list.
+    ///
+    /// **The limitation, stated here rather than discovered later:** for an
+    /// ambiguous name, prose of the form `codescout artifact find` written with no
+    /// delimiters is caught only by the `codescout ` prefix, and a bare sentence
+    /// using the word as a verb-object would not be caught at all. That is the
+    /// price of not redding the build on the word "artifact", and it is the right
+    /// trade only because every *mechanical* reference — a CLI argv entry, a
+    /// matcher alternation, a call form, a backticked mention — carries a
+    /// delimiter by construction.
+    const RETIRED_TOOL_NAMES: &[(&str, &str, bool)] = &[
+        // Pre-collapse consolidations. `edit_lines` and `create_or_update_file`
+        // have no individually-documented successor in-tree — recorded in
+        // `codescout-usage-frictions` only as nonexistent handles still being
+        // matched — so their notes stay generic rather than inventing a lineage.
+        ("replace_symbol", "consolidated into `edit_code`", false),
+        ("insert_code", "consolidated into `edit_code`", false),
+        ("remove_symbol", "consolidated into `edit_code`", false),
+        (
+            "edit_lines",
+            "retired; use the live write-tool surface",
+            false,
+        ),
+        (
+            "create_or_update_file",
+            "retired; use `create_file` / `edit_file`",
+            false,
+        ),
+        // The 2026-09-02 tool-surface collapse: five folded into `doc`, two
+        // markdown tools folded into `read_file`/`edit_file`. No alias shim by
+        // design — these return the MCP unknown-tool error.
+        // The only ambiguous entry: also this domain's most common noun.
+        ("artifact", "renamed to `doc` (2026-09-02 collapse)", true),
+        (
+            "artifact_event",
+            "folded into `doc(action=event_create|event_list)` (2026-09-02)",
+            false,
+        ),
+        (
+            "artifact_augment",
+            "folded into `doc(action=augment)` (2026-09-02)",
+            false,
+        ),
+        ("artifact_refresh", "folded into `doc` (2026-09-02)", false),
+        (
+            "read_markdown",
+            "folded into `read_file` (2026-09-02)",
+            false,
+        ),
+        (
+            "edit_markdown",
+            "folded into `edit_file` (2026-09-02)",
+            false,
+        ),
+    ];
+
+    /// Build the match pattern for one [`RETIRED_TOOL_NAMES`] entry.
+    ///
+    /// Extracted so `companion_surfaces_reference_only_real_tools` and the test
+    /// that pins this behaviour share **one** implementation. A test asserting
+    /// about its own copy of this regex would be green whatever the gate does.
+    fn retired_name_regex(name: &str, ambiguous: bool) -> regex::Regex {
+        let esc = regex::escape(name);
+        let pattern = if ambiguous {
+            // Tool-reference contexts only: adjacent to a delimiter that prose
+            // does not put next to a bare noun, or introduced by `codescout `.
+            // Note the trailing set omits `'`, which the leading set has. An
+            // apostrophe after the word is the English possessive ("this
+            // artifact's vectors"), not a delimiter — and nothing is lost, because
+            // every quoted form (`'artifact'`, `"artifact"`) carries a LEADING
+            // quote that the first branch already catches. Caught by
+            // `retired_name_matching_discriminates_tool_references_from_prose` on
+            // its first run, against a sentence taken from this repo's own ledger.
+            format!(r#"(?:[`'"|_(]{esc}\b|\b{esc}[`"|_(]|codescout\s+{esc}\b)"#)
+        } else {
+            format!(r"\b{esc}\b")
+        };
+        regex::Regex::new(&pattern).unwrap()
+    }
+
+    /// Pins the discrimination that [`retired_name_regex`] exists for, because the
+    /// gate going green after `artifact` was made ambiguous is exactly what a
+    /// *broken* loosening also looks like.
+    ///
+    /// The three positives below are the real defects the broad `\bartifact\b`
+    /// caught on 2026-09-04 and that the narrowed form must keep catching: an argv
+    /// entry in `goal-stop-hook.mjs`, a call form in `subagent-guidance.mjs`, and a
+    /// matcher alternation in `hooks.json`. The negatives are the prose that made
+    /// narrowing necessary — including a string this repo's own hook messages now
+    /// contain, so a regression here reds immediately rather than at the next
+    /// unrelated edit.
+    #[test]
+    fn retired_name_matching_discriminates_tool_references_from_prose() {
+        let amb = retired_name_regex("artifact", true);
+        for fires in [
+            r#"run(['artifact', 'find', '--kind', 'tracker'])"#,
+            r#"artifact(action="find", kind="bug")"#,
+            "use `artifact` with `action=get`",
+            r#""matcher": "mcp__.*__(symbols|artifact|memory)""#,
+            "codescout artifact find failed or returned empty",
+            "artifact_event with action=create",
+        ] {
+            assert!(
+                amb.is_match(fires),
+                "narrowed `artifact` pattern stopped catching a real tool reference: {fires}"
+            );
+        }
+        for quiet in [
+            "For a librarian-managed artifact (docs/trackers), prefer doc(action=\"get\")",
+            "the artifact catalog is machine-local and gitignored",
+            "every archive-move strands its artifact's vectors",
+        ] {
+            assert!(
+                !amb.is_match(quiet),
+                "narrowed `artifact` pattern still reds on ordinary prose: {quiet}"
+            );
+        }
+
+        // An unambiguous name must keep matching bare, un-delimited words — that is
+        // what caught `read_markdown/edit_markdown` in a slash-separated bullet.
+        let plain = retired_name_regex("read_markdown", false);
+        assert!(plain.is_match("• Markdown: read_markdown/edit_markdown, NOT read_file"));
+        assert!(!plain.is_match("read_markdownish is not the tool"));
+
+        // And the table must stay honest about which entry is ambiguous: exactly
+        // one qualifies, and silently adding a second would widen the blind spot
+        // this test exists to bound.
+        let ambiguous: Vec<&str> = RETIRED_TOOL_NAMES
+            .iter()
+            .filter(|(_, _, a)| *a)
+            .map(|(n, _, _)| *n)
+            .collect();
+        assert_eq!(
+            ambiguous,
+            vec!["artifact"],
+            "a retired name was marked ambiguous-as-English; that weakens matching for it, \
+         so it needs its own entry in this test's positive/negative cases first"
+        );
+    }
+
+    /// The `.mjs` twin of the test-local `scrub_shell_comments`, and it is not
+    /// optional once `.mjs` is walked.
+    ///
+    /// The companion hooks cross-reference codescout's *Rust* symbols in comments
+    /// (`guide_ledger.rs`'s `read_entries`, `src/util/fs.rs`'s `state_dir_from()`),
+    /// which is exactly the "document the history without tripping the lint" case
+    /// the shell scrub already exists for. Measured 2026-09-04: scrubbing removes
+    /// **7 of the 8** non-tool snake_case identifiers in those files, and all seven
+    /// are such cross-references.
+    ///
+    /// Deliberately crude — it does not track string literals, so a `//` inside a
+    /// string truncates that line. That fails toward **silence** (scrubbing too
+    /// much), never toward a false accusation, which is the safe direction for a
+    /// gate that reaches into another repo and reds this one.
+    fn scrub_js_comments(content: &str) -> String {
+        let mut out = String::with_capacity(content.len());
+        let mut rest = content;
+        while let Some(start) = rest.find("/*") {
+            out.push_str(&rest[..start]);
+            match rest[start + 2..].find("*/") {
+                Some(end) => rest = &rest[start + 2 + end + 2..],
+                None => {
+                    rest = "";
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        out.lines()
+            .map(|l| match l.find("//") {
+                Some(i) => &l[..i],
+                None => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Companion plugin surfaces (`../claude-plugins/codescout-companion/hooks/*`)
     /// reference codescout tool names as plain text in matcher regexes, case
     /// statements, and message bodies. They drift independently of the codescout
@@ -3913,21 +4116,17 @@ mod tests {
 
         let non_codescout_tools: HashSet<&str> = ["activate_project"].into_iter().collect();
 
-        let stale_names = &[
-            "replace_symbol",
-            "insert_code",
-            "remove_symbol",
-            "edit_lines",
-            "create_or_update_file",
-        ];
+        // Read from the shared list rather than restated here — see
+        // RETIRED_TOOL_NAMES for why this test previously held five names that
+        // did not include any of the six the 2026-09-02 collapse retired.
+        let stale_names = RETIRED_TOOL_NAMES;
 
         let positive_re = regex::Regex::new(r"mcp__codescout__\(?([a-z_|]+)\)?").unwrap();
         let case_re = regex::Regex::new(r"\*__([a-z_]+)").unwrap();
 
-        let mut stale_regexes: Vec<(&str, regex::Regex)> = Vec::new();
-        for name in stale_names {
-            let re = regex::Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap();
-            stale_regexes.push((name, re));
+        let mut stale_regexes: Vec<(&str, &str, regex::Regex)> = Vec::new();
+        for (name, note, ambiguous) in stale_names {
+            stale_regexes.push((name, note, retired_name_regex(name, *ambiguous)));
         }
 
         fn scrub_shell_comments(content: &str) -> String {
@@ -3954,7 +4153,11 @@ mod tests {
         for entry in entries {
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !matches!(ext, "sh" | "json") {
+            // `mjs` is the load-bearing addition. Every hook in the companion
+            // plugin is `.mjs`; with only sh|json this walked 3 of 41 files and
+            // 0 of the 20 that carry the message bodies this gate exists to
+            // police. Measured 2026-09-04.
+            if !matches!(ext, "sh" | "json" | "mjs") {
                 continue;
             }
             let fname = path
@@ -4006,18 +4209,16 @@ mod tests {
 
             // Stale-name sentinel runs on comment-scrubbed text so header
             // documentation explaining consolidation history doesn't false-trip.
-            let scrubbed = if ext == "sh" {
-                scrub_shell_comments(&content)
-            } else {
-                content.clone()
+            let scrubbed = match ext {
+                "sh" => scrub_shell_comments(&content),
+                "mjs" => scrub_js_comments(&content),
+                _ => content.clone(),
             };
-            for (stale, re) in &stale_regexes {
+            for (stale, note, re) in &stale_regexes {
                 if re.is_match(&scrubbed) {
                     drift.push(format!(
-                        "{fname}: contains stale tool name `{stale}` in live \
-                     (non-comment) code — replace with the live equivalent \
-                     (e.g. `edit_code` consolidated \
-                     replace_symbol/insert_code/remove_symbol)"
+                        "{fname}: contains retired tool name `{stale}` in live \
+                         (non-comment) code — {note}"
                     ));
                 }
             }
@@ -4129,19 +4330,16 @@ mod tests {
          list; if you did not intend one, a registration leaked in."
         );
 
-        for dead in [
-            "artifact",
-            "artifact_event",
-            "artifact_augment",
-            "artifact_refresh",
-            "read_markdown",
-            "edit_markdown",
-        ] {
+        // Reads the shared RETIRED_TOOL_NAMES rather than restating six of
+        // them. The companion-surface gate reads the same list, so retiring a
+        // tool is one edit and both directions follow — "must not be
+        // registered" here, "must not be named in companion hook text" there.
+        // They had drifted into two disjoint lists; see RETIRED_TOOL_NAMES.
+        for (dead, note, _ambiguous) in RETIRED_TOOL_NAMES {
             assert!(
                 server.find_tool(dead).is_none(),
-                "`{dead}` was retired by the 2026-09-02 collapse and must not be registered \
-             again. There is no alias shim by design — the old name returns the MCP \
-             unknown-tool error."
+                "`{dead}` was retired ({note}) and must not be registered again. There is no \
+                 alias shim by design — the old name returns the MCP unknown-tool error."
             );
         }
     }
