@@ -11,11 +11,18 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 Why each part, one line each. Every measurement, date and superseded form →
 [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md).
 
-- **The order:** we share one `target/`, and `tests/cli_artifact.rs` resolves
+- **The order:** we share one `target/`, and `tests/cli_doc.rs` resolves
   `target/debug/codescout` **by path at run time** — so a terminal lean lane leaves a
-  librarian-less binary that reds 10 of 11 CLI tests for the *next* session, reading exactly like a
+  librarian-less binary that reds the CLI tests for the *next* session, reading exactly like a
   feature-gating regression in whatever they just committed. Ending on the default lane rebuilds it,
   so **following the gate cannot arm the trap for anyone else — provided both lanes actually run.**
+  The file was `tests/cli_artifact.rs` holding 11 tests until the 2026-09-02 collapse renamed it,
+  and the superseded *"reds 10 of 11"* is deliberately **not** restated with a fresh number:
+  re-deriving it means arming the shared trap on purpose while other sessions are building against
+  the same `target/`. Verified 2026-09-05 — the target is `cli_doc`, it holds **15** tests, and all
+  15 pass against a librarian-bearing binary. Note the rename is why a name-based grep for the old
+  file finds nothing: `claude_md_contains_no_deprecated_tool_names` gates retired *tool* names, and
+  `cli_artifact` is a **filename**, so no gate in this repo was ever going to catch this.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the
   default lane running, and `&&` withdraws it *exactly when something is wrong*. Worse than a
   skipped repair: `cargo test` **builds, then runs**, so a failing lean lane has already
