@@ -1,5 +1,5 @@
 ---
-id: '83229db7274aa666'
+id: b2c666abc279572c
 kind: bug
 status: open
 title: 'BUG: four manual surfaces still describe read_markdown in the present tense, and no gate reaches them'
@@ -61,7 +61,7 @@ prompting a widened regex:
 `docs/issues/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`.
 
 The reason widening is unattractive is the same one that makes
-`prompt_surfaces_reference_only_real_tools` backtick-scoped (`6ccfcc15423f2ae5`): an unanchored scan
+`prompt_surfaces_reference_only_real_tools` backtick-scoped (`4e4762b735deb392`): an unanchored scan
 for tool-shaped tokens over prose matches ordinary words, and a gate nobody can keep green gets
 deleted. Recording the instance is the cheaper correct move; **what is owed is the repair, not a new
 gate.**
@@ -83,7 +83,7 @@ omission, which is worth separating: the first is a decision, the second is the 
 ## Hypotheses tried
 
 1. **Hypothesis:** `docs/manual/` is outside the gate's walk, like `docs/architecture/`
-   (`ddee74c17ea1343c`).
+   (`3f0e7733ae77c707`).
    **Test:** read `tests/doc_tool_refs.rs:263`.
    **Verdict:** rejected — `docs/manual/` **is** walked. The narrowing is the call-form regex, not the
    directory list. Distinct from that bug.
@@ -138,6 +138,6 @@ cannot tell you whether you succeeded, which is why this file lists the surfaces
   as finding M2.
 - Precedent this follows:
   `docs/issues/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`.
-- Sibling with a *directory* gap rather than a grammatical one: `ddee74c17ea1343c`.
+- Sibling with a *directory* gap rather than a grammatical one: `3f0e7733ae77c707`.
 - `CLAUDE.md` § *Testing Discipline* — "Loudness is a property of a PATH, not of a failure."
 

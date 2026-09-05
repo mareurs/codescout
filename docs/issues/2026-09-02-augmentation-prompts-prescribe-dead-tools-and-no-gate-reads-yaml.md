@@ -1,5 +1,5 @@
 ---
-id: a334f497e33a0d33
+id: db80a4adc712c971
 kind: bug
 status: open
 title: 'BUG: 20 augmentation prompts prescribe dead tool calls, and no gate scans YAML'

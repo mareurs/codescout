@@ -1,5 +1,5 @@
 ---
-id: '77cef4bac498c8f0'
+id: bee04240275ee7d9
 kind: bug
 status: open
 title: 'BUG: both doc-citation guards silently skip 49% of the corpus, and neither reports a denominator'

@@ -1,5 +1,5 @@
 ---
-id: '4f4e1478e0a7ba2e'
+id: 571720406a0b7f4a
 kind: bug
 status: open
 title: 'BUG: param_probe does not recurse, so nesting a schema key silently removes it from guard reach'

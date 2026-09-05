@@ -116,7 +116,7 @@ Add a **call-form** pass to `prompt_surfaces_reference_only_real_tools`: extract
 `([a-z][a-z_0-9]{2,})\(` across each surface and require every hit to resolve to a registered tool.
 
 Why this one is cheap to keep green, where dropping the backtick anchor is not (the objection
-`6ccfcc15423f2ae5` correctly raises): **`(` is self-anchoring.** Ordinary English prose does not put
+`4e4762b735deb392` correctly raises): **`(` is self-anchoring.** Ordinary English prose does not put
 an open paren flush against a snake_case word, so the false-positive rate is near zero — the sweep
 above found exactly three non-tool hits across four files, all Rust function names, all in a surface
 the gate does not read. No allowlist growth is needed for the surfaces it does read.
@@ -188,18 +188,30 @@ grep -rn '<tool>(' src/prompts/ .codescout/ tests/fixtures/prompt_surfaces/
 ## Resume
 
 Wire the call-form pass, observe the RED, fix `source.md:352`, regenerate the fixture, re-run the
-gate. Then re-read `6ccfcc15423f2ae5` § Summary — its population sentence needs the correction in
+gate. Then re-read `4e4762b735deb392` § Summary — its population sentence needs the correction in
 § Hypotheses above, and its § Evidence table can take a fourth row.
 
 ## References
 
 - Sibling escape through the same regex, opposite direction: `4e4762b735deb392`
   (`docs/issues/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`).
-  **Cite that id, not the one printed in the file's own frontmatter.** That file says
-  `id: '6ccfcc15423f2ae5'`, which resolves to nothing — it is a worktree-minted id that survived the
-  merge into the main checkout, and `doctor` reports it as one of 8 `frontmatter_id_mismatch` rows
-  (all dated 2026-09-02, all worktree-born). `fix="repair_frontmatter_id"` is the wired repair; it
-  rewrites each file's own `id:` line and does **not** reach prose elsewhere citing the dead value.
+  That id was **not citable when this bug was filed**: the file's own frontmatter declared
+  `6ccfcc15423f2ae5`, which matched no catalog row — one of 8 `frontmatter_id_mismatch` rows
+  `doctor` reported, every one dated 2026-09-02.
+
+  **Cause identified positively, not inferred.**
+  `sha256("/home/marius/work/claude/codescout/.worktrees/tool-collapse/<rel_path>")[:16]` reproduces
+  `6ccfcc15423f2ae5` exactly, and `git log --follow --diff-filter=R` shows the file was never
+  renamed — so the id was minted in a worktree since removed, rather than moved within this
+  checkout. Worth recording because `doctor`'s own `detail` field asserts the opposite: *"a move
+  re-keys the row and this file kept the id it was moved away from"*. That is the check's generic
+  explanation of the mechanism rather than a forensic claim about these 8, and it reads as a finding
+  — following it would have sent the reader looking for a move that never happened.
+
+  **Repaired 2026-09-05** by `librarian(action="doctor", fix="repair_frontmatter_id", confirm=true)`
+  — 8 files, 0 failed. The repair rewrites each file's own `id:` line and does **not** reach prose
+  elsewhere citing the dead value; 17 such citations across 6 files were re-pointed in the same pass,
+  which is the half a future run of this fix will still leave behind.
 - Retirement that stranded the token: `docs/superpowers/plans/2026-05-02-librarian-tools-collapse.md:971`
   — `` `librarian_context` → `librarian(context)` ``.
 - `CLAUDE.md` § *Parsers Over a Namespace* — a parser is correct on every input it accepts; the

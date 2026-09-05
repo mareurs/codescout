@@ -1,5 +1,5 @@
 ---
-id: '4f5c5ddf3c6f1a70'
+id: ef3e685d69e34321
 kind: bug
 status: open
 title: 'BUG: param_probe reads only the first slash token of a shared label, so every later action is unswept'
@@ -55,7 +55,7 @@ let Some(action) = desc.split(':').next().and_then(|l| l.split('/').next()) else
 as naming one.
 
 **This is the second distinct defect in the same probe**, and they narrow the population on
-different axes: `4f4e1478e0a7ba2e` is *depth* (no recursion into nested object properties),
+different axes: `571720406a0b7f4a` is *depth* (no recursion into nested object properties),
 this one is *breadth* (only the first action of a shared label). Both leave `checked` looking
 healthy. Filed separately because the fixes are independent — one changes traversal, the other
 changes label parsing.
@@ -133,7 +133,7 @@ across all four probe sites and add the `N of M` denominator; the delta between 
   2026-09-02, as review finding I1.
 - Sibling defect in the same probe, different axis:
   `docs/issues/2026-09-02-param-probe-does-not-recurse-so-nesting-a-key-removes-it-from-guard-reach.md`
-  (`4f4e1478e0a7ba2e`).
+  (`571720406a0b7f4a`).
 - `CLAUDE.md` § *Testing Discipline* — "A count of a defect population must arrive with its unit or
   not at all", and "Loudness is a property of a PATH, not of a failure".
 

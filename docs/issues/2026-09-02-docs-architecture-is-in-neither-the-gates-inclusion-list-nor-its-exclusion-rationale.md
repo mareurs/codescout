@@ -1,5 +1,5 @@
 ---
-id: ddee74c17ea1343c
+id: 3f0e7733ae77c707
 kind: bug
 status: open
 title: 'BUG: docs/architecture/ is in neither present_tense_surfaces'' inclusion list nor its exclusion rationale'
@@ -61,8 +61,8 @@ axes, and they are **not** re-files of each other:
 
 | bug | what narrows | fix |
 |---|---|---|
-| `77cef4bac498c8f0` | a *citation filter* inside a scanned file (`!c.tool.contains('_')`) | change the filter |
-| `a334f497e33a0d33` | *file type* — every scanner is markdown-scoped, prose moved into YAML | add a YAML reader |
+| `bee04240275ee7d9` | a *citation filter* inside a scanned file (`!c.tool.contains('_')`) | change the filter |
+| `db80a4adc712c971` | *file type* — every scanner is markdown-scoped, prose moved into YAML | add a YAML reader |
 | this one | *directory enumeration* — a markdown dir in no list | add the directory |
 
 Same class, three mechanisms, three independent fixes. Filed separately for that reason.
@@ -89,7 +89,7 @@ declaring the directory covered.
    **Verdict:** rejected — it names four other paths and not this one.
    **Evidence:** § Root cause.
 
-2. **Hypothesis:** this is a re-file of `a334f497e33a0d33`.
+2. **Hypothesis:** this is a re-file of `db80a4adc712c971`.
    **Test:** compared root causes — that bug's mechanism is "every scanner is markdown-scoped".
    **Verdict:** rejected. These files *are* markdown; the gap is directory enumeration, and the fixes
    do not overlap.
@@ -128,7 +128,7 @@ the exclusion rationale — this bug is one instance and the enumeration was nev
 
 - Found during the Opus task review of `f7b7ff33` (Task 6 of the tool-surface-collapse plan),
   2026-09-02, as review finding I3.
-- Siblings in the same class, different mechanisms: `77cef4bac498c8f0`, `a334f497e33a0d33`.
+- Siblings in the same class, different mechanisms: `bee04240275ee7d9`, `db80a4adc712c971`.
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a gate that is silent about a
   directory it never walked is a negative result that does not name its scope.
 

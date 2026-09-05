@@ -1,5 +1,5 @@
 ---
-id: '6ccfcc15423f2ae5'
+id: 4e4762b735deb392
 kind: bug
 status: open
 title: 'BUG: the prompt-surface gate is backtick-scoped, so the Iron Laws are invisible to it'
@@ -140,8 +140,8 @@ once Tasks 7/8 land — `read_markdown` and `edit_markdown`.
 
 - Found during the Task 7 pre-dispatch scout, 2026-09-02.
 - `DEPRECATED_TOOL_NAMES` backfill was separately flagged as M3 by the Opus review of `f7b7ff33`.
-- Siblings in the same class, different mechanisms: `77cef4bac498c8f0` (citation filter),
-  `a334f497e33a0d33` (file type), `ddee74c17ea1343c` (directory enumeration),
-  `4f5c5ddf3c6f1a70` (label parsing). This one is **markup**.
+- Siblings in the same class, different mechanisms: `bee04240275ee7d9` (citation filter),
+  `db80a4adc712c971` (file type), `3f0e7733ae77c707` (directory enumeration),
+  `ef3e685d69e34321` (label parsing). This one is **markup**.
 - `CLAUDE.md` § *Testing Discipline* — "Loudness is a property of a PATH, not of a failure."
 
