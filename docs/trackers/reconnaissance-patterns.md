@@ -11,7 +11,6 @@ entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
 
-
 # Reconnaissance patterns
 
 Per-project R-N ledger for the `codescout-companion:reconnaissance`
@@ -6351,6 +6350,22 @@ marker, one of them surviving a deliberate edit of the same block a day earlier.
 > fresh id* — the later allocation is this one, and the laptop's counter was already the
 > higher of the two.
 >
+> **Corrected 2026-09-05 — "(kept)" records the decision, not the outcome.** Neither `R-148`
+> nor `R-149` exists in this ledger today, and `fadc5dd3` is contained in **no branch**: the
+> rebase `R-178` itself records — *"a peer rebase orphaned 3 of my 6 commits minutes after I
+> cited them by SHA"* — orphaned the very commit this table calls kept. The two laws survived
+> under new numbers: the laptop's `R-148` is now **`R-177`**, and its `R-149` is now
+> **`R-178`**. Verified at the bytes — `git show
+> fadc5dd3:docs/trackers/reconnaissance-patterns.md` defines `## R-148` and `## R-149` with
+> titles word-for-word identical to the ones `R-177` and `R-178` carry today.
+>
+> So the table below is an accurate snapshot of 21:22:44 that a later event falsified, and
+> nothing in it could have said so — `OB-12`'s shape, where the falsifying edit produces no
+> diff hunk, no broken link and no check naming the section it retired, leaving the retired
+> text reading as settled prose. The recursion is worth keeping rather than tidying away:
+> the entry that *documents* the orphaning hazard is one of the two entries this block was
+> wrong about, and it is wearing the number it had to be renumbered to.
+>
 > ```text
 > laptop   fadc5dd3  21:22:44  unpushed  ->  R-148, R-149   (kept)
 > desktop  d1a8db97  21:52:47            ->  R-148          -> renumbered to R-150 here
@@ -8378,3 +8393,4 @@ silently excluding its own target*, hours apart, in `grep` and in Python.
 
   Why this block carries all of it: R-99. A convention documented anywhere other
   than the thing authors copy is not a convention. -->
+
