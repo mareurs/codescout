@@ -1,5 +1,5 @@
 ---
-id: 1b261cfd3f810254
+id: '1b261cfd3f810254'
 kind: bug
 status: fixed
 title: 'BUG: the librarian ToolContext carries no progress reporter, so a long reindex emits nothing to its caller and the client aborts the call while the server keeps working'
@@ -18,9 +18,9 @@ fix_sha: a47940832adde865857e117a073deb9ecf6d0e68
 opened: 2026-09-05
 related:
 - docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md
-- docs/issues/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md
+- docs/issues/archive/2026-09-04-librarian-embeds-stored-artifacts-through-the-query-seam.md
 severity: high
-unverified: Not verified against a live MCP client. The guards prove the notifications are emitted with the right total; nothing here proves the client's idle timeout actually stops firing on a real multi-minute reindex, which needs `cargo rb`, a reconnect, and a full reembed. That run is also the one that would repair the 7 artifacts left vectorless before 8acec9c7 -- so the live check and the outstanding data repair are the same action.
+unverified: 'MEASURED 2026-09-05 AND WORSE THAN THIS RECORD FIRST STATED: Claude Code sends no `_meta` on CallToolRequest, so no progressToken, so `ctx.progress` is always None for this client and the fix emits nothing here. The code is correct and a client that requests progress gets it; the specific claim that this makes a long reindex survivable *in Claude Code* is false. See the Correction section.'
 ---
 
 ## Summary
@@ -171,10 +171,55 @@ so `== queue_len` would be asserting the throttle away. The discriminator is the
 **total**, which can only be right if the real queue length was passed — three artifacts,
 so a hardcoded 1 or an off-by-one fails it.
 
+## Correction, 2026-09-05 — the fix cannot help THIS client
+
+This record's `Resume` said the live check was outstanding. It has now been made, and the
+answer is that it cannot pass **for Claude Code**.
+
+`ProgressReporter` is constructed only when the client sends
+`CallToolRequestParams._meta.progressToken`, and never synthesizes one — correctly, since
+an unsolicited notification crashed Claude Code 2.x. Measured against this session's own
+server log:
+
+| field, over the whole log | count |
+|---|---:|
+| `meta: None, name:` on a real request | **28** |
+| `meta: Some(` on a real request | **0** |
+
+So `ctx.progress` is `None` on every call, every `report()` is a no-op, and a multi-minute
+reindex still emits nothing to Claude Code. The idle timeout still fires.
+
+**This is `CLAUDE.md` § *Testing Discipline*'s own law, missed while writing a fix that
+quotes it.** *"Loudness is a property of a PATH, not of a failure. An alarm nothing reaches
+is exactly as informative as no alarm — name the concrete caller that reaches it and the
+observer who acts on what it emits."* The emitter, the throttle and the token contract were
+all named and guarded. The **caller** was never checked. The tell the law prescribes — *ask
+what an observer would see differently if this were broken right now* — answers "nothing",
+and answered "nothing" before the fix as well.
+
+**Getting to it took three self-contaminating measurements**, which is worth recording
+because the instrument defeated itself in a way no sample size would fix: grepping a debug
+log for a string *writes that string into the log*, because the log records the command.
+The first probe reported 2 `progressToken` hits — both its own text. A shell-concatenated
+pattern (`'progress''Token'`) fixed that, and then matched the **previous** probe's label.
+Only a pattern that could not appear in any command form settled it. Kin: `R-177`'s
+fabricated-section phantom, and `R-180`'s predicate misses.
+
+**What is still true.** The field, the adapter wiring and the per-item call are all
+correct, guarded, and mutation-tested; the two tests exercise a real `ProgressSink` and
+would catch a regression. Any MCP client that requests progress — including a future
+Claude Code — gets it with no further work. What is false is only the operational claim
+that this makes a long reindex survivable here.
+
+**What actually mitigates it today.** Nothing in-process. The prior run showed the server
+*completes* the work after the client aborts, so the practical route is to run the reindex,
+expect the call to abort, and verify completion afterwards from `catalog_meta` and the
+vector store rather than from the tool's response envelope. The sibling record
+(`2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`) is the one whose
+remedy — durable progress in `catalog_meta` — would serve that reader, and it is still open.
+
 ## Resume
 
-The live check is outstanding and is the same action as the outstanding data repair:
-`cargo rb`, reconnect, then `librarian(action="reindex", reembed=true)`. That run both
-demonstrates the timeout no longer fires and re-embeds the 7 artifacts left vectorless
-before `8acec9c7`. Until it runs, this fix is verified by construction and not by
-observation.
+Superseded by the Correction above. Nothing further is owed *to this fix*; the open
+question moved to the sibling record, whose durable-progress remedy is what a caller that
+cannot receive notifications actually needs.

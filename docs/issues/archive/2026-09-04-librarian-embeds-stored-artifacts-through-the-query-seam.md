@@ -1,7 +1,7 @@
 ---
-id: '0aaeae47b7869a43'
+id: ece9fb7e09c453a4
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian embeds stored artifacts through the query seam, and its own constructor path reaches the QueryPrefix default a project ruling forbids'
 owners:
 - marius
@@ -11,12 +11,16 @@ tags:
 - embedding
 - retrieval-quality
 topic: librarian artifact embedding seam
+closed: 2026-09-05
+fix_branch: experiments
+fix_patch_id: 40eabdfa91698ff366909bb3f0356a42188b9aee
+fix_sha: 306dffbd702c5239a9b7e67e438ec80b57dcf38a
 opened: 2026-09-04
 related:
 - docs/issues/archive/2026-09-04-the-chunker-budget-is-not-a-bound-a-single-line-cannot-be-split.md
 - docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 severity: high
-unverified: The prefix is established by reading every link in the chain, not by observing a live request. The RED test named in the Verification-owed section is still owed, and is what would turn this from a sound derivation into an observation.
+unverified: Every artifact vector currently stored is still query-prefixed. The code no longer produces them, but the existing rows are only corrected by a full `reindex(reembed=true)`, which has not been run.
 ---
 
 ## Summary
@@ -126,14 +130,40 @@ librarian construct through a builder that applies the ET-9 D1 mapping rather th
 `create_embedder_with_config` directly, so a future caller of the wrong seam is harmless.
 One of the two is sufficient to stop the prefix; both are wanted, because the class here
 is that either alone leaves the other still loaded.
-## Verification owed
+## Verification owed — discharged
 
-The chain above is verified by reading every link, which is strong but is not an observed
-request. The regression guard should be the observation: a test asserting
-`embed_artifact` does **not** prefix, against a recording embedder, mirroring
-`dense_document_omits_the_query_prefix_that_dense_query_applies`. It must RED on today's
-code — that RED is the live confirmation, and it is owed before the fix is called done.
+The RED this section demanded was observed. Restoring `embed_query` inside the new
+`embed_document_one` helper reds **exactly one** test — the seam guard — while the other
+five in the module stay green, which also establishes that the seam is orthogonal to the
+ceiling and pooling behaviour rather than entangled with it.
 
+The guard's discriminator is worth stating, because the obvious double does not work:
+it records inside an **override of `embed_query`**. `Embedder::embed_query` has a default
+implementation delegating to `embed`, so a recorder that counted only `embed` calls cannot
+tell the seams apart — both arrive there. Overriding the query side is what makes the
+wrong seam observable at all.
+
+## Fix
+
+Fixed on `experiments` at `306dffbd` — patch-id `40eabdfa91698ff366909bb3f0356a42188b9aee`.
+
+**Simpler than § *Suggested direction* prescribed, and the difference is instructive.** That
+section proposed routing through `embed_document_pooled`, which takes `&dyn DenseEmbedder`
+while `EmbeddingService` holds `Arc<dyn Embedder>` — a different trait, with no bridge, and
+the `embed_document_one` / `embed_one` split belongs to `CodeEmbedder` rather than here. For
+`codescout_embed::Embedder` the document side simply **is** `embed`. Verified at the bytes:
+`RemoteEmbedder::embed` (`crates/codescout-embed/src/remote.rs:409`) never touches
+`query_prefix`; `embed_query` (`:596`) applies it. So the change is a seam swap through one
+new private helper, and `8acec9c7`'s segmentation is untouched.
+
+The lesson is the one this record already carries in another form: the prescribed remedy
+named a function from a neighbouring subsystem without checking that the two subsystems
+share a trait. Reading the trait was cheaper than building the bridge.
+
+**One deliberate consequence.** `Embedder::embed` refuses an all-whitespace batch, and the
+old prefix made an empty body non-empty. An artifact whose composed text is blank now
+surfaces as a named error in the reindex's `embed_errors` instead of quietly embedding a
+prefix that carried none of its content — a legible failure in place of a silent success.
 ## Resume
 
 Not started. Take the segmentation half of the sibling bug first; it is independent and
