@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 115
-entry_high_water_W: 106
+entry_high_water_W: 107
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -170,6 +170,7 @@ entry_high_water_W: 106
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-107 | 2026-09-06 | high | **When adding a READ-only action, the question is not "does it write?" but "is it useful *while* something else is writing?"** `LibrarianAdapter::is_write`'s final arm is `_ => true`, and a write takes the cross-process write lock before dispatch. Correct policy — an unclassified write races on a five-session checkout, an unclassified read is merely over-serialised — but it is priced for **mutation risk**, not usefulness, and so silently mis-prices exactly the class of reads that must answer during a write. `librarian(action="status")` exists to answer *"is a reindex running?"*; a running reindex HOLDS that lock, so left to the default it would have blocked for the whole run and then reported, truthfully, that nothing was running — the new instrument reproducing the exact non-discrimination of the bug it was built to remove. **No test would have caught it:** all five `status::tests` call the action directly and never cross the adapter, so the defect ships green and its failing observation is a *hang*, at the one moment anyone needs the tool. Diagnostics are the class most likely to be added late by someone reasoning about what the action does rather than when it is called. Scouted before writing; the read-set entry is load-bearing, and `server.rs`'s gate forced it to be stated a second time after I had already made the first edit. | `90336870`; bug `6ae552cfc223cd6d`; kin W-100 (verify a shipped tool change with one LIVE call after rebuild — done here too, and it is what discharged this fix's `unverified:` field), W-106 |
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
 | W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
 | W-106 | 2026-09-04 | high | **Eight instrument reports returned a plausible wrong value rather than erroring, in one evening across two sessions. 0 of 8 were caught by care, suspicion, or knowing the class; 8 of 8 by a cheap artifact in the output that a broken run cannot fabricate** — an absurd mutation that must die, a control row that must stay green, a `truncated: true` flag, a per-row KILLED/SKIP label. Unit: one invocation of a measuring apparatus whose output is quoted in a commit or bug file (`2685fcd1`, `a5bbc22d`, `96574516`, `f008e74f`, `F-113`, peer `24c55642`), so the count is re-countable rather than asserted | Knowing the class prevented nothing, twice, in the strongest form available: row 2 happened *while writing up row 1*, and the peer produced row 8 an hour after being filed in writing about themselves for that exact window-vs-population error. Same shape CLAUDE.md § *Observer Blindness* measured at n=4 on 2026-08-30, arriving independently at n=8 — and with the **remedy side** measured, which that entry did not have. **Checkable in advance:** ask what a BROKEN instrument's summary line would look like; in rows 1, 3, 5 and 8 it is identical to the healthy one, and that is the condition for needing a control | validated |
@@ -11678,6 +11679,53 @@ first measurement of what actually does the catching.
 **Status:** validated
 **Severity:** high — the remedy this displaces ("know the class, look harder") was the default,
 and is measured here at 0 for 8
+
+## W-107 — scouting is_write before adding a read-only action stopped a diagnostic that deadlocks against the condition it observes
+
+**Status:** validated
+**Valid:** invariant
+**Rests on:** `src/librarian/adapter.rs` § `is_write` (`_ => true` for unlisted
+librarian actions); `src/tools/core/types.rs` — *"must acquire the cross-process
+write lock before dispatch"*.
+
+**Pattern.** Before adding `librarian(action="status")` — a purely read-only
+action — I read `LibrarianAdapter::is_write` rather than assuming a reader needs
+no classification. Its final arm is `_ => true`: **an unlisted action is a
+write**, and a write takes the cross-process write lock before dispatch.
+
+**Counterfactual, and it is not "a reader would be over-serialised".** A running
+`reindex` *holds* that lock for the length of its embed loop — tens of minutes on
+this corpus. `status` exists to answer *"is a reindex running?"*. Left to the
+default it would have **blocked until the run it was asked about finished, then
+reported, truthfully, that nothing was running.** A brand-new instrument
+reproducing the exact non-discrimination of the bug it was built to remove
+(`6ae552cfc223cd6d`), and only ever in production, during an incident, at the one
+moment anyone needs it.
+
+**Why no test would have caught it.** All five `status::tests` call
+`status::call(ctx, args)` directly and pass either way — the adapter is not in
+their path. The lock is acquired one layer above, in `call_content`. So the
+defect ships **green**, and the failing observation is a hang rather than an
+assertion. This is § *Testing Discipline*'s "loudness is a property of a PATH"
+seen from the other side: the tests are on a path the defect does not cross.
+
+**The generalisable half.** `is_write`'s default is *correct policy* — an
+unclassified write races on a checkout carrying five concurrent sessions, an
+unclassified read is merely over-serialised. But that asymmetry is priced for
+**mutation risk**, not for *usefulness*, and it silently mis-prices any read
+whose value depends on answering **while something else is writing**. Diagnostics
+are exactly that class, and they are the class most likely to be added late, by
+someone reasoning about what the action *does* rather than about when it is
+*called*. **So: when adding a read-only action, ask not "does it write?" but "is
+it useful during a write?" — and if yes, the read-set entry is load-bearing, not
+bookkeeping.**
+
+Pinned twice, deliberately, by two files and two readings — the adapter arm and
+`server.rs`'s declared read set, whose own gate message says *"so the exemption
+is stated twice and by two different people's reading."* Hitting that gate is
+what confirmed the second statement was not ceremony: I had already made the
+edit, and it still refused until I stated it again where a different reader
+looks.
 
 ## Template for new entries
 
