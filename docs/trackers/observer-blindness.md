@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 19
+entry_high_water_OB: 20
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-20 | 2026-09-06 | **Authorship is recoverable by asking; AUTHORISATION is not recoverable at all** — it lives in a conversation between a session and its operator that no peer can see, query or infer, and a commit deliberately withheld pending an operator's say-so is BYTE-IDENTICAL to one merely not-yet-pushed. On a shared branch any peer's push publishes it. **The state that does not exist:** "commit but hold the push" reads like a withholding mechanism and is not one — the unit of publication is the BRANCH, the unit of decision is the SESSION, so there are only two real states (uncommitted, which risks peer sweep and the stash window; or committed, i.e. published on anyone's next push) | the **pusher**, structurally — `git log --stat` answers *what am I sending* and *who wrote it*, and there is no field anywhere in git that answers *may this be published*. The fact is not in the substrate, so no amount of reading it produces the answer | wrong instrument, demonstrably: `codescout-7f` read `git log origin/experiments..HEAD --stat` BEFORE pushing rather than after — more than any stated rule asks — and it could not have caught this. Correct attribution would also have changed nothing, since the authorisation is not in the repository | one candidate, `codescout-7f`'s, and it holds WITHOUT coordination: **a session that cannot publish must not COMMIT to a shared branch.** Note the reflex alternative is unavailable — "use a scratch branch" is wrong on a shared CHECKOUT, where `git checkout -b` moves the working tree for every session. Do not repair a published withheld commit either: report it, never revert |
 | OB-19 | 2026-09-06 | **a mechanism emits a clear, timestamped, real-time signal and routes it to the one party for whom it is uninteresting, while the party it damages receives nothing** — not "nobody can see it" (`OB-6`, `OB-15`) and not "the author cannot see it" (`OB-1`, `OB-12`): the observation is perfect, immediate, correctly formatted, and in the wrong terminal. `pre-commit` prints `Stashing unstaged files` / `Restored changes` in the COMMITTER's terminal while reverting a PEER's in-flight work to HEAD for the hook's duration | the session whose work is stashed — it happens in another process, leaves the file byte-identical afterwards, and by the time that session could look, the state is back | wrong instrument on both sides: the affected party cannot check for a state that no longer exists, and the committer would have to already know it matters to someone, which is knowledge about another session's activity rather than their own | none — today's mitigation is a committer who understands the lines choosing to say so, i.e. politeness. Two uncosted directions: stop stashing (several hooks already read the index via `git show :<path>`), or make the stash line NAME the files it took, which is cheap because the signal already exists |
 | OB-18 | 2026-08-31 | a comment in repo A asserting a fact about repo B goes stale silently — and manufactures a plausible design (inverse of OB-4: a **liveness** marker read as **event history**) | anyone designing from the comment's own repo | wrong instrument | **none yet** — worklist |
 | OB-17 | 2026-09-04 | **a gate that enforces a coupling by requiring two files in ONE commit turns any uncommitted edit to the shared half into a mutual-exclusion lock over everyone else's use of it** — emergent: nobody declares it, nobody acquires it, and the holder is doing nothing wrong | **the session holding the uncommitted class file.** Nothing in the act of editing a file surfaces a gate that couples *other people's* commits to it — their own tree is clean and green, and the coupling fires in someone else's process on someone else's commit. Measured: four dirty issue-cluster files blocked bug filing across most of the taxonomy, and the holder had no way to know | wrong instrument on BOTH sides — the holder cannot check a condition no surface reports, and the blocked party's *careful* move (satisfy the gate) is the harmful one | none yet — cheapest candidate is a **read**, not a rule: on refusal, report whether the named class file is currently dirty and by whom. `ledger-counts` already reads the index, so the worktree check is one more call, and it turns "add your line" into "add your line, but this file is held". **Sharp end:** staging the class file clears `ledger-counts` and is exactly what makes `unreviewed-content` green, so the action satisfying gate A disarms gate B and a peer's prose rides in under the wrong Session-Id having passed every check. 1 incident, 4 sessions |
@@ -1893,6 +1894,93 @@ inverted measurement.
 **Status:** open — 2 instances, 2 sessions, 2026-09-06. Derived jointly with `codescout-3d`
 (sessionId `ba061586-6581-4656-b0c5-acad83474de5`); the roles-swapped framing is this session's,
 the underlying hazard is that file's.
+
+## OB-20 — authorisation is invisible to the only party who can violate it
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Reaching a Peer Session* — *"Visibility is not
+authority"*; the 2026-09-06 incident recorded by `codescout-7f` as a bug file.
+
+**Class:** **authorship is recoverable by asking; AUTHORISATION is not
+recoverable at all.** It lives in a conversation between a session and its
+operator that no peer can see, query, or infer. A commit deliberately withheld
+pending an operator's say-so is **byte-identical** to one merely not-yet-pushed,
+and on a shared branch any peer's `git push` publishes it.
+
+**Blind party:** the **pusher**, structurally. `git log origin/experiments..HEAD
+--stat` answers *what am I sending* and *who wrote it*. There is no field
+anywhere in git that answers *may this be published*. The information does not
+exist in the substrate, so no amount of reading it produces the answer.
+
+**Who can see it:** only the withholding author — who is precisely **not** the
+party in a position to violate it. Note the inversion from `OB-19`: there the
+signal existed and arrived in the wrong terminal, and the remedy was routing.
+Here the signal does not exist in the shared substrate at all, so routing has
+nothing to move.
+
+**Plausible-answer property:** the push **succeeds**. The commit list is correct,
+the diff is correct, the tree is green. Everything git records is accurate — the
+missing fact is not among the things git records. Nothing looks wrong afterwards
+either, because the harm is *disclosure*, which leaves no defect behind it.
+
+**Vigilance:** wrong instrument, demonstrably. `codescout-7f` did **more** than
+any stated rule asks — read `git log origin/experiments..HEAD --stat` *before*
+pushing rather than after, checking what they were about to send rather than only
+what they wrote — and it could not have caught this. That check is the right
+check; it answers a different question.
+
+**THE STATE THAT DOES NOT EXIST** — `codescout-98`'s formulation, and sharper than
+the one above. On a shared branch, ***"commit but hold the push" is not a
+withholding mechanism.*** It reads exactly like one, and it is not: the **unit of
+publication is the branch**, while the **unit of decision is the session**. There
+are only two real states — *uncommitted*, which risks peer sweep and the
+pre-commit stash window, or *committed*, which means published on the next push
+by anyone. A third state was being treated as available and does not exist. That
+is a stronger claim than "be careful about pushes", and it is why the remedy is a
+rule about committing rather than a rule about pushing.
+
+**And the two directions of the asymmetry have different tells.** A peer
+*offering* you permission is a thing you can notice and refuse — the grant
+arrives as a message, addressed to you, which you can evaluate. A peer
+*publishing* your withheld work is, from their side, indistinguishable from
+routine. So the guarded direction has a signal and the unguarded one has none,
+which is why `CLAUDE.md` covers the grant half and nothing covered this one.
+
+**Mechanism status:** one candidate, and it is `codescout-7f`'s: **a session that
+cannot publish must not COMMIT to a shared branch.** Uncommitted work cannot be
+carried out by anyone; a commit can, by anyone, at any moment, with no one able
+to see that it should not be. Stronger than a coordinated freeze because it holds
+**without coordination** — it does not depend on every participant having heard
+the same instruction at the same time.
+
+**And the reflex alternative is unavailable here, which is the part to write
+down:** *"use a scratch branch"* is what everyone reaches for, and it is wrong on
+a **shared checkout** — `git checkout -b` moves the working tree for every
+session in it. Branch-per-session presumes a checkout per session, which this
+setup does not have. What is left is a stash, a patch file, or simply leaving the
+work dirty; all cheap, none obvious.
+
+**Also do not repair it.** The remedy for a published withheld commit is the
+author telling their operator, not a revert or a force-push: four sessions build
+against the tree, removing the commits destroys real work, and a rewrite cannot
+un-disclose anything. Same shape as `CLAUDE.md`'s rule for a commit that captures
+a peer's work — report it, never repair it — and with more force here, since the
+harm is already irreversible.
+
+**Instance:** 2026-09-06 — `codescout-98` (sessionId
+`8dba66b0-af4b-4cda-a333-54a0605b318e`) committed `8320d5b0` and `29c5b461` and
+withheld them, having told their operator that pushing was not on their task
+list; `codescout-7f` (sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`) published
+them in an ordinary push and reported it immediately. Two other sessions,
+including this one, had independently worked out the hazard and neither reached
+it in time to prevent it.
+
+**Status:** open — 1 instance, 4 sessions, 2026-09-06. The mirror of a rule
+already in `CLAUDE.md`: *visibility is not authority* is stated there as a limit
+on what a peer may **grant** you. This is the other half — a peer cannot
+**withhold** on your behalf either, because the withholding is invisible to the
+only party who could honour it.
 
 ## Template for new entries
 
