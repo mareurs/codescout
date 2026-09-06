@@ -18,7 +18,7 @@ tags: []
 
 | # | task | severity | verified | state |
 |---|---|---|---|---|
-| 1 | a doctor check for bug files whose fix already shipped | — | 4 instances in one day | not started |
+| 1 | a doctor check for bug files whose fix already shipped | — | 4 instances in one day | **done — `7790f343`** |
 | 2 | audit host identity travels with a transported catalog | high | reproduced live, still worsening | not started |
 | 3 | the `pre-commit` stash window on a shared checkout | high | config present, Fix says nothing attempted | not started |
 
@@ -93,6 +93,33 @@ that reason.
 **Done when.** The check exists, is registered in `doctor`'s report, has a test that RED-s on a
 seeded stale pair and stays silent on a fresh one, and `docs/PROBES.md` gains its row naming the
 blind spot (it cannot see shape 2 above — a fix that never cites its bug file).
+
+### Done — `7790f343`
+
+Shipped as `open_bug_cited_from_source`, with 7 tests. Gate green on all four commands.
+
+**The mutation run is the part worth reading.** Four guards, three killed cleanly, and the
+fourth **survived**: the archive-path filter's test passed with the filter disabled, because
+the fixture seeded `status: fixed` and the SQL status predicate excluded the row before the
+path filter was ever consulted. The test was named for the filter and measured the predicate.
+Six green tests hid it. The filter is not dead code — a bug whose *status* is live while its
+*file* already sits under `archive/` is ordinary catalog/disk drift and one existed in this
+catalog the same afternoon — so the remedy was a second test that isolates it
+(`an_open_status_bug_under_archive_is_silent`), which REDs under the same mutation. **A
+mutation that dies tells you a test is live; a mutation that survives tells you either the
+code is dead or the test is aimed wrong, and only investigating separates them.**
+
+**First real run:** 83 live bugs, 494 source files scanned, 14 cited from source, 13
+suppressed as unsettled, **1 reported** — and it was the subtle case, not the motivating one.
+`2026-08-26-wine-lane-flakes` is legitimately still open (an unreproduced flake), but its
+*Resume* prescribed instrumentation the citing commit had already shipped, at a line range
+that had since drifted. Corrected in the same commit.
+
+**Two things this does NOT do**, so nobody credits it with them: it cannot see a fix that
+never cited its bug file (staleness shape 1 with no citation), and it cannot see a citation
+wrapped across two lines by a formatter. Both are stated in
+`catalog_health.open_bug_source_citations` rather than only in the source, because the reader
+of a `0` is not the reader of a doc comment.
 
 ## 2 — audit host identity travels with a transported catalog
 
