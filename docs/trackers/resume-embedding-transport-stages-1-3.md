@@ -1,8 +1,8 @@
 ---
 id: d24bf146cf7c789f
 kind: tracker
-status: active
-title: Resume queue — Embedding Transport Consolidation Stages 1–3 (ET-N)
+status: archived
+title: Embedding Transport Consolidation Stages 1–3 — CLOSED 2026-09-06 (ET-N, closed record)
 owners:
 - marius
 tags:
@@ -149,11 +149,12 @@ not shipped binary size. Do not oversell this to reviewers.**
 feature gate, then move `reqwest`/`rustls` in `Cargo.toml` from unconditional to
 optional under it. ET-1's test is what makes the gate provably safe.
 
-## ET-3 — Stage 2: swap the dense leg to `RemoteEmbedder` — SHIPPED, one named residual
+## ET-3 — Stage 2: swap the dense leg to `RemoteEmbedder` — CLOSED, both halves shipped
 
-**Status:** shipped 2026-08-30 — the swap landed as `ET-9` T6 step D, `797dd023`, patch-id
-`095ae63248a236e74a2135f101fa416cffb643dc`. **One sub-item below is still open** (the empty
-`dense_model_name`); the three-state prefix blocker that named this entry is closed.
+**Status:** **CLOSED 2026-09-06 — both halves shipped, nothing remains in ET-3.** The swap
+landed 2026-08-30 as `ET-9` T6 step D, `797dd023`, patch-id
+`095ae63248a236e74a2135f101fa416cffb643dc`. The empty-`dense_model_name` sub-item landed
+2026-09-06 as `9c03b32f`, patch-id `dcb3803edf8da367c17eae5d228881dcf22969ef`.
 **Valid:** dated 2026-09-06
 **Rests on:** ADR § *The three contracts*, item 3
 
@@ -191,19 +192,48 @@ from "derive from model name", and on Q4 the former is what we want.
 suppressed*. Root maps unset `CODESCOUT_QUERY_PREFIX` → **suppressed**. Built as the
 `QueryPrefix` enum; see the banner above.
 
-**Also in this stage — STILL OPEN, and it is the only thing left in ET-3.**
+**Also in this stage — RESOLVED 2026-09-06 at `9c03b32f`.** The statement of the problem is
+retained below as the reasoning; the decision and what shipped are at the foot of it.
 `dense_model_name` defaults to the **empty string**, so root sends
 `{"input": […], "model": ""}` today — tolerated by llama-server, rejected by stricter
-gateways. Decide whether the crate's required-model contract is adopted (preferred) or an
-empty model stays legal. **Re-verified 2026-09-06 and it did NOT ride along with the swap:**
+gateways. ~~Decide whether the crate's required-model contract is adopted (preferred) or an
+empty model stays legal.~~ **Decided 2026-09-06 by the operator: correctness over backward
+compatibility — the contract is adopted, and the break is accepted.** **Re-verified 2026-09-06 and it did NOT ride along with the swap:**
 `std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default()`
 (`src/retrieval/embedder.rs:285` — this entry said `new():126`, which has since drifted), and
 `RemoteEmbedder::from_url` takes `model: &str` and stores it unvalidated, so the crate does not
 reject the empty string either. Neither side enforces the contract.
 
-**Next:** ~~add the three-state prefix to `codescout-embed` first; the swap is mechanical after
-that~~ — done. What remains is the empty-model decision above, which is an operator call about
-deployment strictness, not a code task waiting on a design.
+**Shipped 2026-09-06 — `9c03b32f`, patch-id `dcb3803edf8da367c17eae5d228881dcf22969ef`.**
+`RemoteEmbedder::require_model` guards **all four** constructors (`from_url`, `openai`,
+`ollama`, `custom`) from ONE helper rather than four copies — this entry's sibling `ET-4`
+records the crate and root diverging five times on exactly the duplicated-guard shape.
+**Trimmed, not `is_empty()`**: `EmbedRequest` has no `skip_serializing_if`, so `"  "` is
+transmitted as `"model": "  "`, a non-empty JSON value resolving to no model, which an
+`is_empty()` check waves through while reading as protection. Enforced at construction, not at
+request time: by the time `embed()` runs the caller has been accepted, and the failure is a
+remote 4xx describing someone else's validation rather than a local error naming the parameter.
+
+**A second failure mode surfaced while implementing, and it is the quieter one.** An empty
+model also silently disabled prefix derivation: `derive_for("")` cannot contain `coderank`, so
+it returned `None`. Root was immune — it never selects `Derive`, per D1 — but the crate's own
+constructors **default** to `Derive`, so a standalone consumer with an unset model got no
+prefix on an asymmetric model: degraded recall, no error. Same cause as the wire defect,
+no symptom, and invisible from root.
+
+**Not live on this machine, stated so this is not read as repairing an outage.**
+`~/.config/codescout/.env` — the default startup dotenv, loaded for every profile — sets
+`CODESCOUT_EMBEDDER_MODEL_NAME`, and `load_startup_env` never reads the working directory, so
+the repo's own `.env` was never what configured a session. This closed a contract hole rather
+than a breakage.
+
+**Deliberately NOT done:** a second guard in root naming `CODESCOUT_EMBEDDER_MODEL_NAME`. That
+is usability rather than correctness, and a second site is the drift `ET-4` already paid for.
+The accepted cost is that the refusal names the parameter but not codescout's env var.
+
+**Next:** nothing — ET-3 is closed. ~~add the three-state prefix to `codescout-embed` first;
+the swap is mechanical after that~~ done 2026-08-30 (`797dd023`); ~~the empty-model decision,
+an operator call about deployment strictness~~ decided and shipped 2026-09-06 (`9c03b32f`).
 ## ET-4 — Stage 3: delete the duplicates and the root manifest entries
 
 **Status:** substantially done 2026-08-30, recorded 2026-09-06 — **D1 shipped (`c24d2d60`)

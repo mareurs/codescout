@@ -43,21 +43,25 @@ overstate every row. Treat it as "how much is in there", never "how much is left
 |---|---|---|---|---|
 | `docs/trackers/resume-artifact-chunk-grain-retrieval.md` | `AC` | 3 | (a)-vs-stale-vector decomposition; `7695ad877b44e96a` reconciliation; AE-11/AE-12 suite repair | ✅ authored here |
 | `docs/trackers/resume-cross-machine-catalog-restore.md` | `CM` | 10 | what a cross-machine resume restores, decides against, permanently loses | ✅ read |
-| `docs/trackers/resume-embedding-transport-stages-1-3.md` | `ET` | 10 | embedding transport consolidation, stages 1–3 | ✅ read |
 | `docs/trackers/resume-get-guide-section-grain-phases-2-3.md` | `GG` | 10 | `get_guide` section grain, phases 2 and 3 | ✅ read |
 | `docs/trackers/resume-statement-validity-layers-3-5.md` | `SV` | 6 | statement validity, layers 3c/5b | ✅ read |
 | `docs/trackers/resume-workspace-pinning-phase-4b-5.md` | `WP` | 5 | per-request workspace pinning, phase 4b + 5 | ✅ read |
 | `docs/trackers/gate-contract-consolidation.md` | *(none)* | 0 | five transcriptions of one command list, and what replaces them | ✅ read — prose, declares no prefix, so nothing in it is citable by token |
 | `docs/trackers/resume-vacation-wrapup-2026-09-04.md` | `VW` | — | the roster itself; `status: draft` while replies were still arriving | ✅ read |
 
-**Excluded on purpose — two closed records, not one.**
+**Excluded on purpose — three closed records.**
 `docs/trackers/resume-tool-surface-budget.md` (`TB`) is `archived`: the stream shipped in full
 2026-08-18 and the queue was opened on a false-negative grep.
 `docs/trackers/resume-tool-surface-structural-mechanisms.md` (`SM`) joined it **2026-09-06**,
 archived after all four of its entries were verified terminal — SM-1 `71c827f9`, SM-2
 `19c0fc09`, SM-3 refuted, SM-4 probed to a fired power probe whose own follow-up is *"a new
-pre-registration, not a re-run of this one"*. Both are closed records, not remaining work, and
-listing either would inflate this index.
+pre-registration, not a re-run of this one"*.
+`docs/trackers/resume-embedding-transport-stages-1-3.md` (`ET`) joined them **2026-09-06**, when
+ET-3's last residual — the empty `dense_model_name`, an operator decision rather than a code
+task — was decided and shipped at `9c03b32f`. All ten ET entries are terminal, and `ET-9`
+records T9/T16 as **declined** on its own measurement that they buy manifest honesty and zero
+crates. All three are closed records, not remaining work, and listing any of them would inflate
+this index.
 
 **What that cost, and it is the reusable part:** `SM` sat here as a row holding remaining work
 for three days while holding none, and nothing could detect it — this index verifies that a
