@@ -8592,6 +8592,16 @@ four instants leaves no artifact — that is the *recording* law, applied to my 
 history. So the disclosure stands at full strength, and what replaces the answer
 is `cargo fmt --check` first, every time, which makes the question stop arising.
 
+**The one-line form, and it is `codescout-7f`'s (sessionId
+`4a2f34f7-0669-487d-9ce9-39b77881642f`), not mine.** They checked their own
+uncommitted file for formatting churn from my runs, found none, and wrote:
+***"I found nothing is a different statement from there was nothing to find."***
+That is the whole distinction. Their check **could have** come out the other way —
+six hunks, all theirs, churn would have shown. Mine **could not**, because I had
+run the operation that determines the outcome. Same word, "clean"; two different
+epistemic objects. `codescout-98` judged it better than either of our
+formulations and it is kept here over mine.
+
 Knowing the class prevented nothing (`OB-1`): I spent this session writing
 `R-182` about six non-discriminating proxies, then produced one about my own
 history and did not notice until a peer said so.

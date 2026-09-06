@@ -1,15 +1,15 @@
 ---
-id: '3849109620ddf223'
+id: 3a9eb5153e5311a8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the unpushed-ledger guard compares an un-canonicalized path against a canonicalized workdir, so it silently allows on macOS and Windows'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-06
 opened: 2026-09-06
 owner: marius
 related: []
 severity: medium
-unverified: Production impact is reasoned, not measured. The CI failure is in tests, where tempdirs are symlinked (macOS) or short-name (Windows). A real repo reached through a symlink -- a symlinked home, a network mount -- would hit the same path, but no such case was observed.
 ---
 
 # BUG: the unpushed-ledger guard goes silent on a symlinked path
@@ -117,8 +117,25 @@ let Ok(rel) = abs_c.strip_prefix(&work_c) else { return false };
 On Windows this also aligns the `\\?\` extended-length forms, which is why one
 change fixes both platforms.
 
-SHA: *(pending — this commit)*
-patch-id: *(pending — this commit)*
+SHA: `bae74d5a` (**`experiments`**)
+patch-id: `1fac483176898b81e9d6cd4d7bf2cd5956848ea7`
+
+**Verified on the platforms that actually failed**, not only by the Linux
+reproduction — CI run `34048001721` (tree `4489d1b0`, which contains this fix):
+`Test (macos-latest / default)` **success**, `Test (windows-latest / default)`
+**success**, 17 of 18 jobs green. Both had been red since 2026-09-02.
+
+The distinction is why this file was held unarchived for an hour after the fix
+landed: *a Linux reproduction of the mechanism is evidence about the mechanism,
+not about macOS* (`codescout-98`, sessionId
+`8dba66b0-af4b-4cda-a333-54a0605b318e`). Gate-green plus a regression test is the
+normal archive bar; it was not sufficient here, because the regression test runs
+on the one platform where the bug was invisible.
+
+Getting that verdict took a coordinated pause. Four sessions were pushing to one
+branch, `cancel-in-progress` superseded every run, and of the preceding 12 runs
+**9 were cancelled, 2 failed, 0 succeeded** — so no session could cite a CI
+result at all. Three peers held pushes *and commits* while one matrix completed.
 
 ## Tests added
 
@@ -177,4 +194,3 @@ path. If a third arrives with that shape, the class may want splitting on
 `cluster/repro-env-diverges-from-gate-env` (`IC-5`) describes why it survived
 four days — every local gate runs on Linux — but not what it is. Cited, not
 tagged, for the same reason as `4a9ffbd8789df751`.
-
