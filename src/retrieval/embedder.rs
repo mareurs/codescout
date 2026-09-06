@@ -1125,7 +1125,15 @@ mod tests {
         // passed on the authoring session's runs and failed for a concurrent one.
         // `dense_batch` also *owns* the `is_timeout()` error map being pinned, so
         // the narrower call is the more honest unit as well as the stable one.
-        let e = EmbedderHttp::with_config(url.as_str(), url.as_str(), 3, "", "")
+        // The 4th argument (dense model name) must be NON-EMPTY: `RemoteEmbedder`'s
+        // constructors now refuse a blank model under the required-model contract, so
+        // `""` here fails at construction and never reaches the read-timeout path this
+        // test exists to pin. Its VALUE is irrelevant — the wedge accepts the socket
+        // and never reads the body — but its non-emptiness is load-bearing, so do not
+        // "simplify" it back to `""`. The 5th argument (query prefix) must STAY empty:
+        // that is what maps to `QueryPrefix::Suppressed`, and the crate's twin of this
+        // test uses its own `MODEL` const for the same reason.
+        let e = EmbedderHttp::with_config(url.as_str(), url.as_str(), 3, "m", "")
             .with_read_timeout(std::time::Duration::from_millis(250));
 
         let result =

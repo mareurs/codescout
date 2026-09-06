@@ -297,7 +297,35 @@ impl RemoteEmbedder {
         self
     }
 
+    /// The required-model contract, in ONE place so the four constructors cannot
+    /// drift apart — `ET-4` records this crate and root diverging five times on
+    /// exactly that shape, three of them with the crate as the deficient side.
+    ///
+    /// **Trimmed, not `is_empty()`.** `EmbedRequest` carries `model` with no
+    /// `skip_serializing_if`, so a whitespace-only name is transmitted as
+    /// `"model": "  "` — a non-empty JSON value that still resolves to no model. An
+    /// `is_empty()` check would pass that through while reading as protection.
+    ///
+    /// Enforced at CONSTRUCTION rather than at request time because this crate is the
+    /// published boundary: by the time `embed()` runs the caller has been accepted,
+    /// and the failure it would produce is a remote 4xx describing someone else's
+    /// validation rather than a local error naming the parameter to set.
+    fn require_model(model: &str) -> Result<()> {
+        if model.trim().is_empty() {
+            bail!(
+                "embedding model name is required and was empty or blank — an \
+                 OpenAI-compatible /v1/embeddings request carries `model` \
+                 unconditionally, so an empty value goes on the wire as \
+                 `\"model\": \"\"`: strict gateways reject it while llama-server \
+                 silently tolerates it, which hides the defect on the deployment \
+                 that works"
+            );
+        }
+        Ok(())
+    }
+
     pub fn openai(model: &str, api_key: Option<String>) -> Result<Self> {
+        Self::require_model(model)?;
         let api_key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .ok_or_else(|| {
@@ -317,6 +345,7 @@ impl RemoteEmbedder {
     }
 
     pub fn ollama(model: &str) -> Result<Self> {
+        Self::require_model(model)?;
         let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
         Ok(Self {
             client: Self::http_client(),
@@ -330,6 +359,7 @@ impl RemoteEmbedder {
     }
 
     pub fn custom(base_url: &str, model: &str) -> Result<Self> {
+        Self::require_model(model)?;
         let endpoint = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
         let api_key = std::env::var("EMBED_API_KEY").ok();
         if api_key.is_some() && !base_url.starts_with("https://") {
@@ -375,6 +405,7 @@ impl RemoteEmbedder {
     /// Ollama / llama.cpp setups where the key is only meaningful as a
     /// request-shape parameter.
     pub fn from_url(url: &str, model: &str, api_key: Option<String>) -> Result<Self> {
+        Self::require_model(model)?;
         let endpoint = format!("{}/v1/embeddings", crate::normalize_embeddings_base(url));
 
         if api_key.is_some() && !is_https_or_loopback(url) {
@@ -1042,6 +1073,81 @@ mod tests {
         let result = RemoteEmbedder::custom("https://api.example.com", "model");
         unsafe { std::env::remove_var("EMBED_API_KEY") };
         assert!(result.is_ok());
+    }
+    /// The required-model contract, enforced at CONSTRUCTION rather than at request
+    /// time, because this crate is the published boundary and a caller that reaches
+    /// `embed()` has already been accepted.
+    ///
+    /// An empty model is not dropped from the request: `EmbedRequest` carries
+    /// `model: &'a str` with no `skip_serializing_if`, so it serialises as
+    /// `"model": ""` — a present key with a value no gateway resolves. llama-server
+    /// tolerates it and stricter OpenAI-compatible gateways reject it, which is the
+    /// worst split available: the deployment that works is the one that hides the
+    /// defect.
+    ///
+    /// ALL FOUR constructors, because the contract belongs to the crate and not to
+    /// one entry point — guarding `from_url` alone leaves `openai`, `ollama` and
+    /// `custom` accepting the same empty string. Mutating any single site reds this.
+    #[test]
+    #[serial_test::serial]
+    fn every_constructor_refuses_an_empty_model() {
+        unsafe { std::env::remove_var("EMBED_API_KEY") };
+        for (name, err) in [
+            (
+                "from_url",
+                RemoteEmbedder::from_url("http://127.0.0.1:1", "", None).err(),
+            ),
+            (
+                "openai",
+                RemoteEmbedder::openai("", Some("sk-test".into())).err(),
+            ),
+            ("ollama", RemoteEmbedder::ollama("").err()),
+            (
+                "custom",
+                RemoteEmbedder::custom("https://api.example.com", "").err(),
+            ),
+        ] {
+            let err = err.unwrap_or_else(|| panic!("{name} accepted an empty model"));
+            assert!(
+                err.to_string().contains("model"),
+                "{name}: the refusal must name the parameter so the caller knows what to \
+                 set, got: {err}"
+            );
+        }
+    }
+
+    /// Whitespace-only is the same defect wearing a different string, and it is the
+    /// case a `!is_empty()` guard waves through while reading as protection: `"  "`
+    /// serialises as a non-empty JSON value that still resolves to no model. Trim
+    /// before testing, and pin that here so a later simplification to `is_empty()`
+    /// reds instead of silently narrowing the guard.
+    #[test]
+    #[serial_test::serial]
+    fn a_whitespace_only_model_is_refused_like_an_empty_one() {
+        unsafe { std::env::remove_var("EMBED_API_KEY") };
+        for m in ["   ", "\t", "\n", " \t "] {
+            assert!(
+                RemoteEmbedder::from_url("http://127.0.0.1:1", m, None).is_err(),
+                "whitespace-only model {m:?} must be refused"
+            );
+        }
+    }
+
+    /// The direction the two tests above are MONOTONE under, and therefore the one
+    /// they cannot detect: a guard that refused *every* model would satisfy both of
+    /// them completely. This is what reds if the check is ever widened past empty.
+    #[test]
+    #[serial_test::serial]
+    fn a_non_empty_model_still_constructs() {
+        unsafe { std::env::remove_var("EMBED_API_KEY") };
+        assert!(
+            RemoteEmbedder::from_url("http://127.0.0.1:1", "CodeRankEmbed-Q4_K_M.gguf", None)
+                .is_ok()
+        );
+        assert!(RemoteEmbedder::ollama("nomic-embed-text").is_ok());
+        assert!(
+            RemoteEmbedder::custom("https://api.example.com", "text-embedding-3-small").is_ok()
+        );
     }
 
     #[test]
