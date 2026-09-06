@@ -62,7 +62,7 @@ Frozen membership with moved order is the signature of a ranking gain on an unch
 
 **Why it is not attributed.** That run shipped **two** changes at once: (a) `embed_queue_items`
 prepending `TOKEN — title` to mid-entry chunks (`919da0cb`), and a wholesale re-embed that
-repaired whatever stale vectors the chunk-freeze defect (`921a192357e54bad`) had accumulated.
+repaired whatever stale vectors the chunk-freeze defect (`6ee86ac5b140576f`) had accumulated.
 The bench cannot separate them.
 
 **The experiment.** Build with the title prefix disabled — revert only the `match &r.entry_token`
@@ -92,11 +92,11 @@ inherit an earlier entry's token and would be prefixed with the *wrong* title.
 
 `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
 records the *symptom* (a per-file constant offset between a chunk's published `start_line` and
-its own entry heading). `921a192357e54bad` establishes the *cause*: stale chunk rows, not
+its own entry heading). `6ee86ac5b140576f` establishes the *cause*: stale chunk rows, not
 offset arithmetic — `frontmatter::body_line_offset` computes the prefix's line count after an
 `ends_with` guard and cannot be short by a constant.
 
-**What is owed.** Decide whether `c77fb370f61fc309` closes as *superseded by* `921a192357e54bad`
+**What is owed.** Decide whether `c77fb370f61fc309` closes as *superseded by* `6ee86ac5b140576f`
 or narrows to a residue neither the freeze nor the arithmetic explains, and record which. Its
 hypothesis 3 — the forced re-walk that "ruled staleness out" — is **invalid** and already
 annotated as such: `force=true` never reaches `replace_chunks`, so it rebuilt zero chunks.

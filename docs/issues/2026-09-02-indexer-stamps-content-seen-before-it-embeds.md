@@ -7,7 +7,7 @@ opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
-- docs/issues/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
+- docs/issues/archive/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
 severity: high
 unverified: 'The ENTRY path is still not established -- which run stamped each artifact is not distinguishable after the fact, since the catalog keeps no per-artifact embed-attempt record. AND the title''s n=729 is now known to be mis-scoped, not merely unproven: it comes from a join on artifact_vec_rowids, the legacy v1 sqlite-vec table that the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1 shows is no longer written, so on a Qdrant-backend host it counts a table nothing populates. Re-measured 2026-09-04 against the live store: 0 artifacts unsearchable, 7 embed failures, all oversized input. The MECHANISM reproduced exactly; the population size did not. Fix (c) in this file''s plan is already shipped -- see the Correction section before starting work.'
 ---

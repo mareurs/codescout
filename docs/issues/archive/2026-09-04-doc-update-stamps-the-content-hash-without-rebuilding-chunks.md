@@ -1,26 +1,41 @@
 ---
-id: '921a192357e54bad'
+id: 6ee86ac5b140576f
 kind: bug
-status: open
+status: fixed
 title: doc(update) stamps the content hash without rebuilding chunks, so every later reindex correctly skips the file
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: ''
+closed: 2026-09-06
 opened: 2026-09-04
 owner: marius
 related:
 - '6ae552cfc223cd6d'
 severity: high
+unverified: 'No regression test guards THIS file''s entrance into the trap state. fdad1a99''s guard (index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it) enters via a non-embedding RUN; doc(update) enters via a STAMP. Both produce file_sha256==disk && embedded_sha256!=disk so the same escape releases both, but that is an argument and only one entrance is observed. The 2026-09-06 reproduction covers the other, and a reproduction is not a guard: making update.rs also stamp embedded_sha256 would restore this bug with the suite green.'
 ---
 
 # BUG: `doc(action="update")` stamps the content hash without rebuilding chunks, so every later reindex correctly skips the file forever
 
 ## Summary
 
-`doc(action="update")` writes a new body to disk **and** stamps the matching `file_sha256` into the artifact row, without touching `artifact_chunk`. The chunk rows — line ranges, `entry_token`, `entry_part`, and the vectors keyed to them — keep describing the *previous* body. Every subsequent `librarian(action="reindex")` then compares hashes, correctly concludes the content is unchanged, and skips the file. The desync is **permanent and self-sealing**: the only escape is `reembed=true`, which nothing schedules and no signal requests.
+> **FIXED at `fdad1a99` (patch-id `d7c4618ce3ffb77079df92b500d62f9649bfb979`, `experiments`).**
+> Read this paragraph with care: its *mechanism* still verifies today and its *prognosis* does
+> not. `doc(update)` really does stamp the hash and leave `artifact_chunk` stale — but an
+> ordinary `reindex` now repairs it, because the embed decision moved off `file_sha256`.
+> The sentence below beginning "The desync is permanent" is the **false** half, refuted by the
+> reproduction in § *Fix*. Kept verbatim rather than edited, because a report whose every
+> individual claim checks out and whose conclusion is wrong is the thing worth being able to
+> recognise later.
 
-Affected: any artifact edited through `doc(update)` — which is the prescribed edit path for every guarded tracker, and therefore for most of `docs/trackers/`.
+`doc(action="update")` writes a new body to disk **and** stamps the matching `file_sha256` into
+the artifact row, without touching `artifact_chunk`. The chunk rows — line ranges,
+`entry_token`, `entry_part`, and the vectors keyed to them — keep describing the *previous*
+body. Every subsequent `librarian(action="reindex")` then compares hashes, correctly concludes
+the content is unchanged, and skips the file. The desync is **permanent and self-sealing**: the
+only escape is `reembed=true`, which nothing schedules and no signal requests.
 
+Affected: any artifact edited through `doc(update)` — which is the prescribed edit path for
+every guarded tracker, and therefore for most of `docs/trackers/`.
 ## Symptom (Effect)
 
 No error, no warning, no counter. The observable is a silent disagreement between two catalog states. Measured 2026-09-04 03:47 on `docs/trackers/retrieval-benchmark.md` (id `cc4843e5c1a020bd`), 4 minutes after a `doc(action="update")` that inserted ~64 lines:
@@ -134,22 +149,92 @@ So `reembed=true` is a **repair with a half-life**, not a fix: five hours of ord
 
 ## Fix
 
-Not implemented. Three options, in ascending cost, all in mechanism terms:
+**Fixed — but not where this file was looking, and not by a change to `doc(update)` at all.**
+`fdad1a99` ("gate the embed on a stamp the embedder writes, not on `file_sha256`"), landed
+2026-09-04, the same day this was filed. Patch-id recorded below.
 
-- **A — make the writer honest.** Have `doc(update)` call `embed_queue_items` (or a narrower `rechunk_artifact`) after `std::fs::write` at `src/librarian/tools/update.rs:633`. Correct at the source, but drags an embed round-trip into what is currently a fast local write, and `update` has no embedder handle today.
-- **B — do not stamp what you did not do.** Drop the `file_sha256` stamp at `:661` and let the next reindex notice, matching `append_entry`'s accidental-but-correct behaviour. One line, and it converts a permanent desync into ordinary index lag. Costs one re-chunk per edited artifact per reindex, which is what the design already pays everywhere else.
-- **C — stop keying the gate on a defeatable proxy.** Give `artifact_chunk` its own content hash and compare *that* in the `:395` early return, so the gate observes the state it guards instead of a correlate. Strictly the most correct, and the only one that also catches a future third writer.
+Everything this file says about the *update* path is still true and was re-verified 2026-09-06:
+`src/librarian/tools/update.rs:661` stamps `file_sha256` from the new body, and a grep of that
+file for `chunk|reembed|embed_queue` returns **0 matches**. `doc(update)` still writes a body
+and leaves `artifact_chunk` describing the previous one.
 
-**B is the recommended first move** — smallest diff, no new state, and it removes the one-way door rather than adding a second mechanism to compensate for it. C is worth filing as the follow-up.
+What changed is the claim that the desync is **permanent and self-sealing**. It is not, because
+the reindex decision no longer reads `file_sha256`:
 
-**Do not "fix" this by scheduling periodic `reembed=true`.** That is a full re-embed of the corpus (28,140 chunks, ~7 minutes, holding the project write lock throughout — see `6ae552cfc223cd6d`) standing in for a one-line write. It also fails silently the moment someone stops running it.
+```rust
+// src/librarian/indexer.rs:440
+let needs_embed = if want_embeddings {
+    artifact::embedded_sha256(cat, &id)?.as_deref() != Some(sha.as_str())
+} else { false };
+```
 
+`doc(update)` stamps `file_sha256` and **never touches `embedded_sha256`**, so after an update
+`content_unchanged` is true *and* `needs_embed` is true. The unchanged-row early return
+(`indexer.rs:446`) therefore takes its escape at `:465` and calls `embed_queue_items`, whose doc
+comment states the part that closes this bug:
+
+> Writes the artifact's `artifact_chunk` rows as a side effect, because the chunk ids the queue
+> is keyed on are assigned there — the queue and the rows cannot be built independently without
+> the two disagreeing.
+
+So an **ordinary** reindex rebuilds the rows. `reembed=true` was never required.
+
+### Reproduced end-to-end, 2026-09-06
+
+Run against the live catalog rather than reasoned from the code, because this file's central
+claim was about a *sequence*, and only a sequence can refute it. Artifact
+`863fb5cf6bf011ef`:
+
+| stage | `file_sha256` | `embedded_sha256` | chunks | `MAX(end_line)` | content bytes | file lines |
+|---|---|---|---|---|---|---|
+| before                    | `4fd916de6333` | `39031c35d395` | 17 | 145 | 5627 | 145 |
+| after `doc(update)`       | `33a94169ff6b` | `39031c35d395` | 17 | **145** | **5627** | **149** |
+| after ordinary `reindex`  | `33a94169ff6b` | `33a94169ff6b` | 17 | **149** | **5927** | 149 |
+
+Row 2 is this bug, reproduced exactly: the hash matches disk while the chunks describe a
+145-line body that is now 149 lines. Row 3 is the refutation of "permanent": no `reembed`, no
+force lever, just `librarian(action="reindex")`.
+
+### The residual, and why it is not worth a fix
+
+`needs_embed` is `false` when `want_embeddings` is false (`reindex.rs:356`,
+`ctx.embedding.is_some()`), so on a deployment with **no embedder** the escape is not taken and
+the rows stay stale. That is a real gap and it is benign in both directions: on such a
+deployment `semantic_find` has no vectors to return, so the stale `start_line` / `entry_token`
+rows have no consumer; and the moment an embedder is configured, an ordinary run re-queues the
+content, which is exactly what
+`index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`
+(`src/librarian/indexer.rs:2556`) pins. Filed as no further work rather than left implied.
+
+**SHA:** `fdad1a99` on `experiments`. **patch-id:** see § *Tests added*.
 ## Tests added
 
-**None yet** — the fix is not written, and this is a gap rather than an omission. The regression test the fix owes is behavioural and cheap: seed an artifact, `doc(update)` its body with an insertion, run `index_repo_sync` with `force_embed=false`, and assert the artifact's chunk rows reflect the **new** body. It must be observed RED first: today it returns chunks from the old body with no error, which is exactly the shape a passing test would also produce if the assertion were written against the row's hash rather than against the chunks.
+**Fix identifiers:** `fdad1a99` on `experiments`, patch-id
+`d7c4618ce3ffb77079df92b500d62f9649bfb979`.
 
-Note what a test asserting `content_unchanged == false` would prove: nothing. That is a claim about the sentinel, and the sentinel is the thing that lies. Assert on `max(end_line)` or on chunk content — the state the user actually reads.
+The regression guard that closes this file is
+`index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`
+(`src/librarian/indexer.rs:2556`), and its own header is worth reading before adding anything
+beside it. It pins the **sequence**, not either run's outcome: run A indexes with no embedder
+and commits `file_sha256`; run B has an embedder and both force levers `false` — exactly how
+`index_repo` calls it — and must still queue. Its comment records why the pre-existing tests
+were no evidence here: they exercised `force_embed` / `force_rewalk`, *"the escape hatch — and
+they are monotone under the defect, because the trap state is precisely the state in which
+`force_embed` still works."*
 
+**No test was added for the `doc(update)` → `reindex` sequence specifically**, and that is the
+honest gap in this archive. `fdad1a99` was written against the indexer, so its guard enters the
+trap state through a non-embedding *run*; this file's route in is a `doc(update)` **stamp**.
+Both produce `file_sha256 == disk && embedded_sha256 != disk`, so the same escape releases
+both — but that is an argument, and the guard only observes one of the two entrances. The
+2026-09-06 reproduction in § *Fix* is what covers the other one, and a reproduction is not a
+regression test: nothing reds if someone later makes `update` stamp `embedded_sha256` too,
+which would restore this bug exactly.
+
+**If you are here to harden it, that is the test to write** — assert that after a
+`doc(action="update")` an ordinary `reindex` moves the artifact's `MAX(end_line)`, and mutate
+`update.rs` to also stamp `embedded_sha256` to confirm it reds. Cheap, and it guards the
+entrance this file actually documents.
 ## Workarounds
 
 `librarian(action="reindex", reembed=true)` repairs the whole corpus and is the only thing that does. It is expensive (~7 min here, full write-lock hold) so it is a repair, not a habit. `force=true` looks like it should work and does not.
@@ -158,10 +243,22 @@ Nothing repairs a single artifact today.
 
 ## Resume
 
-Implement option **B**: delete the `file_sha256` stamp at `src/librarian/tools/update.rs:661` and let the row carry the *pre-edit* hash, so the next `reindex` sees a content change and re-chunks. Then write the RED-first regression test described under *Tests added* — assert on `max(end_line)` of `artifact_chunk`, never on `content_unchanged`. Check `update.rs`'s second write site at `:823` (`trim_history`'s path) for the same defect before claiming the fix is complete; it writes the file and was not read in this pass.
+N/A — fixed and archived. One optional piece of work is named at the end of § *Tests added*
+(a regression test for this file's own entrance into the trap state); it is a hardening, not
+an outstanding defect.
 
-Then re-run `drift-by-root.py` against a non-codescout root to confirm the corpus-wide figure moves for a reason other than a manual `reembed`.
+**How this file came to be wrong, since it is the third instance in one sweep.** It was filed
+2026-09-04 and `fdad1a99` landed 2026-09-04 — the fix and the report crossed. The report's
+mechanism was *right* and its prognosis was *wrong*, which is the harder shape to catch: every
+line about `update.rs` still verifies today, so re-reading the file confirms it. Only running
+the sequence refutes it, and this repo already has the rule that would have caught it —
+*"Run the reproduction before reading the fix plan — the plan is a hypothesis about the
+reproduction."*
 
+That rule earned its place again here: reading the code alone was **not enough**, because the
+escape at `indexer.rs:465` is inside the `content_unchanged` early return, which is the last
+place you look when the claim is *"reindex correctly skips the file"*. The reproduction found
+it in three SQL queries.
 ## References
 
 - `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`c77fb370f61fc309`) — the symptom this explains; its hypothesis-3 refutation is invalidated here.
