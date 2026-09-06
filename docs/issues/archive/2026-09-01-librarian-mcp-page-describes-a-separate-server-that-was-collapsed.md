@@ -1,7 +1,7 @@
 ---
-id: '876d7282ddc61f06'
+id: 013539dfb210912d
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the librarian-mcp manual page describes a separate sister server; the tools collapsed into codescout'
 tags:
 - cluster/doc-contradicted-by-code
@@ -144,6 +144,27 @@ Paired with a **TOC-reachability gate**, so the class cannot recur silently: no 
 `docs/manual/src/` may be absent from `SUMMARY.md`. Wired before the deletion specifically so the
 existing orphan supplies its RED — a gate whose population is empty on the day it lands is one
 nobody can distinguish from a gate that does not work.
+
+**Applied 2026-09-06.** The page is deleted — through `doc(action="delete")` rather than `rm`, so
+the catalog row went with the file; the dry run reported zero cascades (no augmentation, links,
+observations or events) and the apply returned `vectors_deleted: true`.
+
+The gate is `tests/manual_toc.rs`. Wired **before** the deletion so the live orphan supplied its
+RED: observed `every_manual_page_is_reachable_from_summary` fail naming
+`concepts/librarian-mcp.md`, then go green from the deletion rather than from any change to the
+test. Measured population at the time: **1 orphan of 112 pages**, so the sweep this file's
+§ *Resume* asked for is discharged — there was no second orphan hiding behind this one.
+
+It ships with a non-vacuity guard (`the_toc_scan_is_reading_both_sides`) for the reason
+`doc_tool_refs.rs` ships one: a broken directory walk or an unparsed `SUMMARY.md` yields **zero
+orphans** and a green tick, because an empty numerator and an empty denominator agree perfectly.
+
+**No allowlist, and that was a deliberate rejection rather than an omission.** It was offered as an
+option and declined: an entry would have left the page unreachable while the gate reported health,
+which is precisely the state the gate exists to detect.
+
+Fix SHA: `a6743089a348b177c174234d305cbc0354404bbc`
+Patch-id: `d95d41e70bbab9d031847601632d02f09c4480fb`
 
 ## Tests added
 
