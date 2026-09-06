@@ -2394,6 +2394,81 @@ mod tests {
         }
     }
 
+    /// The gate section must keep NAMING what the four commands do not cover, and must
+    /// keep naming it accurately.
+    ///
+    /// `default` does not include `server-stack`, so the documented gate never compiles
+    /// `dep:qdrant-client`, `QdrantArtifactStore` or the hybrid sparse+reranker path —
+    /// 11 source files and 2 test files, measured 2026-09-06 — while `cargo rb` ships
+    /// exactly that feature set. Local green is therefore *silence* about code the
+    /// running binary uses, which is the lean-lane vacuity law with its polarity
+    /// reversed. See `docs/issues/2026-09-06-the-documented-gate-never-compiles-the-feature-set-that-ships.md`.
+    ///
+    /// The chosen repair was a sentence rather than a fifth command, because CI already
+    /// owns the lane and `tests/feature_lanes.rs` guards that it keeps existing. A
+    /// sentence with no test is a resolution to remember, which is what the bug file
+    /// itself warned against — hence this.
+    ///
+    /// **Both directions are asserted, and that is the point.** A one-way check would
+    /// let the pair rot in whichever direction it was not looking:
+    ///
+    /// - CLAUDE.md must cite the guard, so deleting or softening the bullet fails here.
+    /// - The guard must still EXIST under the cited name, so renaming or removing
+    ///   `every_declared_feature_has_a_lane_or_a_reason` fails here too, rather than
+    ///   leaving CLAUDE.md confidently pointing at nothing. A citation nobody resolves
+    ///   is indistinguishable from a live one — that is
+    ///   `cluster/doc-contradicted-by-code`, and this is the cheap way to be immune to it.
+    ///
+    /// Scoped to the gate section rather than the whole file, for the reason the sibling
+    /// test above documents: `server-stack` is discussed elsewhere in this repo, so a
+    /// file-wide `contains` would pass on a mention that has nothing to do with the gate.
+    #[test]
+    fn claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
+            .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
+
+        // Same scoping discipline as the sibling test: find the gate section first.
+        const START: &str = "**Run `cargo fmt`";
+        const END: &str = "The gate sentence above is pinned byte-for-byte by";
+
+        let start = claude_md.find(START).unwrap_or_else(|| {
+            panic!("CLAUDE.md has no gate directive beginning {START:?} — move this test with it")
+        });
+        let rest = &claude_md[start..];
+        let end = rest.find(END).unwrap_or_else(|| {
+            panic!("CLAUDE.md's gate section begins with {START:?} but never reaches {END:?}")
+        });
+        let section = &rest[..end];
+
+        const GUARD_FN: &str = "every_declared_feature_has_a_lane_or_a_reason";
+        for needle in ["server-stack", "test-server-stack", GUARD_FN] {
+            assert!(
+                section.contains(needle),
+                "CLAUDE.md § Development Commands no longer names {needle:?}.\n\n\
+                 The four gate commands do not compile `server-stack`, but `cargo rb` \
+                 ships it — so a session that reads local green as full coverage is \
+                 wrong, and nothing in the gate's own output says so. That bound lives \
+                 nowhere a session reads except this section: not in the CI yaml, not in \
+                 tests/feature_lanes.rs's module header. If you are moving this text, \
+                 move it somewhere a session running the gate will actually see, and \
+                 update this test. Do not simply delete it."
+            );
+        }
+
+        // The other direction. Without this, the citation above can rot into a confident
+        // pointer at a test that no longer exists.
+        let lanes = std::fs::read_to_string(format!("{root}/tests/feature_lanes.rs"))
+            .unwrap_or_else(|e| panic!("cannot read tests/feature_lanes.rs: {e}"));
+        assert!(
+            lanes.contains(&format!("fn {GUARD_FN}(")),
+            "CLAUDE.md § Development Commands tells sessions that {GUARD_FN} keeps the \
+             server-stack CI lane alive, but tests/feature_lanes.rs no longer defines it. \
+             Either the guard was renamed (update CLAUDE.md) or it was removed (then \
+             CLAUDE.md's claim is false and the lane is unprotected — fix that first)."
+        );
+    }
+
     /// The `get_guide` bodies are the fourth prose surface the model reads, and
     /// until now the only one with no drift gate at all:
     /// `prompt_surfaces_reference_only_real_tools` builds its `surfaces` list from

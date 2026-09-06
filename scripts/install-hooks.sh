@@ -168,8 +168,13 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # blocks all work is worse than the hole it closes, and it cannot ask its question either
 # way; that is the same principle the pre-push guard already applies when it has no
 # session id. The warning is what keeps this from being silent degradation, which is the
-# failure the rest of this script is written against. Raised by codescout-3d 2026-09-06,
-# who measured the 127 rather than assuming it.
+# failure the rest of this script is written against. Raised 2026-09-06 by sessionId
+# ba061586-6581-4656-b0c5-acad83474de5, who measured the 127 rather than assuming it, and
+# who also asked to be cited by sid rather than by session NAME here: a name is
+# registry-minted and re-minted by compaction, resume, or a restart under another profile,
+# so it decays silently in a comment that does not. Covered by the shim section of
+# tests/pre-push-foreign-session-guard.sh; that section exists because the suite's
+# 34-assertion aggregate had zero of them on this clause.
 SHIM
     printf 'if [ ! -x "$root/%s" ]; then\n' "$target" >> "$dest"
     printf '    echo "warning: git hook %s is installed, but %s is missing or not executable - skipping" >&2\n' \

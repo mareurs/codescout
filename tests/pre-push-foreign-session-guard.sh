@@ -209,6 +209,86 @@ run "$ALICE" - "refs/heads/main $TIP refs/heads/main $ZERO"
 eq  "allowed: bob's published commit is not re-litigated" "$EC" 0
 
 echo
+echo "== the generated shim degrades OPEN when its target is missing =="
+# WHY THIS IS HERE, AND WHY IT DOES NOT ASSERT AGAINST A HAND-WRITTEN SHIM.
+#
+# Everything above tests the guard SCRIPT. The shim in `.git/hooks/` is a separate
+# member with, until this section, zero assertions — and the suite's own headline count
+# concealed that: "34 passed" is an aggregate over the guard, and an aggregate reads as
+# coverage for both members. That is this repo's population-vs-member law turned on its
+# own test suite. Raised by sessionId ba061586-6581-4656-b0c5-acad83474de5, who ran the
+# discrimination before saying so.
+#
+# What it guards: `exec` on a missing target exits 127, and git refuses on any non-zero
+# hook exit, so losing the guard clause in `install_shim` would make EVERY push in the
+# checkout fail with a bare "No such file or directory". The suite would have stayed
+# green through that.
+#
+# It regenerates the shim from the REAL `scripts/install-hooks.sh`, copied byte-for-byte
+# into a throwaway repo — `install_shim` is not sourceable, and the script cds to its own
+# `$0/..`, so a copy is how you make it generate somewhere else. Asserting against a
+# shim written here would be a second implementation checking itself; mutating
+# `install_shim` must turn this red.
+INSTALLER="$(cd "$(dirname "$0")/../scripts" && pwd)/install-hooks.sh"
+new_repo
+mkdir -p "$REPO/scripts" "$REPO/fakebin"
+cp "$INSTALLER" "$REPO/scripts/install-hooks.sh"
+chmod +x "$REPO/scripts/install-hooks.sh"
+# A stub keeps `pre-commit install` from aborting the script in a repo with no config.
+# The framework stage is not what this section is about.
+printf '#!/bin/sh\nexit 0\n' > "$REPO/fakebin/pre-commit"
+chmod +x "$REPO/fakebin/pre-commit"
+git -C "$REPO" config --unset core.hooksPath 2>/dev/null || true
+commit "$ALICE" "seed"
+
+# The targets must EXIST at install time — `install_shim` refuses to wire a hook whose
+# script is missing, which is a sound precondition and means the vanishing has to happen
+# AFTER installation. That is the real hazard anyway: `git clean`, a branch switch, or a
+# checkout predating the script, on a checkout where the hook is already wired.
+for t in pre-push-foreign-session-guard post-index-change-stage-log; do
+    printf '#!/usr/bin/env bash\necho "GUARD-RAN" >&2\nexit 1\n' > "$REPO/scripts/$t.sh"
+    chmod +x "$REPO/scripts/$t.sh"
+done
+( cd "$REPO" && PATH="$REPO/fakebin:$PATH" bash scripts/install-hooks.sh ) > "$REPO/install.log" 2>&1
+
+SHIM="$REPO/.git/hooks/pre-push"
+TARGET="$REPO/scripts/pre-push-foreign-session-guard.sh"
+# MUST run with cwd inside the throwaway. The shim resolves its repo at RUN time
+# (`git rev-parse --show-toplevel`) — that is its documented feature, the one that makes
+# it survive the checkout moving. Invoked from anywhere else it resolves to THIS repo and
+# execs the live guard, so the assertions below silently measure the wrong repository:
+# first written that way, and it reported exit 0 with empty output for every case.
+fire() {
+    OUT="$(cd "$REPO" && printf 'refs/heads/main %s refs/heads/main %s\n' "$(sha)" "$ZERO" \
+        | CLAUDE_CODE_SESSION_ID="$ALICE" "$SHIM" origin git@example.invalid:x 2>&1)"
+    EC=$?
+}
+if [ ! -x "$SHIM" ]; then
+    no "installer produced a pre-push shim" "see $REPO/install.log"
+else
+    ok "installer produced a pre-push shim"
+
+    # Case B first: the shim really delegates. Without this, Case A cannot tell
+    # degrade-open from a shim that exits 0 unconditionally.
+    fire
+    eq  "target present: shim delegates"      "$EC" 1
+    has "target present: guard actually ran"  "$OUT" "GUARD-RAN"
+    hasnt "no spurious warning"               "$OUT" "missing or not executable"
+
+    # Case A: the target vanishes after install.
+    mv "$TARGET" "$TARGET.parked"
+    fire
+    eq  "target vanished: does NOT block"     "$EC" 0
+    has "target vanished: says so, loudly"    "$OUT" "missing or not executable"
+    hasnt "and does not silently run nothing" "$OUT" "GUARD-RAN"
+
+    # And it recovers rather than latching.
+    mv "$TARGET.parked" "$TARGET"
+    fire
+    eq  "target restored: refuses again"      "$EC" 1
+fi
+
+echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
