@@ -149,11 +149,25 @@ not shipped binary size. Do not oversell this to reviewers.**
 feature gate, then move `reqwest`/`rustls` in `Cargo.toml` from unconditional to
 optional under it. ET-1's test is what makes the gate provably safe.
 
-## ET-3 — Stage 2: swap the dense leg to `RemoteEmbedder` — blocked on a three-state query prefix
+## ET-3 — Stage 2: swap the dense leg to `RemoteEmbedder` — SHIPPED, one named residual
 
-**Status:** blocked on a design change to `codescout-embed`
-**Valid:** dated 2026-07-25
+**Status:** shipped 2026-08-30 — the swap landed as `ET-9` T6 step D, `797dd023`, patch-id
+`095ae63248a236e74a2135f101fa416cffb643dc`. **One sub-item below is still open** (the empty
+`dense_model_name`); the three-state prefix blocker that named this entry is closed.
+**Valid:** dated 2026-09-06
 **Rests on:** ADR § *The three contracts*, item 3
+
+> **RESOLVED 2026-08-30, recorded 2026-09-06 — this entry read `blocked` for seven days after
+> its blocker was built.** `codescout_embed::remote::QueryPrefix` is the three-state type this
+> entry asked for (`Derive` / `Explicit(String)` / `Suppressed`), and its own doc comment cites
+> this ledger: *"Decided 2026-08-30 (`resume-embedding-transport-stages-1-3:ET-9` D1) … an unset
+> `CODESCOUT_QUERY_PREFIX` maps to `QueryPrefix::Suppressed`, never to `QueryPrefix::Derive`."*
+> Root's mapping is live at `src/retrieval/embedder.rs:456-460` — empty prefix → `Suppressed`,
+> non-empty → `Explicit` — with the 37-vs-34 benchmark quoted in the code as the reason.
+> Verified at the bytes 2026-09-06.
+>
+> **The table below is retained as the reasoning, not as a live warning.** All three of its
+> regression rows are now unreachable: `Derive` is never selected on this path.
 
 Root and crate derive the query prefix from **different sources of truth**, and
 all three disagreements fail as degraded recall, never as an error:
@@ -171,24 +185,33 @@ asymmetric subspace if a prefix is forced."* So root applying **nothing** is
 correct on the default model, and the crate's unconditional model-derived prefix
 is the defect.
 
-**The blocker:** `Option<String>` cannot express "explicitly no prefix" distinctly
+**The blocker (CLOSED):** `Option<String>` cannot express "explicitly no prefix" distinctly
 from "derive from model name", and on Q4 the former is what we want.
 `RemoteEmbedder` needs **three** states: *derive*, *explicit value*, *explicitly
-suppressed*. Root maps unset `CODESCOUT_QUERY_PREFIX` → **suppressed**.
+suppressed*. Root maps unset `CODESCOUT_QUERY_PREFIX` → **suppressed**. Built as the
+`QueryPrefix` enum; see the banner above.
 
-**Also in this stage:** `dense_model_name` defaults to the **empty string**
-(`new():126`), so root sends `{"input": […], "model": ""}` today — tolerated by
-llama-server, rejected by stricter gateways. Decide whether the crate's
-required-model contract is adopted (preferred) or an empty model stays legal.
+**Also in this stage — STILL OPEN, and it is the only thing left in ET-3.**
+`dense_model_name` defaults to the **empty string**, so root sends
+`{"input": […], "model": ""}` today — tolerated by llama-server, rejected by stricter
+gateways. Decide whether the crate's required-model contract is adopted (preferred) or an
+empty model stays legal. **Re-verified 2026-09-06 and it did NOT ride along with the swap:**
+`std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default()`
+(`src/retrieval/embedder.rs:285` — this entry said `new():126`, which has since drifted), and
+`RemoteEmbedder::from_url` takes `model: &str` and stores it unvalidated, so the crate does not
+reject the empty string either. Neither side enforces the contract.
 
-**Next:** add the three-state prefix to `codescout-embed` first; the swap is
-mechanical after that. Hold batch size at 8 so the change is behaviour-preserving.
-
+**Next:** ~~add the three-state prefix to `codescout-embed` first; the swap is mechanical after
+that~~ — done. What remains is the empty-model decision above, which is an operator call about
+deployment strictness, not a code task waiting on a design.
 ## ET-4 — Stage 3: delete the duplicates and the root manifest entries
 
-**Status:** open — blocked on ET-3. **Re-framed 2026-08-29: this is a
+**Status:** substantially done 2026-08-30, recorded 2026-09-06 — **D1 shipped (`c24d2d60`)
+and D2 shipped (`797dd023`)**. **No longer blocked on ET-3**: that swap landed 2026-08-30.
+What remains is **D3 alone** — drop `reqwest`/`rustls` from the root manifest — which `ET-9`
+T9 records as blocked on T16 and worth **zero crates**. **Re-framed 2026-08-29: this is a
 correctness item, not trailing cleanup.**
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-09-06
 
 ### The duplicates have measurably drifted, and only in one direction
 
@@ -317,7 +340,10 @@ crate, and a wholesale delete would silently drop the better guard.
 re-run the crate counts and confirm `--no-default-features` actually dropped. The
 plan's § *Verification: the feature-delta measurement* has the method.
 
-**Next:** blocked on ET-3.
+**Next:** nothing queued. **The pairwise audit was this entry's load-bearing half and it is
+done** — completed 2026-08-30 by `codescout-ae`, which found the remaining pairs clean plus one
+non-pair instance (`probe_ollama`, `BL-66`) that a pairwise sweep nearly missed. D1 and D2
+shipped. D3 is a manifest tidy that buys no crates; take it for honesty or not at all.
 
 ## ET-5 — The connect-error marker becomes a cross-crate string contract
 
@@ -489,8 +515,9 @@ types.
 **Observed:** 2026-08-29, after ET-2 shipped. Reviewed with the architecture
 (snow-lion) and refactoring (yak) lenses.
 
-**Status:** open — **A and B1 DONE. B2 is BLOCKED on a user decision** (below);
-do not start it unilaterally.
+**Status:** closed 2026-09-06 — **A, B1, B2, B3, B4, C, D1 and D2 are all done.** The only
+phase not done is **D3**, which `ET-9` T9 records as *blocked and discretionary, worth zero
+crates*. **B2 stopped being a pending decision on 2026-08-30** — see the correction below.
 
 > **The live board is `ET-9`.** This entry holds the *reasoning* — why this order,
 > what gates what, why Phase D audits rather than deletes. `ET-9` holds the
@@ -502,26 +529,44 @@ do not start it unilaterally.
 |---|---|---|---|
 | A | done | `28bb6e8a` | `52cb00b5b67d80de322ccc0c9f5a6166d1860fb0` |
 | B1 | done | `ffdf1b09` | `9bee6603a61ef66ba6aaf3b999896d64bceb68d2` |
-| B2 | **blocked** | — | — |
-| B3, B4, C, D | not started | — | — |
+| B2 | **done** — `QueryPrefix` enum; mapping decided as `ET-9` D1 | within T6, load-bearing in step D `797dd023` | `095ae63248a236e74a2135f101fa416cffb643dc` |
+| B3 | done — typed connect error (`ET-5` / T4) | `6be58840` | — |
+| B4 | done — `is_https_or_loopback` now `pub` (`remote.rs:69`), root's copy deleted | `c24d2d60` | `d7e1f42fa6e68e0922a0197cdd234694f034364f` |
+| C | done — T6, four commits | `8097c2d6` → `4fd4e5f4` → `f9a205a9` → `797dd023` | step D: `095ae63248a236e74a2135f101fa416cffb643dc` |
+| D1 | done — T7 | `c24d2d60` | `d7e1f42fa6e68e0922a0197cdd234694f034364f` |
+| D2 | done — T8, absorbed by T6 step D | `797dd023` | `095ae63248a236e74a2135f101fa416cffb643dc` |
+| D3 | **not done — discretionary**, see `ET-9` T9/T16 | — | — |
 
-**Why B2 is blocked, and what unblocks it.** B2 is not plumbing — it decides
-whether an unset `CODESCOUT_QUERY_PREFIX` means *suppressed* or *derive from the
-model name*, and that is benchmark-visible retrieval quality. The operator's live
-config currently disagrees with the repo's own measurement:
+> **CORRECTION 2026-09-06 — the "user decision" below was answered on 2026-08-30, and this
+> entry went on asking for it for seven more days.** Both halves had gone stale, in opposite
+> directions:
+>
+> 1. **Question (1) was decided AND implemented.** `codescout_embed::remote::QueryPrefix` is
+>    the three-state enum, and its own doc comment reads *"Decided 2026-08-30
+>    (`resume-embedding-transport-stages-1-3:ET-9` D1) … an unset `CODESCOUT_QUERY_PREFIX`
+>    maps to `QueryPrefix::Suppressed`, never to `QueryPrefix::Derive`."* Root's mapping is
+>    live at `src/retrieval/embedder.rs:456-460`. **Answer: unset means suppressed**, exactly
+>    as `ET-3`'s table predicted.
+> 2. **Question (2)'s premise was false by the time anyone read it.** This entry states that
+>    `~/.claude/settings.json` sets the CodeRank prefix string. Read at the bytes 2026-09-06 it
+>    is `"CODESCOUT_QUERY_PREFIX": ""` — empty, which root maps to `Suppressed`, which is the
+>    benchmark-correct state. **The machine is NOT sitting on `ET-3`'s row 2.** Nothing owed.
+>
+> Two things worth carrying. A `**Status:**` naming a *blocking question* decays exactly like
+> one naming a *task*, and nothing re-reads it — here the answer landed in a code comment that
+> **cites this very ledger**, while the ledger kept asking. And an entry whose blocker is a
+> claim about **live machine config** decays with nobody touching the repo at all: re-read such
+> a claim at the bytes before acting on it, never relay it.
 
-- `~/.claude/settings.json` sets `CODESCOUT_QUERY_PREFIX = "Represent this query
-  for searching relevant code: "` alongside
-  `CODESCOUT_EMBEDDER_MODEL_NAME = CodeRankEmbed-Q4_K_M.gguf`.
-- The repo's `.env` has that exact line **commented out**, because "Q4_K_M is
-  benchmarked best with NO query prefix (37, champion) — forcing the prefix drops
-  to the f16+prefix tier (34)".
-
-So the machine is sitting on ET-3's row 2 (*CodeRank + custom prefix →
-regression*). Two questions to put to the user before writing code: (1) does unset
-mean suppressed — ET-3's table says yes; (2) should the `settings.json` prefix be
-removed to match the benchmark, or was it deliberate? Answering (1) is enough to
-start B2; (2) is separable and is theirs regardless.
+**Why B2 was blocked, and what unblocked it (HISTORICAL — see the correction above).** B2 is
+not plumbing — it decides whether an unset `CODESCOUT_QUERY_PREFIX` means *suppressed* or
+*derive from the model name*, and that is benchmark-visible retrieval quality. The measurement
+it rested on, which still holds: the repo's `.env` has the prefix line **commented out**,
+because "Q4_K_M is benchmarked best with NO query prefix (37, champion) — forcing the prefix
+drops to the f16+prefix tier (34)". The two questions were (1) does unset mean suppressed —
+`ET-3`'s table says yes; (2) should the `settings.json` prefix be removed to match the
+benchmark, or was it deliberate? **(1) decided as `ET-9` D1 and shipped; (2) moot — the setting
+is already empty.**
 
 **Also landed alongside B1, not part of the plan:** `21174425` (patch-id
 `9885fb29d5499e85b27532de50688cbf59d1c942`) removed a race in the wedged-peer
@@ -532,9 +577,7 @@ never applied; `embed_one_batch` does not consult it. Fixed by calling
 `dense_batch` directly. Found by a peer session running the suite under
 contention; it passes in isolation, which is why its authoring session missed it.
 
-**Valid:** dated 2026-08-29
-
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-09-06
 
 **Rests on:** the dependency direction measured below, and the crate visibility
 table. Both re-check in one command each; do so before resuming.
@@ -595,25 +638,34 @@ Each phase ends green and is independently revertable. Baseline to hold:
   currently uses `.timeout(300s)` (whole request); root uses `.read_timeout(120s)`
   (gap between bytes). Swapping the consumer first would regress the guard root
   gained in `9f4debc3`. Do this before C1, not after.
-- **B2.** Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* /
-  *explicitly suppressed*. `Option<String>` cannot express the third, and on the
-  default Q4 model suppressed is the correct state. This is ET-3's blocker; see
-  ET-3 for the three-row regression table.
-- **B3.** Typed connect error (`EmbedError::Connect { url }`) replacing the
+- **B2. DONE** 2026-08-30. Three-state query prefix on `RemoteEmbedder` — *derive* /
+  *explicit* / *explicitly suppressed*. `Option<String>` cannot express the third, and on
+  the default Q4 model suppressed is the correct state. Shipped as
+  `codescout_embed::remote::QueryPrefix`; the unset→`Suppressed` mapping is `ET-9` D1 and is
+  load-bearing in root at `src/retrieval/embedder.rs:456-460`. See ET-3 for the three-row
+  regression table — every row of it is now unreachable, because `Derive` is never selected
+  on this path.
+- **B3. DONE** (`6be58840`). Typed connect error (`EmbedError::Connect { url }`) replacing the
   `"embed connect failed"` substring contract. See ET-5 — it must land with this
   phase, not after, or the contract crosses a crate boundary as a bare string
   with nothing making both sides' tests fail together.
-- **B4.** Export `is_https_or_loopback` (and whatever else D-phase needs) as
-  `pub`.
+- **B4. DONE** (`c24d2d60`). Export `is_https_or_loopback` (and whatever else D-phase needs)
+  as `pub`. Verified 2026-09-06: it is `pub` at `remote.rs:69` and root's copy is gone.
 
-**Phase C — consumer migration.** ET-3 proper: swap root's dense leg to
-`RemoteEmbedder`. Hold batch size at 8 so the change is behaviour-preserving.
+**Phase C — consumer migration. DONE** (T6, four commits, final `797dd023`). ET-3 proper: swap
+root's dense leg to `RemoteEmbedder`. Batch size held at 8 so the change was
+behaviour-preserving. **The seam turned out to be `dense_batch`, not the call site** —
+`RemoteEmbedder` is dense-only and root's two legs are fused per sub-batch; see `ET-9` T6.
 
 **Phase D — delete duplicates.** ET-4. Audit each pair first; root is not
-reliably the stale side (B1 is the counterexample). D1 root's
-`is_https_or_loopback` (A1's tests prove equivalence), D2 root's
-`transport.rs` + wire structs, D3 drop `reqwest`/`rustls` from the root manifest
-and re-measure the crate delta.
+reliably the stale side (B1 is the counterexample). **D1 DONE** (`c24d2d60`) — root's
+`is_https_or_loopback`, A1's tests proving equivalence. **D2 DONE** (`797dd023`) — root's wire
+structs; note `transport.rs` **survives**, because `reranker.rs` keeps it alive (`ET-5`), so
+this row's original "`transport.rs` + wire structs" overstated the scope. **D3 NOT DONE and
+discretionary** — dropping `reqwest`/`rustls` from the root manifest is blocked on T16 and
+buys **zero crates**, because the crate declares the same `reqwest` and cargo unifies them;
+the −48 was measured on the bare lean build and `ET-2` already banked it. `ET-9` T9 has the
+derivation.
 
 **Phase E — independent, no dependency on A-D.** Can be picked up by any session
 at any time. Status as of 2026-08-30:
@@ -653,7 +705,13 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — **T1 through T8 are all closed.** What remains is T9 and its
+**Status:** **CLOSED 2026-09-06 — the stream is done and T9/T16 are DECLINED.** This entry's
+own question, *"a reader picking this up should decide whether to continue at all"*, was put to
+the operator on 2026-09-06 and answered **no**: T9/T16 buy manifest honesty and zero crates, on
+this entry's own measurement. Recording the answer so the next reader inherits a decision
+instead of re-opening the question. Everything below is the state that decision rests on.
+
+**Prior status, unchanged and still accurate** — **T1 through T8 are all closed.** What remains is T9 and its
 precondition T16, and both are **discretionary rather than queued**: they buy
 manifest honesty and **zero crates**, because root and the crate declare the same
 `reqwest` and cargo unifies them. Verified at the bytes 2026-08-30, not inferred.
@@ -666,6 +724,15 @@ bidirectional, and three of the five known instances had the crate as the
 deficient side. That is an argument for auditing the remaining pairs — which
 `codescout-ae` did on 2026-08-30, finding them clean plus one non-pair instance
 (`probe_ollama`, `BL-66`) — rather than for grinding out T9.
+
+> **Answered 2026-09-06: do NOT continue.** The audit this paragraph recommends was done and
+> came back clean; T9/T16 are declined on the zero-crates measurement above. **What made the
+> decision cheap is that this entry had already priced its own remaining work** — it named the
+> payoff as *manifest honesty*, verified the crate count at the bytes rather than inferring it,
+> and said so in the Status line. A board that records what its remaining rows are *worth*, not
+> just that they are open, is what lets a later reader close a stream in one reading instead of
+> re-deriving the value. `ET-3`, `ET-4`, `ET-8` and `ET-10` did not, and each sat `blocked` or
+> `open` for seven days after its blocker had gone.
 
 **That bug is now fixed, and its filing was wrong in a way worth keeping** —
 `docs/issues/archive/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
@@ -1218,8 +1285,14 @@ that was wrong (`include_str!` in the binary probe; hidden paths in the citation
 sweep; this).
 ## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
 
-**Status:** open
-**Valid:** dated 2026-08-30
+**Status:** closed 2026-09-06 — all three findings are discharged or informational. **Finding
+1's prescribed repair is DONE**: `build_embedder`'s doc comment no longer asserts the retired
+connect-marker constraint — verified at the bytes 2026-09-06, it now reads *"This comment used
+to add … and that constraint is gone … since T6 step D `EmbedderHttp`'s dense leg *is*
+`RemoteEmbedder`"*, recording the retired reason rather than deleting it, which is what this
+finding asked for. Findings 2 and 3 are standing facts about scope and about T9's blockers,
+not work items. **No action remains in ET-10.**
+**Valid:** dated 2026-09-06
 
 **Observed.** 2026-08-30, at the bytes, *before* writing any T6 code —
 `ET-9`'s resume block says T6 "is a consumer swap, not a design task". Three

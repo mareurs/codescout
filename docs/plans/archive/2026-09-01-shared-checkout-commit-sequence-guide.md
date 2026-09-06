@@ -1,6 +1,6 @@
 ---
 kind: plan
-status: draft
+status: archived
 title: A committed sequence for shared-checkout git operations
 owners: [marius]
 tags: [shared-checkout, guides, hooks, multi-session]

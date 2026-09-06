@@ -31,8 +31,26 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 | 1 | double-frontmatter corruption in `artifact(create)` **and `update`** | code fix | **done** — 2 sites guarded, 4 tests, 3 mutations measured |
 | 2 | heading-miss discards the `Available headings` hint | code fix | **done** — 2 sites guarded, 3 tests, 3 mutations measured |
 | 3 | hook refusal-text "what comes next" tail | design + shell | **done** — one emitted copy, 3 hooks, end-to-end probed |
-| 4 | triage the 27 open bugs (verify-open cadence) | survey | queued |
+| 4 | triage the open bugs (verify-open cadence) | survey | **partial** — the `high` subset was triaged 2026-09-06 (13 rows read, 4 archived, yielding `docs/plans/2026-09-06-stale-ledger-and-shared-state-fix-queue.md`); the remainder queued |
+| 5 | repair the 9 already-corrupted files | design + data | queued — § 5 below; the open question is adjudication, not mechanism |
 
+**Item 5 had no row in this table until 2026-09-06.** It has existed as a body section since
+the queue was opened, so this table listed four items while the queue held five — and a reader
+taking the table as the contents would never have learned otherwise, because nothing
+cross-checks a hand-maintained index against the sections beneath it.
+
+**Item 4's population is no longer 27, and the number moved faster than the item did.** § 4
+below says *"27 are open or investigating"* — true when written on 2026-09-01. Re-derived
+2026-09-06 with the canonical triage query:
+
+```
+doc(action="find", kind="bug",
+    filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
+```
+
+**85 rows — 79 `open`, 1 `investigating`, 4 `zombie`, 1 `taken`**, so the figure comparable to
+the original *open-or-investigating* unit is **80**. It roughly tripled in five days while
+reading like a total the whole time. Cite the query and the instant, never the bare number.
 ## 1 — double-frontmatter corruption (`a1dd1e9b0ef2f999`, archived)
 
 `artifact(action="create")` with a body copied from `docs/issues/_TEMPLATE.md` writes **two**

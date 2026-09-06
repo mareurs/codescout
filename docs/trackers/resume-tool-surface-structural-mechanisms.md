@@ -1,8 +1,8 @@
 ---
 id: '25633146506bd8b3'
 kind: tracker
-status: active
-title: Tool Surface — Structural Mechanisms (SM-N)
+status: archived
+title: Tool Surface — Structural Mechanisms — CLOSED 2026-09-06 (SM-N, closed record)
 owners:
 - marius
 tags:

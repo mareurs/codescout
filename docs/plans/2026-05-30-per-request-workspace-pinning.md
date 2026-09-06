@@ -1,9 +1,10 @@
 ---
+kind: plan
 status: active
 ---
 # Plan — Per-Request Workspace Pinning (regime 3 real fix)
 
-**Status:** draft · **Opened:** 2026-05-30 · **Owner:** marius
+**Status:** active — frontmatter is authoritative · **Opened:** 2026-05-30 · **Owner:** marius
 **Fixes:** `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md` (root cause)
 **Supersedes mitigation:** the `concurrent_activation_warning` guard (`Agent::note_activation`) only *surfaces* the race; this plan *removes* it.
 
@@ -420,6 +421,17 @@ list into the phases that own them. What remains is genuinely open:
 >
 > **Phase 5 is complete.** Phase 4b remains deferred and correctly so:
 > `AgentInner.workspaces` is still `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
+>
+> **RETRACTED 2026-09-06 — Phase 5 is NOT complete, and this blockquote was the only
+> surface claiming it is.** Verified at the bytes on 2026-09-06:
+> `concurrent_activation_warning` is still inserted (`src/tools/config/mod.rs:333`), and
+> `src/prompts/source.md` documents the per-call `workspace` param nowhere — all ten of its
+> `workspace` hits are the repo/multi-project concept, not the pin. Those are two of the
+> four things § *Then Phase 5* lists. Both have been open as
+> `resume-workspace-pinning-phase-4b-5:WP-3` and `WP-4` since 2026-08-28: the plan and its
+> own resume queue disagreed for nine days, and the queue was right. **Read the queue, not
+> this line, for Phase 5 state** — the plan is the row a `find` returns and the queue is the
+> row that corrects it, which is the one-way pointer `resume-queue-index:RQ-1` describes.
 
 **Status: Phases 0–3 COMPLETE — the entire READ surface honors per-request pinning;
 regime-3 is fixed for all reads.** Work lives on branch

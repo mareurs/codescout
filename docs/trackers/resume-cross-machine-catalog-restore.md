@@ -278,11 +278,20 @@ The **workaround is retired for agents on a rebuilt binary** — a destructive
 MCP server until `cargo rb` + `/mcp`. Until this host's binary is rebuilt, keep using
 `edit_markdown` and assert the section count.
 
-## CM-7 — `@tool_*` buffer grep nesting is unreproduced
+## CM-7 — `@tool_*` buffer grep nesting re-wraps a single over-budget line
 
-**Status:** reproduced 2026-08-29; root cause measured; fix not yet written.
-Bug file flipped to `investigating`.
+**Status:** fixed 2026-08-29 — `61476cb5` on `experiments`, patch-id
+`f459ee93c80aba7eab5c3f922d1a6982b0b02f24`. Bug file archived, `status: fixed`.
 **Valid:** dated 2026-08-29
+
+> **CLOSED 2026-09-06.** This entry read *"fix not yet written"* for eight days after
+> the fix had shipped — the shape the 2026-09-06 fix queue names *"fix landed, file
+> never updated"*. **And the fix that shipped is not the one § Next recommends:** that
+> paragraph prescribes byte-truncating inside `extract_lines_with_cost`; the shipped fix
+> deliberately leaves that shared primitive alone (measured callers: 4, one of them
+> `read_markdown`, which has no stake in this defect) and clamps at the two call sites in
+> `src/tools/read_file.rs` instead — `clamp_over_budget_line`, verified in tree at :461 on
+> 2026-09-06. Read § Next as a superseded recommendation, not a work item.
 
 **Observed.** Filed as
 `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`. Six reads
@@ -338,7 +347,8 @@ varying the command never reproduced it.
 the payload as 119 real lines, in one call. Neither the original session nor the
 first pass tried it.
 
-**Next:** decide on the fix, which touches a shared primitive and so is not a
+**Next (SUPERSEDED 2026-09-06 — the shipped fix took the other option; see the banner
+above):** decide on the fix, which touches a shared primitive and so is not a
 drive-by. Recommended is byte-truncating the oversized line inside the safety
 valve (~10 lines in `extract_lines_with_cost`, needs a char-boundary-safe cut and
 a visible marker), plus a hint naming `$.<field>` when `read_file` line-slices a

@@ -46,14 +46,24 @@ overstate every row. Treat it as "how much is in there", never "how much is left
 | `docs/trackers/resume-embedding-transport-stages-1-3.md` | `ET` | 10 | embedding transport consolidation, stages 1–3 | ✅ read |
 | `docs/trackers/resume-get-guide-section-grain-phases-2-3.md` | `GG` | 10 | `get_guide` section grain, phases 2 and 3 | ✅ read |
 | `docs/trackers/resume-statement-validity-layers-3-5.md` | `SV` | 6 | statement validity, layers 3c/5b | ✅ read |
-| `docs/trackers/resume-tool-surface-structural-mechanisms.md` | `SM` | 4 | tool-surface structural mechanisms | ✅ read — **and missing from `TAXONOMY.md`'s table, see RQ-4** |
 | `docs/trackers/resume-workspace-pinning-phase-4b-5.md` | `WP` | 5 | per-request workspace pinning, phase 4b + 5 | ✅ read |
 | `docs/trackers/gate-contract-consolidation.md` | *(none)* | 0 | five transcriptions of one command list, and what replaces them | ✅ read — prose, declares no prefix, so nothing in it is citable by token |
 | `docs/trackers/resume-vacation-wrapup-2026-09-04.md` | `VW` | — | the roster itself; `status: draft` while replies were still arriving | ✅ read |
 
-**Excluded on purpose:** `docs/trackers/resume-tool-surface-budget.md` (`TB`) is `archived` — the
-stream shipped in full 2026-08-18 and the queue was opened on a false-negative grep. It is a
-closed record, not remaining work, and listing it would inflate this index by one.
+**Excluded on purpose — two closed records, not one.**
+`docs/trackers/resume-tool-surface-budget.md` (`TB`) is `archived`: the stream shipped in full
+2026-08-18 and the queue was opened on a false-negative grep.
+`docs/trackers/resume-tool-surface-structural-mechanisms.md` (`SM`) joined it **2026-09-06**,
+archived after all four of its entries were verified terminal — SM-1 `71c827f9`, SM-2
+`19c0fc09`, SM-3 refuted, SM-4 probed to a fired power probe whose own follow-up is *"a new
+pre-registration, not a re-run of this one"*. Both are closed records, not remaining work, and
+listing either would inflate this index.
+
+**What that cost, and it is the reusable part:** `SM` sat here as a row holding remaining work
+for three days while holding none, and nothing could detect it — this index verifies that a
+tracker *exists and has entries* (§ RQ-2), never that its entries are live, and the tracker's
+own `status: active` is set by hand. The two instruments that agree here share the blind spot.
+The only thing that separated them was opening the file and reading four Status lines.
 
 **Not enumerated here, by design:** codescout bug files carrying open `## Resume` sections. Two
 sessions reported theirs at the stop (`d2bc134a…` across three committed bug files, `08a2785b…`
@@ -63,7 +73,6 @@ at `d73ee203`). They are reachable by query and restating them would make this a
 doc(action="find", kind="bug",
     filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
 ```
-
 ### mirela/backend-kotlin — `/home/marius/work/mirela/backend-kotlin`
 
 | tracker | prefix | entries | holds | verified |
@@ -185,6 +194,16 @@ titles itself `VW-N` but declares **no** `entry_prefix` in frontmatter, so its e
 citable by token and it is not a declared ledger. Whether it belongs in that table is part of the
 same decision.
 
+**Correction 2026-09-06 — the `SM` half closes, and not by anyone fixing the table.** `SM` was
+archived that day (all four entries verified terminal), so a queue of *live* resume ledgers is
+now correct to omit it, and the `status: active` above is stale from this date. `AC` and `RQ`
+are still genuinely absent from `TAXONOMY.md`'s table, and the six-then-five self-contradiction
+is untouched — **so RQ-4 stays open on two of its three layers.**
+
+Worth naming because the shape recurs: a row can leave a "missing from the index" list by being
+added to the index *or* by ceasing to qualify, and only the first is a repair. Nothing in the
+entry's own text distinguishes them, so an entry closed on the second route reads exactly like
+one closed on the first.
 ## Template for new entries
 
 ```
