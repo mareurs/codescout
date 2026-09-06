@@ -231,7 +231,7 @@ fn foreign_mint<'a>(stored: &'a str, this_name: &str) -> Option<&'a str> {
 /// `merge=union`, so the mixing was published and a union merge folds both streams together
 /// with nothing marking the seam. `shard_file_name`'s doc comment states the invariant that
 /// was lost: *"host keeps two machines off each other's lines entirely."*
-/// `docs/issues/2026-09-04-a-transported-catalog-carries-its-host-identity.md`.
+/// `docs/issues/archive/2026-09-04-a-transported-catalog-carries-its-host-identity.md`.
 ///
 /// **The check costs no new state.** [`minted_name`] recovers the sanitized machine name
 /// from the stored id itself, so a catalog minted before this code existed is still

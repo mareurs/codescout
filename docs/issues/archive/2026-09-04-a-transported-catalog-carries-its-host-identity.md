@@ -1,7 +1,7 @@
 ---
-id: d0e2dbc4a4085d0c
+id: 1f70ca0cd916e7a0
 kind: bug
-status: open
+status: fixed
 title: 'BUG: audit_host_id lives in the catalog, so a transported catalog makes the receiving host write the sender''s audit lines into a committed merge=union shard'
 owners:
 - marius
@@ -12,12 +12,13 @@ tags:
 - cross-machine
 - catalog
 topic: audit host identity survives catalog transport
+closed: 2026-09-06
 opened: 2026-09-04
 related:
 - docs/conventions/cross-machine-catalog-resume.md
 - docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md
 severity: high
-unverified: 'Whether the several-hundred-entry audit_open_gaps list is caused by cross-host sequence interleaving is NOT established -- gaps have other documented causes (prune markers, rolled-back transactions burning seq). The host-identity adoption itself IS established at the bytes: catalog_meta.audit_host_id = ripper-65e654 on a host whose every candidate_name() source yields archlinux. Also not established: whether any OTHER host has already merged rows into this shard, which would make the mixing bidirectional rather than one-way.'
+unverified: 'The audit_open_gaps question is UNCHANGED and still not established: whether the several-hundred-entry gap list was caused by cross-host sequence interleaving was never proven, and gaps have other documented causes (prune markers, rolled-back transactions burning seq). The fix stops future interleaving; it does not explain the existing gaps and no measurement here attributes them. Also still unestablished: whether any OTHER host merged rows into this shard, which would make the mixing bidirectional. AND NEW, created by the fix: the ~5,566 rows already exported under ripper-65e654 stay counted as exported by the per-repo watermark and will never re-emit under the corrected id without a deliberate rollback -- doctor reports them as host_previous_stranded_rows, but nothing remediates them and no one has decided whether to.'
 ---
 
 ## Summary
@@ -133,6 +134,99 @@ correctness").
    field. Do not rewrite the committed shard; decide whether the mixed month is worth
    annotating.
 
+
+## Fix
+
+**Fixed at `d4f0bafb` on `experiments`, patch-id
+`ec44ea726129a1117fe2c034c9bcc3c18ae11de6`.** Direction 1 above, with one simplification and
+one addition that the direction did not anticipate.
+
+**Reproduced before the plan was read**, as this file's own Resume demanded:
+`catalog_meta.audit_host_id` = `ripper-65e654` on a host where `CODESCOUT_AUDIT_HOST` and
+`COMPUTERNAME` are unset and `HOSTNAME` and `/etc/hostname` both read `archlinux`. The shard
+had been written two minutes earlier, so this was live accumulation, not a historical
+artifact.
+
+### The simplification: no new state, which is what makes it reach the affected catalogs
+
+Direction 1 proposed persisting a machine fingerprint alongside the id. Correct, but a new
+meta key only protects catalogs minted **after** it exists — and the population that matters
+is exactly the ones minted before, this machine's among them. A remedy that cannot fix the
+instance that motivated it is not a remedy.
+
+`mint_host_id` writes `sanitize(candidate) + "-" + <6 lowercase hex>`, so the sanitized machine
+name *at mint time* is already inside the id. `minted_name()` recovers it and `foreign_mint()`
+compares it against this host's — `ripper` vs `archlinux` — with no new key and no migration.
+
+**Two cases deliberately do not re-mint**, because neither can discriminate:
+
+- an id that does not parse as `<name>-<6 lowercase hex>` — an unrecognised format is not
+  evidence of transport, and re-minting would discard an identity the code does not
+  understand;
+- a host whose name sanitizes to the `host` fallback — every machine that cannot name itself
+  produces that string, so re-minting there churns a fresh shard on every open, which is this
+  defect with its sign flipped.
+
+### Direction 2 rejected, and the reason generalises
+
+*"Refuse rather than adopt — a loud error at open"* is the better **report** and the worse
+**behaviour**. The catalogs this fires on are already in the mismatched state, so refusing
+bricks every tool call on that host until a human intervenes. Stated as a rule, because it is
+not specific to this bug: **a guard that refuses on an invalid state is only safe if the state
+is reachable but not yet reached.** Once the system is already in it, the same guard is a
+denial of service — and the asymmetry is that the party proposing it is reasoning about a clean
+system while the party implementing it is standing in the dirty one.
+
+### The addition the direction did not anticipate: the fix would have hidden the loss
+
+Raised by `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b` while the change was in flight, and it changed
+the shape of the fix rather than adding a field to it.
+
+After re-minting, the identity is correct **and** the export is complete by the watermark's own
+accounting — because the watermark is per-repo and never rolls back (see the corrected
+§ *Workarounds*). So a report answering only *"does the stored id match this host?"* would read
+clean while thousands of rows sat in another machine's shard, owed by no counter anywhere.
+**That is the fix making the symptom invisible while leaving the loss — worse than the bug,
+which at least left a wrong-looking filename in `git status`.**
+
+So `doctor` reports the stranded population, not the identity match:
+
+| field | |
+|---|---|
+| `audit_health.host_previous` | the id that was replaced, from `audit_host_id_previous` |
+| `audit_health.host_previous_stranded_rows` | total rows sitting in that host's shards |
+| `audit_health.host_previous_shards` | per-file line counts |
+| `audit_health.host_previous_hint` | says outright that `unexported_rows` will **not** count them |
+
+The hint naming the contradiction is the part that makes it a report rather than one more
+number — every other figure in that block says the export is complete, and it is, by the only
+definition those figures use.
+
+## Tests added
+
+Six, in `src/librarian/catalog/audit/host.rs`; 17/17 in the module.
+
+- `a_transported_catalog_is_re_minted_and_names_what_it_replaced` — the motivating case, end to
+  end, including that the replaced id is preserved rather than dropped.
+- `an_id_minted_here_is_returned_unchanged_and_records_no_previous` — the control. Without it
+  every other assertion is satisfied by a function that re-mints unconditionally.
+- `a_catalog_that_cannot_be_judged_is_left_exactly_as_found` — both no-re-mint cases, as
+  separate assertions rather than a loop, because they are separate guards.
+- `a_blank_stored_id_mints_without_claiming_a_predecessor` — pins the ordering of the emptiness
+  check, which if reordered would write a `host_previous` of `""` that `doctor` would report as
+  a real predecessor.
+- `foreign_mint_distinguishes_cannot_tell_from_all_is_well` and
+  `minted_name_accepts_only_the_shape_mint_host_id_emits` — the pure halves.
+
+**Deterministic without touching the environment.** `resolve_host_id_for` takes the machine
+name, so every branch is an ordinary call rather than a race on a process-global env var under
+a parallel runner — this repo already carries bug files about load-sensitive flakes, and
+`candidate_name()` reads three env vars.
+
+**Mutation-verified, with the runs bracketed by `git rev-parse HEAD` and the file's mtime**
+so a peer's commit could not silently revert the mutation and manufacture a false survivor
+(`WINDOW_CLEAN=yes` both times). Disabling the fallback guard killed two tests; widening the
+suffix test from `== 6` to `>= 4` killed the shape test. No survivors.
 ## Workarounds
 
 The exported lines sitting uncommitted in `.codescout/audit/ripper-65e654-202609.jsonl` are
@@ -173,5 +267,22 @@ with interleaving, not as a consequence proven here.
 
 ## Resume
 
-Not started. Reproduce by reading `catalog_meta.audit_host_id` on any host whose catalog
-was transported, and comparing it to `mint_host_id(candidate_name())` for that host.
+Fixed and archived. Two things are genuinely outstanding and are recorded in `unverified:`
+rather than left to be rediscovered:
+
+1. **The `audit_open_gaps` question is untouched.** Whether the several-hundred-entry gap list
+   was caused by cross-host interleaving was never established, and the fix does not answer it
+   — it stops *future* interleaving. Gaps have other documented causes (prune markers,
+   rolled-back transactions burning `seq`), and no measurement here separates them.
+2. **The stranded rows are reported but not remediated.** `doctor` now names them
+   (`audit_health.host_previous_stranded_rows`); nothing re-attributes them, and whether the
+   watermark rollback is worth its cost is an operator decision nobody has made.
+
+**On this host specifically:** the re-mint has not happened yet at time of archiving. It fires
+on the next `resolve_host_id` call against the live catalog — any `reindex`, `audit_log` or
+`doctor`. After it, `.codescout/audit/` will hold `ripper-65e654-202609.jsonl` (frozen, this
+laptop's rows mixed into the workstation's) alongside a new `archlinux-<hex>-202609.jsonl`, and
+`doctor` will report the first as stranded. That gap is permanent unless someone acts on (2).
+
+**Do not commit the uncommitted `ripper-65e654-202609.jsonl` lines** — see § *Workarounds*.
+That advice survives the fix unchanged.

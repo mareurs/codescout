@@ -19,7 +19,7 @@ tags: []
 | # | task | severity | verified | state |
 |---|---|---|---|---|
 | 1 | a doctor check for bug files whose fix already shipped | — | 4 instances in one day | **done — `7790f343`** |
-| 2 | audit host identity travels with a transported catalog | high | reproduced live, still worsening | not started |
+| 2 | audit host identity travels with a transported catalog | high | reproduced live, still worsening | **done — `d4f0bafb`** |
 | 3 | the `pre-commit` stash window on a shared checkout | high | config present, Fix says nothing attempted | not started |
 
 **Not tasks, and why** — at the bottom.
@@ -123,7 +123,7 @@ of a `0` is not the reader of a doc comment.
 
 ## 2 — audit host identity travels with a transported catalog
 
-`docs/issues/2026-09-04-a-transported-catalog-carries-its-host-identity.md` · `high` ·
+`docs/issues/archive/2026-09-04-a-transported-catalog-carries-its-host-identity.md` · `high` ·
 `cluster/authorship-unrecoverable-after-the-fact`
 
 **Verified live 2026-09-06, and still worsening.** `resolve_host_id`
@@ -303,6 +303,34 @@ The companion tell for the 3a case is different and both are needed: a stash rev
 `git rev-parse HEAD` and the file's mtime before and after the run and refusing to trust a
 result where either moved — used successfully for this task's mutation runs, and cheaper than
 the message-passing it replaces.
+
+#### The precondition is necessary and NOT sufficient — a peer's red is often the healthy state
+
+Contributed by `codescout-7f` (sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`), whose own
+work is the case that proves it.
+
+`git status --short -- '*.rs'` tells you a peer is **present**. It does not tell you what their
+red *means*. Under test-first, **a failing test is the expected state of a healthy in-progress
+change** — so "peer file dirty **and** peer test red" is not evidence of breakage, and treating
+it as such is its own error. Both failures in this task's gate run were misread on first pass:
+one was a peer's intermediate fixture state, the other was a deliberate TDD red, and both were
+reported as failures by sessions sampling someone else's correct work mid-stride.
+
+**The discriminator is cheap and decisive** — ask whether the failing test exists at `HEAD` at
+all:
+
+```
+git show HEAD:<file> | grep -c 'fn <failing_test_name>'
+```
+
+`0` means the test is **born-red**: it does not exist in committed history, its first run ever
+is the failure you are looking at, and it cannot be a regression of anything. That settled
+`a_chunk_that_only_moved_ordinal_keeps_its_id_and_its_vector` here in one line, where an hour
+of reasoning about call graphs had only produced an argument.
+
+So the full sequence before citing a gate result on this tree is three steps, not one: dirty
+check, positive attribution, then **read the failing test's name and ask whether it exists at
+`HEAD`**. Only the third distinguishes *someone is working* from *something is wrong*.
 ## Not in this queue, and why
 
 - **`experiments` CI has been red for 4 days** (last green 2026-09-02 06:45), three independent
