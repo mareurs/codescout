@@ -257,6 +257,7 @@ declare_checks! {
     LedgerDefinesNothing => "ledger_defines_nothing",
     MissingFile => "missing_file",
     NonTerminalStatusWithFixAnchor => "non_terminal_status_with_fix_anchor",
+    OpenBugCitedFromSource => "open_bug_cited_from_source",
     ParamsBehindBody => "params_behind_body",
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
@@ -478,6 +479,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // BODY declares a patch-id while its status still says `open`. Detectable only by reading
     // bodies, which is why the two cheap frontmatter-keyed checks exist and this one did not.
     all_violations.extend(scan_non_terminal_status_with_fix_anchor(ctx, &cat.conn)?);
+    // The check above needs the bug FILE to declare something. This one needs it to declare
+    // NOTHING, and reads the source tree instead — the case where a fix landed and the record
+    // was never touched at all, which is how four live `high` records went stale in one week
+    // with every existing check correctly reporting 0. Health block carried out to
+    // `catalog_health` below for the same reason as `archived_fix_shas`: a zero here is scoped
+    // to settled, single-line, non-markdown citations and must not read as "no bug is stale".
+    let (cited_from_source_violations, open_bug_source_citations) =
+        scan_open_bug_cited_from_source(ctx, &cat.conn)?;
+    all_violations.extend(cited_from_source_violations);
     // Both checks above answer "is a fix pointer declared?". This one answers why that
     // answer can be confidently wrong: an unterminated fence mutes every line-anchored
     // scan below it, so a "nothing declared" finding may be about the parse and not the
@@ -878,6 +888,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // absent/unreadable/unparseable config) stays distinguishable from a pass.
     catalog_health.insert("declared_roots".to_string(), declared_roots_health);
     catalog_health.insert("archived_fix_shas".to_string(), archived_fix_shas);
+    catalog_health.insert(
+        "open_bug_source_citations".to_string(),
+        open_bug_source_citations,
+    );
     catalog_health.insert("audit".to_string(), audit_health);
     catalog_health.insert("hint".to_string(), json!(health_hint));
 
@@ -5494,6 +5508,310 @@ fn scan_non_terminal_status_with_fix_anchor(
     Ok(out)
 }
 
+/// Every `docs/issues/…​.md` path token appearing literally in `content`.
+///
+/// **Whitespace terminates a token, so a citation WRAPPED across two lines is invisible
+/// here.** That is a real blind spot and it is not hypothetical: `src/librarian/tools/find.rs`
+/// carried one, split as `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-` /
+/// `but-published-as-file-lines.md`, which survived the path-shaped grep that found its
+/// sixteen siblings. Rejoining wrapped comment text before matching would fix it and is
+/// deliberately not done here: it needs a comment-syntax model per language, and a scanner
+/// that guesses at continuation would start reporting citations nobody wrote. The cost is
+/// under-reporting, which is the safe direction for a worklist — and it is stated in the
+/// health block rather than only here, because the reader of a `0` is not the reader of this
+/// comment.
+fn cited_issue_paths(content: &str) -> std::collections::BTreeSet<String> {
+    const NEEDLE: &str = "docs/issues/";
+    let mut out = std::collections::BTreeSet::new();
+    let mut from = 0usize;
+    while let Some(rel) = content[from..].find(NEEDLE) {
+        let start = from + rel;
+        let Some(off) = content[start..].find(".md") else {
+            break;
+        };
+        let end = start + off + ".md".len();
+        let token = &content[start..end];
+        if !token.chars().any(char::is_whitespace) {
+            out.insert(token.to_string());
+        }
+        from = end;
+    }
+    out
+}
+
+/// Repo-relative paths touched by any commit newer than `cutoff_epoch_secs`.
+///
+/// **Bounded twice, and both bounds matter.** By time, because the question is only about
+/// recent history; and by `max_commits`, because `git2::Sort::TIME` orders by committer
+/// timestamp, which is **not monotonic** across merges and rebases — so stopping at the first
+/// commit older than the cutoff would silently truncate on any branch whose parent is newer
+/// than its child. Walking to a hard commit ceiling instead costs a fixed amount and cannot
+/// be wrong in a way that varies by repo shape.
+///
+/// A commit with no parent (the root) is diffed against an empty tree, so an initial commit's
+/// files count as touched. Missing that made a one-commit fixture report *nothing* recent,
+/// which is the state every test repo is in.
+fn paths_touched_since(
+    repo: &git2::Repository,
+    cutoff_epoch_secs: i64,
+    max_commits: usize,
+) -> std::collections::HashSet<String> {
+    let mut touched = std::collections::HashSet::new();
+    let Ok(mut walk) = repo.revwalk() else {
+        return touched;
+    };
+    if walk.push_head().is_err() {
+        return touched;
+    }
+    let _ = walk.set_sorting(git2::Sort::TIME);
+    for (seen, oid) in walk.flatten().enumerate() {
+        if seen >= max_commits {
+            break;
+        }
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        if commit.time().seconds() < cutoff_epoch_secs {
+            continue;
+        }
+        let Ok(tree) = commit.tree() else { continue };
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+            continue;
+        };
+        for delta in diff.deltas() {
+            for file in [delta.new_file(), delta.old_file()] {
+                if let Some(p) = file.path().and_then(|p| p.to_str()) {
+                    touched.insert(p.replace('\\', "/"));
+                }
+            }
+        }
+    }
+    touched
+}
+
+/// `open_bug_cited_from_source`: a live bug file whose path is cited from a **source** file,
+/// where the citation has been sitting unchanged long enough to have settled.
+///
+/// **The signal, and why the existing checks cannot see it.**
+/// [`scan_non_terminal_status_with_fix_anchor`] fires on an open bug that *records* a fix
+/// anchor. That is the right question when the record was updated and the status was not — but
+/// it needs the FILE to know something. When a fix lands and nobody touches the bug file at
+/// all, there is no anchor, so that check reads `0`: a true answer to a question nobody asked.
+///
+/// Measured 2026-09-06 on this repo. A severity-ranked triage of 13 live `high` bug files
+/// found **four** whose fixes had already shipped — `6f032dbd`, `36afd405` and `fdad1a99`
+/// (which closed two) — with gaps of 3 days, 4 days and *same day*.
+/// `non_terminal_status_with_fix_anchor` reported none of them, correctly. What every one of
+/// them DID have was a doc comment in the fixing commit citing the bug file by path:
+/// `artifact_store.rs:132`, `retrieval/artifact.rs:99`, `catalog/find.rs:306`,
+/// `catalog/chunk.rs:60`, `entry_token.rs:132`.
+///
+/// **Two false-positive classes it is built against**, both observed live the same day and
+/// both raised by the session that wrote two of the four fixes:
+///
+/// 1. **A fix in flight legitimately cites its still-open bug.**
+///    `src/librarian/reindex_progress.rs` cited a live bug file in its module docs for a whole
+///    session before that bug was archived. A check without a settling period fires on the
+///    working tree of whoever is doing the very thing it exists to reward.
+/// 2. **Doc comments cite bugs as RATIONALE, not as "I fixed this"** — *"this is why X is
+///    shaped this way, see `<bug>`"*. The path alone cannot separate those, and no amount of
+///    parsing will: the two are distinguished by intent, not syntax.
+///
+/// Both are answered by the same shape, and it is the reason this is a **worklist rather than
+/// a verdict**: fire only once the citing file has been unmodified and uncommitted-against for
+/// `SETTLE_DAYS`, and phrase the finding as "check whether this shipped". (1) becomes
+/// impossible by construction; (2) stays possible and is merely noisy, which is the acceptable
+/// direction — a rationale citation costs the reader one look, a missed shipped fix costs a
+/// triage.
+///
+/// **`.md` is excluded from the scanned population on purpose.** One document citing another
+/// is ordinary cross-referencing and carries no claim about code; it is the *source* citation
+/// that means someone edited code because of this bug. Including markdown would flood the
+/// check with every tracker that mentions a bug id.
+///
+/// Reports only; there is no `fix=`. The right action might be archiving the bug, recording a
+/// fix anchor, or nothing at all — and the check cannot tell which, by construction.
+fn scan_open_bug_cited_from_source(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<(Vec<Violation>, Value)> {
+    /// How long a citation must sit unchanged before it counts as settled. Seven days is
+    /// longer than the observed in-flight window (one session) and shorter than the observed
+    /// staleness (3-4 days at notice, and those had already been missed).
+    const SETTLE_DAYS: i64 = 7;
+    /// Extensions treated as SOURCE — see the doc comment on why `.md` is absent.
+    const SOURCE_EXTENSIONS: &[&str] = &["rs", "py", "mjs", "js", "ts", "sh"];
+    /// Hard ceiling on the revwalk, independent of the time bound. See [`paths_touched_since`].
+    const MAX_WALK_COMMITS: usize = 4000;
+
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok((
+            Vec::new(),
+            json!({ "note": "no active project, so no source tree was walked — \
+                             source citations of live bug files were NOT checked" }),
+        ));
+    };
+    let Ok(repo) = git2::Repository::open(&cp.git_root) else {
+        return Ok((
+            Vec::new(),
+            json!({ "note": format!(
+                "{} is not a git repository, so citation age cannot be established and \
+                 source citations of live bug files were NOT checked",
+                crate::util::fs::RepoPath::from_path(&cp.git_root).into_string()
+            )}),
+        ));
+    };
+
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path, status FROM artifact \
+         WHERE kind = 'bug' AND status IN ('open', 'taken', 'investigating') \
+         ORDER BY abs_path",
+    )?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    // Repo-relative path -> the live bug at it. Keyed this way because that is the form a
+    // source comment writes, and the form the walk will hand back.
+    let mut live_by_rel: std::collections::HashMap<String, (String, String, String)> =
+        Default::default();
+    for (id, abs_path, status) in rows {
+        let path = Path::new(&abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        // Same path-COMPONENT test as the sibling checks: a repo living under a directory
+        // named `archive` must not silence its whole issue tree.
+        if path
+            .components()
+            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
+        {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(&cp.git_root) else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        live_by_rel.insert(rel, (id, abs_path, status));
+    }
+    let live_bug_count = live_by_rel.len();
+
+    // Bug rel_path -> the source files citing it, repo-relative.
+    let mut citations: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut source_files_scanned = 0usize;
+    for entry in ignore::WalkBuilder::new(&cp.git_root)
+        .standard_filters(true)
+        .build()
+        .flatten()
+    {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let is_source = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| SOURCE_EXTENSIONS.contains(&e));
+        if !is_source {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        source_files_scanned += 1;
+        let Ok(rel) = entry.path().strip_prefix(&cp.git_root) else {
+            continue;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        for token in cited_issue_paths(&content) {
+            if live_by_rel.contains_key(&token) {
+                citations.entry(token).or_default().push(rel.clone());
+            }
+        }
+    }
+
+    let now = chrono::Utc::now().timestamp();
+    let cutoff = now - SETTLE_DAYS * 24 * 60 * 60;
+    let recently_touched = paths_touched_since(&repo, cutoff, MAX_WALK_COMMITS);
+
+    let mut unsettled = 0usize;
+    let mut out = Vec::new();
+    for (bug_rel, citing) in &citations {
+        // A citing file that is uncommitted, or was committed inside the settling window, is
+        // a fix in flight — false-positive class 1. BOTH tests are needed: the commit-age one
+        // alone misses an edit that has not been committed at all, and the working-tree one
+        // alone misses a fix that landed an hour ago.
+        let settled: Vec<&String> = citing
+            .iter()
+            .filter(|f| {
+                if recently_touched.contains(*f) {
+                    return false;
+                }
+                match repo.status_file(Path::new(f)) {
+                    Ok(s) => s.is_empty(),
+                    // Unreadable status is not evidence of settling.
+                    Err(_) => false,
+                }
+            })
+            .collect();
+        if settled.is_empty() {
+            unsettled += 1;
+            continue;
+        }
+        let Some((id, abs_path, status)) = live_by_rel.get(bug_rel) else {
+            continue;
+        };
+        let shown: Vec<String> = settled.iter().take(2).map(|f| format!("`{f}`")).collect();
+        let more = settled.len().saturating_sub(shown.len());
+        let tail = if more > 0 {
+            format!(" (+{more} more)")
+        } else {
+            String::new()
+        };
+        out.push(Violation::new(
+            "open_bug_cited_from_source",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "status is `{status}` but {} source file(s) cite this bug by path — {}{} — and \
+                 none has been edited or committed against for {SETTLE_DAYS} days. Code that \
+                 names a bug file is usually code written BECAUSE of it, so the fix has \
+                 probably shipped while the record stayed open. Measured 2026-09-06, four live \
+                 `high` records on this repo were in exactly this state, with gaps of 3 days, \
+                 4 days and same-day. CHECK, then archive with its SHA and patch-id, or record \
+                 the anchor. This is a worklist, not a verdict: a doc comment may cite a bug as \
+                 RATIONALE (\"this is why X is shaped this way\") rather than as a fix, and \
+                 nothing in the path distinguishes the two.",
+                settled.len(),
+                shown.join(", "),
+                tail
+            ),
+        ));
+    }
+
+    let health = json!({
+        "live_bugs_in_scope": live_bug_count,
+        "source_files_scanned": source_files_scanned,
+        "source_extensions": SOURCE_EXTENSIONS,
+        "bugs_cited_from_source": citations.len(),
+        "suppressed_as_unsettled": unsettled,
+        "settle_days": SETTLE_DAYS,
+        "blind_to": "a citation WRAPPED across lines by a code formatter — whitespace \
+                     terminates the path token, and one such citation existed in this repo. \
+                     Markdown is excluded by design. A zero here means no SETTLED, \
+                     single-line, source-file citation of a live bug was found — not that \
+                     every live bug is genuinely unfixed.",
+    });
+    Ok((out, health))
+}
+
 /// `unterminated_fence`: a catalogued markdown file that reaches EOF with a fence still
 /// open, so every line below the opener is read as code by any line-anchored scan.
 ///
@@ -7655,6 +7973,306 @@ mod tests {
         };
         assert_eq!(v.len(), 1, "only the Fix-section anchor counts: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("anchored"));
+    }
+
+    // ---- open_bug_cited_from_source ---------------------------------------------------
+
+    /// A repo whose single commit is backdated by `days_ago`, carrying one source file.
+    ///
+    /// Backdating is the whole fixture. The check's discriminator is *citation age*, and a
+    /// repo committed `now` puts every path inside the settling window — so a fixture built
+    /// the ordinary way exercises only the suppression branch and would let a check that
+    /// never fires pass every test.
+    fn git_fixture_with_backdated_source(
+        citing_rel: &str,
+        content: &str,
+        days_ago: i64,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test").unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
+
+        let full = root.join(citing_rel);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(citing_rel)).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let when = git2::Time::new(chrono::Utc::now().timestamp() - days_ago * 86_400, 0);
+        let sig = git2::Signature::new("Test", "test@test.com", &when).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+            .unwrap();
+        (tmp, root)
+    }
+
+    /// The load-bearing test, and the second assertion is why.
+    ///
+    /// The seeded bug declares **no fix anchor at all** — that is deliberately the shape
+    /// [`scan_non_terminal_status_with_fix_anchor`] is blind to, and it is the shape all four
+    /// of the 2026-09-06 stale records were in. Asserting only that the new check fires would
+    /// certify a branch that was never in doubt; asserting that the SIBLING stays silent on
+    /// the same fixture is what shows the new check reaches a case the existing one cannot.
+    ///
+    /// The uncited bug is the population control: a check that fired on every open record
+    /// would pass without it.
+    #[tokio::test]
+    async fn open_bug_cited_from_settled_source_fires_where_no_fix_anchor_exists() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "src/thing.rs",
+            "//! Shaped this way because of docs/issues/stale.md\npub fn f() {}\n",
+            30,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "stale",
+            "open",
+            "",
+            "## Fix\n\nNot implemented.",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "uncited",
+            "open",
+            "",
+            "## Fix\n\nNot implemented.",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the cited bug fires: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("stale"));
+        assert!(
+            v[0].detail.contains("src/thing.rs"),
+            "the finding must name the citing file, or the reader cannot check it: {}",
+            v[0].detail
+        );
+        assert_eq!(
+            health["live_bugs_in_scope"], 2,
+            "a zero must be able to name its denominator: {health}"
+        );
+
+        // The whole justification for this check existing.
+        let sibling = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            sibling.is_empty(),
+            "the existing anchor check must be BLIND to this fixture — if it fires, this new \
+             check is redundant and its RED proves nothing: {sibling:#?}"
+        );
+    }
+
+    /// False-positive class 1, committed half: a fix in flight cites its own still-open bug,
+    /// and the citing commit landed inside the settling window. Firing here would mean
+    /// reporting the working state of whoever is doing the thing the check exists to reward.
+    #[tokio::test]
+    async fn a_citation_committed_inside_the_settling_window_is_silent() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "src/thing.rs",
+            "//! In progress, see docs/issues/stale.md\npub fn f() {}\n",
+            1,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &root, "stale", "open", "", "## Fix\n\nIn progress.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert!(v.is_empty(), "a day-old citation has not settled: {v:#?}");
+        // Counted, not merely dropped: an uncounted suppression makes a suppressed corpus
+        // indistinguishable from an empty one, which is the failure this whole check exists
+        // to answer one layer up.
+        assert_eq!(
+            health["suppressed_as_unsettled"], 1,
+            "the suppression must be visible in the health block: {health}"
+        );
+    }
+
+    /// False-positive class 1, uncommitted half. The commit-age test alone cannot see this:
+    /// the citing file's last commit is old, but the citation was added minutes ago and is
+    /// still in the working tree. Without the `status_file` half, the check fires on every
+    /// in-flight fix whose module happens to be otherwise stable.
+    #[tokio::test]
+    async fn a_citation_still_dirty_in_the_working_tree_is_silent() {
+        let (_tmp, root) = git_fixture_with_backdated_source("src/thing.rs", "pub fn f() {}\n", 30);
+        // The citation is added AFTER the backdated commit, so the path is absent from
+        // `recently_touched` and only the working-tree test can catch it.
+        std::fs::write(
+            root.join("src/thing.rs"),
+            "//! Just wrote this, see docs/issues/stale.md\npub fn f() {}\n",
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &root, "stale", "open", "", "## Fix\n\nIn progress.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, _health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "an uncommitted citation is a fix in flight, not a stale record: {v:#?}"
+        );
+    }
+
+    /// Markdown is excluded from the scanned population by design — one document citing
+    /// another is ordinary cross-referencing and carries no claim about code. Without this
+    /// test the exclusion is a line in a `const` that any tidy-up could widen, and widening
+    /// it is monotone: the check would only ever report MORE, so nothing else would red.
+    #[tokio::test]
+    async fn a_markdown_citation_is_not_a_source_citation() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "docs/notes.md",
+            "See docs/issues/stale.md for background.\n",
+            30,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "stale",
+            "open",
+            "",
+            "## Fix\n\nNot implemented.",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert!(v.is_empty(), "markdown is not source: {v:#?}");
+        assert_eq!(
+            health["source_files_scanned"], 0,
+            "and it must not even be scanned, or the exclusion is happening by accident \
+             somewhere downstream: {health}"
+        );
+    }
+
+    /// An ARCHIVED, terminal bug cited from source is the normal healthy end state — the fix
+    /// shipped, the record was filed, and the comment still points at it.
+    ///
+    /// **This test does NOT cover the archive-path filter, and says so because it looks like
+    /// it does.** `seed_archived_bug` writes `status: fixed`, so the SQL `status IN (…)`
+    /// predicate excludes this row before the path filter is ever consulted. Measured by
+    /// mutation 2026-09-06: replacing the `"archive"` component test with a string that
+    /// matches nothing left this test GREEN. What it actually pins is the status filter.
+    /// The path filter is isolated by
+    /// [`an_open_status_bug_under_archive_is_silent`] — keep both.
+    #[tokio::test]
+    async fn an_archived_bug_cited_from_source_is_silent() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "src/thing.rs",
+            "//! See docs/issues/archive/done.md\npub fn f() {}\n",
+            30,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(&cat, &root, "done", "## Fix\n\nShipped.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, _health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "an archived bug cited from source is the success state: {v:#?}"
+        );
+    }
+
+    /// The archive-path filter, isolated — a bug whose STATUS is live while its FILE already
+    /// sits under `archive/`.
+    ///
+    /// That combination is not hypothetical: measured on this repo 2026-09-06, the catalog
+    /// reported `docs/issues/archive/2026-09-03-il4-deny-hook-will-deadlock-markdown-reads-\
+    /// after-the-fold.md` with a live status while the file was already archived on disk —
+    /// ordinary catalog/disk drift after a move. Without the path filter the check fires on
+    /// every such row, and since a source comment citing an archived bug is the *correct* end
+    /// state, it would fire on the repo's healthiest records.
+    ///
+    /// This is the test the mutation run demanded. Its sibling above passes with the filter
+    /// disabled; this one does not.
+    #[tokio::test]
+    async fn an_open_status_bug_under_archive_is_silent() {
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "src/thing.rs",
+            "//! See docs/issues/archive/drifted.md\npub fn f() {}\n",
+            30,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        let dir = root.join("docs").join("issues").join("archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("drifted.md");
+        std::fs::write(
+            &path,
+            "---\nkind: bug\nstatus: open\n---\n\n# BUG: drifted\n\n## Fix\n\nShipped.\n",
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new("drifted")
+            .with_abs_path(&path)
+            .with_kind("bug")
+            .with_status("open")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "a live-status row whose file is already archived must not fire — the path is \
+             what settles it, not the status: {v:#?}"
+        );
+        assert_eq!(
+            health["live_bugs_in_scope"], 0,
+            "and it must be excluded from the DENOMINATOR too, or the health block reports a \
+             population the check never considered: {health}"
+        );
+    }
+
+    /// Pins the extractor's boundaries, INCLUDING the one it gets wrong.
+    ///
+    /// The wrapped case is asserted as **not found** on purpose. It is a real blind spot with
+    /// a real instance in this repo (`src/librarian/tools/find.rs` carried a citation split
+    /// across two comment lines), and writing it down as an expectation is what stops the next
+    /// reader crediting the extractor with coverage it does not have. If someone teaches the
+    /// extractor to rejoin continuation lines, this assertion reds and should be inverted —
+    /// that is the intended signal, not a regression.
+    #[test]
+    fn cited_issue_paths_finds_inline_tokens_and_misses_wrapped_ones() {
+        let found = cited_issue_paths(
+            "/// see docs/issues/a.md and `docs/issues/b.md`.\n// docs/issues/c.md\n",
+        );
+        assert!(found.contains("docs/issues/a.md"), "bare: {found:?}");
+        assert!(found.contains("docs/issues/b.md"), "backticked: {found:?}");
+        assert!(
+            found.contains("docs/issues/c.md"),
+            "line comment: {found:?}"
+        );
+
+        let wrapped = cited_issue_paths("// docs/issues/2026-09-02-chunk-line-\n// ranges.md\n");
+        assert!(
+            wrapped.is_empty(),
+            "KNOWN BLIND SPOT, asserted so it is not mistaken for coverage — whitespace \
+             terminates the token, so a wrapped citation is invisible: {wrapped:?}"
+        );
     }
 
     /// The discrimination that keeps the decoy heuristic honest. A 16-hex catalog id and a

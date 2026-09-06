@@ -90,6 +90,45 @@ loud, which makes `66523284`'s the cheapest to cite. They then took the predicte
 (`cargo fmt`, re-stage, commit again), opening window two voluntarily — the mitigation failing
 exactly as predicted, by the party who had just read the prediction.
 
+
+### A fifth symptom: the window INVERTS a peer's measurement, silently and in one direction
+
+Derived 2026-09-06 by sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`, while another session
+in this checkout was running a mutation test. It is a stronger claim than the symptoms above
+and belongs beside them rather than inside one of them.
+
+Those are all about an *operation on wrong input* — a read, a rename, a build seeing HEAD bytes
+or `ENOENT`. This one is about a **measurement returning a plausible wrong answer**:
+
+1. A session mutates production code to check that a guard is load-bearing. The mutation is
+   **unstaged**, which is the normal state of an experiment.
+2. Any peer commits — even strictly by pathspec, touching only its own files. `pre-commit`
+   stashes *all* unstaged work repo-wide for the duration of its hook run.
+3. If the mutating session's `cargo test` build reads the file inside that window, it compiles
+   the **unmutated** code.
+4. The mutation **survives**. The run reports a green test where a red was expected.
+
+A surviving mutation reads as *"this guard is dead code"*, and the remedy that invites is to
+**delete a guard that was fine**. So the failure is not merely a lost result: it manufactures a
+confident wrong conclusion, in the direction of removing a working check, and neither party's
+output records that the window opened. `pre-commit` prints
+`Stashing unstaged files to …` / `Restored changes from …` in the *committer's* terminal — the
+one session for whom nothing is wrong.
+
+**The asymmetry is why it stays unnoticed:** only the party running an experiment is harmed,
+and only the party committing knows the window happened. Neither can see both halves.
+
+**This is not hypothetical arithmetic — the same run produced a genuine surviving mutation for
+an unrelated reason**, and the two are indistinguishable from the output alone. A doctor check's
+archive-path filter survived its mutation because the *test fixture* excluded the row by status
+before the filter was consulted. That took investigation to separate from "the code is dead",
+and a stash-window survivor would have looked identical while being neither.
+
+**Consequence for this checkout:** a mutation window and any peer commit are mutually exclusive,
+in both directions, and nothing enforces it — on 2026-09-06 it was arranged by message between
+two sessions and held only because both complied. Staging the mutation would protect it (the
+stash takes *unstaged* work only), but a staged mutation is one absent-minded `git commit` away
+from being committed, which is worse.
 ## Reproduction
 
 Not deterministic — it is a race, and reproducing it means winning one:

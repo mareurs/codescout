@@ -233,12 +233,25 @@ waiting for — and *then* instrument before changing anything.
 
 ## Resume
 
-If a second occurrence appears: capture load at failure time (`uptime`, concurrent wine
-processes) and add a temporary probe at
-`src/tools/run_command/output.rs:129-131` logging the `read_to_string` error that `.ok()`
-currently discards. That single `.ok()` is the highest-value instrumentation point — it is
-the one place a transient failure becomes an absent field with no trace.
+**The instrumentation this Resume used to prescribe is already shipped — do not rebuild it.**
+It asked for "a temporary probe at `src/tools/run_command/output.rs:129-131` logging the
+`read_to_string` error that `.ok()` currently discards". That `.ok()` is gone: the site now
+matches the error and leaves a trace, and its comment cites this file by name as the reason.
+The line range had drifted too, so a reader following the old text would have landed in the
+wrong block and then written a probe that already existed.
 
+Found 2026-09-06 by `librarian(action="doctor")`'s `open_bug_cited_from_source`, on its first
+run against this repo — a live bug cited from a source file whose citation had settled. Worth
+recording because this is the check's **subtle** case rather than its motivating one: the bug
+itself is legitimately still open (an unreproduced flake), so nothing about its `status` was
+wrong. Only its Resume had been discharged, silently, by the commit that cited it.
+
+**Still open, and what is actually left.** If a second occurrence appears: capture load at
+failure time (`uptime`, concurrent wine processes) and read the newly-emitted error rather
+than adding a probe for it. Behaviour at that site is deliberately unchanged — still `None` on
+error, no retry, no timeout tuning — because this file rules all three out as actively harmful
+on a single unreproduced occurrence. The only thing that changed is that the next occurrence
+leaves a trace instead of a silence.
 ## References
 
 - `docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md` — the
