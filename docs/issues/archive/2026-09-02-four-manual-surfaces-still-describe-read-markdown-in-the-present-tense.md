@@ -1,7 +1,7 @@
 ---
-id: b2c666abc279572c
+id: 8cddaf991ea51a6a
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: four manual surfaces still describe read_markdown in the present tense, and no gate reaches them'
 tags:
 - cluster/doc-contradicted-by-code
@@ -112,8 +112,33 @@ surfaces. Doing this once, after Task 8, costs one pass instead of two — but *
 plan's docs sweep (Task 10)**, or it becomes that task's silent debt rather than this one's recorded
 work.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+**Done 2026-09-06 — and three of the four items above were already done by other work.** The
+reproduction was run before this plan was read, which is the only reason that surfaced: item 1's
+tombstone, item 2's `SUMMARY.md` re-point, item 3's `overview.md` row and item 4's `peer.md` row had
+all landed since 2026-09-02, and nothing had closed this file.
+
+What actually remained, none of it named above:
+
+- **`read-markdown.md:23,37`** — the body stayed present-tense over a dead name *underneath* the
+  tombstone, which instructed the reader to substitute mentally (*"read `read_markdown` here as
+  `read_file`"*). Made current instead. A softened historical mention left in prose is
+  indistinguishable from a live citation to any parser over that namespace, and to the next reader.
+- **`cross-process-write-serialization.md:35`** — `edit_markdown` listed in a present-tense set of
+  tools that acquire the write lock.
+- **`augmentation-render-template.md` ×3** — `librarian_context`, from the **2026-05-02** collapse
+  rather than the 2026-09-02 one. A served page (`SUMMARY.md:60`), so reader-facing.
+
+Two look-alikes deliberately left: `src/tools/markdown/edit_markdown.rs` is a **live source path**
+(the tool retired, the module did not), and the past-tense blockquote tombstones in
+`document-section-editing.md` and `markdown-tools.md` are already the correct shape.
+
+**Not fixed here, filed instead:** `docs/manual/src/concepts/librarian-mcp.md` carries 18 retired
+names in a tool-inventory table and documents a separate MCP server that no longer exists. It is
+absent from `SUMMARY.md`, so it needs a delete/tombstone/rewrite decision rather than a substitution
+— `36ff17248b2c6ec7`.
+
+Fix SHA: `1f982a34f0a2371fd92d233f4aedf576c29f5c31`
+Patch-id: `c2ae9f523f258d1175f9704ff9a478cd7ff63aba`
 
 ## Tests added
 
@@ -142,4 +167,3 @@ cannot tell you whether you succeeded, which is why this file lists the surfaces
   `docs/issues/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`.
 - Sibling with a *directory* gap rather than a grammatical one: `3f0e7733ae77c707`.
 - `CLAUDE.md` § *Testing Discipline* — "Loudness is a property of a PATH, not of a failure."
-

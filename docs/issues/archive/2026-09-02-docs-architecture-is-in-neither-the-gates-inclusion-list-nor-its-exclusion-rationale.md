@@ -1,7 +1,7 @@
 ---
-id: '3f0e7733ae77c707'
+id: 259132d14f2b0f00
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: docs/architecture/ is in neither present_tense_surfaces'' inclusion list nor its exclusion rationale'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -107,8 +107,43 @@ declaring the directory covered.
    added to the walk is not the same as a file made correct, and conflating them is how this class
    keeps recurring.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+**Done 2026-09-06, and item 1's acceptance criterion was UNREACHABLE by the time it was actioned.**
+
+The plan says *"expect it to red immediately on `:213` and `:253` — that RED is the acceptance
+criterion, not a problem to route around."* Both lines had been repaired by the collapse programme's
+own sweep: `:213` now reads `doc(action="gather", id)` and `:253` `doc(action="gather") →`. The file
+carries **28** anchored calls, every one naming a live tool. So the 10 dead call sites this bug
+counted were **0** at fix time — the failure mode that fails *green*, where the change compiles, the
+gate passes, the diff is clean and nothing says the fix did nothing.
+
+**So wiring was proved by mutation, not by the suite.** Planted
+`` `artifact_augment(id="x")` `` in `docs/architecture/companion-plugin.md`, ran the gate, watched
+`a_documented_call_names_a_live_tool` fail naming that exact file and line, then reverted and
+confirmed the revert clean. A green suite after the addition is the identical output of an addition
+that never took effect.
+
+**And the mutation run caught a real defect nobody planted** — the directory addition earning itself
+on its first execution:
+
+```
+docs/architecture/augmented-artifacts.md:75
+  `doc(params=` — doc has no such parameter.
+```
+
+An unclosed brace in `augment={prompt: ..., params=...)` makes the extractor read `params=` as a
+top-level argument of `doc`. Line 210 of the same file already carried the correct form, so the
+document disagreed with itself. Fixed in the same commit.
+
+**Item 3 is discharged in the code, not here.** `present_tense_surfaces()`'s doc-comment now records
+that the addition red on a *parameter* finding rather than the predicted *name* findings, and that a
+pre-check for retired names under the directory returned none — sound, and still misleading, because
+these two tests ask two different questions and a survey of one says nothing about the other. The
+bug's own note stands: a directory added to the walk is not the same as a file made correct.
+
+Item 2 needed no work; the call sites were already repaired.
+
+Fix SHA: `1f982a34f0a2371fd92d233f4aedf576c29f5c31`
+Patch-id: `c2ae9f523f258d1175f9704ff9a478cd7ff63aba`
 
 ## Tests added
 
@@ -133,4 +168,3 @@ the exclusion rationale — this bug is one instance and the enumeration was nev
 - Siblings in the same class, different mechanisms: `bee04240275ee7d9`, `db80a4adc712c971`.
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a gate that is silent about a
   directory it never walked is a negative result that does not name its scope.
-
