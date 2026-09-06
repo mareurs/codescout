@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 115
+entry_high_water_F: 116
 entry_high_water_W: 107
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 107
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-116 | 2026-09-06 | med | self-friction | mitigated | **An uncommitted non-compiling edit is an unannounced build-level lock on every other session in the checkout — and the interesting cost is not the breakage, it is what it does to a peer's EVIDENCE.** Left a test stub in `mv.rs` with wrong trait signatures (`fn query` where the trait has `knn`) and went to read another file before compiling. For those minutes no `cargo test` in the tree could build, so a peer's run said nothing about their own code AND actively misdirected — it named a file and a symbol, both real, both irrelevant to them. A compile error is normally the most trustworthy signal there is: unambiguous, located, reproducible. On a shared checkout it is none of those things *about you*, and nothing distinguishes "your code is broken" from "someone else's uncommitted edit is". **Same shape as `OB-17`'s coupling lock, one layer down and worse in two ways:** it needs no gate, since the compiler supplies the coupling, and it is unbounded — it lasts exactly as long as the author is distracted, and `OB-17`'s victim at least receives a well-written refusal. **Author-side rule:** compile before you stop typing. The peer-side rule (`git status --short -- '*.rs'` before citing a run — the peer's own, written after failing to follow it) only tells them to distrust the result, never how to get a good one. Peer `codescout-3d` (`ba061586`) asked rather than fixed, which was correct and cost a round-trip. Kin `OB-17`, `OB-19`, `F-114`. |
 | F-114 | 2026-09-04 | med | self-friction | open | **A bug's own `## Resume` named the source repo — the one axis that reads green in the broken world.** The IL-4 hook's enforcement surface is the version-pinned install under `<profile>/plugins/cache/…/<version>/hooks/`, one per profile; the Resume said to confirm it in the source checkout. Following it, my first check printed `(absent)` for a *missing directory* — a string indistinguishable from a removed hook, and it would have been right by accident. Source-deleted ≠ retired, source-present ≠ firing, and `mtime` adjudicates neither (installed `1.20.4` stats two days BEFORE the commit that created 1.20.4) |
 | F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
 | F-111 | 2026-09-04 | med | self-friction | open | **A similarity test cited as a content test.** I archived two bug files with `doc(action="move")`, saw one `R` line in `git status --short` — the confirmation the tool's own `stage_hint` prescribes — and reported the move verified, twice. `R` pairs a delete with an add on SIMILARITY, so a destination holding a STALE copy of its source produces the identical `R`. The archives turned out fine; my evidence for saying so an hour earlier was worthless, and I only learned it by grepping the bytes after a peer filed a (misattributed) bug that made the question live. **Third instance of the recon skill's own Phase 3 law** after `R-125` and `F-78`, and like both of those it happened in a session that had invoked the skill — this one about an hour earlier. Nastier than its siblings in one respect: they substituted a proxy the author chose, this substituted the **tool's own suggested confirmation**, which reads as the vendor's verification step rather than as a ritual. Natural home for a fix: the `stage_hint` already names the `R` check and could name a content check beside it |
@@ -11726,6 +11727,52 @@ is stated twice and by two different people's reading."* Hitting that gate is
 what confirmed the second statement was not ceremony: I had already made the
 edit, and it still refused until I stated it again where a different reader
 looks.
+
+## F-116 — an uncommitted non-compiling edit is an unannounced build-level lock on every other session in the checkout
+
+**Valid:** invariant
+
+**Severity:** med — cost one peer session a full test build and a message round-trip;
+absorbed without rework.
+
+**Status:** mitigated — by a habit (`cargo check` before stepping away), not a mechanism.
+
+**Observed:** I wrote a test stub into `src/librarian/tools/mv.rs` with wrong trait
+signatures (`fn query` where the trait has `knn`, and a bare `Result<T>` where the scope's
+`Result` takes two parameters), then went to read another file before compiling it. For those
+minutes **no `cargo test` in the tree could build** — the lib-test target failed at compile
+stage, so every session sharing this checkout got a build error naming a file it had never
+touched.
+
+Peer `codescout-3d` (sessionId `ba061586-6581-4656-b0c5-acad83474de5`) ran a full test build
+into it, correctly inferred from the `bail!` string that someone was reproducing the
+`server-stack` red, and **asked rather than fixed** — which was the right call and cost a
+round-trip.
+
+**Why this is worth an entry rather than "be careful":** the interesting property is not that
+I broke the build, it is what a broken shared tree *does to a peer's evidence*. Their run
+said nothing about their own code, and the failure **actively misdirected** — it named a file
+and a symbol, both real, both irrelevant to them. A compile error is normally the most
+trustworthy signal there is: unambiguous, located, reproducible. On a shared checkout it is
+none of those things about *you*, and nothing distinguishes "your code is broken" from
+"someone else's uncommitted edit is".
+
+**The lock framing, which is the transferable half.** `OB-17` records a *coupling gate*
+turning an uncommitted shared file into an emergent mutual-exclusion lock. This is the same
+shape one layer down and strictly worse in two respects: it needs **no gate** — the compiler
+supplies the coupling — and it is **unbounded**, lasting exactly as long as the author is
+distracted, with no refusal text to tell the blocked party anything. `OB-17`'s victim at
+least gets a well-written refusal; this one gets an error about someone else's symbol.
+
+**What actually protects a peer:** compiling before you stop typing. `cargo check` is
+seconds and would have cost nobody anything. Stated as a rule the author can follow, because
+the peer-side rule (`git status --short -- '*.rs'` before citing a run — the peer's own,
+written after failing to follow it) only tells them to *distrust* the result, never how to
+get a good one.
+
+**Not filed as a bug.** There is no defect here; every component behaved correctly. It is a
+friction of the shared-checkout substrate, and the durable form of it lives in
+`observer-blindness:OB-19` and the shared-state queue rather than in a fix.
 
 ## Template for new entries
 

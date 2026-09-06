@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 18
+entry_high_water_OB: 19
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-19 | 2026-09-06 | **a mechanism emits a clear, timestamped, real-time signal and routes it to the one party for whom it is uninteresting, while the party it damages receives nothing** — not "nobody can see it" (`OB-6`, `OB-15`) and not "the author cannot see it" (`OB-1`, `OB-12`): the observation is perfect, immediate, correctly formatted, and in the wrong terminal. `pre-commit` prints `Stashing unstaged files` / `Restored changes` in the COMMITTER's terminal while reverting a PEER's in-flight work to HEAD for the hook's duration | the session whose work is stashed — it happens in another process, leaves the file byte-identical afterwards, and by the time that session could look, the state is back | wrong instrument on both sides: the affected party cannot check for a state that no longer exists, and the committer would have to already know it matters to someone, which is knowledge about another session's activity rather than their own | none — today's mitigation is a committer who understands the lines choosing to say so, i.e. politeness. Two uncosted directions: stop stashing (several hooks already read the index via `git show :<path>`), or make the stash line NAME the files it took, which is cheap because the signal already exists |
 | OB-18 | 2026-08-31 | a comment in repo A asserting a fact about repo B goes stale silently — and manufactures a plausible design (inverse of OB-4: a **liveness** marker read as **event history**) | anyone designing from the comment's own repo | wrong instrument | **none yet** — worklist |
 | OB-17 | 2026-09-04 | **a gate that enforces a coupling by requiring two files in ONE commit turns any uncommitted edit to the shared half into a mutual-exclusion lock over everyone else's use of it** — emergent: nobody declares it, nobody acquires it, and the holder is doing nothing wrong | **the session holding the uncommitted class file.** Nothing in the act of editing a file surfaces a gate that couples *other people's* commits to it — their own tree is clean and green, and the coupling fires in someone else's process on someone else's commit. Measured: four dirty issue-cluster files blocked bug filing across most of the taxonomy, and the holder had no way to know | wrong instrument on BOTH sides — the holder cannot check a condition no surface reports, and the blocked party's *careful* move (satisfy the gate) is the harmful one | none yet — cheapest candidate is a **read**, not a rule: on refusal, report whether the named class file is currently dirty and by whom. `ledger-counts` already reads the index, so the worktree check is one more call, and it turns "add your line" into "add your line, but this file is held". **Sharp end:** staging the class file clears `ledger-counts` and is exactly what makes `unreviewed-content` green, so the action satisfying gate A disarms gate B and a peer's prose rides in under the wrong Session-Id having passed every check. 1 incident, 4 sessions |
 | OB-16 | 2026-09-04 | **a redirect, hint or guard in repo A names a capability registered in repo B** — correct when written, decaying when B changes, and no gate in *either* repo can evaluate the pair, because neither repo holds both halves at the moment its own gate runs | **both repos' gates, each for its own reason and neither for carelessness** — codescout's three surface gates enumerate `DEPRECATED_TOOL_NAMES` against codescout's own text at test time, and a version-pinned plugin in a per-profile cache is not in that tree; the plugin holds no copy of the tool registry and runs with no server, so it can check that a hook *fires* but never that what it *names* still exists. The missing thing is a corpus, not attention | wrong instrument — the filing session read the deny message and the doc inventory, and neither can answer *"does the named tool still exist?"*; reading the hook source would not have helped either, since the source was correct-and-obsolete and only the installed copy's absence settles it | none yet — candidate is a smoke check in the plugin's own suite asserting every tool named in a hook redirect is one the currently-installed server advertises, which must run where both halves co-exist rather than in either repo's CI. **Fails closed**, and that sets the blast radius: a stale advisory costs a round-trip, a stale `permissionDecision: deny` removes the capability. 1 instance, 1 session |
@@ -1822,6 +1823,76 @@ true, which is why it was not the one that misled.
 
 **Status:** validated — comment verified against `lib.mjs:333` and `:348`, against a live slot's
 `hook_at` age, and against the companion's `session-start.mjs:76` stamping site.
+
+## OB-19 — the event is observable in real time, and only by the party it does not affect
+
+**Valid:** conditional — `pre-commit` stops stashing unstaged files
+
+**Rests on:** `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`
+and its queue item 3a; observed across two sessions 2026-09-06.
+
+**Class:** a mechanism emits a **clear, timestamped, real-time signal** and routes it to the one
+party for whom it is uninteresting, while the party it damages receives nothing at all. This is
+**not** "nobody can see it" (`OB-6`, `OB-15`) and **not** "the author cannot see it" (`OB-1`,
+`OB-12`) — the observation is perfect, immediate, correctly formatted, and in the wrong terminal.
+Every other entry in this ledger is blind because the signal is absent or ambiguous. Here it is
+present and well-addressed to the wrong person.
+
+**The instance.** `pre-commit` stashes every unstaged file for the duration of hook execution:
+
+```
+[INFO] Stashing unstaged files to /home/marius/.cache/pre-commit/patch<ts>-<pid>
+[INFO] Restored changes from /home/marius/.cache/pre-commit/patch<ts>-<pid>
+```
+
+Those two lines print in the **committer's** terminal. On a shared checkout the files stashed are
+routinely a *peer's* in-flight work — reverted to `HEAD` for the length of a hook run, restored
+after. Measured 2026-09-06: a peer's commit stashed seven of this session's uncommitted doc files,
+and this session learned of it only because the peer quoted the lines back over `SendMessage`.
+
+**Blind party:** the session whose work is stashed — structurally, not carelessly. The
+revert-and-restore happens in another process, leaves the file byte-identical afterwards, and
+produces no artifact in the affected session's tree, logs, or tooling. There is no check it could
+run: by the time it could look, the state is already back.
+
+**Who can see it:** the committer, perfectly and in real time — and has **no reason to care**,
+because from their side it is routine hook noise printed on every commit they have ever made. That
+inversion is the whole class.
+
+**Plausible-answer property:** the damage lands as a **false negative in someone else's
+experiment**. A mutation run whose build falls inside the window compiles the *un-mutated* code, the
+mutation **survives**, and survival reads as *"this guard is dead code"* — inviting the deletion of
+a guard that was fine. The measurement completes, reports a plausible number, and is wrong in a
+specific direction. Nothing in either session's output records that it happened.
+
+**Vigilance:** wrong instrument on both sides, and unusually so. The affected party cannot check for
+a state that no longer exists. The committer *can* see it, but would have to already know it matters
+to someone — which is knowledge about **another session's activity**, not about their own work. No
+amount of care about your own commit surfaces it.
+
+**Mechanism status:** none. The 2026-09-06 mitigation was that a committer who happened to
+understand the lines said so — politeness, not a mechanism, and exactly what § *Observer Blindness*
+means by *a trigger the model must notice is a policy*. Two directions are recorded and **neither is
+costed**: (a) stop stashing at all, since several hooks here already read the index via `git show
+:<path>` — this closes the class rather than reporting it; (b) the cheap **read**, available because
+the signal already exists — have the stash line name the files it took, so a committer can relay it
+without knowing in advance that it matters to anyone.
+
+**The transferable test, which is what makes this mineable:** when a mechanism logs something, ask
+**whose terminal it lands in** and **whose state it changed**. When those are different parties, the
+signal is decoration for its reader and absent for the party who needs it — and the fix is usually
+routing, not detection, because the hard part is already solved.
+
+**Instances:** the 2026-09-06 seven-file stash (this entry); the mutation-window hold that prompted
+it, where the hazard was avoided *only* by a peer announcing uncommitted state in advance;
+`docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`'s original
+symptom — peers reading wrong bytes or hitting `ENOENT` — which is the same mechanism reaching a
+**different victim**, and is why that file records an operation on wrong input where this records an
+inverted measurement.
+
+**Status:** open — 2 instances, 2 sessions, 2026-09-06. Derived jointly with `codescout-3d`
+(sessionId `ba061586-6581-4656-b0c5-acad83474de5`); the roles-swapped framing is this session's,
+the underlying hazard is that file's.
 
 ## Template for new entries
 

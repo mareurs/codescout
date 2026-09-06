@@ -219,6 +219,35 @@ ordering decisions. Filed as R-55 (`miss → proposal`) in
 **Valid:** dated 2026-08-06
 ## run_command observations
 
+### T-34 — a chained `run_command` reports the ECHO's exit code, not the command's
+**Session:** cda3afe5 (codescout self, 2026-09-06)
+
+`run_command("cargo test …; echo \"LANE exit=$?\"")` returns the **echo's** status in the
+envelope, so the response reads `exit_code: 0` while cargo exited `101`. The `$?` inside the
+echo captures cargo's status correctly and prints it to **stdout** — so the truth is in stdout
+and a zero is in the envelope, disagreeing with nothing to mark it. `passed: 0` in the same
+response compounds it: that reads as *"no tests matched the filter"* rather than *"nothing
+compiled"* — a plausible value where an error belongs.
+
+Hit twice in one evening by peer `codescout-3d` (`ba061586`) and reported here. This session had
+used the identical chained form for **every** four-command gate run that day and read the right
+number only because it greps the echoed `LANE exit=` marker out of stdout rather than reading
+`exit_code`. That is habit, not design, and one attention lapse from the same failure — which is
+why this is filed even though it never actually misled this session.
+
+**Verdict:** legitimate — deliberately. The call is the gate's own documented form and the chain
+is correct; the defect is in what the envelope reports about it. Filing it as `wrong-tool` would
+aim the remedy at the caller, and there is nothing for a caller to do differently except
+distrust a field.
+**Prompt gap:** `CLAUDE.md` § *Development Commands* says *"Read the exit codes instead"* — that
+is about `;` vs `&&` and which STEP may be short-circuited, not about **which command's** code the
+envelope reports. No surface states that a chained `run_command`'s `exit_code` is the last
+command's, so the trailing `echo` the gate's own form encourages (to label each lane) makes the
+envelope unconditionally `0`. The working practice — echo a labelled exit per lane, then grep the
+marker instead of reading `exit_code` — is undocumented. Two candidate fixes: `run_command`
+reports the highest non-zero exit in a chain, or the gate's documented form carries the
+marker-read instruction with it.
+
 ### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
 
 **Tool:** `run_command` · **Verdict:** wrong-tool (IL3 violation) · **Observed:** 2026-07-28,
