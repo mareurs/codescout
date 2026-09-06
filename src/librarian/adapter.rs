@@ -1010,7 +1010,7 @@ mod tests {
     /// for that entire time and then report, truthfully, that nothing is
     /// running: a brand-new instrument reproducing the exact non-discrimination
     /// it was built to remove.
-    /// `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+    /// `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
     ///
     /// **The `reindex` and `link_scan` rows are discriminators and must not be
     /// deleted as redundant.** Without them, an arm rewritten to return `false`

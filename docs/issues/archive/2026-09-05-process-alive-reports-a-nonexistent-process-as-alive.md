@@ -1,10 +1,11 @@
 ---
-id: d1dabefbd8c5b413
+id: d78bb9d7d7acfb0b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: process_alive reports a nonexistent process as alive, and terminate_process would signal a whole process group'
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-06
 opened: 2026-09-05
 owner: marius
 related: []
@@ -166,8 +167,8 @@ is a fact about that directory's naming scheme, not about signal semantics, and
 it should not silently start depending on a platform detail. Its comments were
 corrected in the same change, since they asserted behaviour that is now false.
 
-SHA: *(pending — this commit)*
-patch-id: *(pending — this commit)*
+SHA: `01b185d6` (**`experiments`**)
+patch-id: `5ee25dcd470221a49b7da116dcc1f796da18c908`
 
 ## Tests added
 
@@ -210,7 +211,7 @@ explicitly-named function, not a relaxation of this guard.
 - `src/tools/rendezvous.rs` — the 2026-08-18 pid-0 workaround this generalises.
 - `src/lsp/client.rs:1614` — the safety comment that is correct about its own
   caller and does not transfer.
-- `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+- `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
   — the fix whose liveness check surfaced this.
 - `docs/trackers/reconnaissance-patterns.md` § `R-182`.
 
@@ -231,4 +232,3 @@ new class rather than in `cluster/unclassified`. The rival candidate considered
 and rejected was `cluster/guard-narrower-than-its-name` (`IC-14`) — rejected on
 the remedy test: nothing here was guarded too narrowly, a function returned a
 wrong answer, and the repair is a disambiguator rather than a wider guard.
-

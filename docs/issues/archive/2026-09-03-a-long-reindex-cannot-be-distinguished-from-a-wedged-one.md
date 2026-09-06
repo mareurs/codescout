@@ -1,13 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - librarian
 - observability
 - reindex
 - codescout-tool
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-06
 opened: 2026-09-03
 owner: marius
 related:
@@ -210,7 +210,7 @@ Discipline*.
   down surfaced a live defect: `platform::process_alive` cast `u32 as i32`, so
   `kill`'s addressing mode flipped and a nonexistent process read as **alive**.
   Filed and fixed as
-  `docs/issues/2026-09-05-process-alive-reports-a-nonexistent-process-as-alive.md`;
+  `docs/issues/archive/2026-09-05-process-alive-reports-a-nonexistent-process-as-alive.md`;
   this fix's stale-row pruning does not work without it.
 
 **A third question the plan did not contain, and the one that would have
@@ -227,8 +227,12 @@ arm, pinned by
 is a full-catalog scan and would contend with the very run an observer is
 asking about; the point of `status` is that it is cheap and lock-free.
 
-SHA: *(pending — recorded at archive)*
-patch-id: *(pending — recorded at archive)*
+SHA: `90336870` (**`experiments`**)
+patch-id: `a4b40a8eec5b72daa2d97683935bdaff36aaba2a`
+
+Depends on `01b185d6` / patch-id `5ee25dcd470221a49b7da116dcc1f796da18c908`
+(`platform::process_alive`), without which the stale-row pruning here is inert:
+a dead holder's pid read as **alive**, so its row was never collected.
 ## Tests added
 
 The guard demanded above — *"a second process reading progress while a first is
@@ -255,7 +259,24 @@ unparseable rows surfaced not dropped, prune-dead-keep-live), 5 in
 
 **Read out of the DEFAULT lane, never the lean one.** `--no-default-features`
 switches the librarian off, so it compiles none of this code and returns
-`exit=0` whether it is right or broken.
+`exit=0` whether it is right or broken. Measured on the gate run that shipped
+this: **0** `librarian::` tests in the lean lane against **1714** in the
+default one.
+
+**Live-verified 2026-09-06**, after `cargo rb` and an MCP reconnect:
+`librarian(action="status")` dispatches and returns its negative-result note
+verbatim. The pre-reconnect server refused the same call with `unknown action
+'status'`, which is the discriminating pair — one binary without the code, one
+with it, same call.
+
+That check was nearly misread, and the misreading is worth keeping. The
+rebuilt binary was on disk and a server process was live, yet the call failed;
+the available conclusion was "the rebuild missed my changes". It had not.
+`/proc/<pid>/exe` on the serving process read **`(deleted)`** and did not
+contain `reindex_in_progress:`, while the on-disk file at the same path did —
+two objects behind one name. Same shape as the misdiagnosis this bug is about:
+several signals consistent with both stories, and exactly one that separates
+them.
 ## Workarounds
 
 > **Corrected 2026-09-05 — the workaround below was blind on the run that needs it most.**

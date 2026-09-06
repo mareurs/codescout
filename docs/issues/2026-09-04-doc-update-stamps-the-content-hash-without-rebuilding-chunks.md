@@ -9,9 +9,7 @@ closed: ''
 opened: 2026-09-04
 owner: marius
 related:
-- '7695ad877b44e96a'
-- a766aad35b0b7610
-- '823d9ccaa13e2def'
+- '6ae552cfc223cd6d'
 severity: high
 ---
 
@@ -144,7 +142,7 @@ Not implemented. Three options, in ascending cost, all in mechanism terms:
 
 **B is the recommended first move** — smallest diff, no new state, and it removes the one-way door rather than adding a second mechanism to compensate for it. C is worth filing as the follow-up.
 
-**Do not "fix" this by scheduling periodic `reembed=true`.** That is a full re-embed of the corpus (28,140 chunks, ~7 minutes, holding the project write lock throughout — see `823d9ccaa13e2def`) standing in for a one-line write. It also fails silently the moment someone stops running it.
+**Do not "fix" this by scheduling periodic `reembed=true`.** That is a full re-embed of the corpus (28,140 chunks, ~7 minutes, holding the project write lock throughout — see `6ae552cfc223cd6d`) standing in for a one-line write. It also fails silently the moment someone stops running it.
 
 ## Tests added
 
@@ -168,6 +166,6 @@ Then re-run `drift-by-root.py` against a non-codescout root to confirm the corpu
 
 - `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`7695ad877b44e96a`) — the symptom this explains; its hypothesis-3 refutation is invalidated here.
 - `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` (`a766aad35b0b7610`) — the sibling absorbing state, same `reembed=true` escape, different write.
-- `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md` (`823d9ccaa13e2def`) — why the prescribed workaround is expensive.
+- `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md` (`6ae552cfc223cd6d`) — why the prescribed workaround is expensive.
 - `docs/trackers/retrieval-benchmark.md` § *2026-09-04 (dawn)* — the natural experiment and its numbers.
 - `src/librarian/indexer.rs:184`, `:395`, `:409`; `src/librarian/tools/update.rs:633`, `:661`, `:664`; `src/librarian/frontmatter.rs:118`.

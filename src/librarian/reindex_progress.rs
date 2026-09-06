@@ -25,7 +25,7 @@
 //! spot counted six times, which at the point of use is indistinguishable from
 //! corroboration.
 //!
-//! - `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+//! - `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
 //! - `docs/trackers/reconnaissance-patterns.md` § `R-182`
 //!
 //! # The discriminator is `done`, never elapsed time

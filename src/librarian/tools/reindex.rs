@@ -1069,7 +1069,7 @@ mod tests {
     /// no new chunk rows for unchanged content, the `embedded_sha256` stamp lands
     /// after the loop), which is how a healthy 28,379-vector run came to be
     /// diagnosed "wedged" from six separate proxies on 2026-09-04.
-    /// `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+    /// `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
     /// `reconnaissance-patterns:R-182`
     ///
     /// **Three fixture details are load-bearing.**

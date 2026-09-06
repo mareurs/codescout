@@ -357,7 +357,7 @@ not held, and the resulting change would pass review by matching the file.
 
 **Status:** promoted-to-bug-tracker
 
-**Fix idea / Pointer:** `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+**Fix idea / Pointer:** `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
 
 **Rests on:** the reindex embed loop staying outside the `ctx.catalog.lock()`
 scope at `src/librarian/tools/reindex.rs:346-390`. If that loop is ever moved
