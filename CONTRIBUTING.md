@@ -168,7 +168,7 @@ the lean lane is what mirrors `no-features`. A test that reaches a `#[cfg(featur
 item without gating itself compiles and passes under default features, so the default lane
 cannot see it by construction.
 
-Run them in that order. Both lanes share one `target/`, and `tests/cli_artifact.rs` resolves
+Run them in that order. Both lanes share one `target/`, and `tests/cli_doc.rs` resolves
 `target/debug/codescout` by path at run time, so the lean lane leaves a librarian-less binary
 sitting there; ending on the default lane puts it back.
 

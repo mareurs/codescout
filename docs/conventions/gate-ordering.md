@@ -34,7 +34,7 @@ which command they justify.
 
 ## Why the order is load-bearing — the shared `target/` trap
 
-We share one `target/`, and `tests/cli_artifact.rs` resolves `target/debug/codescout` **by path at
+We share one `target/`, and `tests/cli_doc.rs` resolves `target/debug/codescout` **by path at
 run time** — so the lean lane leaves a librarian-less binary there, and a concurrent
 default-features run then execs it and dies with `unrecognized subcommand 'artifact'` on 10 of 11
 tests, reading exactly like a librarian feature-gating regression in whatever you just committed. It

@@ -16,13 +16,10 @@ Why each part, one line each. Every measurement, date and superseded form →
   librarian-less binary that reds the CLI tests for the *next* session, reading exactly like a
   feature-gating regression in whatever they just committed. Ending on the default lane rebuilds it,
   so **following the gate cannot arm the trap for anyone else — provided both lanes actually run.**
-  The file was `tests/cli_artifact.rs` holding 11 tests until the 2026-09-02 collapse renamed it,
-  and the superseded *"reds 10 of 11"* is deliberately **not** restated with a fresh number:
+  The superseded *"reds 10 of 11"* figure is deliberately **not** restated with a fresh number:
   re-deriving it means arming the shared trap on purpose while other sessions are building against
   the same `target/`. Verified 2026-09-05 — the target is `cli_doc`, it holds **15** tests, and all
-  15 pass against a librarian-bearing binary. Note the rename is why a name-based grep for the old
-  file finds nothing: `claude_md_contains_no_deprecated_tool_names` gates retired *tool* names, and
-  `cli_artifact` is a **filename**, so no gate in this repo was ever going to catch this.
+  15 pass against a librarian-bearing binary.
 - **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the
   default lane running, and `&&` withdraws it *exactly when something is wrong*. Worse than a
   skipped repair: `cargo test` **builds, then runs**, so a failing lean lane has already
@@ -413,6 +410,27 @@ corpus states the point better than this section can — an entry id cannot be *
 citing it, the only escape being a fenced block, so
 `docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md` is this class
 holding about the very ledger that records it.
+
+**Recording history is where this class bites hardest, so record less of it.** A superseded
+fact written in prose — a former filename, an old count, a retired tool name — is
+**indistinguishable from a live citation** to any parser over that namespace, and the parsers
+here have no escape for *mention*. `audit_doc_refs` checks every backticked path-shaped token
+against the filesystem and caps severity only for a fenced block (`code_block`) or a released
+changelog section (`released_history`, whose own legend reads *"history, which must not be
+rewritten to satisfy a linter"*). **Ordinary backticks are not an escape** — they get
+`policy_default`, which is `high`, which reds CI. Measured 2026-09-06: `Audit Doc Refs` failed on
+exactly three `high` findings, all naming one retired test filename, and one of the three was a
+deliberate note that the file *used to* be called that. The note cost more than it bought — and
+this paragraph named that filename too until the gate's own output was re-read, which is the
+section above holding about the sentence that describes it.
+
+So the test is **decision**, not interest: keep the history a reader would **act wrongly without**
+— a rejected approach they would otherwise retry, a measurement whose method changes how you read
+the number, an exception someone already paid for. Everything else — a rename, a tidy-up, a count
+that moved, a path that changed — just make the text current and delete the past; the commit
+message and `git log` already hold it, and that is where a reader who genuinely needs it looks. If
+you must keep a dead path, **fence it**. Do not soften a live citation into a "historical" mention
+and leave it in prose: the gate cannot tell the difference, and neither can the next reader.
 ## Design Principles
 
 codescout's conventions and design principles live in memory (auto-listed at session start) — read them when writing codescout code:
