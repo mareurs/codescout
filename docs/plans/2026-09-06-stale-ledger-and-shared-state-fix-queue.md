@@ -331,6 +331,59 @@ of reasoning about call graphs had only produced an argument.
 So the full sequence before citing a gate result on this tree is three steps, not one: dirty
 check, positive attribution, then **read the failing test's name and ask whether it exists at
 `HEAD`**. Only the third distinguishes *someone is working* from *something is wrong*.
+
+### 3c — CI: four sessions each doing the right thing at a normal rate destroys the signal
+
+The purest instance of this class in the corpus, because **there is no antagonist anywhere in
+it**. 3a's stash needs someone to commit; 3b's dirty tree needs someone mid-edit. 3c needs only
+that four people each behave correctly at an ordinary cadence.
+
+`.github/workflows` sets `cancel-in-progress`, deliberately, with a comment explaining why: a
+15-job matrix per push starves the runner pool when pushes land in a row. That is correct, and
+its premise — pushes are occasional — was true when it was written.
+
+**Measured 2026-09-06, last 12 runs: 9 cancelled, 2 failure, 0 success.** Nobody could cite a CI
+result for over an hour, and all four sessions had been reading a red-then-cancelled matrix as
+though it told them something.
+
+**The quiet part, again a status word that reads like success:** all 9 cancelled rows report
+`completed` in `gh run list`'s `status` column. Only `conclusion` says `cancelled`. Without
+`--json conclusion` the history looks healthy.
+
+**The aggregate says the signal is unusable; only the DISTRIBUTION says where to intervene.**
+*"Nobody is misusing CI"* is true of the mechanism and useless for choosing an action. Seven of
+the nine cancellations came from one participant — this session — each push individually
+justified (gate green, work complete, land it) and collectively the largest single consumer of
+the signal everyone then wanted to read. An emergence framing that stops at "no one is at
+fault" discards the only measurement that locates a fix.
+
+**On a shared branch, "hold pushes" is not sufficient — hold COMMITS.** A local commit rides out
+on someone else's next push. Observed directly today at `9e20d3ad..9c1709b0`, where a peer's
+push carried five of this session's commits. A session holding only pushes can break the window
+without doing anything wrong.
+
+#### Two second-order findings, both from the coordination attempt rather than from CI
+
+Contributed by `codescout-98` (sessionId `8dba66b0-af4b-4cda-a333-54a0605b318e`) and
+`cda3afe5-…`, and they are the parts a reader will not anticipate.
+
+- **A coordination instruction that TIGHTENS mid-window has the same failure shape as the thing
+  it coordinates.** The window opened with "land it NOW rather than politely idle"; a peer did
+  exactly that; the commits-must-hold-too refinement arrived afterwards. So a participant acting
+  correctly on the version of the instruction they held produced the state the new version
+  forbids — and neither party could see it without re-measuring. This session reported
+  `origin/experiments..HEAD` as empty; that was true when taken and **expired inside a minute**
+  while being carried as the window's precondition.
+- **The obvious repair is wrong.** `git reset --soft` to un-commit the stray work moves the
+  branch pointer for *every* session on the checkout and drops the files back to uncommitted,
+  where the next index-scoped commit sweeps them. The cure's blast radius exceeds the disease's,
+  and the peer correctly declined it.
+
+**Direction.** Unlike 3 and 3a this one has a cheap first move that needs no design: read
+`conclusion`, never `status`. Beyond that the real question is whether `cancel-in-progress`
+should be conditioned on something other than "a newer push exists" — a matrix that has already
+reached the platform-specific jobs is nearly finished and is exactly the one worth keeping.
+Not costed.
 ## Not in this queue, and why
 
 - **`experiments` CI has been red for 4 days** (last green 2026-09-02 06:45), three independent
