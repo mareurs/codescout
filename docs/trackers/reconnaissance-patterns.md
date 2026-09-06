@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 185
+entry_high_water_R: 186
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-186 | 2026-09-06 | miss ×1 → rule (found by the peer whose file I duplicated) | **Capture-on-notice has no corpus-check step, and a bug file is the one artifact whose duplicate is invisible to its author** — the search that would find it is the thing you are about to write. Filed a complete bug file for a stale error message; `codescout-98` had filed the same defect hours earlier, already on `origin/experiments` at `29c5b461`. The two slugs shared **not one word** (`the-invalid-action-message-omits-edit-…` vs `body-edits-invalid-action-error-omits-…`), so a slug grep would also have missed — the query that works is **semantic over the defect**, or a grep for the *symptom string* (`invalid action`). **The cost is not the duplicate:** the existing file had already falsified this one's prescribed fix (adding `edit` to `edit_markdown.rs:281` would make that message false for `plan_section_edit`'s other callers; the real repair validates one layer up at `apply_body_edits`). So the miss produced **a plausible one-line diff that would have shipped a second defect**, behind a confident bug file. Same shape as *run the reproduction before reading the fix plan*, one level out: read the corpus before writing the plan, because the corpus may hold the refutation. Does **not** weaken capture-on-notice — one `doc(find, kind="bug", semantic=…)` is not "later". | `R-186` |
 | R-183 | 2026-09-06 | miss ×1 → rule | **The cost of re-deriving a wired check is the REMEDY, not the number — and the check's cause line is authored, not measured.** Hand-rolled a Python scan of `docs/issues/**` for frontmatter ids not matching `sha256(abs_path)[:16]`, when `librarian(action="doctor")` already ships the check. It returned **8**; `doctor` returns **8**. So the standard warning — *"re-derives a worse version and reports its own shortfall as a clean backlog"* — **did not apply**: accuracy was fine, which is what makes this worth an entry. What was lost is that a hand-rolled scan **can only return the finding, never the fix**: `doctor` also ships `fix="repair_frontmatter_id"`, which repaired all 8 with 0 failures. Reaching it was **accidental** — a grep of `docs/issues/` surfaced archived bug files that named the repair; nothing deliberate pointed at it, so this is a mechanism gap, not a discipline gap. **Then the inverse:** having reached the instrument, its `detail` asserted *"a move re-keys the row"* — **false for 8 of 8**, all worktree-minted, identified positively by `sha256("<repo>/.worktrees/tool-collapse/<rel_path>")[:16]` reproducing the stale id with `git log --follow --diff-filter=R` empty. So `doctor` was right on the finding, uniquely able on the remedy, and **wrong on the cause**, where the ad-hoc reasoning was right. **Generative:** a wired check's **finding** is recomputed against live state every run; its **explanation** is a string a human wrote once, ages like a comment, and arrives in the same JSON inheriting the measurement's authority. Sharper because the 2026-08-18 fix had *already* split this field once, partitioning by id **shape** as a proxy for *was this row moved* — well-formed does not imply moved. **Runnable:** (1) before deriving a population by hand, grep `docs/PROBES.md` and `librarian`'s `fix=` enum for the noun — not for a better number, to learn whether the repair exists; (2) read a wired tool's counts as measurement and its `detail`/`hint`/`reason` prose as an assertion of the same rank as a code comment, asking what the check can actually observe. | `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`; fixes `593614aa` (8 ids + 17 dead citations), `c7a54d12` (the cause-line bug); `IC-22` sixth member |
 | R-185 | 2026-09-06 | miss → rule (caught by a peer, not by me) | **A measurement your own action DETERMINED says nothing about the state before it — and the reading you reach for will be the one that favours you.** Having run workspace-wide `cargo fmt` four times while three peers held uncommitted Rust, I ran `cargo fmt --check`, got a clean exit, and called it "weak evidence" my earlier runs were no-ops. It is ZERO evidence: `cargo fmt` is the operation that MAKES `--check` clean, so a clean check taken after my runs is monotone under my own intervention — exit 0 in both worlds. "Weak" was assigning a small positive number to something with none. **The direction is what makes it a class:** not a neutral misreading but the one that lowered my estimate of harm *I had caused*, on a measurement *my own action determined*. **How it extends the published law:** § *Testing Discipline*'s monotone rule is about a TEST being blind — a property of the check, sitting in the repo. Here the AUTHOR is the cause of the blindness, and a MOTIVE selects which blind check gets reached for; "ask which direction your assertion is monotone under" never prompts *did I make it so, and does the answer suit me?* **The contrast:** `codescout-98`'s `git status --short -- '*.rs'` returning empty establishes the PRECONDITION is absent where my `--check` established the TRIGGER is absent — different scopes, so that agreement carries information (`R-184`) and mine carried none. **Runnable, two questions not one:** (1) did my own action determine this value? if yes it says nothing about before; (2) is the reading I reached for the one that favours me? — the second is a fact about why THIS measurement came to mind rather than another, and it operates without announcing itself. Coda: the right conclusion from an unrecoverable question is the standing mechanism (`--check` first, every time), not more forensics. | caught by `codescout-98` (sessionId `8dba66b0-af4b-4cda-a333-54a0605b318e`); kin `R-182`, `R-184`, `OB-1` — I wrote R-182 about six non-discriminating proxies this same session, then produced one about my own history and did not notice |
 | R-184 | 2026-09-06 | rule (refines a published one) | **A corroboration check whose AGREEMENT is worthless can still be a good detector, because disagreement is not symmetric with it.** `CLAUDE.md` § *Reaching a Peer Session* says two instruments agreeing is evidence only if their scopes differ — true, and it leaves a false implication: that such a comparison is worthless and can be skipped. Agreement between same-scope instruments is worth ~nothing; **disagreement between them is worth a lot**, and is often MORE diagnostic than a disagreement between independent instruments, because the shared scope has already eliminated most legitimate reasons two readings could differ, leaving a short nameable list. **Case:** two sessions counted `librarian::tools::doctor::tests` minutes apart on one shared checkout and both got 249 — establishing nothing (same binary, same tree, one scope counted twice). A divergence would have been strong evidence of exactly one thing: `pre-commit`'s unstaged-file stash reverting a peer's tree mid-run, very nearly the only mechanism that makes two sessions disagree about one test binary in that window. **Why it's mis-read:** the published rule warns against over-trusting agreement, so the natural response is to discount the comparison — i.e. not run it — which discards the half that works, invisibly, since you never see the disagreement you declined to look for. **Runnable:** take both cheap readings, decide BEFORE looking which outcome you'll act on, name in advance what a divergence could mean (if you can't name a mechanism, the check really is worthless and you've established that cheaply), then read only that direction — and state the asymmetry when reporting, because "both said 249" reads as corroboration to every later reader. **General form:** a test whose PASS is uninformative can still be a good detector if its FAIL has few causes; we discard checks by asking what a green tells us, and this class is discarded correctly by that question and kept correctly by the other one. | derived jointly with `codescout-3d` (sessionId `ba061586-6581-4656-b0c5-acad83474de5`); kin R-182, and the monotone-assertion law in `CLAUDE.md` § *Testing Discipline* |
@@ -8605,6 +8606,67 @@ formulations and it is kept here over mine.
 Knowing the class prevented nothing (`OB-1`): I spent this session writing
 `R-182` about six non-discriminating proxies, then produced one about my own
 history and did not notice until a peer said so.
+
+
+## R-186 — capture-on-notice has no corpus-check step, and a bug file is where a duplicate is invisible to its author
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Bug Tracking* — *"Capture on notice — add the bug file the
+moment a bug is noticed … not at task end."* The rule is right and has no scouting step in
+it; that absence is what this entry is about.
+
+**Observed:** 2026-09-06. This session hit a stale error message while editing a tracker,
+followed capture-on-notice, and wrote a complete bug file — root cause, dated git
+archaeology, hypotheses, prescribed fix. `codescout-98` had filed the same defect hours
+earlier and it was already on `origin/experiments` at `29c5b461`. The duplicate was deleted
+(`doc(action="delete", force=true)`) along with a `+1:` append it had made to the wrong
+cluster's `**Members:**` line, which had to be reverted too.
+
+**Why the reflex answer misses it.** Reconnaissance as written scouts the *substrate* — the
+struct, the signature, the tool's real output — because that is where a plan goes stale. It
+does not scout the *corpus*, and for a bug file the corpus is the seam. **A bug file is the
+one artifact whose duplicate is structurally invisible to its author**, because the search
+that would find it is the thing you are about to write: at notice time you hold a symptom
+and a mechanism, not the slug someone else chose for them. Here the two slugs shared not
+one word —
+`the-invalid-action-message-omits-edit-the-action-most-callers-want` against
+`body-edits-invalid-action-error-omits-the-edit-action` — so even a slug grep would have
+missed, and the right query was semantic, over the defect rather than its name.
+
+**Cost, and it is not the duplicate.** The wasted file is cheap. The expensive part is that
+the existing file had already **falsified this one's prescribed fix**: it establishes that
+adding `edit` to `edit_markdown.rs:281` would make that message false for
+`plan_section_edit`'s *other* callers, and that the real repair is to validate one layer up
+at `apply_body_edits`, sourcing both messages from one const. So capture-on-notice without a
+corpus check did not merely duplicate work — **it produced a plausible one-line diff that
+would have shipped a second defect**, behind a bug file confident enough to be acted on.
+That is the same shape as `CLAUDE.md`'s *run the reproduction before reading the fix plan*,
+one level out: read the corpus before writing the plan, because the corpus may already
+contain the refutation.
+
+**What would have caught it, in order of cost.** One `doc(action="find", kind="bug",
+semantic="<the defect in your own words>")` before writing a line — seconds, and it is the
+call that survives divergent slugs. `grep` over `docs/issues/` for the *symptom string* (here
+`invalid action`) rather than the slug would also have hit. Both are one call; neither is in
+the rule.
+
+**The generalisable form:** *capture-on-notice optimises for not losing the observation, and
+the corpus check optimises for not duplicating it — the first is urgent and the second is
+cheap, so ordering them the natural way loses nothing.* Scout the corpus, then write. This
+does **not** weaken capture-on-notice: the point is still to file immediately rather than at
+task end. One query is not "later".
+
+**Not promoted to the served skill yet.** Status below is a promotion state, not an open
+defect — `tracker-hygiene-log:HY-25` applies.
+
+**Independently endorsed:** `codescout-98` (sessionId
+`8dba66b0-af4b-4cda-a333-54a0605b318e`), who found the duplicate from the other direction
+and asked rather than attributing it, replied that this statement of the gap was *"a better
+statement of the defect than the incident"*. Recorded because a lesson the other party
+volunteers back is a second observer on it, not a self-assessment.
+
+**Status:** open
 
 ## Template for new entries
 

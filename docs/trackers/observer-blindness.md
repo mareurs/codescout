@@ -1902,8 +1902,11 @@ the underlying hazard is that file's.
 **Rests on:** `CLAUDE.md` § *Reaching a Peer Session* — *"Visibility is not
 authority"*; the 2026-09-06 incident recorded by `codescout-7f` as a bug file.
 
-**Class:** **authorship is recoverable by asking; AUTHORISATION is not
-recoverable at all.** It lives in a conversation between a session and its
+**Class:** **authorship is recoverable from the ARTIFACT; AUTHORISATION is not
+recoverable at all.** (Sharpened 2026-09-06 from *"recoverable by asking"*, which
+undersold it — see *the three layers* below: a `Session-Id` trailer has been on
+every commit since 2026-09-04, so no one need be asked and no session need be
+alive.) It lives in a conversation between a session and its
 operator that no peer can see, query, or infer. A commit deliberately withheld
 pending an operator's say-so is **byte-identical** to one merely not-yet-pushed,
 and on a shared branch any peer's `git push` publishes it.
@@ -1936,7 +1939,37 @@ withholding mechanism.*** It reads exactly like one, and it is not: the **unit o
 publication is the branch**, while the **unit of decision is the session**. There
 are only two real states — *uncommitted*, which risks peer sweep and the
 pre-commit stash window, or *committed*, which means published on the next push
-by anyone. A third state was being treated as available and does not exist. That
+by anyone. A third state was being treated as available and does not exist.
+
+**NARROWED 2026-09-06, by `codescout-98` correcting their own file:** that is true
+of the default `git push` and false of the refspec form. `git push origin
+<sha>:experiments` publishes **that commit and all its ancestors** — verified
+locally at `757f7b74` by enumerating `origin/experiments..<sha>` for three targets
+rather than by a dry-run push. So partial publication *does* have a mechanism, and
+the claim above overstated. **But it publishes a PREFIX, and the direction is what
+matters:** it can hold back commits stacked ABOVE the last one you want to send,
+and can never skip one BELOW. Tonight's topology had the withheld commit at the
+**bottom** (`91cbdb4f`, with three sessions' work stacked on it), so no session
+above it could send its own work without sending that one.
+
+**But "the mechanism helps nobody" was wrong, and `codescout-98` caught it before
+this entry carried it** — corrected the same evening, from the same enumeration
+run one push later rather than as a snapshot. It helps **exactly one party: the
+author of the bottom commit**, whose own refspec sends 1. And relief is
+**sequential** — once `91cbdb4f` reaches origin it leaves the
+`origin/experiments..c65b143f` range, so the next session's refspec then sends 1
+instead of 2, and so on up the stack. So the composite rule, which neither
+single reading gives you: **binding-ness is transitive upward, and relief
+propagates upward too, one commit at a time.** A bottom withheld commit is both
+the most binding thing on the branch and the cheapest thing to clear.
+
+The operational consequence is the reason this is worth the paragraph: **the
+correct ask is never "authorise my pile", it is "authorise the lowest commit that
+is blocking someone"** — a materially smaller question to put to an operator, and
+one whose answer unblocks parties the asker cannot enumerate. The cost of the
+barrier is therefore set by **how fast someone else commits** rather than by
+anything its author does, Nothing surfaces the refspec form at the moment it would help, which is why
+four sessions reached for a freeze and a revert before anyone reached for it. That
 is a stronger claim than "be careful about pushes", and it is why the remedy is a
 rule about committing rather than a rule about pushing.
 
@@ -1947,12 +1980,31 @@ arrives as a message, addressed to you, which you can evaluate. A peer
 routine. So the guarded direction has a signal and the unguarded one has none,
 which is why `CLAUDE.md` covers the grant half and nothing covered this one.
 
-**Mechanism status:** one candidate, and it is `codescout-7f`'s: **a session that
+**Mechanism status:** two candidates — one a policy, one buildable. The first is `codescout-7f`'s: **a session that
 cannot publish must not COMMIT to a shared branch.** Uncommitted work cannot be
 carried out by anyone; a commit can, by anyone, at any moment, with no one able
 to see that it should not be. Stronger than a coordinated freeze because it holds
 **without coordination** — it does not depend on every participant having heard
 the same instruction at the same time.
+
+The second is a **`pre-push` hook**, and it is the one *the third position asks
+for* — a check that runs when nobody is worried. `.git/hooks/` currently holds
+`pre-commit`, `prepare-commit-msg` and `post-index-change`, and **no `pre-push`**;
+that absence is the actual gap, not any missing documentation. Shape: enumerate
+`git log @{upstream}..HEAD --format='%(trailers:key=Session-Id)'`, and if any value
+differs from `$CLAUDE_CODE_SESSION_ID`, print the foreign sids with their commits
+and refuse pending an explicit ack. That converts *"before pushing, if anything
+unpushed is not yours, ASK"* from a policy the pusher must remember into a
+mechanism that fires unprompted — and it is the complement the first candidate
+lacks, since the first puts the whole obligation on the withholder and is silent
+on the party who actually acts. It cannot decide authorisation (nothing can) but
+it makes the question **unskippable at the only moment it is answerable**, which
+is the most a mechanism can do for a fact that lives outside the substrate.
+
+**NOT BUILT, and deliberately not built by this session:** a hook that refuses
+pushes changes behaviour for three other live sessions on this checkout, so it is
+the operator's call, not a peer's and not a drive-by. Recorded here as a design
+with its measurement rather than a resolution to be careful.
 
 **A PUSH FREEZE IS NOT THE REMEDY, AND IS WORSE THAN NOT HAVING ONE** —
 `codescout-7f`'s, offered for the class rather than kept in the instance, and
@@ -1981,6 +2033,58 @@ against the tree, removing the commits destroys real work, and a rewrite cannot
 un-disclose anything. Same shape as `CLAUDE.md`'s rule for a commit that captures
 a peer's work — report it, never repair it — and with more force here, since the
 harm is already irreversible.
+
+**A HELD COMMIT IS A BRANCH-WIDE WRITE BARRIER, and that is a THIRD-PARTY cost
+the rule above does not price.** Everything above reasons from the withholder's
+side. But an unresolved held commit blocks every **authorised** write stacked
+above it: publishing yours necessarily publishes everything BELOW it — the refspec
+form narrows this to a prefix but can never skip an ancestor (see the narrowing
+above; *"there is no per-commit push"* stood here until `codescout-98` falsified
+it) — and the alternatives (rebase, cherry-pick) rewrite history four sessions are
+building against.
+
+**And the barrier GROWS while it is being discussed.** Measured across roughly
+ninety minutes of the incident: the pile went from two commits to four
+(`9c03b32f`, `757f7b74` arriving from other sessions mid-discussion) with no one
+doing anything wrong. Each arrival is another authorised session that can no
+longer publish, so the blast radius is a function of elapsed time rather than of
+the withholding decision — and the party best placed to notice is the one who
+cannot see the barrier at all. So sessions who did nothing wrong, whose own operators have
+cleared their work, cannot publish — and **the barrier is invisible until someone
+attempts the push**, i.e. discovered only by the party performing the very action
+it forbids. Measured 2026-09-06: two sessions blocked behind one held commit
+within an hour of the class being filed. This is a *different argument for the
+same rule* and a stronger one — "don't commit what you can't publish" is not
+tidiness, it is not taking a lock on a shared branch that only you can release.
+
+**THE THREE LAYERS — why the read side is the gap, and why "document it" is not
+the remedy.** Tonight's failure ran with all three of these already in place:
+
+1. **A documented convention.** `docs/conventions/shared-checkout-commit-sequence.md`
+   § 2, *Identify your own work positively* — *"By the `Session-Id` trailer, or
+   `scripts/file-provenance.py` — **never by a commit range**."* Already written,
+   in the right file, in the right words.
+2. **A shipped mechanism.** `scripts/prepare-commit-msg-session-id.sh`, installed
+   2026-09-04 13:50, stamps the trailer unconditionally: **74 of 74** commits
+   since install carry it, 802 of 807 since the convention began.
+3. **The field rendered in the default view.** `git log --stat` prints the full
+   message body. In the exact 187-line output the pusher inspected *before*
+   pushing, `Session-Id:` appeared **five times, spanning two distinct sids**
+   (lines 39/102/105/175/178, reconstructed and re-verified independently by both
+   sessions).
+
+All three are **notice-dependent**: a convention must be recalled, a field must be
+looked for, a rendered line must be seen. Three appearances of one mechanism and
+zero mechanisms that *act*. And the misreading was rational, which is what makes
+"be more careful" predict nothing: `Author:` is a labelled header on line 2 of
+every entry, `Session-Id:` is body prose around line 35, and thirty years of git
+convention puts identity in the header block. An eye seeking an owner goes to
+`Author:`, finds it constant across four sessions, and stops. **The generalisable
+form: a mechanism can be unconditional on the WRITE side and entirely
+discretionary on the READ side, and the default view can file its output where the
+reader is not looking.** `git log --format='%(trailers:key=Session-Id)'` exists,
+returns the correct single value even on the 48-of-802 commits carrying a
+duplicated raw line, and is called by nothing.
 
 **Instance:** 2026-09-06 — `codescout-98` (sessionId
 `8dba66b0-af4b-4cda-a333-54a0605b318e`) committed `8320d5b0` and `29c5b461` and

@@ -71,9 +71,20 @@ vacuous for `server-stack` code, because nothing in the gate names a feature it
 does not pass.
 
 *Measured 2026-09-06:* the greps above; one confirmed consequence
-(`42769b490e11f106`, four days red). *Not measured:* how much code is hidden — no
-enumeration of `server-stack`-gated modules was made, so the exposure is
-demonstrated, not sized.
+(`42769b490e11f106`, four days red).
+
+*Sized 2026-09-06, paying the debt this paragraph used to declare* (it read *"the
+exposure is demonstrated, not sized"*). `feature = "server-stack"` appears **96
+times across 30 files**; stripping docs, the code behind it is **11 source files
+and 2 test files**:
+
+    src/retrieval/{memory_payload,client,memory,payload,code_store,mod}.rs
+    src/librarian/{artifact_store,mod}.rs, src/librarian/catalog/chunk.rs
+    src/agent/mod.rs, src/memory/semantic_store.rs
+    tests/retrieval_unit.rs, tests/feature_lanes.rs
+
+So the hole is a subsystem, not a corner — which argues for the bound being
+*published*, and against it being re-derived by each reader.
 
 ## Hypotheses tried
 
@@ -92,36 +103,63 @@ demonstrated, not sized.
 
 ## Fix
 
-*Not implemented — this is a gate change and the tradeoff is a judgement, not a
-defect fix.* Three options, with the cost each pays:
+**Option 3, and the option list needed correcting before it could be picked.** Fixed
+2026-09-06 by adding a bullet to `CLAUDE.md` § *Development Commands*, beside the
+lean-lane vacuity law it is the mirror of.
 
-1. **Add a fifth command**, `cargo test --workspace --features server-stack`.
-   Complete, and the most expensive: it pulls `qdrant-client` (tonic/prost/gRPC)
-   into the gate's compile budget for every session, on a gate whose ordering
-   rationale is already about not wasting shared `target/` rebuilds. It also
-   **needs a reachable Qdrant or it reproduces `42769b490e11f106`'s failure on
-   every run** — which is either a feature (it would have caught that bug) or a
-   permanent local red, depending on whether the affected tests are made
-   backend-independent first.
-2. **Fold the feature into the existing clippy line** —
-   `--features local-embed,server-stack`. Cheap, catches compile errors and lint
-   failures, catches **no** runtime failure. Would not have caught
-   `42769b490e11f106`.
-3. **Leave the gate and fix the expectation** — state in `CLAUDE.md` that green
-   does not cover `server-stack`, and that the CI lane is the only check. Costs
-   nothing, catches nothing, and makes the limit legible instead of invisible.
+**What changed the decision: a corpus check the original three options were written
+without.** The framing above assumed nothing covers `server-stack`. Something does,
+and has since 2026-08-08:
 
-Option 3 is not a null option here: this repo's own § *Observer Blindness*
-argues that publishing a bound's **scope** at the read surface is the repair when
-re-checking is impossible. But it is the weakest of the three, and picking
-between them is a call for the repo owner.
+- `.github/workflows/ci.yml` has a dedicated `test-server-stack` job — `clippy
+  --features server-stack --all-targets -- -D warnings` plus `cargo test --features
+  server-stack`, Linux-only and hermetic (no Qdrant service container; the tests
+  return false when the stack is unreachable). Shipped in `ecf3e461` for
+  `docs/issues/archive/2026-08-08-server-stack-gated-tests-never-compiled-by-any-lane.md`,
+  which is **this same defect one layer out** — then, no lane anywhere compiled it.
+- `tests/feature_lanes.rs` guards that the lane keeps existing:
+  `every_declared_feature_has_a_lane_or_a_reason` reds the build if a declared
+  feature has neither a CI lane nor an explicit `EXEMPT` entry, and
+  `the_guard_is_not_vacuous` asserts the guard's own inputs are non-empty —
+  including, by name, that `server-stack` appears in a workflow — so it cannot pass
+  by finding nothing.
 
-**Whichever is chosen, the mechanism belongs in the gate, not in a resolution to
-remember** — a session cannot notice a feature the gate does not name.
+So `server-stack` **is** compiled and tested, with a guard on the guard. The defect
+is narrower than this file originally read: not that nothing covers it, but that the
+**local** gate does not and `CLAUDE.md` never said so, leaving every session to read
+local green as full coverage.
 
-SHA: *(not fixed)*
-patch-id: *(not fixed)*
+That collapses the three options rather than leaving a judgement call:
 
+- **Option 1 (fifth command)** — now clearly wrong. It duplicates a guarded CI lane
+  and pulls tonic/prost/gRPC into every session's compile budget, on a gate whose
+  own ordering rationale is about not wasting shared `target/` rebuilds.
+- **Option 2 (fold into clippy)** — same objection, smaller. Also catches no runtime
+  failure, so it would not have caught `42769b490e11f106`.
+- **Option 3** — and its costing here was wrong. It was written as *"costs nothing,
+  catches nothing"*. CI catches it and a test guards the catcher; the only thing
+  missing was the reader's expectation. That is not the weakest option, it is the
+  whole remaining gap.
+
+**Why a sentence is the right shape, and not a cop-out.** § *Observer Blindness*
+position 3 already names this exact repair: *a bound that lives in the enforcement
+layer — a test module header, a gate script, a hook — is correctly published to an
+audience that never reads it, and the fix is to move the scope to the READ surface,
+not to record the lesson.* The bound lived in `tests/feature_lanes.rs`'s module
+header and in the CI yaml. A session running the four commands opens neither. So
+`CLAUDE.md` is not a fallback here — it is the surface the reader is actually on.
+
+**The change**: one bullet in `CLAUDE.md` § *Development Commands*, immediately after
+the lean-lane bullet, stating that the default lane is vacuous for `server-stack`,
+naming the CI job and the guard that keeps it alive, saying explicitly not to add a
+fifth command and why, and ending with the operative instruction — *never report
+"gate green" as coverage for `server-stack` work; read the CI job*. The pinned
+`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` scopes to the
+directive sentence only, which is untouched.
+
+SHA: *(pending — held behind an unresolved authorisation on `experiments`, see
+`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`)*
+patch-id: *(pending, same reason)*
 ## Tests added
 
 None — nothing is fixed. When it is: the guard must fail when a

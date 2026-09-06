@@ -43,6 +43,23 @@ Why each part, one line each. Every measurement, date and superseded form →
   a suite that never compiled the code under test, returned identically whether it is right or
   broken, and two sessions cited it as a pass in one evening. Read **your own test names** out of
   the default lane (`grep -E '^test librarian::<module>::tests::'`), never either lane's total.
+- **AND THE DEFAULT LANE IS VACUOUS FOR `server-stack` — the same law again, polarity
+  reversed, which is why internalising the one above does not protect you.** `default =
+  ["remote-embed", "http", "librarian"]` names no `server-stack`, so the four commands never
+  compile `dep:qdrant-client`, `QdrantArtifactStore` or the hybrid sparse+reranker query path —
+  while `.cargo/config.toml`'s `cargo rb` ships exactly that feature set. **Green here is
+  silence about code the running binary uses.** Do **not** answer this by adding a fifth
+  command: CI already owns it in a dedicated `test-server-stack` job
+  (`.github/workflows/ci.yml` — clippy + `cargo test --features server-stack`, Linux-only and
+  hermetic), and `every_declared_feature_has_a_lane_or_a_reason` (`tests/feature_lanes.rs`)
+  reds the build if that lane ever disappears, with `the_guard_is_not_vacuous` asserting the
+  guard's own inputs are non-empty so it cannot pass by finding nothing. A fifth local lane
+  would duplicate a guarded CI lane and pull gRPC into every session's compile budget. **What
+  was owed instead is this sentence**: the bound lived only in `tests/feature_lanes.rs`'s
+  module header and the CI yaml — surfaces a session running the gate never opens — so
+  `CLAUDE.md` is where it has to be said. **Never report "gate green" as coverage for
+  `server-stack` work; read the CI job.** (The OB rule this obeys is § *Observer Blindness*:
+  move the scope to the read surface rather than recording the lesson.)
 
 The gate sentence above is pinned byte-for-byte by
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`). If it

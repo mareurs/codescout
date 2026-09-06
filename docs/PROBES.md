@@ -31,8 +31,11 @@ compared over time. That is the whole test, and it is deliberately narrow:
 
 ## Before you trust any probe on this page
 
-Four rules, each earned by a measured failure in this repo. They cost more to skip than
-to follow.
+Each rule below was earned by a measured failure in this repo. They cost more to skip
+than to follow. **Deliberately not numbered in the lead sentence** — the line here read
+"Four rules" while six stood beneath it, which is the same defect the page is about: a
+count of a section's own contents is a premise every addition falsifies, and nobody
+re-reads the lead when appending.
 
 1. **Calibrate against a known-good instrument on the overlap before extending one.**
    `friction-probe.py` was checked against TU-7's published immediate-repeat figures first
@@ -110,6 +113,31 @@ to follow.
    the source of truth. Duplicating its examples would let the two drift, which is the
    failure this page exists to prevent. Deliberately the only rule above without its
    incident inline; do not "fix" that by pasting them in.
+
+7. **A date-bounded query can carry the clock into its own SELECTOR, and rule 6's
+   temporal remedy is a no-op against it.** Rule 6 covers a probe that measured an
+   instant which has passed, where bracketing works. This is the other direction: the
+   time you run the command silently defines *what the command asks*. Git's approxidate
+   completes fields you omit from `time(NULL)`, so `--since='2026-09-01'` does not mean
+   the start of that day — it means that day **at the hour you happen to run it**.
+   Measured 2026-09-06 at 20:45:38 local: `git rev-list --count --since='2026-09-01'`
+   returned **636** where `--since='2026-09-01 00:00:00'` returned **859**. 223 commits,
+   26% of the population, exit 0, no warning.
+
+   **Bracketing does not reach this, and neither does a positive control**, because the
+   command is perfectly deterministic *within an hour* — re-run it back-to-back and it
+   reproduces exactly, which reads as a stable instrument. Only running it at a
+   different time of day reveals anything, and that is the one variation nobody makes on
+   purpose. The tell that actually surfaced it was an **impossible ordering**: a later
+   cutoff returning more rows than an earlier one (`--since='2026-09-01'` → 636 against
+   `--since='2026-09-01 02:01:38'` → 807). Fully specify every date —
+   `'YYYY-MM-DD 00:00:00'` or ISO with an offset — and when publishing a date-bounded
+   count, state the spelling *and* the instant you ran it. A bare-date count is not
+   reproducible by a reader an hour later, and nothing in its output says so. Live
+   in-tree instances: **zero**, swept at `c9e6cb6b` (see the bug file) — the exposure is
+   ad-hoc measurement, which is exactly how it was found and one step from a published
+   wrong denominator.
+   (`docs/issues/2026-09-06-a-bare-date-in-gits-since-is-filled-from-the-current-wall-clock.md`)
 
 **There is deliberately no separate long form.** Each rule above carries its own
 incident inline, and cites the artifact holding the detail. Do not replace this with a
