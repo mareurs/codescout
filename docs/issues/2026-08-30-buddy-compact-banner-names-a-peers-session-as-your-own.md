@@ -13,7 +13,7 @@ opened: 2026-08-30
 owner: marius
 related: []
 severity: medium
-unverified: 'Root cause not established — the hook source has not been read. What IS established (2026-08-31): the cited sid is a live session in a DIFFERENT config profile, so the hook is resolving ''from'' against something not scoped to the reader''s profile. Still reproducing.'
+unverified: 'Root cause not established — the hook source has not been read. Reproduction is no longer in doubt: re-observed 2026-09-06 in BOTH directions within one hour (see Evidence), so what is outstanding is the mechanism, not the phenomenon.'
 ---
 
 # BUG: the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript"
@@ -166,6 +166,42 @@ Two independent identifications of `7114cb0d`, neither relying on the other:
    embedding-transport work, and visibly not this session's.
 2. **Process table**, independently produced by the peer session `codescout-ae`:
    `claude 801487 --resume 7114cb0d… = fix-embedding-transport-stage-1`, live.
+
+### Reproduced 2026-09-06 — and in BOTH directions within one hour
+
+This instance is worth recording because the two sessions involved observed
+opposite halves of the same swap, and each believed its own banner.
+
+- Session `4a2f34f7-0669-487d-9ce9-39b77881642f`'s post-compact banner read
+  `sid=4a2f34f7-… from=8dba66b0-af4b-4cda-a333-54a0605b318e`. `8dba66b0` is a
+  **live peer in this same checkout** — it self-identified from its own scratchpad
+  path and reported having touched zero Rust files that day, so it is not that
+  session's lineage under any reading.
+- The same evening, peer `codescout-ae`'s banner carried `from=4a2f34f7-…`, and it
+  stated **in writing, to a third session**, that `4a2f34f7` was its own
+  pre-compaction id. It was not. It was the id of the session in the bullet above,
+  which was live and holding the file under discussion the whole time.
+
+**The cost is measured rather than hypothetical.** That second reading sent three
+sessions into an attribution exchange over an uncommitted
+`src/librarian/catalog/chunk.rs`, whose author was live, reachable, and mid-TDD
+throughout — its red test was the expected state of a healthy in-progress change,
+not a regression. The author was identified only after being asked directly and
+quoting its own scratchpad path.
+
+**What makes this expensive is the direction of trust, not the size of the error.**
+A `SessionStart` banner is emitted by the reader's own harness, inside the reader's
+own session-start block, about the reader's own identity — about as authoritative
+as a source gets on its face. Neither session doubted its banner. What prevented
+the wrong conclusion was the standing convention refusing
+identification-by-elimination and demanding a positive id: `codescout-ae` recorded
+that it asked *"because the rule said to, not because I doubted the evidence"* — a
+rule outperforming judgement, on evidence judgement had no reason to question.
+
+Practical reading for triage: the `sid=` half is trustworthy, because the harness
+derives it from the scratchpad path — which is why a session can always quote its
+own id on request. The `from=` half is shared mutable state and carries no more
+authority than any other last-writer-wins file.
 
 ## Hypotheses tried
 
