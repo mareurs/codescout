@@ -51,12 +51,73 @@ reconciliation" was on its task list and "push" was not — and had said so to a
 third session, explicitly asking that nobody plan around those commits landing.
 The pusher had no way to learn any of that.
 
+**The cost does not stop at the two parties, and the second half was found the
+same evening.** A held commit blocks every **authorised** write stacked above it,
+because `git push` is all-or-nothing over the branch. Within an hour of this file
+being written, two further sessions — both fully authorised by their own operators,
+neither having done anything wrong — were sitting on commits they could not
+publish, because an unresolved held commit lay beneath them.
+
+**And the block is invisible until someone tries to push.** Nothing announces it;
+the commits look landed locally, `git status` is clean, and the queue is only
+discovered by a party attempting the very action that would breach it. So the
+rule *"a session that cannot publish must not commit"* is not merely about the
+withholder's own tidiness: their commit is a **branch-wide write barrier** that
+nobody else can see and only they can lift.
+
+*(Contributed 2026-09-06 by the peer session that hit the barrier. Recorded here
+rather than in their tracker because it is an effect of this defect, and the
+blocked party is a third party — which is precisely what makes it worth stating.)*
+
 ## Root cause
 
 Publication is a **branch-scoped** operation over a **session-scoped** permission.
-`git push` has no per-commit granularity: there is no way to send only your own
-commits, so the unit of the action and the unit of the authorisation do not line
-up, and the mismatch is resolved silently in favour of publishing.
+The unit of the action and the unit of the authorisation do not line up, and the
+mismatch is resolved silently in favour of publishing.
+
+**Corrected 2026-09-06, and the correction is narrower and more useful than the
+claim it replaces.** This section first read *"`git push` has no per-commit
+granularity: there is no way to send only your own commits."* The second clause is
+true; the first is not. `git push origin <sha>:<branch>` publishes history up to
+and including `<sha>` and **nothing above it**, so granularity exists — it is
+**prefix-only**, not per-commit.
+
+That distinction decides who it helps, and it is worth stating because it is not
+symmetric:
+
+- a withheld commit **above** yours — push to your own sha and it stays unpublished;
+- a withheld commit **beneath** yours — no refspec reaches past it **in one step**,
+  so you cannot act alone. But the wait is not for a blanket authorisation: once
+  that one commit is published it is no longer beneath you, and your own sha then
+  publishes exactly your own commit. Relief arrives in **two steps**, and what you
+  are waiting on is a **single named commit**, not permission covering yours.
+
+Measured on the incident that produced this file, where the withheld commit sat
+**beneath** the pusher's:
+
+```
+git rev-list --count origin/experiments..91cbdb4f   -> 1   the withheld one alone
+git rev-list --count origin/experiments..c65b143f   -> 2   it, plus the pusher's
+```
+
+So publishing the single withheld docs commit costs exactly one commit; the
+pusher's own then lands alone, leaving a `feat(embed)` above it still unpublished.
+That converts *"authorise my whole pile"* into *"clear one docs commit"* — a
+materially smaller thing to put to an operator, and what the author did put to
+theirs.
+
+*(Corrected 2026-09-06 — the **third** correction to this section, and the third
+found by running a command rather than re-reasoning about one. It first said the
+mechanism "changed nothing for the pusher". That is true of **unilateral action**
+and false of the **outcome**, and the two had been collapsed. The pattern is worth
+more than the fact: every correction in this file came from re-executing, none
+from re-thinking.)*
+
+So the accurate root cause is not that git cannot express partial publication. It
+is that **the default form of the command is all-or-nothing and nothing surfaces
+the other form**, so every party reasons from the default's shape and concludes a
+limit that is real only for it. Both this file and the peer's said "there are two
+states" while a third was one refspec away.
 
 The pusher's available instruments answer adjacent questions and answer them
 correctly:
@@ -155,6 +216,55 @@ but it is an observation rather than an argument.
    they were rejecting. The verdict did not change; its evidential weight did,
    and that distinction is the reason this note exists rather than a silent
    rewrite.)*
+
+3. **Hypothesis:** git records nothing that identifies WHICH session authored a
+   commit on a shared checkout, so the pusher cannot even name who to ask.
+   **Test:** checked `%an` / `%ae`, found `Marius Ailinca` on every session in the
+   checkout, and stated the conclusion to a peer.
+   **Verdict:** **WRONG, and wrong by a route worth recording.** This repo's commit
+   convention writes a `Session-Id:` trailer. Verified independently rather than
+   taken on a peer's report: **25 of the last 25** commits carry one, partitioning
+   into exactly **four** sids, each matching a live session.
+   **The error was inferring an object's contents from one field's silence** — a
+   negative result about the **query**, not about the world, which is the ledger's
+   most-repeated law, met while writing a file about a different blindness.
+
+   *(AMENDED 2026-09-06, and the amendment matters more than the entry. This first
+   read "one format string away", implying the remedy was `%B` or `%(trailers)` —
+   query better. **That is false, and it was checkable.** `git log --stat` prints
+   the full message body; it always has. The exact pre-push range was reconstructed
+   and grepped: `git log 53597469~3..53597469 --stat` is **187 lines** and contains
+   `Session-Id:` **five times**, at lines 39, 102, 105, 175 and 178, in **two
+   distinct sids** — mine at 39, the withholding session's at the rest. So the
+   discriminator was **rendered, in the default view, in output read for exactly
+   this purpose.* There was no better query to have run. Found by the peer
+   reconstructing the range rather than reasoning about it — which is how their
+   correction of me turned out to be wrong too.)*
+
+   **So the class is not "query better", it is this:** a mechanism can be
+   **unconditional on the write side and entirely discretionary on the read side**,
+   and the default view can file its output where the reader is not looking.
+   `scripts/prepare-commit-msg-session-id.sh` stamps every commit — 100% since
+   2026-09-04 — and nothing reads it back. Worse, placement defeats it: `Author:`
+   is a labelled header on line 2 of every entry, `Session-Id:` is body prose around
+   line 35. Thirty years of git convention puts identity in the header block, so an
+   eye seeking an owner goes to `Author:`, finds it constant across all four
+   sessions, and stops. That inference is **rational given where the field sits**,
+   which is why calling it carelessness would predict nothing.
+   `git log --format='%(trailers:key=Session-Id)'` exists and nothing calls it.
+
+   **And the real finding is neither error.** That hook was built FOR
+   `issue-clusters:IC-10` (`authorship-unrecoverable-after-the-fact`), which its own
+   header records as having had `Mechanism status: none yet` until it shipped. The
+   mechanism answering "who authored this commit" has worked perfectly every day
+   since 2026-09-04 — and on 2026-09-06 two sessions spent an evening on
+   identification-by-elimination without knowing to look at it. A shipped mechanism
+   nobody knows to read is, at the read end, not yet a mechanism.
+   **What survives unchanged:** the trailer identifies the AUTHOR, never the
+   AUTHORISATION. It makes the ask *cheap* — a named session instead of a
+   broadcast — and does not remove it. A field that is present, accurate, and
+   answers the **adjacent** question is this file's own subject, arriving one
+   layer down.
 ## Fix
 
 Not applied — the useful remedy is a convention, and it should be agreed rather
