@@ -303,7 +303,7 @@ pub struct SemanticPage {
     /// different and reassuring claim. Measured 2026-09-03 on the live Qdrant
     /// collection: 2476 of 5388 points (46%) were artifact-grain, discarded on
     /// every query, and nothing anywhere counted them. See
-    /// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+    /// `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
     ///
     /// Reset per widening pass, like `cap_suppressed` — it describes the pass
     /// that produced `hits`, not the loop's history.

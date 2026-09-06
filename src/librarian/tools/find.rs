@@ -1009,8 +1009,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // The line range is the wrong handle for this and has been
                     // measurably wrong: 378 of 3,729 entry-bearing chunks publish a
                     // `start_line` that resolves to the PREVIOUS entry
-                    // (docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-
-                    // but-published-as-file-lines.md, still open). A token is
+                    // (docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-
+                    // relative-but-published-as-file-lines.md, fixed at 36afd405 —
+                    // the 378/3,729 figure predates that fix). A token is
                     // resolved by `doc(action="get", heading=…)`'s fuzzy match, so
                     // it survives every edit above it — which is exactly the class
                     // of change that breaks a line number. Cheap, too: no title

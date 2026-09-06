@@ -129,7 +129,7 @@ pub fn artifact_collection_name(prefix: &str, project_root: &str) -> String {
 /// "an artifact's embedding". sqlite-vec tolerated the ambiguity because it can
 /// recover the artifact id by joining `artifact_chunk`; Qdrant has no join and
 /// silently spent its one id twice. See
-/// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+/// `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
 #[async_trait]
 pub trait ArtifactVectorStore: Send + Sync {
     /// Upsert one CHUNK's embedding. `chunk_id` is the vector's identity;

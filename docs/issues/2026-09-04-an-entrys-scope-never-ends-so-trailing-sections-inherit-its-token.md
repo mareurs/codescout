@@ -51,7 +51,7 @@ Three consumers are affected, in increasing order of cost:
 - **The token itself** is a wrong answer where `None` is the true one.
 - **`retrieve`** (added `1e1fb026`) sends the reader to the wrong entry. It is
   strictly better than the line range it replaces — which is wrong for 378 of 3,729
-  chunks (`7695ad877b44e96a`) — but it inherits this error rather than avoiding it.
+  chunks (`c77fb370f61fc309`) — but it inherits this error rather than avoiding it.
 - **The embedded text.** `indexer.rs:175-180` prepends the token to a chunk that
   does not open with a heading, so `## History` is embedded as `GF-8\n\n## History`.
   A query about GF-8 is pulled toward a section that has nothing to do with it.
@@ -173,6 +173,6 @@ and does not scale; there is no query-side workaround.
 
 - `src/librarian/entry_token.rs:30-69`
 - `src/librarian/indexer.rs:175-180` — the embed-text prepend that inherits the error
-- `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
+- `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
   — the other half of "the published anchor does not agree with the entry"
 - CLAUDE.md § *Parsers Over a Namespace — owe an escape and a disambiguator*

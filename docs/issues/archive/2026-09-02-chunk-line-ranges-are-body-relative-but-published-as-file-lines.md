@@ -1,25 +1,28 @@
 ---
-status: open
-opened: 2026-09-02
-closed:
-severity: high
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
-unverified: 'The blast radius beyond `matched` is not established — every consumer of `artifact_chunk.start_line` / `end_line` was not enumerated, only the one this session shipped.'
+closed: 2026-09-06
+opened: 2026-09-02
+owner: marius
+related: []
+severity: high
+unverified: The original Resume's prediction that scripts/run-artifact-bench.py would show a non-zero hits@5 after this fix was NOT re-run at archive time, and the suite's number has since moved for unrelated reasons (63fae4ea, 6f032dbd), so a reading taken now would not isolate this change. The consumer enumeration that discharged the previous caveat covers src/**/*.rs only -- not raw SQL built elsewhere, nor out-of-tree readers of the catalog file.
 ---
 
 # BUG: chunk line ranges are body-relative but published as file lines, so every span points N lines short
 
 ## Summary
 
+> **FIXED at `36afd405` (patch-id `6ba7ae81ba07d8fde8870fc6162c6330093159b8`, `experiments`).**
+> The description below is the state as filed on 2026-09-02, kept verbatim as the premise
+> § *Fix* discharges. It does not describe current behaviour.
+
 `artifact_chunk.start_line` / `end_line` are computed against the **frontmatter-stripped
 body**, and exported to callers as if they were **file** lines. Every artifact with
 frontmatter — which is essentially all of them — reports a span short by exactly the
 frontmatter length. On a tracker that means the range lands inside the *previous* entry.
-
 ## Symptom (Effect)
 
 Measured 2026-09-02 against the live catalog, `artifact-entries` suite case `AE-1`:
@@ -156,27 +159,76 @@ those — *"searchable header prepended before embedding"* — and is explicitly
 on the markdown path.
 ## Fix
 
-**Not implemented — two shapes, and they differ in what has to be re-run.**
+**Fixed — shape (a), store file-relative. `36afd405` on `experiments`, patch-id
+`6ba7ae81ba07d8fde8870fc6162c6330093159b8`.**
 
-- **(a) Store file-relative.** Pass the frontmatter line count into `build_chunks` and add
-  it to every `start_line` / `end_line`. One meaning per stored row, every consumer correct
-  by construction. Requires re-chunking the corpus, because existing rows are wrong.
-- **(b) Offset at export.** Leave rows body-relative and add the offset in `find.rs` when
-  building `matched`. No migration, but the stored column keeps a meaning its name does not
-  state, and the next consumer inherits the same trap.
+(a) was preferred above and (a) is what shipped, so the stored column's name and its meaning
+now agree and no consumer has to re-apply an offset.
 
-(a) is preferred. Either way the regression test must compare a published range against a
-**file** — the property no existing test checks.
+- **`embed_queue_items` takes the WHOLE document** rather than a pre-stripped body, and derives
+  the body *and* its line offset from **one** `frontmatter::parse`. A caller cannot pair a body
+  from one parse with an offset from another, because it never sees the offset — the
+  representable-state fix, not a discipline fix.
+- **`build_chunks` gains an explicit `line_offset`** (`src/librarian/catalog/chunk.rs:71-135`),
+  applied to every returned range. There is deliberately **no** 3-argument form meaning zero,
+  because an implicit zero is exactly how the defect shipped. `build_single_chunk` took the
+  same parameter (`chunk.rs:265`).
+- **The offset is applied AFTER the entry-token lookup**, and the doc comment pins why:
+  `entry_tokens_by_line` is computed over `body`, so its keys are body-relative. Folding the
+  offset in before the lookup leaves every range correct and slides every token onto the wrong
+  chunk — measured under mutation 2026-09-03, the preamble inheriting `W-2` while the real
+  `W-2` chunk read `None`.
+- **The re-chunk cost nothing**: `content_hash` is computed over `content` only, so
+  `replace_chunks` keeps each chunk's id and vector and re-syncs only its position. The
+  migration off body-relative ranges required no re-embedding.
 
-SHA and patch-id to be recorded here at fix time.
+The commit also aligned a fallback the two callers disagreed on: a document whose frontmatter
+fails to parse is now chunked whole at offset 0 in both paths. `index_repo_sync` previously
+fell back to an **empty** body, so a file with a malformed opening block was chunked into
+nothing and silently never became searchable — a second, unrelated silent-loss path closed in
+passing.
 
+### The `unverified:` caveat, discharged 2026-09-06
+
+The caveat read: *"every consumer of `artifact_chunk.start_line` / `end_line` was not
+enumerated, only the one this session shipped."* Enumerated now, and the population is
+smaller than the caveat implied:
+
+- `rows_by_chunk_ids` (`chunk.rs:503`) is the only read accessor that returns `ChunkRow`s to a
+  caller, and it has **exactly one production call site** — `src/librarian/catalog/find.rs:365`,
+  inside `semantic_find`. That is the consumer the fix shipped against.
+- `chunks_for` (`chunk.rs:471`) is called only by `replace_chunks` (`chunk.rs:340`), which
+  compares stored rows against freshly built ones, and by tests. It publishes nothing.
+- The other 11 files touching `artifact_chunk` (`indexer.rs`, `tools/delete.rs`, `tools/mv.rs`,
+  `tools/reindex.rs`, `artifact_store.rs`, …) address rows by id for vector bookkeeping and
+  never read a line range.
+
+**Scope of that check:** `grep artifact_chunk` over `src/**/*.rs` plus `references()` on both
+accessors. It does not cover a consumer that reaches the column through raw SQL it builds
+elsewhere, and it says nothing about out-of-tree readers of the catalog file.
 ## Tests added
 
-None yet. The guard that would have caught this is a test asserting that the entry token at
-`matched.start_line`, read from the FILE on disk, equals the token the hit reports — i.e.
-the benchmark's own scoring rule, run as a unit test over one seeded artifact WITH
-frontmatter. Every current test seeds a body and compares against the same body.
+Four, all in `src/librarian/catalog/chunk.rs`, and they discharge this file's own requirement
+that *"the regression test must compare a published range against a **file**"*:
 
+- `a_line_offset_shifts_every_range_and_moves_no_entry_token` (`chunk.rs:705`) — the load-bearing
+  one. Asserts both halves of the ordering constraint at once: at offset 0 ranges stay
+  body-relative, at offset 4 every range shifts by exactly 4, **and** no `entry_token` moves.
+  A fix that folded the offset in before the token lookup passes the range half and reds here,
+  which is the mutation the doc comment describes.
+- `a_single_chunks_range_is_file_relative_like_every_other_chunk_row` (`chunk.rs:866`) — the
+  `build_single_chunk` path, which is a separate writing site and therefore a separate guarded
+  site rather than a second sample of the same one.
+- `an_unchanged_chunk_gets_its_line_range_resynced_when_content_above_it_shifts`
+  (`chunk.rs:970`) — byte-identical content at a shifted `start_line`, so it catches a
+  `replace_chunks` that preserves the vector and forgets the position.
+- `build_chunks_carries_line_ranges_and_entry_tokens` (`chunk.rs:554`) — its own comment
+  records that the brief's proposed `w.start_line <= 5 && w.end_line >= 7` was **one-sided in
+  both directions** and could not see `start_line.saturating_sub(1)`, so it asserts equality
+  on the pair instead.
+
+Both gate lanes compile and run all four — this is catalog code, not backend code, so the
+`server-stack` blind spot that affects the sibling Qdrant bug does not apply here.
 ## Workarounds
 
 Add the artifact's frontmatter line count to any range read from `matched`. There is no
@@ -185,13 +237,27 @@ defeats the purpose of the range.
 
 ## Resume
 
-Decide (a) vs (b). If (a): thread the offset through `embed_queue_items` ->
-`build_chunks`, then re-chunk (the `backfill-chunks` CLI added in `488192e8` will not do it
-— it skips artifacts that already have chunk rows, so the corpus needs a forced re-chunk
-or a targeted DELETE + backfill). Then re-run
-`python3 scripts/run-artifact-bench.py --suite scripts/tc-suites/artifact-entries.json
---bin target/release/codescout` and expect a non-zero hits@5 for the first time.
+N/A — fixed and archived.
 
+**One thing the original Resume promised that was NOT re-run, said plainly rather than left to
+look discharged.** It predicted that after the fix,
+`python3 scripts/run-artifact-bench.py --suite scripts/tc-suites/artifact-entries.json` would
+show *"a non-zero hits@5 for the first time"*. That prediction is untested here: the benchmark
+was not re-run as part of this archive, and the number in
+`docs/trackers/retrieval-benchmark.md` has since moved for unrelated reasons (chunk grain
+became the default at `63fae4ea`, and Qdrant went per-project at `6f032dbd`), so a reading
+taken now would not isolate this fix anyway. Whoever next runs that suite should treat the
+non-zero as expected, not as confirmation of this specific change.
+
+**Why this file sat open for three days after `36afd405` closed it.** Nothing connected the
+two. The commit did not name the file, the file recorded no SHA, and
+`librarian(action="doctor")`'s `non_terminal_status_with_fix_anchor` only fires on an open bug
+that *records* an anchor — so it read 0, correctly, about a question nobody had asked. The
+signal that did exist was in the source: `36afd405` left doc comments citing this file by path
+at `src/librarian/catalog/chunk.rs:60` and `src/librarian/entry_token.rs:132`. **A live bug
+file cited from a source doc comment is a cheap tell that its fix already shipped**, and it is
+wired to nothing. Same mechanism, same evening, same sweep: the sibling
+`docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
 ## References
 
 - `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md` § Task 10, Task 12

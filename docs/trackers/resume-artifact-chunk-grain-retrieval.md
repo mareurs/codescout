@@ -84,19 +84,19 @@ believing any figure.
 measure a configuration that never shipped: without it, thousands of trailing-section chunks
 inherit an earlier entry's token and would be prefixed with the *wrong* title.
 
-## AC-2 — Reconcile `7695ad877b44e96a` against the root cause found under it
+## AC-2 — Reconcile `c77fb370f61fc309` against the root cause found under it
 
-**Valid:** conditional — `7695ad877b44e96a` is closed or re-scoped
+**Valid:** conditional — `c77fb370f61fc309` is closed or re-scoped
 
 **Status:** open — the bug is still `open` and its own Fix section is superseded.
 
-`docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
+`docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
 records the *symptom* (a per-file constant offset between a chunk's published `start_line` and
 its own entry heading). `921a192357e54bad` establishes the *cause*: stale chunk rows, not
 offset arithmetic — `frontmatter::body_line_offset` computes the prefix's line count after an
 `ends_with` guard and cannot be short by a constant.
 
-**What is owed.** Decide whether `7695ad877b44e96a` closes as *superseded by* `921a192357e54bad`
+**What is owed.** Decide whether `c77fb370f61fc309` closes as *superseded by* `921a192357e54bad`
 or narrows to a residue neither the freeze nor the arithmetic explains, and record which. Its
 hypothesis 3 — the forced re-walk that "ruled staleness out" — is **invalid** and already
 annotated as such: `force=true` never reaches `replace_chunks`, so it rebuilt zero chunks.

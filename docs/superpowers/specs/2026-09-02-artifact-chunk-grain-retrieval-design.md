@@ -369,7 +369,7 @@ them is a number, not an error — 25 scores, all of them about code.
    artifact-grain half was discarded on every query — 2476 of 5388 points, 46%,
    uncounted. Editing any artifact then re-minted its chunk ids and the write of
    the new ones was refused, so the artifact left search permanently. See
-   `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+   `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
 
    Vectors are written to a **new collection, `artifact_chunks`**. The old
    `artifacts` collection is left intact rather than rewritten: it is shared

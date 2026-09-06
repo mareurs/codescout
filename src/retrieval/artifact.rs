@@ -96,7 +96,7 @@ impl QdrantWrap {
     /// and as `payload["artifact_id"]` — because the trait had only one slot.
     /// That is what made a chunk id indistinguishable from an artifact id
     /// downstream. See
-    /// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+    /// `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
     pub async fn artifact_upsert(
         &self,
         collection: &str,

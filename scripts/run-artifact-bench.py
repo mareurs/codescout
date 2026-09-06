@@ -151,7 +151,7 @@ def main():
             # PER-FILE constant -- -2 on all 218 chunks of bug-fix-session-log.md,
             # -1 on all 71 of open-issue-work-queue.md, with zero chunks landing
             # on a heading in either. That is the open bug
-            # `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`,
+            # `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`,
             # only PARTIALLY fixed: short by 1-2 rather than by the whole
             # frontmatter, which is why it stopped being visible.
             #

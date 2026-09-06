@@ -35,7 +35,7 @@ The hashes are byte-identical — the row asserts it has seen exactly this conte
 
 Downstream, this presents three different ways, none of which names the cause:
 
-1. **Wrong line ranges.** A published `matched.start_line` precedes the heading whose token the chunk carries, by a per-file constant. That is the open bug `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`7695ad877b44e96a`), whose remaining unexplained residue this accounts for.
+1. **Wrong line ranges.** A published `matched.start_line` precedes the heading whose token the chunk carries, by a per-file constant. That is the open bug `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`c77fb370f61fc309`), whose remaining unexplained residue this accounts for.
 2. **Wrong entry attribution.** A chunk keeps the `entry_token` of whatever entry occupied that position in the old body, so any consumer re-deriving the entry from `(path, line)` resolves to the wrong one.
 3. **Stale vectors.** New text is never embedded, so an edited artifact is unfindable by a query quoting its own new content.
 
@@ -90,7 +90,7 @@ docs/trackers/bug-fix-session-log.md      resolvable=150  drift=0
 docs/trackers/open-issue-work-queue.md    resolvable= 98  drift=0
 ```
 
-The two files `7695ad877b44e96a` named at −2 and −1 are reported **positively** — 150 and 98 resolvable chunks, zero drift each — rather than by absence from a truncated list. A single `reembed=true` took the treated root to exactly zero.
+The two files `c77fb370f61fc309` named at −2 and −1 are reported **positively** — 150 and 98 resolvable chunks, zero drift each — rather than by absence from a truncated list. A single `reembed=true` took the treated root to exactly zero.
 
 **Three defensible numbers, none interchangeable:** 143/632 = 22.63% *in non-reindexed repos*; 0/2940 *in codescout*; 143/3572 = 4.00% *corpus-wide*. Quote the population or quote nothing.
 
@@ -124,7 +124,7 @@ So `reembed=true` is a **repair with a half-life**, not a fix: five hours of ord
    **Test:** the natural experiment plus the live reproduction, both above.
    **Verdict:** **confirmed.** 0.00% drift in the reindexed root; the un-reindexed roots unchanged at 22.63%.
 
-3. **Hypothesis (recorded in `7695ad877b44e96a`, and the reason hypothesis 2 was struck off for four days):** staleness is excluded, because "a forced re-walk of all 1,471 artifacts left it in place, and got worse".
+3. **Hypothesis (recorded in `c77fb370f61fc309`, and the reason hypothesis 2 was struck off for four days):** staleness is excluded, because "a forced re-walk of all 1,471 artifacts left it in place, and got worse".
    **Test:** re-read what `force=true` actually does — `src/librarian/indexer.rs:395`, `:409`.
    **Verdict:** **the refutation was invalid, not merely wrong.** `force_rewalk` never reaches `replace_chunks`, so that re-walk rebuilt **zero** chunks. It was an instrument that could not express the hypothesis it was aimed at, and it returned a plausible "still there" rather than an error. *Before citing a re-run as a refutation, name the write the re-run was supposed to perform, and check that it performed it.*
 
@@ -164,7 +164,7 @@ Then re-run `drift-by-root.py` against a non-codescout root to confirm the corpu
 
 ## References
 
-- `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`7695ad877b44e96a`) — the symptom this explains; its hypothesis-3 refutation is invalidated here.
+- `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md` (`c77fb370f61fc309`) — the symptom this explains; its hypothesis-3 refutation is invalidated here.
 - `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` (`a766aad35b0b7610`) — the sibling absorbing state, same `reembed=true` escape, different write.
 - `docs/issues/archive/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md` (`6ae552cfc223cd6d`) — why the prescribed workaround is expensive.
 - `docs/trackers/retrieval-benchmark.md` § *2026-09-04 (dawn)* — the natural experiment and its numbers.

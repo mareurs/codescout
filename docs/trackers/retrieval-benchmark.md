@@ -232,7 +232,7 @@ relative — known gap.
 
 **Reindex envelope:** 1,472 unchanged, 2 updated, **28,140 chunks embedded**, 3 embed errors (all HTTP 500 `input is too large to process. increase the physical batch size` from the embedder on `127.0.0.1:48081`), 10 vectorless. Start 03:32, finish 03:39.
 
-#### The side finding: `7695ad877b44e96a`'s root cause, and a prior refutation that could not have been valid
+#### The side finding: `c77fb370f61fc309`'s root cause, and a prior refutation that could not have been valid
 
 The same run resolved the open coordinate-drift bug, by accident of scoping. `scope="project"` reindexed codescout and nothing else, so the catalog was left holding a treated group and a control:
 
@@ -698,7 +698,7 @@ default; `CODESCOUT_ARTIFACT_BACKEND` unset), tree `experiments` at `488192e8`, 
 **#1**. Its reported span is `7793`, the expected entry `W-81` begins at file line `7808`,
 and the artifact's frontmatter closes at line `15` — the offset is exactly the frontmatter
 length, so the published range lands inside the *previous* entry. Filed as
-`docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+`docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
 The suite cannot score above 0 until that is fixed, and it should be re-run immediately
 afterwards — this is the first run where a non-zero number is even reachable.
 ### 2026-08-30 — D2 resolved: prefix removed, boost 3.0→5.0 — and the precedence list below was missing a layer

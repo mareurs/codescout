@@ -57,7 +57,7 @@ pub struct ChunkRow {
 /// numbers as file lines put every hit on a tracker short by the frontmatter's
 /// height, landing inside the PREVIOUS entry — measured 2026-09-02 at 7793 vs
 /// a true 7808, see
-/// `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+/// `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
 /// A caller with nothing above its body passes `0`; there is deliberately no
 /// 3-argument form that means `0` implicitly, because an implicit `0` is
 /// exactly how that defect was shipped.

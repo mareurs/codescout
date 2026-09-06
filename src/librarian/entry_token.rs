@@ -129,7 +129,7 @@ fn heading_defines_entry_parts(line: &str) -> Option<(usize, String, String)> {
 /// `start_line` is FILE-relative while this map is built over the BODY, and
 /// reconciling those two frames is exactly the arithmetic that is currently
 /// wrong for 378 of 3,729 chunks
-/// (`docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`).
+/// (`docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`).
 /// A token lookup needs no coordinate at all, so it cannot inherit that defect.
 ///
 /// FIRST definition wins when a token is defined twice — a real case, since a

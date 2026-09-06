@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/blast-radius-exceeds-visibility
-closed: null
+closed: 2026-09-06
 opened: 2026-09-03
 owner: marius
 related: []
@@ -13,6 +13,10 @@ severity: high
 # BUG: on the Qdrant backend, editing an artifact silently removes it from semantic search, permanently
 
 ## Summary
+
+> **FIXED at `6f032dbd` (patch-id `2605fac14725020fcd4fcb66e5a22d6d21d85f9a`, `experiments`).**
+> The description below is the state as filed on 2026-09-03 and is kept verbatim — it is the
+> premise § *Fix* discharges. Nothing in it describes current behaviour.
 
 The `artifacts` Qdrant collection is a **mixture** of two id grains, and
 `semantic_find` can only read one of them. 2476 of 5388 points (46%) are
@@ -28,7 +32,6 @@ This is not the state the plan's § *Deferred* describes. That section says a
 Qdrant deployment is one "this plan does not apply to yet", which reads as
 *keeps working artifact-grain*. It does not: the artifact-grain half of the
 collection is unreachable.
-
 ## Symptom (Effect)
 
 Measured 2026-09-03 18:50 by scrolling the whole collection:
@@ -138,59 +141,104 @@ observed instance (`bug-fix-session-log.md`), not a rate.
 
 ## Fix
 
-Two options; this is the plan's **open question 4** and it is a deployment
-decision, not only a code one.
+**Fixed — Qdrant chunk-grain parity. `6f032dbd` on `experiments`, patch-id
+`2605fac14725020fcd4fcb66e5a22d6d21d85f9a`.**
 
-- **Point this project at sqlite-vec** — `[librarian] vector_backend = "sqlite-vec"`
-  in `.codescout/project.toml`. Cheap and immediate, but `artifact_vec_v2` is
-  empty, so it needs a full re-embed before search returns anything at all.
-- **Implement Qdrant chunk-grain parity** — widen the trait to carry both ids
-  (chunk id as the vector's identity, artifact id as the hydration/scope key),
-  add the second payload field, and have `knn` return the pair. This reaches
-  `semantic_find`'s read shape too.
+The second fork was taken. The trait was widened rather than the deployment being moved to
+sqlite-vec, so the `artifact_vec_v2` re-embed contemplated above was never needed.
 
-**Either way the collection needs rebuilding, not patching**: 46% of its points
-are in a grain nothing reads, and the rest are frozen at a stale snapshot.
+Three changes that only work together:
 
-Independently of the choice: `semantic_find` should **count** the candidates it
-skips and surface that, the way it already surfaces `cap_suppressed`. A read
-path that silently discards 46% of what the store returns is the reason this took
-a full session to see.
+- **`ArtifactVectorStore::upsert` carries both ids** (`src/librarian/artifact_store.rs:139-145`)
+  — `chunk_id` is the vector's identity, `artifact_id` the catalog key `delete` matches on.
+  The one-slot signature was the bug; the backend was not. sqlite-vec had merely been
+  *surviving* it by joining `artifact_chunk`, which is why the defect read as Qdrant-specific.
+- **The 16-hex grain guard is gone** (`src/librarian/artifact_store.rs:295-321`). Its absence
+  is the fix rather than a relaxation: with both ids travelling, the input it refused is
+  exactly the input that path is for. The comment at the old guard site says so, so a reader
+  does not restore it.
+- **`artifact_upsert` writes both payload fields** (`src/retrieval/artifact.rs:100-124`) —
+  point id derived from `chunk_id`, payload carrying `chunk_id` *and* `artifact_id`. That is
+  the second slot whose absence forced the one id to be spent twice.
 
+The read-side instrument this file asked for first shipped in the same commit: `semantic_find`
+counts what it discards as `SemanticPage::unresolved` (`src/librarian/catalog/find.rs:381-388`)
+and `doc(action="find")` surfaces it with a hint (`src/librarian/tools/find.rs:1089-1094`).
+
+Qdrant also went **one collection per project** (`artifact_chunks_<name>_<hash>`). That is what
+retired the mixed-grain `artifacts` collection — it was abandoned rather than migrated, which
+is why "the collection needs rebuilding, not patching" was satisfied without a rebuild step.
+
+**Verified live 2026-09-06 14:2x against the running daemon at 127.0.0.1:6333**, because no
+gate lane can reach this code (see § *Tests added*):
+
+```
+collection                                         exact point count
+artifact_chunks_codescout_dc6a871595179329                    29435
+artifact_chunks_claude_plugins_38b0719140f222d8                4818
+artifact_chunks_backend_kotlin_dcb6382ad43d85ac                 164
+artifacts                     (legacy, mixed-grain)            2425
+```
+
+The legacy `artifacts` collection still exists and is **unreachable, not stale**:
+`artifact_collections` enumerates by `n.starts_with(prefix)` with `prefix = "artifact_chunks_"`
+(`src/librarian/artifact_store.rs:219`, `src/retrieval/artifact.rs:230-244`), and
+`"artifacts".starts_with("artifact_chunks_")` is false. No query path reads it. It is dead
+storage, tracked separately — see § *Resume*.
 ## Tests added
 
-None yet — filed at notice.
+`a_candidate_with_no_chunk_row_is_counted_not_silently_dropped` —
+`src/librarian/catalog/find.rs:625`. Exactly the test this file prescribed while it was open:
+seed a candidate whose id resolves to no `artifact_chunk` row, and assert `page.unresolved == 1`
+rather than a silently-short page. Written against the catalog rather than a backend, so **both**
+gate lanes run it — which was the point of choosing the read-side half as the testable one.
 
-No gate lane compiles this path: `server-stack` is not a default feature, so
-both test lanes build `ArtifactBackend::resolve`'s `SqliteVec` arm and the
-Qdrant code is never exercised. A regression test for the read-side half can be
-written feature-independently against `InMemoryArtifactStore`: seed it with an
-id that has no `artifact_chunk` row, and assert `semantic_find` reports the skip
-rather than returning a silently-short page.
+Its own comment (`find.rs:630`) records why it asserts on `unresolved` alone: a bare
+`unresolved` check paired with `exhausted` would pass a change that set both, so the
+discriminating assertion is the count, not the pair.
 
+Two further behavioural guards run against `InMemoryArtifactStore` — the collection-naming rule
+and the delete grain.
+
+**What no test covers, stated plainly in `6f032dbd`'s own commit message and repeated here so it
+is not rediscovered:** the Qdrant write keying, the filtered delete, and the fan-out merge.
+`server-stack` is not a default feature, so neither gate lane compiles any of it —
+`cargo clippy --features server-stack` (added to the gate by that commit) is the only thing that
+type-checks it, and an end-to-end reindex is the only thing that runs it. That gap is
+pre-existing and is now the largest in this area. It is precisely why the live point-count
+census sits in § *Fix* rather than being left to the suite: for this code the running daemon
+**is** the instrument, and a green gate is evidence about the other half of the file.
 ## Workarounds
 
-None that preserve current behaviour. Until the fork is decided, treat artifact
-semantic search as returning a decaying subset, and expect any artifact you edit
-to leave it.
-
+N/A — fixed. While it was open the only honest advice was to treat artifact semantic search as
+a decaying subset; that no longer holds.
 ## Resume
 
-Decide the fork above. If sqlite-vec: set `vector_backend`, then re-embed
-(`librarian(action="reindex", reembed=true)`), and expect the first run to
-write ~7573 chunk vectors. If Qdrant parity: start at
-`src/librarian/artifact_store.rs:92` (the trait), then
-`src/retrieval/artifact.rs:77` (payload), then
-`src/librarian/catalog/find.rs:~355` (read shape).
+N/A — fixed and archived.
 
-Either way, add the skip counter to `semantic_find` first — it is small,
-independent of the fork, and it is the instrument whose absence hid this.
+**One residual, deliberately not folded in here:** the legacy `artifacts` Qdrant collection
+holds 2425 orphaned mixed-grain points that no code path enumerates. It is dead storage, not a
+search defect, and it will never be reclaimed on its own — filed as
+`docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`
+rather than kept open here, because leaving a *fixed* correctness bug open to carry an ops
+chore is how a high-severity row stays live long after its mechanism is gone. That is the
+failure this very file demonstrated: it sat at `status: open severity: high` for three days
+after `6f032dbd` closed it, with a Resume sending the next reader to re-implement finished
+work.
 
+**Why it stayed open, recorded because no instrument caught it.** `librarian(action="doctor")`
+has `non_terminal_status_with_fix_anchor`, which fires on an open bug that *records* a fix
+anchor. `6f032dbd` never referenced this file, and this file never recorded a SHA, so there was
+no anchor to notice and the check read 0 — a true answer to a question nobody had asked. The
+signal that did exist was in the source: the fixing commit left three doc comments citing this
+file by path (`artifact_store.rs:132`, `retrieval/artifact.rs:99`, `catalog/find.rs:306`).
+A live bug file cited from a *source* doc comment is a cheap tell that its fix already shipped,
+and it is not currently wired to anything.
 ## References
 
 - `docs/superpowers/plans/2026-09-02-artifact-chunk-grain-retrieval.md` §
   *Deferred* — predicted "Qdrant is already storing chunk-keyed points whose
   payload claims they are artifact ids". Confirmed here, with the census.
 - `docs/trackers/retrieval-benchmark.md` — the 2026-09-03 runs, 2/12 then 1/12.
-- `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
+- `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`
   — the sibling defect, fixed at `36afd405`.

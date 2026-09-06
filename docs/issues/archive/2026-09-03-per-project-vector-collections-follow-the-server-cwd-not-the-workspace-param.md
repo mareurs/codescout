@@ -226,7 +226,7 @@ fix that is otherwise clean.
 ## Hypotheses tried
 
 1. **Hypothesis:** this is the already-filed grain mixture,
-   `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+   `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
    **Test:** read that file; check whether the symptom survives its fix at `6f032dbd`.
    **Verdict:** rejected as the same defect — that one is the pre-fix `artifacts` collection
    holding two id grains, and `6f032dbd` fixes it (embed errors went 45 → 0 on the same call
@@ -294,4 +294,4 @@ file:
 - `src/librarian/mod.rs:78-233` — `build_tool_context_with`
 - `src/librarian/artifact_store.rs:191-207` — `QdrantArtifactStore`
 - `6f032dbd` — the commit that introduced per-project collections, and the fix for the grain mixture
-- `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md` — the defect `6f032dbd` fixes; related, not duplicate
+- `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md` — the defect `6f032dbd` fixes; related, not duplicate

@@ -71,7 +71,7 @@ pub struct IndexReport {
 /// artifact id by joining `artifact_chunk`, and Qdrant could not — it has no
 /// join, so it spent the one id twice, as both the point id and the payload
 /// field named `artifact_id`. See
-/// `docs/issues/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
+/// `docs/issues/archive/2026-09-03-editing-an-artifact-removes-it-from-qdrant-backed-semantic-search.md`.
 #[derive(Debug, Clone)]
 pub struct EmbedQueueItem {
     /// UUID v4, minted by `replace_chunks`. The identity of the vector itself.
@@ -135,7 +135,7 @@ pub fn first_h1(body: &str) -> Option<String> {
 /// from one parse and an offset from another (or forgot the offset) would
 /// store ranges silently short by the frontmatter's height, which is the
 /// defect this signature exists to prevent recurring. See
-/// `docs/issues/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
+/// `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`.
 ///
 /// A document whose frontmatter does not parse is chunked whole, at offset 0.
 /// That aligns the two former callers, which disagreed: `index_repo_sync` fell
