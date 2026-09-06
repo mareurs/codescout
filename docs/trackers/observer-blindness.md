@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 20
+entry_high_water_OB: 21
 entry_prefix: OB
 ---
 
@@ -2133,6 +2133,46 @@ somewhere to go** — the mechanism was correct and its guidance pointed at a pa
 structurally unable to answer, which is this entry's own class holding about the
 tool built to address it.
 
+**AND IT SURVIVED A 54-ASSERTION SUITE, for a reason that generalises past this
+bug.** Every one of those assertions is about the guard's **predicate** — *who* is
+refused. Not one is about its **remedy text** — *where the refusal sends you*. That
+half is untested **by construction**, and no mutation reaches it: pinning prose
+reds on every edit, so suites rightly avoid it, and the omission is therefore
+universal rather than an oversight here. It is the twin of *loudness is a property
+of a PATH* and is **not** covered by it: that law is about an alarm nothing
+reaches, this is an alarm that fires, is read by exactly the right person, and
+routes them somewhere useless. Promoted into `CLAUDE.md` § *Testing Discipline*
+alongside its sibling. **The operative habit: when shipping a guard, name the next
+action its message produces and ask whether that party can perform it.**
+
+**And it is partly testable after all — as SHAPE, never as prose.** `codescout-7f`
+retracted their own *"there may be no fix"* as over-stated toward giving up, and
+they were right to. Pinning the sentence reds on every rewording, which is why
+suites avoid it; asserting that the message still names **a second addressee** does
+not. Both directions measured 2026-09-06 rather than argued:
+
+| change | suite |
+|---|---|
+| second addressee removed from the refusal | **RED**, exactly 1 assertion |
+| first step heavily reworded, both addressees kept | **GREEN**, 56/56 |
+
+That control is the load-bearing half — without it the assertion is prose-pinning
+wearing a shape assertion's clothes, and would deserve deleting the first time
+someone improved the wording. **Deliberately weak, and recorded as weak:** it
+cannot tell you the remedy is *correct*, only that both steps survive. *"The
+sideways-only form cannot silently return"* is the whole claim, and it is the
+regression that actually happened — the original text was not **wrong** when
+written, it was **incomplete** in a way nobody could see until four sessions
+followed it.
+
+**Do not compress step 2 into "same operator, just push."** *Your operator is the
+author's operator* is true of a single-human checkout and **false** of one shared
+by two people — where both steps still hold and the answer may simply be **no**,
+which is a complete answer rather than a failure of the procedure. The clause earns
+its place by making the question **askable**, never by predicting how it is
+answered. Flagged by `codescout-7f` as an over-reading a later reader would
+plausibly make; the guard's refusal text now says so at the point of use.
+
 **Verdict on the mechanism, from its first real use.** It refused a push five hours
 after the incident that produced it, printed the withholding sid and subjects, and
 turned a one-word instruction into a question that reached the person who could
@@ -2153,6 +2193,94 @@ already in `CLAUDE.md`: *visibility is not authority* is stated there as a limit
 on what a peer may **grant** you. This is the other half — a peer cannot
 **withhold** on your behalf either, because the withholding is invisible to the
 only party who could honour it.
+
+## OB-21 — a session cannot audit its own successive claims, because it never re-reads what it sent
+
+**Valid:** invariant
+
+**Rests on:** the 2026-09-06 pre-push-guard exchange; `OB-20`'s procedural half. Not on any
+code — this is a property of how a session's context is assembled.
+
+**Class:** two statements by one author, an hour apart, confidently contradicting each
+other, with **nothing marking the second as superseding the first**. Each was defensible
+when written. The defect exists only in the *pair*, and the pair is never assembled
+anywhere the author can see it.
+
+**Blind party:** the **author** — but by a *prompt* gap, not an inability, and the first
+version of this entry got that wrong in the exact way the entry is about.
+
+> **FALSIFIED WITHIN THE HOUR, BY ONE COMMAND.** This field originally read *"re-reading is
+> not an option that was declined, it is an operation the context does not afford"*, and
+> concluded *"the outbox stays unreadable"*. **It is not unreadable. It is unread.** The
+> harness writes each session's full transcript to
+> `$CLAUDE_CONFIG_DIR/projects/<slug>/<sessionId>.jsonl` and hands the session its own path
+> at startup. Checked 2026-09-06 against this session's own file (20.7 MB): `fail-CLOSED`
+> → 9 hits, `the safe direction` → 7, `34 assertions` → 10 — including the superseded
+> sentence recovered verbatim. Falsified by `codescout-7f` on their own transcript first,
+> then reproduced here before amending. **An entry asserting that an author cannot audit
+> their own claims was itself an unaudited claim** — the class instantiating inside the
+> record of the class.
+
+So the true statement is narrower: a sent message leaves the **context window**, so nothing
+*prompts* the author to look, and no author has ever thought to. The author holds statement
+2 and a memory of *having reasoned*; statement 1's text is on disk, one grep away, and
+unconsulted.
+
+**Admission test, marginal and said so rather than defended.** This ledger's rule is *would
+a more careful version of the same party have caught it?* — and with the instrument known,
+yes. Retained as a class because three instances in one evening from an author actively
+writing about the class is a population that earns a record, and because the **mechanism
+below is the deliverable**; but a fourth instance from someone who knows about the grep is
+an `F-N`, not an instance of this.
+
+**Who can see it:** the **recipient**, and essentially only them. They hold both messages as
+received text, in order, undecayed. This is a stronger form of `OB`'s usual reviewer
+argument: the peer is not merely a fresher pair of eyes on the same artifact, they hold an
+artifact — the sequence — that does not exist on the author's side at all.
+
+**Plausible-answer property:** both statements read as correct, because both *were* correct
+at their moment. Nothing errors, nothing contradicts itself within a single message, and the
+author's own re-derivation confirms statement 2. The only observable is the pair.
+
+**Vigilance:** wrong instrument for *noticing*, right instrument for *checking* — the split
+this entry originally missed. Resolving to be careful does not assemble the pair; running
+one command does. Measured 2026-09-06: **three**
+scope-of-claim errors from one session in one evening, all while that session was actively
+writing about scope-of-claim errors — *"two of the six are yours"* (zero were, contradicted
+by output pasted in the same message), *"34 assertions"* offered as coverage for a member
+holding zero of them, and *"fail-CLOSED... the safe direction"* left standing after adopting
+fail-open an hour later. **Two of the three were caught only by a peer comparing two
+statements from the same author.** Knowing the class prevented none.
+
+**Mechanism status:** **one available, unbuilt — and it is a grep.** Found by `codescout-7f`
+by testing the word *"unreadable"*, on the grounds that an absolute is either true or one
+command from falsified:
+
+> Before asserting a posture that could supersede an earlier one, **grep your own transcript
+> for the subject.** The path is fixed, given to every session at startup, and the trigger
+> is one you already recognise — you know when you are changing a posture, which is exactly
+> the moment to run it.
+
+That is the third position properly filled: an operation with a concrete instrument, not a
+resolution. It replaces both candidates this entry first offered, which were policies and
+would have decayed — *state a posture change as an explicit retraction* (must be remembered)
+and *write postures into the artifact rather than into messages* (real, and why degrade-open
+now lives in `scripts/install-hooks.sh` beside the code, but a mitigation of the
+**consequence**, not of the class).
+
+**Two limits, so it is not oversold — `codescout-7f`'s, kept verbatim in substance.** It is
+still **self**-audit, so it fails exactly when the author does not realise a claim is
+superseding — some of the population, though *not* the `fail-CLOSED` case, where the author
+knew. And it is **per-session**: a session can read its own transcript, never a peer's, so
+cross-session contradiction still needs the third party. What it removes is the case hit
+twice tonight, where the author **held both claims and could not compare them**.
+
+**Instances:** the three above, all 2026-09-06, all this session (`cda3afe5-…`); caught by
+`4a2f34f7-…` (×2) and `ba061586-…` (×1).
+
+**Status:** open — 3 instances, 1 author, 2 observers, 2026-09-06. Distinct from `OB-20`,
+which is about a fact absent from the substrate; this is about a fact absent from the
+author's *context* while present in the recipient's.
 
 ## Template for new entries
 

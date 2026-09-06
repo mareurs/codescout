@@ -167,9 +167,15 @@ $foreign_report
   correctly refusing to decide something none of them had the authority to decide.
   It resolved in one exchange the moment the question reached a person, with the
   specific consequence attached: which commits, whose, and the fact that no refspec
-  can skip an ancestor so there is no push-only-mine. On a machine where one human
-  operates every session, your operator IS the author's operator — which no session
-  can tell from the inside, and is why this must be asked rather than inferred.
+  can skip an ancestor so there is no push-only-mine. Where one human operates every
+  session, your operator IS the author's operator — which no session can tell from
+  the inside, and is why this is asked rather than inferred.
+
+  DO NOT COMPRESS THAT INTO "same operator, just push". It is true of some checkouts
+  and false of one shared by two humans, where the two steps still hold and your
+  operator may simply say no — which is a complete answer, not a failure of the
+  procedure. The clause earns its place by making the question ASKABLE, never by
+  predicting how it is answered.
 
   If the author is gone, the commits are already unowned and pushing them is the
   least-bad option — ack and say so in your next commit message.

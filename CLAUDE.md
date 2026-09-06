@@ -38,8 +38,11 @@ Why each part, one line each. Every measurement, date and superseded form →
 - **The lean lane is VACUOUS for librarian code — same gate, opposite direction.**
   `--no-default-features` switches the librarian *off*, which is why a terminal lean lane leaves a
   librarian-less binary; the half that went unwritten is that it therefore **never runs a librarian
-  test**. Measured 2026-09-04 over one gate run: **0** `librarian::` tests in the lean lane against
-  **1676** in the default one — absence, not a thinner sample. So `LEAN exit=0` on librarian work is
+  test**. Measured 2026-09-06 over one gate run: **0** `librarian::` tests in the lean lane against
+  **1732** in the default one — absence, not a thinner sample. **The control is what makes that `0`
+  a measurement rather than a broken grep:** `prompts::` returns **101 in BOTH** lanes, so the lean
+  lane demonstrably runs tests and the counting method works. Re-derive both together or neither.
+  So `LEAN exit=0` on librarian work is
   a suite that never compiled the code under test, returned identically whether it is right or
   broken, and two sessions cited it as a pass in one evening. Read **your own test names** out of
   the default lane (`grep -E '^test librarian::<module>::tests::'`), never either lane's total.
@@ -104,7 +107,25 @@ premise that every addition falsifies.
   is decoration however loudly written. **The law reaches past guards, to features** — `ListFunctions`
   and `ListDocs` implemented the `Tool` trait, were registered nowhere, and carried a passing test
   suite for months while no agent could reach a line of it. The defect was the *tests*, not the
-  tools.
+  tools. **And the twin, which the reached-alarm case does NOT cover: an alarm can fire, be read by
+  exactly the right person, and send them somewhere useless — because a suite tests a guard's
+  PREDICATE and never its REMEDY TEXT.** Every assertion is about *who is refused*; nobody writes
+  one about *where the refusal sends you*, so that half is untested by construction and no mutation
+  reaches it. Measured 2026-09-06: the `pre-push` foreign-session guard refused correctly on its
+  first real use and its own text said *"ASK THE AUTHOR"* — a party who can report what they were
+  told and **cannot grant**. Four sessions followed it and held for eight hours, each correctly
+  refusing to decide what none had authority over; the pile grew 2 → 14 commits. It survived a
+  54-assertion suite because every one of them was about the predicate. So when you ship a
+  guard, **name the next action its message produces and ask whether that party can perform it.**
+  **The remedy is untestable as PROSE and partly testable as SHAPE, and the difference is worth
+  the line:** pinning sentences reds on every rewording and is rightly avoided, but asserting that
+  the message still names *a second addressee* is cheap and reds exactly on the deletion. Measured
+  the same day — removing the operator step from that guard killed **1** assertion, and a heavy
+  rewrite of the surrounding prose that kept both addressees stayed **green**. It cannot tell you
+  the remedy is *correct*, only that both steps survive; *"the sideways-only form cannot silently
+  return"* is the whole claim, and it is the regression that actually happened.
+  (`observer-blindness:OB-20`; raised by sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`, who
+  then retracted their own *"there may be no fix"* as over-stated toward giving up.)
 - **A count of a defect population must arrive with its unit or not at all.** Derive it, don't cite
   it: one population yielded four defensible numbers inside an hour, each the right answer to a
   different question — and near enough to each other that no reader would have queried any of them.

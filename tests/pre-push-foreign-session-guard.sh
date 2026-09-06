@@ -22,6 +22,22 @@
 # so those SHAs die and the test would have started failing for a reason having nothing to
 # do with the guard.
 #
+# VERIFYING THE LIVE GUARD BY DISABLING IT IS A TRADE WITH A DIRECTION. To confirm the
+# shim degrades open, this session parked `scripts/pre-push-foreign-session-guard.sh` and
+# ran `--check` and a real `git push --dry-run` against the same state. That is the
+# stronger evidence — both exits observed in one state, and reading a predicate cannot rule
+# out an earlier line returning first — but for the seconds it runs, the guard is OFF on a
+# tree four sessions share, which is precisely the window the guard exists to cover.
+# Verifying a safety mechanism by disabling it creates the state it protects against.
+#
+# The cheaper alternative, which `codescout-7f` used to confirm the same claim: read the
+# predicate (`install-hooks.sh`'s `[ ! -x "$PROJECT_ROOT/$target" ]` arm) and exercise the
+# instrument in the HEALTHY state as a positive control. Weaker, and free.
+#
+# On a single-session checkout the disable costs nothing and you should always take it.
+# Here it is not free, and neither party priced it at the time. Prefer the cases below —
+# they disable nothing, because every one of them runs in a throwaway repo.
+#
 # Usage:
 #   tests/pre-push-foreign-session-guard.sh     # non-zero exit on any failure
 
@@ -111,6 +127,27 @@ hasnt "your own commits are not in the report" "$(report_rows "$OUT")" "$ALICE"
 hasnt "nor is your own subject"       "$(report_rows "$OUT")" "alice on top"
 has "offers the ack, prefilled"      "$OUT" "CODESCOUT_PUSH_ACK=\"$BOB\""
 has "points at the class"            "$OUT" "OB-20"
+
+# THE REMEDY TEXT, ASSERTED AS SHAPE RATHER THAN AS PROSE.
+#
+# Every other assertion in this file is about the guard's PREDICATE -- who gets refused.
+# None was about where the refusal SENDS you, and that is how the first version shipped
+# saying only "ASK THE AUTHOR": a party who can report what they were told and cannot
+# grant. Four sessions followed it and held eight hours while the pile went 2 -> 14, and a
+# 54-assertion suite stayed green throughout, because the predicate was never wrong.
+#
+# Pinning the sentence would red on every rewording and is rightly avoided -- but pinning
+# the SHAPE does not. These two lines survive a complete rewrite of the message and fail
+# exactly when someone deletes the second step, which is the mutation that produced
+# tonight. Deliberately weak, and say so rather than bank it: it cannot tell you the remedy
+# is CORRECT, only that both addressees are still named. "The sideways-only form cannot
+# silently return" is the whole claim.
+#
+# Proposed by sessionId 4a2f34f7-0669-487d-9ce9-39b77881642f, retracting their own "there
+# may be no fix" -- which this file had already recorded as correct, and which was
+# over-stated in the direction of giving up.
+has "remedy names the AUTHOR step"   "$OUT" "AUTHOR"
+has "remedy names the OPERATOR step" "$OUT" "OPERATOR"
 
 echo
 echo "== the ack is per-session, not a switch =="

@@ -160,7 +160,26 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # blocks all work is worse than the hole it closes, and it cannot ask its question either
 # way; that is the same principle the pre-push guard already applies when it has no
 # session id. The warning is what keeps this from being silent degradation, which is the
-# failure the rest of this script is written against. Raised 2026-09-06 by sessionId
+# failure the rest of this script is written against.
+#
+# NAMING THE OBSERVER, because "loud" is what makes an open degradation defensible and an
+# alarm nothing reaches is exactly as informative as no alarm. There are TWO paths and only
+# one depends on someone reading stderr:
+#   1. push time  -> this warning, on stderr. Swallowed by any caller that reads only the
+#                    exit code -- and with fail-open that exit is 0, so open-and-unheard is
+#                    the worst square of the matrix. Real, and not sufficient on its own.
+#   2. `install-hooks.sh --check` -> reports `MISSING <hook>` and exits 1, from the
+#                    `-x "$PROJECT_ROOT/$target"` precondition, independently of whether
+#                    anyone saw path 1. Verified 2026-09-06 by parking the script: --check
+#                    exit=1 with `MISSING pre-push`, while the same state pushed with exit 0.
+#                    That path has a test caller (tests/pre-push-foreign-session-guard.sh).
+# The exposure window also shrank when the script became tracked: `git clean -fdx` removes
+# untracked and ignored files, so it can no longer take this one. The realistic trigger is
+# checking out a branch that predates the script. Raised by sessionId
+# 4a2f34f7-0669-487d-9ce9-39b77881642f, applying "loudness is a property of a PATH" to the
+# warning itself rather than to the refusal.
+#
+# Raised 2026-09-06 by sessionId
 # ba061586-6581-4656-b0c5-acad83474de5, who measured the 127 rather than assuming it, and
 # who also asked to be cited by sid rather than by session NAME here: a name is
 # registry-minted and re-minted by compaction, resume, or a restart under another profile,
