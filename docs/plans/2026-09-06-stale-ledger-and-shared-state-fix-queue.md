@@ -254,6 +254,55 @@ reducible to a rule someone can follow today.
 Ranked below task 3's main body only because it shares its fix space; if the first candidate
 lands, both are closed at once.
 
+
+### 3b — a gate result on this tree is worthless without a dirty-file check, and that is now a precondition
+
+Distinct from 3a: **no stash is involved**. This is the plain case — peers have uncommitted
+`.rs` edits in the tree at the moment you run the gate, so your green (or your red) describes
+a tree that is nobody's intent, including yours.
+
+Measured twice on 2026-09-06, and the second is much worse than the first:
+
+| | what happened | why it was survivable |
+|---|---|---|
+| ~15:40 | a peer's half-written test stub in `mv.rs` failed to **compile** | loud, obviously foreign, diagnosable from the error text alone |
+| ~19:5x | two peers' in-flight edits produced **two passing-looking test failures** in `librarian::catalog::chunk` and `librarian::tools::append_entry` | nothing about the output said "not yours" |
+
+The second one is the dangerous shape. The tree **compiled**. The failures were plausible,
+in the librarian, in the same subsystem as the change under test — a host-identity fix in
+`audit/host.rs`. The natural reading of `DEFAULT exit=101` with a chunk-reuse assertion in it
+is *"my change broke chunk reuse"*. It could not have: `resolve_host_id`'s only callers are
+`shard::export`, `tools/audit_log` and `tools/doctor`, none of which those tests reach. But
+that is an **argument**, constructed after the fact, and the failure was sitting there looking
+like evidence for the opposite.
+
+**So the rule is promoted from "worth doing" to a precondition of reporting a gate result at
+all:**
+
+```
+git status --short -- '*.rs'      # before citing ANY gate run on this checkout
+```
+
+Non-empty means the run describes a tree that includes work you did not write. That does not
+make the result useless — it makes it a result **about a different tree**, which has to be
+said out loud when reporting it.
+
+Two things that make the check sufficient rather than merely advisable:
+
+- **Attribute positively, never by adjacency.** `scripts/file-provenance.py <paths>` returned
+  the sessionIds for both files here (`cda3afe5` for `append_entry.rs`, `4a2f34f7` for
+  `chunk.rs`) — one of them a session this one had never spoken to. Guessing from subject-area
+  proximity would have named the wrong party, which is the failure mode already recorded
+  earlier in this same session.
+- **Read your own test names out of the lane, not the totals.** `8744 passed, 2 failed` is
+  compatible with your change being the cause and with it being untouched. `17 passed, 0
+  failed` over `librarian::catalog::audit::host::tests` is the sentence that settles it.
+
+The companion tell for the 3a case is different and both are needed: a stash reverts work so
+`git status` is **clean** during the window. The bracket that catches that one is capturing
+`git rev-parse HEAD` and the file's mtime before and after the run and refusing to trust a
+result where either moved — used successfully for this task's mutation runs, and cheaper than
+the message-passing it replaces.
 ## Not in this queue, and why
 
 - **`experiments` CI has been red for 4 days** (last green 2026-09-02 06:45), three independent

@@ -135,11 +135,35 @@ correctness").
 
 ## Workarounds
 
-The 5,566 exported lines are **left uncommitted deliberately**. Committing them would
-publish this laptop's rows under the workstation's host id into a `merge=union` file, which
-is the irreversible half of the defect. They are not lost — the rows are in the catalog and
-`audit_exported_through_seq` governs re-export once the identity is fixed.
+The exported lines sitting uncommitted in `.codescout/audit/ripper-65e654-202609.jsonl` are
+**left uncommitted deliberately**. Committing them would publish this laptop's rows under the
+workstation's host id into a `merge=union` file, which is the irreversible half of the defect.
 
+**CORRECTED 2026-09-06, and the corrected sentence is the one an operator reads first.** This
+section used to end: *"They are not lost — the rows are in the catalog and
+`audit_exported_through_seq` governs re-export once the identity is fixed."* The watermark does
+**not** govern that. It is per-**repo**, keyed on the repo path (`shard::watermark_key`,
+`src/librarian/catalog/audit/shard.rs:146-154`), and the host id is absent from the key
+entirely. Fixing the identity does not roll it back: every row already emitted under
+`ripper-65e654` stays counted as exported and will never re-emit under the corrected id on its
+own. Re-verified at those lines by the original reporter rather than accepted from the
+correction.
+
+What actually survives, and what does not:
+
+- **Not recovered by the fix:** the *machine* attribution of the already-exported rows. Nothing
+  automatic restores it — and after the fix ships, every counter reports the export as
+  complete, because by the watermark's accounting it is. That is precisely why `doctor` reports
+  `audit_health.host_previous_stranded_rows` and not merely whether the identity matches: a
+  check that answered only the identity question would read clean while thousands of rows sat
+  in another machine's shard with nothing owed by any number in the report.
+- **Not lost at all:** *session* attribution. Audit rows carry `actor`, which is a sessionId, so
+  **who** wrote a row is recoverable even where **which machine** is not. That was always the
+  recovery route; the host field was never the thing carrying it.
+- **Recoverable, but only on purpose:** re-emitting the stranded rows under the corrected id
+  means rolling the per-repo watermark back below the contaminated range and re-exporting. That
+  has a real cost — it re-emits *everything* after that point, not only the contaminated rows —
+  so it is an operator decision, and the fix deliberately does not make it unasked.
 ## Unverified
 
 Whether the large `audit_open_gaps` list is caused by cross-host sequence interleaving is

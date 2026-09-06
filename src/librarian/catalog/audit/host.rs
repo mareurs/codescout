@@ -49,6 +49,25 @@ use rusqlite::Connection;
 pub(crate) const AUDIT_DIR_PARTS: [&str; 2] = [".codescout", "audit"];
 pub(crate) const HOST_META_KEY: &str = "audit_host_id";
 
+/// Set by [`resolve_host_id`] when it detects that the stored id was minted by a DIFFERENT
+/// machine and re-mints. Holds the id being replaced, so the shard that id already wrote
+/// stays attributable after this host stops using it.
+///
+/// Written once per re-mint and never read by the audit path — it exists for the operator
+/// and for `doctor`'s `audit_health.host_previous`. A `tracing::warn!` alone would have been
+/// cheaper and wrong: the party who needs this is triaging a mixed shard days later, not
+/// watching the terminal at the moment of the transport. "Loudness is a property of a PATH,
+/// not of a failure" (CLAUDE.md § *Testing Discipline*) — so the finding is persisted where a
+/// later query reaches it, and the log line is the courtesy.
+pub(crate) const PREV_HOST_META_KEY: &str = "audit_host_id_previous";
+
+/// What [`sanitize`] returns when a name resolves to nothing usable.
+///
+/// Named rather than inlined because [`resolve_host_id`] must be able to RECOGNISE it: every
+/// machine that cannot name itself sanitizes to this same string, so it is exactly the value
+/// the transport check cannot discriminate on.
+const FALLBACK_NAME: &str = "host";
+
 /// Sources tried in order, first non-empty wins. No `gethostname` crate: the
 /// value must be persisted anyway, so a dependency would buy only the readable
 /// prefix — and the prefix is a courtesy, not the correctness.
@@ -102,7 +121,7 @@ fn sanitize(raw: &str) -> String {
     }
     let trimmed = out.trim_matches('-').to_string();
     if trimmed.is_empty() {
-        "host".to_string()
+        FALLBACK_NAME.to_string()
     } else {
         trimmed
     }
@@ -153,18 +172,145 @@ pub(crate) fn mint_host_id(candidate: &str) -> String {
     format!("{}-{}", sanitize(candidate), suffix())
 }
 
-/// The stable id for this catalog's machine: read from `catalog_meta` if
-/// already minted, else minted from `candidate_name()` and persisted. Thin by
-/// design — all the logic that needs testing lives in `mint_host_id`.
+/// The name half of an id built by [`mint_host_id`] — everything before the trailing
+/// `-<6 lowercase hex>`. `None` when `id` does not have that shape.
+///
+/// **This is what lets the transport check need no new state and no migration.**
+/// `mint_host_id` writes `sanitize(candidate) + "-" + suffix()`, so the sanitized machine
+/// name *at mint time* is already carried inside the id. A catalog minted long before this
+/// check existed can still be tested against the host now reading it — which is the only
+/// case that matters, since the catalogs already in the field are exactly those.
+///
+/// Returning `None` rather than guessing is load-bearing: [`resolve_host_id`] treats an
+/// unparseable id as "cannot discriminate" and leaves it alone. An id in a shape this
+/// function does not recognise is a *future or hand-written* format, and re-minting over one
+/// would destroy an identity the code does not understand.
+///
+/// The suffix test is exact — six characters, lowercase hex — because that is precisely what
+/// [`suffix`] emits (`{:06x}` over a value masked to 24 bits). Accepting uppercase or a
+/// variable length would widen this to match names that merely end in something hex-ish,
+/// and `-cafe` is a plausible tail for a real host name.
+fn minted_name(id: &str) -> Option<&str> {
+    let (name, tail) = id.rsplit_once('-')?;
+    let looks_minted = !name.is_empty()
+        && tail.len() == 6
+        && tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'));
+    looks_minted.then_some(name)
+}
+
+/// Was `stored` minted by a machine other than the one whose sanitized name is `this_name`?
+/// `Some(minted_name)` when that can be established positively; `None` when it cannot.
+///
+/// Pure, and split out from [`resolve_host_id`] for the reason [`mint_host_id`] already is:
+/// the whole decision is testable without an environment or a catalog connection, so the
+/// tests that matter never race on a process-global env var. `resolve_host_id` keeps only
+/// the two impure ends — reading the machine name, and writing the meta rows.
+///
+/// **`None` is returned for three different reasons and they are not interchangeable:**
+/// the host cannot name itself, the stored id is in an unrecognised format, or the id was
+/// genuinely minted here. Only the last is "all is well"; the first two are "cannot tell",
+/// and both deliberately resolve to *leave it alone*. Adopting silently is the defect this
+/// exists to fix — but re-minting on a machine that cannot discriminate would churn a fresh
+/// shard on every open, which is the same defect with the sign flipped.
+fn foreign_mint<'a>(stored: &'a str, this_name: &str) -> Option<&'a str> {
+    if this_name == FALLBACK_NAME {
+        return None;
+    }
+    let minted = minted_name(stored)?;
+    (minted != this_name).then_some(minted)
+}
+
+/// The stable id for the machine reading this catalog — read from `catalog_meta` if it was
+/// minted **here**, otherwise minted fresh and persisted.
+///
+/// **The old contract said "this catalog's machine", and that phrase was the bug.** It
+/// assumed a catalog belongs to one machine for life. It does not: this repo ships a
+/// cross-machine catalog-integration design, and on 2026-09-04 a catalog was transported
+/// wholesale onto a second host, which then silently adopted the sender's id and wrote its
+/// own rows into the sender's monthly shard — a file tracked in git and declared
+/// `merge=union`, so the mixing was published and a union merge folds both streams together
+/// with nothing marking the seam. `shard_file_name`'s doc comment states the invariant that
+/// was lost: *"host keeps two machines off each other's lines entirely."*
+/// `docs/issues/2026-09-04-a-transported-catalog-carries-its-host-identity.md`.
+///
+/// **The check costs no new state.** [`minted_name`] recovers the sanitized machine name
+/// from the stored id itself, so a catalog minted before this code existed is still
+/// testable — which is the only population that matters, those being the catalogs already in
+/// the field.
+///
+/// **It re-mints rather than refusing, and that is a deliberate rejection of the louder
+/// option.** The bug file offered "refuse at open, naming both ids". A hard error is the
+/// better report and the worse behaviour: the catalogs this fires on are *already* in the
+/// mismatched state, so refusing bricks every tool call on that host until a human
+/// intervenes. Re-minting costs at worst one spare shard file; refusing costs the running
+/// system. The previous id is preserved in [`PREV_HOST_META_KEY`] so the report survives.
+///
+/// **What this does NOT do, stated because the bug file's Workarounds section reads
+/// otherwise:** it does not recover rows already exported under the foreign id. The export
+/// watermark is per-REPO (`shard::watermark`, keyed on repo path) and entirely independent of
+/// the host id, so re-minting does not roll it back — those rows stay counted as exported and
+/// never re-emit under the new id. Re-attributing them needs a deliberate watermark rollback,
+/// which is an operator decision and not something this function should do unasked.
+///
+/// A renamed-but-not-transported host also trips this, and that is correct rather than
+/// tolerated: for audit purposes a machine answering to a new name is a new identity, and a
+/// fresh shard is the honest record of the change.
 pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
-    if let Some(existing) = gc::get_meta(conn, HOST_META_KEY)? {
-        if !existing.trim().is_empty() {
-            return Ok(existing.trim().to_string());
+    resolve_host_id_for(conn, &candidate_name())
+}
+
+/// [`resolve_host_id`] with the machine name injected.
+///
+/// The split exists so every branch above is reachable from a test **without touching a
+/// process-global environment variable**. `candidate_name()` reads `CODESCOUT_AUDIT_HOST` and
+/// friends; a test that set one would be mutating shared state under a parallel test runner,
+/// and this repo already carries bug files about load-sensitive flakes. With the name as a
+/// parameter the interesting cases — foreign, native, unparseable, unnameable — are ordinary
+/// deterministic calls.
+fn resolve_host_id_for(conn: &Connection, candidate: &str) -> Result<String> {
+    let this_name = sanitize(candidate);
+
+    if let Some(stored) = gc::get_meta(conn, HOST_META_KEY)? {
+        let stored = stored.trim().to_string();
+        if !stored.is_empty() {
+            let Some(minted) = foreign_mint(&stored, &this_name) else {
+                return Ok(stored);
+            };
+            let id = mint_host_id(candidate);
+            tracing::warn!(
+                stored_id = %stored,
+                minted_by = %minted,
+                this_host = %this_name,
+                new_id = %id,
+                "audit host id was minted by a different machine — re-minting. Rows this \
+                 host already exported under the stored id remain in that shard; the export \
+                 watermark is per-repo and does not roll back."
+            );
+            gc::set_meta(conn, PREV_HOST_META_KEY, &stored)?;
+            gc::set_meta(conn, HOST_META_KEY, &id)?;
+            return Ok(id);
         }
     }
-    let id = mint_host_id(&candidate_name());
+
+    let id = mint_host_id(candidate);
     gc::set_meta(conn, HOST_META_KEY, &id)?;
     Ok(id)
+}
+
+/// The id [`resolve_host_id`] replaced, if it has ever re-minted on this catalog.
+///
+/// `None` is the ordinary state and means only that no transport was ever *detected* — not
+/// that none happened. A catalog transported before this check shipped, whose stored id
+/// happens to parse and happens to match the receiving host's name, is indistinguishable
+/// from a native one and always will be.
+///
+/// Exists so the re-mint has a reader. `doctor` surfaces it as
+/// `audit_health.host_previous`, which is the query a person triaging a mixed shard actually
+/// runs — days after the `tracing::warn!` scrolled past in someone else's terminal.
+pub(crate) fn previous_host_id(conn: &Connection) -> Result<Option<String>> {
+    Ok(gc::get_meta(conn, PREV_HOST_META_KEY)?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty()))
 }
 
 /// `<host>-<YYYYMM>.jsonl`. One file per host per month: month bounds the file
@@ -240,6 +386,165 @@ mod tests {
         assert_eq!(
             a, b,
             "the id must come from catalog_meta after the first call"
+        );
+    }
+
+    /// The suffix in these fixtures is exactly six lowercase hex characters because that is
+    /// what `suffix()` emits. Shortening it, or using an uppercase digit, makes
+    /// `minted_name` return `None` and turns every re-mint assertion below into a silent
+    /// no-op that still passes — the id would read as "unrecognised format", which is a
+    /// leave-it-alone case.
+    const FIXTURE_SUFFIX: &str = "65e654";
+
+    #[test]
+    fn minted_name_accepts_only_the_shape_mint_host_id_emits() {
+        assert_eq!(minted_name("ripper-65e654"), Some("ripper"));
+        // A sanitized name may itself contain `-`; the split takes the LAST one, so a
+        // hyphenated host name survives intact.
+        assert_eq!(minted_name("build-box-2-abc123"), Some("build-box-2"));
+
+        // Everything below is a leave-it-alone case, and each fails for its own reason.
+        assert_eq!(minted_name("ripper"), None, "no suffix at all");
+        assert_eq!(
+            minted_name("ripper-65E654"),
+            None,
+            "uppercase is not our format"
+        );
+        assert_eq!(minted_name("ripper-65e65"), None, "five chars, not six");
+        assert_eq!(minted_name("ripper-65e6544"), None, "seven chars, not six");
+        assert_eq!(minted_name("ripper-65g654"), None, "`g` is not hex");
+        assert_eq!(minted_name("-65e654"), None, "empty name half");
+        // The reason the length test is exact rather than "ends in something hex-ish":
+        // `-cafe` is a plausible tail for a real host name and must not be read as a mint.
+        assert_eq!(
+            minted_name("coffee-cafe"),
+            None,
+            "a hex-looking 4-char tail"
+        );
+    }
+
+    /// The three `None` reasons are not interchangeable, and only one of them means
+    /// "all is well". Pinning them together because a future simplification that collapsed
+    /// them would still pass any test that only checked the foreign case.
+    #[test]
+    fn foreign_mint_distinguishes_cannot_tell_from_all_is_well() {
+        let foreign = format!("ripper-{FIXTURE_SUFFIX}");
+
+        assert_eq!(
+            foreign_mint(&foreign, "archlinux"),
+            Some("ripper"),
+            "different machine, both names known — the only case that re-mints"
+        );
+        assert_eq!(
+            foreign_mint(&foreign, "ripper"),
+            None,
+            "minted here: all is well"
+        );
+        assert_eq!(
+            foreign_mint("hand-written-id", "archlinux"),
+            None,
+            "unrecognised format: cannot tell, so leave an identity we do not understand"
+        );
+        assert_eq!(
+            foreign_mint(&foreign, FALLBACK_NAME),
+            None,
+            "this host cannot name itself, so EVERY machine looks like `host` and a \
+             mismatch says nothing — re-minting here would churn a new shard on every open, \
+             which is the defect with its sign flipped"
+        );
+    }
+
+    /// The motivating case, end to end: a catalog carrying another machine's id is
+    /// re-minted, and the id it replaced is preserved rather than discarded.
+    ///
+    /// Deterministic without touching the environment — `resolve_host_id_for` takes the
+    /// machine name, so nothing here races a parallel test on a process-global env var.
+    #[test]
+    fn a_transported_catalog_is_re_minted_and_names_what_it_replaced() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let foreign = format!("ripper-{FIXTURE_SUFFIX}");
+        gc::set_meta(&cat.conn, HOST_META_KEY, &foreign).unwrap();
+
+        let got = resolve_host_id_for(&cat.conn, "archlinux").unwrap();
+
+        assert_ne!(got, foreign, "the sender's id must not be adopted");
+        assert!(
+            got.starts_with("archlinux-"),
+            "the new id must name THIS host: {got}"
+        );
+        assert_eq!(
+            previous_host_id(&cat.conn).unwrap().as_deref(),
+            Some(foreign.as_str()),
+            "the replaced id is what makes the already-written shard attributable \
+             afterwards; dropping it would close the record while the rows stay stranded"
+        );
+        // Persisted, not merely returned: the next call must agree with this one, or the
+        // host forks its own shard history across two filenames.
+        assert_eq!(resolve_host_id_for(&cat.conn, "archlinux").unwrap(), got);
+    }
+
+    /// The control, and without it every assertion above is satisfied by a function that
+    /// re-mints unconditionally. A native id must survive untouched AND leave no
+    /// `host_previous` behind — a spurious one would make `doctor` report stranded rows on a
+    /// healthy catalog.
+    #[test]
+    fn an_id_minted_here_is_returned_unchanged_and_records_no_previous() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let native = format!("archlinux-{FIXTURE_SUFFIX}");
+        gc::set_meta(&cat.conn, HOST_META_KEY, &native).unwrap();
+
+        assert_eq!(
+            resolve_host_id_for(&cat.conn, "archlinux").unwrap(),
+            native,
+            "same machine: nothing to do"
+        );
+        assert_eq!(
+            previous_host_id(&cat.conn).unwrap(),
+            None,
+            "no re-mint happened, so nothing may claim one did"
+        );
+    }
+
+    /// Both leave-it-alone cases, end to end. They are separate assertions rather than one
+    /// parameterised loop because they are separate GUARDS: a change that dropped the
+    /// unparseable check would leave the unnameable one passing, and vice versa.
+    #[test]
+    fn a_catalog_that_cannot_be_judged_is_left_exactly_as_found() {
+        // Unrecognised id format.
+        let cat = Catalog::open_in_memory().unwrap();
+        gc::set_meta(&cat.conn, HOST_META_KEY, "legacy-hand-written").unwrap();
+        assert_eq!(
+            resolve_host_id_for(&cat.conn, "archlinux").unwrap(),
+            "legacy-hand-written"
+        );
+        assert_eq!(previous_host_id(&cat.conn).unwrap(), None);
+
+        // Host cannot name itself: `sanitize("")` is the shared fallback, so the comparison
+        // has nothing to discriminate on.
+        let cat = Catalog::open_in_memory().unwrap();
+        let foreign = format!("ripper-{FIXTURE_SUFFIX}");
+        gc::set_meta(&cat.conn, HOST_META_KEY, &foreign).unwrap();
+        assert_eq!(resolve_host_id_for(&cat.conn, "").unwrap(), foreign);
+        assert_eq!(previous_host_id(&cat.conn).unwrap(), None);
+    }
+
+    /// An empty or whitespace-only stored value is not an identity, and must mint rather
+    /// than being treated as a foreign id. Pinned because the emptiness check sits BEFORE
+    /// the foreign-mint branch and a reordering would send `""` down the re-mint path,
+    /// writing a `host_previous` of `""` that `doctor` would then report as a real
+    /// predecessor.
+    #[test]
+    fn a_blank_stored_id_mints_without_claiming_a_predecessor() {
+        let cat = Catalog::open_in_memory().unwrap();
+        gc::set_meta(&cat.conn, HOST_META_KEY, "   ").unwrap();
+
+        let got = resolve_host_id_for(&cat.conn, "archlinux").unwrap();
+
+        assert!(got.starts_with("archlinux-"), "minted fresh: {got}");
+        assert_eq!(
+            previous_host_id(&cat.conn).unwrap(),
+            None,
+            "a blank is an absence, not a machine that once owned this catalog"
         );
     }
 

@@ -613,6 +613,61 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     audit_health["host"] = json!(crate::librarian::catalog::audit::host::resolve_host_id(
         &cat.conn
     )?);
+    // Present only after a re-mint, so its ABSENCE is the ordinary state and carries no
+    // claim — a catalog transported before that check shipped is indistinguishable from a
+    // native one.
+    //
+    // **It reports the STRANDED ROWS, not merely the identity match, and that distinction is
+    // the whole reason this block is more than one line.** Once `resolve_host_id` re-mints,
+    // the identity is correct AND the export is complete by the watermark's own accounting —
+    // the watermark is per-repo and never rolls back, so every row already emitted under the
+    // foreign id stays counted as exported. A field that said only "the stored id matches
+    // this host" would therefore read clean while thousands of rows sit in another machine's
+    // shard with nothing owed by any counter. That is the fix hiding the symptom and leaving
+    // the loss, which is worse than the bug: the bug at least left a wrong-looking filename
+    // in `git status`. Raised by sessionId cda3afe5-17b8-4863-9f4c-9fe4eadbc17b, who wrote
+    // the original report.
+    if let Some(prev) = crate::librarian::catalog::audit::host::previous_host_id(&cat.conn)? {
+        audit_health["host_previous"] = json!(prev);
+        let mut stranded_files: Vec<Value> = Vec::new();
+        let mut stranded_rows = 0usize;
+        if let Some(cp) = ctx.current_project.as_deref() {
+            let audit_repo_root = cp.main_root.as_deref().unwrap_or(&cp.git_root);
+            let dir = crate::librarian::catalog::audit::host::audit_dir(audit_repo_root);
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let Some((shard_host, _month)) =
+                        crate::librarian::catalog::audit::host::parse_shard_file_name(&name)
+                    else {
+                        continue;
+                    };
+                    if shard_host != prev {
+                        continue;
+                    }
+                    // Line count, not a parse: a stranded-row COUNT is what an operator
+                    // acts on, and a malformed line is still a stranded line.
+                    let rows = std::fs::read_to_string(entry.path())
+                        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+                        .unwrap_or(0);
+                    stranded_rows += rows;
+                    stranded_files.push(json!({ "file": name, "rows": rows }));
+                }
+            }
+        }
+        audit_health["host_previous_stranded_rows"] = json!(stranded_rows);
+        audit_health["host_previous_shards"] = json!(stranded_files);
+        audit_health["host_previous_hint"] = json!(format!(
+            "this catalog previously carried `{prev}`, minted on another machine. \
+             {stranded_rows} row(s) sit in that host's shard(s) under its identity, and \
+             `unexported_rows` will NOT count them — the per-repo export watermark already \
+             passed them and does not roll back, so by every other number here the export is \
+             complete. Re-emitting them under this host's id requires deliberately rolling \
+             that watermark back; nothing does it automatically. Session attribution survives \
+             regardless: audit rows carry `actor`, which is a sessionId, so WHO wrote a row \
+             is recoverable even where WHICH MACHINE is not."
+        ));
+    }
     audit_health["unexported_rows"] = json!(pending);
     if pending > 0 {
         // Reworded, not filtered (cheap fix, task-6 round-3 review):
