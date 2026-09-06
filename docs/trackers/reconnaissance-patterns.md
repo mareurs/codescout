@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 183
+entry_high_water_R: 184
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -290,6 +290,7 @@ be treated as findings, not as a summary to re-derive.
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
 | R-183 | 2026-09-06 | miss ×1 → rule | **The cost of re-deriving a wired check is the REMEDY, not the number — and the check's cause line is authored, not measured.** Hand-rolled a Python scan of `docs/issues/**` for frontmatter ids not matching `sha256(abs_path)[:16]`, when `librarian(action="doctor")` already ships the check. It returned **8**; `doctor` returns **8**. So the standard warning — *"re-derives a worse version and reports its own shortfall as a clean backlog"* — **did not apply**: accuracy was fine, which is what makes this worth an entry. What was lost is that a hand-rolled scan **can only return the finding, never the fix**: `doctor` also ships `fix="repair_frontmatter_id"`, which repaired all 8 with 0 failures. Reaching it was **accidental** — a grep of `docs/issues/` surfaced archived bug files that named the repair; nothing deliberate pointed at it, so this is a mechanism gap, not a discipline gap. **Then the inverse:** having reached the instrument, its `detail` asserted *"a move re-keys the row"* — **false for 8 of 8**, all worktree-minted, identified positively by `sha256("<repo>/.worktrees/tool-collapse/<rel_path>")[:16]` reproducing the stale id with `git log --follow --diff-filter=R` empty. So `doctor` was right on the finding, uniquely able on the remedy, and **wrong on the cause**, where the ad-hoc reasoning was right. **Generative:** a wired check's **finding** is recomputed against live state every run; its **explanation** is a string a human wrote once, ages like a comment, and arrives in the same JSON inheriting the measurement's authority. Sharper because the 2026-08-18 fix had *already* split this field once, partitioning by id **shape** as a proxy for *was this row moved* — well-formed does not imply moved. **Runnable:** (1) before deriving a population by hand, grep `docs/PROBES.md` and `librarian`'s `fix=` enum for the noun — not for a better number, to learn whether the repair exists; (2) read a wired tool's counts as measurement and its `detail`/`hint`/`reason` prose as an assertion of the same rank as a code comment, asking what the check can actually observe. | `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`; fixes `593614aa` (8 ids + 17 dead citations), `c7a54d12` (the cause-line bug); `IC-22` sixth member |
+| R-184 | 2026-09-06 | rule (refines a published one) | **A corroboration check whose AGREEMENT is worthless can still be a good detector, because disagreement is not symmetric with it.** `CLAUDE.md` § *Reaching a Peer Session* says two instruments agreeing is evidence only if their scopes differ — true, and it leaves a false implication: that such a comparison is worthless and can be skipped. Agreement between same-scope instruments is worth ~nothing; **disagreement between them is worth a lot**, and is often MORE diagnostic than a disagreement between independent instruments, because the shared scope has already eliminated most legitimate reasons two readings could differ, leaving a short nameable list. **Case:** two sessions counted `librarian::tools::doctor::tests` minutes apart on one shared checkout and both got 249 — establishing nothing (same binary, same tree, one scope counted twice). A divergence would have been strong evidence of exactly one thing: `pre-commit`'s unstaged-file stash reverting a peer's tree mid-run, very nearly the only mechanism that makes two sessions disagree about one test binary in that window. **Why it's mis-read:** the published rule warns against over-trusting agreement, so the natural response is to discount the comparison — i.e. not run it — which discards the half that works, invisibly, since you never see the disagreement you declined to look for. **Runnable:** take both cheap readings, decide BEFORE looking which outcome you'll act on, name in advance what a divergence could mean (if you can't name a mechanism, the check really is worthless and you've established that cheaply), then read only that direction — and state the asymmetry when reporting, because "both said 249" reads as corroboration to every later reader. **General form:** a test whose PASS is uninformative can still be a good detector if its FAIL has few causes; we discard checks by asking what a green tells us, and this class is discarded correctly by that question and kept correctly by the other one. | derived jointly with `codescout-3d` (sessionId `ba061586-6581-4656-b0c5-acad83474de5`); kin R-182, and the monotone-assertion law in `CLAUDE.md` § *Testing Discipline* |
 | R-182 | 2026-09-05 | miss (6 instruments) → rule | **Six proxies for one hidden variable is ONE blind spot counted six times — and the bug file's own workaround is blind on exactly the run that needs it.** Scouted a long-running `librarian(reindex, reembed=true)` with six instruments, concluded **"wedged"** in writing to the user; it was working (`embedded: 28379, vectorless: 0, embed_error_count: 0`). Each instrument failed for a *different* reason, which is why they read as corroboration: CPU% measured **codescout, not `llama-server`** where the compute is; futex-parked workers are what awaiting HTTP looks like; `catalog.db` mtime is stale because the durable stamp block runs **after** the loop; the Qdrant count is frozen because `upsert` is **idempotent on `chunk_id`** (`artifact_store.rs:137`) — a fact I had stated myself an hour earlier and then used the frozen count as proof of stalling; a held write lock is what a long write does; and `doc(find)` is a **read** answering a write-lock question. **Generative fact:** during a re-embed there was **no monotone durable observable anywhere** — `embed_done` is a local `u32` reaching only `ctx.progress` (`None` for this client), the stamp lands after the loop, `upsert` overwrites — so the scout's target was unrepresentable and returned a plausible answer rather than an error. **The workaround inherits it:** `6ae552cfc223cd6d` prescribes `SELECT COUNT(*) FROM artifact_chunk`, true of a **first** embed (the 2026-09-03 run it was validated on, `9760 → 10518`) and **flat for the whole embed loop of a re-embed** — `unchanged: 1483` means no new rows while 28,379 vectors were written. **Runnable:** before citing a proxy for loop progress ask (1) which process does the work, (2) written during the loop or after it, (3) is the write idempotent; a "no" to any one makes it non-discriminating, and stacking more proxies past a "no" adds confidence without information. All three fail → publish a counter, don't find a better instrument. | second instance of `bug-fix-session-log:F-109` (peer made it from outside 2026-09-03); bug `6ae552cfc223cd6d`; `CLAUDE.md` § *Reaching a Peer Session* ("check independence, not agreement"), applied outside its stated peer-enumeration scope; `OB-1` |
 | R-181 | 2026-09-04 | miss ×2 → rule (both plans changed before either was read) | **Enumerate by the FIELD name, not the feature name — and ask who WRITES an artifact before designing anything that marks it.** Two bug files prescribed fixes for one tool; reconnaissance run before reading either plan changed both. The eager-stamp file named 2 sites (`:497`, `:582`); one `grep onboarding_version` found **4** — also `perform_full_onboarding`'s tail, whose comment read *"Optimistic version write for full onboarding"*, and the fresh-config literal. All four return a `subagent_prompt`, so all four certify work they defer, and a fix at the two named sites ships the defect twice more behind a passing suite. **Why the third hid is the transferable half:** it is in neither function a reader thinking about *"refresh"* opens, sits at the tail of a 220-line function doing something else, and its comment names the OTHER bug's flag combination — the two files shared a line neither cited. Reading the two functions the files named returns 2, and reads as complete. **Second miss:** the file's *preferred* remedy was to stamp the version into `.codescout/system-prompt.md`; one grep showed **no production code writes that file** — every write is prose instructing a subagent to `create_file` it — so the remedy rested on subagent compliance: a policy, prescribed by a file arguing for mechanisms. **And the fixture layer held the same defect**, which is why no test caught it: six pre-existing tests reported a fully-onboarded project while the prompt had never been written, because site 4 stamped at config creation. The tests did not miss the defect, they ENCODED it, inside the fixtures meant to describe a *completed* onboarding. Repaired by completing the flow rather than relaxing assertions; disabling the new witness reds exactly those six plus the end-to-end test, which is what establishes the repair is load-bearing and not cosmetic. | `c79c629d` + patch-id `5a671249…`; archived bugs `2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md` and `2026-09-04-force-silently-discards-refresh-prompt.md`; body records a 4th datapoint for R-180's class (a grep alternation anchoring ` ...` after a fragment that continues, reporting 2 of 10 tests as run); kin R-180, R-177 |
 | R-180 | 2026-09-04 | miss ×4 → rule | **A unitless count crosses a session boundary as a cost estimate; the instrument built to replace it inherits the claim's bias; and a partition that SUMS proves nothing when its total shares the buckets' predicate.** Published *"~50 in-tree `ToolContext` constructions, all `#[cfg(test)]`"* from a **capped** grep whose pattern also matched `struct`/`impl`/`->` headers — files-with-a-match, quoted as constructions, over codescout's own *"50 across 50 files is a floor, not a count"* warning. The cost was not "a reader re-derives it": a peer **spot-checked 2 of ~20 files, deferred to a wider sweep that did not exist**, and re-priced an architecture decision on it to their user — two sessions holding one wrong number with **real** agreement about the true half beside it. The replacement classifier then invented production sites **twice**, both toward findings: `\b(struct|impl|->)` never fires on `) -> ToolContext {` (space→hyphen is no word boundary), and `#[cfg(test)]` on an `impl` read as production to mod-shaped detection — neither on the blind-spot list I had written in its own header. **Then the fix was the same error one level up:** "two instruments sharing no code both said 202" — both were `\bToolContext\s*\{`, one predicate run twice. The peer's **substring** predicate said **203**, simultaneously (HEAD `531d7ee3` at 15:53:48; `git status` clean of `.rs` at 16:01:19 — so **not** the churn they proposed), and the gap was one line: `Arc::new(LibToolContext {`, an alias where `\b` fails because `b` is a word character. That `\b` was right for the core bucket and silently corrupted the librarian one, which is why it survived — an error protecting the number under scrutiny is one nobody checks. Corrected: 60 headers + **1** core prod + **136** core test + **2** librarian prod + 4 librarian test = 203, so **137** core sites, ~3× the first figure. **Runnable:** a partition proves completeness only when its total comes from a different PREDICATE, not merely different code; name the predicate beside the number; localise a peer's differing count before blaming timing (a simultaneity check is one call); and test a load-bearing exclusion regex against the construct it excludes. | `7320d27d`-adjacent; script `scratchpad/toolctx_literals2.py`; peer `codescout-ae` supplied the independent predicate; kin R-179, R-177, R-178, R-3/R-113, R-5 |
@@ -8472,6 +8473,61 @@ cousin: a search that finds the *right* thing is still evidence only about the s
 R-117 (a fix naming a population asserts it is non-empty — the population here was real,
 which is why the failure was silent), R-182 (six non-discriminating instruments; that entry
 is about proxies for a hidden variable, this one about believing an instrument's narration).
+
+## R-184 — a corroboration check whose agreement is worthless can still be a good detector, because disagreement is not symmetric with it
+
+**Status:** open — not yet promoted into the served skill.
+**Valid:** invariant
+**Rests on:** `CLAUDE.md` § *Reaching a Peer Session* — *"Check independence, not
+agreement"*; `R-182` (the same arithmetic in the agreement direction).
+
+`CLAUDE.md` already says that two instruments agreeing is evidence only if their
+**scopes** differ, and that two instruments sharing a scope agree *because* of
+the shared blind spot — one blind spot counted twice. True, and it leaves an
+implication that is false: that such a comparison is therefore worthless and can
+be skipped.
+
+**It is not symmetric.** Agreement between same-scope instruments is worth
+approximately nothing. **Disagreement between them is worth a great deal**, and
+is often *more* diagnostic than a disagreement between independent ones — because
+the shared scope has already eliminated most of the ways two readings could
+legitimately differ. What remains is a short list, and you can usually name it in
+advance.
+
+**The case.** Two sessions counted `librarian::tools::doctor::tests` minutes
+apart on one shared checkout and both got **249**. That agreement established
+nothing — same binary, same tree, same test harness, one scope counted twice. But
+a *divergence* would have been strong evidence of one specific thing: that
+`pre-commit`'s unstaged-file stash had reverted a peer's working tree during one
+of the two runs, which is very nearly the only mechanism that makes two sessions
+disagree about the same test binary in that window. The check cost one line and
+was worth running for an outcome it did not produce.
+
+**Why this is easy to get wrong in the reassuring direction.** The published rule
+is a warning against over-trusting agreement, so the natural reading is *"discount
+this comparison"* — and discounting it means not running it, which discards the
+half that works. The failure is invisible: you never see the disagreement you
+declined to look for.
+
+**Runnable.** When two same-scope readings are cheap, take both — and decide
+**before** looking which outcome you will act on. Write down what a divergence
+*could* mean while the list is still short; if you cannot name a mechanism that
+would produce one, the check really is worthless and you have established that
+cheaply. Then read only that direction. **State the asymmetry when you report
+it**, because "both instruments said 249" reads as corroboration to every later
+reader unless the sentence says it is not.
+
+**The general form, which is where the value is.** A test whose PASS is
+uninformative can still be a good detector if its FAIL has few causes. That
+inverts the usual reflex — we discard checks by asking what a green tells us, and
+this class is discarded correctly by that question and kept correctly by the other
+one. Kin to the *monotone assertion* law in § *Testing Discipline*: both are about
+a check being blind in one direction and sighted in the other, and both are
+mis-handled by treating the check as a single thing that is either good or bad.
+
+Derived jointly with `codescout-3d` (sessionId
+`ba061586-6581-4656-b0c5-acad83474de5`) on 2026-09-06, from the stash-window
+hazard in `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`.
 
 ## Template for new entries
 
