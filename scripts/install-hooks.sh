@@ -75,6 +75,9 @@ for arg in "$@"; do
 done
 
 fail=0
+# Tracked separately from `fail` because STALE and MISSING are not the same state and the
+# summary must not collapse them — see the footer at the end of this script.
+stale=0
 
 # ---------------------------------------------------------------- the hooksPath trap
 hooks_path="$(git config --get core.hooksPath 2>/dev/null)"
@@ -123,6 +126,56 @@ else
 fi
 
 # ------------------------------------------------------------------- the direct shims
+# Render the shim this script would install for <hook_name> -> <target>, into <out>.
+#
+# EXTRACTED SO `--check` COMPARES AGAINST THE GENERATOR RATHER THAN A PROXY FOR IT.
+# `--check` used to ask `grep -q "$target" "$dest"` — "does the shim MENTION the target
+# path". Every shim this script has ever written mentions it, including the pre-2026-09-06
+# shape with no degrade-open clause, so the predicate was monotone under exactly the drift
+# that matters: a checkout wired before that clause existed and never re-installed keeps
+# the `exec`-on-missing-target 127 trap, and `--check` calls it `ok`.
+#
+# Measured 2026-09-06 by sessionId ba061586-6581-4656-b0c5-acad83474de5, who planted a
+# pre-clause shim in a throwaway and got `ok  pre-push  shim present` / CHECK_EXIT=0 from
+# this script, then `No such file or directory` / PUSH_EXIT=1 from a real
+# `git push --dry-run` on the same shim. Present was the wrong predicate for "will not
+# brick this checkout" — and this is the one tool whose own header says not to infer
+# liveness from the presence of these scripts.
+#
+# A byte-comparison needs no update when the shim changes again, which a second grep would.
+render_shim() {
+    _rs_hook="$1"
+    _rs_target="$2"
+    _rs_out="$3"
+
+    cat > "$_rs_out" <<'SHIM'
+#!/usr/bin/env bash
+# Installed by scripts/install-hooks.sh. Thin shim: edit the tracked script, not this.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+# DEGRADE OPEN, AND LOUDLY. `exec` on a missing target exits 127, and git refuses the
+# operation on any non-zero hook exit — so a script that is deleted, `git clean`ed, or
+# absent on an older branch would break EVERY commit and push in this checkout, with a
+# bare "No such file or directory" and nothing naming the hook. A guard whose ABSENCE
+# blocks all work is worse than the hole it closes, and it cannot ask its question either
+# way; that is the same principle the pre-push guard already applies when it has no
+# session id. The warning is what keeps this from being silent degradation, which is the
+# failure the rest of this script is written against. Raised 2026-09-06 by sessionId
+# ba061586-6581-4656-b0c5-acad83474de5, who measured the 127 rather than assuming it, and
+# who also asked to be cited by sid rather than by session NAME here: a name is
+# registry-minted and re-minted by compaction, resume, or a restart under another profile,
+# so it decays silently in a comment that does not. Covered by the shim section of
+# tests/pre-push-foreign-session-guard.sh; that section exists because the suite's
+# 34-assertion aggregate had zero of them on this clause.
+SHIM
+    printf 'if [ ! -x "$root/%s" ]; then\n' "$_rs_target" >> "$_rs_out"
+    printf '    echo "warning: git hook %s is installed, but %s is missing or not executable - skipping" >&2\n' \
+        "$_rs_hook" "$_rs_target" >> "$_rs_out"
+    printf '    exit 0\n' >> "$_rs_out"
+    printf 'fi\n' >> "$_rs_out"
+    printf 'exec "$root/%s" "$@"\n' "$_rs_target" >> "$_rs_out"
+}
+
 install_shim() {
     hook_name="$1"
     target="$2"
@@ -145,43 +198,33 @@ install_shim() {
     fi
 
     if [ "$check_only" = "1" ]; then
-        if [ -x "$dest" ] && grep -q "$target" "$dest" 2>/dev/null; then
-            echo "ok      $hook_name      shim present"
-        else
+        # MISSING and STALE are separated because their remedies differ and so does their
+        # danger: a missing shim runs nothing, while a stale one RUNS, and runs the older
+        # shape — which is how a checkout keeps the 127 trap. Collapsing them into one word
+        # is how the old predicate managed to be reassuring about the worse case.
+        if [ ! -x "$dest" ]; then
             echo "MISSING $hook_name      run without --check"
             fail=1
+            return
         fi
+        _want="$(mktemp)"
+        render_shim "$hook_name" "$target" "$_want"
+        if cmp -s "$_want" "$dest"; then
+            echo "ok      $hook_name      shim matches generator"
+        else
+            echo "STALE   $hook_name      shim differs from what this script generates" >&2
+            echo "        Installed before a change to the shim and never re-installed." >&2
+            echo "        It is NOT inert - it runs, and runs the older shape. Re-run this" >&2
+            echo "        script without --check. Diff (installed vs generated):" >&2
+            diff -u "$dest" "$_want" >&2 || true
+            fail=1
+            stale=1
+        fi
+        rm -f "$_want"
         return
     fi
 
-    # The shim resolves the repo at RUN time, so it keeps working if the checkout
-    # moves — which is the failure the hooksPath bug was made of.
-    cat > "$dest" <<'SHIM'
-#!/usr/bin/env bash
-# Installed by scripts/install-hooks.sh. Thin shim: edit the tracked script, not this.
-set -uo pipefail
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-# DEGRADE OPEN, AND LOUDLY. `exec` on a missing target exits 127, and git refuses the
-# operation on any non-zero hook exit — so a script that is deleted, `git clean`ed, or
-# absent on an older branch would break EVERY commit and push in this checkout, with a
-# bare "No such file or directory" and nothing naming the hook. A guard whose ABSENCE
-# blocks all work is worse than the hole it closes, and it cannot ask its question either
-# way; that is the same principle the pre-push guard already applies when it has no
-# session id. The warning is what keeps this from being silent degradation, which is the
-# failure the rest of this script is written against. Raised 2026-09-06 by sessionId
-# ba061586-6581-4656-b0c5-acad83474de5, who measured the 127 rather than assuming it, and
-# who also asked to be cited by sid rather than by session NAME here: a name is
-# registry-minted and re-minted by compaction, resume, or a restart under another profile,
-# so it decays silently in a comment that does not. Covered by the shim section of
-# tests/pre-push-foreign-session-guard.sh; that section exists because the suite's
-# 34-assertion aggregate had zero of them on this clause.
-SHIM
-    printf 'if [ ! -x "$root/%s" ]; then\n' "$target" >> "$dest"
-    printf '    echo "warning: git hook %s is installed, but %s is missing or not executable - skipping" >&2\n' \
-        "$hook_name" "$target" >> "$dest"
-    printf '    exit 0\n' >> "$dest"
-    printf 'fi\n' >> "$dest"
-    printf 'exec "$root/%s" "$@"\n' "$target" >> "$dest"
+    render_shim "$hook_name" "$target" "$dest"
     chmod +x "$dest"
     echo "ok      $hook_name      shim installed -> $target"
 }
@@ -248,8 +291,25 @@ fi
 
 echo
 if [ "$fail" != "0" ]; then
-    echo "One or more hooks are NOT installed. Nothing above is a substitute for the" >&2
-    echo "positive check below." >&2
+    # THE FOOTER MUST NOT COLLAPSE STALE INTO MISSING. The per-hook lines above stopped
+    # doing that on 2026-09-06; this line kept doing it, which is worse, because it is the
+    # one line a skimmer reads AND it errs toward the reassuring reading: "not installed"
+    # implies inert and harmless, while the true state of a stale hook is "running the
+    # older shape" — the worse case, and the whole reason the words were split. A reader
+    # trusting the summary over the detail concluded the opposite of the truth.
+    #
+    # Found 2026-09-06 by sessionId ba061586-6581-4656-b0c5-acad83474de5, on a run with two
+    # stale hooks and zero missing ones, having first ruled out `off prepare-commit-msg` as
+    # the cause by checking that the same line was present in a pre-change run that exited 0.
+    if [ "$stale" != "0" ]; then
+        echo "One or more hooks are STALE: installed, RUNNING, and running an OLDER shape" >&2
+        echo "than this script generates. A stale hook is NOT inert — that is why this line" >&2
+        echo "does not say 'not installed'. Some hooks above may ALSO be missing; read the" >&2
+        echo "per-hook lines rather than this one. Re-run without --check to regenerate." >&2
+    else
+        echo "One or more hooks are NOT installed. Nothing above is a substitute for the" >&2
+        echo "positive check below." >&2
+    fi
     exit 1
 fi
 
