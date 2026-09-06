@@ -1,10 +1,11 @@
 ---
-id: '4a9ffbd8789df751'
+id: d2ba6a00f3fb0061
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the four-command gate never compiles server-stack, so it certifies a feature set the shipped binary does not use'
 tags:
 - cluster/repro-env-diverges-from-gate-env
+closed: 2026-09-06
 opened: 2026-09-06
 owner: marius
 related: []
@@ -157,17 +158,49 @@ fifth command and why, and ending with the operative instruction — *never repo
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` scopes to the
 directive sentence only, which is untouched.
 
-SHA: *(pending — held behind an unresolved authorisation on `experiments`, see
-`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`)*
-patch-id: *(pending, same reason)*
+**Fixed on `experiments`, in two commits — the sentence and the guard that keeps it.**
+
+| what | SHA (`experiments`) | patch-id |
+|---|---|---|
+| the CLAUDE.md bullet | `29f1940c` | `7722deef3bcee1d70818477ad138e83eb955133e` |
+| the test pinning it | `c0cfa326` | `6e0447b4504e0c2d173112d0eede0c4e38e13bf6` |
+
+Both recorded now rather than owed later: the SHA is positional and dies when
+`experiments` is rebased, which happens after every ship; the patch-id is a content
+hash of the diff and survives rebase and cherry-pick alike. There is no
+pending-master line to reconcile.
 ## Tests added
 
-None — nothing is fixed. When it is: the guard must fail when a
-`server-stack`-gated compile error exists, which means the gate change itself is
-the test. A test asserting `CLAUDE.md` contains the string `server-stack` would
-be monotone under the gate being wrong in any other way, and would pass on option
-3 while catching nothing.
+`claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard`
+(`src/prompts/mod.rs`, beside the existing gate-order test), asserting in **both**
+directions — which is the whole design, because a one-way check rots in whichever
+direction it is not looking:
 
+- **CLAUDE.md must cite the guard.** Its gate section must name `server-stack`, the
+  `test-server-stack` CI job, and `every_declared_feature_has_a_lane_or_a_reason`.
+  Deleting or softening the bullet reds the build.
+- **The guard must still exist under that name.** `tests/feature_lanes.rs` must
+  define that function, so renaming or removing it also reds the build instead of
+  leaving `CLAUDE.md` pointing confidently at nothing. An unresolvable citation is
+  indistinguishable from a live one — `cluster/doc-contradicted-by-code`, and this
+  is the cheap way to be immune to it.
+
+Scoped to the gate section rather than the whole file, for the reason the sibling
+gate-order test documents: `server-stack` is discussed elsewhere in this repo, so a
+file-wide `contains()` would pass on a mention with nothing to do with the gate.
+
+**Mutation-verified in both directions, rather than trusted for existing:**
+
+| mutation | result |
+|---|---|
+| renamed `every_declared_feature_has_a_lane_or_a_reason` in `tests/feature_lanes.rs` | RED — *"tests/feature_lanes.rs no longer defines it"* |
+| replaced the CI job name in the `CLAUDE.md` bullet | RED — *"no longer names `test-server-stack`"* |
+
+**What it does NOT do, stated so nobody credits it with more:** it does not compile
+`server-stack` and cannot. It guards the *sentence* and the *citation*. The code is
+covered by CI's `test-server-stack` job, and that job's continued existence is
+covered by `every_declared_feature_has_a_lane_or_a_reason` — which this test now
+keeps CLAUDE.md honest about. Three links, each guarding the next.
 ## Workarounds
 
 Run `cargo test --workspace --features server-stack` by hand before committing
