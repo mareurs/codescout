@@ -71,7 +71,7 @@ vacuous for `server-stack` code, because nothing in the gate names a feature it
 does not pass.
 
 *Measured 2026-09-06:* the greps above; one confirmed consequence
-(`ef21d299867be70f`, four days red). *Not measured:* how much code is hidden — no
+(`42769b490e11f106`, four days red). *Not measured:* how much code is hidden — no
 enumeration of `server-stack`-gated modules was made, so the exposure is
 demonstrated, not sized.
 
@@ -99,14 +99,14 @@ defect fix.* Three options, with the cost each pays:
    Complete, and the most expensive: it pulls `qdrant-client` (tonic/prost/gRPC)
    into the gate's compile budget for every session, on a gate whose ordering
    rationale is already about not wasting shared `target/` rebuilds. It also
-   **needs a reachable Qdrant or it reproduces `ef21d299867be70f`'s failure on
+   **needs a reachable Qdrant or it reproduces `42769b490e11f106`'s failure on
    every run** — which is either a feature (it would have caught that bug) or a
    permanent local red, depending on whether the affected tests are made
    backend-independent first.
 2. **Fold the feature into the existing clippy line** —
    `--features local-embed,server-stack`. Cheap, catches compile errors and lint
    failures, catches **no** runtime failure. Would not have caught
-   `ef21d299867be70f`.
+   `42769b490e11f106`.
 3. **Leave the gate and fix the expectation** — state in `CLAUDE.md` that green
    does not cover `server-stack`, and that the CI lane is the only check. Costs
    nothing, catches nothing, and makes the limit legible instead of invisible.
@@ -135,20 +135,20 @@ be monotone under the gate being wrong in any other way, and would pass on optio
 Run `cargo test --workspace --features server-stack` by hand before committing
 anything touching `src/retrieval/`, `src/librarian/artifact_store.rs`, or any
 `#[cfg(feature = "server-stack")]` block. Note this currently fails on
-`ef21d299867be70f` unless a Qdrant is reachable.
+`42769b490e11f106` unless a Qdrant is reachable.
 
 ## Resume
 
 Decide between the three options above with the repo owner. If option 1: fix
-`ef21d299867be70f` first (done, `a_failing_vector_store_does_not_refuse_the_move`),
+`42769b490e11f106` first (done, `a_failing_vector_store_does_not_refuse_the_move`),
 then audit the remaining `server-stack` tests for daemon dependence before adding
 the command — otherwise the new lane is red by default and gets ignored, which is
 worse than absent.
 
 ## References
 
-- `docs/issues/2026-09-06-a-move-is-refused-when-the-vector-store-is-reachable-but-failing.md`
-  (`ef21d299867be70f`) — the one measured consequence. Sibling, not duplicate:
+- `docs/issues/archive/2026-09-06-a-move-is-refused-when-the-vector-store-is-reachable-but-failing.md`
+  (`42769b490e11f106`) — the one measured consequence. Sibling, not duplicate:
   that is the defect, this is the blindness.
 - `docs/conventions/gate-ordering.md` — why the four commands are those four, in
   that order. Any change lands there too.
@@ -164,5 +164,4 @@ green locally and red where it matters. The rival was
 `cluster/guard-narrower-than-its-name` — rejected because the gate is not
 narrower than its *name*; it is narrower than its **readers' belief**, and its
 name says nothing false. That distinction is the reason this needs its own
-record rather than folding into `ef21d299867be70f`.
-
+record rather than folding into `42769b490e11f106`.

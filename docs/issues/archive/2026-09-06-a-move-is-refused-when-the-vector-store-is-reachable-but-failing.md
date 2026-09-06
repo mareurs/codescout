@@ -1,10 +1,11 @@
 ---
-id: ef21d299867be70f
+id: 42769b490e11f106
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc(move) is refused outright when the vector store constructs and then fails, though its own fallback comment names that exact case'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-06
 opened: 2026-09-06
 owner: marius
 related: []
@@ -156,8 +157,12 @@ was asked and failed — the vectors are still filed under the dead id and a
 that difference from an absence, which is the shape the `null`-vs-`0`
 distinction in this file already exists to avoid.
 
-SHA: *(pending — this commit)*
-patch-id: *(pending — this commit)*
+SHA: `69917aa5` (**`experiments`**)
+patch-id: `87c155515e3ed1e76d05f535dda187885a2fafb5`
+
+Verified: full four-command gate green, and the new test read out of the
+**DEFAULT** lane rather than the lean one — `--no-default-features` compiles the
+librarian out entirely, so `LEAN exit=0` says nothing about this file.
 
 ## Tests added
 
@@ -209,4 +214,3 @@ the defect was *recognised*, not what it is; the doc is right and the code is
 wrong, and fixing the code discharges it. `cluster/repro-env-diverges-from-gate-env`
 describes why nobody saw it for four days, which is the sibling bug's subject,
 not this one's.
-
