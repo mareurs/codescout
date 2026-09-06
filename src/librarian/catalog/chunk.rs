@@ -289,28 +289,49 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 }
 
 /// Replace an artifact's chunk rows with a targeted diff, preserving `chunk_id`
-/// wherever `(chunk_ix, content_hash)` is unchanged so untouched chunks keep
-/// their vectors. Returns the rows as stored.
+/// — and so the `artifact_vec_v2` embedding that names it — for every chunk whose
+/// CONTENT is unchanged, wherever in the body that chunk ends up. Returns the
+/// rows as stored.
 ///
 /// This must NOT be a blanket delete-then-insert: `artifact_vec_v2_cascade_delete`
 /// (`AFTER DELETE ON artifact_chunk`) fires on every deleted row, including ones
 /// whose `chunk_id` a blanket delete-then-insert would otherwise "preserve" —
 /// the id survives but the embedding it was preserving the id for does not.
 ///
-/// The vector and the position fields have different dependencies and are kept
-/// in sync separately: the vector depends on `content` alone, so it is keyed by
-/// `content_hash`; `start_line`/`end_line`/`entry_token` depend on the body's
-/// layout, so they are re-synced on every content-hash match whose position
-/// actually moved — an ordinary edit above an unchanged chunk shifts it without
-/// touching its hash, and a stale line range is worse than a miss: the caller
-/// follows it to the wrong place with no error. Four branches, keyed on
-/// `chunk_ix`:
-///   - same `chunk_ix`, same `content_hash` → keep the id and the vector
-///     (no DELETE, no INSERT); UPDATE the position fields only if they moved.
-///   - same `chunk_ix`, different `content_hash` → DELETE + INSERT (a new
-///     `chunk_id`); the vector is correctly destroyed, content changed.
-///   - old `chunk_ix` absent from the new rows (body shrank) → DELETE.
-///   - new `chunk_ix` absent from the old rows → INSERT.
+/// # The reuse key is `content_hash`, NOT `(chunk_ix, content_hash)`
+///
+/// The vector depends on the chunk's bytes, so `content_hash` is the whole of
+/// what decides whether it can be kept. `chunk_ix` is a POSITION, and ANDing it
+/// into the key made the selector narrower than the population it covers: any
+/// insertion above a chunk shifted its ordinal and defeated the match even though
+/// its bytes were identical. That is not a corner case — `append_entry` with
+/// `anchor_heading` writes the new section BEFORE an existing heading, so the
+/// librarian's own busiest write path is mid-body by construction, and an append
+/// near the top of a several-hundred-chunk ledger re-embedded essentially the
+/// whole file.
+///
+/// Matching on `content_hash` alone is ambiguous when two chunks hold identical
+/// bytes, so the match runs in two passes and each existing row is claimed at
+/// most once:
+///   1. exact `chunk_ix` match — preferred, so a body whose ordinals did NOT move
+///      writes exactly what it wrote before this scheme existed;
+///   2. any still-unclaimed row with the same `content_hash`, taken in ordinal
+///      order — the chunk only moved.
+///
+/// Whatever stays unclaimed is deleted, and its vector correctly cascades away.
+///
+/// # Positions are re-synced separately from the vector
+///
+/// `start_line`/`end_line`/`entry_token`/`entry_part`/`entry_parts` depend on the
+/// body's layout rather than on the chunk's own bytes, so a reused row's are
+/// re-synced whenever they moved: an edit above an unchanged chunk shifts it
+/// without touching its hash, and a stale line range is worse than a miss — the
+/// caller follows it to the wrong place with no error. `entry_part`/`entry_parts`
+/// are position fields in exactly this sense: appending a paragraph to an entry
+/// can push it from 6 chunks to 7, leaving every unchanged sibling's
+/// `content_hash` identical while its "of N" becomes wrong, and a stale
+/// "part 3 of 6" is a specific, checkable, FALSE claim about how much the reader
+/// is holding.
 ///
 /// The resync uses a plain `UPDATE`, never `INSERT OR REPLACE`: SQLite only
 /// fires delete triggers on a REPLACE-conflict deletion when `recursive_triggers`
@@ -318,9 +339,26 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// by accident of that pragma, and silently destroy it again the moment anything
 /// turns the pragma on. `UPDATE` is safe unconditionally.
 ///
-/// Deletes run before inserts so a body that shrinks AND changes in the same
-/// edit never collides with a stale row still holding the freed `chunk_ix`
-/// under `UNIQUE (artifact_id, chunk_ix)`.
+/// # Why the ordinal shift is two-phase
+///
+/// `UNIQUE (artifact_id, chunk_ix)` is enforced per statement — SQLite has no
+/// DEFERRABLE form for a unique constraint — so a surviving row cannot be
+/// UPDATEd straight into a slot another surviving row still holds. A one-line
+/// insertion shifts the whole tail down by one, and every one of those UPDATEs
+/// would collide with its neighbour. So the four writes run in this order, and
+/// the order is load-bearing:
+///   1. DELETE every unclaimed row — frees its ordinal, fires the vector cascade.
+///   2. Park every MOVING row on the sentinel ordinal `-(new_ix + 1)`: distinct
+///      per row because the new ordinals are, and safe against every row that
+///      stayed put because no ordinal the table holds at rest is negative.
+///   3. INSERT the genuinely new rows, whose ordinals are all free by now — an
+///      ordinal is either claimed by a reused row (parked, or unchanged and
+///      therefore not an insert target) or was deleted in step 1.
+///   4. Land the movers on their final ordinal, re-syncing positions in the same
+///      statement.
+///
+/// It cannot be done by delete-then-reinsert instead: the `AFTER DELETE` trigger
+/// would destroy the very vectors the whole exercise exists to preserve.
 ///
 /// Not wrapped in a transaction: this is deliberate house style, not an
 /// oversight. Leaf `&Catalog` writers here (`commits::upsert_many`,
@@ -332,64 +370,96 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// Connection` and is unreachable through `&Catalog`, so the option here is
 /// `conn.unchecked_transaction()`; and `unchecked_transaction()` must never be
 /// nested — the caller opens at most one across the whole composite operation.
+/// A caller that wraps also gets the sentinel ordinals of step 2 rolled back on
+/// error; unwrapped, a failure between steps 2 and 4 leaves them on disk, which
+/// is the same class of exposure the pre-existing delete-then-insert already had.
 pub fn replace_chunks(
     cat: &Catalog,
     artifact_id: &str,
     rows: &[ChunkRow],
 ) -> Result<Vec<ChunkRow>> {
-    let existing = chunks_for(cat, artifact_id)?;
-    let existing_by_ix: std::collections::HashMap<usize, &ChunkRow> =
-        existing.iter().map(|e| (e.chunk_ix, e)).collect();
-    let new_ixs: std::collections::HashSet<usize> = rows.iter().map(|r| r.chunk_ix).collect();
+    use std::collections::{HashMap, VecDeque};
 
-    // Old chunk_ix values with no surviving row at all — the shrunk tail.
-    let mut delete_ixs: Vec<usize> = existing
+    let existing = chunks_for(cat, artifact_id)?;
+    // Indices into `existing`, which `chunks_for` returns in `chunk_ix` order.
+    // A claimed row is reused; whatever is unclaimed at the end is deleted.
+    let mut claimed = vec![false; existing.len()];
+    let by_ix: HashMap<usize, usize> = existing
         .iter()
-        .filter(|e| !new_ixs.contains(&e.chunk_ix))
-        .map(|e| e.chunk_ix)
+        .enumerate()
+        .map(|(i, e)| (e.chunk_ix, i))
         .collect();
+    // Deliberately a MULTI-map. Two chunks may legitimately hold byte-identical
+    // content, which is the whole reason pass 2 cannot match on the hash and
+    // stop: it has to hand out each existing row to at most one new row.
+    let mut by_hash: HashMap<&str, VecDeque<usize>> = HashMap::new();
+    for (i, e) in existing.iter().enumerate() {
+        by_hash
+            .entry(e.content_hash.as_str())
+            .or_default()
+            .push_back(i);
+    }
+
+    let mut reuse: Vec<Option<usize>> = vec![None; rows.len()];
+    // Pass 1 — same ordinal, same bytes. Runs to completion before pass 2 so an
+    // in-place match always wins over a moved one; without that ordering, a
+    // duplicate-content chunk earlier in the body could claim the row belonging
+    // to a chunk that never moved at all.
+    for (n, row) in rows.iter().enumerate() {
+        if let Some(&i) = by_ix.get(&row.chunk_ix) {
+            if !claimed[i] && existing[i].content_hash == row.content_hash {
+                claimed[i] = true;
+                reuse[n] = Some(i);
+            }
+        }
+    }
+    // Pass 2 — same bytes at a DIFFERENT ordinal: the chunk only moved.
+    for (n, row) in rows.iter().enumerate() {
+        if reuse[n].is_some() {
+            continue;
+        }
+        if let Some(q) = by_hash.get_mut(row.content_hash.as_str()) {
+            // Pass 1 claims without dequeuing, so skip past anything it took.
+            while let Some(i) = q.pop_front() {
+                if !claimed[i] {
+                    claimed[i] = true;
+                    reuse[n] = Some(i);
+                    break;
+                }
+            }
+        }
+    }
 
     let mut out = Vec::with_capacity(rows.len());
     let mut to_insert: Vec<ChunkRow> = Vec::new();
-    let mut to_resync: Vec<ChunkRow> = Vec::new();
-    for row in rows {
+    // Movers need parking before they can land. `to_sync` is the superset that
+    // needs the final UPDATE: the movers, plus rows that stayed on their ordinal
+    // and only shifted position.
+    let mut to_park: Vec<ChunkRow> = Vec::new();
+    let mut to_sync: Vec<ChunkRow> = Vec::new();
+    for (n, row) in rows.iter().enumerate() {
         let mut stored = row.clone();
-        match existing_by_ix.get(&row.chunk_ix) {
-            Some(e) if e.content_hash == row.content_hash => {
-                // Unchanged content: preserve the id AND the vector (no DELETE),
-                // but the body's layout may have shifted — a preamble edit moves
-                // every unchanged chunk below it without touching its hash. Only
-                // the position fields depend on layout, so only they are synced;
-                // an UPDATE (never INSERT OR REPLACE — that relies on
-                // recursive_triggers, off by default, to avoid firing the vector
-                // cascade, which silently breaks the moment that pragma flips).
-                //
-                // `entry_part`/`entry_parts` are position fields in exactly this
-                // sense and must be compared here: appending a paragraph to an
-                // entry can push it from 6 chunks to 7, leaving every unchanged
-                // sibling's `content_hash` identical while its "of N" becomes
-                // wrong. A stale "part 3 of 6" is worse than a missing one — it
-                // is a specific, checkable, false claim about how much the reader
-                // is holding.
+        match reuse[n] {
+            Some(i) => {
+                let e = &existing[i];
                 stored.chunk_id = e.chunk_id.clone();
-                if e.start_line != stored.start_line
+                let moved = e.chunk_ix != stored.chunk_ix;
+                if moved {
+                    to_park.push(stored.clone());
+                }
+                if moved
+                    || e.start_line != stored.start_line
                     || e.end_line != stored.end_line
                     || e.entry_token != stored.entry_token
                     || e.entry_part != stored.entry_part
                     || e.entry_parts != stored.entry_parts
                 {
-                    to_resync.push(stored.clone());
+                    to_sync.push(stored.clone());
                 }
             }
-            Some(e) => {
-                // Same ordinal, different content: the old row must go so the
-                // vector cascade fires, and a fresh row (fresh id) replaces it.
-                delete_ixs.push(e.chunk_ix);
-                stored.chunk_id = uuid::Uuid::new_v4().to_string();
-                to_insert.push(stored.clone());
-            }
             None => {
-                // A genuinely new ordinal.
+                // No row holds these bytes any more: a fresh id, and the vector
+                // that would have named it is gone with whatever row is deleted.
                 stored.chunk_id = uuid::Uuid::new_v4().to_string();
                 to_insert.push(stored.clone());
             }
@@ -397,34 +467,36 @@ pub fn replace_chunks(
         out.push(stored);
     }
 
-    if !delete_ixs.is_empty() {
+    // 1. DELETE by `chunk_id`, never by `chunk_ix`: a reused row can be sitting
+    //    on an ordinal that some other row is about to take, and an
+    //    ordinal-keyed DELETE would take that reused row down with it — losing
+    //    exactly the vector this function exists to keep.
+    let delete_ids: Vec<&str> = existing
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !claimed[*i])
+        .map(|(_, e)| e.chunk_id.as_str())
+        .collect();
+    if !delete_ids.is_empty() {
         let mut del_stmt = cat
             .conn
-            .prepare("DELETE FROM artifact_chunk WHERE artifact_id = ?1 AND chunk_ix = ?2")?;
-        for ix in &delete_ixs {
-            del_stmt.execute(rusqlite::params![artifact_id, *ix as i64])?;
+            .prepare("DELETE FROM artifact_chunk WHERE chunk_id = ?1")?;
+        for id in &delete_ids {
+            del_stmt.execute([id])?;
         }
     }
 
-    if !to_resync.is_empty() {
-        let mut upd_stmt = cat.conn.prepare(
-            "UPDATE artifact_chunk
-                    SET start_line = ?1, end_line = ?2, entry_token = ?3,
-                        entry_part = ?4, entry_parts = ?5
-                  WHERE chunk_id = ?6",
-        )?;
-        for r in &to_resync {
-            upd_stmt.execute(rusqlite::params![
-                r.start_line as i64,
-                r.end_line as i64,
-                r.entry_token,
-                r.entry_part.map(|v| v as i64),
-                r.entry_parts.map(|v| v as i64),
-                r.chunk_id
-            ])?;
+    // 2. Park the movers below zero so their destination ordinals come free.
+    if !to_park.is_empty() {
+        let mut park_stmt = cat
+            .conn
+            .prepare("UPDATE artifact_chunk SET chunk_ix = ?1 WHERE chunk_id = ?2")?;
+        for r in &to_park {
+            park_stmt.execute(rusqlite::params![-(r.chunk_ix as i64 + 1), r.chunk_id])?;
         }
     }
 
+    // 3. INSERT the genuinely new rows.
     if !to_insert.is_empty() {
         let mut ins_stmt = cat.conn.prepare(
             "INSERT INTO artifact_chunk
@@ -460,6 +532,29 @@ pub fn replace_chunks(
                 r.entry_parts.map(|v| v as i64),
                 r.content,
                 r.content_hash
+            ])?;
+        }
+    }
+
+    // 4. Land the movers on their final ordinal and re-sync every reused row
+    //    whose layout shifted — one statement, because setting `chunk_ix` to the
+    //    value a non-mover already holds is a no-op rather than a conflict.
+    if !to_sync.is_empty() {
+        let mut upd_stmt = cat.conn.prepare(
+            "UPDATE artifact_chunk
+                    SET chunk_ix = ?1, start_line = ?2, end_line = ?3, entry_token = ?4,
+                        entry_part = ?5, entry_parts = ?6
+                  WHERE chunk_id = ?7",
+        )?;
+        for r in &to_sync {
+            upd_stmt.execute(rusqlite::params![
+                r.chunk_ix as i64,
+                r.start_line as i64,
+                r.end_line as i64,
+                r.entry_token,
+                r.entry_part.map(|v| v as i64),
+                r.entry_parts.map(|v| v as i64),
+                r.chunk_id
             ])?;
         }
     }
@@ -1010,6 +1105,84 @@ mod tests {
             vec_row_count(&cat, &chunk_id),
             1,
             "resyncing position must not disturb the content-keyed vector"
+        );
+    }
+
+    #[test]
+    fn a_chunk_that_only_moved_ordinal_keeps_its_id_and_its_vector() {
+        // LOAD-BEARING, and the one case the three tests above cannot reach:
+        // every one of them moves a chunk's LINE range while its ORDINAL stays
+        // put. `append_entry` with `anchor_heading` writes the new section
+        // BEFORE an existing heading, so the whole tail below it keeps
+        // byte-identical content at a shifted `chunk_ix`. A reuse key that ANDs
+        // `chunk_ix` with `content_hash` matches none of that tail: every chunk
+        // takes delete-and-insert, mints a fresh uuid, and loses its vector to
+        // `artifact_vec_v2_cascade_delete` — the exact re-embedding this
+        // function exists to prevent, on the librarian's own busiest write path.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let find = |rows: &[ChunkRow], tok: &str| -> ChunkRow {
+            rows.iter()
+                .find(|r| r.entry_token.as_deref() == Some(tok))
+                .unwrap_or_else(|| panic!("fixture must yield a {tok} chunk"))
+                .clone()
+        };
+
+        let body = "# T\n\npre\n\n## W-1 — t\n\ny\n\n## W-2 — u\n\nz\n";
+        let first = build_chunks("a", body, 2048, 0);
+        let stored1 = replace_chunks(&cat, "a", &first).unwrap();
+        let w1 = find(&stored1, "W-1");
+        let w2 = find(&stored1, "W-2");
+        seed_vec_row(&cat, &w1.chunk_id);
+        seed_vec_row(&cat, &w2.chunk_id);
+
+        // Insert a NEW entry ABOVE W-1. That insertion is the whole fixture.
+        let grown = "# T\n\npre\n\n## W-0 — s\n\nw\n\n## W-1 — t\n\ny\n\n## W-2 — u\n\nz\n";
+        let second = build_chunks("a", grown, 2048, 0);
+
+        // Both preconditions are load-bearing. W-1's bytes must be IDENTICAL and
+        // its ordinal must have MOVED; lose either and this test still passes
+        // against the bug — without the first it is a content-change test, and
+        // without the second it is a duplicate of the resync test above.
+        let w1_next = find(&second, "W-1");
+        assert_eq!(
+            w1_next.content_hash, w1.content_hash,
+            "fixture: W-1's bytes must be unchanged by the insertion"
+        );
+        assert_ne!(
+            w1_next.chunk_ix, w1.chunk_ix,
+            "fixture: W-1's ordinal must MOVE, or this test proves nothing"
+        );
+
+        replace_chunks(&cat, "a", &second).unwrap();
+
+        // Read back from the DB — replace_chunks' return value is built from the
+        // rows it was handed, so asserting on it would pass even if the write
+        // never landed.
+        let persisted = chunks_for(&cat, "a").unwrap();
+        assert_eq!(
+            persisted.iter().map(|r| r.chunk_ix).collect::<Vec<_>>(),
+            (0..second.len()).collect::<Vec<_>>(),
+            "ordinals must come back a dense 0..n run — a two-phase shift whose \
+             second pass is skipped leaves its sentinel ordinals behind instead"
+        );
+        assert_eq!(
+            find(&persisted, "W-1").chunk_id,
+            w1.chunk_id,
+            "W-1 only MOVED — its id, and so its vector, must survive"
+        );
+        assert_eq!(
+            find(&persisted, "W-2").chunk_id,
+            w2.chunk_id,
+            "W-2 only MOVED — its id, and so its vector, must survive"
+        );
+        assert_eq!(
+            (
+                vec_row_count(&cat, &w1.chunk_id),
+                vec_row_count(&cat, &w2.chunk_id)
+            ),
+            (1, 1),
+            "preserving the id is pointless if the cascade took the vector it named"
         );
     }
 
