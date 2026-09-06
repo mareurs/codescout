@@ -390,7 +390,29 @@ fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
     let Ok(workdir) = repo.workdir().ok_or(()) else {
         return false;
     };
-    let Ok(rel) = abs_path.strip_prefix(workdir) else {
+    // Canonicalize BOTH sides before comparing. `repo.workdir()` is already resolved
+    // by libgit2; `abs_path` is whatever the caller held. On macOS every
+    // `tempfile::tempdir()` path reaches its repo through the `/var` → `/private/var`
+    // symlink, and on Windows `canonicalize` yields the `\\?\` extended-length form
+    // where libgit2 yields `C:\…` — so a raw `strip_prefix` fails on both platforms
+    // and returns `Err`.
+    //
+    // That mattered more than a missed refusal, because EVERY failure path in this
+    // helper ALLOWS: the guard went **silent rather than loud**, reporting "no unpushed
+    // commits" for a ledger that had them. Measured on CI 2026-09-06 — red on
+    // `macos-latest / default` and `windows-latest / default`, green on
+    // `ubuntu-latest / default`, because `/tmp` is not a symlink on Linux.
+    //
+    // Falling back to the un-canonicalized path when resolution fails keeps the
+    // allow-on-failure contract: a path that cannot be resolved is not one this guard
+    // has any business refusing on.
+    let abs_c = abs_path
+        .canonicalize()
+        .unwrap_or_else(|_| abs_path.to_path_buf());
+    let work_c = workdir
+        .canonicalize()
+        .unwrap_or_else(|_| workdir.to_path_buf());
+    let Ok(rel) = abs_c.strip_prefix(&work_c) else {
         return false;
     };
     let rel = rel.to_string_lossy().replace('\\', "/");
@@ -1517,6 +1539,54 @@ mod tests {
             "an unpushed commit on THIS nested ledger must be reported"
         );
         let _ = tmp;
+    }
+
+    /// macOS's `/var` → `/private/var` tempdir symlink, reproduced on Linux.
+    ///
+    /// `git2`'s `repo.workdir()` is **canonicalized**; `abs_path` is whatever the
+    /// caller happened to hold. On macOS every `tempfile::tempdir()` path reaches its
+    /// repo through a symlink, so `strip_prefix` fails — and because EVERY failure
+    /// path in this helper ALLOWS by design, the guard goes **silent** rather than
+    /// loud. It reports "no unpushed commits" for a ledger that has them.
+    ///
+    /// That is why `allocation_is_refused_while_the_ledger_has_unpushed_commits` and
+    /// `unpushed_is_per_file_not_per_branch` failed on macOS **and** Windows (a `\\?\`
+    /// UNC workdir fails to strip the same way) for four days while `ubuntu-latest`
+    /// stayed green: `/tmp` is not a symlink on Linux. The CI matrix's own green cells
+    /// were what made it look platform-flaky rather than wrong.
+    ///
+    /// **The direct-path row is load-bearing and must not be deleted as redundant.**
+    /// Without it this test passes against an implementation hard-wired to `true`,
+    /// which is the mutation that "fixes" the symlink case by removing the guard.
+    #[cfg(unix)]
+    #[test]
+    fn a_ledger_reached_through_a_symlink_still_reports_its_unpushed_commits() {
+        let (tmp, work) = repo_with_upstream();
+        let direct = work.join("ledger.md");
+        // The write is load-bearing: `commit_path` stages a path, and an unchanged
+        // file produces a tree identical to its parent's, so the commit lands with
+        // NO delta on `ledger.md` and the guard correctly reports nothing. Omitting
+        // it reds the control row below — which is how this fixture was caught.
+        std::fs::write(&direct, "changed").unwrap();
+        commit_path(&work, "ledger.md", "touch ledger");
+
+        assert!(
+            ledger_has_unpushed_commits(&direct),
+            "control: the direct path must report. If THIS row fails, the fixture is \
+             wrong and the symlink assertion below proves nothing"
+        );
+
+        // The symlink is the entire fixture: `link/ledger.md` names the same file
+        // through a different prefix, which is what macOS hands every test for free.
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&work, &link).unwrap();
+        assert!(
+            ledger_has_unpushed_commits(&link.join("ledger.md")),
+            "a path reaching the ledger through a symlink must report the same unpushed \
+             commit — `strip_prefix` against a canonicalized workdir fails here, and \
+             every failure path in this helper allows, so the guard reports the SAFE \
+             answer for the wrong reason"
+        );
     }
 
     /// Refusal names the PUSH remedy, not the refusal. The guard does not prevent
