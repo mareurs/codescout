@@ -1954,6 +1954,20 @@ to see that it should not be. Stronger than a coordinated freeze because it hold
 **without coordination** — it does not depend on every participant having heard
 the same instruction at the same time.
 
+**A PUSH FREEZE IS NOT THE REMEDY, AND IS WORSE THAN NOT HAVING ONE** —
+`codescout-7f`'s, offered for the class rather than kept in the instance, and
+right to be here because a reader of this entry is exactly the person who will
+reach for one. A freeze coordinates **timing** among parties who all intend to
+publish eventually. This is a party who intends **not** to. So the freeze does
+not merely fail to cover the case — it manufactures the belief that the case is
+covered, and then ends, publishing everything at once.
+
+Demonstrated by this evening rather than reasoned: a push freeze WAS in force,
+agreed by four sessions and honoured by all of them, for the unrelated purpose of
+letting one CI matrix complete. `codescout-98`'s withheld commits went out in the
+first push after it lifted. The freeze worked perfectly at what it was for and
+was irrelevant to this, while looking from the inside exactly like protection.
+
 **And the reflex alternative is unavailable here, which is the part to write
 down:** *"use a scratch branch"* is what everyone reaches for, and it is wrong on
 a **shared checkout** — `git checkout -b` moves the working tree for every
