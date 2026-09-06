@@ -109,6 +109,14 @@ no git field records authorisation is checkable and was checked (no trailer, not
 or ref carries it, and `git push` has no per-commit selector); the claim that this
 recurs is not yet supported.
 
+**One sub-claim is better evidenced than the rest, and is worth separating rather
+than averaging in.** *"A push freeze does not remedy this"* is not an inference —
+it was demonstrated by this very incident, which contained a real freeze, agreed
+and honoured by four sessions, that the withheld commits sailed straight through
+on the first push after it lifted. See `## Hypotheses tried` → 2. The occurrence
+count for the defect is one; the count for the freeze being no remedy is also one,
+but it is an observation rather than an argument.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
@@ -117,15 +125,36 @@ recurs is not yet supported.
    before the push.
    **Verdict:** **rejected.** It is the right check and it cannot see this. The
    question it answers is *what am I sending*; the question that mattered is
-   *may I send it*.
+   *may I send it*. Worth keeping anyway: it catches every other kind of surprise,
+   and dropping a check because it missed the case that prompted it is the wrong
+   lesson from a real miss. Know its scope instead.
 
 2. **Hypothesis:** a push freeze covers it.
-   **Test:** reasoned against the incident — the freeze had been released, and the
-   withholding was never about the freeze.
-   **Verdict:** **rejected, and it is the more dangerous of the two**, because a
-   freeze looks like it addresses this. A freeze coordinates *timing* between
-   parties who all intend to publish eventually. This is a party who intends not to.
+   **Test:** **demonstrated, not merely reasoned** — and the demonstration was
+   inside this same incident, unnoticed by everyone in it. A freeze WAS in force
+   that evening: four sessions agreed it, all four honoured it, and it did the job
+   it was for (one CI matrix completed, the first conclusive one in four days).
+   The withheld commits went out in **the first push after it lifted**. The
+   session that requested and ran the freeze reported not noticing until the
+   distinction was named out loud.
+   **Verdict:** **rejected, and it is the more dangerous of the two.** A freeze
+   coordinates *timing* among parties who all intend to publish eventually; this
+   is a party who intends not to. So the freeze was irrelevant to this the entire
+   time, while looking — from the inside, to the person running it — exactly like
+   protection.
+   **The asymmetry is what makes it a trap rather than a gap:** the rule that
+   works sounds like extra caution, while the freeze that does not sounds like
+   enough. A reader with a freeze in place believes they are covered, which is
+   why the trap is the half a reader actually needs. Now carried by `OB-20` with
+   this measurement attached, since it belongs to the class rather than to this
+   occurrence.
 
+   *(Upgraded 2026-09-06, hours after filing. This entry first recorded the test
+   as reasoning rather than observation, which understated evidence that already
+   existed — nobody had connected the freeze they were running to the hypothesis
+   they were rejecting. The verdict did not change; its evidential weight did,
+   and that distinction is the reason this note exists rather than a silent
+   rewrite.)*
 ## Fix
 
 Not applied — the useful remedy is a convention, and it should be agreed rather
