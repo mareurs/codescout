@@ -155,20 +155,35 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // the graft's FK cascade delete the chunk rows and the
     // artifact_vec_v2_cascade_delete trigger take their vectors with them.
     // docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md
-    let vectors_refiled = {
+    let (vectors_refiled, vectors_refile_error) = {
         // The guard is already gone — the block above ended its scope, which is what
         // makes this `.await` legal at all. Nothing to drop here.
         if new_id != a.id {
             match ctx.artifact_store.as_ref() {
-                Some(store) => Some(store.refile(&a.id, &new_id).await?),
-                // No backend configured (unreachable Qdrant, or a lean build).
-                // Reported as null rather than 0: "no store to ask" and "asked, the
-                // artifact had none" are different facts, and a 0 here would assert
-                // the second while meaning the first.
-                None => None,
+                // A store that CONSTRUCTED and then failed at call time is the same
+                // operational fact as one that could not be constructed — the vector
+                // backend is down — reached by a different path. Only the second had
+                // a fallback until 2026-09-06, and `refile`'s own doc in
+                // `artifact_store.rs` already forbade the first: "a `refile` that
+                // failed there would turn a working archive into a refused one."
+                // It did. CI's `--features server-stack` lane ran without a Qdrant
+                // and red for four days, invisible to the documented gate because
+                // `server-stack` is not in `default`.
+                //
+                // So degrade rather than refuse: the catalog half is the half that
+                // matters, it is already written, and a `reindex` heals the vectors.
+                Some(store) => match store.refile(&a.id, &new_id).await {
+                    Ok(n) => (Some(n), None),
+                    Err(e) => (None, Some(format!("{e:#}"))),
+                },
+                // No backend configured (a lean build, or one that could not be
+                // constructed). Reported as null rather than 0: "no store to ask" and
+                // "asked, the artifact had none" are different facts, and a 0 here
+                // would assert the second while meaning the first.
+                None => (None, None),
             }
         } else {
-            None
+            (None, None)
         }
     };
 
@@ -212,6 +227,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // clean `moved: true`. `null` means no vector backend was reachable —
         // deliberately not 0, which would claim the artifact had none.
         "vectors_refiled": vectors_refiled,
+        // Carried BESIDE `vectors_refiled` rather than omitted when absent, because
+        // the two fields only disambiguate as a pair. `refiled: null` alone is now
+        // two different facts: `error: null` means no backend was configured to ask,
+        // and `error: <text>` means one was asked and failed — the artifact's vectors
+        // are still filed under its dead id and a `reindex` is owed. Dropping the
+        // field on success would leave a reader inferring the difference from an
+        // absence, which is the shape this whole field family exists to avoid.
+        "vectors_refile_error": vectors_refile_error,
         // A move is a tracked DELETION plus an untracked ADDITION, so every
         // selector defined over index entries — `git add -u`, `git commit -a` —
         // enumerates only the first half and silently undoes the archive with a
@@ -877,6 +900,133 @@ mod tests {
             Some((new_id.clone(), vec![0.25, 0.75])),
             "the vector was recomputed or dropped rather than re-filed"
         );
+    }
+
+    /// A vector store that is REACHABLE-BUT-FAILING must not refuse the move.
+    ///
+    /// `artifact_store.rs`'s own `refile` doc already states the requirement —
+    /// *"`mv` calls this on every id-changing move, including … an unreachable
+    /// Qdrant. A `refile` that failed there would turn a working archive into a
+    /// refused one."* — and until this test the code could not honour it. `mv`
+    /// handled a store that could not be CONSTRUCTED (`None` → `vectors_refiled:
+    /// null`, whose own field doc reads *"no vector backend was reachable"*), and
+    /// propagated a store that constructed and then failed at CALL time. Those are
+    /// the same operational fact — Qdrant is down — reached by two paths, and only
+    /// one had a fallback.
+    ///
+    /// **The failure was invisible to the documented gate.** `server-stack` is not
+    /// in `default`, so `cargo test --workspace` never compiles the Qdrant backend;
+    /// CI's `--features server-stack` lane did, found no Qdrant, and red for four
+    /// days while every local gate stayed green. This test needs neither feature
+    /// nor daemon: it injects the failure directly, so it runs in the lean lane too.
+    ///
+    /// **Why `null` and not `0`.** The distinction is already load-bearing in this
+    /// file — `0` asserts "asked, the artifact had none", which would be a lie here
+    /// and would make a stranded-vector bug read as a clean move. The error text is
+    /// carried in a sibling field rather than dropped, because a re-file that
+    /// silently did not happen is the defect the neighbouring test exists to catch.
+    #[tokio::test]
+    async fn a_failing_vector_store_does_not_refuse_the_move() {
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        /// Mirrors an unreachable Qdrant: constructs fine, errors on the call.
+        /// `list_collections(artifact)` is the verbatim context string CI saw.
+        struct UnreachableStore;
+        #[async_trait::async_trait]
+        impl ArtifactVectorStore for UnreachableStore {
+            async fn upsert(&self, _: &str, _: &str, _: &str, _: &[f32]) -> anyhow::Result<()> {
+                anyhow::bail!("list_collections(artifact)")
+            }
+            async fn delete(&self, _: &str) -> anyhow::Result<()> {
+                anyhow::bail!("list_collections(artifact)")
+            }
+            async fn refile(&self, _: &str, _: &str) -> anyhow::Result<u64> {
+                anyhow::bail!("list_collections(artifact)")
+            }
+            async fn knn(
+                &self,
+                _: Option<&str>,
+                _: &[f32],
+                _: usize,
+            ) -> anyhow::Result<Vec<(String, f32)>> {
+                anyhow::bail!("list_collections(artifact)")
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let row = ArtifactRow {
+            id: "aabbccdd11223344".into(),
+            abs_path: tmp.path().join("docs/trackers/foo.md"),
+            kind: "tracker".into(),
+            status: "active".into(),
+            title: Some("Foo Tracker".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+        let src = tmp.path().join("docs/trackers/foo.md");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(
+            &src,
+            "---\nid: aabbccdd11223344\nkind: tracker\n---\n# Foo\n",
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .with_artifact_store(Arc::new(UnreachableStore))
+            .build();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .expect(
+            "a move must not be refused because the vector store is down — the catalog \
+             half is the half that matters, and `reindex` heals the vectors",
+        );
+
+        assert_eq!(result["moved"], true);
+        assert!(
+            result["id"]
+                .as_str()
+                .is_some_and(|s| s != "aabbccdd11223344"),
+            "the re-key must still have happened: {result:#}"
+        );
+        assert!(
+            result["vectors_refiled"].is_null(),
+            "null means 'no vector backend was reachable'; 0 would claim the artifact \
+             had no vectors, which is a different and unverified fact: {result:#}"
+        );
+        // The degradation must be legible. Silence here is the failure mode the
+        // sibling test above was written to catch, one layer down.
+        assert!(
+            result["vectors_refile_error"]
+                .as_str()
+                .is_some_and(|e| e.contains("list_collections")),
+            "a re-file that did not happen must say so, or a stranded-vector bug \
+             reads as a clean move: {result:#}"
+        );
+        // The file moved on disk regardless of the store.
+        assert!(tmp.path().join("docs/archive/foo.md").exists());
+        assert!(!src.exists());
     }
 
     #[tokio::test]
