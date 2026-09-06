@@ -213,6 +213,34 @@ sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`.
 The item above was itself filed through a commit that stashed that same session's seven
 uncommitted files — evidence better than the prose, and the reason this paragraph exists.
 
+### The one part that IS a rule, and can be followed before any fix lands
+
+The hazard became visible on 2026-09-06 for one reason: a session **announced a work window**,
+and the peer checked what its next action would do to it. Stated plainly by that peer
+(`cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`) and worth recording in their terms: they did not
+deduce the interaction, they read the announcement and computed against it. Without it they
+would have committed, the mutation would have survived, and the likely outcome is a working
+guard deleted with neither session ever knowing.
+
+**The obvious lesson — "sessions should announce more" — is wrong in the usual way.** More
+announcements is noise, and noise is what makes the next real one skippable. The property that
+paid was **precision about STATE, not frequency**:
+
+| announcement | what a peer can compute from it |
+|---|---|
+| "I'm working in `doctor.rs`" | nothing — no interaction is derivable |
+| "uncommitted single-line mutations in one function, ~10 min, only `doctor::tests` affected, build stays green" | that a commit would stash it, that the stash would invert the measurement, and that holding costs ~10 minutes |
+
+So the announcement must carry **file, committed-or-not, blast radius, and duration**. The
+middle one is the load-bearing field and the one most likely to be dropped, because it is the
+only one that is not about *your* work — it is about what someone else's routine action would
+do to it.
+
+This does **not** soften the politeness point above: the mitigation is still not a mechanism,
+and nothing makes anyone announce. But the gap between an announcement that is merely polite
+and one that is useful lives entirely in what the message contains, and that half *is*
+reducible to a rule someone can follow today.
+
 **So the fix to aim at is not "warn harder".** Candidates, none costed yet:
 
 - **Make the correct path safe.** If `pre-commit` can be configured to stash nothing (several
