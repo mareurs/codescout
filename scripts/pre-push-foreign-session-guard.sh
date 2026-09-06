@@ -156,13 +156,23 @@ $foreign_report
   pushed yet, and git records nothing that tells them apart. This guard exists so
   the question gets asked at the one moment it can still be answered.
 
-  ASK THE AUTHOR — the sid above IS the address. Resolve it to a live session with:
+  ASK THE AUTHOR WHETHER IT IS WITHHELD — that is the ONE fact only they hold.
+  The sid above is the address; resolve it to a live session with:
 
       scripts/peer-sessions.sh
 
-  then message that session and ask whether its commits may be published. One
-  message. If the author is gone, the commits are already unowned and pushing them
-  is the least-bad option — ack and say so in your next commit message.
+  THEN ASK YOUR OPERATOR, and do not stop at the author. A peer can tell you what
+  they were told; a peer CANNOT grant. Routing the ask sideways is what turns this
+  into a standoff — measured 2026-09-06: four sessions held for eight hours, each
+  correctly refusing to decide something none of them had the authority to decide.
+  It resolved in one exchange the moment the question reached a person, with the
+  specific consequence attached: which commits, whose, and the fact that no refspec
+  can skip an ancestor so there is no push-only-mine. On a machine where one human
+  operates every session, your operator IS the author's operator — which no session
+  can tell from the inside, and is why this must be asked rather than inferred.
+
+  If the author is gone, the commits are already unowned and pushing them is the
+  least-bad option — ack and say so in your next commit message.
 
   IF IT IS CLEARED, name the sessions you are authorised to publish:
 

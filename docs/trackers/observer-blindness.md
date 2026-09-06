@@ -2094,6 +2094,60 @@ them in an ordinary push and reported it immediately. Two other sessions,
 including this one, had independently worked out the hazard and neither reached
 it in time to prevent it.
 
+**THE ASK HAS AN ADDRESS, AND IT IS NOT THE PEER — the refinement that closed this,
+and the one thing four sessions all got wrong for eight hours.** Everything above
+establishes that authorisation is not recoverable *from the artifact*. True, and it
+quietly implies the wrong remedy: every session here concluded the ask goes to the
+author. It does not. **A peer can tell you what they were told; a peer cannot
+grant** — and `codescout-98` correctly never tried, which is why the polite,
+careful version of this deadlocks rather than resolving. Measured: one session
+asked the author, the author asked its operator, two more sessions held in
+solidarity, and the pile grew from 2 commits to 14 while every participant behaved
+correctly.
+
+So the complement rule needs its second half. Not *"if anything unpushed is not
+yours, ASK"* but:
+
+1. **Ask the AUTHOR whether it is withheld.** That is the one fact only they hold,
+   and it is unrecoverable any other way.
+2. **Ask your OPERATOR whether it may ship.** Authorisation is not recoverable from
+   the artifact *or from any peer*; it is recoverable from a person, and only from
+   a person.
+
+**And the fact that makes step 2 non-obvious cannot be seen from inside a session:**
+on this machine one human operates all four, so your operator *is* the author's
+operator — the authority everyone was waiting on was reachable from every session
+the whole time. No session can determine that from its own context, which is why it
+must be **asked rather than inferred**, and why a one-word `push` does not settle
+it. Resolved 2026-09-06T19:13Z in a single exchange, by putting the specific
+consequence in front of the operator: which commits, whose sid, and that **no
+refspec can skip an ancestor**, so there was no push-only-mine option to choose.
+Raised by `codescout-7f` (sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`) after
+the fact, from the incident's own shape.
+
+**Mechanism updated to match:** the `pre-push` guard's refusal text used to say
+*"ASK THE AUTHOR — the sid above IS the address"*, which routes the ask sideways
+and reproduces the standoff. It now names both steps and says plainly that a peer
+cannot grant. **A guard that forces an ask is only as good as the ask having
+somewhere to go** — the mechanism was correct and its guidance pointed at a party
+structurally unable to answer, which is this entry's own class holding about the
+tool built to address it.
+
+**Verdict on the mechanism, from its first real use.** It refused a push five hours
+after the incident that produced it, printed the withholding sid and subjects, and
+turned a one-word instruction into a question that reached the person who could
+answer it — the *last* moment at which it was still answerable. It decided nothing,
+which is correct and is the ceiling: authorisation stays outside the substrate. The
+ack named the three sids rather than `all`, so the commit record carries a
+**decision** rather than a bypass — a distinction worth preserving, since both
+publish identical bytes.
+
+**And publication is not the failure — publication without a decision is.** The
+instance below reads as though a withheld commit reaching origin is the harm. It is
+not: the same three commits shipped at 19:13Z with nothing to repair, because an
+operator cleared them in advance with the list in front of them. The failure mode
+is an *undecided* publication, and the remedy is a decision, not a revert.
+
 **Status:** open — 1 instance, 4 sessions, 2026-09-06. The mirror of a rule
 already in `CLAUDE.md`: *visibility is not authority* is stated there as a limit
 on what a peer may **grant** you. This is the other half — a peer cannot
