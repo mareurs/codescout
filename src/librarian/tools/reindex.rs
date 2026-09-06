@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::librarian::indexer;
+use crate::librarian::reindex_progress::{self, ReindexProgress};
 
 use super::ToolContext;
 
@@ -189,6 +190,23 @@ fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     ctx.current_project
         .as_ref()
         .map(|cp| cp.main_root.clone().unwrap_or_else(|| cp.git_root.clone()))
+}
+
+/// Best-effort write of the durable progress row.
+///
+/// **Never propagates.** A diagnostic surface must not be able to fail the run
+/// it describes: this row exists so an observer can tell a working reindex from
+/// a wedged one, and a reindex that aborted because its own progress row could
+/// not be written would be strictly worse than the ambiguity it removes.
+///
+/// Scoping the lock inside this function is load-bearing, not style — the
+/// caller is an `async` loop, and a `parking_lot` guard held across an `.await`
+/// does not compile. Keeping the guard here makes that impossible by shape.
+fn publish_progress(ctx: &ToolContext, p: &ReindexProgress) {
+    let cat = ctx.catalog.lock();
+    if let Err(e) = reindex_progress::publish(&cat.conn, p) {
+        tracing::warn!("publishing reindex progress failed: {e}");
+    }
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -415,6 +433,42 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let embed_total = embed_queue.len() as u32;
             let mut embed_done: u32 = 0;
 
+            // The DURABLE twin of the `ctx.progress` reporting below, for every
+            // observer that is not this caller. `ctx.progress` is `None` unless the
+            // client sent a `_meta.progressToken`, and Claude Code sends
+            // `meta: None` — so on the client this project is developed against
+            // that path is a no-op, and a 40-minute re-embed emits nothing anyone
+            // can read. Nor is there a side effect to fall back on: `upsert` is
+            // idempotent on `chunk_id`, no new `artifact_chunk` rows appear for
+            // unchanged content, and the `embedded_sha256` stamp lands only after
+            // this loop. `librarian::reindex_progress` documents each dead proxy
+            // and the 2026-09-04 run that was called wedged from six of them.
+            let pid = std::process::id();
+            let started_ms = reindex_progress::now_ms();
+            let progress_row = |done: u32, at: i64| ReindexProgress {
+                pid,
+                started_ms,
+                heartbeat_ms: at,
+                done,
+                total: embed_total,
+                scope: project_id.clone(),
+            };
+
+            {
+                // Repair on the path that happens anyway: a run killed mid-loop
+                // leaves a row nothing else removes, and a stale row read as
+                // current is the very defect class this fix belongs to.
+                let cat = ctx.catalog.lock();
+                if let Err(e) = reindex_progress::prune_dead(&cat.conn) {
+                    tracing::warn!("pruning dead reindex-progress rows failed: {e}");
+                }
+            }
+            // Published BEFORE the first embed, so a run whose first item is slow
+            // is still visible. Left to the throttle below, the row would be absent
+            // for exactly the opening of the window an observer looks in.
+            let mut last_published_ms = started_ms;
+            publish_progress(ctx, &progress_row(0, started_ms));
+
             for item in &embed_queue {
                 match svc.embed_artifact(item.title.as_deref(), &item.text).await {
                     Ok(vec) => match store
@@ -439,6 +493,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 embed_done += 1;
                 if let Some(p) = ctx.progress.as_ref() {
                     p.report(embed_done, Some(embed_total)).await;
+                }
+
+                // Throttled, unlike the line above: `report()` costs a channel
+                // send, this costs a write transaction. One per item would be
+                // ~28k of them on this repo's corpus, all competing with the
+                // upserts for the same 5000 ms `busy_timeout` budget — the fix
+                // causing the contention the bug file could only speculate about.
+                let now = reindex_progress::now_ms();
+                if reindex_progress::should_publish(last_published_ms, now) {
+                    last_published_ms = now;
+                    publish_progress(ctx, &progress_row(embed_done, now));
+                }
+            }
+
+            // The loop is over, so the row's claim — "a reindex is embedding right
+            // now" — has stopped being true. Cleared here rather than at the end of
+            // `call` so the row's meaning is exactly the loop's extent; the stamping
+            // and backfill below are fast, and a row outliving the loop would report
+            // a wedge-shaped tail that does not exist.
+            {
+                let cat = ctx.catalog.lock();
+                if let Err(e) = reindex_progress::clear(&cat.conn, pid) {
+                    tracing::warn!("clearing reindex progress row failed: {e}");
                 }
             }
 
@@ -978,6 +1055,147 @@ mod tests {
                 "step {step} outside 1..={embedded}"
             );
         }
+    }
+
+    /// The bug's own acceptance criterion: **a second connection reads progress
+    /// while the first is mid-loop.**
+    ///
+    /// The sibling test above proves the *caller* can be told. This proves an
+    /// observer who is not the caller can, which is the half that was missing:
+    /// `ctx.progress` is `None` whenever the client sent no `_meta.progressToken`
+    /// — Claude Code sends `meta: None` — so on this project's own client the
+    /// reporting path above is a no-op and a 40-minute run is silent. Every other
+    /// observable is flat during a re-embed (`upsert` overwrites by `chunk_id`,
+    /// no new chunk rows for unchanged content, the `embedded_sha256` stamp lands
+    /// after the loop), which is how a healthy 28,379-vector run came to be
+    /// diagnosed "wedged" from six separate proxies on 2026-09-04.
+    /// `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+    /// `reconnaissance-patterns:R-182`
+    ///
+    /// **Three fixture details are load-bearing.**
+    ///
+    /// 1. **A file-backed catalog and a genuinely separate `Catalog::open`.** A read
+    ///    through the writer's own handle passes even if the value never leaves this
+    ///    process, which is the exact claim under test. An in-memory catalog cannot
+    ///    express the failure at all.
+    /// 2. **The one-shot sleep past `HEARTBEAT_INTERVAL_MS`.** Without it every
+    ///    embed finishes inside the throttle window, every observation is the
+    ///    pre-loop `done: 0` publish, and a loop publishing a hardcoded zero passes.
+    ///    The sleep is what lets a later observation see the counter *move*.
+    /// 3. **`total` is compared against the run's own `embedded`**, not a literal:
+    ///    a hardcoded or off-by-one total would otherwise satisfy the assertion.
+    ///
+    /// Mutations this kills: deleting the pre-loop publish → no observation at all;
+    /// moving either publish after the loop → same; publishing `0` instead of
+    /// `embed_done` → the advance assertion fails; deleting the post-loop `clear`
+    /// → the final assertion fails.
+    #[tokio::test]
+    async fn a_running_reindex_publishes_progress_a_separate_connection_can_read() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct ObservingEmbedder {
+            db: std::path::PathBuf,
+            seen: std::sync::Mutex<Vec<(u32, u32, u32)>>,
+            slept: AtomicBool,
+        }
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for ObservingEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                let reader = Catalog::open(&self.db).unwrap();
+                let snap = crate::librarian::reindex_progress::read_all(&reader.conn).unwrap();
+                for p in &snap.runs {
+                    self.seen.lock().unwrap().push((p.pid, p.done, p.total));
+                }
+                if !self.slept.swap(true, Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        crate::librarian::reindex_progress::HEARTBEAT_INTERVAL_MS as u64 + 200,
+                    ))
+                    .await;
+                }
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        for name in ["a", "b", "c", "d"] {
+            std::fs::write(
+                proj.join(format!("docs/specs/{name}.md")),
+                format!("# {name}\nbody\n"),
+            )
+            .unwrap();
+        }
+
+        // Catalog on disk, beside the project and under the same temp root, so the
+        // temp-write guard sees an inside-temp catalog and does not refuse.
+        let db = tmp.path().join("catalog.db");
+        let embedder = std::sync::Arc::new(ObservingEmbedder {
+            db: db.clone(),
+            seen: std::sync::Mutex::new(Vec::new()),
+            slept: AtomicBool::new(false),
+        });
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let ctx = TestToolContextBuilder::new(Catalog::open(&db).unwrap())
+            .with_rules(rules)
+            .with_current_project(std::sync::Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: proj.clone(),
+                    git_root: proj.clone(),
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(embedder.clone()),
+            ))
+            .with_artifact_store(std::sync::Arc::new(
+                crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default(),
+            ))
+            .build();
+
+        let v = call(&ctx, json!({"scope": "project"})).await.unwrap();
+        let embedded = v["embedded"].as_u64().unwrap() as u32;
+        assert!(
+            embedded >= 4,
+            "test setup: the embed loop must actually run, got {embedded}"
+        );
+
+        let seen = embedder.seen.lock().unwrap().clone();
+        assert!(
+            !seen.is_empty(),
+            "a separate connection saw NO progress row at any point during the run — \
+             this is the bug: a working run and a wedged one are the same observation"
+        );
+        assert!(
+            seen.iter().all(|(pid, _, _)| *pid == std::process::id()),
+            "every row must name the writing process, or liveness cannot be resolved: {seen:?}"
+        );
+        assert!(
+            seen.iter().all(|(_, _, total)| *total == embedded),
+            "the published total must be the real queue length ({embedded}): {seen:?}"
+        );
+        let max_done = seen.iter().map(|(_, done, _)| *done).max().unwrap();
+        assert!(
+            max_done > 0,
+            "the counter never advanced past its initial publish — an observer could \
+             see a row but not that work was happening: {seen:?}"
+        );
+
+        // Cleared on the way out: a row outliving its loop is a stale record read as
+        // current, which is the defect class this fix belongs to.
+        let after = Catalog::open(&db).unwrap();
+        let snap = crate::librarian::reindex_progress::read_all(&after.conn).unwrap();
+        assert!(
+            snap.runs.is_empty(),
+            "the progress row must be cleared when the loop ends: {:?}",
+            snap.runs
+        );
     }
 
     /// Step 2 of docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:

@@ -16,6 +16,7 @@ impl Tool for Librarian {
         "Workspace-level librarian operations. \
              context: pack topic/anchor neighbourhood into a markdown bundle. \
              reindex: re-scan and classify markdown artifacts. \
+             status: is a reindex running, how far along? Live counter; lock-free. \
              tracker_design: return teaching prompt + archetype library (call BEFORE doc(create) for trackers). \
              workspace_state_at: time-travel snapshot of all artifacts at a commit/timestamp. \
              audit_doc_refs: scan markdown for stale code refs (paths, symbols, \
@@ -26,7 +27,7 @@ impl Tool for Librarian {
              refactored ones. write=false for a dry-run JSON. \
              link_scan: derive rel=\"cites\" edges from prose citations (entry \
              tokens, ids, md links); default reports, write=true \
-             materializes/prunes cites edges. \
+             materializes/prunes them. \
              doctor: catalog drift scanner (read-only by default): abs_path form, \
              ADS colons, '..' segments, missing files; commits.git_root form; \
              worktree-scoped rows; frontmatter id vs catalog id; and \
@@ -53,7 +54,7 @@ impl Tool for Librarian {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor", "merge_worktree", "audit_log"],
+                    "enum": ["context", "reindex", "status", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor", "merge_worktree", "audit_log"],
                     "description": "Operation to perform"
                 },
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
@@ -142,6 +143,7 @@ impl Tool for Librarian {
         match action {
                 "context"            => super::context::call(ctx, args).await,
                 "reindex"            => super::reindex::call(ctx, args).await,
+                "status"             => super::status::call(ctx, args).await,
                 "tracker_design"     => super::tracker_design::call(ctx, args).await,
                 "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
                 "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
@@ -151,7 +153,7 @@ impl Tool for Librarian {
                 "merge_worktree"     => super::merge_worktree::call(ctx, args).await,
                 "audit_log"          => super::audit_log::call(ctx, args).await,
                 other => Err(RecoverableError::new(format!(
-                    "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
+                    "unknown action '{other}' — expected one of: context, reindex, status, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
                 ))),
             }
     }
@@ -220,6 +222,7 @@ mod tests {
             actions: &[
                 "context",
                 "reindex",
+                "status",
                 "tracker_design",
                 "workspace_state_at",
                 "audit_doc_refs",

@@ -3517,7 +3517,28 @@ mod tests {
     /// the response would look wrong. Gross addition was 85; 24 was paid on the spot by
     /// compressing the same description's "not the file's opening lines" to "not the
     /// file's head", which says the same thing.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_574;
+    /// 2026-09-05, +72 → 56_646 (desc 7_060 / schema 48_829 / annot 757). `librarian`
+    /// gained a `status` action: is a reindex running, and how far along? The bytes buy
+    /// an OBSERVABLE that did not previously exist anywhere. A long
+    /// `reindex(reembed=true)` published nothing any observer could reach, and during a
+    /// re-embed every side effect is flat — `upsert` is idempotent on `chunk_id`, no new
+    /// chunk rows appear for unchanged content, the `embedded_sha256` stamp lands after
+    /// the loop — so a healthy 40-minute run and a wedged one were the same observation.
+    /// Measured 2026-09-04: a 28,379-vector run was diagnosed "wedged" in writing, from
+    /// six separate proxies, every one consistent with a working run.
+    ///
+    /// The description clause is not optional and could not have been traded away:
+    /// `action_contract` declares `librarian` an **Inventory**, so `under_reported`
+    /// requires the description to name every action in the enum — and its own message
+    /// is the argument for these bytes, that "an omitted action is one it never learns
+    /// exists". For a diagnostic that is the whole of its value.
+    ///
+    /// Gross addition was 79 (70 description + 9 for the schema enum entry); 7 was paid
+    /// on the spot inside `link_scan`'s own clause, which said "cites edges" twice in
+    /// one sentence. Nothing was taken from a NEIGHBOURING action's description to fund
+    /// this one: trimming prose I am not changing, to pay for prose I am, degrades a
+    /// surface on the quiet and hides the true cost of the addition in the diff.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_646;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -7147,6 +7168,14 @@ mod tests {
                     "context",
                     "tracker_design",
                     "workspace_state_at",
+                    // Reads one `catalog_meta` row and resolves each holder's
+                    // liveness. Writing nothing is necessary but not the reason
+                    // it is here: `status` answers "is a reindex running?", and a
+                    // running reindex HOLDS the cross-process write lock — so
+                    // classified as a write it would block until that run ended
+                    // and then report, truthfully, that nothing was running. The
+                    // one action whose usefulness depends on this entry.
+                    "status",
                     "link_scan",
                     "doctor",
                     "audit_log",

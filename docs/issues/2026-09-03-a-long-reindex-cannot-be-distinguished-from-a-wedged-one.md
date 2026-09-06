@@ -183,50 +183,118 @@ and released on the order of 27,762 times and never held long.
 
 ## Fix
 
-*Plan only — not implemented.*
+*Implemented 2026-09-05.* `src/librarian/reindex_progress.rs` (new),
+`src/librarian/tools/reindex.rs`, `src/librarian/tools/status.rs` (new),
+`src/librarian/tools/librarian.rs`, `src/librarian/adapter.rs`.
 
-The cheap shape, matching the `index` precedent: have `reindex` publish progress
-to a durable, queryable place **during** the loop rather than only after it. The
-catalog already has the mechanism — `catalog::gc::set_meta` is what `:424-435`
-uses at the end. Writing `reindex_in_progress` (pid, started_at, done, total)
-every N items, and clearing it in a guard on the way out, makes the run readable
-by any process sharing the catalog file.
+The shape is the one planned above, plus three things the plan did not have.
 
-Then either add a `librarian(action="status")`, or fold the fields into
-`doctor`'s report so an observer's existing habit surfaces it.
+**Publishing.** A running reindex writes a `catalog_meta` row keyed
+`reindex_in_progress:<pid>` holding `{pid, started_ms, heartbeat_ms, done,
+total, scope}`. Published once before the first embed — so a run whose first
+item is slow is still visible — then refreshed on a **2 s** throttle, and
+cleared when the loop ends.
 
-**Two design questions this bug does not decide:**
+**Reading.** `librarian(action="status")` partitions rows into `running` and
+`stale` by resolving each holder's pid, and reports unparseable rows rather
+than dropping them. Both halves shipped together: a published counter nothing
+can read is the *"alarm nothing reaches"* defect in `CLAUDE.md` § *Testing
+Discipline*.
 
-- *Frequency.* A `set_meta` per item is 27,762 extra write transactions competing
-  with the upserts for the same 5000 ms `busy_timeout` budget — the fix could
-  cause the contention this bug currently only speculates about. Batch it.
-- *Staleness.* A progress row whose writer died is exactly the class of defect
-  the `index` bug was (`cluster/gate-keyed-on-unobservable-event`): a stale
-  record read as current. It needs a pid whose liveness a reader can check, which
-  is why the `index` lock file stores one on its first line.
+**Answers to the two design questions this bug deliberately left open:**
 
-SHA: *(not fixed)*
-patch-id: *(not fixed)*
+- *Frequency* — throttled by **time**, not item count, because per-item cost
+  varies by orders of magnitude between a one-line memory and a 25 KB tracker
+  section. At 2 s a 12-minute run writes ~360 rows instead of 27,762.
+- *Staleness* — resolved by **holder liveness**, never by age. Writing that
+  down surfaced a live defect: `platform::process_alive` cast `u32 as i32`, so
+  `kill`'s addressing mode flipped and a nonexistent process read as **alive**.
+  Filed and fixed as
+  `docs/issues/2026-09-05-process-alive-reports-a-nonexistent-process-as-alive.md`;
+  this fix's stale-row pruning does not work without it.
 
+**A third question the plan did not contain, and the one that would have
+shipped a broken fix.** `LibrarianAdapter::is_write` classifies unlisted
+actions as writes (`adapter.rs`, `_ => true`), and a write takes the
+cross-process write lock — which a running `reindex` holds. Left to the
+default, `status` would have **blocked until the run it was asking about
+finished, then truthfully reported that nothing was running**: a brand-new
+instrument reproducing this bug exactly. `status` is in the unconditional-read
+arm, pinned by
+`librarian_status_is_a_read_or_it_cannot_observe_a_running_reindex`.
+
+**Not done, deliberately:** the fields are not folded into `doctor`. `doctor`
+is a full-catalog scan and would contend with the very run an observer is
+asking about; the point of `status` is that it is cheap and lock-free.
+
+SHA: *(pending — recorded at archive)*
+patch-id: *(pending — recorded at archive)*
 ## Tests added
 
-None yet — nothing is fixed. When it is, the guard must assert on the
-**observable**: a second process reading progress while a first is mid-run. A
-test that only checks `set_meta` was called is monotone under the writer dying,
-which is the failure that matters.
+The guard demanded above — *"a second process reading progress while a first is
+mid-run"* — is
+`librarian::tools::reindex::tests::a_running_reindex_publishes_progress_a_separate_connection_can_read`.
+It uses a **file-backed** catalog and an embedder that opens its own
+`Catalog::open` on each call, because a read through the writer's handle passes
+even if the value never leaves the process, and an in-memory catalog cannot
+express the failure at all.
 
+**Observed RED under three production-path mutations** (not test-input
+mutations), 2026-09-05:
+
+| mutation | failure |
+|---|---|
+| publish `0` instead of `embed_done` | `the counter never advanced past its initial publish — [(pid, 0, 4) ×4]` |
+| delete the post-loop `clear` | `the progress row must be cleared when the loop ends: [ReindexProgress { done: 1, total: 4, … }]` |
+| drop `status` from `is_write`'s read arm | `librarian(action="status") — must answer while a reindex holds the lock: left: true, right: false` |
+
+Supporting units: 11 in `librarian::reindex_progress::tests` (cross-connection
+visibility, per-pid keying against clobber, LIKE-escape against a decoy key,
+unparseable rows surfaced not dropped, prune-dead-keep-live), 5 in
+`librarian::tools::status::tests`, 3 in `platform::unix::tests`.
+
+**Read out of the DEFAULT lane, never the lean one.** `--no-default-features`
+switches the librarian off, so it compiles none of this code and returns
+`exit=0` whether it is right or broken.
 ## Workarounds
 
-Query the side effect directly while a reindex runs:
+> **Corrected 2026-09-05 — the workaround below was blind on the run that needs it most.**
+> Both halves were validated against a **first** embed and silently do not transfer to a
+> **re-embed**. Second instance of this bug's own mechanism, made by its author. See
+> `reconnaissance-patterns:R-182`.
+
+The original text prescribed:
 
 ```sql
 SELECT COUNT(*) FROM artifact_chunk;   -- rows grow as the walk queues them
 ```
 
-and for a peer, ask the running session rather than inferring from `ps` — a
-sleeping low-CPU codescout process carries no information about which of the two
-states it is in.
+That is true of a first embed — the 2026-09-03 relay above moved `9760 → 10518` on
+exactly this query. It is **flat for the entire embed loop of a `reembed=true` run over
+unchanged content**: no new chunk rows are created, so the count sits still while tens of
+thousands of vectors are written. Measured 2026-09-04 on a 28,379-vector run that
+reported `unchanged: 1483`.
 
+**During a re-embed there is no monotone durable observable at all**, which is the
+strongest form of this bug and the reason no better instrument exists:
+
+| candidate | why it is flat or absent |
+|---|---|
+| `artifact_chunk` row count | no new rows for unchanged content |
+| vector-store point count | `upsert` is idempotent on `chunk_id` (`artifact_store.rs:137`) — overwrites in place |
+| `artifact.embedded_sha256` | the stamp block runs **after** the loop (`reindex.rs:447`) |
+| `catalog.db` mtime | same reason |
+| `embed_done` counter | a local `u32`, published only via `ctx.progress`, which is `None` unless the client sent `_meta.progressToken` — Claude Code sends `meta: None` |
+| CPU% of the codescout process | the compute is in the embedder process (`llama-server`); codescout is IO-bound on HTTP |
+
+So the honest workaround today is: **ask the running session**, and have it report the
+counter it holds in memory. Nothing else discriminates. Inferring from `ps` is worse than
+useless — a sleeping, low-CPU codescout process is the signature of a leaked lock guard
+**and** of a healthy IO-bound embed loop, and a scout that stacks six such proxies gets
+six copies of one blind spot, not corroboration.
+
+Which is the argument for the fix rather than a note beside it: the counter exists
+(`reindex.rs:437`) and reaches nobody durable.
 ## Resume
 
 Start at `src/librarian/tools/reindex.rs:368-390` (the emitting-nothing loop) and

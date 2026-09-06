@@ -341,7 +341,16 @@ impl crate::tools::Tool for LibrarianAdapter {
             ),
             "librarian" => match action {
                 // Unconditional reads.
-                Some("context" | "tracker_design" | "workspace_state_at") => false,
+                //
+                // `status` is here for a reason stronger than "it happens not to
+                // write": left to the `_ => true` default it would acquire the
+                // cross-process write lock, which a running `reindex` holds — so
+                // the call would block until the run it is asking about finished,
+                // then truthfully report that nothing is running. That is a new
+                // instrument reproducing the exact non-discrimination the bug it
+                // fixes is about. Pinned by
+                // `librarian_status_is_a_read_or_it_cannot_observe_a_running_reindex`.
+                Some("context" | "tracker_design" | "workspace_state_at" | "status") => false,
                 // Conditional arms, and the polarities are NOT uniform — do not
                 // copy one onto another. audit_doc_refs and legibility_scan write
                 // by default and opt out on an explicit flag; link_scan, doctor
@@ -989,6 +998,55 @@ mod tests {
             ),
         ] {
             assert_eq!(scoped_body_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+
+    /// `librarian(action="status")` must classify as a **read**.
+    ///
+    /// Not a style preference, and not merely "it happens not to write".
+    /// `is_write` gates the cross-process write lock, and a running `reindex`
+    /// holds that lock for the length of its embed loop — tens of minutes on
+    /// this repo's corpus. Left to the `_ => true` default, `status` would block
+    /// for that entire time and then report, truthfully, that nothing is
+    /// running: a brand-new instrument reproducing the exact non-discrimination
+    /// it was built to remove.
+    /// `docs/issues/2026-09-03-a-long-reindex-cannot-be-distinguished-from-a-wedged-one.md`
+    ///
+    /// **The `reindex` and `link_scan` rows are discriminators and must not be
+    /// deleted as redundant.** Without them, an arm rewritten to return `false`
+    /// for everything passes — which would silently disarm the write guard the
+    /// 2026-09-02 `is_write` bug installed. One row of each polarity is the
+    /// minimum that distinguishes "status was added" from "the guard was
+    /// removed".
+    #[test]
+    fn librarian_status_is_a_read_or_it_cannot_observe_a_running_reindex() {
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let inner = lib_all_tools()
+            .into_iter()
+            .find(|t| t.name() == "librarian")
+            .expect("the `librarian` tool must be registered");
+        let adapter = LibrarianAdapter { inner, ctx };
+
+        for (action, expect_write, why) in [
+            (
+                "status",
+                false,
+                "must answer while a reindex holds the lock",
+            ),
+            ("reindex", true, "writes the catalog"),
+            ("link_scan", false, "read-default, opts in via write=true"),
+            ("merge_worktree", true, "moves rows between artifacts"),
+        ] {
+            assert_eq!(
+                adapter.is_write(&json!({ "action": action })),
+                expect_write,
+                "librarian(action={action:?}) — {why}"
+            );
         }
     }
 

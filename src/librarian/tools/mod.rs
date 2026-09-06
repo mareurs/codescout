@@ -381,6 +381,9 @@ pub mod workspace_state_at;
 pub mod timeline;
 
 pub mod reindex;
+/// Reader for the progress `reindex` publishes. Ships with it, never after it —
+/// a published counter nothing can read is the "alarm nothing reaches" defect.
+pub mod status;
 
 pub mod context;
 

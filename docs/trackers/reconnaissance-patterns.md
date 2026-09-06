@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 181
+entry_high_water_R: 182
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-182 | 2026-09-05 | miss (6 instruments) → rule | **Six proxies for one hidden variable is ONE blind spot counted six times — and the bug file's own workaround is blind on exactly the run that needs it.** Scouted a long-running `librarian(reindex, reembed=true)` with six instruments, concluded **"wedged"** in writing to the user; it was working (`embedded: 28379, vectorless: 0, embed_error_count: 0`). Each instrument failed for a *different* reason, which is why they read as corroboration: CPU% measured **codescout, not `llama-server`** where the compute is; futex-parked workers are what awaiting HTTP looks like; `catalog.db` mtime is stale because the durable stamp block runs **after** the loop; the Qdrant count is frozen because `upsert` is **idempotent on `chunk_id`** (`artifact_store.rs:137`) — a fact I had stated myself an hour earlier and then used the frozen count as proof of stalling; a held write lock is what a long write does; and `doc(find)` is a **read** answering a write-lock question. **Generative fact:** during a re-embed there was **no monotone durable observable anywhere** — `embed_done` is a local `u32` reaching only `ctx.progress` (`None` for this client), the stamp lands after the loop, `upsert` overwrites — so the scout's target was unrepresentable and returned a plausible answer rather than an error. **The workaround inherits it:** `823d9ccaa13e2def` prescribes `SELECT COUNT(*) FROM artifact_chunk`, true of a **first** embed (the 2026-09-03 run it was validated on, `9760 → 10518`) and **flat for the whole embed loop of a re-embed** — `unchanged: 1483` means no new rows while 28,379 vectors were written. **Runnable:** before citing a proxy for loop progress ask (1) which process does the work, (2) written during the loop or after it, (3) is the write idempotent; a "no" to any one makes it non-discriminating, and stacking more proxies past a "no" adds confidence without information. All three fail → publish a counter, don't find a better instrument. | second instance of `bug-fix-session-log:F-109` (peer made it from outside 2026-09-03); bug `823d9ccaa13e2def`; `CLAUDE.md` § *Reaching a Peer Session* ("check independence, not agreement"), applied outside its stated peer-enumeration scope; `OB-1` |
 | R-181 | 2026-09-04 | miss ×2 → rule (both plans changed before either was read) | **Enumerate by the FIELD name, not the feature name — and ask who WRITES an artifact before designing anything that marks it.** Two bug files prescribed fixes for one tool; reconnaissance run before reading either plan changed both. The eager-stamp file named 2 sites (`:497`, `:582`); one `grep onboarding_version` found **4** — also `perform_full_onboarding`'s tail, whose comment read *"Optimistic version write for full onboarding"*, and the fresh-config literal. All four return a `subagent_prompt`, so all four certify work they defer, and a fix at the two named sites ships the defect twice more behind a passing suite. **Why the third hid is the transferable half:** it is in neither function a reader thinking about *"refresh"* opens, sits at the tail of a 220-line function doing something else, and its comment names the OTHER bug's flag combination — the two files shared a line neither cited. Reading the two functions the files named returns 2, and reads as complete. **Second miss:** the file's *preferred* remedy was to stamp the version into `.codescout/system-prompt.md`; one grep showed **no production code writes that file** — every write is prose instructing a subagent to `create_file` it — so the remedy rested on subagent compliance: a policy, prescribed by a file arguing for mechanisms. **And the fixture layer held the same defect**, which is why no test caught it: six pre-existing tests reported a fully-onboarded project while the prompt had never been written, because site 4 stamped at config creation. The tests did not miss the defect, they ENCODED it, inside the fixtures meant to describe a *completed* onboarding. Repaired by completing the flow rather than relaxing assertions; disabling the new witness reds exactly those six plus the end-to-end test, which is what establishes the repair is load-bearing and not cosmetic. | `c79c629d` + patch-id `5a671249…`; archived bugs `2026-09-04-refresh-prompt-stamps-the-version-before-the-work.md` and `2026-09-04-force-silently-discards-refresh-prompt.md`; body records a 4th datapoint for R-180's class (a grep alternation anchoring ` ...` after a fragment that continues, reporting 2 of 10 tests as run); kin R-180, R-177 |
 | R-180 | 2026-09-04 | miss ×4 → rule | **A unitless count crosses a session boundary as a cost estimate; the instrument built to replace it inherits the claim's bias; and a partition that SUMS proves nothing when its total shares the buckets' predicate.** Published *"~50 in-tree `ToolContext` constructions, all `#[cfg(test)]`"* from a **capped** grep whose pattern also matched `struct`/`impl`/`->` headers — files-with-a-match, quoted as constructions, over codescout's own *"50 across 50 files is a floor, not a count"* warning. The cost was not "a reader re-derives it": a peer **spot-checked 2 of ~20 files, deferred to a wider sweep that did not exist**, and re-priced an architecture decision on it to their user — two sessions holding one wrong number with **real** agreement about the true half beside it. The replacement classifier then invented production sites **twice**, both toward findings: `\b(struct|impl|->)` never fires on `) -> ToolContext {` (space→hyphen is no word boundary), and `#[cfg(test)]` on an `impl` read as production to mod-shaped detection — neither on the blind-spot list I had written in its own header. **Then the fix was the same error one level up:** "two instruments sharing no code both said 202" — both were `\bToolContext\s*\{`, one predicate run twice. The peer's **substring** predicate said **203**, simultaneously (HEAD `531d7ee3` at 15:53:48; `git status` clean of `.rs` at 16:01:19 — so **not** the churn they proposed), and the gap was one line: `Arc::new(LibToolContext {`, an alias where `\b` fails because `b` is a word character. That `\b` was right for the core bucket and silently corrupted the librarian one, which is why it survived — an error protecting the number under scrutiny is one nobody checks. Corrected: 60 headers + **1** core prod + **136** core test + **2** librarian prod + 4 librarian test = 203, so **137** core sites, ~3× the first figure. **Runnable:** a partition proves completeness only when its total comes from a different PREDICATE, not merely different code; name the predicate beside the number; localise a peer's differing count before blaming timing (a simultaneity check is one call); and test a load-bearing exclusion regex against the construct it excludes. | `7320d27d`-adjacent; script `scratchpad/toolctx_literals2.py`; peer `codescout-ae` supplied the independent predicate; kin R-179, R-177, R-178, R-3/R-113, R-5 |
 | R-179 | 2026-09-04 | hit → widens the deferral-rationale law (1 datapoint for the new half; 10th for the cost half) | **Discharging a deferral's prohibition can hand you the fix's best argument — which the prohibition could not have contained.** A bug file forbade its own one-line fix pending two checks, one of which named *"the in-process subagent path"*. Both cleared in ~10 min, and that path **does not exist**: `Server::build_context` is the only production constructor of a core `ToolContext` (~50 others all `#[cfg(test)]`), so a subagent's calls arrive through the same `call_tool_inner` and its pin is a per-call argument, never inherited state — `R-117`'s empty-population shape wearing a prohibition's clothes. **The new half is what the check RETURNED:** the other prerequisite surfaced `call_tool_inner` already granting a pinned write-tool call write residency under a comment reading *"the pin itself already is the caller's consent"*, so the guard was refusing what the layer directly above it had accepted. That converts the change from *"new policy on a write path, proceed carefully"* to *"restore consistency inside one call path"* — an argument a stop-rationale cannot hold, because whoever writes one has stopped reading, and the fact lives one layer up. **Tell:** a rationale that reasons entirely inside one function while the question is a contract between layers. | `7320d27d` + archived bug `2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md`; kin `R-117`, `R-49`, and the skill's deferral bullet |
@@ -8317,6 +8318,71 @@ proved the buffer complete and moved the fault to the pattern. `R-180`'s `\b`-vs
 `LibToolContext` miss and this one are independent instances of *a measuring predicate
 silently excluding its own target*, hours apart, in `grep` and in Python.
 
+## R-182 — six instruments, one blind spot — and the bug file's own workaround is blind on the run that needs it
+
+**Status:** open — not yet promoted into the served skill.
+**Valid:** dated 2026-09-05
+**Rests on:** `src/librarian/artifact_store.rs:137` (`upsert` idempotent on `chunk_id`);
+`src/librarian/tools/reindex.rs:417-443` (`embed_done` is a local `u32` published only
+through `ctx.progress`); `:447-467` (the durable stamp block runs **after** the loop);
+and the run's own report — `unchanged: 1483` beside `embedded: 28379`.
+
+A live `librarian(action="reindex", reembed=true)` over this repo's artifact corpus ran
+long enough to look stuck. I scouted it with six instruments and concluded **"wedged"**,
+in writing, to the user. It was working: `embedded: 28379, vectorless: 0,
+embed_error_count: 0`.
+
+**Every instrument was non-discriminating, and they failed for four distinct reasons —
+which is what made six of them feel like corroboration.**
+
+| instrument | why it could not discriminate |
+|---|---|
+| CPU% on the codescout process | the embed compute is in **`llama-server`, a different process**; codescout is IO-bound awaiting HTTP |
+| `/proc/<pid>/task/*/stat` — all workers `futex_do_wait` | that is what awaiting an HTTP response looks like |
+| `catalog.db` mtime, stale | the durable stamp block runs **after** the loop (`:447`) |
+| Qdrant point count, frozen | `upsert` is **idempotent on `chunk_id`** — a re-embed overwrites in place and moves no counter |
+| catalog write lock, held | what a long write does |
+| `doc(find)` succeeding | a **read**; the question was about a write lock |
+
+**This is `CLAUDE.md` § *Reaching a Peer Session*'s "check independence, not agreement"
+outside its stated scope.** That rule is written about peer-enumeration instruments; the
+same arithmetic governs any scout. Six proxies for one hidden variable is **one blind
+spot counted six times**, and at the point of use it is indistinguishable from
+corroboration — the more of them I ran, the more confident I became.
+
+**The generative fact, which no amount of care substitutes for: during a re-embed there
+was no monotone durable observable anywhere.** `embed_done` increments per item
+(`:437`) and is a local `u32` reaching only `ctx.progress`, which is `None` for this
+client. `set_embedded_sha256` lands after the loop. `upsert` overwrites. So the scout was
+not badly executed — **the signal did not exist in any queryable place**, and a scout
+whose target is unrepresentable returns a plausible answer rather than an error.
+
+**And the bug file's own workaround inherits the blind spot.**
+`823d9ccaa13e2def` § *Workarounds* prescribes
+
+```sql
+SELECT COUNT(*) FROM artifact_chunk;   -- rows grow as the walk queues them
+```
+
+That is true of a **first** embed — which is the run it was validated against, where the
+2026-09-03 peer relay moved `9760 → 10518`. It is **flat for the whole embed loop of a
+re-embed**: `unchanged: 1483` means no new chunk rows, so the count sat still while
+28,379 vectors were written. The workaround is blind on precisely the run that takes
+longest and most needs it, and its author could not see that because a first embed
+validates it perfectly. Corrected in the bug file in the same commit as this entry.
+
+**Knowing the class prevented nothing** (`OB-1`). This is the **second** instance of one
+inference — `bug-fix-session-log:F-109` is the peer making it from outside on 2026-09-03
+— and I made it *while quoting the bug file that says the two states are the same
+observation*. n=2, from both sides of the process boundary.
+
+**Runnable.** Before citing a proxy for a loop's progress, ask the three questions in
+order: (1) *which process does the work?* (2) *is this observable written during the
+loop or after it?* (3) *is the write idempotent — does re-running move the number?* A
+"no" to any one makes the proxy non-discriminating, and stacking more proxies past a
+"no" adds confidence without adding information. Where all three fail, stop scouting and
+**publish a counter**; that is the fix, not a better instrument.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
@@ -8393,4 +8459,3 @@ silently excluding its own target*, hours apart, in `grep` and in Python.
 
   Why this block carries all of it: R-99. A convention documented anywhere other
   than the thing authors copy is not a convention. -->
-
