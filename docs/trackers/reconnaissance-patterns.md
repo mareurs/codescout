@@ -8525,6 +8525,8 @@ one. Kin to the *monotone assertion* law in § *Testing Discipline*: both are ab
 a check being blind in one direction and sighted in the other, and both are
 mis-handled by treating the check as a single thing that is either good or bad.
 
+**`R-182` is the trap and this is the salvage — one phenomenon, not two entries.** Both are the fact that same-scope agreement carries no information. `R-182` is what that costs when you read it as corroboration: six proxies for one hidden variable, and the confidence rose with each one. This is what is left worth doing once you have stopped falling for it — the comparison survives its own debunking, in one direction only. Filed as kin for that reason rather than by topic, and a reader who takes only one of them gets either a warning with no remedy or a technique with no motive. (`codescout-3d` put it as "the same mistake read from opposite ends", which is nearly right and worth the correction: only the first is a mistake.)
+
 Derived jointly with `codescout-3d` (sessionId
 `ba061586-6581-4656-b0c5-acad83474de5`) on 2026-09-06, from the stash-window
 hazard in `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`.
