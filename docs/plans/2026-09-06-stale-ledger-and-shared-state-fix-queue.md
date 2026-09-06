@@ -173,6 +173,40 @@ protects in-flight work. I used it deliberately this session.
 ("staleness before deletion") that was derived while a since-retracted mechanism stood, sounded
 right, and is meaningless under the true one.
 
+### 3a — the mitigation is currently politeness, and that is the actual defect
+
+Corrected 2026-09-06 by sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`, retracting a narrower
+claim we had both been working from. We had said *"on this tree a mutation window and any peer
+commit are mutually exclusive"*. That is accurate and **too narrow**: the stash is
+**unconditional**. It fires on every commit by every session, whether or not anyone is
+measuring. Nothing about a mutation window makes it special except that the mutating session
+happens to be harmed.
+
+What made 2026-09-06 safe was one session messaging another that it was idle, and the other
+one holding its gate and its commit until told otherwise. **That is a message, not a
+mechanism**, and it worked because two sessions were being careful at each other for twenty
+minutes.
+
+This is CLAUDE.md § *Observer Blindness*, third position, almost verbatim: *"a trigger the
+model must notice is a policy, not a mechanism"*, and the preferred shape is *"making the
+correct path end in a safe state, so compliance leaves nothing armed."* Neither exists here.
+A session that follows every documented rule — enumerate peers, stage early, commit by
+pathspec — still silently reverts every other session's unstaged work for the length of its
+hook run.
+
+**So the fix to aim at is not "warn harder".** Candidates, none costed yet:
+
+- **Make the correct path safe.** If `pre-commit` can be configured to stash nothing (several
+  hooks here already read the index directly via `git show :<path>`), the hazard disappears
+  rather than being scheduled around.
+- **Make the window observable.** A marker file written for the duration of the hook run, of
+  the same shape as `git status --porcelain`, so a peer about to measure can *check* rather
+  than *be told*. This is the weaker option — it converts a silent hazard into a precondition,
+  which still requires the other party to look.
+
+Ranked below task 3's main body only because it shares its fix space; if the first candidate
+lands, both are closed at once.
+
 ## Not in this queue, and why
 
 - **`experiments` CI has been red for 4 days** (last green 2026-09-02 06:45), three independent
