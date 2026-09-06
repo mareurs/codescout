@@ -1,20 +1,40 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
+closed: 2026-09-06
 opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/2026-09-04-artifact-grain-sends-whole-documents-to-an-embedder-that-refuses-them.md
 - docs/issues/archive/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
 severity: high
-unverified: 'The ENTRY path is still not established -- which run stamped each artifact is not distinguishable after the fact, since the catalog keeps no per-artifact embed-attempt record. AND the title''s n=729 is now known to be mis-scoped, not merely unproven: it comes from a join on artifact_vec_rowids, the legacy v1 sqlite-vec table that the_sqlite_store_writes_a_chunk_id_into_v2_and_never_into_v1 shows is no longer written, so on a Qdrant-backend host it counts a table nothing populates. Re-measured 2026-09-04 against the live store: 0 artifacts unsearchable, 7 embed failures, all oversized input. The MECHANISM reproduced exactly; the population size did not. Fix (c) in this file''s plan is already shipped -- see the Correction section before starting work.'
 ---
 
 # BUG: the indexer stamps content as seen before it embeds it, trapping 729 artifacts permanently unembeddable
 
 ## Summary
+
+> **FIXED by fix (b), at `fdad1a99` (2026-09-04), patch-id
+> `d7c4618ce3ffb77079df92b500d62f9649bfb979`. Verified and closed 2026-09-06.**
+> The gate no longer reads `file_sha256`. `src/librarian/indexer.rs:440` reads
+> `artifact::embedded_sha256` -- a stamp only the code that actually embedded
+> writes -- and both queue sites (`:465`, `:501`) gate on `needs_embed ||
+> force_embed`. A stamp from a non-embedding run no longer suppresses the embed,
+> so the state is no longer absorbing.
+>
+> **Two headline claims here are false, and the title is one of them.** The
+> title's figure was mis-scoped even when written: the E2 query joins
+> `artifact_vec_rowids`, the legacy v1 sqlite-vec table that nothing writes on a
+> Qdrant-backed host. The title is left standing as the record of what was
+> believed; the measurement that replaces it is in the Resume.
+>
+> **It was closed by a commit filed under a DIFFERENT bug** -- the `doc(update)`
+> chunk-rebuild one -- which is precisely why it sat `open` for two days after
+> being fixed. A fix shipping under a message that names another entry trips no
+> gate, and nothing re-reads a bug file to ask whether the tree still has the
+> defect.
 
 `index_repo_sync` writes an artifact's `file_sha256` to the catalog at
 `src/librarian/indexer.rs:302`, then decides whether to embed it at `:309` — and that
@@ -302,7 +322,30 @@ predicts.
 
 ## Fix
 
-**Plan — not yet implemented.** The defect is an ordering-and-observability problem, so
+**SHIPPED. (a) and (b) were ALTERNATIVES rather than a sequence, and (b) won.**
+
+| candidate | disposition |
+|---|---|
+| (a) reorder the stamp | **not taken**, and not outstanding. (b) removes the proxy instead of tightening it, which makes (a) moot rather than owed. |
+| (b) separate stamp from claim | **shipped** at `fdad1a99`, patch-id `d7c4618ce3ffb77079df92b500d62f9649bfb979`. |
+| (c) make the hole reportable | **shipped** -- `IndexReport::vectorless` plus `vectorless_note`, summed in `reindex.rs`, with the durable `catalog_meta` half. |
+
+The Correction section below already recorded that (c) had shipped. What nobody
+recorded is that (b) shipped two days later, so this file stayed `open` describing
+a tree that no longer had the defect.
+
+**The detail item 4 below demanded was honoured.** It warned that the embed queue is
+chunk-grained while `embedded_sha256` is artifact-grained, so stamping on the first
+successful chunk would rebuild the trap one level down. `EmbedQueueItem` carries a
+`file_sha256: Option<String>` filled in by the indexer at its two production call
+sites, and the backfill deliberately does NOT stamp -- its own test comment states
+why: stamping there would claim embeddedness for `artifact_vec_v2` vectors that are
+inert on a Qdrant host, which is the exact false claim (b) exists to remove.
+
+The original plan text follows, kept because it names the option that was NOT taken
+and a reader would otherwise re-propose it.
+
+**Plan (superseded).** The defect is an ordering-and-observability problem, so
 the candidate fixes differ in what they make *observable*, not only in what they repair:
 
 - **(a) Reorder** — do not commit `file_sha256` until the embed for that artifact has
@@ -393,19 +436,27 @@ rather than silently dropping the column. It carries a `contains("slug")` sanity
 so it cannot pass by parsing zero columns.
 ## Tests added
 
-None yet — bug is `open`, no fix written. The regression test this needs is a
-two-run test asserting the *sequence*, not either run's outcome:
-index once with `want_embeddings=false`, then once with `want_embeddings=true` and both
-force levers `false`, and assert the embed queue is non-empty on the second run.
+**Two exist, and neither was written by this file's plan -- they arrived with the
+fix and are named here so this entry stops claiming a gap it does not have.**
 
-Note that the existing pair `index_repo_sync_force_embed_requeues_unchanged_content`
-(`src/librarian/indexer.rs:1283`) and
-`index_repo_sync_force_embed_alone_requeues_without_force_rewalk` (`:1327`) both pass
-`force_embed=true` and so exercise only the escape hatch. **They are monotone under this
-defect** — the trap state is exactly the state in which `force_embed` still works — so a
-green suite here is not evidence about the un-forced path. That path currently has no
-test.
+- `index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`
+  (`src/librarian/indexer.rs`) is exactly the two-run sequence test the plan
+  below describes: index with `want_embeddings=false`, then with `true` and both
+  force levers `false`, and assert the queue is non-empty. Verified passing
+  2026-09-06.
+- `the_backfill_embeds_artifacts_with_no_chunk_rows_without_a_walk` was **renamed**
+  from `the_backfill_embeds_what_the_indexer_permanently_refuses_to`, because the
+  old name asserted a defect the tree no longer has. Its doc comment says so, and
+  calls the old name `IC-14` in miniature -- a guard whose NAME outlives the
+  condition it guards.
 
+**The plan's warning about the pre-existing pair was correct and is worth keeping.**
+`index_repo_sync_force_embed_requeues_unchanged_content` and
+`index_repo_sync_force_embed_alone_requeues_without_force_rewalk` both pass
+`force_embed=true`, so they exercise only the escape hatch. They are monotone under
+this defect -- the trap state is precisely the state in which `force_embed` still
+works -- so their green was never evidence about the un-forced path. That is why
+the fix needed a new test rather than a passing suite.
 ## Workarounds
 
 `librarian(action="reindex", reembed=true)` on the affected project. `reembed=true`
@@ -415,22 +466,37 @@ of the corpus — a `semantic_search` result set here is a sample, not a search.
 
 ## Resume
 
-Decide between fix (a) and fix (b) before writing code — they differ in whether
-`file_sha256` keeps its current meaning, and Task 11 of the chunk-grain retrieval plan
-backfills into whichever shape wins. Then, in order:
+> **CLOSED 2026-09-06.** Fixed at `fdad1a99`, patch-id
+> `d7c4618ce3ffb77079df92b500d62f9649bfb979`, on `experiments`. Nothing
+> outstanding for this bug.
 
-1. Write the failing two-run test described under **Tests added** and observe it RED
-   before touching `src/librarian/indexer.rs`. The existing `force_embed` tests will stay
-   green throughout and must not be read as coverage.
-2. Implement (c) — the `IndexReport` count — in the same change, so the condition is
-   observable whichever of (a)/(b) ships.
-3. Re-run the E2 query after the backfill; the expected post-fix reading is
-   `sha MATCHES disk (permanently trapped): 0`.
+**Step 3 of the old resume was the one open question, and it is answered.** It
+asked for the post-fix reading `permanently trapped: 0`. Measured 2026-09-06
+against the live catalog -- but NOT with the E2 query, which this file's own
+correction showed is mis-scoped on a Qdrant host. The absorbing state's signature
+under the current gate is an artifact that CLAIMS embeddedness and has no chunk
+rows, because that is the pair an ordinary reindex would skip forever:
 
-**Task 11 of the chunk-grain plan is blocked on this** — it backfills chunk rows from
-artifacts the indexer declines to process, so running it first would backfill into the
-hole and report success.
+```
+embedded_sha256 = file_sha256 AND no artifact_chunk rows
+  codescout   0
+  ALL repos   0        (of 4715 artifacts on this host)
 
+positive control -- claims embedded AND has chunks:  1493
+```
+
+The control is what makes the zero evidence rather than a broken query: the same
+predicate returns 1493 one field away, so it can come out non-zero.
+
+The 11 codescout artifacts currently without vectors all carry
+`embedded_sha256 = NULL`, so the current gate reads them as needing embed and an
+ordinary run will take them. They are PENDING, not trapped -- the distinction this
+bug is entirely about.
+
+**Two things deliberately NOT closed by this.** The oversized-input embed failures
+(7, all against the embedder's hard token limits) are a separate open bug and are
+unaffected. And Task 11 of the chunk-grain plan was blocked on this file; that
+block is lifted, but whether Task 11 is still wanted is not this bug's call.
 ## References
 
 - `src/librarian/indexer.rs` — `index_repo_sync:115-388` (gates at `:244`, `:262`,

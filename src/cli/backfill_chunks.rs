@@ -5,7 +5,7 @@
 //! artifacts it targets are exactly the ones `librarian(action="reindex")`
 //! DECLINES to process: their content is stamped as seen while unembedded, so
 //! `content_unchanged` is true and the embed is skipped on every later run
-//! (`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
+//! (`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
 //! A backfill routed through the ordinary walk inherits that gate and reports
 //! success having done nothing.
 //!

@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS artifact (
   -- code that actually embeds, and only once every chunk of the artifact has
   -- been stored -- the queue is chunk-grained, so stamping on the first
   -- success would rebuild the same trap one level down.
-  -- docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
+  -- docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
   embedded_sha256 TEXT
 );
 

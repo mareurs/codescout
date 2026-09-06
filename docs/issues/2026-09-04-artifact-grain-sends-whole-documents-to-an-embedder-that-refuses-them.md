@@ -11,7 +11,7 @@ closed: null
 opened: 2026-09-04
 owner: marius
 related:
-- docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
+- docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
 - docs/trackers/retrieval-benchmark.md
 severity: high
 ---
@@ -26,7 +26,7 @@ path truncates. The llama-server embedder answers oversized input with **HTTP
 500**, not a truncated vector — so on this corpus **473 of 1,475 artifacts (32%)
 fail to embed**, land in `embed_errors`, and are left with a chunk row and no
 vector: the absorbing state
-`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
+`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
 describes, which no ordinary reindex escapes.
 
 Reachable today only via `[librarian] chunk_grain = false`, since the default
@@ -182,7 +182,7 @@ Do not set `[librarian] chunk_grain = false`. The default is chunk grain as of
 
 `src/librarian/catalog/chunk.rs` (`build_single_chunk`),
 `src/librarian/embedding.rs:14-17` (the unclipped send), and
-`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` for why
+`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` for why
 the resulting state is absorbing rather than merely missing.
 
 ## References

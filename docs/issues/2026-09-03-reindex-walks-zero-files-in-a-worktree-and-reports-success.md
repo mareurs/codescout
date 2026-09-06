@@ -224,7 +224,7 @@ rather than from whatever collection the walk actually iterates.
 - `docs/superpowers/specs/2026-07-17-worktree-overlay-design.md`
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the rule the all-zero response
   breaks.
-- `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` — a different silent
+- `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` — a different silent
   indexer failure surfaced in the same session's control run (`vectorless: 1332`); unrelated
   mechanism, same "plausible number rather than an error" shape.
 - `docs/issues/2026-09-03-two-file-templates-propagate-retired-call-forms-into-new-files.md` —

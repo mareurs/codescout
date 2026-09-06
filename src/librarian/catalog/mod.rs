@@ -225,7 +225,7 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
     // content ever embedded?" is genuinely unknown for rows written before the
     // column existed. NULL means "not known to be embedded", so the next run
     // with an embedder configured queues them once and stamps the answer.
-    // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
+    // docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md
     if !column_exists(conn, "artifact", "embedded_sha256")? {
         conn.execute("ALTER TABLE artifact ADD COLUMN embedded_sha256 TEXT", [])?;
     }

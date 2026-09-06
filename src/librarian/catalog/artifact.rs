@@ -206,7 +206,7 @@ pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
 /// This is the stamp the embed decision reads. `file_sha256` means only "this
 /// content was written to the catalog" — reading that as "embedded" is the
 /// defect in
-/// docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md,
+/// docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md,
 /// because the row write is unconditional while the embed is not.
 pub fn embedded_sha256(cat: &Catalog, id: &str) -> Result<Option<String>> {
     cat.conn

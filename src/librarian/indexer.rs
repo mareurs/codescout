@@ -24,7 +24,7 @@ pub struct IndexReport {
     /// never looked.
     ///
     /// Fix (c) of
-    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
+    /// `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
     /// The stamp/gate ordering in [`index_repo_sync`] can commit content as
     /// "seen" while leaving it unembedded, and the resulting state is ABSORBING —
     /// every later run computes `content_unchanged == true` and skips it. This
@@ -429,7 +429,7 @@ pub fn index_repo_sync(
         // `upsert_and_mint_slug` below writes unconditionally and so can
         // manufacture the "unchanged" condition on content that was never
         // embedded. That substitution is the defect in
-        // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+        // docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
         //
         // Subsumes the old `!content_unchanged` test rather than sitting beside
         // it: changed content has a stale stamp, so it still queues.
@@ -586,7 +586,7 @@ pub fn index_repo_sync(
     }
     report.removed = removed;
 
-    // FIX (c) of docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+    // FIX (c) of docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
     //
     // 729 of codescout's 1373 artifacts were measured with no searchable
     // representation of any kind — 53% of the corpus invisible to semantic
@@ -1054,7 +1054,7 @@ const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 /// exists for are exactly the ones the indexer *declines to process*: their
 /// content is stamped as seen, so `content_unchanged` is true and the embed is
 /// skipped — an absorbing state
-/// (`docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
+/// (`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
 /// A backfill routed through the normal walk would inherit that gate and report
 /// success having done nothing. This one consults `content_unchanged` NOWHERE.
 ///
@@ -1623,7 +1623,7 @@ kind = "memory"
     /// `the_backfill_embeds_what_the_indexer_permanently_refuses_to`. That premise —
     /// that the indexer refuses these artifacts forever — was true of the code and
     /// is now false: fix (b) in
-    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
+    /// `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
     /// makes the embed decision read `artifact.embedded_sha256` instead of
     /// `content_unchanged`, so an ordinary run queues them too. Keeping the old
     /// name would have left a test whose NAME asserts a defect the tree no longer
@@ -1847,7 +1847,7 @@ kind = "memory"
     /// consults `artifact.embedded_sha256` — written only by code that actually
     /// embedded — so a stamp from a non-embedding run no longer suppresses the
     /// embed. See fix (b) in
-    /// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
+    /// `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`.
     ///
     /// What the test still guards, and why it is kept rather than deleted:
     ///
@@ -2401,7 +2401,7 @@ kind = "memory"
         // empty queue, calling the content "unchanged" — but content stamped by a
         // run that never embedded it is not "already embedded", it is content with
         // NO VECTOR, and declining to queue it is the absorbing trap in
-        // docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+        // docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
         // The assertion was true of the code and wrong about the world.
         //
         // So the setup now establishes the state the assertion NAMES: a completed

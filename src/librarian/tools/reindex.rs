@@ -334,7 +334,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
     // invisible (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     let mut total_embedded = 0usize;
-    // Fix (c) of docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
+    // Fix (c) of docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
     // `None` until some target actually measures it, so "embeddings disabled"
     // stays distinguishable from "measured, nothing missing". A count that
     // reaches no observer is decoration, so it is surfaced in the response
@@ -645,7 +645,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  representation, and no ORDINARY reindex will give them one: their \
                  content is stamped as seen while unembedded, which is an ABSORBING \
                  state. Escape it with librarian(action=\"reindex\", reembed=true). \
-                 docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md"
+                 docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md"
             ),
         },
         "embeddings_enabled": want_embeddings,

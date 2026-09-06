@@ -165,7 +165,7 @@ pub fn build_chunks(
 /// input with HTTP 500 rather than truncating, and nothing in the librarian embed
 /// path cuts the text first, so a third of artifacts would be left permanently
 /// vectorless in the absorbing state
-/// `docs/issues/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
+/// `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`
 /// describes. Do not reach for it as a hardware concession until that is fixed.
 /// It is kept, rather than deleted, because the *storage* shape is sound (one
 /// whole-body chunk row, so `matched` reports a true span) and a larger-context
