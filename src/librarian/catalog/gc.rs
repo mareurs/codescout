@@ -437,6 +437,38 @@ fn migrate_vec_id(tx: &rusqlite::Transaction<'_>, old_id: &str, new_id: &str) ->
     Ok(())
 }
 
+/// Every `(table, column)` carrying a foreign key onto `artifact(id)`, which
+/// [`apply_rehome`] must rewrite when it changes an artifact's primary key.
+///
+/// **This list is hand-written, and that is the entire hazard.** Those FKs are
+/// declared `ON DELETE CASCADE` with **no `ON UPDATE` clause**, so a parent-key
+/// rewrite falls to `NO ACTION`. A child table missing from here therefore does
+/// not silently orphan — it makes the whole COMMIT fail with
+/// `FOREIGN KEY constraint failed`, after every row has been rewritten.
+///
+/// It has fallen behind the schema twice, and neither was noticed by a test:
+/// `artifact_chunk` arrived with v11 and `entry_reservation` earlier still.
+/// `rehome_child_columns_cover_every_fk_onto_artifact_id` now derives the true
+/// set from the live schema and fails if this constant lags it, so the next
+/// table added is caught by a red test instead of by a user's rehome.
+const REHOME_CHILD_COLUMNS: &[(&str, &str)] = &[
+    ("events", "artifact_id"),
+    ("event_edges", "dst_artifact_id"),
+    ("artifact_augmentation", "artifact_id"),
+    ("artifact_observation", "artifact_id"),
+    ("artifact_link", "src_id"),
+    ("artifact_link", "dst_id"),
+    // v11, chunk-grain retrieval. Missing until 2026-09-06: `apply_rehome`
+    // predates the table, so rehoming any artifact holding chunk rows — which,
+    // after v11, is very nearly all of them — failed at COMMIT.
+    ("artifact_chunk", "artifact_id"),
+    // The same omission, found by enumerating the class rather than repairing
+    // the reported instance. Never reported on its own because a reservation
+    // row exists only for a ledger that has allocated an entry id, so it needs
+    // a rehome of a ledger specifically to surface.
+    ("entry_reservation", "artifact_id"),
+];
+
 /// Apply the plan in ONE transaction with deferred FK checks, so the parent
 /// `artifact.id` rewrite and every FK-child rewrite validate together at
 /// COMMIT (the FKs are `ON DELETE CASCADE` only — they do not cover UPDATE,
@@ -455,14 +487,7 @@ pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats>
     for row in &plan.rows {
         // FK children first (order among these is irrelevant — checks are
         // deferred to COMMIT, not per-statement):
-        for (table, col) in [
-            ("events", "artifact_id"),
-            ("event_edges", "dst_artifact_id"),
-            ("artifact_augmentation", "artifact_id"),
-            ("artifact_observation", "artifact_id"),
-            ("artifact_link", "src_id"),
-            ("artifact_link", "dst_id"),
-        ] {
+        for &(table, col) in REHOME_CHILD_COLUMNS {
             tx.execute(
                 &format!("UPDATE {table} SET {col} = ?1 WHERE {col} = ?2"),
                 rusqlite::params![row.new_id, row.old_id],
@@ -849,6 +874,157 @@ mod tests {
             )
             .unwrap();
         assert_eq!(existing, 1, "the pre-existing collider is untouched");
+    }
+
+    #[test]
+    fn rehome_carries_chunk_rows_and_their_vectors_to_the_new_id() {
+        // LOAD-BEARING, and deliberately NOT folded into
+        // `rehome_rewrites_id_and_preserves_all_children` above. That test's name
+        // says "all children" and its body seeds one row per child table as they
+        // existed BEFORE v11 introduced `artifact_chunk` — a guard whose coverage
+        // is narrower than its name, which is why this shipped unnoticed.
+        //
+        // `artifact_chunk.artifact_id REFERENCES artifact(id) ON DELETE CASCADE`
+        // carries NO `ON UPDATE` clause, so a parent-key rewrite falls to
+        // `NO ACTION`. Two chunks, not one: a single row cannot distinguish
+        // "the rows moved" from "one row moved".
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1", "/oldrepo/a.md");
+        for (ck, ix) in [("ck0", 0i64), ("ck1", 1i64)] {
+            cat.conn
+                .execute(
+                    "INSERT INTO artifact_chunk \
+                     (chunk_id, artifact_id, chunk_ix, start_line, end_line, content, content_hash) \
+                     VALUES (?1, 'a1', ?2, 1, 5, 'body', 'h')",
+                    rusqlite::params![ck, ix],
+                )
+                .unwrap();
+            cat.conn
+                .execute(
+                    "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![ck, vec![0u8; 768 * 4]],
+                )
+                .unwrap();
+        }
+
+        let plan = RehomePlan {
+            rows: vec![RehomeRow {
+                old_id: "a1".to_string(),
+                old_abs: "/oldrepo/a.md".to_string(),
+                new_id: "a1-new".to_string(),
+                new_abs: "/newrepo/a.md".to_string(),
+            }],
+            collisions: vec![],
+            commit_rows: 0,
+        };
+
+        apply_rehome(&cat.conn, &plan)
+            .expect("rehome must not fail on an artifact that has chunk rows");
+
+        let moved: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = 'a1-new'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            moved, 2,
+            "both chunk rows must follow the artifact's new id"
+        );
+
+        let stranded: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = 'a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stranded, 0,
+            "no chunk row may be left naming an artifact id that no longer exists"
+        );
+
+        // Keyed by `chunk_id`, which a rehome does not change — so these survive
+        // IF the rows were UPDATEd. This is the leg that separates "the rows
+        // moved" from "the rows were cascade-deleted and something re-created
+        // them": `artifact_vec_v2_cascade_delete` fires on any chunk DELETE, so a
+        // count of chunk rows alone cannot tell those apart.
+        let vecs: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec_v2 WHERE id IN ('ck0','ck1')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(vecs, 2, "chunk vectors must survive a rehome");
+    }
+
+    #[test]
+    fn rehome_child_columns_cover_every_fk_onto_artifact_id() {
+        // THE MECHANISM, not a third instance. `REHOME_CHILD_COLUMNS` is
+        // hand-written and nothing re-derived it when a table was added, which is
+        // how `artifact_chunk` and `entry_reservation` both came to be missing —
+        // one of them reported, the other found only by enumerating the class.
+        // Fixing the two would have left the next one to be discovered the same
+        // way, so this derives the true set from the LIVE schema.
+        //
+        // It reads `pragma_foreign_key_list` rather than re-parsing the DDL text:
+        // a test that re-implements the thing it checks is asserting about its own
+        // copy, and would agree with a schema it had never read.
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut stmt = cat
+            .conn
+            .prepare(
+                r#"SELECT m.name, p."from"
+                     FROM sqlite_master m
+                     JOIN pragma_foreign_key_list(m.name) p
+                    WHERE m.type = 'table'
+                      AND p."table" = 'artifact'
+                      AND (p."to" = 'id' OR p."to" IS NULL)"#,
+            )
+            .unwrap();
+        let actual: std::collections::BTreeSet<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        // Non-vacuity: a query that silently matched nothing would make every
+        // assertion below pass, and read exactly like a clean bill of health.
+        assert!(
+            actual.len() >= 6,
+            "the schema query found only {} FK(s) onto artifact(id) — that is a \
+             broken query, not a clean result",
+            actual.len()
+        );
+
+        let declared: std::collections::BTreeSet<(String, String)> = REHOME_CHILD_COLUMNS
+            .iter()
+            .map(|(t, c)| ((*t).to_string(), (*c).to_string()))
+            .collect();
+
+        let missing: Vec<_> = actual.difference(&declared).collect();
+        assert!(
+            missing.is_empty(),
+            "these columns reference artifact(id) and apply_rehome does not rewrite \
+             them, so rehoming an artifact that owns such a row fails at COMMIT with \
+             `FOREIGN KEY constraint failed` — add them to REHOME_CHILD_COLUMNS: \
+             {missing:?}"
+        );
+
+        // The other direction, so a dropped or renamed table cannot leave a dead
+        // entry behind. A stale name is not merely untidy: the UPDATE would fail
+        // with `no such table`, taking down rehome for every artifact.
+        let stale: Vec<_> = declared.difference(&actual).collect();
+        assert!(
+            stale.is_empty(),
+            "REHOME_CHILD_COLUMNS names columns the live schema does not have: \
+             {stale:?}"
+        );
     }
 
     #[test]
