@@ -202,6 +202,53 @@ The hint naming the contradiction is the part that makes it a report rather than
 number — every other figure in that block says the export is complete, and it is, by the only
 definition those figures use.
 
+
+### Verified live 2026-09-06 20:0x — deployed and exercised, not merely committed
+
+`cargo rb` + `/mcp` reconnect, then a `librarian(action="doctor")` call, which is what reaches
+`resolve_host_id`. Binary confirmed by **behaviour** rather than metadata (`stale-servers.sh`'s
+rule): the report carries `open_bug_cited_from_source`, a check that exists only in `7790f343`
+and later.
+
+| | before | after |
+|---|---|---|
+| `catalog_meta.audit_host_id` | `ripper-65e654` | **`archlinux-d9b5c3`** |
+| `catalog_meta.audit_host_id_previous` | *(absent)* | **`ripper-65e654`** |
+
+The re-mint fired on the first call, named this host, and preserved its predecessor. No new
+shard exists yet — one appears on the next export, which is correct: the id is chosen at
+resolve time and the file at write time.
+
+**The number this exposed is 5× what the report claimed, and the gap is instructive.**
+`doctor` now says:
+
+```
+unexported_rows:              45      <- every other figure says "complete"
+host_previous_stranded_rows:  27297   <- ripper-65e654-202609.jsonl, whole file
+```
+
+This file said "5,566 exported lines" throughout, because that was **one reindex's export** —
+the increment someone happened to watch. The stranded population is the entire shard. Nobody
+was wrong; the measured quantity was simply not the one that mattered, and it took the field
+existing to notice. That is the argument for reporting the population rather than the delta.
+
+**What is lost and what is not, measured rather than asserted:**
+
+```
+total non-blank rows                       27297
+distinct actors                               26
+rows whose actor is a codescout session    27088   (99.2%)
+```
+
+So **machine** attribution is gone for the whole file, and **session** attribution survives for
+99.2% of it. The 26 actors span both hosts — which is precisely why the shard cannot be split
+by anything in its own filename, and why per-session analysis is the only route back. That was
+the bug file's own claim about `actor` being the recovery route; it is now a measurement rather
+than a prediction.
+
+**Not remediated, and deliberately so.** Separating this laptop's rows from the workstation's
+means rolling the per-repo watermark back and re-exporting — which re-emits *everything* after
+that point, not only the mixed rows. An operator decision with a real cost, left to an operator.
 ## Tests added
 
 Six, in `src/librarian/catalog/audit/host.rs`; 17/17 in the module.
