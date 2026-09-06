@@ -1,10 +1,12 @@
 ---
 id: b2c666abc279572c
 kind: bug
-status: open
+status: taken
 title: 'BUG: four manual surfaces still describe read_markdown in the present tense, and no gate reaches them'
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-06
+claimed_by: 4a2f34f7-0669-487d-9ce9-39b77881642f
 ---
 
 ## Summary

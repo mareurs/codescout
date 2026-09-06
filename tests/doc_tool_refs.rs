@@ -243,6 +243,29 @@ fn tool_params() -> HashMap<String, HashSet<String>> {
 /// and a spec proposing `references(kind="call")` is describing a world that does not exist yet.
 /// Neither asserts the parameter exists, so neither is this class. Measured 2026-09-01: 32 hits
 /// sit on those surfaces and every one sampled was a past or proposed state.
+///
+/// `docs/architecture/` was added 2026-09-06. It had been in neither the walk nor the exclusion
+/// list above, so a reader auditing coverage met a thoughtful, complete-looking rationale that
+/// simply did not mention it — which is the shape that stops anyone asking.
+///
+/// **It red on its first run, and not on what the bug predicted.** The bug cited 10 dead-tool call
+/// sites in `augmented-artifacts.md` as the acceptance RED; by the time it was actioned all 10 had
+/// been repaired by the collapse programme's own sweep, and a pre-check for retired tool names over
+/// the directory found none. What it actually caught was `augmented-artifacts.md:75` — a malformed
+/// `doc(action="augment", …, augment={prompt: ..., params=...)`, whose unclosed brace makes the
+/// regex read `params=` as a top-level argument of `doc`, which has no such parameter. Line 210 of
+/// the same file already carried the correct form, so the document disagreed with itself.
+///
+/// Worth the paragraph because the pre-check was *sound and still misleading*: it asked "are there
+/// dead tool NAMES here?" and answered no, and that was generalised to "this addition will find
+/// nothing". These two tests ask two questions — is the name live, and does the parameter exist —
+/// and a survey of one says nothing about the other. Wiring was proved separately by planting a
+/// dead call under the directory and watching this gate red, then reverting; the suite passing is
+/// not what established it.
+///
+/// What adding a directory does NOT reach: bare prose that names a dead tool without writing a
+/// call. That is [`CALL_OPEN`]'s anchor working as designed, and it is a different defect class
+/// with its own bug file. A directory added to the walk is not the same as a file made correct.
 fn present_tense_surfaces() -> Vec<PathBuf> {
     let root = repo_root();
     let mut out = Vec::new();
@@ -262,6 +285,7 @@ fn present_tense_surfaces() -> Vec<PathBuf> {
     }
     walk_md(&root.join("docs/manual"), &mut out);
     walk_md(&root.join("src/prompts/guides"), &mut out);
+    walk_md(&root.join("docs/architecture"), &mut out);
 
     for f in [
         "docs/PROGRESSIVE_DISCOVERABILITY.md",

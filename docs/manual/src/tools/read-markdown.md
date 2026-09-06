@@ -10,8 +10,8 @@
 > `.md` path, takes `heading`/`headings` for sections, `start_line`/`end_line`
 > (or native-`Read` `offset`/`limit`) for a slice, and `force=true` for raw
 > lines. **Every capability described below survives unchanged** — only the
-> tool name in front of it moved, so read `read_markdown` here as
-> `read_file`. The file keeps its `read-markdown.md` name deliberately:
+> tool name in front of it moved, and the body below names `read_file`
+> throughout. The file keeps its `read-markdown.md` name deliberately:
 > renaming it would break the `SUMMARY.md` entry and any external link, for no
 > gain a title cannot deliver.
 ## What changed
@@ -20,7 +20,7 @@ Three related improvements landed together:
 
 ### 1. Adaptive output tiers
 
-`read_markdown` now selects output detail based on file size:
+`read_file` now selects output detail based on file size:
 
 | File size | Output |
 |---|---|
@@ -34,7 +34,7 @@ path. This prevents repeated full-file reads for every heading navigation call.
 
 ### 2. `@file_*` buffer ref support
 
-`read_markdown` now accepts `@file_*` buffer refs as the `path` argument for
+`read_file` now accepts `@file_*` buffer refs as the `path` argument for
 all subsequent calls (heading navigation, line-range slicing). Once a large
 file is loaded into a buffer ref, every subsequent access hits the in-process
 cache — no disk re-read.

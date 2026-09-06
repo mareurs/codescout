@@ -1,10 +1,12 @@
 ---
-id: 3f0e7733ae77c707
+id: '3f0e7733ae77c707'
 kind: bug
-status: open
+status: taken
 title: 'BUG: docs/architecture/ is in neither present_tense_surfaces'' inclusion list nor its exclusion rationale'
 tags:
 - cluster/guard-narrower-than-its-name
+claimed_at: 2026-09-06
+claimed_by: 4a2f34f7-0669-487d-9ce9-39b77881642f
 ---
 
 ## Summary

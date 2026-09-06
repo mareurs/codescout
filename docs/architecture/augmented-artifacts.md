@@ -72,7 +72,7 @@ An augmented artifact has **three controllable channels**:
 |---|---|---|---|
 | **Body** | The `.md` file on disk | Written by whoever edits it — **never auto-rendered from params** | Auto-render OR human via `edit_file` |
 | **Params** | Catalog DB row (`augmentations.params`) | Mutated via `doc(action="augment", merge=true, augment={params: ...})` or by the producing tool | Programmatic only — never hand-edit a managed file's params via filesystem |
-| **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `doc(action="gather")` | `doc(action="augment", merge=false, augment={prompt: ..., params=...)` to replace |
+| **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `doc(action="gather")` | `doc(action="augment", merge=false, augment={prompt: ..., params: ...})` to replace |
 
 Plus four optional fields stored alongside the prompt:
 

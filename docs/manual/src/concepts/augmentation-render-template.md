@@ -6,7 +6,7 @@ from narrative (artifact body).
 ## `render_template`
 
 A [MiniJinja](https://docs.rs/minijinja) template projecting `params` into a
-markdown snippet injected under the `[LIVE]` header in `librarian_context`
+markdown snippet injected under the `[LIVE]` header in `librarian(action="context")`
 output. Set it when you want a status table, flag grid, or F-N row list that
 the agent can read without parsing raw JSON.
 
@@ -40,7 +40,7 @@ existing augmentation, or the default `merge=false` to seed one:
 
 ### Behaviour
 
-- Evaluated at `librarian_context` read time against current `params`.
+- Evaluated at `librarian(action="context")` read time against current `params`.
 - Errors in template evaluation are surfaced inline (not fatal).
 - Omit the field for `reflective` trackers — prose-only body needs no template.
 
@@ -83,5 +83,5 @@ Violations return a recoverable error — params are **not** written.
 
 ## Known limitations
 
-- Template is re-evaluated on every `librarian_context` call — no caching.
+- Template is re-evaluated on every `librarian(action="context")` call — no caching.
 - Schema validation uses draft-07 semantics; newer keywords are ignored.
