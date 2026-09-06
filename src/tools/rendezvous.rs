@@ -268,12 +268,22 @@ fn gc(dir: &Path) {
             continue;
         };
         if pid == 0 {
-            // A stray `0.json` can only be garbage: `std::process::id()` is
-            // never 0, and `process_alive(0)` is unconditionally true on unix
-            // because `kill(0, 0)` addresses the caller's process GROUP, not
-            // process number zero — so the liveness check below would never
-            // collect it. Collect it here explicitly rather than letting it
-            // live forever.
+            // A stray `0.json` can only be garbage — `std::process::id()` is
+            // never 0 — so collect it without consulting liveness at all.
+            //
+            // This arm was originally REQUIRED: `process_alive(0)` returned
+            // true unconditionally on unix, because `kill(0, 0)` addresses the
+            // caller's process GROUP rather than process number zero, so the
+            // check below could never collect a `0.json`. That hole was closed
+            // at the platform layer on 2026-09-05 (`addressable_pid` rejects
+            // every value that does not name one process), and the check below
+            // would now handle this case correctly.
+            //
+            // Kept anyway, deliberately: the claim "pid 0 is garbage" is a fact
+            // about this directory's naming scheme, not about signal semantics,
+            // and it should not silently start depending on a platform detail
+            // that was wrong for months. `publish_collects_a_stray_pid_zero_file`
+            // pins the behaviour from the caller's side either way.
             let _ = std::fs::remove_file(&path);
             continue;
         }
@@ -292,9 +302,14 @@ mod tests {
         serde_json::from_str(&text).ok()
     }
 
-    /// A pid that is definitely not running. Pid 0 does NOT work: `kill(0, 0)`
-    /// targets the caller's process GROUP and succeeds, so `process_alive(0)`
-    /// is true on unix (measured 2026-08-18: `kill -0 0` exits 0).
+    /// A pid that is definitely not running.
+    ///
+    /// Spawned and reaped rather than a constant. Pid 0 used not to work here:
+    /// `kill(0, 0)` targets the caller's process GROUP and succeeds, so
+    /// `process_alive(0)` was true on unix (measured 2026-08-18: `kill -0 0`
+    /// exits 0). `platform::unix::addressable_pid` closed that on 2026-09-05,
+    /// but a real reaped pid stays the right fixture: it exercises `kill`
+    /// itself, where a constant now stops at the range guard.
     fn a_dead_pid() -> u32 {
         #[cfg(windows)]
         let mut child = std::process::Command::new("cmd")
@@ -438,10 +453,12 @@ mod tests {
     }
     #[test]
     fn publish_collects_a_stray_pid_zero_file() {
-        // `process_alive(0)` is unconditionally true (POSIX `kill(0, 0)`
-        // addresses the caller's process GROUP, not process number zero), so
-        // pid 0 needs its own explicit collection path in `gc` rather than
-        // falling through the liveness check, which would never fire for it.
+        // Pid 0 has its own explicit collection path in `gc`. It was once
+        // mandatory — `process_alive(0)` returned true unconditionally, POSIX
+        // `kill(0, 0)` addressing the caller's process GROUP rather than process
+        // number zero, so the liveness check could never fire for it. The
+        // platform guard added 2026-09-05 would now catch it too; this test
+        // pins the observable behaviour, which is unchanged either way.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("0.json"),
