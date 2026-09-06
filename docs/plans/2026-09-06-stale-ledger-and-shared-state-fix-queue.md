@@ -194,6 +194,25 @@ A session that follows every documented rule — enumerate peers, stage early, c
 pathspec — still silently reverts every other session's unstaged work for the length of its
 hook run.
 
+**And the blindness has its ROLES SWAPPED relative to every other instance in this corpus,
+which is the actionable part.** The usual shape is *the author cannot see it*. Here a second
+party can see it perfectly, in real time:
+
+```
+[INFO] Stashing unstaged files to /home/marius/.cache/pre-commit/patch<ts>-<pid>
+[INFO] Restored changes from /home/marius/.cache/pre-commit/patch<ts>-<pid>
+```
+
+Those two lines print in the **committer's** terminal and nowhere in the affected session's.
+So the party who *could* report it has no reason to — nothing is wrong from where they sit —
+and the party it happens to cannot see it at all. That is why "be careful" fails in both
+directions at once, and it is also the cheapest available mitigation short of a real fix: a
+committer who knows what those lines mean can say so, and today one did. Derivation:
+sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`.
+
+The item above was itself filed through a commit that stashed that same session's seven
+uncommitted files — evidence better than the prose, and the reason this paragraph exists.
+
 **So the fix to aim at is not "warn harder".** Candidates, none costed yet:
 
 - **Make the correct path safe.** If `pre-commit` can be configured to stash nothing (several
