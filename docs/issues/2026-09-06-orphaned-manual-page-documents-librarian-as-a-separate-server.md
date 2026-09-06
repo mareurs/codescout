@@ -1,7 +1,7 @@
 ---
 id: '36ff17248b2c6ec7'
 kind: bug
-status: open
+status: superseded
 title: 'BUG: an orphaned manual page documents librarian as a separate MCP server, unreachable from SUMMARY.md and invisible to the gate that scans it'
 tags:
 - cluster/doc-contradicted-by-code

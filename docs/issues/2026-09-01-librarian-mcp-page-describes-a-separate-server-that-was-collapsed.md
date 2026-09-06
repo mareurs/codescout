@@ -1,7 +1,7 @@
 ---
 id: '876d7282ddc61f06'
 kind: bug
-status: open
+status: taken
 title: 'BUG: the librarian-mcp manual page describes a separate sister server; the tools collapsed into codescout'
 tags:
 - cluster/doc-contradicted-by-code
@@ -9,6 +9,8 @@ tags:
 - manual
 - librarian
 - doc-drift
+claimed_at: 2026-09-06
+claimed_by: 4a2f34f7-0669-487d-9ce9-39b77881642f
 opened: 2026-09-01
 owner: marius
 severity: low
@@ -83,6 +85,34 @@ viable. It is not, and that measurement is the other half of this file:
 because that form distinguishes "calls it" from "mentions it" by construction. Prose
 mention has no such discriminator, which is why this is filed rather than gated.
 
+
+### Three facts added 2026-09-06, one of which settles the § Fix question
+
+Found while verifying an unrelated bug's surface, and merged in from a duplicate filed the same
+day (`36ff17248b2c6ec7`, now superseded by this file — grepping `docs/issues/` for `librarian-mcp`
+before filing would have caught it, and I did not).
+
+1. **The page is absent from `SUMMARY.md`.** mdBook renders what `SUMMARY.md` lists, so this page
+   is **never built into the book** and no reader reaches it by navigation. Measured over the whole
+   manual: **1 orphaned page of 112**, and it is this one. That is the fact § *Fix* was missing —
+   the choice is not "rewrite or delete a page readers rely on" but "rewrite or delete a page no
+   reader can reach".
+
+2. **§ Installation is an instruction that cannot succeed.** It says to run
+   `cargo build --release -p librarian-mcp`. `crates/librarian-mcp/` is an **empty directory** and
+   is not a workspace member (`Cargo.toml:2` — `members = [".", "crates/codescout-embed"]`). The
+   build file states the dissolve itself at `Cargo.toml:141`: *"Librarian dependencies (formerly in
+   `crates/librarian-mcp`, now dissolved into `src/librarian/`)."* Last commit touching that path is
+   `860d7bc7`, four months ago. So the page is not merely out of date on framing — one of its
+   sections is actionable and fails.
+
+3. **Two independent misses, either of which alone is recoverable.** The page is outside the human
+   review path (absent from the TOC) **and** inside the automated one that cannot see it:
+   `present_tense_surfaces()` walks `docs/manual/**`, so this page is scanned on every gate run and
+   stays green, because its retired names are table cells and prose rather than anchored calls. The
+   generalisable part: **absence from the TOC is a structural property no content check can
+   observe**, so a doc gate that walks a *directory* is not a gate over the documentation a reader
+   can *reach*. Those two populations differ by exactly one page here, and nobody had compared them.
 ## Hypotheses tried
 
 1. **Hypothesis:** extend `DEPRECATED_TOOL_NAMES`' denylist check to `docs/manual/`.
@@ -105,6 +135,16 @@ to the collapsed API — or supersede the page outright and redirect to
 Decide which before editing. If the page has no reason to exist post-collapse, deleting
 it beats maintaining a second description of the same surface.
 
+**Decided 2026-09-06: delete.** The three facts added to § Evidence settle it — the page is
+unreachable from the book, its § Installation cannot succeed, and every live fact in it is already
+carried by `librarian-tools-collapse.md` (the old→new mapping) and `augmented-artifacts.md`. A page
+no reader can reach and no gate can check is not documentation.
+
+Paired with a **TOC-reachability gate**, so the class cannot recur silently: no page under
+`docs/manual/src/` may be absent from `SUMMARY.md`. Wired before the deletion specifically so the
+existing orphan supplies its RED — a gate whose population is empty on the day it lands is one
+nobody can distinguish from a gate that does not work.
+
 ## Tests added
 
 None, and the reason is measured rather than skipped — see § Evidence. The two guards that
@@ -120,4 +160,3 @@ live surface.
 - `docs/manual/src/concepts/librarian-tools-collapse.md:43,50` — the collapse mapping.
 - `tests/doc_tool_refs.rs` — the anchored-call guard, and why prose is out of its reach.
 - `docs/trackers/issue-clusters.md` — `IC-11` (this class) and `IC-6` (why no denylist).
-
