@@ -161,13 +161,34 @@ install_shim() {
 # Installed by scripts/install-hooks.sh. Thin shim: edit the tracked script, not this.
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+# DEGRADE OPEN, AND LOUDLY. `exec` on a missing target exits 127, and git refuses the
+# operation on any non-zero hook exit — so a script that is deleted, `git clean`ed, or
+# absent on an older branch would break EVERY commit and push in this checkout, with a
+# bare "No such file or directory" and nothing naming the hook. A guard whose ABSENCE
+# blocks all work is worse than the hole it closes, and it cannot ask its question either
+# way; that is the same principle the pre-push guard already applies when it has no
+# session id. The warning is what keeps this from being silent degradation, which is the
+# failure the rest of this script is written against. Raised by codescout-3d 2026-09-06,
+# who measured the 127 rather than assuming it.
 SHIM
+    printf 'if [ ! -x "$root/%s" ]; then\n' "$target" >> "$dest"
+    printf '    echo "warning: git hook %s is installed, but %s is missing or not executable - skipping" >&2\n' \
+        "$hook_name" "$target" >> "$dest"
+    printf '    exit 0\n' >> "$dest"
+    printf 'fi\n' >> "$dest"
     printf 'exec "$root/%s" "$@"\n' "$target" >> "$dest"
     chmod +x "$dest"
     echo "ok      $hook_name      shim installed -> $target"
 }
 
 install_shim post-index-change scripts/post-index-change-stage-log.sh
+
+# Refuses a push that would publish another session's commits. Pusher-side complement to
+# "a session that cannot publish must not commit to a shared branch" — that rule needs no
+# coordination and is the right primary defence, but it is silent on the party who acts.
+# Inert for anyone without CLAUDE_CODE_SESSION_ID, so the human release flow is untouched.
+# Why: docs/trackers/observer-blindness.md OB-20. Tests: tests/pre-push-foreign-session-guard.sh.
+install_shim pre-push scripts/pre-push-foreign-session-guard.sh
 
 # SEED THE STAGE LOG, and only when it does not exist.
 #
