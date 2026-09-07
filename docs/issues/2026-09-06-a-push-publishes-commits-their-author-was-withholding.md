@@ -165,10 +165,11 @@ that no peer can see, query, or infer.
 The incident above, reported by the pushing session and confirmed by the
 withholding session's own peer, both on 2026-09-06.
 
-Recorded as a **limitation, not a finding**: this is one occurrence. The claim that
-no git field records authorisation is checkable and was checked (no trailer, note,
-or ref carries it, and `git push` has no per-commit selector); the claim that this
-recurs is not yet supported.
+Recorded as a **limitation, not a finding**: at filing this was one occurrence. The
+claim that no git field records authorisation is checkable and was checked (no
+trailer, note, or ref carries it, and `git push` has no per-commit selector); the
+claim that it **recurs** was not yet supported at filing and is now supported by a
+second occurrence the following day — see below.
 
 **One sub-claim is better evidenced than the rest, and is worth separating rather
 than averaging in.** *"A push freeze does not remedy this"* is not an inference —
@@ -177,6 +178,40 @@ and honoured by four sessions, that the withheld commits sailed straight through
 on the first push after it lifted. See `## Hypotheses tried` → 2. The occurrence
 count for the defect is one; the count for the freeze being no remedy is also one,
 but it is an observation rather than an argument.
+
+**Second occurrence, 2026-09-07 — and the withholding author was the session that filed
+this file.** The stack reached 13 commits with three authors interleaved. A session on
+the `.claude-sdd` profile (sid `8dba66b0-af4b-4cda-a333-54a0605b318e`) put the specifics
+to its operator — which commits, whose, and that pushing would publish work whose
+authors had not cleared it — was instructed to push all of it, and used the `pre-push`
+guard's `CODESCOUT_PUSH_ACK` escape naming three sids. Verified independently by the
+withholding session rather than taken on report: its four commits are on
+`origin/experiments`, the range `d5b20fbb..4b30601c` exists and holds 13 commits, and
+that tip is current.
+
+**Nobody misbehaved, which is what makes it evidence.** The pushing session followed
+this guard's documented remedy exactly — *"THEN ASK YOUR OPERATOR, and do not stop at
+the author"* — and its operator answered. The defect is structural and survived correct
+conduct by every party, which is the second occurrence's actual contribution: the first
+showed a freeze is no remedy, this one shows **the documented remedy is not one either**,
+because it resolves the question without reaching the party whose work is published.
+
+**The sharpest detail is about the escape's audit trail.** `CODESCOUT_PUSH_ACK` is a
+string the *pusher* supplies, naming the authors being acked. It therefore records
+**which authors were overridden**, never **that they agreed** — the two are
+indistinguishable in the trail afterwards, and the withholding author here was never
+contacted before the push. That is not a hole in the escape so much as a statement of
+what it is for: it releases the pusher's operator's decision, not the authors'. A reader
+of a future ack should not read the named sids as consent.
+
+**And the parties could not see each other.** The deciding sessions and the withholding
+author were on different profiles (`.claude-sdd` and `.claude`), so `ListAgents` showed
+neither to the other in either direction; the pushing session reached the author only
+afterwards, by walking `/run/user/1000/cc-socks` and resolving each PID's sessionId from
+its own profile registry, matching on the `Session-Id` trailers of the commits it was
+about to publish. Attribution was never the missing piece here — it worked, and it is
+what made the ack precise. What was missing is a channel for *asking*, and the two are
+not the same instrument.
 
 ## Hypotheses tried
 
@@ -309,6 +344,34 @@ tree, stashed, or exported as a patch file.
 **Not a scratch branch.** `git checkout -b` moves the working tree for every
 session sharing the checkout, so it is not an isolation primitive here; it is a
 branch switch performed on four sessions at once.
+
+**The uncommitted workaround has a cost worth naming, because it is another class's
+defect.** Work held dirty or stashed carries no `Session-Id` trailer, so it lands in
+exactly the state `IC-10` says is unattributable — its instrument table reads
+`uncommitted | none exists`. The remedy for the authorisation gap therefore re-opens the
+attribution gap: commit and your work can be published without your say-so; do not commit
+and nothing can say it is yours. Two classes, opposite remedies, one substrate. Neither
+is wrong; there is simply no state that satisfies both today.
+
+**The refspec ladder — a real partial workaround with a measured ceiling.** Instead of
+acking, each author publishes only their own commit: `git push origin <sha>:experiments`,
+bottom-up, the lowest unpushed commit first. It needs no acks at all, because each push
+carries only its own author's work plus already-published ancestors. Three sessions used
+it on 2026-09-07 and it **cleared four rungs and then stalled**.
+
+Why it stalls is structural, not operational: a refspec sends a commit **and all its
+ancestors**, and cannot skip one underneath. So the ladder's reach is bounded by the
+position of the **lowest uncleared author**, and every commit above that author — whoever
+wrote it — is unpublishable by this route. It converts *"everyone is blocked"* into
+*"everyone above the lowest uncleared author is blocked"*, which is an improvement and not
+a remedy.
+
+Its failure mode is also the wrong way round. The chance that some author mid-stack is
+uncleared rises with stack depth and with the number of authors, so the ladder is weakest
+exactly when the stack is deep — which is when anyone reaches for it. It also needs every
+author **cleared**, not merely *identified*: the `Session-Id` trailer answers the second
+question completely and the first not at all, which is the distinction the whole file
+turns on.
 ## Resume
 
 Decide whether the "cannot publish → do not commit" convention is adopted, and
