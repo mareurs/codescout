@@ -141,27 +141,17 @@ fn manifest_editions() -> Vec<String> {
         .collect()
 }
 
-/// The edition the `cargo-fmt` hook passes to `rustfmt`.
-fn hook_edition(config: &str) -> Option<String> {
-    let entry = config
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("entry:") && l.contains("rustfmt"))?;
-    let rest = entry.split("--edition").nth(1)?.trim_start();
-    Some(
-        rest.split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_owned(),
-    )
-}
-
 /// Editions declared in the manifest that the hook does not pass. Empty means agreement.
 ///
-/// Pure over both inputs so [`the_hook_edition_parser_discriminates`] can feed it a
+/// Pure over both inputs so [`the_script_edition_parser_discriminates`] can feed it a
 /// disagreeing pair. A gate whose failing branch is only ever reached by editing a shared
 /// config file is a branch nobody runs — and on this checkout, editing that file to test it
 /// is a write four other sessions can commit.
+///
+/// That caller used to be `the_hook_edition_parser_discriminates`, deleted with the
+/// pre-commit framework. The link was updated rather than dropped: this comment is the
+/// only thing recording that the failing branch has a caller at all, and a doc link to a
+/// removed item is exactly the stale citation `audit_doc_refs` exists to catch.
 fn mismatches(hook: &str, editions: &[String]) -> Vec<String> {
     editions
         .iter()
@@ -170,71 +160,19 @@ fn mismatches(hook: &str, editions: &[String]) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn the_fmt_hook_edition_matches_the_manifest() {
-    let config = std::fs::read_to_string(repo_root().join(".pre-commit-config.yaml"))
-        .expect("read .pre-commit-config.yaml");
-    let hook = hook_edition(&config).expect(
-        "the cargo-fmt hook must pass --edition to rustfmt: standalone rustfmt defaults to \
-         2015 and would misparse this workspace rather than fail cleanly",
-    );
-    let editions = manifest_editions();
-    assert!(
-        !editions.is_empty(),
-        "no `edition = \"…\"` found in Cargo.toml — this gate parsed nothing and would have \
-         passed vacuously"
-    );
-    let bad = mismatches(&hook, &editions);
-    assert!(
-        bad.is_empty(),
-        "the cargo-fmt hook passes --edition {hook} while Cargo.toml declares {bad:?}.\n\
-         `cargo fmt` reads the edition from the manifest; standalone `rustfmt` does not, so the \
-         hook would check a different grammar than the code is written in. Update `entry:` in \
-         .pre-commit-config.yaml to match — this gate deliberately reddens on an edition bump \
-         rather than following it, because the hook is a second declaration of the same fact."
-    );
-}
-
-/// The parser and the comparison must each be able to return both answers, or the gate above
-/// is decoration.
-#[test]
-fn the_hook_edition_parser_discriminates() {
-    let with = "      - id: cargo-fmt\n        entry: rustfmt --edition 2018 --check\n";
-    assert_eq!(hook_edition(with).as_deref(), Some("2018"));
-
-    // No `--edition` at all is the case worth catching: the gate must see None, not a default.
-    let without = "      - id: cargo-fmt\n        entry: rustfmt --check\n";
-    assert_eq!(hook_edition(without), None);
-
-    // A non-rustfmt entry must not be mistaken for the fmt hook.
-    let other = "        entry: scripts/pre-commit-ledger-counts.py --edition 1999\n";
-    assert_eq!(hook_edition(other), None);
-
-    // The FAILING branch, exercised without editing a file four other sessions can commit.
-    let editions = vec!["2021".to_string(), "2021".to_string()];
-    assert!(mismatches("2021", &editions).is_empty());
-    assert_eq!(mismatches("2018", &editions).len(), 2);
-    assert_eq!(
-        mismatches("2021", &["2021".to_string(), "2024".to_string()]),
-        vec!["2024".to_string()],
-        "a workspace whose members disagree must be reported, not averaged"
-    );
-
-    // Not `contains("2021")`: pinning the live value here would red on an edition bump for a
-    // reason unrelated to what this file gates. Non-empty is the property that matters —
-    // it is what stops the real gate passing vacuously.
-    assert!(!manifest_editions().is_empty());
-}
-
 /// The edition `scripts/pre-commit-cargo-fmt.sh` passes to `rustfmt`.
 ///
-/// A SECOND parser rather than a generalisation of [`hook_edition`], and deliberately so:
-/// the two surfaces coexist while the migration off the pre-commit framework is staged,
-/// and both are live declarations of the same manifest fact. Widening the existing parser
-/// to match either shape would let one surface satisfy the gate for both — the aggregate
-/// trap, where a per-member claim is checked against a population. When the YAML goes, its
-/// parser and its two tests go with it; until then, deleting either leaves a live hook
-/// unpinned against an edition bump.
+/// THE ONLY EDITION GATE, since the pre-commit framework was retired. It briefly had a
+/// twin — `hook_edition`, which parsed the `entry:` line out of `.pre-commit-config.yaml`
+/// — and that twin was deleted with the hook it gated rather than left passing. The file
+/// it read still exists (retained so 33 backticked references stay resolvable, and marked
+/// RETIRED in its own header), so those tests would have gone on being green about a hook
+/// that no longer runs. A passing test over a retired surface is false coverage, which is
+/// worse than none: it is what stops the next person looking.
+///
+/// The failing branch of `mismatches` moved into this parser's discriminator when that
+/// twin was removed — see the comment there. Without it the real gate's
+/// `assert!(bad.is_empty())` could not fail for a reason any test had observed.
 fn script_edition(script: &str) -> Option<String> {
     let line = script
         .lines()
@@ -305,6 +243,27 @@ fn the_script_edition_parser_discriminates() {
         script_edition(&script).is_some(),
         "the live script must expose an EDITION= line this parser can read"
     );
+
+    // THE COMPARISON'S FAILING BRANCH, inherited from the retired YAML gate's
+    // discriminator when that gate was deleted. It is exercised here rather than dropped
+    // because nothing else reaches it: `mismatches` is only ever called with agreeing
+    // inputs in the passing path, so without these three lines its non-empty return is
+    // unreachable in the suite and the real gate's `assert!(bad.is_empty())` could not
+    // fail for a reason any test had observed. Kept out of the live gate deliberately —
+    // reaching that branch there would mean editing a shared file four sessions can commit.
+    let editions = vec!["2021".to_string(), "2021".to_string()];
+    assert!(mismatches("2021", &editions).is_empty());
+    assert_eq!(mismatches("2018", &editions).len(), 2);
+    assert_eq!(
+        mismatches("2021", &["2021".to_string(), "2024".to_string()]),
+        vec!["2024".to_string()],
+        "a workspace whose members disagree must be reported, not averaged"
+    );
+
+    // Not `contains("2021")`: pinning the live value would red on an edition bump for a
+    // reason unrelated to what this file gates. Non-empty is the property that matters —
+    // it is what stops the real gate passing vacuously.
+    assert!(!manifest_editions().is_empty());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,36 @@
+# ============================================================================
+# RETIRED — THIS FILE IS NOT INSTALLED AND NOTHING RUNS IT.
+#
+# The commit-stage checks moved to a direct shim: scripts/pre-commit-run.sh,
+# installed by scripts/install-hooks.sh. Same four checks, same order, same
+# refusal texts. What is gone is the framework's repo-wide stash, which reverted
+# every OTHER session's unstaged work for the length of each hook run.
+#
+#   DO NOT RUN `pre-commit install`. It succeeds against any config — including
+#   one with no `repos:` key — and would replace the live shim with the stashing
+#   path. `scripts/install-hooks.sh --check` reports which shim you actually
+#   have; `install_shim` refuses to clobber a framework-generated one, so a
+#   re-install is loud rather than silent, but it is still a regression.
+#
+# EVERYTHING BELOW DESCRIBES THE RETIRED CONFIGURATION and is kept as the record
+# of why those four checks are those four, in that order. Read it as past tense.
+# In particular the `cargo-fmt` block's "a staged CRATE ROOT still recurses…
+# measured 1868 ms" was true of the retired hook and is NOT true of its
+# replacement: scripts/pre-commit-cargo-fmt.sh feeds rustfmt on stdin, which
+# resolves no `mod` children at all.
+#
+# The file is retained rather than deleted because 33 backticked references to
+# it across 21 files — archived bug files and trackers among them — would become
+# dead paths, and rewriting history to satisfy a linter is the wrong remedy.
+#
+# Why the stash had to go: scripts/pre-commit-run.sh's header, and
+# docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md
+# ============================================================================
+#
 # Pre-commit hooks for codescout.
 #
 # Install:
-#   pre-commit install
+#   pre-commit install          <- RETIRED; see the block above
 #
 # There is no pre-push stage — see the block below before adding one.
 #
