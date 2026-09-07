@@ -1,7 +1,7 @@
 ---
 id: b32c8f1ff14f66bb
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: the chunk reuse key hashes `content`, but the text that gets embedded is entry token + entry title + content'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -87,38 +87,63 @@ supersedes made exactly that claim and it decayed without anyone noticing.
 
 The three facts are each read from the source rather than inferred:
 
-1. `content_hash` is `format!("{:x}", hasher.finalize())` over `content` alone —
-   two sites in `src/librarian/catalog/chunk.rs`, `build_chunks` and
-   `build_single_chunk`.
+1. `content_hash` is a SHA-256 over `content` alone — two sites in
+   `src/librarian/catalog/chunk.rs`, `build_chunks` and `build_single_chunk`.
 2. `embed_queue_items` prepends `{tok} — {title}` for any chunk carrying an
    `entry_token` whose content does not itself start with `#`.
 3. `titles` is rebuilt from the **current** body on every call
    (`entry_titles_by_token(body)`), so a renamed heading changes it immediately.
 
+**2026-09-07 — the run happened, and it went the other way.** All three facts are
+true; the symptom drawn from them is not. They describe the **key**, and the
+symptom additionally needed a property of the **caller** — that a reused row can
+skip re-embedding — which does not hold at either call site. See `## Fix`.
+
+Fact 3 is the refutation, written down here a day before it was read as one: a
+title table rebuilt from the current body cannot hand a stale title to anything.
+It was recorded as background for how the stale value *arises* without asking what
+consumes it. And the caution this file opened with — that the superseded file made
+a by-construction claim which decayed unnoticed — named the right risk and missed
+that the by-construction claim was **this file's own**, one paragraph below.
 ## Hypotheses tried
 
 None yet — filed on notice, not investigated.
 
 ## Fix
 
-Not applied, and deliberately not folded into the ordinal fix: that change was
-about *which* rows may be reused, this one is about *what* the reuse key must
-cover. Fixing both in one commit would have made neither's regression test
-discriminating.
+**Reproduced 2026-09-07, and the reproduction falsified this file's own symptom.**
+Applied option three — accept the incomplete key and say so at the refusal site —
+plus the regression guard that keeps the acceptance honest.
 
-Three directions, unpriced — **price them before choosing, and do not trust this
-list to be complete.**
+What the run established, against `index_repo_sync`'s real shape rather than by
+construction:
 
-- **Hash the embedded text, not the chunk.** Move the `{tok} — {title}` assembly
-  below the reuse decision, or hoist the hash above it, so one value covers all
-  three inputs. Most correct; touches the layer boundary.
-- **Add the two fields to the reuse comparison.** Cheap and local, but it would
-  re-embed on a pure `entry_part` renumber, which today is correctly free.
-- **Accept it and say so at the refusal site.** A stale title in a vector is a
-  ranking cost, not a wrong answer. If that is the call, the doc comment's *"the
-  vector depends on the chunk's bytes"* has to go — it is the sentence that makes
-  the next reader confident the key is complete.
+- `embed_queue_items` rebuilds `titles` from the **current** body on every call, so
+  the text it queues for a REUSED row already carries the new title. Pinned by
+  `a_reused_chunk_embeds_with_the_current_entry_title_not_the_stored_one`
+  (`src/librarian/indexer.rs`), which asserts the reuse genuinely happened —
+  `chunk_id` preserved for the mid-entry chunk, changed for the heading-bearing one
+  — so it cannot pass by the row having been rebuilt instead. Verified to
+  discriminate: hardcoding the old title in the production path reds it.
+- Both production callers embed **every** item they are handed. `index_repo_sync`
+  gates per ARTIFACT on the file's `sha256`, which any heading rename changes, and
+  drains the queue unfiltered. `backfill_chunk_vectors` selects only artifacts with
+  **no chunk rows at all** (`NOT EXISTS`), so it never reuses anything.
 
+So no stale title can reach a stored vector today. The gap in the key is real and
+**latent**, not live — which makes the fix stopping the sentence that would let
+someone close it wrongly.
+
+Applied in `src/librarian/catalog/chunk.rs`:
+
+- The false half of the doc comment — *"the vector depends on the chunk's bytes, so
+  `content_hash` is the whole of what decides whether it can be kept"* — now says it
+  decides whether the **row** can be kept, and points at the limitation.
+- A new *The reuse key is incomplete* section states which one of the three inputs
+  the key covers, that the harmlessness is a property of the CALLER rather than of
+  the key, and names the single change that would make it live: **filtering the
+  embed queue against chunks that already hold a vector.** That is the obvious cost
+  optimisation, which is precisely why it needed writing down.
 ## Tests added
 
 None. A regression test would rename an entry's heading, leaving a later chunk of
@@ -145,4 +170,3 @@ whether option three is already the honest answer. Whichever is chosen, the doc
 comment in `replace_chunks` asserting that the vector depends on the chunk's bytes
 must be corrected in the same commit — it is currently false, and it is what
 stopped this being noticed for as long as it was.
-

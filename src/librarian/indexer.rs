@@ -1533,6 +1533,78 @@ kind = "memory"
         );
     }
 
+    /// A reused chunk row embeds with the CURRENT entry title, not the one it was
+    /// first embedded under.
+    ///
+    /// The reuse key is `content_hash` — the chunk's own bytes — while the text
+    /// that reaches the embedder is `{token} — {title}\n\n{content}`, three inputs
+    /// of which the key covers one. That gap is real, and this test pins the
+    /// reason it is currently harmless rather than the gap itself: `titles` is
+    /// rebuilt from the CURRENT body on every call, so a stale title never reaches
+    /// an `EmbedQueueItem` even when the row underneath it is reused verbatim.
+    /// The day someone filters this queue against rows that already hold a vector
+    /// — the obvious cost optimisation, and the one `replace_chunks`' own doc
+    /// comment invites — that stops being true, and this is where it fails.
+    ///
+    /// LOAD-BEARING: the two headings are the SAME BYTE LENGTH (37 each), so the
+    /// chunk boundary below them does not move and the mid-entry chunk's bytes are
+    /// genuinely identical across the two calls. Retitle one to a different length
+    /// and the row stops being reused — the `chunk_id` assertions below are what
+    /// turn that into a failure instead of a silent loss of discrimination.
+    #[test]
+    fn a_reused_chunk_embeds_with_the_current_entry_title_not_the_stored_one() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let tail = "aaaa bbbb cccc dddd eeee\n".repeat(120);
+        let before = format!("## W-81 — choose a gate by its feedback latency\n\n{tail}");
+        let after = format!("## W-81 — select a gate by its response latency\n\n{tail}");
+
+        let first = embed_queue_items(&cat, "a", None, &before, ChunkGrain::Chunk).unwrap();
+        assert!(
+            first.len() > 1,
+            "fixture must split the entry; got {}",
+            first.len()
+        );
+        let second = embed_queue_items(&cat, "a", None, &after, ChunkGrain::Chunk).unwrap();
+        assert_eq!(first.len(), second.len(), "the rename must not re-chunk");
+
+        // Precondition, in BOTH directions: the heading-bearing chunk changed
+        // (its bytes hold the title) and the mid-entry chunk did not (so it is
+        // reused). Without the second assertion the fresh title below would be
+        // fresh because the row was REBUILT, and the test would say nothing
+        // about a reused row.
+        assert_ne!(
+            first[0].chunk_id, second[0].chunk_id,
+            "the chunk holding the heading changed bytes; it must NOT be reused"
+        );
+        assert_eq!(
+            first[1].chunk_id, second[1].chunk_id,
+            "the mid-entry chunk's bytes are unchanged, so it must be REUSED — \
+             otherwise this test is not about a reused row at all"
+        );
+
+        assert!(
+            !second[1].text.trim_start().starts_with("## "),
+            "the second chunk must not open with a heading or the prefix arm is skipped: {:?}",
+            &second[1].text[..second[1].text.len().min(40)]
+        );
+        assert!(
+            second[1]
+                .text
+                .starts_with("W-81 — select a gate by its response latency\n\n"),
+            "a REUSED chunk must embed with the entry's CURRENT title, not the one \
+             it was stored under: {:?}",
+            &second[1].text[..second[1].text.len().min(80)]
+        );
+    }
+
     #[test]
     fn the_project_flag_reaches_the_walk_and_decides_what_an_artifact_costs() {
         // Guarded site 2 of 2, and the one that matters most: whether the flag is

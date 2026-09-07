@@ -300,8 +300,9 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 ///
 /// # The reuse key is `content_hash`, NOT `(chunk_ix, content_hash)`
 ///
-/// The vector depends on the chunk's bytes, so `content_hash` is the whole of
-/// what decides whether it can be kept. `chunk_ix` is a POSITION, and ANDing it
+/// The vector depends on the chunk's bytes, so `content_hash` decides whether the
+/// ROW can be kept — but it is NOT the whole of what the embedded TEXT depends on;
+/// see *The reuse key is incomplete* below. `chunk_ix` is a POSITION, and ANDing it
 /// into the key made the selector narrower than the population it covers: any
 /// insertion above a chunk shifted its ordinal and defeated the match even though
 /// its bytes were identical. That is not a corner case — `append_entry` with
@@ -319,6 +320,32 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 ///      order — the chunk only moved.
 ///
 /// Whatever stays unclaimed is deleted, and its vector correctly cascades away.
+///
+/// # The reuse key is incomplete — a documented limitation, not an oversight
+///
+/// `content_hash` covers ONE of the three inputs the embedded text is built from.
+/// `embed_queue_items` embeds `{entry_token} — {entry_title}\n\n{content}` for any
+/// chunk that does not open with its own heading, so renaming an entry's heading
+/// changes the embedded text of every mid-entry chunk of that entry while leaving
+/// every `content_hash` — and therefore every reuse decision here — identical.
+///
+/// That is harmless TODAY because of a property of the CALLER, never of this key:
+/// `embed_queue_items` rebuilds its title table from the CURRENT body on every
+/// call and returns an item for EVERY stored chunk, and both production callers
+/// embed every item they are handed. `index_repo_sync` gates per ARTIFACT on the
+/// file's `sha256`, which any rename changes, and `backfill_chunk_vectors` selects
+/// only artifacts with no chunk rows at all. So a reused row's vector is
+/// overwritten with freshly-titled text whatever this key matched on.
+///
+/// **So do not filter that queue against chunks that already hold a vector.** It
+/// is the obvious cost optimisation, and it is precisely the change that would
+/// turn this incompleteness into a live retrieval defect: mid-entry chunks left
+/// embedded under a title no longer anywhere in the corpus, findable by a query
+/// for the old name and not by one for the new. Verified by reproduction rather
+/// than by construction on 2026-09-07 —
+/// `indexer.rs`'s `a_reused_chunk_embeds_with_the_current_entry_title_not_the_stored_one`
+/// is the guard, and it asserts the reuse actually happened so it cannot pass by
+/// the row being rebuilt instead.
 ///
 /// # Positions are re-synced separately from the vector
 ///
