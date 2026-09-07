@@ -152,17 +152,61 @@ routine.
 Not fixed. **The honest first output is a rule, not code**, because the mechanism is git's and
 the decision is the operator's:
 
-**On a shared checkout there are two states, not three.** *Uncommitted* — withheld, at the cost
-of exposure to peer index-capture and the `pre-commit` stash window. *Committed* — published on
-the next push by anyone. "Committed but held" is not available. A session asked to hold
+**On a shared checkout the DEFAULT `git push` gives you two states, not three.** *Uncommitted* —
+withheld, at the cost of exposure to peer index-capture and the `pre-commit` stash window.
+*Committed* — published on the next `git push <branch>` by anyone. A session asked to hold
 publication must therefore either not commit, or say plainly that committing publishes.
+
+> **NARROWED 2026-09-07 — the sentence above originally read "there are two states, not three"
+> and that was overstated.** "Committed but held is not available" is true of
+> `git push <branch>` and **false of the refspec form**: `git push origin <sha>:<branch>`
+> publishes up to and including `<sha>` and nothing above it. Partial publication has a
+> mechanism; it is simply not the form anyone reaches for.
+>
+> **Granularity is PREFIX-only, so the relief is directional.** This is the half that makes it
+> usable, and both this file and `codescout-7f`'s said it wrong in *opposite* directions before
+> either of us caught it — neither while reviewing the other's:
+>
+> | the withheld commit sits… | effect |
+> |---|---|
+> | **above** yours | push to your own sha; it stays unpublished |
+> | **beneath** yours | no refspec reaches past it — its author must clear it, or you wait |
+>
+> A reader given only *"the refspec form exists"* reaches for it in the beneath case, watches it
+> publish two commits instead of one, and concludes the mechanism is broken. A reader given only
+> *"it cannot help beneath you"* waits for the wrong thing. Both halves are load-bearing.
+>
+> **Relief propagates upward one commit at a time**, because a beneath-you commit *becoming
+> published* removes it from beneath you. So the operational form is never *"authorise my pile"*
+> but **"authorise the lowest commit that is blocking someone"** — a materially smaller question,
+> whose answer unblocks parties the asker cannot enumerate.
+>
+> Exercised 2026-09-07: `git push origin c812ecd4:experiments` sent **1 of 2**, leaving a peer's
+> commit above it unpublished, verified after by `git branch -r --contains` on both. Prefix-only
+> correction and the directional table from `codescout-7f`
+> (sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`); the enumeration that proved a refspec drags
+> its ancestors from `codescout-ae` (sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`).
 
 Directions if a mechanism is wanted, none free and none yet chosen:
 
-- **A `withheld` marker.** A commit trailer or a tracked marker file naming shas their authors are
-  holding, plus a `pre-push` hook that refuses when the push would carry one. This adds the owner
-  field the class calls for, at the cost of a hook every session must have installed — and a hook
-  that is *absent* fails open and silently, which is the same shape as the defect.
+- **A `withheld` marker — SHIPPED 2026-09-06, and it changes this file's conclusion.** Proposed
+  here as "a commit trailer or tracked marker file plus a `pre-push` hook that refuses when the
+  push would carry one". What landed is better: `scripts/pre-push-foreign-session-guard.sh`,
+  installed at `.git/hooks/pre-push`, authorised by the operator after `codescout-ae` raised it
+  as a decision rather than building it. It refuses a push carrying another session's commits,
+  keyed on the `Session-Id` trailer, with two printed escapes — a per-session
+  `CODESCOUT_PUSH_ACK="<sid>[,<sid>]"` (acking one of two still refuses, so it records a decision
+  rather than dismissing a prompt) and the refspec form above.
+  **It reads pre-push's stdin** — the refs actually being pushed — so it follows a partial
+  refspec exactly instead of assuming `HEAD`; a guard keyed on `@{upstream}..HEAD`, the obvious
+  implementation, would have refused the legitimate partial push this file now recommends.
+  **So "committed but held" IS available on this checkout**, which is the third state the
+  Summary says does not exist: a peer can no longer carry withheld work out by accident. The
+  concern recorded above survives as its named hole — the guard **allows untrailered commits
+  with a note**, so a withheld commit carrying no trailer is still invisible to it, and it is
+  inert without `CLAUDE_CODE_SESSION_ID` so the human release flow is untouched. First real use
+  was against this very incident: it refused, printed the withheld sid and subjects, and turned
+  "push" into a question that reached the operator.
 - **Isolate the resource — and note that the reflex answer is unavailable here.** *"Use a scratch
   branch"* is what anyone reaches for first, and it does not work: on a shared **checkout**,
   `git checkout -b` moves the working tree for **every** session in it. Branch-per-session
@@ -209,6 +253,49 @@ Session*, since this is that rule's other direction. That is a text change and n
 operator's agreement, not a code change. Only then decide between the marker and the isolation
 direction in § *Fix*; do not build the marker first, because a fail-open hook nobody has
 installed reproduces the defect while reading as a fix.
+
+## Resolution, and the two things this file said too strongly
+
+**The incident resolved without repair, and not the way § Fix predicted.** The three withheld
+commits reached origin at `2026-09-06T19:13Z`, cleared by the operator **in advance**: a peer
+enumerated the pile by `Session-Id`, put the specific consequence and the full list in front of
+them — with the withheld commit marked — and they chose to push knowing it.
+
+**So publication is not the failure. Publication WITHOUT A DECISION is.** § *Workarounds* still
+holds for the undecided kind: report it, never revert. But as first written this file reads as
+though any publication of held work is a defect, and that is wrong — it did not name the better
+path, which is the operator clearing it *before* the push, prompted by a mechanism, costing one
+question and leaving nothing to repair. On this checkout that is now the expected path rather
+than the lucky one, because the guard makes the question unskippable at the moment it is
+answerable. Distinction owed to `codescout-ae` (sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`).
+
+### The class: a limit read off the default form
+
+Both corrections this file has taken have one shape, and it is worth stating once — a single
+instance reads as a quirk, two read as a class:
+
+> **Every party reasons from the DEFAULT form's shape and concludes a limit that is real only
+> for that form.**
+
+- **`git push`.** The default form is all-or-nothing, so four sessions concluded partial
+  publication was impossible and reasoned for an evening about how to live with it. The refspec
+  form was available throughout.
+- **The `Session-Id` trailer.** A peer checked `%an`, found it identical across all four
+  sessions, concluded the commit object carried no discriminator, and pushed. The trailer was in
+  the same object — documented in `docs/conventions/shared-checkout-commit-sequence.md` § 2,
+  stamped by a hook on **74 of 74** commits since install, **and printed five times in the very
+  `git log --stat` output inspected before that push.** Three layers, all present, none of which
+  acts.
+
+In both cases the capability was there and the default view did not carry it, so the model
+everyone built was a model of the view rather than of the tool. **The cheap tell is a limit
+nobody has tried to violate**: *"there is no way to send only your own commits"* was stated,
+believed, repeated across four sessions and two bug files, and never tested until someone needed
+it to be false.
+
+Corrections credited: `codescout-7f` (sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`) for the
+prefix-only direction and the `%an` account; `codescout-ae` for the ancestor enumeration proving
+a refspec carries its whole prefix.
 
 ## References
 

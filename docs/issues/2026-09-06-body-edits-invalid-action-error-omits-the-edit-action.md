@@ -131,6 +131,36 @@ which is the anti-pattern `get_guide("librarian")` names as having caused a ~600
 loss. `edit` was found only because a `replace` attempt tripped the nested-heading guard and
 that guard's hint mentions it.
 
+### Archaeology — the string was never wrong at its own layer, for ~3.5 months
+
+`git log -S` on both literals, re-derived 2026-09-07:
+
+| string | site | introduced |
+|---|---|---|
+| `expected replace, insert_before, insert_after, or remove` | `plan_section_edit` | `4991cc21`, **2026-03-23** |
+| `Allowed actions: replace, insert_before, insert_after, remove, edit.` | `apply_body_edits` | `f351e1a2`, **2026-05-25** |
+
+`f351e1a2` is where `edit` arrived — *"defense-in-depth + surgical `body_edits[]`"*, +446 lines
+to `src/librarian/tools/update.rs`, the file holding `apply_body_edits`. So the two messages
+have disagreed for roughly **three and a half months**, not days.
+
+**This closes off the reading a future reader reaches for first.** *"Someone added `edit` and
+forgot to update the string"* is the natural story, and it leads straight to the repair
+§ *Root cause* rules out — editing `edit_markdown.rs:281`. The archaeology shows there was never
+a moment when that string was wrong **about `plan_section_edit`**: that function has not
+implemented `edit` before or since. Nothing was forgotten. A caller-layer action was added above
+a callee whose own enumeration stayed correct, and the callee's message went on being surfaced
+to the caller unchanged.
+
+**Corrected from a relayed version, and the correction strengthens it.** `codescout-ae` offered
+this archaeology with `09981399` (2026-05-02) for the message and `af974c0a` (2026-09-03) for
+`edit`. Re-derived here, both are wrong: `09981399` is a refactor that *moved* the string
+(*"split markdown.rs into read_markdown + edit_markdown"*), and `edit` predates `af974c0a` by
+three months. The conclusion survives — and a 3-day divergence would read as an oversight where
+a 3.5-month one reads as structural, which is the whole point of the entry. Approach credited to
+`codescout-ae` (sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`); dates re-derived rather than
+taken, after that session had already corrected three of its own numbers in one evening.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the `edit` action is newer than the error string, i.e. ordinary prose decay
