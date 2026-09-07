@@ -1,7 +1,7 @@
 ---
 id: c4a3d1eb1be7654b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: append_entry''s two-call protocol guarantees an interval where a ledger entry exists on disk without its index row'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -9,12 +9,13 @@ tags:
 - trackers
 - shared-checkout
 - multi-session
+closed: 2026-09-07
 opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
 severity: medium
-unverified: Observed on ONE ledger. That every table-keeping ledger has the same window is reasoned from the guide's text, not measured on a second instance — see Resume for the population count that would establish it.
+unverified: 'The window is closed for callers who USE the new parameters; it is not closed for callers who do not. `index_row` + `index_after_line` are opt-in, so any ledger whose appends omit them keeps the original two-call window unchanged. Nothing migrates the 21 table-keeping ledgers'' callers, and no gate requires the parameters — a recipe in docs/TAXONOMY.md or get_guide("tracker-conventions") that still prescribes the second call will keep producing the window. The original file''s other unverified: also still stands — the window is now observed on a second ledger (bug-fix-session-log:F-118, this session) but "every table-keeping ledger has it" remains reasoned from the protocol rather than measured per ledger.'
 ---
 
 ## Summary
@@ -103,18 +104,78 @@ Attribution by the recorded `Session-Id` trailer, not by adjacency or a self-rep
 
 ## Fix
 
-Not implemented. Three candidate directions, cheapest first:
+**FIXED at `8857b0b2`, patch-id `dec1af44d91b701b1ff7863e9f44b7946df470ce`, on `experiments`
+— direction (3).** Chosen on the measurement in § *Resume* rather than on the ordering of this
+list: 21 of 49 guarded ledgers keep a row table, so direction (1) is a loss for 43% of them
+rather than free.
 
-1. **Documentation only — stop instructing the row.** The guide already says headings are the index and a row table is optional and hand-maintained. Making that the single instruction removes the second call entirely for ledgers willing to drop the table. Cheapest, and resolves the internal tension named in Root cause. Cost: ledgers that use the table as a reading surface lose it, or keep maintaining it and keep the window.
-2. **`append_entry` writes the row.** Needs the table's column shape, which differs per ledger (`bug-fix-session-log`'s Wins Index is 6 columns; other ledgers differ), so it would need a declared row template — plausibly an augmentation field. Closes the window properly for table-keeping ledgers.
-3. **A transactional pair** — let `append_entry` accept the row text and write both in one file write. Narrower than (2), no schema inference, and the caller keeps control of the row's prose.
+`doc(action="append_entry")` accepts `index_row` + `index_after_line`. `PendingSection` gains an
+`index_row`, spliced into the **same string** as the section and the high-water mark, so one
+`fs::write` carries all three.
 
-**No SHA / patch-id — nothing is fixed yet.** Do not record either field until a fix lands.
+```
+doc(action="append_entry", id=…, id_prefix="F",
+    anchor_heading="## Template for new entries", title=…, body=…,
+    index_row="| {id} | 2026-09-07 | med | recon | open | **title** — text |",
+    index_after_line="|----|------|---------:|----------|--------|-------|")
+```
 
+### The three original directions, resolved
+
+1. **Stop instructing the row** — not adopted. Free for 28 ledgers, a lost reading surface for
+   21. A per-ledger judgement, not a project-wide fix.
+2. **`append_entry` derives the row** — not adopted, and still the only option if a row should
+   ever be *derived*. Needs a declared column shape per ledger; nothing here argues for it.
+3. **A transactional pair** — **shipped**. No schema inference, and the row's prose stays with
+   the caller.
+
+### Design decisions, because the alternatives are the tempting ones
+
+- **`{id}` is a template, not a literal.** The caller cannot know the id before the call — the
+  same reason the heading is formatted server-side rather than by the caller.
+- **`after_line` is explicit and matches the FIRST such line.** A separator is not unique across
+  a ledger with several tables, and filling every one silently is worse than refusing. Same law
+  as `anchor_heading` (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
+- **One struct, not two `Option`s**, so "a row with no anchor" is unrepresentable rather than
+  refused at runtime.
+- **A missing anchor writes nothing and allocates nothing.**
+
+### Reachability was half the change
+
+`Args` has no `deny_unknown_fields`, so before the schema learned these fields a caller passing
+`index_row` got `Ok` with **no row and no error**. The capability would have existed in
+`allocate_entry_id` and been unusable — `IC-3` exactly, and `CLAUDE.md` § *Testing Discipline*
+names two tools that shipped in that state for months.
 ## Tests added
 
-None — no fix yet. When one lands, the regression test must observe the **file on disk between the two writes**, not just the end state: an end-state assertion is satisfied by the current broken behaviour, since both writes do eventually land. That is a monotone-assertion trap of exactly the kind `CLAUDE.md` § *Testing Discipline* names.
+Four, all in the **default** lane only — `augmentation.rs` and `append_entry.rs` are librarian
+code, so `--no-default-features` compiles neither. Verified by exact name: **0** of the four run
+in lean, **4** in default; controls held (`librarian::` 0 in lean, `prompts::` 101).
 
+| test | site |
+|---|---|
+| `the_section_and_its_index_row_land_in_one_write` | substitution + placement |
+| `a_missing_index_row_anchor_writes_nothing_and_allocates_nothing` | the refusal |
+| `the_tool_writes_the_index_row_in_the_same_call` | **reachability** — the only one that fails if the wiring is dropped |
+| `an_index_row_without_its_anchor_is_refused_and_names_the_missing_half` | both-or-neither, and that the refusal NAMES the missing half |
+
+**Three mutations on the production path, one per site, each observed RED and each killing a
+different test:** missing anchor silently no-ops → the refusal test; `{id}` left unsubstituted →
+the one-write test; row inserted *before* the anchor → the one-write test. Restored green.
+
+**The refusal test's discriminator is the RETRY**, not the error: it asserts the next call still
+gets `F-2`, so an implementation that errors but lets the transaction commit — issuing `F-3` —
+fails. Asserting only *"it errored"* is monotone under exactly that bug.
+
+**One assertion is guaranteed by construction and is annotated as such rather than credited:**
+*the file must be byte-identical* after a refused row. No simple mutation breaks it, because the
+section and the row are spliced into one string before a single `fs::write`. It is not inert — it
+is the regression guard for someone later splitting the row into a second write, which is the
+exact defect this closes.
+
+**A loose `grep index_row` over the lean log returns 4**, all of them `tests/issue_clusters.rs`
+integration tests sharing the substring. That is the selector-wider-than-its-population shape
+filed at `3e040c51`, met again here and caught only by checking exact names.
 ## Workarounds
 
 - **Write the index row immediately after the append**, in the very next call, and stage both together. This narrows the window; per `codescout-dd`'s measurement the gap can be smaller than a single tool call, so it does not close it.
