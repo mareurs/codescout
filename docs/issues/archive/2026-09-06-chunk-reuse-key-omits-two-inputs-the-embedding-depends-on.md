@@ -1,5 +1,5 @@
 ---
-id: b32c8f1ff14f66bb
+id: f93078c50ec53222
 kind: bug
 status: mitigated
 title: 'BUG: the chunk reuse key hashes `content`, but the text that gets embedded is entry token + entry title + content'
@@ -8,7 +8,7 @@ tags:
 - librarian
 - embeddings
 - retrieval-grain
-closed: null
+closed: 2026-09-07
 opened: 2026-09-06
 owner: marius
 severity: med
@@ -146,17 +146,31 @@ Applied in `src/librarian/catalog/chunk.rs`:
   optimisation, which is precisely why it needed writing down.
 ## Tests added
 
-None. A regression test would rename an entry's heading, leaving a later chunk of
-that entry byte-identical, and assert that chunk's vector was **not** reused —
-which is only expressible once the fix direction is chosen, since option three
-makes reuse correct.
+`a_reused_chunk_embeds_with_the_current_entry_title_not_the_stored_one`
+(`src/librarian/indexer.rs`). Fixed on `experiments` at `e4ea22d4`, patch-id
+`30a3f4fe5a4d5c4fa30a92f1a1a8b896a4b00a21`.
 
-The fixture has one load-bearing detail: the entry must split into **more than
-one** chunk, and the assertion must be about a chunk that does **not** contain the
-heading. A single-chunk entry always carries its own heading, so its content hash
-moves with the title and the defect is unreachable — a fixture that forgets this
-passes against every version of the code.
+It asserts the opposite of what this section predicted, and the prediction was
+right about why: *"only expressible once the fix direction is chosen, since option
+three makes reuse correct."* Option three was chosen, so the test asserts the reuse
+**did** happen and the title is fresh anyway — reuse is the correct behaviour, and
+what needs guarding is the caller property that makes it safe.
 
+Both load-bearing fixture details this section named are in it, plus one it did not
+foresee:
+
+1. the entry splits into more than one chunk (asserted, not assumed);
+2. the assertion is about the chunk that does **not** contain the heading
+   (asserted — it must not start with `##`, or the prefix arm is never taken);
+3. **the two headings are the same byte length (37 each)**, so the chunk boundary
+   below them does not move. Without this the mid-entry chunk's bytes differ, the
+   row is rebuilt rather than reused, and the test silently stops being about a
+   reused row at all. The paired `chunk_id` assertions — preserved for the
+   mid-entry chunk, changed for the heading-bearing one — are what turn that into
+   a failure instead of a quiet loss of discrimination.
+
+Verified to discriminate by mutating the **production** path, not the fixture:
+hardcoding the old title in `embed_queue_items` reds it on the final assertion.
 ## Workarounds
 
 `librarian(action="reindex", reembed=true)` re-embeds regardless of content hash,
