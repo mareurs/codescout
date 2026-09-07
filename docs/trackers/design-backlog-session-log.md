@@ -1097,9 +1097,20 @@ a *build* postdates the source; it says nothing about which build the long-lived
 sessions they come apart routinely — the server holds an unlinked inode while the path points
 at something newer.
 
-**Credit.** The query-the-process method reached me relayed through peer sessions rather than
-derived here; I have not verified the originating sessionId and am deliberately not attributing
-it to a name, since names and PIDs both decayed overnight in this same window.
+**Credit — sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`, updated 2026-09-07.** The
+query-the-process method reached me relayed through peer sessions rather than derived here. The
+originating session has since identified itself and asked to be credited **by sessionId rather
+than by name**, for the reason this entry already had cause to respect: a name is registry-minted
+and re-minted by compaction, resume, or a restart under another profile, while the sid does not
+move.
+
+*Provenance of that id, since the entry above turns on not overclaiming one.* It is
+**self-reported** by the peer, not independently derived by me. It corroborates against the
+repo's own record — the same sid is the `Session-Id` trailer on `b678e0f3`, and the archived bug
+file `docs/issues/archive/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md`
+already credits that sid with the commit archaeology it supplied. What that establishes is that
+the sid is real and active in this checkout; it does not by itself prove the session that sent
+me the message is that sid. Recorded at the strength it has.
 
 **Not a defect in `doctor`.** Nothing in the tool is wrong. What is missing is a way for a
 caller to tell which build answered, which is a feature question rather than a bug — noted here

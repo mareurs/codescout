@@ -129,6 +129,49 @@ in both directions, and nothing enforces it — on 2026-09-06 it was arranged by
 two sessions and held only because both complied. Staging the mutation would protect it (the
 stash takes *unstaged* work only), but a staged mutation is one absent-minded `git commit` away
 from being committed, which is worse.
+### A sixth symptom: it makes a WORKING tool emit a correct-looking refusal, and the debugging goes to the tool
+
+Measured 2026-09-07 by sessionId `8dba66b0-af4b-4cda-a333-54a0605b318e`, with the peer commit
+identified by timestamp rather than inferred.
+
+`doc(action="update", patch={body_edits: […]})` refused with
+`body_edits[0]: heading '## F-117 — …' not found`, and listed the available headings. The heading
+was there — two singleton calls passing the byte-identical string succeeded minutes before and
+after. So it read as a librarian defect and was chased as one: a throwaway artifact was created
+to reproduce it, four hypotheses were ruled out (batch arity, heading punctuation, heading
+length, edit ordering), and a bug file was written against a component that was working
+correctly.
+
+The cause: `## F-117` had been appended to `docs/trackers/bug-fix-session-log.md` in that
+session and was **uncommitted**. A peer committed `e4a01763` at `08:17:08+03:00` — between that
+session's own `491ed828` at `08:14:58` and its next call. For the duration of that hook run the
+tracker on disk was HEAD's copy, which does not contain the section.
+
+**Verified at the bytes, not inferred.** `git show 491ed828:docs/trackers/bug-fix-session-log.md`
+yields **0** occurrences of `F-117` and **2** of `F-116`. The `F-116` figure is the control: it
+shows the file and the counting method are sound, so the `0` is a measurement rather than a
+broken grep, and it pins the discriminator as precisely *committed vs not*.
+
+**The tool was right.** Its error was true about the bytes it was handed and false about the
+caller's document, and nothing available to it can tell those apart. That is what separates this
+from the symptoms above: they describe an operation on wrong input yielding a wrong *result*,
+while this yields a **correct refusal** whose only defect is that the reader attributes it to the
+refusing component. The refusal even shipped a helpful `Available headings:` list — accurate,
+and accurate about the wrong document.
+
+**The tell, and it is cheap and specific:** the target was a heading that session had added and
+not yet committed. If a heading-addressed operation fails on a section you created this session
+and have not committed, read `git log --format='%h %cI' -3` for a peer commit at that instant
+**before** debugging the tool. Anything already in HEAD is immune — which is exactly why this
+never reproduces against a fixture, and why the throwaway artifact above cleared four hypotheses
+and still missed the cause.
+
+**And the fifth symptom nearly landed in the same session.** Three production-path mutations were
+run that evening to confirm a guard was load-bearing, each unstaged for the minute it took to
+compile and run — precisely the window § *A fifth symptom* describes. All three produced the
+expected red, so nothing was lost. Recorded because the exposure was real and unnoticed at the
+time: the mutual exclusion two sessions arranged by message on 2026-09-06 was an agreement
+between those two sessions on that evening, and nothing carried it into 2026-09-07.
 ## Reproduction
 
 Not deterministic — it is a race, and reproducing it means winning one:

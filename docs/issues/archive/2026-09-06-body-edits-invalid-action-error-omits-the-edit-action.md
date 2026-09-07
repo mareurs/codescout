@@ -1,12 +1,12 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/hint-composed-without-the-request
 - librarian
 - body-edits
 - error-messages
-closed: null
+closed: 2026-09-07
 opened: 2026-09-06
 owner: marius
 related: []
@@ -102,6 +102,33 @@ marking the difference.
 That is also why the obvious repair is wrong: adding `edit` to `edit_markdown.rs:281` would
 make the message false for every *other* caller of `plan_section_edit`.
 
+**CORRECTED 2026-09-07 — the same dispatch exists at THREE sites, and this section named one.**
+Everything above is right at the bytes about `apply_body_edits`. It is not the whole population.
+Probed live before the fix:
+
+| dispatcher | caller surface | missing-action names | invalid-action names |
+|---|---|---|---|
+| `apply_body_edits` (`update.rs:242`) | `doc(update, patch={body_edits})` | 5 ✓ | 4 ✗ |
+| single-edit mode (`edit_markdown.rs:1386`) | `edit_file(heading=, action=)` | 5 ✓ | 4 ✗ |
+| `plan_batch` (`edit_markdown.rs:647`) | `edit_file(edits=[…])` | **0** ✗ | 4 ✗ |
+
+`plan_batch` was worse than the site filed here: its missing-action error was
+`edits[0]: missing required 'action' field` with no list at all, so **both** of that surface's
+discovery routes omitted `edit`.
+
+**Why this file could not see them, which is the part worth keeping.** The reproduction ran
+through `doc(update, patch={body_edits})` while editing a librarian-guarded ledger — the one
+surface where `edit_file` is refused outright — so the two `edit_file` dispatchers were
+structurally outside it. Nothing here was careless; the scope was narrow because the
+reproduction was. Recorded as `bug-fix-session-log:F-117`.
+
+**And the documented surfaces were correct throughout, which is why nobody caught it by
+reading.** `edit_file`'s JSON input schema enumerates all five actions at both the single-edit
+and batch keys (`src/tools/edit_file/mod.rs:412`, `:449`), and `doc`'s `body_edits` description
+points at that shape rather than copying it. A caller who checked the schema concluded the tool
+was fine; only a caller who *probed* was misinformed. That is the inverse of the usual
+doc-vs-code drift, and it rules out the schema as a fourth site.
+
 ## Evidence
 
 ### The complete list and the incomplete one, both in-tree
@@ -178,7 +205,23 @@ taken, after that session had already corrected three of its own numbers in one 
 
 ## Fix
 
-Not yet fixed. **Plan:** validate `action` against the caller-level set in `apply_body_edits`,
+**Fixed 2026-09-07 on `experiments` — `491ed828`, patch-id
+`6771fa53b1db5c23e743ee5d35f0a7bf540b6204`.**
+
+`src/tools/markdown/edit_markdown.rs` gains `SECTION_EDIT_ACTIONS` (the five, in one place) and
+`require_dispatchable_action(action, prefix)`, called at **all three** dispatchers immediately
+after `action` is read and before the `if action == "edit"` branch. The three missing-action
+hints now render from the same const, so the two paths at each site cannot drift; `plan_batch`'s
+gains a list where it had none. `plan_section_edit`'s own four-member message is untouched, per
+the ruling above.
+
+A half-finished sixth action is dead rather than silently partial in **both** orders: listed in
+the const but not dispatched, it falls through to `plan_section_edit` and is refused there;
+dispatched but not listed, it is refused by the new validator before its branch can run.
+
+<details><summary>Superseded plan, as filed — correct for one of the three sites</summary>
+
+Validate `action` against the caller-level set in `apply_body_edits`,
 immediately after it is read (`src/librarian/tools/update.rs:255`), and emit the same five-member
 message the missing-action path already emits — so the two paths cannot drift again. Leave
 `edit_markdown.rs:281` alone: it is correct for its own callers.
@@ -188,14 +231,40 @@ agree on the day they are written. A single `const` naming the five, referenced 
 missing-action hint and the invalid-action error, is what makes the agreement checkable rather
 than coincidental.
 
+</details>
+
 ## Tests added
 
-None yet — no fix applied. The regression test this needs must assert on **what a caller
-receives for an invalid action**, not on the presence of the word `edit` somewhere in the file:
-a test that greps the source for `"edit"` passes today, because the complete list is already
-there on the other path. Assert that the invalid-action error string names every action the
-`if/else` chain actually dispatches, so adding a sixth action without updating the message
-reds.
+Five, and the shape the filing asked for was right — assert on **what a caller receives**, not on
+the presence of `edit` somewhere in the file. What it under-specified was the *count*.
+
+**One kill per guarded SITE**, per § *Testing Discipline*: a law implemented at N call sites
+needs N kills, and the three here are not substitutable.
+
+| test | site |
+|---|---|
+| `body_edits_invalid_action_names_the_edit_action_it_dispatches` | `apply_body_edits` |
+| `single_edit_invalid_action_names_the_edit_action_it_dispatches` | `edit_file(heading=, action=)` |
+| `plan_batch_invalid_and_missing_action_both_name_the_edit_action` | `edit_file(edits=[…])` |
+| `every_advertised_body_edit_action_actually_dispatches` | per-member positive control |
+| `every_advertised_batch_action_actually_dispatches` | per-member positive control |
+
+**Observed RED, per site, by mutating the PRODUCTION path** — not the tests' inputs, and not all
+three at once, which would have been one aggregate kill saying nothing about the other two.
+Disabling each site's `require_dispatchable_action` call **alone** reddened exactly that site's
+test while the other two stayed green; the site-3 run put 55 action-related tests up and failed
+precisely one. Each failure printed the original defective string,
+`expected replace, insert_before, insert_after, or remove`.
+
+**Two directions, because the invalid-action assertions are blind to one of them.** They read a
+*message*, so they cannot see a const advertising an action no dispatcher implements, nor a
+validator refusing a valid one. The `every_advertised_*` tests close that by exercising each of
+the five for real — per member, not in aggregate.
+
+**The expected list is spelled out in the assertions rather than read from
+`SECTION_EDIT_ACTIONS`.** A test that consults the same const the message is built from asserts
+the const against itself: delete `edit` from the const and both sides move together, leaving the
+test green while the defect returns.
 
 ## Workarounds
 
@@ -217,10 +286,13 @@ missing-action error names all five.
 
 ## Resume
 
-Add the validation at `src/librarian/tools/update.rs:255`, sourcing both messages from one
-`const`. Write the test first and confirm it reds against the current tree by probing an invalid
-action and asserting `edit` appears in the returned error — it does not today, so the red is
-available immediately without a mutation.
+Nothing. Fixed and archived; gate green (fmt, clippy `--workspace --all-targets --features
+local-embed`, `LEAN exit=0`, `DEFAULT exit=0`), five regression tests, three observed per-site
+reds.
+
+One bound this fix does **not** carry, stated so it is not mistaken for covered: the guard
+single-sources the *action set*, not the *list of dispatchers*. A fourth dispatcher added later
+would reintroduce the defect and red nothing. `F-117`'s **Rests on:** records the same limit.
 
 ## References
 

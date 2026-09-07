@@ -77,7 +77,8 @@ pub(crate) const SECTION_EDIT_ACTIONS: [&str; 5] =
 ///
 /// `prefix` locates the entry for batch callers: `""`, `"edits[0]: "`, `"body_edits[0]: "`.
 ///
-/// See `docs/issues/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md` for the
+/// See `docs/issues/archive/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md`
+/// for the
 /// filed site and `bug-fix-session-log:F-117` for the two the file did not reach.
 pub(crate) fn require_dispatchable_action(action: &str, prefix: &str) -> Result<()> {
     if !SECTION_EDIT_ACTIONS.contains(&action) {

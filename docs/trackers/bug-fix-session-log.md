@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 116
+entry_high_water_F: 117
 entry_high_water_W: 108
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 108
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-117 | 2026-09-07 | med | recon | mitigated | **A bug file scoped a shared-shape defect to the one site its reporter stood on; the live probe found three.** The `body_edits` invalid-action bug file names `apply_body_edits` and prescribes a one-line validation there. The same `if action == "edit" { … } else { plan_section_edit(…) }` dispatch exists at three sites — `apply_body_edits`, `edit_file`'s single-edit mode, and `plan_batch` — all surfacing the callee's four-member message to callers whose set is five. `plan_batch` is worse than the filed site: its missing-action error names *no* actions, so both of its discovery routes omit `edit`. The reporter reached the defect through the one surface where `edit_file` is refused outright (a guarded ledger), so the other two dispatchers were structurally outside their reproduction — the file is right about what it saw, and narrow because the reproduction was. Kin `IC-6`, § *Testing Discipline* "mutate once per guarded SITE". |
 | F-116 | 2026-09-06 | med | self-friction | mitigated | **An uncommitted non-compiling edit is an unannounced build-level lock on every other session in the checkout — and the interesting cost is not the breakage, it is what it does to a peer's EVIDENCE.** Left a test stub in `mv.rs` with wrong trait signatures (`fn query` where the trait has `knn`) and went to read another file before compiling. For those minutes no `cargo test` in the tree could build, so a peer's run said nothing about their own code AND actively misdirected — it named a file and a symbol, both real, both irrelevant to them. A compile error is normally the most trustworthy signal there is: unambiguous, located, reproducible. On a shared checkout it is none of those things *about you*, and nothing distinguishes "your code is broken" from "someone else's uncommitted edit is". **Same shape as `OB-17`'s coupling lock, one layer down and worse in two ways:** it needs no gate, since the compiler supplies the coupling, and it is unbounded — it lasts exactly as long as the author is distracted, and `OB-17`'s victim at least receives a well-written refusal. **Author-side rule:** compile before you stop typing. The peer-side rule (`git status --short -- '*.rs'` before citing a run — the peer's own, written after failing to follow it) only tells them to distrust the result, never how to get a good one. Peer `codescout-3d` (`ba061586`) asked rather than fixed, which was correct and cost a round-trip. Kin `OB-17`, `OB-19`, `F-114`. |
 | F-114 | 2026-09-04 | med | self-friction | open | **A bug's own `## Resume` named the source repo — the one axis that reads green in the broken world.** The IL-4 hook's enforcement surface is the version-pinned install under `<profile>/plugins/cache/…/<version>/hooks/`, one per profile; the Resume said to confirm it in the source checkout. Following it, my first check printed `(absent)` for a *missing directory* — a string indistinguishable from a removed hook, and it would have been right by accident. Source-deleted ≠ retired, source-present ≠ firing, and `mtime` adjudicates neither (installed `1.20.4` stats two days BEFORE the commit that created 1.20.4) |
 | F-110 | 2026-09-03 | med | self-friction | mitigated | **"Started after the commit" is not "has the commit" — the build is the boundary.** Verifying `4f172f70` was live, I wrote the probe as *did this process start after my COMMIT (23:18:27)?*. The binary carrying it was not built until **23:28:11**, so a server started at 23:22 post-dates the commit and cannot contain it — ten minutes in which the natural predicate returns the confident opposite of the truth. It answered correctly today only because nothing started inside that window, which is luck and reads exactly like correctness. **A commit and the artifact carrying it are separated by a build, and every instinct reaches for the commit** — it is what you just did, it has a timestamp, it is what you would cite; the build has no ceremony and so never comes to mind as the boundary, though it is the only one a running process can be on the far side of. Sound forms: POSITIVE = `/proc/<pid>/exe` not `(deleted)` **and** the file at that path contains the change (then the process maps it by definition — no arithmetic); NEGATIVE = `(deleted)` **and** started before the BUILD. Third refinement of `F-108`'s probe, each by narrowing what its result is evidence *about*. Consequence the obvious place cannot show: 9 of 15 live servers predate `chunk_grain` and always write the old grain, and **codescout is opted IN so the two binaries agree exactly here** — divergence is only possible in projects that did not opt in, which is where nobody is verifying |
@@ -11947,6 +11948,57 @@ when there was something to flag.
 
 **Category:** architectural / measurement
 **Status:** validated
+
+## F-117 — A bug file scoped a shared-shape defect to the one site its reporter stood on; the live probe found three
+
+**Valid:** dated 2026-09-07
+
+**Severity:** med — following the bug file's own § *Fix* / § *Resume* literally would have
+shipped the repair at 1 of 3 sites and closed the file, leaving the two `edit_file` surfaces
+defective behind a passing regression test.
+
+**Status:** mitigated — all three sites fixed in `491ed828` (patch-id
+`6771fa53b1db5c23e743ee5d35f0a7bf540b6204`), one regression test each. The *instance* is closed;
+the mechanism is not. A bug file's scope defaults to its reporter's reproduction, and the
+standing remedy is already written — CLAUDE.md § *Bug Tracking*, "run the reproduction before
+reading the fix plan" — which is what caught this one. Nothing further is owed here.
+
+**Observed:** `docs/issues/archive/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md`
+locates the defect in `apply_body_edits` (`src/librarian/tools/update.rs:242`) and prescribes
+*"validate `action` against the caller-level set in `apply_body_edits`, immediately after it is
+read"*. Its § *References* names exactly two code sites. Scouting before the edit found the same
+`if action == "edit" { … } else { plan_section_edit(…) }` shape at **three** dispatchers, all
+reached by callers whose action set is five and all surfacing `plan_section_edit`'s four-member
+message. Probed live 2026-09-07 against the running binary:
+
+| dispatcher | caller surface | missing-action names | invalid-action names |
+|---|---|---|---|
+| `apply_body_edits` (`update.rs:242`) | `doc(update, patch={body_edits})` | 5 ✓ | 4 ✗ |
+| single-edit mode (`edit_markdown.rs:1386`) | `edit_file(heading=, action=)` | 5 ✓ | 4 ✗ |
+| `plan_batch` (`edit_markdown.rs:647`) | `edit_file(edits=[…])` | **0** ✗ | 4 ✗ |
+
+`plan_batch` is strictly worse than the site that was filed: its missing-action error is
+`edits[0]: missing required 'action' field` with no list at all, so **both** of its discovery
+routes omit `edit` and a batch-mode caller has no route to the action except tripping the
+nested-heading replace guard.
+
+**Why the bug file could not see it:** the reporter reached the defect through
+`doc(update, patch={body_edits})` while editing a librarian-guarded ledger — the one surface
+where `edit_file` is refused outright, so the two `edit_file` dispatchers were structurally
+outside their reproduction. The file is not careless; § *Root cause* is correct at the bytes for
+the site it names, and its rejection of the obvious repair (editing `edit_markdown.rs:281`) is
+right and load-bearing. The scope is narrow because the reproduction was.
+
+**Rests on:** the three-site count is a property of the current tree; a fourth dispatcher added
+later would not red anything. The fix shipped for this entry makes the *action set* single-sourced
+but does not enumerate its own call sites.
+
+**Cost avoided:** CLAUDE.md § *Bug Tracking* — *"Run the reproduction before reading the fix plan
+— the plan is a hypothesis about the reproduction."* Here the plan was read first and the
+reproduction run second, which still worked because the probe was run before any edit. Had the
+prescribed one-line change been applied on the strength of the plan alone, the closing regression
+test would have asserted on `body_edits` only, and § *Testing Discipline*'s *"mutate once per
+guarded SITE"* names exactly this outcome: one kill saying nothing about the other N−1.
 
 ## Template for new entries
 
