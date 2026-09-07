@@ -103,6 +103,60 @@ Sites, in `../claude-plugins/codescout-companion/hooks/pre-tool-guard.mjs` (at t
 2026-09-05 state): `ESCAPE_FOOTER` (~L68), `BREAKER_THRESHOLD` (~L61), the stand-down branch
 (~L132), the `Read`-on-source `enforce` (~L277), the `Edit`-on-source `enforce` (~L310).
 
+### What actually removes the tools — and why that makes the footer worse than false
+
+The above is the root cause of the **bad message**. It is not the root cause of the **missing
+tools**, and a third session (`codescout-00`, 2026-09-07) went and found that. Their work,
+with the split between what I verified here and what I am relaying marked, because only one of
+these is in this repo:
+
+**VERIFIED HERE, at the bytes.** codescout is exonerated: `ReadFile`, `EditFile`, `EditCode`,
+`References`, `SymbolAt` and `CallGraph` are registered in the **unconditional** base vector
+(`src/server.rs:322-338`) — no feature gate, no config gate. Only the peer, probe and librarian
+blocks are conditional. **The server advertises every tool the redirect names.**
+
+**RELAYED, not re-derived** (no instrument here can reach either): `llm-proxy` is in the path but
+its `STRIP_TOOLS` is empty in the *running* process's own environment, read at the serving
+process rather than at the config file. And the removal is harness-side.
+
+**So the footer is not merely false, it is maximally misdirecting.** `claude mcp list` reports
+codescout **Connected**, the registration site is unconditional, and the footer sends its reader
+to debug a healthy MCP server while the true cause sits in a layer it never names. "Ask the user
+to run `/mcp`" is not a remedy that fails to help; it is a remedy pointed at the one component
+proven fine.
+
+### The recovery path is itself strippable — a harder class than "the remedy is unreachable"
+
+`ToolSearch` is the documented way to reload a deferred schema. Reported by `codescout-00` and
+reproduced independently by `cda3afe5`: it works once, then answers *"tool search not enabled"*,
+then **disappears from the tool list entirely**. After that nothing in-session restores anything
+— `/mcp` reconnect and a `/model` switch both fail, because the server was never the problem.
+
+`cda3afe5`'s phrasing is the one to keep: **the remedy is removed by the same event it exists to
+recover from.** § *Class* above argues this is `IC-2` because the breaker's stand-down is
+unreachable; that is still true and is now the *weaker* half. A guard whose remedy is merely
+unreachable is one thing. This one deletes its own escape hatch.
+
+### The surviving/missing split is coherent, and is the best lead
+
+Three sessions, same shape. Confirmed first-person here — this is my own tool list, not a report:
+
+| | tools |
+|---|---|
+| **missing** | `read_file`, `edit_file`, `create_file`, `edit_code`, `references`, `symbol_at`, `call_graph` |
+| **surviving** | `symbols`, `grep`, `semantic_search`, `tree`, `doc`, `librarian`, `memory`, `index`, `workspace`, `run_command`, `get_guide`, `library` |
+
+**Every file-read, every file-write and every LSP-position navigation is gone; every name, text
+and semantic search survives.** That is not a random subset, and it is precisely the set the
+source-file and markdown redirects name — which is what makes *"is codescout up?"* the wrong
+question rather than a coarse one. Nobody has been able to see the harness's selection logic from
+inside, so no one can yet say why.
+
+**One correction inherited from `codescout-00`, kept so it is not re-derived:** compaction's
+tool-deferral list is **not** the cause. The post-compact reminder deferred all 21 codescout tools
+and 12 of them work fine, so *deferred* does not predict *missing*. Only the `ToolSearch` half of
+that hypothesis survives.
+
 ## Class
 
 `cluster/gate-keyed-on-unobservable-event` (`IC-2`) — the gate keys on an event it cannot see and
