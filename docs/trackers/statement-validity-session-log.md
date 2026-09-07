@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 10
-entry_high_water_F: 9
+entry_high_water_F: 10
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -41,6 +41,7 @@ entry_high_water_F: 9
 | F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
 | F-7 | 2026-08-21 | high | architectural | open | A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it |
 | F-8 | 2026-08-21 | high | architectural | fixed-verified | A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing |
+| F-10 | 2026-09-07 | low | self-friction | open | A page's measured history was quoted for a host it does not describe, and the instrument had already said so |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1218,6 +1219,32 @@ comment that reads as false is how the next person mis-costs this trade.
 
 **Promote-when:** a decision is taken between options 1-4, or a fourth surface with push
 semantics and free space appears.
+
+## F-10 — A page's measured history was quoted for a host it does not describe, and the instrument had already said so
+
+**Observed:** 2026-09-07, syncing this checkout after 119 commits of laptop work landed on `origin/experiments`.
+
+**When:** About to run post-pull catalog reconciliation, having already told the user which layers to expect missing.
+
+**Expected:** `docs/conventions/cross-machine-catalog-resume.md`, as cited from `CLAUDE.md` § *Docs*, says a pull arrives missing three layers — semantic index, `cites` edges, augmentations — "each silent in a different way", with 21 of 23 memories invisible to `recall`, 697 of 1117 edges absent, 22 augmentations gone. I restated that as what this pull would cost.
+
+**Got:** `index(action="verify")` on this checkout, post-pull: `memories: {on_disk: 23, in_store: 23, missing_count: 0}`, `chunks_without_vectors: 0`, `integrity: "ok"`, and `verdict: "stale"` carrying `hint: "Index is 119 commit(s) behind HEAD; the 55 missing file(s) are explained by that."` Nothing was silent — the instrument named its own cause unprompted. Four of the page's five modes are conditioned on a host that has **not** been building codescout; this host builds it every session.
+
+**Probable cause:** The page's measurements were taken on a 437-commit pull onto a non-building host, but the word "cross-machine" reads as a property of the *pull* rather than of the *host*. Nothing at the citation surface separates the two, so fresh-clone numbers get quoted for any pull.
+
+**The fifth mode DID apply, and is the actionable half.** `orphan_count: 17` against `missing_count: 55`, pairing by slug: `docs/issues/2026-09-02-chunk-reuse-key-misses-chunks-that-only-moved-ordinal.md` is orphaned while its `docs/issues/archive/...` twin is missing. That is the other host's archival arriving as a rename, with `id = sha256(abs_path)` keeping this catalog's pre-move row. The arithmetic closes: 2016 stored − 17 orphans + 55 missing = 2054 expected.
+
+**Workaround:** Read the instrument, not the page. `index(action="verify")` returns a `verdict` plus a hint naming the cause, and already separates stale-from-behind (repaired by `index(action="build")`) from orphaned-by-rename (repaired by `reindex`).
+
+**Severity:** low — no tool call failed; the cost was a wrong characterization of catalog state delivered to the user before any repair ran.
+
+**Status:** open
+
+**Valid:** conditional — `docs/conventions/cross-machine-catalog-resume.md` states at its read surface which of its modes are host-conditioned and which hold for any pull
+
+**Rests on:** `CLAUDE.md` § *Observer Blindness* — "when a tracker's number and its scope live apart, move the scope to the read surface, not the lesson." The page publishes measurements whose population is inferable only from prose further down, so a citer reaches the number before the scope.
+
+**Fix idea / Pointer:** Add a scope line to the page's opening, and cross-check `docs/PROBES.md` — `index(action="verify")` already answers this question and should be the page's first instruction rather than its unmentioned alternative.
 
 ## Template for new entries
 
