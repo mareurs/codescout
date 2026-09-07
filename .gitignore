@@ -41,6 +41,21 @@ tests/fixtures/*/.codescout/
 /.env
 /.claude/*
 !/.claude/skills/
+# Hook-created, at any depth under docs/. `goal-stop-hook.mjs:16` does
+# `mkdirSync(join(cwd, '.claude'))`, so a session running from a subdirectory drops a
+# log dir there; the anchored rule two lines up cannot match below the root.
+#
+# SCOPED TO docs/ DELIBERATELY — `**/.claude/` was tried and is WRONG. It matches at
+# every depth INCLUDING the root, and git will not descend into an excluded directory
+# to reconsider a negation, so it silently kills `!/.claude/skills/` above. Verified
+# 2026-09-07 in a scratch repo, four arms: current rules leak the log; `**/.claude/`
+# appended ignores the skill file; `**/.claude/` placed first does too (reordering does
+# not help, same descent reason); this scoped form is the only one that ignores the logs
+# and keeps the skills negation. `git check-ignore -v` blames `**/.claude/` directly.
+# The cost of getting it wrong is deferred and silent: the two tracked skill files stay
+# tracked either way, but the NEXT skill added under .claude/skills/ would never appear
+# in `git status`. Add a sibling scoped line if plugin logs ever appear outside docs/.
+docs/**/.claude/
 .fastembed_cache/
 /.codescout/tmp/
 /.buddy/*

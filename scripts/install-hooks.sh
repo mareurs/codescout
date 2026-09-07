@@ -334,8 +334,24 @@ elif [ "$check_only" = "1" ]; then
     # A --check run REPORTS; it must describe what is on disk, not what this
     # invocation's flags would have installed. Reporting "skip" for a hook that is in
     # fact live would be a status tool lying about the status it exists to report.
+    #
+    # PRESENCE WAS THE WRONG PREDICATE HERE, and it was the wrong one for the same reason
+    # the `grep -q "$target"` form was wrong above: it is monotone under exactly the drift
+    # that matters. Every shim this script has ever written is `-x`, including the
+    # pre-2026-09-06 shape with no degrade-open clause, so a checkout wired before that
+    # existed keeps the `exec`-on-missing-target 127 trap and this branch called it `ok`.
+    # The other hooks were moved to a byte-comparison against `render_shim` on 2026-09-06;
+    # the change did not reach this branch, because it is a separate `elif` rather than an
+    # `install_shim` call. Measured 2026-09-07 on one checkout, seconds apart:
+    # `--check` said `ok`, `--check --with-session-id` said `STALE`, and the installed shim
+    # had 0 occurrences of `DEGRADE OPEN`.
+    #
+    # So route through `install_shim`, which already byte-compares under `check_only` and
+    # already separates STALE from MISSING. Only when the hook is PRESENT: this stage is
+    # opt-in, and `install_shim` would report a legitimately-absent one as `MISSING` and
+    # fail the run, which is the status tool lying in the other direction.
     if [ -x "$git_dir/hooks/prepare-commit-msg" ]; then
-        echo "ok      prepare-commit-msg    shim present (opt-in, installed earlier)"
+        install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
     else
         echo "off     prepare-commit-msg    opt-in; not installed"
     fi

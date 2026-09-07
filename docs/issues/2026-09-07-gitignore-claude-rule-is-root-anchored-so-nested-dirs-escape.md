@@ -97,21 +97,53 @@ anchoring solves a real problem and the subdirectory case was simply never in vi
 
 ## Fix
 
-Add an unanchored rule alongside the anchored one, keeping the existing negation working:
+**The obvious form is wrong, and this section recommended it.** It read: add `**/.claude/`
+alongside the anchored rule, on the reasoning that a trailing slash restricts it to directories
+and the root entry is "already matched more specifically". Both halves are false. `**/.claude/`
+matches at every depth **including the root**, and git will not descend into an excluded
+directory to reconsider a negation — so it silently kills `!/.claude/skills/` on the line above.
+
+Falsified 2026-09-07 in a scratch repo, four arms, before writing anything to the real one:
+
+| arm | `.claude/skills/…/SKILL.md` | `docs/**/.claude/*.log` |
+|---|---|---|
+| current rules | shown ✓ | **shown — the bug** |
+| `+ **/.claude/` (the old recommendation) | **IGNORED ✗** | ignored |
+| `**/.claude/` placed first | **IGNORED ✗** | ignored |
+| `+ docs/**/.claude/` | shown ✓ | ignored ✓ |
+
+`git check-ignore -v` on arm 2 blames `.gitignore:3:**/.claude/` directly. **Reordering does not
+help** — arm 3 was the first guess and fails for the same descent reason.
+
+**The cost of the wrong form is deferred and silent, which is why it survived review.** It does
+not untrack anything: the two tracked files under `.claude/skills/` stay tracked, `git status`
+stays clean, and the gate stays green. What breaks is the *next* skill added under
+`.claude/skills/` — it would never appear in `git status`, and whoever adds it gets no error.
+That is this file's own class pointed the other way: a rule broader than its name, failing by
+omission.
+
+**Applied form** (`.gitignore:42-58`), scoped rather than global:
 
 ```
 /.claude/*
 !/.claude/skills/
-**/.claude/          # hook-created, any depth — see goal-stop-hook.mjs:16
+# ... comment recording the falsification ...
+docs/**/.claude/
 ```
 
-The trailing slash restricts it to directories, and it does not re-shadow the root entry
-because the root `.claude/` is already matched more specifically. Verify with
-`git check-ignore -v` on all three paths in § *Symptom* — the first must still report line 42.
+Verified against the real repo after applying: the skill file reports `NOT ignored`,
+`.claude/settings.json` still reports `.gitignore:42`, both plugin logs report
+`.gitignore:58:docs/**/.claude/`, and `git ls-files -- '.claude/skills/*'` still returns 2.
+
+If plugin logs ever appear outside `docs/`, add a sibling scoped line. Do not widen to `**/`.
+
+**Credit:** the falsification is `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`'s — they tested the three
+arms and offered the scoped alternative before this file's author wrote the broken form to disk.
+Independently reproduced by `89d91024-cd66-4361-9300-c55b87b179ea` rather than taken on trust,
+since it contradicted an already-approved plan.
 
 - **SHA (experiments):** pending
 - **patch-id:** pending
-
 ## Tests added
 
 None. A `git check-ignore` assertion is plausible in `tests/hook_config.rs`, but the failure is
@@ -134,4 +166,3 @@ to line 42 while the two nested paths now resolve to the new rule.
 - `.gitignore:42-43` (root entry + negation), `.gitignore:133` (`.worktrees/`)
 - `codescout-companion/hooks/goal-stop-hook.mjs:16-19` — the writer
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md`
-

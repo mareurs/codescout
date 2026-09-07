@@ -392,3 +392,144 @@ fn the_hooks_path_verdict_discriminates() {
         "the pre-rename absolute path is the exact shape of the archived bug"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// `.gitignore`: the nested-`.claude/` rule must not swallow the skills negation.
+//
+// WHY THIS IS GATED AND THE SIBLING `.gitignore` RULES ARE NOT.
+// `goal-stop-hook.mjs:16` does `mkdirSync(join(cwd, '.claude'))`, so a session running from a
+// subdirectory drops a log dir there. The anchored `/.claude/*` two lines up cannot match below
+// the root, so those dirs showed up as untracked noise inside tracked doc directories
+// (`docs/issues/2026-09-07-gitignore-claude-rule-is-root-anchored-so-nested-dirs-escape.md`).
+//
+// The obvious repair — append `**/.claude/` — is WRONG, and wrong in a way no other check here
+// would catch. It matches at every depth INCLUDING the root, and git will not descend into an
+// excluded directory to reconsider a negation, so it silently disables `!/.claude/skills/`.
+// Measured 2026-09-07 in a scratch repo: `**/.claude/` appended reports the skill file IGNORED,
+// and placing it FIRST does the same — reordering does not help, same descent reason.
+//
+// THE FAILURE IS DEFERRED AND SILENT, WHICH IS THE WHOLE REASON FOR A TEST.
+// `.gitignore` never untracks: the two files already under `.claude/skills/` stay tracked, the
+// working tree stays clean, and the gate stays green. What breaks is the NEXT skill added
+// there — it never appears in `git status`, and whoever adds it gets no error. Nothing else in
+// this repo asserts on that, so a future tidy-up that "simplifies" the scoped rule to a global
+// one ships a hole with a green suite.
+//
+// The first assertion is the load-bearing one; it reds on exactly that change. The second reds
+// on reverting the original fix. Read the pair as one guard: they are monotone in opposite
+// directions, so either alone would miss the other's regression.
+
+#[derive(Debug, PartialEq, Eq)]
+enum IgnoreVerdict {
+    Ignored,
+    NotIgnored,
+}
+
+/// `git check-ignore -q` for one path, with the error case PANICKING rather than answering.
+///
+/// Exit 0 = ignored, 1 = not ignored, anything else = git itself failed. That third case is the
+/// one worth spelling out: folding it into `NotIgnored` would make a broken invocation — wrong
+/// cwd, no git, a corrupt index — read as "the negation survives", which is the exact answer
+/// this test exists to trust. A guard whose error path produces its own pass condition is not a
+/// guard.
+fn ignore_verdict(rel: &str) -> IgnoreVerdict {
+    let out = Command::new("git")
+        .args(["check-ignore", "-q", "--", rel])
+        .current_dir(repo_root())
+        .output()
+        .expect("git check-ignore must be runnable from the repo root");
+    match out.status.code() {
+        Some(0) => IgnoreVerdict::Ignored,
+        Some(1) => IgnoreVerdict::NotIgnored,
+        other => panic!(
+            "git check-ignore exited {other:?} for {rel:?} — that is git failing, not a verdict. \
+             stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    }
+}
+
+/// The skills negation still works — reds if anyone widens the nested rule to `**/.claude/`.
+///
+/// **This probes a path that does NOT exist, and that is the whole design.** The first version
+/// of this test asserted over `git ls-files -- .claude/skills/` and was VACUOUS: `git
+/// check-ignore` consults the index, and for a **tracked** path it answers "not ignored"
+/// whatever the patterns say. Measured 2026-09-07 with the broken `**/.claude/` rule in place —
+/// tracked file, default flags: exit 1 (not ignored); same file with `--no-index`: exit 0,
+/// blamed on `**/.claude/`. The index was masking the very defect the test existed for, so the
+/// assertion had no input that could fail it and the mutation run passed.
+///
+/// The population was wrong too, not just the flag. The harm this guards is the **next** skill
+/// added under `.claude/skills/` silently never appearing in `git status` — an *untracked* file.
+/// Asserting over tracked ones tested the one set that cannot exhibit it. So the probe is a
+/// path nobody has created: untracked by construction, and the same shape a real new skill
+/// would have.
+///
+/// `--no-index` would also work here and is deliberately not used: it would make the test pass
+/// for a reason the real `git status` does not share, and this guard is about what an author
+/// sees, not about what the pattern matcher can be coaxed into reporting.
+#[test]
+fn the_claude_skills_negation_survives_the_nested_log_rule() {
+    // Non-vacuity: the negation must actually be present, or the probe below is asserting that
+    // an absent rule fails to match — true, and about nothing.
+    let gitignore = std::fs::read_to_string(repo_root().join(".gitignore"))
+        .expect(".gitignore must be readable");
+    assert!(
+        gitignore.lines().any(|l| l.trim() == "!/.claude/skills/"),
+        "`!/.claude/skills/` is gone from .gitignore. Either it was deliberately retired — in \
+         which case delete this test with it — or it was lost, which is the regression this \
+         test exists to catch and it can no longer catch anything."
+    );
+
+    // A skill that does not exist yet. This is the input a tracked path cannot provide.
+    let probe = ".claude/skills/a-skill-nobody-has-added-yet/SKILL.md";
+    assert!(
+        !repo_root().join(probe).exists(),
+        "{probe} now exists, so it may be tracked and the index would mask the defect. Pick \
+         another name that nobody has created."
+    );
+
+    assert_eq!(
+        ignore_verdict(probe),
+        IgnoreVerdict::NotIgnored,
+        "a NEW file under .claude/skills/ would be IGNORED. `!/.claude/skills/` has been \
+         defeated — almost certainly by a nested `.claude/` rule widened to `**/.claude/`, \
+         which matches the root too and which git will not descend past to reconsider a \
+         negation. Scope the rule to a subtree (`docs/**/.claude/`) instead. Note nothing \
+         untracks and `git status` stays clean, so this is the only signal you get."
+    );
+}
+
+/// The hook-created log dirs under `docs/` are ignored — reds if the scoped rule is dropped.
+#[test]
+fn hook_created_claude_dirs_under_docs_are_ignored() {
+    for path in [
+        "docs/superpowers/plans/.claude/codescout-companion.log",
+        "docs/trackers/issue-clusters/.claude/codescout-companion.log",
+    ] {
+        assert_eq!(
+            ignore_verdict(path),
+            IgnoreVerdict::Ignored,
+            "{path} is NOT ignored. The scoped `docs/**/.claude/` rule is missing or has been \
+             re-anchored; `goal-stop-hook.mjs` creates these at whatever cwd a session holds, so \
+             they return as untracked noise inside tracked doc directories."
+        );
+    }
+}
+
+/// The verdict helper discriminates — otherwise both tests above could be reading one constant.
+#[test]
+fn the_ignore_verdict_helper_discriminates() {
+    assert_eq!(
+        ignore_verdict("target/some-build-artifact"),
+        IgnoreVerdict::Ignored,
+        "`target/` is gitignored; a helper that cannot report Ignored makes \
+         `hook_created_claude_dirs_under_docs_are_ignored` vacuous"
+    );
+    assert_eq!(
+        ignore_verdict("Cargo.toml"),
+        IgnoreVerdict::NotIgnored,
+        "`Cargo.toml` is tracked and unignored; a helper that cannot report NotIgnored makes \
+         `the_claude_skills_negation_survives_the_nested_log_rule` vacuous"
+    );
+}
