@@ -1,7 +1,7 @@
 ---
-id: fede5ac714cf3c56
+id: 89d33532b86e816e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the stale-prompt banner tells the caller to run a call form the tool does not accept'
 owners:
 - marius
@@ -10,7 +10,7 @@ tags:
 - prompt-surfaces
 - onboarding
 - remedy-text
-closed: null
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 severity: med
@@ -140,5 +140,35 @@ vouching for it.
 
 ## Tests added
 
-Pending.
+Two assertions added to `format_activate_project_prepends_warning_when_stale`
+(`src/tools/config/tests.rs`). Fixed on `experiments` at `e0888fb9`, patch-id
+`0f2c561bfb97c062c137bfe9108118b52114c5de`.
 
+```rust
+assert!(compact.contains("refresh_prompt=true"), …);
+assert!(!compact.contains("action=\""), …);
+```
+
+Observed RED before the fix, on the first of the two, quoting the live banner:
+
+```
+the banner must name the call form the tool accepts; got: ⚠ SYSTEM PROMPT STALE
+(v20 → v23): run onboarding(action="refresh_prompt") now.
+```
+
+**One guarded site, so one assertion pair is enough.** `format_activate_project`
+builds this banner in a single `format!`; both stale-path tests render that same
+call. The "mutate once per guarded SITE" law is satisfied at N=1 — adding the pair
+to the `none`-stored-version test would exercise the same line twice.
+
+**Why shape and not a pinned sentence.** Pinning the prose reds on every rewording,
+would rightly be deleted the first time someone improves the wording, and cannot
+survive to catch the next occurrence. `contains("refresh_prompt=true")` plus
+`!contains("action=\"")` reds exactly on the regression that happened — a remedy
+naming a parameter the schema does not declare — and stays green through any
+rewrite that keeps the form callable. It cannot tell you the remedy is *helpful*,
+only that it is *callable*; that is the whole claim, and it is the regression that
+actually occurred.
+
+Both fixtures carrying the dead string in their unasserted `action` field were
+corrected in the same commit, so the test data no longer vouches for it.
