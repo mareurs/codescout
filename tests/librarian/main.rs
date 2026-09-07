@@ -16,14 +16,18 @@
 //! See docs/issues/archive/2026-09-02-a-test-file-in-no-cargo-target-asserts-nothing-and-is-a-tautology-anyway.md
 
 mod companion_hint;
-
-// NOT YET DECLARED, and deliberately so — `goal_archetype`, `goal_eval`,
-// `mcp_integration`, `timemachine_smoke`: 4 files, 15 test functions, orphaned
-// by the same move and still uncompiled. Declaring them is one line each; what
-// is unknown is what 15 tests that have not run since 2026-05-16 do when they
-// do run, and two of them are evals rather than unit tests. Measured
-// 2026-09-04: with all four declared, the tree is **one** compile error from
-// building — `tests/librarian/timemachine_smoke.rs:23` is missing
-// `artifact_store`, `lsp` and `temp_guard` on its `ToolContext` literal.
-// Tracked separately so turning them on is its own change with its own gate
-// run: docs/issues/2026-09-04-four-more-test-files-orphaned-by-the-same-move.md
+mod goal_archetype;
+// The next two compile but do NOT execute — annotated so neither is credited with
+// coverage it does not provide. This target is 19 tests, 17 of which run.
+//
+// `goal_eval` is a tier-3 eval, `#[ignore]`d pending an API key and `synthesize()`
+// being wired. `mcp_integration` is `#[ignore]`d because it spawns a `librarian-mcp`
+// binary that the 2026-05-16 dissolution deleted, and asserts a 15-tool list from
+// before the tool collapse — reviving it is a rewrite, not a re-enable.
+//
+// Declaring them is still worth doing rather than leaving them undeclared: an ignored
+// test prints its reason on every run, whereas an undeclared file is silent in exactly
+// the way this harness exists to prevent.
+mod goal_eval;
+mod mcp_integration;
+mod timemachine_smoke;

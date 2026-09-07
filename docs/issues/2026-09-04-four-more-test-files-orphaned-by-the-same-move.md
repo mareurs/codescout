@@ -1,13 +1,15 @@
 ---
 id: '2fa5dc75f5b53efb'
 kind: bug
-status: open
+status: taken
 title: 'BUG: four more test files (15 tests) are still orphaned by the 2026-05-16 crate dissolution, one compile error from building'
 tags:
 - cluster/declared-not-wired
 - tests
 - cargo-targets
 - refactor-fallout
+claimed_at: 2026-09-07
+claimed_by: 59112612-5fc8-4b31-8c8c-e19220d99eac
 ---
 
 ## Summary
@@ -102,11 +104,88 @@ uncompiled file is unguarded twice over.
 **Do not fold this into another change.** The value here is knowing which of 15 previously-dead
 tests pass, and that signal is destroyed by mixing it with unrelated edits in the same gate run.
 
+
+## Outcome — 2026-09-07
+
+All four declared in `tests/librarian/main.rs`. `cargo test --test librarian` now
+enumerates **19 tests** (4 pre-existing `companion_hint` + the 15 above): **17 run and
+pass, 2 are `#[ignore]`d with visible reasons.**
+
+| file | result |
+|---|---|
+| `goal_archetype.rs` | **12/12 pass** — uncompiled 3.5 months, correct the whole time |
+| `goal_eval.rs` | `#[ignore]`d — tier-3 eval, needs an API key + `synthesize()` wired |
+| `mcp_integration.rs` | `#[ignore]`d — kept; disposition below |
+| `timemachine_smoke.rs` | **passes after a test-side fix** — below |
+
+### The plan above was one field stale, and that is the reusable lesson
+
+§ Evidence records `error[E0063]: missing fields artifact_store, lsp and temp_guard`,
+measured 2026-09-04. `ToolContext` carries **nine** fields today — `progress` was added
+since — so it was **four** missing, not three. Coding to the recorded error would have
+produced a fourth `E0063` and read as a misreading of this file.
+
+Generalised: **a measurement of an interface, recorded and then outlived by the
+interface.** A quoted compiler error or JSON shape reads as *evidence* — something that
+was actually checked — so a reader trusts it more than prose, and it decays just as fast.
+The same mechanism bit this bug's plan (a struct field) and the test this bug is about (a
+response shape), on the same day.
+
+### `timemachine_smoke` — the test was stale, the code was right
+
+Five `timeline::call` sites asserted the response **is** a JSON array. It returns an
+envelope `{items, count, truncated}`; the overfetch-by-one and the `truncated` flag landed
+with the silent-cap work so a full-but-complete page is distinguishable from a capped one.
+This file last compiled 2026-05-16 and predates that. Fixed test-side —
+`src/librarian/tools/timeline.rs` is untouched.
+
+Added one envelope assertion (`count` agrees with `items`, `truncated` is false) because
+without it every timeline read here is **monotone under capping**: a truncated page
+satisfies `len() >= 4` exactly as well as a complete one, which is the pair of states that
+contract exists to separate.
+
+Also rewrote the file's doc comment, which named pre-collapse tools (`ArtifactCreate`, …)
+and cited `src/tools/event_create.rs::tests` — a path that does not exist.
+
+### `mcp_integration` disposition: kept and `#[ignore]`d — declaring it is still the win
+
+It spawns a `librarian-mcp` binary the dissolution deleted, and asserts `artifact_find`
+among exactly 15 tools — pre-collapse names throughout. Reviving it is a rewrite, not a
+re-enable, so it keeps its existing (accurate) `#[ignore]` reason.
+
+Declaring it still changed something real: **an ignored test prints its reason on every
+run; an undeclared file is silent.** It was two layers of not-running and is now one, and
+the remaining layer announces itself.
+
+### A third invisibility this bug did not name: `cargo fmt` never reached these files
+
+Declaring the modules produced a one-line rustfmt change in `mcp_integration.rs` that
+nobody authored. rustfmt walks the **module tree**, so an undeclared file is invisible to
+it too — the gate's own first command had been silently skipping these four for 3.5
+months. `cluster/declared-not-wired` costs a file three things, not one: not compiled, not
+run, **not formatted**.
+
+### Gate
+
+`fmt` clean. `clippy --workspace --all-targets --features local-embed -- -D warnings`
+clean. Lean lane 3560 passed. Default lane 5505 passed, 1 failed —
+`peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, the documented
+load-sensitive flake in `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+which passes in isolation in 1.13s and lives in `src/peer/`, a directory this change does
+not touch (`git diff --stat` shows zero files under `src/`).
+
+**The lean lane is vacuous for this change, and that was verified rather than assumed:**
+my tests in the lean lane **0**, control `prompts::` **101** — so the lane demonstrably
+runs tests and the counting method works, making the 0 a measurement. Read the default
+lane only.
 ## Resume
 
-Unclaimed. Found 2026-09-04 while fixing the sibling bug, by following that file's own instruction
-to *"check whether other files under `tests/librarian/` are orphaned the same way before
-choosing"* — the check was one `ls` and it multiplied the population by five. The sibling bug named
-one file; the class had five members, and the tag it already carried
-(`cluster/declared-not-wired`) is what makes that a query rather than a rediscovery.
+Fixed 2026-09-07 by sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`. See § Outcome.
 
+Residual, deliberately not done here — **step 5 of § Fix is still open**: there is no
+standing guard that every `.rs` under `tests/` is reachable from some cargo target. This
+fix wires the four known members; it does not make the class detectable, so the next file
+dropped into `tests/librarian/` without a `mod` line is silently inert again. That guard
+is `H-N` / `I-N` material and wants its own change. The harness doc comment in
+`tests/librarian/main.rs` is currently the only thing standing between this directory and
+a repeat, and a comment is a policy, not a mechanism.

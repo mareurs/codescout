@@ -1,12 +1,14 @@
 /// TimeMachine end-to-end smoke integration test.
 ///
-/// Exercises the full tool chain in-process: ArtifactCreate → ArtifactEventCreate
-/// → ArtifactTimeline → ArtifactStateAt → WorkspaceStateAt → ArtifactGet →
-/// ArtifactGraph → ArtifactEventCreate (note) → ArtifactLink.
+/// Exercises the full librarian tool chain in-process, naming the
+/// `src/librarian/tools/` modules imported directly below: `create` →
+/// `event_create` → `timeline` → `state_at` → `workspace_state_at` → `get` →
+/// `graph` → `event_create` (note) → `link`. Naming the modules rather than the
+/// MCP surface keeps this comment checkable against the `use` block two lines down.
 ///
-/// Mirrors the `mk_ctx` helper pattern from `src/tools/event_create.rs::tests`
-/// (inlined here because `pub(crate)` is not accessible from an external
-/// integration test crate).
+/// Mirrors the `mk_ctx` helper pattern used by the other out-of-crate integration
+/// tests (`tests/link_scan.rs`), inlined here because `TestToolContextBuilder` is
+/// `#[cfg(test)]` and therefore unreachable from `tests/`.
 use std::sync::Arc;
 
 use codescout::librarian::{
@@ -33,7 +35,17 @@ fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
         }),
         rules: Arc::new(vec![]),
         embedding: None,
+        artifact_store: None,
         current_project: None,
+        // The four fields below postdate this file's last compilation (2026-05-16).
+        // They are the out-of-crate construction seam: `TestToolContextBuilder` is
+        // `#[cfg(test)]` and unreachable from `tests/`, so `ToolContext`'s fields are
+        // `pub` precisely so this literal can exist. Same shape as `tests/link_scan.rs`.
+        lsp: codescout::lsp::MockLspProvider::with_client(codescout::lsp::MockLspClient::default()),
+        // Resolved at the edge, never re-read mid-decision — passing the machine's real
+        // env is correct here because this test writes only under its own TempDir.
+        temp_guard: codescout::librarian::tools::TempGuardEnv::from_env(),
+        progress: None,
     }
 }
 
@@ -215,13 +227,33 @@ async fn timemachine_full_chain() {
     )
     .await
     .expect("timeline should succeed");
-    let events = timeline_resp
+    // `timeline::call` returns an envelope `{items, count, truncated}`, not a bare
+    // array. The overfetch-by-one + `truncated` flag landed with the silent-cap work
+    // (docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md) so a
+    // full-but-complete page is distinguishable from a capped one. This file last
+    // compiled 2026-05-16 and so predates it; all five timeline reads below index
+    // `["items"]` for that reason.
+    let events = timeline_resp["items"]
         .as_array()
-        .expect("timeline must return array");
+        .expect("timeline must return an items array");
     assert!(
         events.len() >= 4,
         "expected ≥4 events, got {}",
         events.len()
+    );
+    // The envelope's own contract, not just its payload. Without these two, every
+    // timeline read in this file is monotone under capping: a truncated page
+    // satisfies `len() >= 4` exactly as well as a complete one, which is the pair of
+    // states the overfetch-by-one exists to tell apart.
+    assert_eq!(
+        timeline_resp["count"].as_u64(),
+        Some(events.len() as u64),
+        "envelope `count` must agree with `items` length"
+    );
+    assert_eq!(
+        timeline_resp["truncated"],
+        json!(false),
+        "limit=100 over ~5 events must report an untruncated page"
     );
 
     // Find the verdict event by its known ID and verify the resolves link.
@@ -261,7 +293,7 @@ async fn timemachine_full_chain() {
     )
     .await
     .expect("timeline intent filter should succeed");
-    let intent_events = intent_only.as_array().expect("must be array");
+    let intent_events = intent_only["items"].as_array().expect("must be array");
     assert_eq!(
         intent_events.len(),
         1,
@@ -287,7 +319,7 @@ async fn timemachine_full_chain() {
     )
     .await
     .expect("timeline with old until should succeed");
-    let old_events = old_until.as_array().expect("must be array");
+    let old_events = old_until["items"].as_array().expect("must be array");
     assert_eq!(
         old_events.len(),
         0,
@@ -466,7 +498,7 @@ async fn timemachine_full_chain() {
     )
     .await
     .expect("note timeline should succeed");
-    let note_events = note_timeline.as_array().expect("must be array");
+    let note_events = note_timeline["items"].as_array().expect("must be array");
     let has_dual_write_note = note_events
         .iter()
         .any(|e| e["payload"]["text"].as_str().unwrap_or("") == "dual-write");
@@ -501,7 +533,9 @@ async fn timemachine_full_chain() {
     )
     .await
     .expect("superseded_by timeline should succeed");
-    let sup_events = superseded_timeline.as_array().expect("must be array");
+    let sup_events = superseded_timeline["items"]
+        .as_array()
+        .expect("must be array");
     assert!(
         !sup_events.is_empty(),
         "artifact_link rel=supersedes must dual-write a superseded_by event"

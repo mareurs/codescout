@@ -68,7 +68,8 @@ fn mcp_subprocess_integration() {
     let tmp = tempfile::TempDir::new().unwrap();
 
     // Point at the real fixture directory (has 3 .md files from Phase 7).
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/librarian/fixtures/repo_a");
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/librarian/fixtures/repo_a");
     assert!(
         fixture_dir.exists(),
         "fixture dir missing: {}",
