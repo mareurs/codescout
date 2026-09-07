@@ -2,10 +2,10 @@
 
 ## Entry Points
 
-- `src/server.rs::CodeScoutServer::from_parts` (:307) — all tools registered here; start for tool inventory
-- `src/tools/core/types.rs` — `Tool` trait + `ToolContext`; read before adding or modifying any tool
+- `src/server.rs::CodeScoutServer::from_parts` (:306) — all tools registered here; start for tool inventory
+- `src/tools/core/types.rs` — `Tool` trait (:770), `ToolContext` (:59); read before adding or modifying any tool
 - `src/tools/mod.rs` — the LIVE module index. `src/tools/` is grouped (`symbol/`, `semantic/`, `markdown/`, `memory/`, `config/`, `edit_file/`, `run_command/`), not flat
-- `src/agent/mod.rs::Agent::new` (:444) — project activation and state wiring
+- `src/agent/mod.rs::Agent::new` (:459) — project activation and state wiring
 - `src/librarian/tools/` — one file per doc verb: `find.rs`, `get.rs`, `update.rs`, `event_create.rs`, `augment.rs`, `doctor.rs`, `link_scan/`
 - `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
 
@@ -14,8 +14,8 @@
 - `Tool` + `ToolContext` (`src/tools/core/`) — every tool implements `call()`; `call_content()` is the MCP entry point
 - `OutputGuard` (`src/tools/output.rs`) — enforces exploring/focused two-mode progressive disclosure
 - `RecoverableError` (`src/tools/core/`) — maps to `isError: false`; prevents sibling parallel-call abort
-- `Agent` / `ActiveProject` (`src/agent/mod.rs`) — project state; tools access via `ctx.agent.with_project()` (:1107)
-- `CodeScoutServer` (`src/server.rs`) — MCP `ServerHandler`; every call flows through `call_tool_inner()` (:1014)
+- `Agent` / `ActiveProject` (`src/agent/mod.rs`) — project state; tools access via `ctx.agent.with_project()`
+- `CodeScoutServer` (`src/server.rs`) — MCP `ServerHandler`; every call flows through `call_tool_inner()` (:1045)
 
 ## Search Tips
 
