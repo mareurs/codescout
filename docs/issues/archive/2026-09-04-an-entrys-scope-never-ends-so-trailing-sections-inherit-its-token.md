@@ -1,10 +1,10 @@
 ---
 kind: bug
 status: fixed
-title: "BUG: an entry's scope has no terminator, so every section after the last entry inherits its token"
+title: 'BUG: an entry''s scope has no terminator, so every section after the last entry inherits its token'
 tags:
-  - cluster/addressing-without-an-escape-hatch
-owners: []
+- cluster/addressing-without-an-escape-hatch
+closed: 2026-09-04
 severity: med
 ---
 

@@ -38,7 +38,7 @@
 /// `##` sections later. Corpus-wide, **6,983 lines across 90 of 1,446 files**
 /// changed owner when this landed, every one of them from a wrong entry to
 /// `None`. See
-/// `docs/issues/2026-09-04-an-entrys-scope-never-ends-so-trailing-sections-inherit-its-token.md`.
+/// `docs/issues/archive/2026-09-04-an-entrys-scope-never-ends-so-trailing-sections-inherit-its-token.md`.
 ///
 /// LEVEL-AWARE, and it has to be: this corpus defines entries at `##` (1,082),
 /// `###` (545) **and** `####` (64). A fixed-level terminator is wrong in both
