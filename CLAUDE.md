@@ -155,9 +155,14 @@ premise that every addition falsifies.
   the LIST, never the corpus:** a headline derived from the tool beside an enumeration derived from
   the eye reconciles nowhere, and four sessions shipped that exact mismatch in one morning — the
   last of them thirty seconds after reading a retraction of it, which is this section's own claim
-  about what knowing a class is worth. (Named by sessionId
-  `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`; the two-reasons half by
-  `8dba66b0-af4b-4cda-a333-54a0605b318e`.)
+  about what knowing a class is worth. (Attribution, split because the halves were earned
+  differently and the credited party asked that it read that way: the decay claim and *count the
+  LIST* are sessionId `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`'s. **The line-drift tell is theirs too
+  but as HINDSIGHT** — it sat in front of two sessions unread, and they named it only after the
+  retraction that produced it, so crediting it flat would read as foresight it was not. The
+  two-reasons half, that a stamp cannot buy the tree, is `8dba66b0-af4b-4cda-a333-54a0605b318e`'s,
+  made against a draft of mine that stopped at the stamp and would have failed exactly where the
+  day's confusion lived.)
 - **Annotate a fixture's load-bearing detail, on the fixture line.** Say what breaks if the detail
   goes — not in the test name, not in the assertion message, never a bare "do not edit". A tidy-up
   that removes it leaves the test passing and no longer discriminating, which no assertion can catch
