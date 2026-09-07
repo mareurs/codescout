@@ -1,14 +1,14 @@
 ---
 id: '9ea0a90867c85260'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `backfill-chunks` accepts `--project` but walks the whole catalog, across every repo on the host'
 owners:
 - marius
 tags:
 - cluster/blast-radius-exceeds-visibility
 topic: backfill scope vs project flag
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 related: []
@@ -134,8 +134,31 @@ Minimum viable alternative if the whole-catalog walk is wanted by design: say so
 carry a `scope` field in `BackfillReport` so the JSON names its own population, per
 `docs/adrs/2026-08-27-negative-results-name-their-scope.md`.
 
-- **SHA (experiments):** pending
-- **patch-id:** pending
+- **SHA (experiments):** `45eac50e`
+- **patch-id:** `0f70f33bbc19f0a95ecb08a1966592e63a9b05d0`
+
+**Applied — scoped, not documented-as-wide.** `backfill_chunk_vectors` now takes
+`root_prefix: Option<&str>` and appends `AND a.abs_path LIKE ?4` to its page query. The CLI
+threads the resolved `--project` root by default and **refuses** when there is no active project,
+rather than silently widening — an unscoped run is a host-wide write, and "no active project" is
+not a reason to make it one. `--all` is the deliberate opt-in.
+
+**The resume cursor is keyed by scope**, which was not in the original plan and is the part worth
+re-reading. `BACKFILL_CURSOR` was a single meta key; a scoped run advancing it would make a later
+catalog-wide run resume past rows it never examined. A *completed* run clears its own cursor, so
+this only bites when a run is interrupted — which is the case the cursor exists for, and the one
+where a shared key fails silently.
+
+**The report names its own population** (`scope: {kind, abs_path_like}`), per
+`docs/adrs/2026-08-27-negative-results-name-their-scope.md`. `10` and `2807` were both correct
+answers here and nothing in the output said which question was being answered.
+
+**Test:** two roots in one catalog — the minimum fixture that can express this. A single-root test
+passes identically whether the path predicate is present or absent, which is why the five existing
+`backfill_chunk_vectors` tests could not have caught it and why adding a sixth single-root case
+would not have either. It asserts both halves: the scoped run visits one artifact, **and** the
+other root still has zero chunk rows — `artifacts == 1` alone is satisfied by a run that visited
+the wrong one. Mutation: forcing the predicate off reds it, and reds nothing else.
 
 ## Tests added
 
@@ -159,4 +182,3 @@ the `vectorless` query. Then add the two-root test in § *Tests added* and confi
 - `src/cli/backfill_chunks.rs` — the CLI wrapper and its `--project` flag
 - `docs/issues/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md` — the note that sends you here
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
-

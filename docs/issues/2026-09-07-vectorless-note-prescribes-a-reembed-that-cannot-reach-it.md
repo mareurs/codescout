@@ -1,14 +1,14 @@
 ---
 id: '9a5c069bd5eef463'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `reindex`''s `vectorless_note` prescribes `reembed=true`, which cannot escape the state it describes'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
 topic: absorbing vectorless state remedy
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 related: []
@@ -145,8 +145,24 @@ Text along the lines of: *"…which is an ABSORBING state: these artifacts have 
 Note the sibling defect this exposes: `backfill-chunks` is catalog-wide, so the note should say
 so — see `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`.
 
-- **SHA (experiments):** pending
-- **patch-id:** pending
+- **SHA (experiments):** `45eac50e`
+- **patch-id:** `0f70f33bbc19f0a95ecb08a1966592e63a9b05d0`
+
+**Applied.** The note now names `codescout backfill-chunks`, says explicitly that `reembed=true`
+does *not* reach this population and why (it requeues existing chunk rows; these artifacts have
+none), and states the CLI's scope — `--project` by default, `--all` for the catalog.
+
+**The test was part of the defect and is fixed with it.** It asserted
+`note.contains("reembed=true")` under the comment *"the note must name the ESCAPE, not only the
+condition"*. The instinct was right and the value was wrong, so it passed throughout while the
+note sent every reader into an 8-minute no-op. It now asserts in **both** directions — that the
+note names `backfill-chunks`, and that it does *not* prescribe `reembed` as the escape — because
+either assertion alone is satisfiable by the wrong text. Pinning the whole sentence would red on
+every rewording and is deliberately avoided; per `CLAUDE.md` § *Testing Discipline* this buys
+arrival, not correctness, and arrival is what was missing.
+
+Mutation run: restoring the old remedy text reds the test, and the failure message prints the
+whole note so the next reader sees which sentence is wrong rather than a boolean.
 
 ## Tests added
 
@@ -177,4 +193,3 @@ confirm it reds against the current string before it greens against the new one.
 - `src/cli/backfill_chunks.rs` — why it is a CLI
 - `docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md` — the state itself, archived as fixed; the fix stops new entries and cannot heal existing rows
 - `CLAUDE.md` § *Testing Discipline* — "a suite tests a guard's PREDICATE and never its REMEDY TEXT"
-

@@ -1,14 +1,14 @@
 ---
 id: bf5e57977f5b6af9
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `BackfillReport::missing_file` counts every read failure and reports it as "no longer on disk"'
 owners:
 - marius
 tags:
 - cluster/record-asserts-an-unchecked-completion
 topic: backfill error classification
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 related: []
@@ -151,8 +151,36 @@ classifier exclusion for the second, an operator action for the third. Consider 
 classifier should admit a `.md` file whose bytes are a ZIP container at all — that is the upstream
 half, and closing it would empty this arm rather than only labelling it.
 
-- **SHA (experiments):** pending
-- **patch-id:** pending
+- **SHA (experiments):** `45eac50e`
+- **patch-id:** `0f70f33bbc19f0a95ecb08a1966592e63a9b05d0`
+
+> **The struct quoted in § *Root cause* is the PRE-FIX shape** and no longer matches the tree.
+> `BackfillReport` now has six fields, not four. Left as quoted because a § *Root cause* is a
+> record of what was wrong — but marked, because a quoted struct reads as *evidence* rather than
+> prose, so a reader trusts it harder than it deserves and it decays just as fast. Generalised by
+> sessionId `59112612` while working an unrelated bug whose own fix plan was one field stale:
+> **a measurement of an interface, recorded and then outlived by the interface.**
+
+**Applied.** `Err(_)` becomes `match e.kind()` into three counters — `missing_file`
+(`NotFound`, the only arm whose documented `reindex` remedy actually applies),
+`unreadable_encoding` (`InvalidData` — a binary payload behind a text extension, which `reindex`
+can never clear because the file is present), and `unreadable_other` (permissions, I/O, a
+directory — deliberately not folded into either, because both of those name a remedy and this one
+means "go look").
+
+**Fixture note, because it is the reason this nearly shipped untested.** The first version wrote
+`b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00\xdf\xa4"` — the real file's magic bytes,
+truncated. That literal is **valid UTF-8**: `0xDF` opens a two-byte sequence and `0xA4` is a legal
+continuation, decoding to U+07E4. `read_to_string` succeeded, the artifact embedded normally, and
+the test passed while asserting nothing. Invalidity begins at `0xD2`, which opens a sequence `l`
+(0x6C) cannot continue — byte 16, matching the real artifact. The literal now carries `\xd2l`, an
+annotation on the fixture line saying what breaks if it is shortened, and an
+`assert!(read_to_string(&binary).is_err())` guard so a future truncation reds immediately rather
+than going quiet. The mutation run caught this, not review.
+
+**Discrimination:** the test asserts `unreadable_encoding == 1` **and** `missing_file == 1` in the
+same run, with one genuinely-deleted file present. A single `Err(_)` arm reports `missing_file:
+2`, so either assertion alone would still pass — it is the pair that separates them.
 
 ## Tests added
 
@@ -175,4 +203,3 @@ Edit the `read_to_string` arm in `backfill_chunk_vectors` (`src/librarian/indexe
 
 - `src/librarian/indexer.rs` — `BackfillReport` and the `Err(_)` arm, both from `488192e8`
 - `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md` — why an artifact in an unrelated repo showed up in this run at all
-
