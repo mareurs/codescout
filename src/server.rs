@@ -698,10 +698,18 @@ impl CodeScoutServer {
             })
             .await
             .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
+        let session = crate::tools::session_key::resolve(
+            std::env::var("CODESCOUT_SESSION_ID").ok(),
+            crate::tools::session_key::HARNESS_SESSION_VARS
+                .iter()
+                .filter_map(|v| std::env::var(v).ok().map(|val| (*v, val))),
+        );
+        let holder = format!("codescout:{} {name}", session.id().unwrap_or("anonymous"));
         match crate::agent::acquire_write_guard(
             mutex,
             fd_lock,
             std::time::Duration::from_secs(timeout_secs),
+            &holder,
         )
         .await
         {

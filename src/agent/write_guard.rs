@@ -10,9 +10,10 @@
 //! reverse order on drop (flock released first, then async mutex).
 
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs4::fs_std::FileExt;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -32,7 +33,66 @@ impl Drop for WriteGuard {
         // Release the flock explicitly — documents intent. Closing the fd
         // would also release it, but we keep the File alive in an Arc across
         // calls, so an explicit unlock is required.
+        // Truncate BEFORE unlocking. The reverse order leaves a window in which
+        // the next holder has already taken the flock and written its record,
+        // and this truncate erases it — reporting a live holder as anonymous.
+        let _ = self.file.set_len(0);
         let _ = FileExt::unlock(&*self.file);
+    }
+}
+
+/// Milliseconds since the Unix epoch, or 0 if the clock is before it.
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// The holder record written into `.codescout/write.lock`: `<epoch_ms>\t<holder>`.
+///
+/// `IC-17` layer 2 — a shared resource carries an owner. The model is
+/// `.git/session-stage-log`, which answered in one command a question three
+/// sessions had been answering from memory.
+///
+/// ORDERING IS THE CORRECTNESS ARGUMENT, not the format: the record is written
+/// AFTER the flock is taken and truncated BEFORE it is released, so the only
+/// process that can have written it is the one holding the lock. That is what
+/// makes it trustworthy without a second lock protecting it.
+fn write_holder_record(file: &File, holder: &str) -> std::io::Result<()> {
+    let mut f: &File = file;
+    f.set_len(0)?;
+    f.seek(SeekFrom::Start(0))?;
+    write!(f, "{}\t{}", now_ms(), holder)?;
+    f.flush()
+}
+
+/// Read the holder record, or `None` when it is absent, empty or unparseable.
+///
+/// Every `None` branch means "no usable owner information" and NEVER "no
+/// holder" — the flock already established that someone holds it. The caller
+/// must not turn a `None` into a claim that the lock is free.
+fn read_holder_record(file: &File) -> Option<(u128, String)> {
+    let mut f: &File = file;
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).ok()?;
+    let (ts, holder) = buf.trim_end().split_once('\t')?;
+    let holder = holder.trim();
+    if holder.is_empty() {
+        return None;
+    }
+    Some((ts.parse().ok()?, holder.to_string()))
+}
+
+/// `12m10s` rather than `730s` — the measured hold in the bug this closes was
+/// 12m10s, and a bare second count reads as an error at that magnitude.
+fn human_elapsed(since_ms: u128) -> String {
+    let secs = now_ms().saturating_sub(since_ms) / 1000;
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{:02}s", secs / 60, secs % 60)
     }
 }
 
@@ -48,6 +108,7 @@ pub async fn acquire(
     async_mutex: Arc<AsyncMutex<()>>,
     file: Arc<File>,
     timeout: Duration,
+    holder: &str,
 ) -> Result<WriteGuard, RecoverableError> {
     let start = Instant::now();
 
@@ -91,11 +152,32 @@ pub async fn acquire(
     .unwrap_or(false);
 
     if !acquired {
-        return Err(RecoverableError::with_hint(
-            "another codescout instance is writing to this project",
-            "Retry in a moment — the holder should release shortly.",
-        ));
+        return Err(match read_holder_record(&file) {
+            Some((since_ms, held_by)) => RecoverableError::with_hint(
+                format!("write lock held by {held_by}"),
+                format!(
+                    "Held for {}. Message the holder rather than retrying — a \
+                     `librarian(reindex, reembed=true)` legitimately holds this for \
+                     minutes, so waiting is not different from asking. If no such \
+                     call is running, the holder has exited and the lock clears with \
+                     its process.",
+                    human_elapsed(since_ms)
+                ),
+            ),
+            None => RecoverableError::with_hint(
+                "another codescout instance is writing to this project",
+                "The holder recorded no identity — an older codescout, or an exit \
+                 between taking the lock and writing the record. Check for a running \
+                 reindex before retrying.",
+            ),
+        });
     }
+
+    // Best effort, and deliberately not fatal: the lock IS held, and failing a
+    // granted acquisition because its metadata did not land would trade a real
+    // capability for a diagnostic. A failed write degrades the NEXT refusal to
+    // the `None` branch above, which says so rather than inventing a holder.
+    let _ = write_holder_record(&file, holder);
 
     Ok(WriteGuard {
         file,
@@ -129,7 +211,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let fd = open_lock_file(dir.path()).unwrap();
         let m = Arc::new(AsyncMutex::new(()));
-        let g = acquire(m, fd, Duration::from_secs(1)).await.unwrap();
+        let g = acquire(m, fd, Duration::from_secs(1), "codescout:t x")
+            .await
+            .unwrap();
         drop(g); // released
     }
 
@@ -146,9 +230,11 @@ mod tests {
         let m_a = Arc::new(AsyncMutex::new(()));
         let m_b = Arc::new(AsyncMutex::new(()));
 
-        let _held = acquire(m_a, fd_a, Duration::from_secs(1)).await.unwrap();
+        let _held = acquire(m_a, fd_a, Duration::from_secs(1), "codescout:t x")
+            .await
+            .unwrap();
 
-        let r = acquire(m_b, fd_b, Duration::from_millis(200)).await;
+        let r = acquire(m_b, fd_b, Duration::from_millis(200), "codescout:t y").await;
         assert!(r.is_err(), "second process should time out");
     }
 
@@ -159,15 +245,21 @@ mod tests {
         let fd_b = open_lock_file(dir.path()).unwrap();
 
         {
-            let _g = acquire(Arc::new(AsyncMutex::new(())), fd_a, Duration::from_secs(1))
-                .await
-                .unwrap();
+            let _g = acquire(
+                Arc::new(AsyncMutex::new(())),
+                fd_a,
+                Duration::from_secs(1),
+                "codescout:t x",
+            )
+            .await
+            .unwrap();
         } // guard drops here → flock released
 
         let r = acquire(
             Arc::new(AsyncMutex::new(())),
             fd_b,
             Duration::from_millis(500),
+            "codescout:t y",
         )
         .await;
         assert!(r.is_ok(), "second acquire should succeed after first drops");
@@ -178,5 +270,134 @@ mod tests {
         let dir = tempdir().unwrap();
         let _ = open_lock_file(dir.path()).unwrap();
         assert!(dir.path().join(".codescout/write.lock").exists());
+    }
+
+    /// A refused party must be able to ACT, and the only action available is to
+    /// message the holder — so the refusal has to name them.
+    ///
+    /// LOAD-BEARING: `fd_a` and `fd_b` are SEPARATE `open_lock_file` calls. flock
+    /// is per-open-file-description, so cloning one `Arc` would not contend, the
+    /// second acquire would succeed, and this test would assert nothing.
+    #[tokio::test]
+    async fn a_contended_acquire_names_the_holder_not_merely_that_someone_holds_it() {
+        let dir = tempdir().unwrap();
+        let fd_a = open_lock_file(dir.path()).unwrap();
+        let fd_b = open_lock_file(dir.path()).unwrap();
+        let m_a = Arc::new(AsyncMutex::new(()));
+        let m_b = Arc::new(AsyncMutex::new(()));
+
+        let _held = acquire(
+            m_a,
+            fd_a,
+            Duration::from_secs(1),
+            "codescout:sid-alpha reindex",
+        )
+        .await
+        .unwrap();
+
+        let err = acquire(
+            m_b,
+            fd_b,
+            Duration::from_millis(200),
+            "codescout:sid-beta edit_file",
+        )
+        .await;
+        let err = match err {
+            Ok(_) => panic!("a second open-file-description must contend"),
+            Err(e) => e,
+        };
+
+        let rendered = format!("{} {:?}", err.message, err.guidance);
+        assert!(
+            rendered.contains("sid-alpha"),
+            "the refusal must name the HOLDER — a refused party cannot message an \
+             unnamed one: {rendered}"
+        );
+        // Discriminator: kills an implementation that echoes the CALLER's own
+        // holder string back, which would satisfy the assertion above.
+        assert!(
+            !rendered.contains("sid-beta"),
+            "must name the holder, not the refused caller: {rendered}"
+        );
+    }
+
+    /// Releasing must clear the record. Otherwise the NEXT holder — one whose own
+    /// record write failed — is reported under the PREVIOUS holder's name, which
+    /// is strictly worse than anonymous: it sends a refused party to message
+    /// someone who has already exited.
+    ///
+    /// LOAD-BEARING: the pre-drop assertion is the control. Without it, a build
+    /// in which the record is never written at all would satisfy the post-drop
+    /// assertion and this test would be monotone under the feature's removal.
+    #[tokio::test]
+    async fn releasing_the_lock_clears_the_holder_record() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join(".codescout/write.lock");
+        let fd = open_lock_file(dir.path()).unwrap();
+        let m = Arc::new(AsyncMutex::new(()));
+
+        let g = acquire(m, fd, Duration::from_secs(1), "codescout:sid-gamma reindex")
+            .await
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&lock)
+                .unwrap()
+                .contains("sid-gamma"),
+            "control: the record must exist WHILE held, or the assertion below \
+             passes against a build that never writes one"
+        );
+
+        drop(g);
+        assert_eq!(
+            std::fs::read_to_string(&lock).unwrap(),
+            "",
+            "the record must be cleared on release"
+        );
+    }
+
+    /// The hint must report the elapsed hold and must not promise a short one.
+    ///
+    /// The superseded text said "the holder should release shortly" against a
+    /// measured 12m10s reindex — a claim, and a false one. Both assertions are
+    /// needed: the absence check alone is monotone under deleting the whole
+    /// message, so the positive one carries the discrimination.
+    #[tokio::test]
+    async fn the_refusal_reports_elapsed_hold_and_promises_no_deadline() {
+        let dir = tempdir().unwrap();
+        let fd_a = open_lock_file(dir.path()).unwrap();
+        let fd_b = open_lock_file(dir.path()).unwrap();
+        let m_a = Arc::new(AsyncMutex::new(()));
+        let m_b = Arc::new(AsyncMutex::new(()));
+
+        let _held = acquire(
+            m_a,
+            fd_a,
+            Duration::from_secs(1),
+            "codescout:sid-delta reindex",
+        )
+        .await
+        .unwrap();
+        let r = acquire(
+            m_b,
+            fd_b,
+            Duration::from_millis(200),
+            "codescout:sid-eps edit_file",
+        )
+        .await;
+        let err = match r {
+            Ok(_) => panic!("a second open-file-description must contend"),
+            Err(e) => e,
+        };
+
+        let rendered = format!("{} {:?}", err.message, err.guidance);
+        assert!(
+            rendered.contains("Held for"),
+            "the hint must report elapsed hold: {rendered}"
+        );
+        assert!(
+            !rendered.contains("shortly"),
+            "must not promise a deadline it cannot know — the superseded text was \
+             wrong by two orders of magnitude against a 12m10s reindex: {rendered}"
+        );
     }
 }
