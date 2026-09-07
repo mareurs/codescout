@@ -1,15 +1,14 @@
 ---
-id: '2fa5dc75f5b53efb'
+id: 6974bdb461f923d6
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: four more test files (15 tests) are still orphaned by the 2026-05-16 crate dissolution, one compile error from building'
 tags:
 - cluster/declared-not-wired
 - tests
 - cargo-targets
 - refactor-fallout
-claimed_at: 2026-09-07
-claimed_by: 59112612-5fc8-4b31-8c8c-e19220d99eac
+closed: 2026-09-07
 ---
 
 ## Summary
@@ -106,6 +105,12 @@ tests pass, and that signal is destroyed by mixing it with unrelated edits in th
 
 
 ## Outcome — 2026-09-07
+
+**Fixed on `experiments` at `3a4ddec2`**, patch-id
+`7bd230a38dc097d5f80704e410bbbe5f6f9a5cb8`. The SHA is positional and dies when
+`experiments` is rebased; the patch-id is a content hash of the diff and survives both
+rebase and cherry-pick, so the pair stays resolvable whichever way this reaches `master`.
+This host does not push, so the commit is local to `experiments` for now.
 
 All four declared in `tests/librarian/main.rs`. `cargo test --test librarian` now
 enumerates **19 tests** (4 pre-existing `companion_hint` + the 15 above): **17 run and
