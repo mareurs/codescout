@@ -149,6 +149,25 @@ has "points at the class"            "$OUT" "OB-20"
 has "remedy names the AUTHOR step"   "$OUT" "AUTHOR"
 has "remedy names the OPERATOR step" "$OUT" "OPERATOR"
 
+# THE THIRD ADDRESSEE-SHAPED FAILURE, FOUND BY USING THE GUARD RATHER THAN BY READING IT.
+#
+# The two assertions above fixed a message that named ONE party. They cannot catch a
+# message that names both parties and asks the WRONG QUESTION of the first. Shipped text
+# read "ASK THE AUTHOR WHETHER IT IS WITHHELD", a binary -- and on the guard's first real
+# refusal (2026-09-07) the author's true state was neither branch: not withheld, and not
+# cleared either, because "push only when the user asks" is every session's standing
+# instruction, so an author mid-task holds no authorisation to give. They replied "do not
+# wait on me". A reader taking "not withheld" as clearance satisfies the guard and bypasses
+# it in one step, and the old closing line -- "the author is the only one who can clear it"
+# -- actively sent them to wait on that party.
+#
+# Same reasoning as above: the sentence is not pinned, the SHAPE is. This reds on deleting
+# the third state and survives rewording it, and "not withheld is not cleared" is the whole
+# claim. Note what made it findable: the predicate was correct, both addressees were named,
+# and the suite was green -- it took a real author in the uncovered state to surface it.
+# Reported by sessionId 8dba66b0-af4b-4cda-a333-54a0605b318e, who was that author.
+has "remedy names the UNCLEARED third state" "$OUT" "UNCLEARED"
+
 echo
 echo "== the ack is per-session, not a switch =="
 run "$ALICE" "$BOB"   "refs/heads/main $TIP refs/heads/main $BASE"

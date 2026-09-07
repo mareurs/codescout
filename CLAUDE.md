@@ -124,8 +124,20 @@ premise that every addition falsifies.
   rewrite of the surrounding prose that kept both addressees stayed **green**. It cannot tell you
   the remedy is *correct*, only that both steps survive; *"the sideways-only form cannot silently
   return"* is the whole claim, and it is the regression that actually happened.
+  **And that shape test has a measured CEILING, found by using the guard rather than by reading it:
+  naming both addressees does not check that the QUESTION asked of the first is answerable.** The
+  text asked the author *whether it is withheld* — a binary — and on the guard's first real refusal
+  (2026-09-07) the author's state was **neither branch: not withheld, and not cleared either**,
+  because *"push only when the user asks"* is every session's standing instruction, so an author
+  mid-task holds nothing to give. They replied *"do not wait on me"*, while the guard's closing line
+  still read *"the author is the only one who can clear it"* — sending the reader to wait on a party
+  who was waiting on a person too. A reader taking *"not withheld"* as clearance satisfies this
+  guard and bypasses it in the same step. Both addressees were named, the predicate was right, and
+  57 assertions were green. So **the shape test buys ARRIVAL and never ANSWERABILITY — ask what the
+  addressee can reply, not only who they are**, and enumerate the states their answer can take.
   (`observer-blindness:OB-20`; raised by sessionId `4a2f34f7-0669-487d-9ce9-39b77881642f`, who
-  then retracted their own *"there may be no fix"* as over-stated toward giving up.)
+  then retracted their own *"there may be no fix"* as over-stated toward giving up; the ceiling
+  reported by the author it happened to, sessionId `8dba66b0-af4b-4cda-a333-54a0605b318e`.)
 - **A count of a defect population must arrive with its unit or not at all.** Derive it, don't cite
   it: one population yielded four defensible numbers inside an hour, each the right answer to a
   different question — and near enough to each other that no reader would have queried any of them.

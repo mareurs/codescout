@@ -156,7 +156,19 @@ $foreign_report
   pushed yet, and git records nothing that tells them apart. This guard exists so
   the question gets asked at the one moment it can still be answered.
 
-  ASK THE AUTHOR WHETHER IT IS WITHHELD — that is the ONE fact only they hold.
+  ASK THE AUTHOR WHICH OF THREE STATES IT IS IN — three, not two, and the middle one
+  is the common case. That is the fact only they hold:
+
+    withheld              pending their operator's decision. You hold.
+    not withheld, UNCLEARED   ordinary mid-task work, and they have no push
+                          authorisation of their own either, because "push only when
+                          the user asks" is every session's standing instruction.
+    cleared               their operator said push; they simply have not yet.
+
+  "Not withheld" is an answer about their INTENT. It is never an answer about your
+  authorisation, and reading it as one is how this guard gets satisfied and bypassed
+  in the same breath.
+
   The sid above is the address; resolve it to a live session with:
 
       scripts/peer-sessions.sh
@@ -190,7 +202,15 @@ $foreign_report
 
   That sends that commit and all its ANCESTORS and nothing above it. It cannot skip
   a commit BELOW yours — if the foreign commit is underneath, there is no refspec
-  that helps and the author is the only one who can clear it.
+  that helps. AND THE AUTHOR CANNOT CLEAR IT EITHER, unless their operator has
+  already said so. Measured 2026-09-07 on this guard's first real refusal: the author
+  answered "not withheld" and "do not wait on me" in one message, holding no push
+  authorisation themselves. This line previously read "the author is the only one who
+  can clear it", which sends you to wait on a party who may be waiting on a person
+  too — the same standoff this guard exists to prevent, wearing the guard's own text.
+
+  What the author CAN do is push their own work, which needs nothing from you. Ask
+  them to, and ask your own operator in parallel.
 
   Why this guard is here: docs/trackers/observer-blindness.md OB-20.
 EOF
