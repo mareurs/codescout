@@ -122,8 +122,37 @@ None — no fix yet. When one lands, the regression test must observe the **file
 
 ## Resume
 
-Decide between fix directions (1), (2) and (3) — this is a design call, not an investigation. The input worth gathering first: count how many guarded ledgers under `docs/trackers/` actually keep an index table, since direction (1) is free for any that do not and the population may be small. `grep -l 'entry_prefix' docs/trackers/*.md` for the ledgers, then check each for an `## Index` / `## Wins Index` heading.
+**The input this section asked for was MEASURED on 2026-09-07. It does not support direction (1),
+and it points at (3).**
 
+Population: files under `docs/trackers/` (one subdirectory level included) declaring
+`entry_prefix` — **49 guarded ledgers**.
+
+| selector | n | what it actually measures |
+|---|---|---|
+| `^## (…)Index$` heading | 18 | ledgers with a conventionally-named index section |
+| any `h2`–`h4` mentioning "index", case-insensitive | 25 | …plus prose sections *about* indexes |
+| **a row matching `^\| *[A-Z]{1,3}-[0-9]+ *\|`** | **21** | **ledgers that actually maintain entry ROWS** |
+
+**Take 21/49 — 43%.** The other two answer a question about *headings*; this bug is about a
+second **write**, and the write is a row. Recording all three because the spread (18–25) is wide
+enough that any one of them cited bare would have carried a different conclusion, which is
+§ *Testing Discipline*'s rule holding on this file's own evidence.
+
+**What that decides.** Direction (1) — *stop instructing the row* — was costed here as plausibly
+free because "the population may be small". It is not small: it is 43%, and those 21 ledgers keep
+the table as a reading surface. So (1) is free for 28 ledgers and a real loss for 21, which makes
+it a per-ledger judgement rather than a project-wide fix.
+
+**Recommendation: direction (3).** Let `append_entry` accept the row text and write the section
+and the row in ONE file write. It closes the window for the 21 without costing the 28 anything,
+needs no schema inference (which is (2)'s expense — column shapes differ per ledger), and leaves
+the row's prose with the caller. (2) remains the only option if the row should ever be *derived*
+rather than supplied, and nothing here argues for that.
+
+**First-hand instance, this session:** `bug-fix-session-log:F-118` was written with `append_entry`
+(which wrote the section) and then a separate `doc(action="update")` for the index row. The
+interval was about ninety seconds on a checkout with five live sessions.
 ## References
 
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Instance 7* — the capture this was observed in
