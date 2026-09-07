@@ -168,6 +168,26 @@ has "remedy names the OPERATOR step" "$OUT" "OPERATOR"
 # Reported by sessionId 8dba66b0-af4b-4cda-a333-54a0605b318e, who was that author.
 has "remedy names the UNCLEARED third state" "$OUT" "UNCLEARED"
 
+# THE RESOLUTION, WHICH THE GUARD WITHHELD WHILE CORRECTLY DESCRIBING THE PROBLEM.
+#
+# Every version up to now told you who to ask and never what the exit looks like. There is a
+# mechanical one: an interleaved stack clears BY ITSELF, at any depth, because each commit
+# becomes pushable by its own author as soon as the one below is published. Push yours, say
+# "done", they push theirs. Nobody acks a foreign sid; nobody's operator is asked to authorise
+# another session's work. Demonstrated 2026-09-07 on a six-deep stack across three sessions --
+# two rungs in under a minute, after it had stood blocked with both parties correctly refusing.
+#
+# The eight-hour standoff in OB-20 was FOUR sessions failing to find this, and the guard written
+# afterwards still did not name it: describing a blocker accurately is not the same as naming its
+# exit, and a reader who has the diagnosis and no procedure waits. That is a distinct failure from
+# the two above -- not a missing addressee, not an unanswerable question, but a correct message
+# with no way out of it.
+#
+# Reds on deleting the ladder, survives rewording it. Property found by sessionId
+# 8dba66b0-af4b-4cda-a333-54a0605b318e, by using the guard rather than reading it -- the second
+# time that route beat review on this same file in one morning.
+has "remedy names the LADDER resolution" "$OUT" "LADDER"
+
 echo
 echo "== the ack is per-session, not a switch =="
 run "$ALICE" "$BOB"   "refs/heads/main $TIP refs/heads/main $BASE"

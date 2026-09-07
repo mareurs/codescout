@@ -212,6 +212,32 @@ $foreign_report
   What the author CAN do is push their own work, which needs nothing from you. Ask
   them to, and ask your own operator in parallel.
 
+  THE STACK IS A LADDER, AND IT CLEARS WITH ZERO ACKS. That is the resolution, and it
+  holds at any depth and any interleaving: each commit becomes pushable BY ITS OWN
+  AUTHOR the moment the one below it is published. You push yours by refspec, say
+  "done", they push theirs, say "done", up to the top. Every commit is published by
+  the party who wrote it, no operator is ever asked to authorise someone else's work,
+  and no sid is ever acked. Demonstrated 2026-09-07 on a six-deep stack shared by
+  three sessions: two rungs cleared inside a minute once the property was noticed,
+  after the stack had stood blocked while both parties correctly refused to publish
+  each other's work. FOUR SESSIONS MISSED IT FOR EIGHT HOURS AND THIS GUARD DID NOT
+  MENTION IT. The coordination it needs is the word "done", and nothing else.
+
+  Two things break the ladder, so use a refspec at every rung: pushing the BRANCH
+  NAME publishes the whole stack including commits above yours, and so does taking a
+  rung out of order. Check your rung is clear before you push it, not after:
+
+      git rev-list --count origin/$branch..<your-sha>      must be 1
+
+  Check it BEFORE the push, not after: the push output tells you what happened, the
+  count tells you what is about to, and only the second can stop you.
+
+  THE LADDER'S PRECONDITION, and it is the reason this guard reads trailers at all: it
+  holds only while every commit in the stack has an IDENTIFIED author. That is what
+  the Session-Id trailer buys. Attribute the stack by adjacency instead and the ladder
+  is destroyed — you cannot know whose rung is whose, so there is no order to take
+  them in and every step is a guess about someone else's work.
+
   Why this guard is here: docs/trackers/observer-blindness.md OB-20.
 EOF
 exit 1
