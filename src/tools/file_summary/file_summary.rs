@@ -860,7 +860,39 @@ fn resolve_json_segment<'a>(
     match seg {
         Segment::Key(k) => match value {
             Value::Object(obj) => obj.get(k).map(Cow::Borrowed).ok_or_else(|| {
-                let available = obj.keys().take(10).cloned().collect::<Vec<_>>().join(", ");
+                // WINDOWED, AND THE WINDOW SAYS SO. This was `take(10)` with no marker:
+                // the same defect `resolve_section_range` above already fixed for
+                // headings, at the sibling site, with the same bias. `serde_json` is
+                // built with `preserve_order`, so `keys()` yields INSERTION order —
+                // head-only truncation drops the keys added LAST, which in a report
+                // object are the newest and therefore exactly the ones a caller is
+                // reaching for.
+                //
+                // Measured 2026-09-07 on `doctor`'s `catalog_health`: 13 keys, and
+                // `take(10)` elided `open_bug_source_citations`, `audit` and `hint`. A
+                // session then read the resulting complete-looking list as evidence that
+                // the running binary did not contain the code that inserts them, and came
+                // one step from reporting a shipped fix as missing. The list was not
+                // wrong about any key it named; it was wrong by being read as total.
+                //
+                // The same file prints `absence from a cut list is not evidence` above a
+                // truncated `violations` array, so the rule was already stated one field
+                // away from where it was needed. Keep both ends and state the elision;
+                // the rationale and the archived bug file for the heading half live on
+                // `resolve_section_range`'s own HEAD/TAIL constants.
+                const HEAD: usize = 7;
+                const TAIL: usize = 3;
+                let names: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+                let available = if names.len() > HEAD + TAIL {
+                    format!(
+                        "{} … (+{} more) … {}",
+                        names[..HEAD].join(", "),
+                        names.len() - HEAD - TAIL,
+                        names[names.len() - TAIL..].join(", "),
+                    )
+                } else {
+                    names.join(", ")
+                };
                 RecoverableError::with_hint(
                     format!("path segment '{}' not found", k),
                     format!("Available keys: {}", available),

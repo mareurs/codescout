@@ -472,6 +472,68 @@ fn extract_json_path_not_found() {
     assert!(result.is_err());
 }
 
+/// A capped key list must SAY it was capped, and must keep the TAIL.
+///
+/// `resolve_json_segment`'s hint was `obj.keys().take(10)` with no marker.
+/// `serde_json` is built with `preserve_order`, so `keys()` is insertion order and
+/// head-only truncation drops the keys added LAST — the newest, and the ones a
+/// caller is most likely reaching for. Measured 2026-09-07 on `doctor`'s
+/// `catalog_health`: 13 keys, the three elided were `open_bug_source_citations`,
+/// `audit` and `hint`, and a session read the resulting complete-looking list as
+/// evidence that the running binary lacked the code inserting them. The list named
+/// no key wrongly; it was wrong by being readable as total.
+///
+/// THREE DIRECTIONS, because each assertion alone is monotone under a different
+/// wrong implementation:
+///
+/// - the elision is stated with its true count -> reds on silent truncation
+/// - the tail survives -> reds on a head-only window, even one that marks itself
+/// - under the cap: all keys, no marker -> reds on one that always marks
+#[test]
+fn json_path_key_miss_hint_states_its_elision_and_keeps_the_tail() {
+    // 13 keys, insertion-ordered k00..k12. BOTH details are load-bearing: the count
+    // must exceed HEAD + TAIL (7 + 3), or the windowing branch never runs and this
+    // passes without discriminating anything; and `k12` must be the FINAL insertion,
+    // or the tail assertion stops distinguishing a head-only window from a two-ended
+    // one. A tidy-up that shrinks the loop or sorts the keys silently guts this test.
+    let mut obj = serde_json::Map::new();
+    for i in 0..13 {
+        obj.insert(format!("k{i:02}"), serde_json::json!(i));
+    }
+    let content = serde_json::to_string(&serde_json::Value::Object(obj)).unwrap();
+    let err = extract_json_path(&content, "$.absent")
+        .unwrap_err()
+        .to_string();
+
+    // The cut is stated, with the number actually elided (13 - 7 - 3). This pins
+    // HEAD/TAIL as a contract rather than an implementation detail: changing the
+    // window is a decision, so it should change this number deliberately, not drift.
+    assert!(
+        err.contains("(+3 more)"),
+        "hint must name how many keys it elided: {err}"
+    );
+    // The tail survives. The bug named k00..k09 and dropped exactly these.
+    assert!(
+        err.contains("k12") && err.contains("k11") && err.contains("k10"),
+        "hint must keep the last-inserted keys: {err}"
+    );
+
+    // Under the cap: all three keys named and NO marker. Without this case an
+    // implementation that always prints a marker satisfies both assertions above,
+    // and one that always truncates is indistinguishable from one that windows.
+    let small_err = extract_json_path(r#"{"a": 1, "b": 2, "c": 3}"#, "$.absent")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        small_err.contains("a, b, c"),
+        "an under-cap object must list every key: {small_err}"
+    );
+    assert!(
+        !small_err.contains("more)"),
+        "no elision marker when nothing was elided: {small_err}"
+    );
+}
+
 #[test]
 fn extract_json_path_root() {
     let content = r#"{"a": 1}"#;
