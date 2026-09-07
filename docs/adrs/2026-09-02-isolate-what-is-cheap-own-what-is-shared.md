@@ -16,7 +16,10 @@ topic: multi-agent contention strategy
 # ADR: isolate what is cheap to isolate, own what must be shared, and stop storing shared mutable state
 
 - **Date:** 2026-09-02
-- **Status:** proposed (no code written)
+- **Status:** proposed. Layers 1, 3 and 4 unwritten. **Layer 2 has one shipped instance**
+  — `.codescout/write.lock` at `d1b6146d`, 2026-09-07 (§ *Layer 2*, § *Sites*). The
+  superseded reading of this field was *"proposed (no code written)"*, corrected the day it
+  stopped being true rather than left to be discovered.
 - **Deciders:** Marius (with session `f13f8169-93a1-4392-95d1-8774d296e0c0`)
 - **Commits:** none yet. Diagnosis measured on `experiments` at `b8c226df`, during an evening
   with **9 sessions live in this checkout** (8 peers plus me, by socket enumeration) and 2
@@ -182,6 +185,20 @@ server's active project.
 The principle is `OB-8`: *a shared resource carries no owner, so seeing the peer does not help.*
 Ownership metadata is what makes sharing survivable — not another refusal.
 
+**First instance shipped 2026-09-07 at `d1b6146d`, and it is a FOURTH site this section did
+not name:** `.codescout/write.lock`. The write guard's refusal now reads *"write lock held
+by `codescout:<sid> <tool>` — Held for 12m10s"* instead of *"another codescout instance is
+writing to this project — retry shortly"*, a hint that was wrong by two orders of magnitude
+against a measured 12m10s reindex.
+
+**The transferable part is the ORDERING, not the record format**, and it is what any further
+layer-2 site should copy: the record is written **after** the lock is taken and truncated
+**before** it is released, so the only process that can have written it is the one holding
+the lock. That is what makes an owner field trustworthy without a second lock protecting it
+— and it is the property `.git/session-stage-log` gets from being hook-driven rather than by
+design. A site that writes its owner field outside the locked interval has an owner field
+that can lie.
+
 ### Layer 3 — `target/` per lane
 
 Isolate on the **feature matrix** (`--no-default-features` vs default), which is what actually
@@ -253,6 +270,12 @@ stay flat or rise. If writes fall instead, the spool has added friction rather t
 - `scripts/pre-commit-ledger-counts.py`, `scripts/pre-commit-foreign-index.sh`,
   `scripts/pre-commit-unreviewed-content.sh` — populations shrink
 - `.git/session-stage-log` — the layer-2 model to copy
+- `.codescout/write.lock` — **layer 2, DONE** at `d1b6146d` (patch-id
+  `8288a3733cba958ed0a603240c9860fafaae460a`). Was missing from this list and from § *Layer
+  2*; it was the cheapest of the three, because `open_lock_file` already opened the file
+  `.write(true)` and never wrote a byte to it.
+  Closes the operational half of
+  `docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`.
 
 ## References
 
