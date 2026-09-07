@@ -1026,10 +1026,22 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
     Ok(ids.len())
 }
 
-/// What a [`backfill_chunk_vectors`] run did. Four counts rather than three,
-/// because a file that is *gone* and a file that is *empty* are different
-/// outcomes with different remedies, and folding them into one number would make
-/// the report say "skipped" about two unrelated things.
+/// What a [`backfill_chunk_vectors`] run did. Six counts rather than four, and the
+/// split is the same argument the original four rested on: a file that is *gone*, a
+/// file that is *not text*, and a file that is *unreadable* are different outcomes
+/// with different remedies, and folding them into one number makes the report assert
+/// a cause it never checked.
+///
+/// **The fourth count used to do exactly that.** `missing_file` was incremented from
+/// `Err(_)` on `read_to_string`, which discards the [`std::io::ErrorKind`], while its
+/// own doc comment said "no longer on disk" and named a remedy conditioned on that
+/// (`librarian(action="reindex")` owns removal). Found 2026-09-07 by chasing the one
+/// artifact still vectorless after a full backfill: it was present, readable, 20133
+/// bytes, and a `.docx` carrying a `.md` extension — ZIP magic `PK\x03\x04`, failing
+/// UTF-8 at byte 16 — so the read returned `InvalidData`. The named remedy could never
+/// clear it: `reindex` removes rows whose file is gone, and that file is not. The count
+/// sat at 1 forever, pointing at a repair that cannot apply.
+/// `docs/issues/2026-09-07-missing-file-counts-every-read-failure-including-non-utf8.md`
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BackfillReport {
     /// Chunk vectors written.
@@ -1037,9 +1049,21 @@ pub struct BackfillReport {
     /// Artifacts whose body yielded no embeddable chunk (blank, or
     /// frontmatter-only). These are correctly vectorless and will stay so.
     pub skipped_empty: usize,
-    /// Artifacts whose file is no longer on disk. A catalog-vs-filesystem drift
-    /// this run declines to repair — `librarian(action="reindex")` owns removal.
+    /// Artifacts whose file is genuinely absent (`ErrorKind::NotFound`). A
+    /// catalog-vs-filesystem drift this run declines to repair —
+    /// `librarian(action="reindex")` owns removal, and for THIS arm that remedy
+    /// actually applies.
     pub missing_file: usize,
+    /// Artifacts whose file is present but is not valid UTF-8
+    /// (`ErrorKind::InvalidData`) — a binary payload behind a text extension.
+    /// `reindex` will not clear these: the file is on disk, so there is nothing for
+    /// it to remove, and `NOT EXISTS` re-selects the row on every future run. The
+    /// remedy is upstream — exclude it at the classifier, or fix the extension.
+    pub unreadable_encoding: usize,
+    /// Artifacts whose file could not be read for any other reason — permissions,
+    /// I/O error, a path that is a directory. Deliberately not folded into either
+    /// arm above: both of those name a specific remedy, and this one means "go look".
+    pub unreadable_other: usize,
     /// Artifacts visited.
     pub artifacts: usize,
 }
@@ -1076,19 +1100,45 @@ const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 /// caller is a trap for the second one.
 ///
 /// `batch` is the flush size; 100 matches [`index_repo`]'s own flush.
+///
+/// `root_prefix` scopes the walk to artifacts whose `abs_path` matches it (pass the value
+/// already suffixed with `%`, as the `vectorless` query does). `None` walks the whole catalog.
+///
+/// **The scope parameter exists because its absence was a defect, not for symmetry.** One
+/// catalog serves every project on a host, and this function had no way to be told which one
+/// the caller meant — its page query carried no `abs_path` predicate at all. Meanwhile the
+/// `vectorless` counter that sends people here IS root-scoped (`WHERE a.abs_path LIKE ?1`), so
+/// the number you act on and the population you touch were different by construction. Measured
+/// 2026-09-07: invoked to repair the 10 artifacts reported for one project, it processed 2807
+/// across every repo on the host — 61,613 chunks, ~7.4 GB, ~11 minutes against a shared
+/// embedder, with nothing before or during the run naming a scope.
+/// `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`
+///
+/// **The resume cursor is keyed by scope**, so an interrupted project-scoped run cannot make a
+/// later catalog-wide run resume past rows it never examined. A *completed* run clears its own
+/// cursor, so this only bites in the interrupted case — which is the case the cursor exists for,
+/// and the one where a shared key would be silent.
 pub async fn backfill_chunk_vectors(
     catalog: &parking_lot::Mutex<Catalog>,
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
+    root_prefix: Option<&str>,
 ) -> Result<BackfillReport> {
     use crate::librarian::catalog::gc::{get_meta, set_meta};
 
     let flush = batch.max(1);
     let mut report = BackfillReport::default();
 
+    // Scope-keyed; see the doc comment. A shared key would let an interrupted scoped run
+    // advance the cursor a later catalog-wide run resumes from.
+    let cursor_key = match root_prefix {
+        Some(p) => format!("{BACKFILL_CURSOR}:{p}"),
+        None => BACKFILL_CURSOR.to_string(),
+    };
+
     let (mut cur_updated, mut cur_id) = {
         let cat = catalog.lock();
-        match get_meta(&cat.conn, BACKFILL_CURSOR)? {
+        match get_meta(&cat.conn, &cursor_key)? {
             Some(s) => match s.split_once('|') {
                 Some((u, i)) => (u.parse::<i64>().unwrap_or(i64::MIN), i.to_string()),
                 None => (i64::MIN, String::new()),
@@ -1110,19 +1160,29 @@ pub async fn backfill_chunk_vectors(
         // writers on a shared catalog.
         let page: Vec<(String, String, Option<String>, i64)> = {
             let cat = catalog.lock();
-            let mut stmt = cat.conn.prepare(
+            let sql = format!(
                 "SELECT a.id, a.abs_path, a.title, a.updated_at FROM artifact a \
                  WHERE NOT EXISTS ( \
                    SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
                  ) \
-                 AND (a.updated_at > ?1 OR (a.updated_at = ?1 AND a.id > ?2)) \
+                 AND (a.updated_at > ?1 OR (a.updated_at = ?1 AND a.id > ?2)){} \
                  ORDER BY a.updated_at, a.id LIMIT ?3",
-            )?;
-            let rows = stmt
-                .query_map(rusqlite::params![cur_updated, cur_id, flush as i64], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
+                if root_prefix.is_some() {
+                    " AND a.abs_path LIKE ?4"
+                } else {
+                    ""
+                }
+            );
+            let mut stmt = cat.conn.prepare(&sql)?;
+            let row = |r: &rusqlite::Row<'_>| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?));
+            let rows = match root_prefix {
+                Some(p) => stmt
+                    .query_map(rusqlite::params![cur_updated, cur_id, flush as i64, p], row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+                None => stmt
+                    .query_map(rusqlite::params![cur_updated, cur_id, flush as i64], row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            };
             rows
         };
         if page.is_empty() {
@@ -1136,8 +1196,17 @@ pub async fn backfill_chunk_vectors(
 
             let content = match std::fs::read_to_string(&abs_path) {
                 Ok(c) => c,
-                Err(_) => {
-                    report.missing_file += 1;
+                // Match on the KIND. `Err(_)` folded absence, a non-UTF-8 payload and every
+                // other I/O failure into `missing_file`, whose name asserts the first and
+                // whose named remedy (`reindex` removes rows whose file is gone) can only
+                // clear the first. A present-but-binary file counted as "missing" forever,
+                // re-selected by `NOT EXISTS` on every future run.
+                Err(e) => {
+                    match e.kind() {
+                        std::io::ErrorKind::NotFound => report.missing_file += 1,
+                        std::io::ErrorKind::InvalidData => report.unreadable_encoding += 1,
+                        _ => report.unreadable_other += 1,
+                    }
                     continue;
                 }
             };
@@ -1176,11 +1245,7 @@ pub async fn backfill_chunk_vectors(
         }
         {
             let cat = catalog.lock();
-            set_meta(
-                &cat.conn,
-                BACKFILL_CURSOR,
-                &format!("{cur_updated}|{cur_id}"),
-            )?;
+            set_meta(&cat.conn, &cursor_key, &format!("{cur_updated}|{cur_id}"))?;
         }
     }
 
@@ -1199,7 +1264,7 @@ pub async fn backfill_chunk_vectors(
     // watermark over the corpus's lifetime.
     {
         let cat = catalog.lock();
-        set_meta(&cat.conn, BACKFILL_CURSOR, "")?;
+        set_meta(&cat.conn, &cursor_key, "")?;
     }
     Ok(report)
 }
@@ -1742,7 +1807,7 @@ kind = "memory"
         // would correctly find nothing to do — that is the fix, not a fixture bug.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
             .await
             .unwrap();
         assert_eq!(report.artifacts, 1);
@@ -1819,7 +1884,7 @@ kind = "memory"
         // and one embeddings-off run is the whole of it.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
             .await
             .unwrap();
         assert_eq!(report.artifacts, 1, "sanity: one artifact was reached");
@@ -1851,13 +1916,152 @@ kind = "memory"
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
         std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
 
-        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
             .await
             .unwrap();
         assert_eq!(report.artifacts, 2);
         assert_eq!(report.embedded, 0, "neither had anything to embed");
         assert_eq!(report.skipped_empty, 1, "the blank one");
         assert_eq!(report.missing_file, 1, "the deleted one");
+    }
+
+    /// A scoped run touches only its own root, and leaves the rest of the catalog alone.
+    ///
+    /// **The defect this pins was invisible from the interface.** `backfill_chunk_vectors` had
+    /// no scope parameter and its page query had no `abs_path` predicate, while the CLI wrapping
+    /// it accepted `--project` and was naturally run from inside one repo. One catalog serves
+    /// every project on a host, so a run invoked for 10 artifacts in one repo processed 2807
+    /// across all of them (measured 2026-09-07). Nothing errored and no output named a scope.
+    ///
+    /// Two roots in one catalog is the minimum fixture that can express it: a single-root test
+    /// passes identically whether the predicate is present or absent, which is why the original
+    /// five tests here could not have caught this.
+    #[tokio::test]
+    async fn a_scoped_backfill_leaves_other_roots_untouched() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("projA")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("projB")).unwrap();
+        std::fs::write(tmp.path().join("projA/a.md"), "# A\n\nalpha body\n").unwrap();
+        std::fs::write(tmp.path().join("projB/b.md"), "# B\n\nbravo body\n").unwrap();
+
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        // Induce the absorbing state for BOTH: chunk rows gone, content unchanged.
+        m.lock()
+            .conn
+            .execute("DELETE FROM artifact_chunk", [])
+            .unwrap();
+
+        // Derive the prefix from what the catalog actually stored rather than from
+        // `tmp.path()`: the indexer may canonicalize, and a prefix that silently matches
+        // nothing would make this test pass for the wrong reason.
+        let a_path: String = m
+            .lock()
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE abs_path LIKE '%projA%' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("projA artifact must be catalogued, or the fixture proves nothing");
+        let a_dir = std::path::Path::new(&a_path).parent().unwrap();
+        let prefix = format!("{}%", a_dir.to_string_lossy());
+
+        let scoped = backfill_chunk_vectors(&m, &backfill_svc(), 100, Some(&prefix))
+            .await
+            .unwrap();
+        assert_eq!(
+            scoped.artifacts, 1,
+            "a scoped run must visit ONE artifact; visiting 2 means the path predicate is \
+             absent and the walk is catalog-wide"
+        );
+
+        // The other root is still vectorless — the positive half. Asserting only on
+        // `artifacts == 1` would be satisfied by a run that visited the WRONG one.
+        let b_chunks: i64 = m
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk c JOIN artifact a ON a.id = c.artifact_id \
+                 WHERE a.abs_path LIKE '%projB%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(b_chunks, 0, "projB must be untouched by a projA-scoped run");
+
+        // And an unscoped run still reaches it, so the scoping narrowed rather than broke.
+        let wide = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            wide.artifacts, 1,
+            "the catalog-wide run picks up the root the scoped one skipped"
+        );
+    }
+
+    /// A file that is present but not UTF-8 is `unreadable_encoding`, never `missing_file`.
+    ///
+    /// Reproduces the observed case rather than a synthetic one: a `.docx` carrying a `.md`
+    /// extension (ZIP magic `PK\x03\x04`), which `read_to_string` rejects with
+    /// `ErrorKind::InvalidData`. The old `Err(_)` arm counted it as `missing_file`, whose doc
+    /// named `reindex` removal as the remedy — a repair that can never apply to a file that is
+    /// on disk, so the count sat at 1 forever and `NOT EXISTS` re-selected the row every run.
+    #[tokio::test]
+    async fn a_present_non_utf8_file_is_not_counted_as_missing() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let binary = tmp.path().join("looks-like-markdown.md");
+        std::fs::write(&binary, "# Real\n\nbody\n").unwrap();
+        std::fs::write(tmp.path().join("gone.md"), "# G\n\nbody\n").unwrap();
+
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        m.lock()
+            .conn
+            .execute("DELETE FROM artifact_chunk", [])
+            .unwrap();
+
+        // Now make it binary, keeping the row and the path. This is the real shape: the row
+        // was catalogued while the bytes were readable, or by an earlier classifier.
+        //
+        // THE TRAILING `\xd2l` IS LOAD-BEARING — do not shorten this literal. The ZIP magic
+        // and everything through `\xdf\xa4` is VALID UTF-8: `0xDF` opens a two-byte sequence
+        // and `0xA4` is a legal continuation, decoding to U+07E4. A fixture truncated there
+        // reads back fine, embeds normally, and this test passes while asserting nothing —
+        // which is exactly what its first version did. Invalidity begins at `0xD2`, which
+        // opens a sequence that `l` (0x6C) cannot continue: byte 16, matching the real
+        // artifact this reproduces.
+        std::fs::write(
+            &binary,
+            b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00\xdf\xa4\xd2lZ\x01",
+        )
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(&binary).is_err(),
+            "fixture must be unreadable as UTF-8, or every assertion below is vacuous"
+        );
+        std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
+
+        let report = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            report.unreadable_encoding, 1,
+            "the present-but-binary file must land in its own counter"
+        );
+        assert_eq!(
+            report.missing_file, 1,
+            "and ONLY the genuinely deleted file may be called missing — this is the \
+             discrimination: a single `Err(_)` arm reports 2 here, and both tests below \
+             would still pass"
+        );
+        assert_eq!(report.unreadable_other, 0);
+        assert_eq!(report.embedded, 0, "neither yielded a vector");
     }
 
     /// **A completed run must clear its cursor.** Parked at the end of the
@@ -1879,7 +2083,7 @@ kind = "memory"
         std::fs::write(tmp.path().join("b.md"), "# B\n\nbeta\n").unwrap();
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let first = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+        let first = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
             .await
             .unwrap();
         assert_eq!(first.artifacts, 2);
@@ -1893,7 +2097,7 @@ kind = "memory"
             cat.conn.execute("DELETE FROM artifact_vec_v2", []).unwrap();
         }
 
-        let second = backfill_chunk_vectors(&m, &backfill_svc(), 100)
+        let second = backfill_chunk_vectors(&m, &backfill_svc(), 100, None)
             .await
             .unwrap();
         assert_eq!(

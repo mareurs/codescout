@@ -1,14 +1,14 @@
 ---
 id: '252fe84782103842'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `.gitignore`''s `/.claude/*` is root-anchored, so hook-created nested `.claude/` dirs are never ignored'
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
 topic: gitignore pattern anchoring
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 related: []
@@ -142,8 +142,23 @@ arms and offered the scoped alternative before this file's author wrote the brok
 Independently reproduced by `89d91024-cd66-4361-9300-c55b87b179ea` rather than taken on trust,
 since it contradicted an already-approved plan.
 
-- **SHA (experiments):** pending
-- **patch-id:** pending
+- **SHA (experiments):** `3182c61c`
+- **patch-id:** `370da6629053d1a65af9b2a419409be2a6159733`
+
+Regression test: `tests/hook_config.rs` — `the_claude_skills_negation_survives_the_nested_log_rule`,
+`hook_created_claude_dirs_under_docs_are_ignored`, `the_ignore_verdict_helper_discriminates`.
+Mutation matrix run against the **production path** (`.gitignore` itself), not the test's inputs:
+widening to `**/.claude/` reds the negation test; deleting the scoped rule reds the log test;
+deleting `!/.claude/skills/` reds the non-vacuity guard. Each mutation reds exactly one, and the
+first two are monotone in opposite directions — either alone would miss the other's regression.
+
+**The first version of that test was vacuous, and the mutation run is what caught it.** It
+asserted over `git ls-files -- .claude/skills/`, but `git check-ignore` consults the index, so a
+**tracked** path answers "not ignored" whatever the patterns say — measured with the broken rule
+in place: tracked file default exit 1, same file `--no-index` exit 0 blamed on `**/.claude/`. The
+population was wrong as well as the flag: the harm is the *next* skill added, which is untracked.
+It now probes a path nobody has created. Recorded here because a test that passes its own
+mutation is the failure this repo keeps paying for.
 ## Tests added
 
 None. A `git check-ignore` assertion is plausible in `tests/hook_config.rs`, but the failure is

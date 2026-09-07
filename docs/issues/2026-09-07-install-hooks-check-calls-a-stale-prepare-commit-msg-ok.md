@@ -1,14 +1,14 @@
 ---
 id: ceb1f7a11823d71f
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `install-hooks.sh --check` reports `ok` for a STALE `prepare-commit-msg`, the one hook it checks by presence'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
 topic: git hook installation verification
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 related: []
@@ -117,8 +117,25 @@ comparison the other hooks use, reporting `STALE` when it differs and keeping th
 no flag: whether the hook *should* be installed is a policy question, but whether the installed
 bytes match the generator is not.
 
-- **SHA (experiments):** pending
-- **patch-id:** pending
+- **SHA (experiments):** `3182c61c`
+- **patch-id:** `370da6629053d1a65af9b2a419409be2a6159733`
+
+**Applied form.** The `--check`-without-the-flag arm now calls `install_shim` when the hook is
+present — reusing the byte-comparison every other hook already gets, rather than adding a second
+predicate that would need its own maintenance. When the hook is legitimately absent it still
+prints `off` and does **not** set `fail`: the stage is opt-in, and reporting `MISSING` there would
+make the fix louder than the defect, which is the status tool lying in the other direction.
+
+Regression test: `tests/pre-push-foreign-session-guard.sh`, new section
+*"--check byte-compares the OPT-IN hook too"*, 7 assertions. Reverting the arm to the presence
+predicate reds exactly two — both about the **unflagged** form. The flagged form's assertion stays
+green under that mutation, which is the discrimination: it was already correct before this fix, so
+a test that redded on both would not have been testing what changed.
+
+One fixture note for whoever extends this next: `prepare-commit-msg-session-id` had to join the
+stub list in that file, because `--check` now resolves a fourth target. The section's own header
+already warned that omitting a stub makes an unrelated hook's failure wear this section's name —
+it was right, and the list grew again.
 
 ## Tests added
 
@@ -145,4 +162,3 @@ the STALE footer fires. Then re-run both invocations and confirm they agree.
 - `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md`
 - `docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md` — the prior
   silent-hook-wiring failure this script was written against
-

@@ -642,9 +642,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Some(0) => "every indexed artifact has a vector".to_string(),
             Some(n) => format!(
                 "{n} artifact(s) under the indexed root(s) have NO searchable \
-                 representation, and no ORDINARY reindex will give them one: their \
-                 content is stamped as seen while unembedded, which is an ABSORBING \
-                 state. Escape it with librarian(action=\"reindex\", reembed=true). \
+                 representation, and no reindex of ANY kind will give them one -- \
+                 including reembed=true, which requeues existing chunk rows while \
+                 these artifacts have none, so it walks the whole corpus and changes \
+                 nothing. Their content is stamped as seen while unembedded, which is \
+                 an ABSORBING state. Escape it from a shell: `codescout \
+                 backfill-chunks` (a CLI, not an MCP action, because it holds the \
+                 catalog lock for the run). It is scoped to --project by default; pass \
+                 --all for every artifact in the catalog. \
                  docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md"
             ),
         },
@@ -1774,13 +1779,33 @@ mod tests {
              no-op reindex reports. Only this field separates the two, and before it \
              existed nothing did: {v2}"
         );
+        // THE NOTE MUST NAME A REMEDY THAT WORKS, not merely a remedy.
+        //
+        // This assertion used to be `.contains("reembed=true")`, with the comment "the note
+        // must name the ESCAPE, not only the condition". The instinct was right and the value
+        // was wrong: `reembed=true` requeues EXISTING chunk rows, and this population's defect
+        // is the absence of chunk rows, so the two objects never meet. Running it end to end
+        // 2026-09-07 gave `embedded: 28881, embed_error_count: 0, vectorless: 10` -- unchanged,
+        // ~8 minutes, note repeated verbatim. The test passed throughout, because it checked
+        // that AN escape was named rather than that the named escape reaches this state.
+        //
+        // The note predates its own correction by 14 minutes: 98eb5adc (22:23:49) added the
+        // count and this text; 488192e8 (22:37:48) added `backfill_chunk_vectors`, in a commit
+        // whose subject is this note's own phrase -- "escapes the indexer's absorbing state".
+        // docs/issues/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md
+        //
+        // Two assertions, because either alone is satisfiable by the wrong text: the first
+        // reds if the working escape is dropped, the second if the broken one comes back.
+        // Pinning the whole sentence would red on every rewording and is deliberately avoided.
+        let note = v2["vectorless_note"].as_str().unwrap();
         assert!(
-            v2["vectorless_note"]
-                .as_str()
-                .unwrap()
-                .contains("reembed=true"),
-            "the note must name the ESCAPE, not only the condition: {}",
-            v2["vectorless_note"]
+            note.contains("backfill-chunks"),
+            "the note must name the escape that WORKS: {note}"
+        );
+        assert!(
+            !note.contains("Escape it with librarian"),
+            "the note must not prescribe reembed=true as the escape -- it cannot reach a \
+             population that has no chunk rows: {note}"
         );
     }
 
