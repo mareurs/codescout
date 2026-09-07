@@ -1,10 +1,12 @@
 ---
-id: a5bc701f69b9a317
+id: c5bdee8fff6146dd
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc(action=link, rel=supersedes) moves the status in the catalog and never writes the file'
 tags:
 - cluster/unclassified
+closed: 2026-09-07
+unverified: The write-through is fixed and regression-tested; the pre-existing corpus is NOT. No `frontmatter_status_mismatch` check exists, so artifacts that diverged before `05da2db7` are unmeasured and unrepaired.
 ---
 
 ## Summary
@@ -76,15 +78,54 @@ Then measure the existing population before assuming it is one: add
 `supersedes` link ever recorded is a candidate** and nobody can say how many diverged, because the
 question has never had an instrument.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+Fix SHA: `05da2db7` (`experiments`)
+Patch-id: `889c5c8029d446f688409ca6aae92fb4da631aab`
+
+**Done 2026-09-07 — the first two paragraphs above.** `link` now calls
+`update::write_field_to_frontmatter`, the same primitive `event_create` uses for
+`status_change`, and adopts its ordering: **file before catalog**, so a failed disk write
+leaves the catalog untouched rather than recording a transition that never reached the
+file. Writing the row first would have reproduced this bug with a smaller window.
+
+One hazard worth recording because it does not fail loudly: that primitive takes
+`ctx.catalog.lock()` itself, and `link::call` held the lock across its whole body.
+`parking_lot::Mutex` is not reentrant, so the naive call **deadlocks rather than errors**.
+The lock is now scoped in narrow blocks, the shape `event_create::call` already used.
+
+The supersedes response is no longer bare `"ok"` — it returns
+`{ok, superseded: {id, status, previous_status}}`. Non-supersedes links still return
+`"ok"`. This is inside the no-echo-writes convention, not an exception to it: the rule
+reserves richer responses for *genuinely new info*, and a status transition on a second
+artifact the caller never named is exactly that.
+
+**NOT done — the third paragraph, and it is a different defect.** There is still no
+`frontmatter_status_mismatch` in `doctor`, so the corpus-wide population of
+already-diverged artifacts remains unmeasured and unrepaired. Split out rather than
+absorbed here, because an instrument that has never existed is not the same work as a
+write path that was missing one call.
 
 ## Tests added
 
-None yet. Acceptance is an **observed RED**: link two artifacts with `rel="supersedes"`, then assert
-the destination FILE's frontmatter reads `superseded`. That test fails today. Asserting the catalog
-value instead would pass today and prove nothing — it is the half that already works.
+Two, in `src/librarian/tools/link.rs`, **both observed RED before the fix** rather than
+asserted into existence:
 
+- `supersedes_writes_the_new_status_to_the_dst_file` — reads the destination **file** and
+  asserts its frontmatter. Failed with `status: draft` on disk while the catalog said
+  `superseded`.
+- `supersedes_reports_the_status_transition_it_caused` — failed against the bare `"ok"`.
+
+**The measurement that matters most is the third line of that run:** the pre-existing
+`supersedes_transitions_dst_status` **passed** while the defect was live. It asserts the
+catalog value — the half that already worked — so it is monotone under exactly the failure
+it looks like it guards. It passed for the whole life of the bug. That is this repo's
+monotone-assertion law demonstrated rather than restated, and it is why the acceptance
+criterion this file wrote in advance ("assert the FILE") was the correct one.
+
+Both older supersedes tests now build **real on-disk fixtures** instead of `mk_row`
+synthetics, and say so at the fixture with a do-not-revert note: now that `link` writes
+frontmatter, a row whose `abs_path` names no file cannot reach the transition at all.
+That is the contract, not an obstacle — but it is also exactly the kind of detail a
+tidy-up removes, leaving the test passing and no longer discriminating.
 ## Workarounds
 
 After any `supersedes` link, follow with
@@ -93,9 +134,13 @@ and is what actually writes the file.
 
 ## Resume
 
-Wire the write-through, observe the RED above, then add the doctor check and derive the corpus count
-that this file deliberately does not guess at.
+Write-through and response: **done**, `05da2db7`, gate green (fmt, clippy, lean 3560,
+default 5508 / 0 failed).
 
+Still open, and now carried by its own bug file: `doctor` has `frontmatter_id_mismatch`
+but no `frontmatter_status_mismatch`, so **every `supersedes` link recorded before
+`05da2db7` is a candidate for divergence and nobody can say how many, because the question
+has never had an instrument.** This file deliberately does not guess the number.
 ## References
 
 - Mirror-direction sibling, archived: `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
@@ -105,4 +150,3 @@ that this file deliberately does not guess at.
   and reports success"*. Three instances now span two directions and two fields (status via `link`,
   status via `edit_markdown`, id via move/worktree). Tagged `cluster/unclassified` deliberately
   rather than forced into an existing slug; if a fourth appears, this is the shape to promote.
-
