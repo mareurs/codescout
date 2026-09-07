@@ -103,6 +103,11 @@ fn every_refusing_hook_emits_the_shared_tail() {
             "scripts/pre-commit-ledger-counts.py",
             "\n    _emit_sequence_tail()",
         ),
+        // Added with the migration off the pre-commit framework. The retired `cargo-fmt`
+        // entry ran `rustfmt` directly and could not emit the tail at all — there was no
+        // script to put it in. Its replacement refuses commits, so it owes the same route
+        // out, and this list is the only thing that notices if that call is dropped.
+        ("scripts/pre-commit-cargo-fmt.sh", "cat \"$_tail\""),
     ] {
         let text = std::fs::read_to_string(repo_root().join(script))
             .unwrap_or_else(|e| panic!("cannot read {script}: {e}"));
@@ -220,6 +225,88 @@ fn the_hook_edition_parser_discriminates() {
     // it is what stops the real gate passing vacuously.
     assert!(!manifest_editions().is_empty());
 }
+
+/// The edition `scripts/pre-commit-cargo-fmt.sh` passes to `rustfmt`.
+///
+/// A SECOND parser rather than a generalisation of [`hook_edition`], and deliberately so:
+/// the two surfaces coexist while the migration off the pre-commit framework is staged,
+/// and both are live declarations of the same manifest fact. Widening the existing parser
+/// to match either shape would let one surface satisfy the gate for both — the aggregate
+/// trap, where a per-member claim is checked against a population. When the YAML goes, its
+/// parser and its two tests go with it; until then, deleting either leaves a live hook
+/// unpinned against an edition bump.
+fn script_edition(script: &str) -> Option<String> {
+    let line = script
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("EDITION=") && l.contains("--edition"))?;
+    let rest = line.split("--edition").nth(1)?.trim_start();
+    Some(
+        rest.split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('"')
+            .to_owned(),
+    )
+}
+
+#[test]
+fn the_fmt_script_edition_matches_the_manifest() {
+    let script = std::fs::read_to_string(repo_root().join("scripts/pre-commit-cargo-fmt.sh"))
+        .expect("read scripts/pre-commit-cargo-fmt.sh");
+    let hook = script_edition(&script).expect(
+        "the fmt script must pass --edition to rustfmt: standalone rustfmt defaults to 2015 \
+         and would misparse this workspace rather than fail cleanly",
+    );
+    let editions = manifest_editions();
+    assert!(
+        !editions.is_empty(),
+        "no `edition = \"…\"` found in Cargo.toml — this gate parsed nothing and would have \
+         passed vacuously"
+    );
+    let bad = mismatches(&hook, &editions);
+    assert!(
+        bad.is_empty(),
+        "scripts/pre-commit-cargo-fmt.sh passes --edition {hook} while Cargo.toml declares \
+         {bad:?}.\nThe script feeds rustfmt on STDIN, which reads no manifest at all, so this \
+         is the only thing keeping the two in step. Update `EDITION=` in that script."
+    );
+}
+
+/// The parser must return both answers, or the gate above is decoration.
+#[test]
+fn the_script_edition_parser_discriminates() {
+    assert_eq!(
+        script_edition("EDITION=\"--edition 2018\"\n").as_deref(),
+        Some("2018")
+    );
+
+    // No `--edition` at all is the case worth catching: rustfmt would silently fall back
+    // to 2015 rather than fail, so the gate must see None and not a default.
+    assert_eq!(script_edition("EDITION=\"--check\"\n"), None);
+
+    // PROSE THAT MENTIONS THE FLAG IS NOT A DECLARATION OF IT. This script's own header
+    // contains the line "--edition IS NOT OPTIONAL: standalone rustfmt defaults to 2015",
+    // so a parser keyed on the substring alone would read a sentence and report `IS`.
+    assert_eq!(
+        script_edition("# --edition IS NOT OPTIONAL: standalone rustfmt defaults to 2015\n"),
+        None
+    );
+    assert_eq!(
+        script_edition("    echo \"pass --edition 1999 to rustfmt\"\n"),
+        None
+    );
+
+    // The real script must actually parse — otherwise the gate above passes vacuously on
+    // its own `expect`, which is a panic and not a pass, but the discriminator is cheap.
+    let script = std::fs::read_to_string(repo_root().join("scripts/pre-commit-cargo-fmt.sh"))
+        .expect("read scripts/pre-commit-cargo-fmt.sh");
+    assert!(
+        script_edition(&script).is_some(),
+        "the live script must expose an EDITION= line this parser can read"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // IC-4 — config propagation is additive: a RENAMED path does not propagate
 // ---------------------------------------------------------------------------

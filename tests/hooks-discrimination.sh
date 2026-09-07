@@ -760,6 +760,120 @@ CLAUDE_CODE_SESSION_ID="$S_T" git add -- t.txt
 eq "and the recorder still claims on the real index" "$(owner_of t.txt)" "$S_T"
 rm -rf "$T"
 
+# ---------------------------------------------------------------------------
+# 11. THE FMT CHECK READS THE COMMIT, NOT THE DISK
+#
+# scripts/pre-commit-cargo-fmt.sh replaces the `cargo-fmt` entry in
+# .pre-commit-config.yaml, which passed FILENAMES to rustfmt and so read the working
+# tree. That was correct only because the pre-commit framework stashes every unstaged
+# change in the checkout first — the repo-wide stash this migration exists to remove
+# (docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md).
+#
+# CASES 3 AND 4 ARE THE WHOLE POINT AND THEY POINT IN OPPOSITE DIRECTIONS. A stash-less
+# filename hook fails 3 (refusing a good commit over an unstaged edit) and — worse —
+# PASSES 4, shipping unformatted content because the disk happened to be tidy. Testing
+# only one of them would be satisfied by a hook that reads either source: 1 and 2 alone
+# pass against the old implementation.
+#
+# CASE 7 IS NOT DECORATION. The predicate is `exit != 0 OR stdout non-empty`, and reading
+# the exit code ALONE yields a check that cannot fail: `rustfmt --check` on stdin reports
+# formatting differences on stdout and still exits 0 (measured 2026-09-07, rustfmt
+# 1.9.0-stable). Case 7 is the parse-error row, which is the half stdout cannot see — it
+# reports on stderr with an empty stdout. Delete either arm of the predicate and exactly
+# one of cases 1 and 7 reds.
+FMT="$SRC/pre-commit-cargo-fmt.sh"
+GOODRS='fn main() {
+    let x = 1;
+    println!("{x}");
+}
+'
+BADRS='fn main() {
+let x=1;
+   println!("{x}");
+  }
+'
+
+fmt_exit() { bash "$FMT" >/dev/null 2>&1; echo "$?"; }
+
+new_repo
+git commit -q --allow-empty -m base
+
+printf '%s' "$BADRS" > a.rs; git add a.rs
+eq "unformatted committed bytes are refused" "$(fmt_exit)" "1"
+
+printf '%s' "$GOODRS" > a.rs; git add a.rs
+eq "formatted committed bytes pass" "$(fmt_exit)" "0"
+
+# 3. The old hook needed the stash for exactly this: an unstaged mess on disk over a
+#    clean index must NOT refuse, because the mess is not what is being committed.
+printf '%s' "$GOODRS" > a.rs; git add a.rs
+printf '%s' "$BADRS"  > a.rs
+eq "reads the index, not the working tree" "$(fmt_exit)" "0"
+
+# 4. The inverse, and the expensive one: a tidy working tree must not launder an
+#    unformatted blob into the commit. This is the silent false PASS.
+printf '%s' "$BADRS"  > a.rs; git add a.rs
+printf '%s' "$GOODRS" > a.rs
+eq "cannot be fooled by a clean working tree" "$(fmt_exit)" "1"
+
+# `-f` is required: case 4 leaves index and worktree disagreeing on purpose, and plain
+# `git rm --cached` refuses that state. Without it a.rs stays staged carrying case 4's
+# blob and case 5 silently re-measures case 4 — observed while writing this suite.
+git rm -q --cached -f a.rs; rm -f a.rs
+printf 'hello\n' > notes.md; git add notes.md
+eq "a commit with no rust paths is a clean pass" "$(fmt_exit)" "0"
+
+# 6. Given a FILENAME, rustfmt resolves the `mod` children of the file and errors with
+#    "failed to resolve mod" when one is absent; given stdin it formats the buffer alone.
+#    This asserts the recursion is GONE rather than merely unused — the old hook inherited
+#    it, at a measured 1868 ms on a crate-root commit, and checked files not being
+#    committed.
+printf 'mod nowhere;\nfn main() {let y=2;}\n' > lib.rs; git add lib.rs
+eq "a crate root whose mod child is absent is still checked" "$(fmt_exit)" "1"
+
+# 6b. THE MOD-CHILD RECURSION LOSS, PINNED IN BOTH DIRECTIONS SO IT STAYS DELIBERATE.
+#
+#     Case 6 shows the recursion is gone; it cannot show that losing it is safe, because
+#     an ABSENT child cannot distinguish "no recursion" from "nothing to recurse into".
+#     These two do, and they must be read as a pair: the first alone would be satisfied by
+#     a check that never looks at children at all, the second alone by one that recurses.
+#
+#     The behaviour: an unstaged misformatted child is NOT the commit's problem and must
+#     not refuse it; the same child, once staged, gets its own pass through the loop and
+#     must refuse. That is the index-vs-worktree correction again, seen from the module
+#     graph instead of from one file.
+git rm -q --cached -f lib.rs; rm -f lib.rs
+printf 'mod child;\n\nfn main() {\n    child::go();\n}\n' > root.rs
+printf 'pub fn go() {let z=3;println!("{z}");}\n' > child.rs
+git add root.rs
+eq "an unstaged misformatted mod child does not refuse the commit" "$(fmt_exit)" "0"
+git add child.rs
+eq "the same child, once staged, is checked on its own" "$(fmt_exit)" "1"
+git rm -q --cached -f root.rs child.rs; rm -f root.rs child.rs
+
+# 7. The parse-error row: stdout is EMPTY and the exit code is 1. Only the exit-code arm
+#    of the predicate sees this, as case 1 is only seen by the stdout arm.
+#
+#    No `git rm lib.rs` here: case 6b now owns that cleanup, and a second copy printed a
+#    live `fatal: pathspec 'lib.rs' did not match any files` into a suite that reported
+#    91 passed / 0 failed. Harmless, and worth removing anyway — a stray fatal in green
+#    output is how a reader learns that this suite's noise can be skimmed.
+printf 'fn main( {\n  not rust\n' > broken.rs; git add broken.rs
+eq "content that does not parse is refused" "$(fmt_exit)" "1"
+
+# 8. The refusal reaches the shared sequence tail, like every other refusing hook.
+#
+# `broken.rs` MUST be unstaged first, and this line is load-bearing. Case 7 leaves it
+# staged, and it refuses via the exit-code arm — so with it still in the index this case
+# passes on a refusal it did not cause. Caught by mutation: dropping the stdout arm from
+# the predicate reddened cases 1, 4 and 6 while THIS one stayed green, which is the
+# signature of a case measuring its neighbour's fixture rather than its own.
+git rm -q --cached -f broken.rs; rm -f broken.rs
+printf '%s' "$BADRS" > c.rs; git add c.rs
+has "the refusal emits the shared commit-sequence tail" \
+    "$(bash "$FMT" 2>&1)" "This is one rule in a sequence"
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]
