@@ -213,6 +213,25 @@ has "remedy names the LADDER resolution" "$OUT" "LADDER"
 # Two tokens, two deletions, two reds. Neither is pinned prose.
 has "remedy names the STALLS precondition" "$OUT" "STALLS"
 has "remedy names that a rung EXPIRES"    "$OUT" "EXPIRES"
+# THE READER WITH NO RUNG, FOUND IN THE GUARD'S FIRST REAL ACK-USE.
+#
+# The three assertions above check that the exit is NAMED and BOUNDED. None checks that the reader
+# is ROUTED to the right one of them. The ladder and the rev-list advice both assume the reader is
+# AT a rung; a reader on TOP of a stack whose authors are all uncleared has neither a rung nor a
+# refspec, and the text reaches the ladder first -- correct in general and a dead end here. In that
+# configuration the ack is not the exception it reads as further down: it is the ONLY route, and it
+# goes to their operator.
+#
+# This is a distinct failure from the three above, and the distinction is what earns a fourth
+# assertion: not a missing addressee, not an unanswerable question, not an unnamed exit, but a
+# correctly-named exit the reader is steered PAST. A message can hold every route and still route
+# you wrongly.
+#
+# Observed rather than reasoned -- it is the exact shape of this guard's first real ack-use: three
+# authors, one uncleared, the pusher on top of the stack. Reported by sessionId
+# 8dba66b0-af4b-4cda-a333-54a0605b318e, who was that pusher.
+has "remedy routes a reader with NO RUNG to the ack" "$OUT" "NO RUNG AND NO REFSPEC"
+
 
 echo
 echo "== the ack is per-session, not a switch =="

@@ -192,6 +192,22 @@ $foreign_report
   If the author is gone, the commits are already unowned and pushing them is the
   least-bad option — ack and say so in your next commit message.
 
+  WHICH ROUTE IS YOURS — DERIVE THIS BEFORE READING THE REST, because the routes
+  below are not alternatives and two of them can be dead ends for you:
+
+      git rev-list --count origin/$branch..<your-earliest-unpushed-sha>
+
+    = 1   YOU ARE AT A RUNG. Refspec-push it now; the ladder clears the rest.
+    > 1   foreign commits sit BELOW yours, so no refspec of yours helps. The
+          ladder still works, but one rung at a time and not starting with you.
+
+  AND IF EVERY AUTHOR BELOW YOU IS UNCLEARED, YOU HAVE NO RUNG AND NO REFSPEC.
+  The ack is then not the exception it looks like further down — it is the ONLY
+  route, and it goes to your operator. Measured 2026-09-07: that was exactly the
+  configuration of this guard's first real ack-use — three authors, one of them
+  uncleared, and the pusher on top of the stack. A reader who reaches for the
+  ladder in that state is following correct general advice into a dead end.
+
   IF IT IS CLEARED, name the sessions you are authorised to publish:
 
       CODESCOUT_PUSH_ACK="$foreign_sids" git push <args>
