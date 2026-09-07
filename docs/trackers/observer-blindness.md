@@ -1238,7 +1238,7 @@ re-examined* — only the boundary).
 
 **Valid:** invariant
 
-**Rests on:** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`, and the membership test below rather than the enumeration, which is incomplete by construction.
+**Rests on:** `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`, and the membership test below rather than the enumeration, which is incomplete by construction.
 
 **Class:** a *mutual-exclusion* resource — one whose merely-modified state changes behaviour for every other session — where the holder's own workflow keeps succeeding, and typically **clears the condition as a side effect of finishing**.
 
@@ -1271,7 +1271,7 @@ re-examined* — only the boundary).
 
 **A second instance in the same tool, filed separately:** `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`. It is `IC-12` rather than this class — there the *reader* is deceived and the writer is fine, the exact inversion — but it shares the substrate and, usefully, the remedy direction: its exposure is the hook runtime, which `9e493b20` cut from ~2000 ms to ~40 ms while fixing something else.
 
-**Instances:** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`); adjacent, `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
+**Instances:** `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`; the *mechanism* was removed 2026-09-07 by `074b749e`, which retires the pre-commit framework — the CLASS is untouched, and the instance is kept because it is the one with a live production observation: its holder caused the outage while building the fix, which is the blindness this row asserts); adjacent, `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
 
 **Status:** open — **four verified instances**, one refuted, one session. The enumeration is no longer the honest gap; the **mechanism** is. Nothing in this repo names the holder of a dirty shared resource, and the machinery to do it exists (`scripts/pre-commit-foreign-index.sh` resolves a path to a `Session-Id` and prints its `SendMessage` address). Note the four verified files split by remedy: `.pre-commit-config.yaml` wants an owner field, while `rust-toolchain.toml` / `.cargo/config.toml` / `.gitignore` want *isolation* — which is `IC-17`'s other remedy and, concretely, per-session worktrees.
 

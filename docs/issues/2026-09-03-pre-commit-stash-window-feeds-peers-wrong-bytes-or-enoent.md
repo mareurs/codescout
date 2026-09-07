@@ -1,12 +1,13 @@
 ---
 id: b86ba0380dc36436
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a peer''s pre-commit stash window makes another session''s atomic file read/rename operate on the wrong bytes — or on no file at all'
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-07
 opened: 2026-09-03
 severity: high
 ---
@@ -261,6 +262,40 @@ nothing about how the wrong call gets made.
 
 ## Fix
 
+**FIXED 2026-09-07 — `074b749e`, patch-id `4c3958557408b19cdf60354a5f8288167e4342e4`.**
+
+The first direction below — *stop stashing* — is the one that shipped, and it turned out to
+cost far less than this section assumed. `pre-commit` 4.6.2 exposes no way to disable the
+stash, so the route was to stop using the framework: the four commit-stage checks now run
+from `scripts/pre-commit-run.sh` through a direct shim.
+
+**The assumption that made this look expensive was that the checks needed the stash.** Read
+rather than inferred, three of the four never did — `unreviewed-content`, `foreign-index` and
+`ledger-counts` all read the INDEX (`git rev-parse ":$path"`, `git diff --cached --raw`,
+`git show :<path>`). Only `cargo-fmt` read the working tree, because it passed filenames to
+`rustfmt`. It was rewritten to read `:<path>` and feed rustfmt on stdin, which is a
+correctness improvement in its own right: it now checks the bytes being committed rather than
+the bytes on disk.
+
+All six symptoms above are eliminated rather than mitigated — there is no window, because
+nothing stashes. *Observed rather than claimed:* the commit that landed this printed no
+`[INFO] Stashing unstaged files` line, where every commit earlier that day did, and two peers'
+dirty files sat untouched through it.
+
+**Residual:** `pre-commit install` succeeds against any config (measured) and would reinstate
+the framework over the shim. The normal install path no longer invokes it;
+`install-hooks.sh --check` reports which shim is live.
+
+**NOT ARCHIVED, deliberately.** This file and its sibling
+`2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` are cited **26 times across
+16 files**, including `scripts/pre-commit-run.sh`, `scripts/pre-commit-cargo-fmt.sh` and
+`tests/hooks-discrimination.sh` — written by this fix and citing this file as their rationale.
+Moving it would make every one of those a dead path that `audit_doc_refs` scores `high`.
+`status: fixed` already removes it from the open-bug query. Archive both together and
+deliberately, if at all.
+
+<details><summary>The directions as filed, when none of them were costed</summary>
+
 Not fixed. Directions, none free:
 
 - **Stop stashing.** `pre-commit`'s reason for the stash is that hooks should see the index.
@@ -272,6 +307,8 @@ Not fixed. Directions, none free:
   proposed while the false cause stood, sounded right, and is meaningless under the true one.
   A plausible rule resting on a falsified model is worse than no rule — it survives on
   plausibility and quietly certifies the wrong picture.
+
+</details>
 
 ## Tests added
 

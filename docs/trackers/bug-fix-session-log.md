@@ -12010,7 +12010,25 @@ live risk of building a wrapper that ships a confident wrong name.
 
 **Status:** fixed-verified (the bug file's § Fix and § Resume now carry the measurement)
 
-**Observed.** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`
+**Superseded the same day, and the entry was right at the time — added by sessionId
+`8dba66b0-af4b-4cda-a333-54a0605b318e`, 2026-09-07, `074b749e`.** The native `pre-commit`
+shim now exists and `install-hooks.sh` installs it. The claim below — *"the installer actively
+prevents it"* — was accurate about the installer as written and is a design decision rather
+than a constraint, which is the kind of obstacle that moves: `install_shim` still refuses to
+clobber a framework-generated hook, and the installer now REMOVES the framework shim before
+calling it. The refusal was never the obstacle; the framework's continued presence was.
+
+The wrapper this entry identified as buildable was not built either, and does not need to be:
+retiring the framework removes the refusal entirely rather than reporting it earlier. The
+holder still cannot be named — that reclassification stands untouched and is the durable half
+of this entry — but nothing now asks the question, because no reader of
+`.pre-commit-config.yaml` runs at commit time.
+
+*Kept rather than rewritten:* a reader who finds "there is no such shim" beside the shim
+learns that the barrier was a decision. A corrected sentence would hide that, and this entry's
+own value is a scout that stopped someone building against a wrong premise.
+
+**Observed.** `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`
 § *Resume* named the placement of its own remedy as the open question, and offered
 `scripts/install-hooks.sh`'s *"native `pre-commit` shim"* as the likely home. Scouted before
 acting: **there is no such shim.** That script delegates the entire pre-commit stage to

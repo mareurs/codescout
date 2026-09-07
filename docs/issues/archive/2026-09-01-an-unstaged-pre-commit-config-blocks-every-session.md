@@ -1,10 +1,11 @@
 ---
-id: c629f1ddb35bf2e9
+id: ac66453338e3507c
 kind: bug
-status: open
+status: fixed
 title: 'BUG: an unstaged `.pre-commit-config.yaml` blocks every session''s commits, and the holder is the one party that cannot see it'
 tags:
 - cluster/shared-resource-carries-no-owner
+closed: 2026-09-07
 ---
 
 # BUG: an unstaged `.pre-commit-config.yaml` blocks every session's commits, and the holder is the one party that cannot see it
@@ -114,6 +115,61 @@ exactly that habit.
 
 ## Fix
 
+**FIXED 2026-09-07 by removing the reader — `074b749e`, patch-id
+`4c3958557408b19cdf60354a5f8288167e4342e4`.**
+
+The pre-commit framework is uninstalled. The commit stage now runs
+`scripts/pre-commit-run.sh` through a direct shim, so **nothing reads
+`.pre-commit-config.yaml` at commit time** and no state of that file — dirty, staged,
+deleted — can refuse anything. `_has_unstaged_config` is not reached because the entry point
+containing it is not invoked. This is elimination rather than mitigation: the analysis below
+remains correct about the framework and is now correct about a component this repo no longer
+runs.
+
+**Point 2 below is falsified and deliberately left standing.** It says
+`scripts/install-hooks.sh`'s native `pre-commit` shim *"DOES NOT EXIST — the repo is designed
+not to have it"*. True when written; the design changed. `install-hooks.sh` now removes a
+framework-generated shim before `install_shim` runs, which is the one ordering that makes the
+migration safe — a framework shim whose config is absent exits 1 on **every** commit in the
+clone. Kept rather than edited because a reader who finds the old claim and the new file
+learns something a corrected sentence would hide: the obstacle was a design decision, and
+design decisions are the kind of obstacle that moves.
+
+**THE RESIDUAL, STATED SO IT IS NOT MISTAKEN FOR ZERO.** `pre-commit install` succeeds
+against any config — measured, including one with no `repos:` key and `repos: []` — and would
+reinstall the framework over the native shim, restoring this bug exactly. Nothing in the
+config can prevent that; the retired file's header says so and `install-hooks.sh --check`
+reports which shim is live. The normal install path no longer invokes `pre-commit install` at
+all, so this needs someone to type it deliberately.
+
+### The first production observation, and I caused it
+
+This file records that its reproduction was only ever run in a throwaway repo, *"never on the
+shared checkout — doing so CAUSES the outage this file describes, which is why nobody had run
+it"*. On 2026-09-07 I ran it by accident, on the shared checkout, while building the fix.
+Editing `.pre-commit-config.yaml` at 09:50 made it dirty with the framework shim still live;
+every commit in the clone was blocked until the native shim landed at 09:52.
+
+Two things that only a live instance could show:
+
+- **The window opens at the FIRST KEYSTROKE, not at the deletion.** I had measured the
+  deletion case in a throwaway repo beforehand and ordered the swap around it. The framework
+  refuses on an unstaged *modification* too — same outcome, earlier trigger — so my guard was
+  aimed at the second half of a window that had already opened.
+- **The blocked path's own suggested remedy is a capture.** The framework prints
+  `git add .pre-commit-config.yaml` to fix this`. Following it would stage the *holder's*
+  in-flight config edit into the blocked party's commit, under their message and their
+  `Session-Id` trailer — precisely what `pre-commit-unreviewed-content.sh` and
+  `pre-commit-foreign-index.sh` exist to refuse. A guard whose refusal text routes the reader
+  into a different guard's failure.
+
+Reported by sessionId `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`, who hit it on an ordinary
+pathspec commit, held rather than working around it, and declined the suggested remedy for
+that reason. The summary's own claim held exactly — the holder is the one party who cannot
+see it, and I was the holder.
+
+<details><summary>Superseded analysis, correct for the framework this repo no longer runs</summary>
+
 **Not fixed. The mechanism is upstream and correct; what is missing is an owner field and a
 practice.**
 
@@ -182,6 +238,8 @@ does not convert an unbounded wait into a message, which was the stated goal.
 *(Derived, not cited: run the probe again rather than trusting this table — it is ten lines
 of `bash` in a `mktemp -d` repo and takes one call. The version is load-bearing; the gate
 condition on `stash` could move.)*
+
+</details>
 ## Tests added
 
 None, and the gap is worth naming rather than excusing. A regression test would have to

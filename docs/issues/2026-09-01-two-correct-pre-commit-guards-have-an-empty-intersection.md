@@ -342,8 +342,12 @@ owner-field direction is the only one left and this becomes a design task, not a
   carries the simulation.
 - `docs/trackers/issue-clusters.md` § `IC-17` — the class; its *Mechanism status* line
   already names the git index as unowned.
-- `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` and
+- `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` and
   `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
-  hook defects on the same shared surface.
+  hook defects on the same shared surface. **Both closed 2026-09-07 (`074b749e`) by retiring
+  the pre-commit framework; this one is NOT, and the difference is the point.** Those two
+  were defects OF the framework and died with it. This one is a property of the shared git
+  index, which no hook change touches — so a reader who sees the siblings archived should not
+  infer that the entangled-index problem went with them.
 - `docs/trackers/response-envelope-session-log.md` — `F-2`, `F-3`, `F-5`.
 - Simulation method and the six-row table: session `codescout-3e`, 2026-09-01.

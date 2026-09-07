@@ -1,10 +1,11 @@
 ---
 id: '8cc95806a7b5f37a'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: every session''s commit removes every other session''s unstaged work from the working tree for the duration of its hooks'
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-07
 ---
 
 # BUG: every session's commit removes every other session's unstaged work from the working tree for the duration of its hooks
@@ -274,7 +275,7 @@ hook run; the isolated probe above is reproducible and is the artefact to re-run
 
 None that are free. A session doing something timing-sensitive with uncommitted work can
 stage it (staged content is not stashed), which is also the practice that
-`docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` recommends
+`docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` recommends
 for a different reason.
 
 **And the mitigation must be on the VICTIM's side, not the committer's** — which is not
@@ -285,6 +286,32 @@ Staging is the only lever, and only the session holding the uncommitted work can
 
 ## Resume
 
+**FIXED 2026-09-07 — `074b749e`, patch-id `4c3958557408b19cdf60354a5f8288167e4342e4`.**
+
+The pre-commit framework is uninstalled; the commit stage runs `scripts/pre-commit-run.sh`
+through a direct shim. No stash happens, so no session's commit removes any other session's
+unstaged work. Elimination rather than mitigation — the stash was the framework's, and the
+framework is not invoked.
+
+*Observed rather than claimed:* the commit that landed this printed no
+`[INFO] Stashing unstaged files` line, where every commit earlier that day did, and two
+peers' dirty files sat untouched through it.
+
+**Residual, stated so it is not read as zero:** `pre-commit install` succeeds against any
+config (measured) and would reinstate the framework over the shim. The normal install path no
+longer invokes it, so this needs a deliberate command; `install-hooks.sh --check` reports
+which shim is live.
+
+**NOT ARCHIVED, and the reason is not neglect.** This file and its sibling
+`2026-09-03-...-wrong-bytes-or-enoent.md` are cited **26 times across 16 files**, three of
+which are `scripts/` and `tests/` written by the fix itself. Moving them would turn every one
+of those into a dead path that `audit_doc_refs` scores `high`, and the repair is a 16-file
+rewrite over ledgers. `status: fixed` already removes both from the open-bug query, which is
+what the queue reads. Archive them together, deliberately, if and when someone wants the
+move — not as a side effect of closing them.
+
+<details><summary>Superseded worklist, from when this was an accepted property</summary>
+
 Decide whether this stays a known-and-accepted property or motivates per-session
 worktrees. If it stays: add one line to `.pre-commit-config.yaml`'s header drawing the
 consequence for concurrent readers, **and name `~/.cache/pre-commit/patch<epoch>-<pid>` as the
@@ -292,6 +319,8 @@ after-the-fact oracle** (Evidence, 2026-09-02) — that is the one instrument a 
 can still use, because it survives the window that everything else requires you to be inside
 of. That is a knowledge fix and this ledger's own standard says
 so — see `IC-12`'s `Mechanism status`.
+
+</details>
 
 ## References
 
@@ -308,8 +337,10 @@ so — see `IC-12`'s `Mechanism status`.
 - `IC-12` (`cluster/transient-shared-state-lies-to-readers`) in
   `docs/trackers/issue-clusters.md` — this is the class's first tagged member; it had stood
   at n=0 *on evidence*, after an archive pass that looked and found nothing transient.
-- `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` — the
-  other shared-state defect in the same tool, found in the same pass.
+- `docs/issues/archive/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` —
+  the other shared-state defect in the same tool, found in the same pass. **Archived
+  2026-09-07 by the same commit that closes this one** — one removal, both mechanisms, which
+  is what a shared root cause looks like from the ledger side.
 - `OB-10` in `docs/trackers/observer-blindness.md` — the class covering resources whose
   holder gets no signal.
 - `9e493b20` — shortened this window from ~2000 ms to ~40 ms for an unrelated reason.
