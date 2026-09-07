@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 9
+entry_high_water_F: 10
 entry_high_water_W: 1
 ---
 
@@ -87,6 +87,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-7 | 2026-09-02 | high | architectural | fixed-verified | "impossible by construction" was a claim about Rust, not about the capability — C's last cost was reachable in the shell |
 | F-8 | 2026-09-02 | med | architectural | open | #9 was carried as a prerequisite, and Strategy C dissolves it — third unexamined Strategy-A claim |
 | F-9 | 2026-09-02 | low | measurement | mitigated | a `;`-chained gate reports the echo's exit status, not the gate's |
+| F-10 | 2026-09-07 | med | stale-substrate | fixed-verified | `doctor`'s `by_check` enumerates the RUNNING BINARY's checks and reads as the checks that exist — ask the process, do not date the file |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1050,6 +1051,59 @@ sessions — the trap CLAUDE.md's gate ordering exists to close.
 
 **Rests on:** `@cmd_5f9bf05a` (`### clippy exit=0`, `### lean exit=101`, `### default exit=101`)
 and the task-notification result object for `kjrsjvfi0`, 2026-09-02.
+
+## F-10 — `doctor`'s `by_check` enumerates the RUNNING BINARY's checks and reads as the checks that exist
+
+**Valid:** dated 2026-09-07
+
+**Observed:** 2026-09-06/07, during a plan/tracker backlog triage.
+
+**Severity:** med — it changed no edit, but it produced a confident wrong explanation in a
+report to the operator, and it was one step from making a verification of my own shipped fix
+read as "the fix did not land".
+
+**Status:** fixed-verified
+
+**What happened.** An early `librarian(action="doctor")` call returned `summary.by_check`
+**without** `open_bug_cited_from_source`. Later in the same session I found that check declared
+in `src/librarian/tools/doctor.rs`'s `declare_checks!` and explained the earlier absence as
+*"the check landed after my run"*. That explanation was plausible, self-consistent with the
+commit timeline, and **wrong**.
+
+The real cause: this session's MCP server was started at `2026-09-06T19:12:38+03:00` and never
+respawned, so `/proc/<pid>/exe` read
+`…/target/release/codescout (deleted)`. Eight `src`-touching commits landed after it started —
+including `7790f343` (the check) and `9c03b32f` (this session's own `feat(embed)`). After
+`/mcp`, the identical call returns `open_bug_cited_from_source: 1`.
+
+**The shape, which is the transferable half.** `by_check` is a map over the checks the
+**running binary** was compiled with, and it presents as the set of checks that **exist**. A
+missing key is not marked as missing — the map is complete-looking and silently narrower, and
+every value in it is accurate. So a stale server's `doctor` report is not wrong; it is *scoped
+to a build*, and nothing in the response names the build. That is
+`cluster/floor-published-under-the-name-of-a-total` on a check-set rather than a count.
+
+**The remedy is a method, not more care: ASK THE PROCESS, DO NOT DATE THE FILE.** I first
+"confirmed" freshness by comparing the binary's mtime (22:51:21) against HEAD's commit time
+(22:38) and concluding it was current. That is an inference *about the binary*. The decisive
+test is to ask the running server a question only newer code can answer — here, whether
+`by_check` carries `open_bug_cited_from_source` at all — which is a reading *of the process*.
+Both my mtime check and the peer report that prompted it were inferences; only the query is
+evidence.
+
+**Why "the binary is newer than HEAD" is not sufficient even when true.** It establishes that
+a *build* postdates the source; it says nothing about which build the long-lived server
+*loaded*. Those are different facts, and on a shared checkout with `cargo rb` running between
+sessions they come apart routinely — the server holds an unlinked inode while the path points
+at something newer.
+
+**Credit.** The query-the-process method reached me relayed through peer sessions rather than
+derived here; I have not verified the originating sessionId and am deliberately not attributing
+it to a name, since names and PIDs both decayed overnight in this same window.
+
+**Not a defect in `doctor`.** Nothing in the tool is wrong. What is missing is a way for a
+caller to tell which build answered, which is a feature question rather than a bug — noted here
+rather than filed, because the method above makes it answerable today without one.
 
 ## Template for new entries
 
