@@ -46,6 +46,54 @@ fn find_lost_surface_markers(old_body: &str, new_content: &str) -> Vec<String> {
     old.into_iter().filter(|m| !new.contains(m)).collect()
 }
 
+/// The action set the three *section-edit dispatchers* accept: `edit_file`'s single-edit
+/// mode (`edit`), `edit_file`'s `edits=[...]` batch mode (`plan_batch`), and
+/// `doc(update, patch={body_edits: [...]})` (`librarian::tools::update::apply_body_edits`).
+/// All three share the shape `if action == "edit" { scoped edit } else { plan_section_edit(..) }`,
+/// so all three accept exactly these five.
+///
+/// **`plan_section_edit` names a deliberately SHORTER set in its own error (no `edit`), and that
+/// is correct for it** — it is a callee that does not implement `edit`, and
+/// `librarian::catalog::augmentation` reaches it without passing through any dispatcher. Do NOT
+/// unify the two lists, and do not add `edit` to that message: it would be false for the callers
+/// that reach `plan_section_edit` directly. Surface THIS list at each dispatcher instead, before
+/// the action is forwarded down.
+///
+/// Adding a sixth action means adding it here *and* to every dispatcher's `if/else` chain.
+/// A half-finished addition is dead rather than silently partial, in both orders: an action
+/// listed here but not dispatched falls through to `plan_section_edit` and is refused there,
+/// and an action dispatched but not listed here is refused by `require_dispatchable_action`
+/// before its branch can run.
+pub(crate) const SECTION_EDIT_ACTIONS: [&str; 5] =
+    ["replace", "insert_before", "insert_after", "remove", "edit"];
+
+/// Reject an action no dispatcher implements, naming the full caller-level set.
+///
+/// Call at a dispatcher immediately after reading `action`, before the `if action == "edit"`
+/// branch. Without it an unrecognised string falls through the `else` arm to
+/// `plan_section_edit`, whose own (correct, narrower) message is then surfaced verbatim to a
+/// caller whose option set is strictly larger — the omitted member being `edit`, the only action
+/// that can change text inside a librarian-guarded ledger without re-emitting whole sections.
+///
+/// `prefix` locates the entry for batch callers: `""`, `"edits[0]: "`, `"body_edits[0]: "`.
+///
+/// See `docs/issues/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md` for the
+/// filed site and `bug-fix-session-log:F-117` for the two the file did not reach.
+pub(crate) fn require_dispatchable_action(action: &str, prefix: &str) -> Result<()> {
+    if !SECTION_EDIT_ACTIONS.contains(&action) {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "{prefix}invalid action {action:?}; expected one of: {}",
+                SECTION_EDIT_ACTIONS.join(", ")
+            ),
+            "Use action=\"edit\" with old_string + new_string to change text inside a section \
+             without replacing the whole section.",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Pure string transformation: apply `action` to the section identified by `heading_query`.
 ///
 /// Test-only thin wrapper that delegates to `perform_section_edit_ext` with
@@ -652,9 +700,17 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
         let heading = edit["heading"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'heading' field", i))?;
-        let action = edit["action"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'action' field", i))?;
+        // Both of this dispatcher's discovery routes used to omit `edit`: the missing-action
+        // error named no actions at all, and an invalid one fell through to
+        // `plan_section_edit`'s four. Batch mode was therefore the one surface with no route
+        // to `edit` short of tripping the nested-heading replace guard (`F-117`).
+        let action = edit["action"].as_str().ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("edits[{i}]: missing required 'action' field"),
+                format!("Allowed actions: {}.", SECTION_EDIT_ACTIONS.join(", ")),
+            )
+        })?;
+        require_dispatchable_action(action, &format!("edits[{i}]: "))?;
         // 1-indexed selector among identical headings. Absent keeps today's contract:
         // one match resolves, several are an ambiguity error.
         let query = crate::tools::file_summary::HeadingQuery::new(
@@ -1388,8 +1444,12 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
             &input,
             "action",
             &[],
-            "Set action to one of: replace | insert_before | insert_after | remove | edit. E.g. action=\"replace\", content=\"...\".",
+            &format!(
+                "Set action to one of: {}. E.g. action=\"replace\", content=\"...\".",
+                SECTION_EDIT_ACTIONS.join(" | ")
+            ),
         )?;
+        require_dispatchable_action(action, "")?;
 
         new_content = if action == "edit" {
             let old_string = crate::tools::require_str_param(&input, "old_string")?;

@@ -3619,3 +3619,106 @@ async fn read_markdown_file_not_found_names_the_root_it_searched() {
          'this file is absent' from 'you are pointed at the wrong tree': {msg}"
     );
 }
+
+// ── invalid-action reporting: one kill per dispatcher ────────────────────────
+//
+// `bug-fix-session-log:F-117`. Three dispatchers share the shape
+// `if action == "edit" { scoped } else { plan_section_edit(..) }`; all three used to let an
+// unrecognised action fall through to `plan_section_edit`, whose own four-member message is
+// correct for ITS direct callers (`augmentation.rs` never dispatches `edit`) and short by one
+// for theirs. Site 1 is `apply_body_edits`, tested in `src/librarian/tools/update.rs`.
+
+/// Site 2 of 3 — `edit_file(heading=, action=)`, the single-edit grammar.
+#[tokio::test]
+async fn single_edit_invalid_action_names_the_edit_action_it_dispatches() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    let original = "# Title\n\nalpha body\n";
+    std::fs::write(&file, original).unwrap();
+
+    let result = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# Title",
+            "action": "probe_invalid",
+            "content": "x",
+        }),
+        &ctx,
+    )
+    .await;
+
+    let msg = format!("{result:?}");
+    // Spelled out rather than read from SECTION_EDIT_ACTIONS: a test that consults the same
+    // const the message is built from asserts the const against itself and survives a member
+    // being deleted from both.
+    assert!(
+        msg.contains("expected one of: replace, insert_before, insert_after, remove, edit"),
+        "the invalid-action error must name every action this dispatcher handles, not the \
+         shorter set its callee implements; got: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        original,
+        "a refused action must leave the file byte-identical"
+    );
+}
+
+/// Site 3 of 3 — `edit_file(edits=[...])`, batch mode, and the worst of the three before the
+/// fix: its missing-action error named *no* actions at all, so BOTH of its discovery routes
+/// omitted `edit` and a batch caller could only learn the action by tripping the nested-heading
+/// replace guard. Hence the second assertion, which has no counterpart at the other two sites.
+#[test]
+fn plan_batch_invalid_and_missing_action_both_name_the_edit_action() {
+    let snapshot = "# Doc\n\n## A\nalpha body\n";
+
+    let invalid = vec![json!({"heading": "## A", "action": "probe_invalid", "content": "x"})];
+    let msg = super::edit_markdown::plan_batch(snapshot, &invalid, false)
+        .expect_err("an action no branch dispatches must be refused")
+        .to_string();
+    assert!(
+        msg.contains("expected one of: replace, insert_before, insert_after, remove, edit"),
+        "batch invalid-action must name this dispatcher's five; got: {msg}"
+    );
+    assert!(
+        msg.contains("edits[0]"),
+        "must locate the entry with THIS path's prefix; got: {msg}"
+    );
+
+    let missing = vec![json!({"heading": "## A", "content": "x"})];
+    let msg = super::edit_markdown::plan_batch(snapshot, &missing, false)
+        .expect_err("a missing action must be refused")
+        .to_string();
+    assert!(
+        msg.contains("edit"),
+        "batch missing-action used to name no actions at all, leaving `edit` unreachable from \
+         both of this surface's error paths; got: {msg}"
+    );
+}
+
+/// Per-member positive control covering sites 2 and 3 at once: every action the invalid-action
+/// message advertises must actually reach a branch. Without it the new validator could refuse a
+/// valid action, or the const could advertise one no dispatcher implements, and both
+/// invalid-action tests above would still pass — they only read a message.
+#[test]
+fn every_advertised_batch_action_actually_dispatches() {
+    let snapshot = "# Doc\n\n## A\nalpha body\n";
+    for (action, extra) in [
+        ("replace", json!({"content": "new"})),
+        ("insert_before", json!({"content": "new"})),
+        ("insert_after", json!({"content": "new"})),
+        ("remove", json!({})),
+        ("edit", json!({"old_string": "alpha", "new_string": "beta"})),
+    ] {
+        let mut entry = json!({"heading": "## A", "action": action});
+        for (k, v) in extra.as_object().unwrap() {
+            entry[k] = v.clone();
+        }
+        let out = super::edit_markdown::plan_batch(snapshot, std::slice::from_ref(&entry), false);
+        assert!(
+            out.is_ok(),
+            "action {action:?} is advertised by the invalid-action error but did not \
+             dispatch: {:?}",
+            out.unwrap_err()
+        );
+    }
+}

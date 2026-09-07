@@ -251,9 +251,20 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
         let action = edit["action"].as_str().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'action' field"),
-                "Allowed actions: replace, insert_before, insert_after, remove, edit.",
+                format!(
+                    "Allowed actions: {}.",
+                    crate::tools::markdown::edit_markdown::SECTION_EDIT_ACTIONS.join(", ")
+                ),
             )
         })?;
+        // Refuse an unrecognised action HERE, naming this dispatcher's five. Without it the
+        // string falls through the `else` arm below to `plan_section_edit`, whose own
+        // four-member message (correct for its direct callers, which never dispatch `edit`)
+        // is re-prefixed on the way out and reads as though this function composed it.
+        crate::tools::markdown::edit_markdown::require_dispatchable_action(
+            action,
+            &format!("body_edits[{i}]: "),
+        )?;
         // 1-indexed selector among identical headings — the only way to reach either of
         // two byte-identical ones. `body_edits` is a managed artifact's ONLY edit
         // surface, so without this such a section would be permanently uneditable.
@@ -1958,6 +1969,70 @@ text
             msg.contains("action='edit'"),
             "replace-without-content error must name action='edit'; got: {msg}"
         );
+    }
+
+    /// Site 1 of 3. The same `if action == "edit" { ... } else { plan_section_edit(..) }` dispatch
+    /// exists in `edit_file`'s single-edit mode and in `plan_batch`, and each needs its own kill
+    /// — § *Testing Discipline*, "mutate once per guarded SITE". Deleting the
+    /// `require_dispatchable_action` call from any one of the three leaves the other two green,
+    /// which is exactly how the filed bug came to name only the site its reporter stood on
+    /// (`bug-fix-session-log:F-117`).
+    #[test]
+    fn body_edits_invalid_action_names_the_edit_action_it_dispatches() {
+        let body = "# Doc\n\n## A\nalpha body\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## A",
+            "action": "probe_invalid",
+            "content": "x",
+        })];
+        let msg = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect_err("an action no branch dispatches must be refused")
+            .to_string();
+
+        // Written out, NOT re-derived from SECTION_EDIT_ACTIONS. A test that reads the same
+        // const the message is built from asserts the const against itself: delete `edit` from
+        // the const and both sides move together, leaving this green while the defect returns.
+        assert!(
+            msg.contains("expected one of: replace, insert_before, insert_after, remove, edit"),
+            "the invalid-action error must name every action this dispatcher handles — `edit` \
+         above all, since it is the only one that can change text inside a librarian-guarded \
+         ledger without re-emitting whole sections; got: {msg}"
+        );
+        assert!(
+            msg.contains("body_edits[0]"),
+            "must locate the entry with THIS path's prefix, not edit_file's `edits[0]`; got: {msg}"
+        );
+    }
+
+    /// Positive control for the test above, per member rather than in aggregate: every action the
+    /// invalid-action message advertises must actually reach a branch. Without this the const
+    /// could gain a member no dispatcher implements — or the new validator could refuse a valid
+    /// one — and the invalid-action assertion would still pass, since it only reads the message.
+    #[test]
+    fn every_advertised_body_edit_action_actually_dispatches() {
+        let body = "# Doc\n\n## A\nalpha body\n";
+        for (action, extra) in [
+            ("replace", serde_json::json!({"content": "new"})),
+            ("insert_before", serde_json::json!({"content": "new"})),
+            ("insert_after", serde_json::json!({"content": "new"})),
+            ("remove", serde_json::json!({})),
+            (
+                "edit",
+                serde_json::json!({"old_string": "alpha", "new_string": "beta"}),
+            ),
+        ] {
+            let mut entry = serde_json::json!({"heading": "## A", "action": action});
+            for (k, v) in extra.as_object().unwrap() {
+                entry[k] = v.clone();
+            }
+            let out = apply_body_edits(body, std::slice::from_ref(&entry), &mut Vec::new());
+            assert!(
+                out.is_ok(),
+                "action {action:?} is advertised by the invalid-action error but did not \
+             dispatch: {:?}",
+                out.unwrap_err()
+            );
+        }
     }
 
     /// `apply_body_edits` is a THIRD independent read site for `new_string` —
