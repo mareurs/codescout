@@ -32,7 +32,7 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 | 2 | heading-miss discards the `Available headings` hint | code fix | **done** — 2 sites guarded, 3 tests, 3 mutations measured |
 | 3 | hook refusal-text "what comes next" tail | design + shell | **done** — one emitted copy, 3 hooks, end-to-end probed |
 | 4 | triage the open bugs (verify-open cadence) | survey | **partial** — the `high` subset was triaged 2026-09-06 (13 rows read, 4 archived, yielding `docs/plans/2026-09-06-stale-ledger-and-shared-state-fix-queue.md`); the remainder queued |
-| 5 | repair the 9 already-corrupted files | design + data | queued — § 5 below; the open question is adjudication, not mechanism |
+| 5 | repair the 9 already-corrupted files | design + data | **closed 2026-09-07 — the population is 1, not 9, and the correct action on that 1 is NONE.** § 5 below carries the derivation and the three detector traps it cost |
 
 **Item 5 had no row in this table until 2026-09-06.** It has existed as a body section since
 the queue was opened, so this table listed four items while the queue held five — and a reader
@@ -51,6 +51,21 @@ doc(action="find", kind="bug",
 **85 rows — 79 `open`, 1 `investigating`, 4 `zombie`, 1 `taken`**, so the figure comparable to
 the original *open-or-investigating* unit is **80**. It roughly tripled in five days while
 reading like a total the whole time. Cite the query and the instant, never the bare number.
+
+**Re-derived 2026-09-07T07:26:27Z at `e766233f`: still 85.** Net-unchanged over the day and
+not static underneath — three framework bugs closed by `074b749e` and several filed by peers
+the same morning. A stable total across two reads is not evidence the population is quiet.
+
+**AND THE FIELD NAMED `count` IS NOT THE COUNT — read `hints.more_in_scope` or you are off by
+the cap.** That call returned `count: 50` with `hints.more_in_scope: 35`. The summary line
+renders as `50 matched:`, which reads as *50 matched the filter* and means *50 were returned*.
+The cap IS signalled, correctly, in a different field — the omnibus fix
+`docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md` (`e74382e8c3483370`,
+`fixed`) put it there — so this is loose phrasing over a correct payload rather than a missing
+signal, and it is not re-filed. It is recorded here because this is the paragraph a future triager reads
+before running that exact query, and “cite the instant” does not protect you from citing the
+wrong number at the right instant: **sum the two fields, or page until `more_in_scope` is
+absent.**
 ## 1 — double-frontmatter corruption (`a1dd1e9b0ef2f999`, archived)
 
 `artifact(action="create")` with a body copied from `docs/issues/_TEMPLATE.md` writes **two**
@@ -248,6 +263,53 @@ Likely shape: a `librarian(action="doctor")` check reporting the population read
 opt-in `fix=` that merges only the **non-conflicting** keys and reports the rest for a human. That
 matches how `doctor`'s other repairs are gated.
 
+### Resolved 2026-09-07 — the population is 1, and the adjudication says leave it
+
+**Run the reproduction before reading the fix plan.** Doing so here replaced both halves of
+this item: the count and the remedy.
+
+**The population is 1, not 9.** Re-derived at `e766233f` over `docs/**/*.md`, 966 files with
+leading frontmatter. The named casualty
+`docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md` is **clean** — single block,
+repaired at some point since 2026-09-01 and not recorded here. The one genuine survivor is
+`docs/archive/old-trackers/bug-tracker.md`.
+
+**And the correct action on it is nothing.** It is the hard case this section predicted —
+conflicting on `status` (`archived` vs `active`), `id` (`null` vs `'0ed68e66d69ceec0'`),
+`title`, `owners` and `tags` — but two facts settle it without picking a winner:
+
+- **The catalog already reads the right block.** `doc(action="find")` returns it with
+  `hidden_archived: 1`, i.e. `status: archived` from block 1. Nothing is operationally wrong;
+  the inert block costs a reader a moment, not the tool an answer.
+- **The file forbids the edit in its own words.** Its RETIRED banner reads *"Body preserved
+  verbatim for `git blame` continuity. Do not append."* Block 2 IS that preserved body — the
+  frontmatter the tracker carried while it was live. Merging it would alter a body kept
+  deliberately verbatim, to fix a display nit, on a retired surface.
+
+So the `doctor` check with an opt-in `fix=` proposed above is **not built, deliberately**: it
+would be gated machinery for a population of one whose correct handling is to leave it alone.
+If the population ever grows, this section has the shape ready.
+
+### The detector cost three passes, and every trap is a class this repo already documents
+
+Worth more than the result. Each pass returned a plausible number and none errored:
+
+| pass | rule | answer | why it was wrong |
+|---|---|---|---|
+| 1 | a second `---` block after the first | **1** | `---` is also a markdown horizontal rule. The single "hit" was two `<hr>`s bracketing a closed-as-rediscovery note. |
+| 2 | …whose block contains ≥2 frontmatter keys | **8** | 7 were *documentation examples* — a bug-tracker template, specs designing a frontmatter shape, and a bug file **about** duplicate frontmatter, which necessarily quotes one. |
+| 3 | …and is not inside a code fence | **1** | correct |
+
+Pass 1 is CLAUDE.md § *Parsers Over a Namespace* verbatim — *"`---` read as frontmatter
+wherever it appears"* — reproduced by a detector written minutes after reading that section.
+Pass 2 is the same class's other half: **no escape for MENTION**, and the file it false-flagged
+hardest was the one whose subject is duplicate frontmatter. The fence is the escape, and
+checking it is what pass 3 added.
+
+**The control is what makes the final `1` a measurement.** A constructed positive and negative
+were run through each pass; pass 3 reports 7 fenced examples alongside the 1 unfenced hit, so
+the detector demonstrably still says *yes* to something. A bare `1` from a detector that had
+silently stopped matching is indistinguishable from this one.
 ## Not in this queue, and why
 
 **Promoting `experiments` to `master`.** Measured 2026-09-01: `experiments` is **2423 commits
