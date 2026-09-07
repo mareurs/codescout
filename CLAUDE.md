@@ -141,6 +141,23 @@ premise that every addition falsifies.
 - **A count of a defect population must arrive with its unit or not at all.** Derive it, don't cite
   it: one population yielded four defensible numbers inside an hour, each the right answer to a
   different question — and near enough to each other that no reader would have queried any of them.
+  **On a shared checkout it needs its INSTANT and its TREE as well — and the tree half is the one a
+  stamp cannot buy.** A file:line citation list decays exactly like a peer count, but for **two**
+  independent reasons and only one is churn. The other is that a sweep in flight makes the
+  **worktree and HEAD disagree**, so two sessions reading correctly *at the same instant* still
+  differ. A timestamp dates that ambiguity; `git grep <pattern> HEAD` removes it — which makes
+  naming the tree **cheaper** than stamping the moment, not merely additional to it. **The tell that
+  a corpus MOVED rather than a reader ERRED is line drift** between two otherwise-agreeing readings:
+  `:277` against `:278` sat in front of two sessions who each read it as the other's miscount.
+  Measured 2026-09-07 — one citation list yielded four disagreeing readings inside ten minutes,
+  three resolved by someone reaching for *"they made a mistake"* before *"the corpus moved"*, and
+  the fourth moved toward **correct** while a hazard report about it was being written. **And count
+  the LIST, never the corpus:** a headline derived from the tool beside an enumeration derived from
+  the eye reconciles nowhere, and four sessions shipped that exact mismatch in one morning — the
+  last of them thirty seconds after reading a retraction of it, which is this section's own claim
+  about what knowing a class is worth. (Named by sessionId
+  `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`; the two-reasons half by
+  `8dba66b0-af4b-4cda-a333-54a0605b318e`.)
 - **Annotate a fixture's load-bearing detail, on the fixture line.** Say what breaks if the detail
   goes — not in the test name, not in the assertion message, never a bare "do not edit". A tidy-up
   that removes it leaves the test passing and no longer discriminating, which no assertion can catch
