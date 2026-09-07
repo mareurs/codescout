@@ -189,7 +189,7 @@ stays open as a pointer rather than a task.
 - `docs/trackers/issue-clusters/IC-17-shared-resource-carries-no-owner.md` — the class; its remedy
   clause ("isolating the resource or adding an owner field, never a better listing") is what
   § *Fix* concludes independently
-- `docs/issues/archive/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` and
+- `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` and
   `b5139fc0` — the stash source, closed; this class survived it
 - `CLAUDE.md` § *Testing Discipline* — "where a system already names its own failure state, assert
   on the name, not on a proxy for it"
