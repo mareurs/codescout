@@ -617,16 +617,38 @@ impl OutputBuffer {
     ///   auto-refreshed from disk because the underlying file had changed
     pub fn resolve_refs(&self, command: &str) -> Result<(String, Vec<PathBuf>, bool, Vec<String>)> {
         // Guard: @ack_* handles are for deferred execution, not content interpolation.
+        //
+        // Gated on a LIVE handle lookup rather than on the token's SHAPE. `@ack_<8hex>` is
+        // also a legal filename, and this check runs before shell parsing, so quoting,
+        // `./` and backslashes are all invisible to it -- a shape-only refusal made such a
+        // file unreachable through this tool with no way to name it, and rejected the whole
+        // command over one mention anywhere in it (a heredoc body, a commit message, a
+        // comment). `get_dangerous` is the same disambiguator the sibling `REF_RE` arm
+        // below already applies to its own namespace.
+        //
+        // Anchoring the regex instead would have been dead code: run_command's early
+        // dispatch (`looks_like_ack_handle`, run_command/mod.rs) returns before this
+        // function is reached whenever the command IS a bare handle, so everything
+        // arriving here mentions the token mid-string -- exactly the population that only
+        // a lookup can classify.
         static ACK_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-        if ACK_RE
+        if let Some(m) = ACK_RE
             .get_or_init(|| Regex::new(r"@ack_[0-9a-f]{8}").expect("valid regex"))
-            .is_match(command)
+            .find(command)
         {
-            return Err(RecoverableError::with_hint(
-                "ack handle cannot be used for interpolation",
-                "Use run_command(\"@ack_<id>\") directly to execute a pending acknowledgment.",
-            )
-            .into());
+            let token = m.as_str();
+            if self.get_dangerous(token).is_some() {
+                return Err(RecoverableError::with_hint(
+                    "ack handle cannot be used for interpolation",
+                    format!(
+                        "{token} names a pending acknowledgment, not a buffer — run it alone, \
+                         run_command(\"{token}\"), to execute the command it holds. A file whose \
+                         name merely looks like a handle is not refused; only a token matching a \
+                         live pending ack is."
+                    ),
+                )
+                .into());
+            }
         }
 
         static REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
@@ -1385,6 +1407,49 @@ mod tests {
             msg.contains("ack handle"),
             "error should mention 'ack handle', got: {msg}"
         );
+    }
+
+    #[test]
+    fn resolve_refs_distinguishes_a_live_ack_handle_from_a_file_of_the_same_name() {
+        // The SAME token, twice, with only the buffer's state differing: refused when it
+        // names a live pending ack, passed through when it does not. Pinning both
+        // branches on ONE token is what makes this a test of the DISCRIMINATOR rather
+        // than of either arm -- two tests with two different tokens would let a
+        // shape-only check keep passing, because shape cannot separate them.
+        let live = OutputBuffer::new(10);
+        let handle = live.store_dangerous("rm -rf /dist".to_string(), None, 30);
+        let cmd = format!("stat -c %s {handle}");
+
+        assert!(
+            live.resolve_refs(&cmd).is_err(),
+            "a token naming a LIVE pending ack must still be refused"
+        );
+
+        // Same command string; a buffer that never stored that ack. Here the token is a
+        // filename. The shape is byte-identical -- only the lookup tells them apart.
+        let empty = OutputBuffer::new(10);
+        let (resolved, temps, _is_buffer_only, _refreshed) = empty
+            .resolve_refs(&cmd)
+            .expect("an ack-shaped token with no live handle is a filename, not interpolation");
+        assert_eq!(
+            resolved, cmd,
+            "the command must pass through byte-identical -- no substitution, no rewrite"
+        );
+        assert!(temps.is_empty(), "nothing should have been materialised");
+    }
+
+    #[test]
+    fn resolve_refs_allows_a_script_that_merely_mentions_an_ack_shaped_filename() {
+        // The reported failure was not a bare argument: an eight-line script carrying the
+        // token on one `stat` line was refused whole, so nothing ran. Asserting on the
+        // SUCCESS direction is deliberate -- an assertion that the refusal fires is
+        // monotone under keeping the bug, per the bug file's "Tests added" note.
+        let buf = OutputBuffer::new(10);
+        let script = "echo start\nstat -c '%y  %n' ./@ack_639fc11a\necho done";
+        let (resolved, _temps, _is_buffer_only, _refreshed) = buf
+            .resolve_refs(script)
+            .expect("a script mentioning an ack-shaped filename must be allowed to run");
+        assert_eq!(resolved, script, "command must pass through unchanged");
     }
 
     #[test]
