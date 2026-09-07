@@ -1,14 +1,14 @@
 ---
-id: c0ecdba1574b68bb
+id: 92398b90d9d86891
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a file whose name matches `@ack_<8hex>` is unreachable by `run_command`, with no escape'
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
 topic: run_command handle interpolation
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-02
 owner: marius
 related: []
@@ -116,6 +116,16 @@ feat(librarian): a resumable chunk backfill that escapes the indexer's absorbing
 It sits untracked in the repo root and is invisible to any `run_command` that names it,
 including a cleanup `rm`.
 
+**Second sighting, 2026-09-07, by sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`, which
+was not looking for it.** Stronger than the original for that reason: this file's own
+filing session had to name the case deliberately, whereas the rediscovery arrived during
+unrelated arithmetic — counting untracked paths out of `git status` to settle which of them
+belonged to one authorship cluster. The refused call was an eight-line script in which the
+token appeared on a single `stat` line among seven others; the whole script was refused and
+nothing ran. So the defect is reached by ordinary composition, not only by naming the file
+as a bare argument, and a session with no knowledge of this bug meets it while doing
+something else entirely.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** quoting escapes the check.
@@ -125,29 +135,60 @@ including a cleanup `rm`.
 
 ## Fix
 
-Not started. The class is `CLAUDE.md` § *Parsers Over a Namespace*, which says a parser
-over a namespace owes an escape **and** a disambiguator. Options:
+Fixed at `bd3d0973`, patch-id `31fc06775f8341fe77b3b367fc9ec25346debb18`
+(`git show <sha> | git patch-id --stable`), by sessionId
+`ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`.
 
-- **A — anchor the match.** Require the handle to be the entire command (`^@ack_…$`),
-  which is the only form the hint tells callers to use. Narrowest change; the ack feature
-  is documented as `run_command("@ack_<id>")` standalone, so an interior occurrence is
-  already not a supported invocation.
-- **B — add an escape.** Honour a backslash or a `./` prefix. More faithful to shell
-  intuition but requires the check to do enough parsing to know what it is looking at,
-  which is the thing that made this wrong.
-- **C — say so at the refusal site.** If no escape is affordable, the error should name
-  the limitation and the `find -exec` workaround instead of pointing at a handle that does
-  not exist.
+**What shipped: none of A/B/C — a live-handle lookup.** The refusal is now gated on
+`self.get_dangerous(token).is_some()` rather than on the token's shape. That is the same
+disambiguator the sibling `REF_RE` arm below already applies to its own namespace, so the
+two arms finally agree on what a handle is. A token matching a live pending ack is still
+refused (the guard's real purpose, `cat @ack_xxx` meaning "interpolate this"); a token that
+matches nothing is a filename and passes through byte-identical.
 
-**Recommendation: A, plus C's wording fix.** A removes the collision entirely for the
-documented usage; C repairs a hint that currently sends the reader somewhere useless.
+**A was the recorded recommendation and would have been DEAD CODE — do not retry it.**
+`run_command`'s early dispatch calls `looks_like_ack_handle(command)` and returns
+(`src/tools/run_command/mod.rs:185`) *before* `resolve_refs` is ever reached, and
+`resolve_refs` has exactly one production caller (`mod.rs:215`, after that dispatch). So by
+the time this guard runs, the command is never a bare handle. Anchoring to `^@ack_…$` would
+therefore have matched nothing, made every test of the guard vacuous, and "fixed" the bug by
+silently deleting the feature. The recommendation was written without tracing the caller —
+which is the § *Testing Discipline* point about a guard nothing reaches, arrived at from the
+fix side rather than the test side.
 
+B (an escape) was unnecessary once the lookup existed: the ambiguity is not lexical, so no
+escape syntax was owed. C's wording fix shipped as part of the same change — the hint now
+names the token, says how to execute it alone, and states that a file of that name is not
+refused, so both branches of the reader's question are answered at the refusal site.
+
+**Known residual ambiguity, stated rather than hidden:** a file named identically to a
+*live* pending ack is still refused. That case is genuinely ambiguous, refusing is the safe
+side, and the hint now says so.
 ## Tests added
 
-None yet. A regression test is cheap: create a file named `@ack_deadbeef` in a temp
-project and assert `ls` on it succeeds. Note the test must assert on the **success**
-direction — an assertion that the refusal fires is monotone under keeping the bug.
+Two, both in `src/tools/output_buffer.rs`, both asserting the **success** direction — an
+assertion that the refusal fires is monotone under keeping the bug.
 
+- `resolve_refs_distinguishes_a_live_ack_handle_from_a_file_of_the_same_name` — drives both
+  branches with **one token**, varying only whether the ack is stored. This is the load-bearing
+  one: two tests using two *different* tokens would let a shape-only reimplementation keep
+  passing, because shape cannot separate the two cases. Mutating the fix back to `is_match`
+  fails its second half.
+- `resolve_refs_allows_a_script_that_merely_mentions_an_ack_shaped_filename` — a multi-line
+  script with the token on one `stat` line, pinning that the refusal was whole-command and no
+  longer is.
+
+The pre-existing `resolve_refs_rejects_ack_handle_interpolation` still passes unchanged: it
+stores a real handle via `store_dangerous`, so it exercises the branch the fix preserves.
+Observed RED before the fix and GREEN after — both new tests failed with the exact reported
+error text.
+
+Gate green 2026-09-07 at `bd3d0973`: FMT=0, CLIPPY=0, LEAN=0 (3627 tests), DEFAULT=0 (5571
+tests, 0 failures).
+
+**Not yet verified against a running MCP server.** The fix is in source; the live server
+runs a release binary built before it, so the defect still reproduces in-session until
+`cargo rb` and an `/mcp` reconnect. Nothing in the tests depends on that.
 ## Workarounds
 
 Never write the token. Use a glob that stops short of the hex:
@@ -156,9 +197,30 @@ Never write the token. Use a glob that stops short of the hex:
 find . -maxdepth 1 -name '@ack*' -exec <cmd> {} \;
 ```
 
+A single-character `?` glob is lighter and works positionally, so the path goes straight to
+an ordinary command instead of through `find -exec`:
+
+```
+stat -c '%y  %s bytes  %n' ./?ack_639fc11a
+head -12 ./?ack_639fc11a
+```
+
+`?` matches the `@` and keeps the literal token out of the command text. Both escapes route
+*around* the name rather than through it, which is this cluster's signature: neither is
+provided by the parser, and a caller who does not already know the bug has no way to derive
+either one.
+
 Native `Bash` is also unaffected — the check lives in codescout's `run_command` only.
 
 ## Resume
+
+**SUPERSEDED — fixed at `bd3d0973`; this section is retained for its fixture note only.**
+The A/B/C decision below was not taken: see § *Fix* for why anchoring would have been dead
+code. **The fixture warning is also discharged.** `./@ack_639fc11a` is no longer this bug's
+only reproduction — two unit tests now cover both branches without touching the filesystem,
+so that file may be deleted by whoever owns it without silently disarming anything. It is
+not deleted here: its authorship is open (its content is the commit message of `488192e8`,
+from a different work stream) and it is not this session's to remove.
 
 Decide between A/B/C in § *Fix*, then change `src/tools/output_buffer.rs:620-630`. The
 same block has a sibling `REF_RE` at `:632` for `@cmd_*` / `@tool_*` / `@file_*` handles —
