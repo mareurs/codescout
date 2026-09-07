@@ -188,6 +188,32 @@ has "remedy names the UNCLEARED third state" "$OUT" "UNCLEARED"
 # time that route beat review on this same file in one morning.
 has "remedy names the LADDER resolution" "$OUT" "LADDER"
 
+# THE LADDER'S TWO FAILURE MODES, BOTH FOUND ONE RUNG AFTER IT SHIPPED.
+#
+# The assertion above only checks the exit is named. It passed against text claiming the ladder
+# "holds at any depth and any interleaving" -- an over-claim measured false within the hour.
+#
+# STALLS: the ladder needs every author CLEARED, not merely identified. An author in the
+# not-withheld-but-UNCLEARED state cannot take their rung, and everything above it stalls. Then
+# the ladder reverts to the original question, asked of YOUR operator. Found by being on the
+# receiving end of it: sessionId 4eac25ba-b181-4dac-a5a1-ec88502a5bc5 declined to push their own
+# rungs precisely because a peer cannot stand in for an operator -- the correct call, and the
+# mirror of this guard's own rule.
+#
+# EXPIRES: a rung assignment is valid only at its derivation instant, and it decays SILENTLY
+# TOWARD THE HARM. "I am last, blocking nobody" is true when formed; the natural next move for a
+# session that believes it is last is to stop using refspecs, because being last is exactly when
+# the branch name is safe. When the belief goes stale that push publishes everyone beneath. Argued
+# by sessionId 8dba66b0-af4b-4cda-a333-54a0605b318e against my own "wait until it bites once",
+# which was wrong here for a reason about the failure mode rather than about caution: waiting to
+# observe it means the observation ARRIVES AS the incident. Same shape as the peer-count timestamp
+# rule, which did not wait for one either. Corroborated the same morning by a five-commit ordering
+# that re-ordered between being sent and being read.
+#
+# Two tokens, two deletions, two reds. Neither is pinned prose.
+has "remedy names the STALLS precondition" "$OUT" "STALLS"
+has "remedy names that a rung EXPIRES"    "$OUT" "EXPIRES"
+
 echo
 echo "== the ack is per-session, not a switch =="
 run "$ALICE" "$BOB"   "refs/heads/main $TIP refs/heads/main $BASE"

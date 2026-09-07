@@ -232,11 +232,31 @@ $foreign_report
   Check it BEFORE the push, not after: the push output tells you what happened, the
   count tells you what is about to, and only the second can stop you.
 
-  THE LADDER'S PRECONDITION, and it is the reason this guard reads trailers at all: it
+  THE LADDER'S FIRST PRECONDITION, and the reason this guard reads trailers at all: it
   holds only while every commit in the stack has an IDENTIFIED author. That is what
   the Session-Id trailer buys. Attribute the stack by adjacency instead and the ladder
   is destroyed — you cannot know whose rung is whose, so there is no order to take
   them in and every step is a guess about someone else's work.
+
+  THE SECOND PRECONDITION, WHICH STALLS IT: every author must also be CLEARED, not
+  merely identified. An author in the middle state above — not withheld, UNCLEARED —
+  cannot take their rung, and every rung ABOVE theirs stalls behind it. Measured
+  2026-09-07, ONE RUNG AFTER this text first shipped saying the ladder "holds at any
+  depth and any interleaving": it does not. It holds while every author is cleared, and
+  one uncleared author mid-stack turns the ladder back into the original question — put
+  to YOUR operator, about publishing a commit whose author has said it is not withheld
+  and who cannot consent on their own operator's behalf. That is a fair question to
+  ask, and not a defect or a standoff.
+
+  A RUNG ASSIGNMENT EXPIRES, and this one fails SILENTLY toward the exact action this
+  guard exists to prevent. "I am last, blocking nobody" is true when formed and decays
+  with no signal — and the natural move for a session that believes it is last is to
+  STOP using refspecs, because being last is precisely when pushing the BRANCH NAME is
+  safe. By the time that belief is stale, that push publishes everyone beneath them,
+  and its author was following the rule correctly ten minutes earlier. So carry the
+  instant inside the sentence you tell YOURSELF: "I am last as of 05:49:00Z" can
+  expire; "I am last" does not know how to. Observed the same morning — a five-commit
+  ordering had re-ordered between being sent and being read.
 
   Why this guard is here: docs/trackers/observer-blindness.md OB-20.
 EOF
