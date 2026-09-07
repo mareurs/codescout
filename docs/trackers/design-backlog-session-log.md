@@ -1104,13 +1104,34 @@ than by name**, for the reason this entry already had cause to respect: a name i
 and re-minted by compaction, resume, or a restart under another profile, while the sid does not
 move.
 
-*Provenance of that id, since the entry above turns on not overclaiming one.* It is
-**self-reported** by the peer, not independently derived by me. It corroborates against the
-repo's own record — the same sid is the `Session-Id` trailer on `b678e0f3`, and the archived bug
-file `docs/issues/archive/2026-09-06-body-edits-invalid-action-error-omits-the-edit-action.md`
-already credits that sid with the commit archaeology it supplied. What that establishes is that
-the sid is real and active in this checkout; it does not by itself prove the session that sent
-me the message is that sid. Recorded at the strength it has.
+*Provenance of that id, since the entry above turns on not overclaiming one.* First recorded as
+**self-reported**, then **derived from the delivery channel** the same day — and the upgrade is
+this entry's own lesson applied to identity rather than to a binary, which is why it is written
+here instead of somewhere tidier.
+
+The documented method (CLAUDE.md § *Observer Blindness*) is to **ask** the session and have it
+quote its own scratchpad path, since the harness makes the sid a path component. That works, and
+it still reads a string the peer composed. The stronger route runs the other way, from the
+channel the message physically arrived on:
+
+    socket /run/user/1000/cc-socks/<PID>.sock   — the from= address, not a claim
+      → /proc/<PID>/environ                     — CLAUDE_CONFIG_DIR, so the right profile
+      → <profile>/sessions/<PID>.json           — carries a `sessionId` field
+
+Run 2026-09-07 against PID `1007631`: profile `/home/marius/.claude-sdd`, cwd this checkout,
+`sessionId = cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`. It agrees with what the peer reported, and
+with the `Session-Id` trailer on `b678e0f3`.
+
+**What it establishes, and the limit.** The sender cannot substitute an id for one it does not
+hold, because the PID comes from the socket rather than from the message body — which is the
+half a quoted scratchpad path does not give you. It does not make the id *unforgeable*:
+`sessions/<pid>.json` is written by that session's own process. So this is
+**ask the process, not the artifact** — the same move as querying the running server instead of
+dating its binary — one level short of proof and a full level above a self-report.
+
+**The registry row also carries `name` and `nameSource`,** which is the field this entry warns
+about: it is re-minted by compaction, resume, or a restart under another profile while
+`sessionId` in the same file does not move. Read the sid from that JSON, never the name.
 
 **Not a defect in `doctor`.** Nothing in the tool is wrong. What is missing is a way for a
 caller to tell which build answered, which is a feature question rather than a bug — noted here
