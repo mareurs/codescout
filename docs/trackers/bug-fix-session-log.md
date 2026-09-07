@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 118
+entry_high_water_F: 119
 entry_high_water_W: 108
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 108
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-119 | 2026-09-07 | high | recon | open | **A guard's refusal text EXECUTED its own example commands, and I read the evidence correctly then argued myself out of it.** `pre-push-foreign-session-guard.sh:147` opens `cat >&2 <<EOF` — unquoted — and `:224` carries markdown backticks around `` `git push origin $branch` ``. Bash command-substitutes in an unquoted heredoc, so expanding the refusal RUNS the push, re-firing `pre-push`: 45 guard/push/ssh processes, and the banner never prints, so the authorisation question the guard exists to ask is never asked. Presents as a network hang. The process tree showed the recursion; I refuted my own correct reading because "heredoc bodies are inert text" — true only of a *quoted* delimiter, which I never checked. This inverts CLAUDE.md's heredoc tell: the four prior instances were scanners reading data as syntax, this one is bash reading prose as a program, and the interpreter is the misreader with no appeal. `bash -x` piped to `tail` returned nothing twice; the same trace redirected to a FILE held the whole answer. Filed `high`, `cluster/addressing-without-an-escape-hatch`; introduced `41377049`, already on `origin`. Kin `F-116`, `R-185`, `IC-6`. |
 | F-118 | 2026-09-07 | med | recon | fixed-verified | **A bug's Resume routed the next session to a shim its own installer refuses to create** — a wrapper does work, but cannot name the holder, so the bug reclassifies as a consequence of the unstaged-working-tree gap rather than an independent item. |
 | F-117 | 2026-09-07 | med | recon | mitigated | **A bug file scoped a shared-shape defect to the one site its reporter stood on; the live probe found three.** The `body_edits` invalid-action bug file names `apply_body_edits` and prescribes a one-line validation there. The same `if action == "edit" { … } else { plan_section_edit(…) }` dispatch exists at three sites — `apply_body_edits`, `edit_file`'s single-edit mode, and `plan_batch` — all surfacing the callee's four-member message to callers whose set is five. `plan_batch` is worse than the filed site: its missing-action error names *no* actions, so both of its discovery routes omit `edit`. The reporter reached the defect through the one surface where `edit_file` is refused outright (a guarded ledger), so the other two dispatchers were structurally outside their reproduction — the file is right about what it saw, and narrow because the reproduction was. Kin `IC-6`, § *Testing Discipline* "mutate once per guarded SITE". |
 | F-116 | 2026-09-06 | med | self-friction | mitigated | **An uncommitted non-compiling edit is an unannounced build-level lock on every other session in the checkout — and the interesting cost is not the breakage, it is what it does to a peer's EVIDENCE.** Left a test stub in `mv.rs` with wrong trait signatures (`fn query` where the trait has `knn`) and went to read another file before compiling. For those minutes no `cargo test` in the tree could build, so a peer's run said nothing about their own code AND actively misdirected — it named a file and a symbol, both real, both irrelevant to them. A compile error is normally the most trustworthy signal there is: unambiguous, located, reproducible. On a shared checkout it is none of those things *about you*, and nothing distinguishes "your code is broken" from "someone else's uncommitted edit is". **Same shape as `OB-17`'s coupling lock, one layer down and worse in two ways:** it needs no gate, since the compiler supplies the coupling, and it is unbounded — it lasts exactly as long as the author is distracted, and `OB-17`'s victim at least receives a well-written refusal. **Author-side rule:** compile before you stop typing. The peer-side rule (`git status --short -- '*.rs'` before citing a run — the peer's own, written after failing to follow it) only tells them to distrust the result, never how to get a good one. Peer `codescout-3d` (`ba061586`) asked rather than fixed, which was correct and cost a round-trip. Kin `OB-17`, `OB-19`, `F-114`. |
@@ -12066,6 +12067,53 @@ and had not been crossed in six days.
 
 **Rests on:** `IC-17`'s per-resource *Mechanism status* table, specifically the
 `working tree, unstaged — NONE` row; `OB-8` (a shared resource carries no owner).
+
+## F-119 — A guard's refusal text executed its own example commands, and the process tree told me so twice before I believed it
+
+**Valid:** dated 2026-09-07
+
+**Observed:** an authorised `git push origin experiments` hung with **zero output** for ~10
+minutes. `scripts/pre-push-foreign-session-guard.sh:147` opens its banner with `cat >&2 <<EOF`
+— unquoted — and line 224 carries markdown backticks around `` `git push origin $branch` ``.
+Bash command-substitutes inside an unquoted heredoc, so expanding the refusal **runs the push**,
+which re-fires `pre-push`, which re-expands the banner. 45 guard/push/ssh processes, still
+growing when killed. Filed
+`docs/issues/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md`
+(`high`, `cluster/addressing-without-an-escape-hatch`). Introduced at `41377049`, already on
+`origin`.
+
+**Severity:** high — unbounded process/ssh growth on a checkout shared by 5 live sessions, and
+the guard's whole product (the authorisation question) is never emitted. It presents as a
+network hang, so the natural diagnosis is "slow remote".
+
+**Status:** open
+
+**The friction is not the bug; it is that I read the evidence correctly and then argued myself
+out of it.** The process tree showed `git push → guard → guard → git push → ssh` repeating.
+I called it recursion — correct. Then I opened the script, found that every `git push` string
+sat inside the heredoc, and **refuted my own correct reading on the grounds that heredoc bodies
+are inert text.** They are inert only when the delimiter is quoted, and I did not check the
+delimiter before granting the exemption. I then spent a second hypothesis on a peer-held git
+lock, which was also wrong.
+
+**What makes this an F rather than a note:** the exemption I granted is the *same* exemption
+CLAUDE.md § *Parsers Over a Namespace* documents four other scanners for granting in reverse.
+Its heredoc tell says a construct meaning *"this is data, not syntax"* gets misread by every
+scanner in the process. I inverted it — I assumed data where the interpreter saw syntax — and
+the interpreter is the one misreader with no appeal. **Runnable form: before calling any
+heredoc body inert, read its opener.** `<<EOF` and `<<'EOF'` differ by two characters and by
+whether the body is a program.
+
+**And the instrument hid the answer twice.** `bash -x … 2>&1 | tail -25` returned **nothing** on
+two attempts, which reads as "the script never started" and is what pushed me toward the git-lock
+hypothesis. Redirecting the trace to a **file** produced 198 lines ending in `+ cat` / `++ git
+push origin experiments` — the whole diagnosis, one redirect away. A pipeline whose head is
+killed by `timeout` is not a reliable carrier for the evidence of what it was doing when killed.
+Kin: `F-116`, `R-185`; class `IC-6`.
+
+**Rests on:** `scripts/pre-push-foreign-session-guard.sh:147` (opener) and `:224` (the
+backticks), read 2026-09-07; `tests/pre-push-foreign-session-guard.sh:295`, the suite's only
+`REFUSING` assertion and an absence one.
 
 ## Template for new entries
 

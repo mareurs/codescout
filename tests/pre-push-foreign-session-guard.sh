@@ -100,7 +100,14 @@ run() {
     local -a env=()
     [ "$pusher" != "-" ] && env+=("CLAUDE_CODE_SESSION_ID=$pusher")
     [ "$ack" != "-" ] && env+=("CODESCOUT_PUSH_ACK=$ack")
-    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" origin git@example.invalid:x) 2>&1)"
+    # `timeout` is load-bearing, not defensive tidiness. The guard's refusal banner is an
+    # UNQUOTED heredoc, so a stray backtick in its prose becomes a command substitution that
+    # bash runs while expanding it -- and if that command blocks, `cat` never completes and
+    # this capture waits forever. Without the timeout a hang HANGS THE SUITE rather than
+    # redding it, which is strictly worse than a failure: no assertion reports, no exit code
+    # is produced, and CI shows a job that never finished instead of a test that failed.
+    # Measured 2026-09-07, docs/issues/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md.
+    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" origin git@example.invalid:x) 2>&1)"
     EC=$?
 }
 
@@ -591,6 +598,52 @@ check
 has "an absent opt-in hook reports off"          "$OUT" "off     prepare-commit-msg"
 hasnt "not as missing"                           "$OUT" "MISSING prepare-commit-msg"
 eq  "and does not fail the run"                  "$EC" 0
+
+echo
+echo "== the refusal banner is TEXT, never a program =="
+# REGRESSION. `cat >&2 <<EOF` is unquoted -- deliberately, because the banner interpolates
+# $foreign_report, $me, $branch and $foreign_sids -- so a backtick in its PROSE is not
+# formatting, it is a command substitution bash runs while expanding the message. Shipped
+# 2026-09-07 at 41377049 as markdown habit around an inline example: `git push origin
+# $branch`. On the real repo that executed a push, which re-fired pre-push, which re-expanded
+# the banner: 45 processes and no banner ever printed, so the authorisation question OB-20
+# exists to force was silently never asked.
+#
+# WHY THE 69-ASSERTION SUITE WAS GREEN THROUGHOUT, which is the part worth keeping: the
+# throwaway repo has NO `origin` remote, so the injected `git push origin main` failed
+# instantly and its stderr vanished into the substitution. The bug needs a reachable remote
+# to recurse, and this harness structurally cannot have one -- cluster/repro-env-diverges-
+# from-gate-env. So "assert the banner is present" is NOT the test: it passes under the bug,
+# because a failed substitution still lets `cat` finish. What discriminates is asserting the
+# example survives as LITERAL TEXT -- under the bug it is replaced by the substitution's
+# (empty) output, which is exactly the mutation a future prose edit would reintroduce.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's commit"; TIP=$(sha)
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq  "refused"                                    "$EC" 1
+has "and the banner actually printed"            "$OUT" "REFUSING THE PUSH"
+# The discriminating assertion. Single-quoted so THIS file does not substitute it either.
+has "inline example survived as literal text"    "$OUT" '`git push origin main`'
+
+echo
+echo "== no unescaped backtick survives in the unquoted heredoc body =="
+# The site-specific assertion above cannot see the NEXT inline example someone adds. This is
+# the class-level guard: scan the heredoc body for a backtick that is not backslash-escaped.
+HEREDOC_BODY="$(awk '/^cat >&2 <<EOF$/{inbody=1; next} inbody && /^EOF$/{inbody=0} inbody' "$GUARD")"
+LIVE_TICKS="$(printf '%s\n' "$HEREDOC_BODY" | grep -nE '(^|[^\\])`' || true)"
+is_empty() { [ -z "$2" ] && ok "$1" || no "$1" "unescaped backtick(s) in the heredoc body:
+$2"; }
+is_empty "heredoc body has no live backtick"     "$LIVE_TICKS"
+# NON-VACUITY CONTROL, and it is the reason the check above is worth anything. An emptiness
+# assertion is monotone under removal: rename the opener, or reflow it onto two lines, and
+# the awk matches nothing, LIVE_TICKS is empty, and this passes while scanning air. So pin
+# that the scanner found a real body -- the banner is ~145 lines, so 100 is a floor no
+# healthy edit crosses and no broken selector reaches.
+BODY_LINES="$(printf '%s\n' "$HEREDOC_BODY" | grep -c . || true)"
+[ "${BODY_LINES:-0}" -ge 100 ] \
+    && ok "and the scanner reached a real body ($BODY_LINES lines)" \
+    || no "and the scanner reached a real body" "found $BODY_LINES lines; the opener selector is stale, so the check above scanned nothing"
 
 echo
 echo "-------------------------------------------"

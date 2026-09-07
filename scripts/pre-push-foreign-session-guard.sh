@@ -221,7 +221,7 @@ $foreign_report
 
   Measured 2026-09-07, and the window was ninety seconds: an operator authorised a
   three-commit stack, a fourth commit from another session landed on top while they
-  were answering, and `git push origin $branch` would have satisfied the instruction
+  were answering, and \`git push origin $branch\` would have satisfied the instruction
   to the letter while publishing a commit they never saw. It needs no error from
   anyone, it opens by ordinary churn, and it is INVISIBLE from the pushing side —
   the branch name still reads as "the thing I was told to push". A decision decays
