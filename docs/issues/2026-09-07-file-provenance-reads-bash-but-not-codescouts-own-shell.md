@@ -64,6 +64,45 @@ inside that branch. They are good — `sed -i`, `tee`, `>` / `>>`, and `python -
 are all matched — and **none of them is consulted for a `run_command` call**, whose payload is
 also `command`. The parsing half is right; the selection half never offers it the input.
 
+### The asymmetry, which is worse than "a whole tool is missing"
+
+Contributed 2026-09-07 by the consumer whose `UNKNOWN` this produced, and it is the sharpest
+statement of the defect:
+
+> The branch that EXISTS covers `Bash` — the path the companion plugin actively redirects **away
+> from**. The branch that is MISSING covers `run_command` — the path Iron Law 3 and the hook's
+> own redirect text both push you **toward**. So the instrument covers the discouraged shell and
+> misses the encouraged one: **the more correctly a session follows this repo's guidance, the
+> more invisible its writes are.** That is not a gap in coverage, it is coverage
+> anti-correlated with compliance.
+
+That reframes the severity. A random blind spot costs you a fraction of cases; one that is
+anti-correlated with compliance costs you most of the cases you care about, and it costs them
+**from the sessions most likely to be doing careful work**.
+
+### Verified from both sides of the hole, which is why it is not one party's artefact
+
+- The reporter (`4eac25ba`) wrote `src/` through `run_command` — forced there by the redirect
+  bug — and is **invisible**.
+- The consumer checked which side of the hole they were on **before** reporting, and is
+  **visible**: everything they wrote went through `create_file` / `edit_file` / `edit_code`
+  (`CS_WRITE_TOOLS`) or `doc()` (the artifact branch); their `run_command` use was `git`,
+  `cargo`, `rustfmt` and scratchpad writes outside the repo. So this is not a blind spot its
+  reporter happens to be hiding in.
+- A third session (`cda3afe5`) independently reproduced the read, and volunteered that **its
+  own** mutation-and-restore cycles on `scripts/pre-push-foreign-session-guard.sh` went through
+  `run_command` + `python3` — so for the whole window each mutation was live, its writes were
+  unattributable by the very channel it had just recommended to two peers.
+
+### One correction to how the incident was first described
+
+The consumer's first account said the instrument *"declined to answer"*. They withdrew that as
+too generous: **it did not decline, it was incapable**, and only its caveat text makes the two
+distinguishable from the outside. The distinction is load-bearing rather than pedantic — a
+reader who trusts the header's `2.8%` residual reads `UNKNOWN` as *weak evidence of absence*
+rather than as *silence*, and weak evidence of absence over a small population is one step from
+"probably nobody", which is a wrong positive.
+
 ## Evidence
 
 The composition is what makes this expensive rather than untidy, and it is verifiable rather than
@@ -138,4 +177,3 @@ its control.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md` — the class.
 - Found by sessionId `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`, after a peer's gate went red on this
   session's uncommitted work and the instrument declined to name it.
-

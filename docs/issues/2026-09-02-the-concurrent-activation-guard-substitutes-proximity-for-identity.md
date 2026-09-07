@@ -1,15 +1,16 @@
 ---
 id: faca007609016a6f
 kind: bug
-status: open
+status: fixed
 title: The concurrent-activation guard substitutes wall-clock proximity for caller identity, so a fast linear session is a systematic false positive
 owners:
 - marius
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: ''
+closed: 2026-09-07
 opened: 2026-09-02
 severity: low
+unverified: Only the FALSE-POSITIVE half is fixed. § Root cause names a second and worse consequence of the same gap — the warning is attached to the response of the call that PERFORMED the switch, so it reaches the switcher, while the party harmed is whoever resolves against the wrong workspace afterwards and receives nothing. fd985218 does not touch routing. The guard is now accurate and still speaks to the wrong party.
 ---
 
 ## Summary
@@ -62,7 +63,27 @@ The slot has no owner field, so the guard substitutes **wall-clock proximity** f
 **caller identity**. Proximity is a proxy: it correlates with contention but does not
 imply it, and a fast linear session is a systematic false positive rather than noise.
 
-There is a second, worse consequence of the same gap. The warning is attached to the
+**FIXED (the first half) at `fd985218`, patch-id `99cb861fc8346a5306e5da945e5aa1022aae9c6a`,
+on `experiments`.** `AgentInner.last_activation` was `(PathBuf, Instant)` and is now
+`(PathBuf, Instant, Option<String>)` — the slot carries the activating session id, and
+`concurrent_switch_warning` compares identity instead of substituting proximity for it. A
+session switching its own slot is silent; a switch by a different session still warns **and
+names the other caller**, because "another caller" leaves a reader with nobody to ask.
+
+**The asymmetry is the design, not an implementation detail: identity may only SILENCE a
+warning, never create one.** When either side is unidentified, two anonymous callers are
+indistinguishable from one, so the guard falls back to exactly the proximity behaviour it
+shipped with. A missed warning on a real race is the harm this guard exists for; a spurious
+one merely annoys. `None` means *"did not identify itself"*, never *"same caller"*. The
+mutation that silences `None == None` — naive equality, and exactly what a reasonable
+implementer writes — is caught by two tests.
+
+This is `IC-17` layer 2 at the site the ADR names as *"the MCP server's active project"*
+(`docs/adrs/2026-09-02-isolate-what-is-cheap-own-what-is-shared.md`), and it is the second
+layer-2 instance to ship after `.codescout/write.lock` at `d1b6146d`.
+
+There is a second, worse consequence of the same gap, and **it is NOT fixed** — see
+`unverified:`. The warning is attached to the
 response of the call that *performed* the switch, so it reaches the **switcher** — while
 the party harmed is whoever gets resolved against the wrong workspace afterwards, who
 receives nothing. In `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
