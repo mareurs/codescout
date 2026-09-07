@@ -1,7 +1,7 @@
 ---
-id: '99eb60901aeec260'
+id: d59b84d36225805a
 kind: plan
-status: active
+status: done
 title: Read-surface and shared-checkout fix queue
 owners:
 - marius
@@ -13,6 +13,28 @@ topic: fix queue
 ---
 
 # Read-surface and shared-checkout fix queue
+
+> **CLOSED 2026-09-07 — four of five items terminal, and the fifth is not plan work.**
+>
+> Items 1, 2 and 3 shipped. Item 5 closed 2026-09-07 on a re-derivation that put its population
+> at **1, not 9**, with the correct action on that 1 being **none**.
+>
+> What remains is item 4, *"triage the open bugs"* — and that is the **verify-open cadence**
+> CLAUDE.md already mandates as standing practice, not a task a plan can finish. It is reachable
+> by the canonical query (§ 4 carries it) and needs no open plan to hold it. Item 4 already
+> discharged its one bounded slice — the `high` subset, triaged 2026-09-06, which produced
+> `docs/plans/2026-09-06-stale-ledger-and-shared-state-fix-queue.md`. Keeping this plan open for
+> the unbounded remainder would make the plan queue read as two code-bearing plans while holding
+> one.
+>
+> **Shipped as:** `38ba4f49` + `7dbc7b43` (item 1 — the `create` and `update` seams, fixed
+> separately, which is *mutate once per guarded SITE* paying for itself within one day),
+> `a35a9c35` (item 2, which had a second site of its own for the same reason), `3bf2f5f5`
+> (item 3). Item 5 shipped no code, by decision.
+>
+> **Read § Status's own corrections before quoting any number from this file.** Item 4's
+> population moved 27 → 85 in five days while reading like a total, and the field named `count`
+> is not the count — sum it with `hints.more_in_scope`, or page until that field is absent.
 
 **Opened:** 2026-09-01 · **Owner:** session `codescout-b7` · **Branch:** `experiments`
 

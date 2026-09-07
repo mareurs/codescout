@@ -90,7 +90,7 @@ fn the_shared_commit_sequence_tail_is_present_and_non_trivial() {
 /// a test that cannot construct those would assert nothing. The end-to-end run was done
 /// once by hand against `pre-commit-foreign-index.sh` — exit 1, refusal carrying both its
 /// own rule and the tail — and is recorded in
-/// `docs/plans/2026-09-01-read-surface-fix-queue.md` § 3 rather than re-derived here.
+/// `docs/plans/archive/2026-09-01-read-surface-fix-queue.md` § 3 rather than re-derived here.
 #[test]
 fn every_refusing_hook_emits_the_shared_tail() {
     // Each anchor is the line that RUNS the emission in that script's language, chosen so

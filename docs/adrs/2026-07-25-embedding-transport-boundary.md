@@ -19,7 +19,7 @@ topic: embedding transport boundary
 - **Deciders:** Marius (with the Architecture Snow Lion)
 - **Commits:** none yet. Diagnosis from a dependency-leanness review on
   `experiments` at `52fcaf01`. Implementation plan:
-  `docs/plans/2026-07-25-embedding-transport-consolidation.md`.
+  `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md`.
 
 ## Decision
 
@@ -136,7 +136,7 @@ fingerprint of the mis-gating.
 ## Mechanism
 
 Four stages, each independently shippable, each with its own gate. Full task
-breakdown in `docs/plans/2026-07-25-embedding-transport-consolidation.md`.
+breakdown in `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md`.
 
 0. Reconcile three contracts that differ between the two clients (design only,
    no dependency changes) — connect-error marker, dim validation, query prefix.
@@ -307,8 +307,8 @@ argument for Stage 0 existing at all.
 
 ## References
 
-- [Embedding transport consolidation plan](../plans/2026-07-25-embedding-transport-consolidation.md)
-  (`0da5bd672ef60dfc`) — task breakdown
+- [Embedding transport consolidation plan](../plans/archive/2026-07-25-embedding-transport-consolidation.md)
+  (`0191b17a0cbf8487`) — task breakdown
 - [Dependency review session log](../trackers/archive/dependency-review-session-log-2026-08-25.md)
   (`228a7a2f4dc2378d`) — F-1, F-2, W-1 from the review that produced this ADR
 - `docs/trackers/reconnaissance-patterns.md` — R-43 (the `#[cfg]`-from-grep miss

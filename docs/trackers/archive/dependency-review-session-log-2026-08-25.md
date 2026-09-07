@@ -50,7 +50,7 @@ tags:
 - **F-1 … F-5:** all `fixed-verified` same day — corrected mid-review or landed as plan
   edits before any subagent ran. No code touched; no follow-up owed. Full repro/fix detail
   lived in each entry's body (pre-compaction; see git history on this file, or the citing
-  plan `docs/plans/2026-07-25-embedding-transport-consolidation.md` Stage 1 tasks
+  plan `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md` Stage 1 tasks
   1.0/1.3/1.2/3.1/1.4/1.5/3.2, which carry the corrected claims directly).
 - **W-1 — unfired `Promote-when`:** "A second session uses patch→measure→restore for a
   build-config claim and it catches a wrong assertion" → promote to CLAUDE.md as
@@ -75,4 +75,3 @@ tags:
          content: "## F-N — title\n..."}]})
      Also update the matching Index / Wins Index table row at the top.
      Templates + Status vocabulary: docs/templates/session-log.md -->
-

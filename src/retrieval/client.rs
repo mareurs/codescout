@@ -831,11 +831,16 @@ mod selection_tests {
     /// pins that call refusing, which is what closes the last door.
     ///
     /// Why it matters beyond tidiness: the consolidation in
-    /// `docs/plans/2026-07-25-embedding-transport-consolidation.md` gates the sparse
-    /// leg and the reranker behind `server-stack`, and argues the gate is a runtime
-    /// no-op *because* a lean build can never take either path. That argument IS this
-    /// invariant. Until now three files had to agree for it to hold and nothing made
-    /// them fail together. See `resume-embedding-transport-stages-1-3:ET-1`.
+    /// `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md` gates the
+    /// sparse leg and the reranker, and argues the gate is a runtime no-op *because* a
+    /// lean build can never take either path. That argument IS this invariant. Until now
+    /// three files had to agree for it to hold and nothing made them fail together. See
+    /// `resume-embedding-transport-stages-1-3:ET-1`.
+    ///
+    /// **The gate is `remote-embed`, not the `server-stack` the plan prose says.** `ET-7`
+    /// corrected it mid-execution: `search_in` references `self.reranker` ungated, so the
+    /// type must exist in every configuration. Read `pub mod reranker` in
+    /// `src/retrieval/mod.rs` for the shipped attribute, never the plan.
     #[cfg(not(feature = "server-stack"))]
     #[tokio::test]
     async fn a_lean_build_cannot_construct_a_non_lite_client() {

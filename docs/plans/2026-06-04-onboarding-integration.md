@@ -1,7 +1,7 @@
 ---
 id: b5bc613afc68e6d3
 kind: plan
-status: draft
+status: active
 title: Onboarding Integration — manual workflow → codescout capability
 owners:
 - marius
@@ -16,6 +16,34 @@ time_scope: null
 ---
 
 # Plan — Onboarding Integration (manual workflow → codescout capability)
+
+> **State verified at the bytes 2026-09-07 — WS1 is SHIPPED; WS2/WS3/WS4 are the live
+> remainder. The Constraints section below is a 2026-06-03/04 scout and describes the
+> pre-WS1 code.**
+>
+> **WS1 (the FOUNDATION) is done.** File-dominance attribution replaced the manifest-type
+> derivation: `scan_languages_by_dominance`, `dominant_language` and `merge_languages` in
+> `src/workspace.rs`, applied in the `discover_projects` post-pass, with `primary_language`
+> repointed at both hint sites (`src/mcp_resources/project_hints.rs`,
+> `src/mcp_resources/project_summary.rs`). Regression test:
+> `polyglot_root_languages_reflect_file_dominance`. Its bug — `e7454c40`,
+> `docs/issues/archive/2026-06-03-project-languages-from-manifest-not-files.md` — is archived
+> `fixed`, closed 2026-06-04.
+>
+> **So this plan's own sequencing gate is open.** § *Sequencing* reads *"WS1 → WS2 (WS2 depends
+> on WS1 for correct languages)"*. That dependency has been discharged since 2026-06-04, and
+> nothing recorded it here — which is why the plan still reads as blocked on its first step.
+>
+> **WS2 is unbuilt, and it is not in this repo.**
+> `claude-plugins/codescout-companion/skills/` holds `explore-project`,
+> `reaching-peer-sessions`, `reconnaissance`, `researcher-mcp`, `research-subagent`,
+> `research-web` and `tracker-hygiene` — no `onboard-project`. No `ONBOARDING.md` is generated
+> anywhere in `src/`. **This plan stays open and stays here because it is the only surface
+> that records the WS2 design**; archiving it on the strength of WS1 would lose it. Whoever
+> picks WS2 up works in `claude-plugins`, not here.
+>
+> **WS3 is an undecided decision and it gates WS2 step 3.** The plan recommends skill-only
+> `ONBOARDING.md` generation; nobody has recorded the call. **WS4 remains optional.**
 
 > Captures the full integration vision surfaced while onboarding a polyglot client
 > repo (hermes-agent: Python core + TS/JS subprojects) by hand. The Rust correctness
@@ -135,4 +163,3 @@ boundary. WS4 is independent / optional.
 - `claude-plugins/codescout-companion/skills/explore-project/SKILL.md` (skill model)
 - `ShareOnboardingGuide` harness tool
 - Session 2026-06-03/04: `hermes-agent` + `hermes_cli` onboarding — memories + `ONBOARDING.md` produced by hand
-

@@ -208,7 +208,7 @@ positive-controlled in both directions before that count was trusted. **Repairin
 of this fix**: it is a data migration over other sessions' archived artifacts, and for a conflicting
 key it would have to pick a winner — the exact act this guard refuses to perform on a caller's
 behalf. Queued with a `doctor`-check shape at
-`docs/plans/2026-09-01-read-surface-fix-queue.md` § *5*.
+`docs/plans/archive/2026-09-01-read-surface-fix-queue.md` § *5*.
 
 ---
 

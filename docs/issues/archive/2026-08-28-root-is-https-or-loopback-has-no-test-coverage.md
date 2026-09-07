@@ -6,14 +6,14 @@ severity: medium
 owner: marius
 related:
   - docs/trackers/resume-embedding-transport-stages-1-3.md
-  - docs/plans/2026-07-25-embedding-transport-consolidation.md
+  - docs/plans/archive/2026-07-25-embedding-transport-consolidation.md
 tags:
   - security
   - test-coverage
   - duplication
   - embeddings
 kind: bug
-unverified: The duplication itself is NOT resolved -- two byte-equivalent copies of this predicate still exist, root's and the crate's. This record covers only the missing coverage. ET-4 removes the duplicate; until it lands, a change must be made in both places or they drift again, which is the failure mode that produced this bug.
+unverified: The duplication itself is NOT resolved -- two byte-equivalent copies of this predicate still exist, root's and the crate's. This record covers only the missing coverage. ET-4's D3 was DECLINED 2026-09-06 (`resume-embedding-transport-stages-1-3:ET-9`, T9 -- priced at zero crates), so the duplicate is now PERMANENT, not pending: a change must be made in both places or they drift again, which is the failure mode that produced this bug. Do not wait for ET-4 to remove it.
 ---
 
 # BUG: root's `is_https_or_loopback` guard has zero test coverage; only the codescout-embed twin is tested

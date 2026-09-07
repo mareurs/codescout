@@ -1518,7 +1518,7 @@ applies to all of them. None refreshed. Neutral.
 promoted) — nothing to rehome. Compacted body to an outcomes digest, archived to
 `docs/trackers/archive/dependency-review-session-log-2026-08-25.md`
 (id `4232733980fe92e9` → `228a7a2f4dc2378d`), and repointed the 3 live citations found by
-grep: `docs/plans/2026-07-25-embedding-transport-consolidation.md` (2 sites),
+grep: `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md` (2 sites),
 `docs/adrs/2026-07-25-embedding-transport-boundary.md` (1 site),
 `docs/trackers/reconnaissance-patterns.md` R-44 (1 site). `docs/issues/archive/*` and
 `docs/trackers/archive/reconnaissance-patterns-archived-entries.md` citations left alone

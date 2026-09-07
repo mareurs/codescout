@@ -20,7 +20,7 @@ tags: []
 |---|---|---|---|---|
 | 1 | a doctor check for bug files whose fix already shipped | — | 4 instances in one day | **done — `7790f343`** |
 | 2 | audit host identity travels with a transported catalog | high | reproduced live, still worsening | **done — `d4f0bafb`** |
-| 3 | the `pre-commit` stash window on a shared checkout | high | config present, Fix says nothing attempted | not started |
+| 3 | the `pre-commit` stash window on a shared checkout | high | config present, Fix says nothing attempted | **3a done — `4b30601c`; 3b is a rule, 3c uncosted** |
 
 **Not tasks, and why** — at the bottom.
 
@@ -153,6 +153,28 @@ it); and the disposition of the already-contaminated shard is recorded — repai
 or explicitly accepted.
 
 ## 3 — the `pre-commit` stash window on a shared checkout
+
+> **3a SHIPPED 2026-09-07 — `4b30601c`, patch-id `ad517014b9af378afc163f25f5bbc49261d6d6d7`.
+> Read this before the analysis below, which was written while the stash still fired.**
+>
+> The first of the two candidates at the end of § 3a landed: the `pre-commit` framework is
+> **uninstalled, not bypassed**. `scripts/pre-commit-run.sh` (installed by
+> `scripts/install-hooks.sh`) runs the same four checks in the same order and stashes nothing —
+> the hooks read the commit through `git show :<path>` and never needed it.
+> `.pre-commit-config.yaml` is retired in place, and its header names the one regression that
+> would undo this: **`pre-commit install` succeeds against any config** — including one with no
+> `repos:` key — **and would restore the stashing path.** `scripts/install-hooks.sh --check`
+> reports which shim you actually have.
+>
+> Both bug files closed at `b5139fc0`, `fixed` / `closed: 2026-09-07`. Per § 3a's own closing
+> line — *"if the first candidate lands, both are closed at once"* — the marker-file option is
+> moot and was correctly never built.
+>
+> **What remains under this task is not code.** § 3b is a rule; it is promoted into
+> `reconnaissance-patterns:R-185` and `bug-fix-session-log:F-116` and reaches no standing
+> mechanism, so it is still the policy § 3a itself calls insufficient. § 3c is uncosted:
+> `cancel-in-progress` is live at `.github/workflows/ci.yml:15`, and its cheap first move —
+> read `conclusion`, never `status` — is written down nowhere outside this plan.
 
 `docs/issues/2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md` (`high`)
 and `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — one

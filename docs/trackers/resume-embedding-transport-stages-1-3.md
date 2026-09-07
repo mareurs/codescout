@@ -19,7 +19,7 @@ entry_prefix: ET
 # Resume queue — Embedding Transport Consolidation Stages 1–3 (ET-N)
 
 **ADR:** `docs/adrs/2026-07-25-embedding-transport-boundary.md`
-**Plan:** `docs/plans/2026-07-25-embedding-transport-consolidation.md` (`0da5bd672ef60dfc`)
+**Plan:** `docs/plans/archive/2026-07-25-embedding-transport-consolidation.md` (`0191b17a0cbf8487`) — archived 2026-09-07
 
 **Goal.** `codescout-embed` owns remote embedding transport. `src/retrieval`
 keeps the domain vocabulary and a `server-stack`-only sparse + rerank client.
@@ -443,7 +443,7 @@ and returns degenerate results.
 ## ET-7 — Stage 1's design table was wrong in six places; the corrected gate is `remote-embed` throughout
 
 **Observed:** 2026-08-28, executing ET-2 against the approved plan
-`docs/plans/2026-07-25-embedding-transport-consolidation.md` § Stage 1.
+`docs/plans/archive/2026-07-25-embedding-transport-consolidation.md` § Stage 1.
 
 **Outcome: shipped.** `bare 274 → 226 (−48)`, `remote-embed +1 → +49`. Gate green
 (`fmt`, `clippy --workspace --all-targets --features local-embed -D warnings`,

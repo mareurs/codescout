@@ -1200,7 +1200,7 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 **Verdict:** hit (recon caught it pre-dispatch; no downstream gate was reached because no code was written) — write-side twin of R-43, backstopped by R-5
 
 **Observed:** 2026-07-25, pre-dispatch reconnaissance on Stage 1 of
-`docs/plans/2026-07-25-embedding-transport-consolidation.md`. Same work stream
+`docs/plans/archive/2026-07-25-embedding-transport-consolidation.md`. Same work stream
 as R-43, one session later.
 
 **Pattern.** R-43 covers *reading* gating that already exists. This is the

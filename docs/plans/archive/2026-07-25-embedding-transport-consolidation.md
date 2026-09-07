@@ -1,7 +1,7 @@
 ---
-id: '0da5bd672ef60dfc'
+id: 0191b17a0cbf8487
 kind: plan
-status: active
+status: done
 title: Embedding transport consolidation — codescout-embed owns remote HTTP
 tags:
 - architecture
@@ -13,6 +13,34 @@ topic: embedding transport boundary
 ---
 
 # Plan: Embedding transport consolidation
+
+> **CLOSED 2026-09-07 — the work stream is done and its remaining stages are DECLINED, not
+> pending. Read this before the stages below, which describe work that was superseded during
+> execution.**
+>
+> The resume queue that carried this plan —
+> `docs/trackers/resume-embedding-transport-stages-1-3.md` (`d24bf146cf7c789f`, `ET-N`) — was
+> archived 2026-09-06 with all ten entries terminal. `ET-9`: *"CLOSED 2026-09-06 — the stream
+> is done and T9/T16 are DECLINED"*, on its own measurement that they buy manifest honesty and
+> **zero crates**.
+>
+> **The Goal below is not what shipped, and the difference is the part a reader would act
+> wrongly without.** It reads *"Root drops `reqwest`, `rustls`, and
+> `install_default_crypto_provider`"*. `ET-7` corrected the gate during Stage 1: they are
+> **optional under `remote-embed`, not deleted** — `reqwest` and `rustls` carry
+> `optional = true` in `Cargo.toml` and are pulled in by the `remote-embed` feature.
+> Verified at the bytes 2026-09-07. Anyone resuming Stage 3 from the text below would delete a
+> dependency the default build still uses.
+>
+> **Why deleting the remainder was worth nothing:** Stage 1 banked the entire measured payoff
+> on its own — bare `--no-default-features` 274 → 226 crates (−48) — exactly as its own
+> preamble predicted. `ET-4`'s D3 (drop the root manifest entries) is `ET-9`'s T9, priced at
+> zero crates.
+>
+> **Shipped as:** `2bd3415b` (ET-1, the invariant test), `2c6f2677` (ET-2 / Stage 1 — the whole
+> −48), `797dd023` (ET-3 Stage 2 swap, and ET-4 D2), `c24d2d60` (ET-4 D1), `6be58840` (ET-5,
+> the cross-crate connect-error contract), `9c03b32f` (ET-3's empty-`dense_model_name`
+> residual).
 
 Implements `docs/adrs/2026-07-25-embedding-transport-boundary.md`.
 
