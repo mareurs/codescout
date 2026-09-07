@@ -1,5 +1,5 @@
 ---
-id: '252fe84782103842'
+id: 2882150c03ce050b
 kind: bug
 status: fixed
 title: 'BUG: `.gitignore`''s `/.claude/*` is root-anchored, so hook-created nested `.claude/` dirs are never ignored'

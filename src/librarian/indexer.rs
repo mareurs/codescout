@@ -1041,7 +1041,7 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 /// UTF-8 at byte 16 — so the read returned `InvalidData`. The named remedy could never
 /// clear it: `reindex` removes rows whose file is gone, and that file is not. The count
 /// sat at 1 forever, pointing at a repair that cannot apply.
-/// `docs/issues/2026-09-07-missing-file-counts-every-read-failure-including-non-utf8.md`
+/// `docs/issues/archive/2026-09-07-missing-file-counts-every-read-failure-including-non-utf8.md`
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BackfillReport {
     /// Chunk vectors written.
@@ -1112,7 +1112,7 @@ const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 /// 2026-09-07: invoked to repair the 10 artifacts reported for one project, it processed 2807
 /// across every repo on the host — 61,613 chunks, ~7.4 GB, ~11 minutes against a shared
 /// embedder, with nothing before or during the run naming a scope.
-/// `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`
+/// `docs/issues/archive/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`
 ///
 /// **The resume cursor is keyed by scope**, so an interrupted project-scoped run cannot make a
 /// later catalog-wide run resume past rows it never examined. A *completed* run clears its own

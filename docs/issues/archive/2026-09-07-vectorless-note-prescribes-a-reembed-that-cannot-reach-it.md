@@ -1,5 +1,5 @@
 ---
-id: '9a5c069bd5eef463'
+id: 4cc472b73906ecf8
 kind: bug
 status: fixed
 title: 'BUG: `reindex`''s `vectorless_note` prescribes `reembed=true`, which cannot escape the state it describes'
@@ -143,7 +143,7 @@ Text along the lines of: *"…which is an ABSORBING state: these artifacts have 
 `codescout backfill-chunks`."*
 
 Note the sibling defect this exposes: `backfill-chunks` is catalog-wide, so the note should say
-so — see `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`.
+so — see `docs/issues/archive/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`.
 
 - **SHA (experiments):** `45eac50e`
 - **patch-id:** `0f70f33bbc19f0a95ecb08a1966592e63a9b05d0`

@@ -1,5 +1,5 @@
 ---
-id: bf5e57977f5b6af9
+id: 306e756308463ee4
 kind: bug
 status: fixed
 title: 'BUG: `BackfillReport::missing_file` counts every read failure and reports it as "no longer on disk"'
@@ -202,4 +202,4 @@ Edit the `read_to_string` arm in `backfill_chunk_vectors` (`src/librarian/indexe
 ## References
 
 - `src/librarian/indexer.rs` — `BackfillReport` and the `Err(_)` arm, both from `488192e8`
-- `docs/issues/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md` — why an artifact in an unrelated repo showed up in this run at all
+- `docs/issues/archive/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md` — why an artifact in an unrelated repo showed up in this run at all

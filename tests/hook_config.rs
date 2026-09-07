@@ -400,7 +400,7 @@ fn the_hooks_path_verdict_discriminates() {
 // `goal-stop-hook.mjs:16` does `mkdirSync(join(cwd, '.claude'))`, so a session running from a
 // subdirectory drops a log dir there. The anchored `/.claude/*` two lines up cannot match below
 // the root, so those dirs showed up as untracked noise inside tracked doc directories
-// (`docs/issues/2026-09-07-gitignore-claude-rule-is-root-anchored-so-nested-dirs-escape.md`).
+// (`docs/issues/archive/2026-09-07-gitignore-claude-rule-is-root-anchored-so-nested-dirs-escape.md`).
 //
 // The obvious repair — append `**/.claude/` — is WRONG, and wrong in a way no other check here
 // would catch. It matches at every depth INCLUDING the root, and git will not descend into an

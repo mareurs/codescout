@@ -1,5 +1,5 @@
 ---
-id: ceb1f7a11823d71f
+id: 91b06fa4341e4a28
 kind: bug
 status: fixed
 title: 'BUG: `install-hooks.sh --check` reports `ok` for a STALE `prepare-commit-msg`, the one hook it checks by presence'

@@ -1792,7 +1792,7 @@ mod tests {
         // The note predates its own correction by 14 minutes: 98eb5adc (22:23:49) added the
         // count and this text; 488192e8 (22:37:48) added `backfill_chunk_vectors`, in a commit
         // whose subject is this note's own phrase -- "escapes the indexer's absorbing state".
-        // docs/issues/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md
+        // docs/issues/archive/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md
         //
         // Two assertions, because either alone is satisfiable by the wrong text: the first
         // reds if the working escape is dropped, the second if the broken one comes back.

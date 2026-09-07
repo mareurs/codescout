@@ -1,5 +1,5 @@
 ---
-id: '9ea0a90867c85260'
+id: a453611e2194dcef
 kind: bug
 status: fixed
 title: 'BUG: `backfill-chunks` accepts `--project` but walks the whole catalog, across every repo on the host'
@@ -180,5 +180,5 @@ the `vectorless` query. Then add the two-root test in § *Tests added* and confi
 
 - `src/librarian/indexer.rs:1079` — signature and page query
 - `src/cli/backfill_chunks.rs` — the CLI wrapper and its `--project` flag
-- `docs/issues/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md` — the note that sends you here
+- `docs/issues/archive/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md` — the note that sends you here
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
