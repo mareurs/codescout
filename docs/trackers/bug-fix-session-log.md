@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 117
+entry_high_water_F: 118
 entry_high_water_W: 108
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 108
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-118 | 2026-09-07 | med | recon | fixed-verified | **A bug's Resume routed the next session to a shim its own installer refuses to create** — a wrapper does work, but cannot name the holder, so the bug reclassifies as a consequence of the unstaged-working-tree gap rather than an independent item. |
 | F-117 | 2026-09-07 | med | recon | mitigated | **A bug file scoped a shared-shape defect to the one site its reporter stood on; the live probe found three.** The `body_edits` invalid-action bug file names `apply_body_edits` and prescribes a one-line validation there. The same `if action == "edit" { … } else { plan_section_edit(…) }` dispatch exists at three sites — `apply_body_edits`, `edit_file`'s single-edit mode, and `plan_batch` — all surfacing the callee's four-member message to callers whose set is five. `plan_batch` is worse than the filed site: its missing-action error names *no* actions, so both of its discovery routes omit `edit`. The reporter reached the defect through the one surface where `edit_file` is refused outright (a guarded ledger), so the other two dispatchers were structurally outside their reproduction — the file is right about what it saw, and narrow because the reproduction was. Kin `IC-6`, § *Testing Discipline* "mutate once per guarded SITE". |
 | F-116 | 2026-09-06 | med | self-friction | mitigated | **An uncommitted non-compiling edit is an unannounced build-level lock on every other session in the checkout — and the interesting cost is not the breakage, it is what it does to a peer's EVIDENCE.** Left a test stub in `mv.rs` with wrong trait signatures (`fn query` where the trait has `knn`) and went to read another file before compiling. For those minutes no `cargo test` in the tree could build, so a peer's run said nothing about their own code AND actively misdirected — it named a file and a symbol, both real, both irrelevant to them. A compile error is normally the most trustworthy signal there is: unambiguous, located, reproducible. On a shared checkout it is none of those things *about you*, and nothing distinguishes "your code is broken" from "someone else's uncommitted edit is". **Same shape as `OB-17`'s coupling lock, one layer down and worse in two ways:** it needs no gate, since the compiler supplies the coupling, and it is unbounded — it lasts exactly as long as the author is distracted, and `OB-17`'s victim at least receives a well-written refusal. **Author-side rule:** compile before you stop typing. The peer-side rule (`git status --short -- '*.rs'` before citing a run — the peer's own, written after failing to follow it) only tells them to distrust the result, never how to get a good one. Peer `codescout-3d` (`ba061586`) asked rather than fixed, which was correct and cost a round-trip. Kin `OB-17`, `OB-19`, `F-114`. |
 | F-114 | 2026-09-04 | med | self-friction | open | **A bug's own `## Resume` named the source repo — the one axis that reads green in the broken world.** The IL-4 hook's enforcement surface is the version-pinned install under `<profile>/plugins/cache/…/<version>/hooks/`, one per profile; the Resume said to confirm it in the source checkout. Following it, my first check printed `(absent)` for a *missing directory* — a string indistinguishable from a removed hook, and it would have been right by accident. Source-deleted ≠ retired, source-present ≠ firing, and `mtime` adjudicates neither (installed `1.20.4` stats two days BEFORE the commit that created 1.20.4) |
@@ -11999,6 +12000,54 @@ reproduction run second, which still worked because the probe was run before any
 prescribed one-line change been applied on the strength of the plan alone, the closing regression
 test would have asserted on `body_edits` only, and § *Testing Discipline*'s *"mutate once per
 guarded SITE"* names exactly this outcome: one kill saying nothing about the other N−1.
+
+## F-118 — a bug's Resume routed the next session to a shim its own installer refuses to create
+
+**Valid:** dated 2026-09-07
+
+**Severity:** med — one session's search for a file the repo is designed not to have, plus a
+live risk of building a wrapper that ships a confident wrong name.
+
+**Status:** fixed-verified (the bug file's § Fix and § Resume now carry the measurement)
+
+**Observed.** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`
+§ *Resume* named the placement of its own remedy as the open question, and offered
+`scripts/install-hooks.sh`'s *"native `pre-commit` shim"* as the likely home. Scouted before
+acting: **there is no such shim.** That script delegates the entire pre-commit stage to
+`pre-commit install`, and its `install_shim` **REFUSES** to overwrite a framework-generated
+hook — by design, to catch someone running `pre-commit install --hook-type` over a native
+one. The proposed location is not merely absent; the installer actively prevents it.
+
+**And the ordering premise it rested on was right for the wrong reason.** The Resume said a
+hook cannot pre-empt pre-commit's internal refusal. True, and verified in 4.6.2 — but the
+obstacle was never ordering, because a **wrapper works**: moving the framework shim aside and
+`exec`ing it from a native `pre-commit` put our output *above* the refusal with the refusal
+still firing. So the remedy is buildable, and the file was blocked on a question that had a
+yes.
+
+**What the scout actually changed — the reclassification.** The wrapper cannot name the
+holder. In the probe it printed the file's last *committer*, which is attribution by
+proximity and exactly what `IC-17` and `OB-8` forbid. The reason is structural: the resource
+is the **unstaged working tree**, `IC-17`'s own `NONE` row, *"the one gap with no adjacent
+primitive to extend"*. `session-stage-log` covers staged pairs only. So this bug is a
+**consequence** of the working-tree gap rather than an independent item, and cannot be closed
+ahead of it — its § *Fix* promised *"convert an unbounded wait into a message"*, and what is
+reachable is only *"this refusal is global and the holder is unrecorded"*. Smaller, true, and
+still most of the value.
+
+**Method note, because the absence is the result.** The probe carried a **canary hook** as its
+control: with the config clean the canary ran and the commit passed; with it dirty the canary
+did not run and the commit failed. Without the control, "no hook output" is equally the
+signature of a broken fixture. Per § *Testing Discipline* — a zero needs an instrument proven
+able to return non-zero.
+
+**Why nobody had run it.** Reproducing this on the shared checkout *causes* the outage it
+describes — every session's commits blocked, and the party who dirties the file is the one
+who cannot see it. It has to be a `mktemp -d` repo, which is a barrier of exactly one thought
+and had not been crossed in six days.
+
+**Rests on:** `IC-17`'s per-resource *Mechanism status* table, specifically the
+`working tree, unstaged — NONE` row; `OB-8` (a shared resource carries no owner).
 
 ## Template for new entries
 

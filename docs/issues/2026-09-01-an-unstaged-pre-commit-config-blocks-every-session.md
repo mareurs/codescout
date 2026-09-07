@@ -130,6 +130,58 @@ practice.**
 - **Not a candidate:** telling people to be careful. The party who would have to remember
   is defined by the mechanism as the one receiving no signal.
 
+### Measured 2026-09-07 — the placement is solved and the ATTRIBUTION is not
+
+The bullet above is **half wrong, and it is the expensive half.** Reproduced end-to-end in a
+throwaway repo (never on the shared checkout — doing so *causes* the outage this file
+describes, which is why nobody had run it):
+
+**1. No hook can pre-empt the refusal, including a `local:` one.** Verified in pre-commit
+4.6.2: `_has_unstaged_config` runs inside the framework's own entry point, gated on
+`stash = not args.all_files and not args.files`, and returns before dispatching anything.
+The probe carried a canary hook as its control, which is what makes the absence a
+measurement rather than a broken fixture:
+
+| config state | canary hook | commit |
+|---|---|---|
+| clean | **ran** | rc=0 |
+| dirty, unstaged | **did not run** | rc=1, names the file |
+
+**2. The alternative location this file proposed DOES NOT EXIST.** § *Resume* previously
+sent the next session to `scripts/install-hooks.sh`'s "native `pre-commit` shim". There is
+none: that script delegates the whole pre-commit stage to `pre-commit install`, and its
+`install_shim` explicitly **REFUSES** to overwrite a framework-generated hook. A session
+following the old Resume would have gone looking for a file the repo is designed not to
+have.
+
+**3. A WRAPPER works, and that is the buildable path.** Moving the framework's shim aside
+and installing a native `pre-commit` that runs first and then `exec`s it: the wrapper's
+output appeared *above* the framework's refusal, with the refusal still correctly firing.
+So "a check that fires before pre-commit's own refusal" is reachable — the obstacle was
+never ordering.
+
+**4. And it still cannot name the holder — which RECLASSIFIES this bug.** The wrapper in
+the probe printed a holder line, and the value it produced was the last *committer* of the
+file, not the party holding the current unstaged edit. That is attribution by proximity,
+which `IC-17` and `OB-8` both forbid; the wrapper would ship a confident wrong name.
+
+The reason is structural rather than a missing lookup: the resource here is the **unstaged
+working tree**, which is `IC-17`'s own `NONE` row — *"Git has no per-path unstaged ownership
+concept, so this is the one gap with no adjacent primitive to extend."*
+`session-stage-log` covers **staged** pairs only, so the machinery cited in the bullet above
+is real and out of reach here by one step.
+
+**So this is not an independent item with an unbuilt remedy; it is a CONSEQUENCE of the
+working-tree gap, and it cannot be closed ahead of it.** What a wrapper can honestly deliver
+is **scope, not ownership**: *"this refusal is global — it blocks every session on this
+checkout, and the holder is unrecorded."* That is a smaller claim than the § *Fix* bullet
+promised and it is the one that is true. It still converts the outage from a confusing
+per-session error into a legible checkout-wide condition, which is most of the value; it
+does not convert an unbounded wait into a message, which was the stated goal.
+
+*(Derived, not cited: run the probe again rather than trusting this table — it is ten lines
+of `bash` in a `mktemp -d` repo and takes one call. The version is load-bearing; the gate
+condition on `stash` could move.)*
 ## Tests added
 
 None, and the gap is worth naming rather than excusing. A regression test would have to
@@ -144,13 +196,16 @@ the holder to land it, and `--no-verify` is the wrong habit here specifically.
 
 ## Resume
 
-Decide whether the owner-field check is worth building: a `pre-commit`-stage hook that runs
-before pre-commit's internal refusal, detects `git diff --quiet .pre-commit-config.yaml`
-returning 1, and resolves the holder the way `scripts/pre-commit-foreign-index.sh` already
-resolves stagers. Ordering is the open question — pre-commit's check at `run.py:353` runs
-before any hook, so a hook cannot pre-empt it and the check may have to live in
-`scripts/install-hooks.sh`'s native `pre-commit` shim instead.
+**The placement question is CLOSED (measured 2026-09-07, below). What is open is a
+decision, and it is a narrower one than this file previously posed:** ship a wrapper that
+announces the *scope* of the outage, or ship nothing until the working-tree gap is closed.
+Do not go looking for a way to name the holder — that route was measured shut.
 
+Next concrete step if the answer is "ship the wrapper": amend `scripts/install-hooks.sh`,
+whose `install_shim` currently **refuses** this shape by design, and decide whether the
+refusal should gain an exception or the wrapper should be installed by a separate path.
+That refusal is correct as written — it exists to catch someone running `pre-commit install
+--hook-type` over a native hook — so widening it is a deliberate change, not a bug fix.
 ## References
 
 - `OB-10` in `docs/trackers/observer-blindness.md` — the class, its membership test, and
@@ -161,4 +216,3 @@ before any hook, so a hook cannot pre-empt it and the check may have to live in
   hooks, and the `--no-verify`-teaching argument this bug feeds.
 - `9e493b20` — the commit whose editing window produced this; it also shortened two hook
   runtimes for a related reason.
-
