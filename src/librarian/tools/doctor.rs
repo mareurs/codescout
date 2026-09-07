@@ -254,6 +254,7 @@ declare_checks! {
     EntryWithoutDefinition => "entry_without_definition",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
+    FrontmatterStatusMismatch => "frontmatter_status_mismatch",
     LedgerDefinesNothing => "ledger_defines_nothing",
     MissingFile => "missing_file",
     NonTerminalStatusWithFixAnchor => "non_terminal_status_with_fix_anchor",
@@ -372,6 +373,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(artifact_path_violations);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
+    // The CONTENT half of the file/catalog pair, and the direction that had no instrument
+    // until 2026-09-07. Its id sibling runs inside `scan_artifact_paths`' row loop above;
+    // this one needs the row's `status` column as well, so it takes its own query rather
+    // than widening that loop's tuple for every other check sharing it.
+    all_violations.extend(scan_frontmatter_status_mismatches(&cat.conn)?);
     all_violations.extend(scan_snapshot_drift(&cat.conn)?);
     // Runs beside snapshot_drift rather than inside it: the two ask different
     // questions of the same body (does it carry the row / can anything cite the
@@ -545,6 +551,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     const SCOPED_ROW_CHECKS: &[&str] = &[
         "frontmatter_id_mismatch",
         "frontmatter_id_is_not_a_catalog_id",
+        "frontmatter_status_mismatch",
         "ledger_defines_nothing",
         "entry_without_definition",
         "entry_defined_twice",
@@ -2403,6 +2410,88 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
              a move re-keys the row and this file kept the id it was moved away from"
         ),
     ))
+}
+
+/// Every artifact file's frontmatter `status:` must agree with the row that owns it.
+///
+/// The **content** sibling of [`check_frontmatter_id_matches_catalog`]: same file/catalog
+/// pair, different field. Until 2026-09-07 only the id half had an instrument, and the
+/// asymmetry was less a coverage gap than a *measurability* one — a divergent status could
+/// be stumbled over but never counted, so each fix to a write path shipped with nobody able
+/// to say how much existing drift it left behind.
+///
+/// Two write paths produced exactly this, in opposite directions, and each was fixed alone:
+/// `doc(action="link", rel="supersedes")` moved the row and never wrote the file (`05da2db7`),
+/// and `edit_markdown` wrote the file and never moved the row
+/// (`docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`).
+/// Neither fix reaches the other direction, and neither could report a population.
+///
+/// **Reports, never repairs — a judgement, not caution.** Which side is authoritative is not
+/// decidable here. The project declares the file the source of truth, but at this layer a
+/// hand-edited file and a stale row are indistinguishable, and the id sibling only earns its
+/// repair because a move re-keys deterministically. So this names both values and leaves the
+/// choice to the reader.
+///
+/// The abstentions mirror the id check's, for the same reasons:
+/// - **No `status:` at all** asserts nothing false, and stamping one is a taxonomy decision.
+/// - **A missing file** is [`check_missing_file`]'s finding — repeating it here would inflate
+///   the count on precisely the rows nothing can repair.
+/// - **Unparseable frontmatter** is left alone rather than guessed at.
+fn check_frontmatter_status_matches_catalog(
+    id: &str,
+    abs_path: &str,
+    row_status: &str,
+) -> Option<Violation> {
+    let content = std::fs::read_to_string(abs_path).ok()?;
+    let (fm, _) = crate::librarian::frontmatter::parse(&content).ok()?;
+    let declared = fm?.status?;
+    if declared == row_status {
+        return None;
+    }
+    Some(Violation::new(
+        "frontmatter_status_mismatch",
+        Some(id.to_string()),
+        abs_path,
+        format!(
+            "frontmatter says status '{declared}' but the catalog row says '{row_status}' — the \
+             file and the index disagree and neither reader sees a conflict, so a triage query \
+             and the file itself answer differently with no error anywhere. REPORTED, NOT \
+             REPAIRED: which side is right is not decidable from here — a write path that moved \
+             the row without writing the file leaves the FILE correct, while a hand-edit the \
+             catalog never saw leaves the ROW correct. Establish which changed last, then \
+             `doc(action=\"update\", id=\"{id}\", patch={{\"status\": \"...\"}})`, which is the \
+             call that round-trips to both."
+        ),
+    ))
+}
+
+/// The `frontmatter_status_mismatch` rows. Ordered by `abs_path` for the same reason
+/// [`scan_artifact_paths`] is: a stable order is what makes a reported sweep reproducible,
+/// and what lets two runs be diffed against each other.
+///
+/// A row whose `status` is NULL is skipped rather than compared against the empty string —
+/// there is no declared value to disagree with, and reporting one would be a finding about
+/// the schema rather than about drift.
+///
+/// Unlike [`scan_frontmatter_id_mismatches`] no `fix=` consumes this, so it carries no
+/// check-name write guard: there is no repair for the filter to keep honest.
+fn scan_frontmatter_status_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows
+        .iter()
+        .filter_map(|(id, abs_path, status)| {
+            check_frontmatter_status_matches_catalog(id, abs_path, status.as_deref()?)
+        })
+        .collect())
 }
 
 /// One params-backed ledger, with everything the four entry-drift scans need in order
@@ -6407,6 +6496,133 @@ mod tests {
                 "{label}: must not be flagged"
             );
         }
+    }
+
+    /// The measurement this check exists to make possible.
+    ///
+    /// Before it, a file saying `active` while its row said `superseded` was invisible to
+    /// every query — not merely unfixed but **uncountable**, so no fix to a write path could
+    /// report the drift it left behind. Two such fixes shipped that way.
+    ///
+    /// The three abstentions are asserted rather than trusted, because each is a case where
+    /// the naive implementation emits a finding nothing can act on.
+    #[test]
+    fn check_frontmatter_status_flags_only_a_status_that_is_present_and_differs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |name: &str, body: &str| -> String {
+            let p = tmp.path().join(name);
+            std::fs::write(&p, body).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+
+        // Present and differing — the finding.
+        let diverged = write("a.md", "---\nid: aaaa\nstatus: active\n---\nbody\n");
+        let v = check_frontmatter_status_matches_catalog("row1", &diverged, "superseded")
+            .expect("a present, differing status must be reported");
+        assert_eq!(v.check, "frontmatter_status_mismatch");
+
+        // Agreement is not a finding.
+        let agreeing = write("b.md", "---\nid: bbbb\nstatus: superseded\n---\nbody\n");
+        assert!(
+            check_frontmatter_status_matches_catalog("row2", &agreeing, "superseded").is_none(),
+            "agreement must be silent"
+        );
+
+        // No `status:` at all asserts nothing false, and stamping one is a taxonomy
+        // decision this check has no standing to make.
+        let absent = write("c.md", "---\nid: cccc\nkind: spec\n---\nbody\n");
+        assert!(
+            check_frontmatter_status_matches_catalog("row3", &absent, "superseded").is_none(),
+            "an absent status declares nothing and must not read as disagreement"
+        );
+
+        // A missing file is `check_missing_file`'s finding. Repeating it here would inflate
+        // the count on precisely the rows nothing can repair.
+        let gone = tmp.path().join("nope.md").to_string_lossy().into_owned();
+        assert!(
+            check_frontmatter_status_matches_catalog("row4", &gone, "superseded").is_none(),
+            "a missing file belongs to check_missing_file, not to this check"
+        );
+    }
+
+    /// The detail must name BOTH values, and this is deliberately a separate assertion from
+    /// the predicate above.
+    ///
+    /// A message reading *"the file and the index disagree"* is true, satisfies every
+    /// assertion on `v.check`, and still sends the reader to open two surfaces to learn what
+    /// each one says. Because this check **reports and never repairs**, its message is the
+    /// entire deliverable — a predicate-only suite would leave the half that does the work
+    /// untested by construction, which is how a guard comes to fire correctly and help
+    /// nobody.
+    #[test]
+    fn frontmatter_status_mismatch_detail_names_both_sides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("d.md");
+        std::fs::write(&p, "---\nid: dddd\nstatus: open\n---\nbody\n").unwrap();
+        let v =
+            check_frontmatter_status_matches_catalog("row5", &p.to_string_lossy(), "superseded")
+                .expect("present and differing");
+        assert!(
+            v.detail.contains("'open'"),
+            "detail must quote the FILE's value; got: {}",
+            v.detail
+        );
+        assert!(
+            v.detail.contains("'superseded'"),
+            "detail must quote the ROW's value; got: {}",
+            v.detail
+        );
+    }
+
+    /// The check must be **reached** by the default scan, not merely exist.
+    ///
+    /// The two tests above prove the predicate. Neither says anything about whether
+    /// `doctor`'s entry point ever calls it — and a `0` from a check nothing reaches is
+    /// byte-identical to a clean corpus, which is the shape of every un-wired guard in this
+    /// repo's history.
+    ///
+    /// Not hypothetical: this check's first live run reported **0** across the whole
+    /// catalog, and the only thing separating *"the corpus is clean"* from *"I wired it into
+    /// nothing"* was a planted positive. `frontmatter_id_mismatch` read 0 on that same run
+    /// too, so the sibling could not serve as the control either.
+    ///
+    /// The agreeing row is the discriminator: a scan that reported every artifact rather
+    /// than only diverged ones would answer 2 here and still look like it worked.
+    #[tokio::test]
+    async fn frontmatter_status_mismatch_is_reached_by_the_default_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        let root = tmp.path().to_string_lossy().into_owned();
+
+        // `seed_artifact` writes rows with status 'active'; the file is what varies.
+        let seed_file = |name: &str, status: &str| -> String {
+            std::fs::write(
+                tmp.path().join("docs").join(name),
+                format!("---\nkind: spec\nstatus: {status}\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            format!("{root}/docs/{name}")
+        };
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(
+            &cat,
+            "1111111111111111",
+            &seed_file("diverged.md", "superseded"),
+        );
+        seed_artifact(
+            &cat,
+            "2222222222222222",
+            &seed_file("agreeing.md", "active"),
+        );
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let scan = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            scan["summary"]["by_check"]["frontmatter_status_mismatch"], 1,
+            "the check must run in the DEFAULT scan and count ONLY the diverged row. Got: {}",
+            scan["summary"]["by_check"]
+        );
     }
 
     /// The discriminating pair the check could not tell apart. Both files declare an
