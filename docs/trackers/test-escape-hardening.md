@@ -284,6 +284,54 @@ family run finds a blind sibling when the diff-scoped run is already green.
 That needs a deliberate sweep neither of us has run.
 
 **Valid:** dated 2026-08-29
+
+### I-9 — Standing detector for stale-after-move citations (archive-citation-forward)
+
+**Valid:** dated 2026-09-07
+
+**Layer:** cheap-detector · **Mechanical:** yes · **Status:** proposed · **Home:**
+`src/librarian/tools/doctor.rs`, as the mirror of `premature_archive_citation`.
+
+`doctor` already covers the **backward** form: a citation naming
+`docs/issues/archive/<slug>.md` for a bug still sitting in `docs/issues/`, written
+expecting a move that never happens. The **forward** form is its mirror — an archive move
+lands and every citation of the old path goes stale — and nothing in code repairs or
+detects it.
+
+**What makes this worth a row is that two sessions theorised about the repair mechanism
+for three rounds without either checking that it exists.** The remedy is documented as a
+grep in `get_guide("tracker-conventions")` that an agent runs by hand.
+`premature_archive_citation`'s own rationale says so in as many words — *"no event fires,
+no sweep runs, no procedure owns the fix"* — and a scan of `src/` for citation
+re-pointing returns only `graft.rs`. There is no `sweep_citations`.
+
+**Why the belief was reasonable, which is the part a future reader needs.**
+`doc(action="move")` *does* perform automatic repair and reports it: every move response
+carries `history_grafted: {events, observations, links, event_edges}` from
+`graft.rs::repoint_history`. That repair is real and it covers **catalog rows**. It does
+not touch **prose** — and the `cites` edges it re-points are themselves *derived from
+prose* by `link_scan`, so stale prose is re-derived into stale edges on the next scan.
+The visible automatic repair sits upstream of the thing that stays broken, which is why
+seeing a move report N links re-pointed supports exactly the wrong inference.
+
+**Measured, on the session that found it.** Five archive moves in `6a2ab716` left **seven**
+stale citations. **None were swept.** They were found by a deliberate grep, run because
+that session had just read the slug-vs-path bug — not by any mechanism. The session then
+cited its own repair as evidence that the trigger fires.
+
+**Why `cheap-detector` and not `static-gate`.** `audit_doc_refs` already finds these as
+missing paths and deliberately caps them to `Med` for code comments so an archiver cannot
+red the build via a comment they never touched. The population is therefore partly visible
+and intentionally non-gating; a detector that *names the post-move stale set* is the
+increment, while a gate would re-open the severity decision that cap was made to settle.
+
+**Attribution.** Found and diagnosed by sessionId
+`89d91024-cd66-4361-9300-c55b87b179ea`, who falsified two successive framings of it —
+theirs and mine — before establishing that neither framing's mechanism existed. Filed here
+rather than left in their scratchpad because their prose ledgers are id-blocked on
+unpushed commits and this host does not push, so the park had no scheduled end; this
+tracker is a **params** ledger and so is unguarded by that check. The `SKF-22` framing is
+theirs too: *a trigger the model must notice is a policy, not a mechanism.*
 ## History
 
 ### 2026-08-16 — I-7 opened and shipped same day (tracker-hygiene sweep → verify-open → fix)
