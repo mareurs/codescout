@@ -186,9 +186,18 @@ error text.
 Gate green 2026-09-07 at `bd3d0973`: FMT=0, CLIPPY=0, LEAN=0 (3627 tests), DEFAULT=0 (5571
 tests, 0 failures).
 
-**Not yet verified against a running MCP server.** The fix is in source; the live server
-runs a release binary built before it, so the defect still reproduces in-session until
-`cargo rb` and an `/mcp` reconnect. Nothing in the tests depends on that.
+**Verified end-to-end against the running MCP server** on 2026-09-07, after `cargo rb` and an
+`/mcp` reconnect — both branches, through the real tool boundary rather than the unit harness:
+
+- `run_command("stat -c '%y  %s bytes  %n' @ack_639fc11a")` → **succeeds**, returning the file's
+  stat. The token is written BARE here: not the `./?` glob, not `find -exec`. This is the exact
+  call shape that was refused when this bug was rediscovered.
+- `run_command("cat @ack_7bd908c0")`, against a handle minted seconds earlier by the
+  dangerous-command gate, → **still refused**, with the new hint naming the token, giving the
+  standalone form that executes it, and stating that a file of that name is not refused.
+
+The second check is the one worth keeping: it is the branch the fix had to PRESERVE, and a
+repair that merely deleted the guard would pass the first check alone.
 ## Workarounds
 
 Never write the token. Use a glob that stops short of the hex:
