@@ -110,10 +110,19 @@ tools**, and a third session (`codescout-00`, 2026-09-07) went and found that. T
 with the split between what I verified here and what I am relaying marked, because only one of
 these is in this repo:
 
-**VERIFIED HERE, at the bytes.** codescout is exonerated: `ReadFile`, `EditFile`, `EditCode`,
-`References`, `SymbolAt` and `CallGraph` are registered in the **unconditional** base vector
-(`src/server.rs:322-338`) — no feature gate, no config gate. Only the peer, probe and librarian
-blocks are conditional. **The server advertises every tool the redirect names.**
+**VERIFIED HERE, at the bytes.** codescout is exonerated: `ReadFile`, `CreateFile`, `EditFile`,
+`EditCode`, `References`, `SymbolAt` and `CallGraph` — **all seven** — are registered in the
+**unconditional** base vector (`src/server.rs:321-338`): a plain `vec!`, no `cfg`, no feature
+gate, no conditional push. Only the peer, probe and librarian blocks are conditional. **The
+server advertises every tool the redirect names, on every start.**
+
+*(This sentence named **six** until 2026-09-07 while the table below listed **seven** missing —
+`CreateFile` was in the table and out of the prose. Caught by `cda3afe5` spot-checking the
+exoneration rather than taking it. It is the count-versus-its-own-enumeration defect from
+`docs/issues/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`,
+committed for the third time today by this author, inside the file that reports it. The number
+came from the registration site and the list came from my own tool set; nothing reconciled
+them.)*
 
 **RELAYED, not re-derived** (no instrument here can reach either): `llm-proxy` is in the path but
 its `STRIP_TOOLS` is empty in the *running* process's own environment, read at the serving
