@@ -1216,8 +1216,22 @@ fn format_activate_project(result: &Value) -> String {
             .get("current_version")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        // `refresh_prompt=true`, not `action="refresh_prompt"`. The tool's schema
+        // declares `force` and `refresh_prompt` (a boolean) and no `action`
+        // parameter, so the old form left `refresh_prompt` absent — false — and
+        // fell through to the already-onboarded path, which then instructed the
+        // real form: a wrong first instruction that recovered on a second round
+        // trip and so never looked broken. The JSON field this banner duplicates
+        // was corrected on its own; this copy was missed, because the sweep had
+        // no way to enumerate the surfaces it had not changed.
+        //
+        // This is the surface that matters most on the path it appears: `workspace`
+        // is `OutputForm::Json`, so `format_compact` is reached only on buffered
+        // overflow — where `call_content` shows the caller this string AND NOTHING
+        // ELSE (`src/tools/format.rs`), leaving the correct `action` field unread
+        // in the buffer.
         let mut out = format!(
-            "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(action=\"refresh_prompt\") now."
+            "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(refresh_prompt=true) now."
         );
         if let Some(b) = legacy_banner {
             out.push('\n');

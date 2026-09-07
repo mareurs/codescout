@@ -2467,7 +2467,7 @@ fn format_activate_project_prepends_warning_when_stale() {
         "system_prompt_stale": {
             "stored_version": 20,
             "current_version": 23,
-            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
+            "action": "Run onboarding(refresh_prompt=true) — tool names or signatures have changed."
         },
         "hint": "CWD: /home/user/my-project"
     });
@@ -2479,6 +2479,29 @@ fn format_activate_project_prepends_warning_when_stale() {
     assert!(
         compact.contains("activated · my-project (rw)"),
         "compact should still contain activation summary but was: {compact}"
+    );
+
+    // The remedy must name a call form the tool ACCEPTS. `onboarding`'s schema
+    // declares `force` and `refresh_prompt` (a boolean) and no `action` parameter
+    // at all, so `action="refresh_prompt"` leaves `refresh_prompt` absent — false —
+    // and falls through to the already-onboarded path, which then instructs the
+    // real form. The caller recovers on a second round trip having been told to do
+    // the wrong thing once.
+    //
+    // This half of the banner was untested by construction: the two assertions
+    // above stop one character before the remedy, so nothing reached the call form.
+    // Asserted as SHAPE rather than as a pinned sentence — pinning the prose reds
+    // on every rewording and would rightly be deleted, while these two red exactly
+    // on the regression that happened and survive any rewrite that keeps the form
+    // callable.
+    assert!(
+        compact.contains("refresh_prompt=true"),
+        "the banner must name the call form the tool accepts; got: {compact}"
+    );
+    assert!(
+        !compact.contains("action=\""),
+        "the banner must not name an `action` parameter — onboarding declares none; \
+         got: {compact}"
     );
 }
 
@@ -2516,7 +2539,7 @@ fn format_activate_project_prepends_warning_with_none_stored_version() {
         "system_prompt_stale": {
             "stored_version": null,
             "current_version": 23,
-            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
+            "action": "Run onboarding(refresh_prompt=true) — tool names or signatures have changed."
         },
         "hint": "CWD: /home/user/my-project"
     });
