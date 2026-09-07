@@ -123,9 +123,13 @@ pub struct AgentInner {
     /// Last `activate()` as (root, when). Drives the concurrent-activation
     /// guard (`Agent::note_activation`): if a *different* root is activated
     /// under this shared server within a short window, the activate response
-    /// carries a `concurrent_activation_warning`. See
+    /// carries a `concurrent_activation_warning`. The third element is the
+    /// activating session id — `IC-17` layer 2, the owner field that lets the
+    /// guard compare identity instead of substituting wall-clock proximity for
+    /// it. `None` means the caller did not identify itself, never that it was
+    /// the same caller. See
     /// docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md
-    pub last_activation: Option<(PathBuf, std::time::Instant)>,
+    pub last_activation: Option<(PathBuf, std::time::Instant, Option<String>)>,
 }
 
 impl AgentInner {
@@ -883,25 +887,60 @@ impl Agent {
     /// fingerprint of concurrent multi-workspace use on a single shared server
     /// (parallel subagents that each `activate` a different workspace). Same-root
     /// re-activation and slow sequential switches (outside `window`) are silent.
+    ///
+    /// So is a switch whose previous activation carries the SAME session id: that is
+    /// one linear session using the documented cross-project pattern, and warning on
+    /// it was a systematic false positive rather than noise
+    /// (`docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`).
+    /// Identity only ever silences — an unknown id on either side keeps the old
+    /// proximity behaviour.
     /// See docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md
     fn concurrent_switch_warning(
-        prev: Option<(&std::path::Path, std::time::Duration)>,
+        prev: Option<(&std::path::Path, std::time::Duration, Option<&str>)>,
         new_root: &std::path::Path,
+        new_sid: Option<&str>,
         window: std::time::Duration,
     ) -> Option<String> {
         match prev {
-            Some((prev_root, since)) if prev_root != new_root && since < window => Some(format!(
-                "active project switched from {} to {} {:?} ago — another caller \
-                 (e.g. a concurrent subagent) shares this server's single \
-                 active-project slot, so reads may resolve against the wrong \
-                 workspace. Fix: pass workspace=<absolute path> on each tool call \
-                 to pin resolution per-request instead of activating. For fully \
-                 independent parallel work, separate client windows also \
-                 isolate (separate processes = separate slots).",
-                prev_root.display(),
-                new_root.display(),
-                since
-            )),
+            Some((prev_root, since, prev_sid)) if prev_root != new_root && since < window => {
+                // IDENTITY MAY ONLY SILENCE A WARNING, NEVER CREATE ONE.
+                //
+                // Proximity is a proxy for contention: it correlates with it and does
+                // not imply it. One session following the documented cross-project
+                // pattern (activate foreign -> work -> activate home) inside the window
+                // is a SYSTEMATIC false positive, not noise, and a guard that cries on
+                // the documented path trains its reader to ignore it.
+                //
+                // The asymmetry is deliberate. When either side is unidentified, two
+                // anonymous callers are indistinguishable from one, so we fall back to
+                // the proximity behaviour this guard shipped with: a missed warning on
+                // a real race is the harm it exists for, a spurious one merely annoys.
+                if let (Some(p), Some(n)) = (prev_sid, new_sid) {
+                    if p == n {
+                        return None;
+                    }
+                }
+                // Name the OTHER caller when we know it. "another caller" leaves a
+                // reader with nobody to ask; a sessionId is an address they can reach
+                // (see CLAUDE.md § Reaching a Peer Session).
+                let by = match prev_sid {
+                    Some(s) => format!(", the previous activation by session {s}"),
+                    None => String::new(),
+                };
+                Some(format!(
+                    "active project switched from {} to {} {:?} ago{} — another caller \
+                     (e.g. a concurrent subagent) shares this server's single \
+                     active-project slot, so reads may resolve against the wrong \
+                     workspace. Fix: pass workspace=<absolute path> on each tool call \
+                     to pin resolution per-request instead of activating. For fully \
+                     independent parallel work, separate client windows also \
+                     isolate (separate processes = separate slots).",
+                    prev_root.display(),
+                    new_root.display(),
+                    since,
+                    by
+                ))
+            }
             _ => None,
         }
     }
@@ -911,14 +950,26 @@ impl Agent {
     /// prevent the race (the active project is process-global shared state), only
     /// surface it. The real fix is per-request workspace pinning; see the bug file.
     pub async fn note_activation(&self, root: &std::path::Path) -> Option<String> {
+        let sid = crate::tools::session_key::resolve(
+            std::env::var("CODESCOUT_SESSION_ID").ok(),
+            crate::tools::session_key::HARNESS_SESSION_VARS
+                .iter()
+                .filter_map(|v| std::env::var(v).ok().map(|val| (*v, val))),
+        )
+        .id()
+        .map(str::to_string);
         let mut inner = self.inner.write().await;
         let prev = inner
             .last_activation
             .as_ref()
-            .map(|(p, at)| (p.as_path(), at.elapsed()));
-        let warning =
-            Self::concurrent_switch_warning(prev, root, Self::CONCURRENT_ACTIVATION_WINDOW);
-        inner.last_activation = Some((root.to_path_buf(), std::time::Instant::now()));
+            .map(|(p, at, s)| (p.as_path(), at.elapsed(), s.as_deref()));
+        let warning = Self::concurrent_switch_warning(
+            prev,
+            root,
+            sid.as_deref(),
+            Self::CONCURRENT_ACTIVATION_WINDOW,
+        );
+        inner.last_activation = Some((root.to_path_buf(), std::time::Instant::now(), sid));
         warning
     }
 
@@ -2415,27 +2466,125 @@ mod tests {
         let window = Duration::from_secs(5);
 
         // First activation (no prior) → silent.
-        assert!(Agent::concurrent_switch_warning(None, a, window).is_none());
+        assert!(Agent::concurrent_switch_warning(None, a, None, window).is_none());
 
         // Rapid switch to a DIFFERENT root → warning (the subagent-race signature).
         // The message must recommend per-request pinning as the primary fix and
         // separate windows as the fallback — both are guidance contracts.
-        let w = Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), b, window);
+        let w = Agent::concurrent_switch_warning(
+            Some((a, Duration::from_millis(200), None)),
+            b,
+            None,
+            window,
+        );
         assert!(w.as_deref().is_some_and(|s| {
             s.contains("workspace=<absolute path>") && s.contains("separate client windows")
         }));
 
         // Same-root re-activation → silent (normal return-home / re-activate).
-        assert!(
-            Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), a, window)
-                .is_none()
-        );
+        assert!(Agent::concurrent_switch_warning(
+            Some((a, Duration::from_millis(200), None)),
+            a,
+            None,
+            window
+        )
+        .is_none());
 
         // Different root but OUTSIDE the window (slow sequential switch) → silent.
+        assert!(Agent::concurrent_switch_warning(
+            Some((a, Duration::from_secs(60), None)),
+            b,
+            None,
+            window
+        )
+        .is_none());
+    }
+
+    /// The false positive the bug is about: ONE session following the documented
+    /// cross-project pattern (activate foreign -> work -> activate home) fast
+    /// enough to land inside the window. Proximity alone cannot tell it from a
+    /// two-caller race; identity can.
+    #[test]
+    fn a_single_session_switching_its_own_slot_is_not_a_race() {
+        use std::time::Duration;
+        let a = std::path::Path::new("/tmp/cc-wt-a");
+        let b = std::path::Path::new("/tmp/cc-wt-b");
+        let window = Duration::from_secs(5);
+
         assert!(
-            Agent::concurrent_switch_warning(Some((a, Duration::from_secs(60))), b, window)
-                .is_none()
+            Agent::concurrent_switch_warning(
+                Some((a, Duration::from_millis(200), Some("sid-one"))),
+                b,
+                Some("sid-one"),
+                window,
+            )
+            .is_none(),
+            "a session switching its OWN slot is not concurrent use — this is the \
+             documented cross-project pattern, and warning on it trains the reader \
+             to ignore the guard"
         );
+    }
+
+    /// The case the guard exists for must survive, and it must now NAME the other
+    /// caller — a warning that says "another caller" leaves the reader with no one
+    /// to ask.
+    #[test]
+    fn a_switch_by_a_different_session_still_warns_and_names_the_other_caller() {
+        use std::time::Duration;
+        let a = std::path::Path::new("/tmp/cc-wt-a");
+        let b = std::path::Path::new("/tmp/cc-wt-b");
+        let window = Duration::from_secs(5);
+
+        let w = Agent::concurrent_switch_warning(
+            Some((a, Duration::from_millis(200), Some("sid-one"))),
+            b,
+            Some("sid-two"),
+            window,
+        )
+        .expect("a genuine two-caller race must still warn");
+
+        assert!(
+            w.contains("sid-one"),
+            "the warning must name the OTHER caller, not merely assert one exists: {w}"
+        );
+        // Discriminator: kills an implementation that interpolates the CALLER's own
+        // id, which would satisfy the assertion above.
+        assert!(
+            !w.contains("sid-two"),
+            "it must name the previous holder, not the caller being warned: {w}"
+        );
+    }
+
+    /// IDENTITY MAY ONLY SILENCE A WARNING, NEVER CREATE ONE.
+    ///
+    /// When either side is unidentified, two anonymous callers are
+    /// indistinguishable from one, so the guard must fall back to the proximity
+    /// behaviour it had before. A missed warning on a real race is the harm this
+    /// guard exists for; a spurious one merely annoys.
+    #[test]
+    fn an_unidentified_caller_falls_back_to_proximity_and_still_warns() {
+        use std::time::Duration;
+        let a = std::path::Path::new("/tmp/cc-wt-a");
+        let b = std::path::Path::new("/tmp/cc-wt-b");
+        let window = Duration::from_secs(5);
+
+        for (prev_sid, new_sid) in [
+            (None, None),
+            (Some("sid-one"), None),
+            (None, Some("sid-one")),
+        ] {
+            assert!(
+                Agent::concurrent_switch_warning(
+                    Some((a, Duration::from_millis(200), prev_sid)),
+                    b,
+                    new_sid,
+                    window,
+                )
+                .is_some(),
+                "unidentified ({prev_sid:?} -> {new_sid:?}) must keep the old \
+                 proximity warning: identity can only silence, never create"
+            );
+        }
     }
 
     #[tokio::test]
