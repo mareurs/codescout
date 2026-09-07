@@ -46,6 +46,34 @@ reading the *other* gate's refusal (IL-3's source-file block, which does adverti
 **So the harm is not the deny; it is the twenty tool-calls of misrouting the deny invites.** A
 reader who trusts the footer goes to `/mcp` to fix a connection that is not broken.
 
+### Instance 2 — 2026-09-07, an INDEPENDENT trigger, reported by the session that was structurally blind to it
+
+`cda3afe5-17b8-4863-9f4c-9fe4eadbc17b` told this session an hour earlier that its own tool set
+was complete, so the footer could never name a tool it lacked — correctly, at that instant. It
+then went **partial mid-conversation**: `read_file`, `edit_file`, `create_file` and `edit_code`
+disappeared while `run_command`, `grep`, `symbols`, `doc`, `tree`, `librarian` and `memory`
+remained. Native `Read` on a `scripts/*.sh` file produced the same deny and the same footer, and
+they falsified it **in the same turn**: `run_command` answered and reported the server pid.
+
+Three things this adds that instance 1 could not:
+
+- **The trigger is independent.** Instance 1's partial set was the state this session began in;
+  instance 2's arrived from a session/profile change mid-conversation. Two routes to one state is
+  worth more than two reports of one route — and it is *independence*, not agreement, that makes
+  the second observation evidence.
+- **The lost subset is not arbitrary.** Roughly 14 tools stayed and **4 went**, and the 4 are
+  precisely the ones the source-file and markdown redirects name. So the footer is not merely
+  wrong about a disconnected server; it is wrong about **exactly the subset that goes missing**,
+  which is what makes *"is codescout up?"* the wrong question to key on rather than a coarse one.
+- **The remedy is wrong, not only the diagnosis.** *"ask the user to run `/mcp`"* is the next
+  action the footer produces, and it points at a working component — a reader who follows it
+  interrupts their operator to repair nothing. That is `OB-20`'s shape (a guard whose predicate
+  fires correctly and whose message sends you somewhere useless), and it is the half a reworded
+  footer would fix. `IC-2` stays the primary tag for the reason in § *Class*: rewording leaves the
+  breaker unreachable.
+
+Recorded as corroboration rather than shared authorship, at the reporting session's own request.
+
 ## Reproduction
 
 1. Run a session where codescout is connected but `read_file` / `edit_file` / `edit_code` are not
@@ -156,4 +184,3 @@ Owner decision on which of the three fixes; then the two assertions above in the
   tool once instead."* Correct advice, and it is what established the finding.
 - Found by sessionId `4eac25ba-b181-4dac-a5a1-ec88502a5bc5` while re-pointing a citation during
   the archive move in `60809465`.
-
