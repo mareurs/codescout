@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 116
-entry_high_water_W: 107
+entry_high_water_W: 108
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -175,6 +175,7 @@ entry_high_water_W: 107
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
 | W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
 | W-106 | 2026-09-04 | high | **Eight instrument reports returned a plausible wrong value rather than erroring, in one evening across two sessions. 0 of 8 were caught by care, suspicion, or knowing the class; 8 of 8 by a cheap artifact in the output that a broken run cannot fabricate** — an absurd mutation that must die, a control row that must stay green, a `truncated: true` flag, a per-row KILLED/SKIP label. Unit: one invocation of a measuring apparatus whose output is quoted in a commit or bug file (`2685fcd1`, `a5bbc22d`, `96574516`, `f008e74f`, `F-113`, peer `24c55642`), so the count is re-countable rather than asserted | Knowing the class prevented nothing, twice, in the strongest form available: row 2 happened *while writing up row 1*, and the peer produced row 8 an hour after being filed in writing about themselves for that exact window-vs-population error. Same shape CLAUDE.md § *Observer Blindness* measured at n=4 on 2026-08-30, arriving independently at n=8 — and with the **remedy side** measured, which that entry did not have. **Checkable in advance:** ask what a BROKEN instrument's summary line would look like; in rows 1, 3, 5 and 8 it is identical to the healthy one, and that is the condition for needing a control | validated |
+| W-108 | 2026-09-07 | med | **After a rebuild, check the PEERS' servers, not only your own — `readlink /proc/<pid>/exe` answers both and only one half needs asking.** My server was current (pid `1007917`, no `(deleted)`, mtime `22:51:21`, zero `src` commits after it). Four peer servers held **`(deleted)`** inodes, started before the rebuild, so they were executing code predating **six `src` commits** — including two catalog fixes those same sessions authored (`71077fe9`, `35f97afb`). "Rebuild verified" would have been true of me and silent about them. Two riders: `ps lstart` showed a **future** timestamp that was really an **8.5-hour clock advance** under a session that felt continuous (re-derived via `/proc/<pid>/stat` field 22 + `btime`, which agreed — making the clock the suspect, not the instrument); and my own PID decayed `3712302` → `1007631` with the sessionId unchanged. Extends `W-100` to the peer half. **CORRECTED twice-over, and the second correction is the useful one:** the first version of this row *and* of the entry's table swapped two rows against the scout's own correct `/proc` output — `2248814`'s server was `3827042`, not `3521378` — so two sessions were messaged the wrong server pid. Nothing had decayed and nothing was inferred: the measurement was right and hand-copied wrong, which makes the remedy *do not hand-build a published table from tool output*, not *re-derive*. `2248814` has since reconnected, so the stale set is **three** as of `04:27:34Z` (`3183909`, `1315060`, `2251240`). This row also originally had five cells against the table's six, putting the id in the Status column. | Without the scout I would have reported "rebuild verified, binary current, hooks intact" — every word true of my session and silent about the three it was false of, each running code predating six `src` commits including fixes those same sessions authored. `scripts/peer-sessions.sh` already reports it as `cs REPLACED`; the contribution was reaching for it at the one moment it discriminates. | validated |
 | W-103 | 2026-09-04 | high | **A schema field is not a value — when a predicate's safety rests on a payload being populated, scroll the real store before writing the predicate.** Post-rebuild recon on the vector-routing seam sampled 200 points of the live codescout collection and found `project_id: ''` on **200 of 200**: every pre-fix vector carries the empty payload that `99558134` fixed, and the fix is not retroactive | The planned GC backstop drops a collection when its recorded path "no longer exists on disk". An empty string is not a path that exists, so the predicate evaluates TRUE for codescout's collection and destroys the whole semantic index — **29,154 vectors** — while doing exactly what it was specified to do. It would have shipped green: a fresh fixture writes through the *fixed* path, so its payloads are populated and the orphan branch never fires. The plan cited the field from `src/retrieval/artifact.rs:46,64`, where it is genuinely declared — reading the source confirms the field exists; only reading the data shows what is in it | validated |
 | W-101 | 2026-09-02 | high | **Before filing a bug against the component that REPORTED an anomaly, ask what else was writing to the resource it read.** `edit_file` refused a mutation quoting the **pre-edit** line, at a line number, while `read_file` seconds later returned the post-edit line and a `cargo test` between them had already proven the post-edit line live. On a shared checkout the answer is routinely a peer's pre-commit hook, which empties the working tree of every unstaged change for its hook run | Not one wasted file. Two diagnostics had already run and **both pointed the wrong way while looking like progress**: `read_edit_target` (`src/tools/edit_file/mod.rs:678`) is a bare `std::fs::read_to_string` with **no cache**, and a two-edit scratch probe did not reproduce. Read together they invite *"the cache must be specific to indexed source files"* — a cache that does not exist, in a tool that is not at fault — while `IC-12` gained no member and kept its *"no downstream failure observed"* line. What closed it was a different question, not more care: pre-commit retains its stash at `~/.cache/pre-commit/patch<epoch>-<pid>` **permanently**, and the patch from the peer commit inside the window contains `-                1,` / `+                2,` verbatim. **The reusable half is that oracle** — readable *after* the window, and a more complete index than `git log`, since 2 of the 4 stash events here correspond to no commit at all | validated |
 | W-100 | 2026-09-02 | med | **After a rebuild, verify a shipped tool change with one LIVE call rather than trusting the unit test that gated it.** `move_names_the_staging_action_not_only_the_two_paths` calls `mv::call` directly and therefore observes **absolute** paths — `strip_paths_in_value` runs later, at `Tool::call_content` — so it established that the fields exist and ordered correctly, and established nothing about whether the new `PATH_KEYS` entry relativizes at runtime | A `stage_together` holding absolute paths passes the unit suite **and** the corpus gate: `src/tools/core/path_strip.rs`'s own header states `no_absolute_project_paths_in_rendered_output` "only covers the file-tool surface … no librarian tool is in its fixture set", so librarian's path keys are exercised only by synthetic-`Value` unit tests. **Nothing in the suite covers end-to-end relativization of a librarian key**, so the defect would have shipped as two absolute paths rendered beside the relativized `old_abs_path`/`new_abs_path` in the same response — visible to every caller, invisible to every test. Binary provenance established positively rather than by mtime inference: server pid 190206, exe with no ` (deleted)` suffix, started 20:08:10 > binary built 20:06:36 > `489715ef` committed 17:11:17, ancestor of HEAD | validated |
@@ -11773,6 +11774,179 @@ get a good one.
 **Not filed as a bug.** There is no defect here; every component behaved correctly. It is a
 friction of the shared-checkout substrate, and the durable form of it lives in
 `observer-blindness:OB-19` and the shared-state queue rather than in a fix.
+
+## W-108 — a post-rebuild scout found four PEER servers stale, not mine — and the clock had moved 8.5h under a session that felt continuous
+
+**Valid:** dated 2026-09-07
+
+**Observed:** asked to verify a rebuild, the natural check is *"is MY binary current?"* — and the
+answer was yes, which is the uninformative half. Positive identification by walking `$$` up the
+process tree: my server is pid `1007917`, `/proc/1007917/exe` →
+`target/release/codescout` with **no `(deleted)` marker**, binary mtime `2026-09-06 22:51:21`, and
+**zero** commits touching `src/`, `crates/`, `Cargo.toml` or `Cargo.lock` after that mtime. Running
+binary matches the tree.
+
+**What the scout actually bought — four PEER servers are running a replaced binary:**
+
+| session pid | server pid | server started | `/proc/exe` |
+|---|---|---|---|
+| 3183909 | 3521378 | 2026-09-06 19:12:38 | `(deleted)` |
+| 1315060 | 3531686 | 2026-09-06 19:13:39 | `(deleted)` |
+| 2251240 | 3825848 | 2026-09-06 20:09:19 | `(deleted)` |
+| 2248814 | 3827042 | 2026-09-06 20:09:32 | `(deleted)` — **since reconnected**, now server `1027769` (07:22:43, clean inode) |
+
+As of `2026-09-07T04:27:34Z` the stale set is **three**, not four: `2248814` ran `/mcp` about
+ninety seconds after the scout and its old server `3827042` exited. Both counts are correct at
+their instants, which is why each carries one.
+
+> **THE FIRST VERSION OF THIS TABLE SWAPPED ROWS 1 AND 4, and the mechanism is worse than a
+> decayed mapping.** It read `2248814 → 3521378` and `3183909 → 3827042`. The scout's own
+> output — `ppid` read straight from `/proc/<pid>/stat` — had said `3521378 → 3183909` and
+> `3827042 → 2248814`. **Nothing was stale and nothing was inferred: the measurement was
+> correct and I hand-copied it into a table wrong**, then messaged two sessions the wrong
+> server pid on the strength of it. Caught by `2248814`, who re-derived their own and found
+> the pid I had attributed to them belonged to `3183909`.
+>
+> Their diagnosis was *"the stale mapping was server→session"* — and that is the more
+> forgiving reading, so it is worth refusing: it implies the remedy is **re-derive**, when the
+> derivation was already right. The actual remedy is narrower and duller: **do not hand-build
+> a published table out of tool output.** Emit it in the shape it will be published in, or
+> quote the raw block. Third instance in one evening of the same shape — *"two of the six are
+> yours"* (contradicted by output pasted in the same message), *"34 assertions"* (an aggregate
+> offered as coverage for a member holding zero), and this. Every one: correct value measured,
+> wrong value narrated. That is **not** `OB-21`, which is about a session's inability to
+> compare its own *successive* claims; here the contradicting evidence was in the same message
+> or one command back.
+
+All four started **before** the 22:51 rebuild. **The staleness set is PER SERVER, and the first
+version of this entry computed it over one aggregate window — wrong for every member but the
+earliest.** Derived per member, `[server start, binary mtime]`, pathspec `src/ crates/ Cargo.toml
+Cargo.lock`:
+
+| server | session | started | src-touching commits missing |
+|---|---|---|---|
+| 3521378 | 3183909 | 19:12:38 | **8** — `d4f0bafb` `4536bcad` `bae74d5a` `71077fe9` `9c03b32f` `35f97afb` `f7c8fc78` `c0cfa326` |
+| 3531686 | 1315060 | 19:13:39 | **8** — same set |
+| 3825848 | 2251240 | 20:09:19 | **4** — `9c03b32f` `35f97afb` `f7c8fc78` `c0cfa326` |
+
+For `2251240`, `d4f0bafb` landed **37 minutes before** their server started and was already in
+their binary — along with `bae74d5a`, `71077fe9` and `4536bcad`. They were told otherwise. Caught
+and re-derived by `2251240`.
+
+> **TWO NUMBERS WRONG, AND THE SECOND IS THE WORSE ONE.** The window error is the
+> population/member law — *an assertion computed over a POPULATION cannot verify a claim about a
+> MEMBER* — the same law `2251240` had caught me on ninety minutes earlier over a test-suite
+> total. But the count was also wrong *within* the aggregate: I wrote **"eight commits landed,
+> six touching `src/`"** when the command had already applied `-- src/ crates/ Cargo.toml
+> Cargo.lock`, so **all eight** touch `src` by construction. I then re-filtered the list **by
+> commit subject**, dropping the two titled `docs(issues):`. One of them, `f7c8fc78`, changes
+> **seven** `src` files including `librarian/catalog/schema.sql` and `librarian/indexer.rs`. The
+> sub-selection discarded a schema change on the strength of a commit message. **The pathspec
+> had already answered the question; I answered it again, worse, from prose.**
+
+**Behavioural corroboration beats timestamp inference, and `2251240` supplied the better
+evidence.** Everything above is an *inference about* a binary from mtimes and commit dates, not a
+*reading of* one. They instead asked their running server a question only the newer code can
+answer — `doctor`'s `by_check` returned `open_bug_cited_from_source: 1`, a check present in no
+older build — proving the binary carries it. **Ask the process, do not date the file.** Timestamps
+keep the negative direction: a `(deleted)` inode is a reading, not an inference.
+
+**Superseded detail, kept only because the numbers above replace it:** `d4f0bafb` (audit host-id), `bae74d5a` (librarian unpushed-ledger
+guard), `71077fe9` (chunk-vector reuse), `9c03b32f` (embed model-name boundary), `35f97afb`
+(catalog FK rehome), `c0cfa326` (a test). So those sessions' codescout tools are executing code
+that predates five behavioural fixes — two of which *those same sessions authored*. Their tool
+output is evidence about the build they loaded, never about the tree.
+
+**THE GIVEN ROUTE, and it is the exact analogue of the scratchpad-path trick for sessionIds.**
+From inside a session, `ps -o ppid= -p $$` in any shell the MCP server spawns returns **the
+server serving you** — the harness makes it your shell's parent, so the answer is *given*, and
+it cannot be attributed to the wrong session by construction. Verified here: it returns
+`1007917`, matching the walk-up. Enumerating servers from outside and mapping them back to
+sessions is the inferential direction, and it is where the swap above happened. **What no
+session can do is run it for a PEER** — which is precisely why this finding needs the peer to
+act on it, and is the asymmetry the entry is about. Contributed by `2248814`.
+
+**Counterfactual:** without the scout I would have reported *"rebuild verified, binary current,
+hooks intact"* — every word true of me and silent about the four sessions it was false of. They
+would have kept measuring against a stale server, on catalog code they had just changed, with
+nothing emitting a warning. `scripts/peer-sessions.sh` already reports this as `cs REPLACED`; the
+scout's contribution was reaching for it at the one moment it discriminates.
+
+**Second finding, and it is why the first nearly went wrong: the clock had moved 8.5 hours.** `ps
+lstart` reported two servers starting `Mon Sep 7 07:18`, which read as a *future* timestamp against
+the `2026-09-06T19:38Z` I had been stamping messages with all session. It was not future — the wall
+clock was `2026-09-07 07:21 +0300`. **A session that resumes feels continuous from the inside; the
+only in-context signal is a timestamp that looks wrong.** Re-derived through `/proc/<pid>/stat`
+field 22 against `/proc/stat`'s `btime` rather than trusting `lstart` — both agreed, which is what
+made the clock the suspect instead of the instrument. **And the proximate cause of the
+"future" reading was an OFFSET MIX, not the clock advance itself:** `ps lstart` prints local
+time with **no offset in the string**, and I was comparing it against the `Z` stamps I had been
+writing all session. `07:18 +0300` against `19:38Z` is three hours of unlabelled skew on top of
+the eight-hour gap, and the eye supplies whichever offset it last used. Named by `2248814`,
+whose own stamps were `Z` throughout and consistent. (`docs/PROBES.md` rule 4 already warns about
+`ps lstart`, for sorting; this is the reading case.)
+
+**And my own PID decayed while the sessionId did not** — `3712302` last night, `1007631` now, same
+`cda3afe5-…` confirmed from the scratchpad path component. Exactly what `CLAUDE.md` § *Observer
+Blindness* says about names versus sessionIds, observed live rather than cited: anything I had
+recorded as "pid 3712302" is now wrong, and nothing announced it.
+
+**Also verified, and non-trivially:** `.git/hooks/` is untracked, so a rebuild never touches it —
+which means it can silently drift from a changed generator. `install-hooks.sh --check` exit 0,
+`pre-push shim matches generator`. **First use of that byte-comparison for its actual purpose**
+rather than inside its own test, three hours after it replaced a `grep` that would have reported
+`ok` here regardless.
+
+**Proposition and its limits, stated rather than implied:** the evidence proves *no `src` change
+landed after the binary's mtime*. It does **not** prove the binary was built **from** `b5322af7` —
+a build from a dirty tree or an aborted rebuild leaving an older artifact would look identical if
+no `src` commit followed. What discriminates a *failed* build is that `cargo` writes the artifact
+only on success, so the mtime could not have advanced past the commits at all.
+
+**Rests on / extends `W-100`** (*"after a rebuild, verify a shipped tool change with one LIVE
+call rather than trusting the unit test that gated it"*) in a direction that entry does not
+cover: `W-100` is about **your own** rebuild being under-verified. This is about the rebuild
+being verified *for you* and stale *for everyone else on the checkout* — the same command
+(`readlink /proc/<pid>/exe`) answers both, and only the peer half needs someone to think of
+running it against processes that are not theirs. `W-100`'s live-call rule was satisfied here
+incidentally: the `append_entry` that wrote this entry is a live catalog write against the
+rebuilt binary, and it succeeded.
+
+**RESOLVED — population empty at `2026-09-07T04:34:00Z`.** 6 servers, **0** deleted binaries, 0
+unreadable; all three owners reconnected between 04:24 and 04:32 after being told, and the set has
+churned again since (`1009908` gone, `1087172` new). **Not one signal was sent.** The counterfactual
+held: told, they fixed it; untold, none of them could have seen it. Verified with a control — the
+sweep must find a server known to exist (mine, `1007917`, via `ps -o ppid= -p $$`), because *"0
+stale" from a broken predicate reads identically to a clean machine*.
+
+**Two closing laws, both `codescout-7f`'s, both earned by their own broken first attempt:**
+
+- **`(deleted)` IS A NAMESPACE WITH NO ESCAPE, and it fails toward "nothing to do".** The kernel
+  appends *prose* to a path in `/proc/<pid>/exe`, so every naive path matcher silently
+  under-reports **exactly** the processes a staleness check is hunting. Their first fix used
+  `readlink -f` with a `*/codescout` glob, which stopped matching once the suffix was appended and
+  dropped **all three** real stale servers — reporting a clean machine. Match the suffix
+  explicitly. This is *Parsers Over a Namespace* on a path the kernel itself decorates, and the
+  direction of failure is what makes it dangerous rather than merely wrong. **A related hole in
+  the predicate used here:** an unreadable `/proc/<pid>/exe` yields an empty string, which a
+  `deleted`-substring test scores as *current* — same wrong direction, so this sweep counts
+  `unreadable` as its own bucket rather than folding it into either verdict.
+- **Re-verify a PID at the MOMENT OF SIGNALLING, never from an enumeration.** Their operator asked
+  them to kill the stale servers; they re-checked each PID at send time and all three returned
+  *already gone*. Had they signalled from the eight-minute-old list and had any PID been recycled
+  meanwhile, they would have `TERM`ed an unrelated process **with a clean exit code and nothing to
+  notice**. *A process list is a fact about an instant, exactly as a peer count is* — the same law
+  this repo already carries for peer enumeration, arriving on a different instrument, and neither
+  of us connected the two until it nearly cost something.
+
+**One honesty note on this entry's own verification:** the agreement between the loose
+`grep -c deleted` predicate used at scout time and the strict suffix match was re-checked at
+04:34 and found identical — but over a population with **zero** stale members, so that agreement
+is vacuous. The loose predicate's real evidence is that it flagged 4 of 4 correctly at 04:21,
+when there was something to flag.
+
+**Category:** architectural / measurement
+**Status:** validated
 
 ## Template for new entries
 
