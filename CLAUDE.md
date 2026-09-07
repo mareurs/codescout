@@ -346,7 +346,12 @@ session".
   and the reason it is not proof:** `$CLAUDE_CONFIG_DIR/sessions/<pid>.json` is written by that
   session's own process, so the sid is still self-asserted — what the channel buys is that you are
   reading the row of *the process that actually sent the message*. One level short of proof, one
-  full level above a self-report. Asking a session to quote its own scratchpad path
+  full level above a self-report. **RE-DERIVE IT AT USE AND NEVER CACHE IT** — the route resolves a
+  sid, and every other component of it decays. Measured 2026-09-07: a peer's pid AND registry name
+  both moved in a single hop while a message was in flight (`1751007` to `2452834`, `codescout-f4`
+  to `codescout-00`), and the send ENOENT'd on the stale socket. The sessionId is the only durable
+  component; the route that resolves it is not a fact you can hold, only one you can recompute.
+  Asking a session to quote its own scratchpad path
   (`/tmp/claude-*/<project>/<session-id>/scratchpad`) still works and is right when you have no
   socket for it, but it is a *self-report* and ranks below the route above. That same registry row
   carries `name` and `nameSource` beside `sessionId` — the decaying half and the durable half in one
