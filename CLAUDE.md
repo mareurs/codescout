@@ -310,10 +310,26 @@ session".
 
 - **Never route by adjacency.** `git diff --stat` names insertions and names no author, and a
   file touched by three sessions in an hour makes proximity *anti*-evidence. To attribute a
-  write: intersect the socket enumeration with `scripts/file-provenance.py`, then **ask** the
-  survivors — a session can quote its own id from its scratchpad path
-  (`/tmp/claude-*/<project>/<session-id>/scratchpad`), so the id is *given*, not inferred. **Take
-  the sessionId, not the name** — a name is registry-minted and re-minted by compaction, resume,
+  write: intersect the socket enumeration with `scripts/file-provenance.py`, then resolve the
+  survivors. **Prefer the CHANNEL over the ANSWER — derive the sid from the socket a message
+  arrived on, which the sender does not control:**
+
+      /run/user/<uid>/cc-socks/<PID>.sock        the from= address, not a claim
+        -> tr '\0' '\n' < /proc/<PID>/environ | grep ^CLAUDE_CONFIG_DIR=
+        -> $CLAUDE_CONFIG_DIR/sessions/<pid>.json   -> .sessionId, .cwd
+
+  Verified 2026-09-07 against an independent source — run on one peer's pid it returned the same
+  sid as the `Session-Id` trailer on that session's own commit. It needs **no cooperation**, so it
+  works on a session that is busy, wedged or uncooperative, and costs no round trip. **Its limit,
+  and the reason it is not proof:** `$CLAUDE_CONFIG_DIR/sessions/<pid>.json` is written by that
+  session's own process, so the sid is still self-asserted — what the channel buys is that you are
+  reading the row of *the process that actually sent the message*. One level short of proof, one
+  full level above a self-report. Asking a session to quote its own scratchpad path
+  (`/tmp/claude-*/<project>/<session-id>/scratchpad`) still works and is right when you have no
+  socket for it, but it is a *self-report* and ranks below the route above. That same registry row
+  carries `name` and `nameSource` beside `sessionId` — the decaying half and the durable half in one
+  object, which is much of why the substitution is easy to make. **Take the sessionId, not the
+  name** — a name is registry-minted and re-minted by compaction, resume,
   or a restart under another profile, so it decays silently while the sessionId cannot (§ *Observer
   Blindness*).
   Broadcasting widens the guess without closing it, and on a 16-session machine "tell everyone
@@ -395,9 +411,12 @@ agreeing instruments are not that when they share a scope. Two instruments that 
 agree *because* of it — one blind spot counted twice, and the shape is indistinguishable from real
 agreement at the point of use. **So completeness is the thing to check, not the inference.** A
 windowed instrument's zero is scoped to its window, and re-running it later silently moves that
-window; the positive identifier for uncommitted state is to **ask** the session and have it quote
-its own scratchpad path, because the harness makes the session id a path component — so the
-**sessionId** is *given* rather than inferred.
+window; the positive identifier for uncommitted state is to resolve the session's own registry row
+from the socket its message arrived on — a channel the sender does not control (§ *Reaching a Peer
+Session* holds the route). **Asking it to quote its scratchpad path is the FALLBACK, and calling
+that *given* was too strong.** The harness does make the session id a path component, but a session
+reporting its own path is still reporting, and nothing ties the quoted string to the process that
+sent it. Both beat inference; only the channel route is independent of the message body.
 
 **That holds for the sessionId and fails for the NAME — and the name is what sessions actually
 quote at each other.** A name is minted into a per-profile registry
