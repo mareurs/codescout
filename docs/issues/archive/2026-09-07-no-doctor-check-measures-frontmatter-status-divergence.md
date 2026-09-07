@@ -1,13 +1,14 @@
 ---
-id: '18fc99be15d48940'
+id: 5ff6fdfd63d50f24
 kind: bug
-status: open
+status: fixed
 title: 'BUG: no doctor check measures frontmatter/catalog status divergence, so the corpus population is unknowable'
 tags:
 - cluster/unclassified
 - librarian
 - doctor
 - catalog-drift
+closed: 2026-09-07
 opened: 2026-09-07
 owner: marius
 severity: medium
@@ -86,15 +87,55 @@ Two design notes, both learned from the id checks rather than guessed:
   status check needs its own answer for an artifact whose file is absent, rather than
   reporting it as disagreement.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+Fix SHA: `765a1402` (`experiments`)
+Patch-id: `19cf2a8cfd047c9aee36399d156cf7c3f62de31e`
+
+**Done 2026-09-07.** `frontmatter_status_mismatch` is wired into the default scan beside
+the two id checks and registered in `SCOPED_ROW_CHECKS`, so out-of-project findings
+aggregate the same way theirs do. Both design notes above were kept: it **reports and
+never repairs**, and a missing file stays [`check_missing_file`]'s finding. A NULL row
+status is skipped too, which the file did not anticipate — that would be a finding about
+the schema rather than about drift.
+
+### The corpus count, with the scope that makes it a number
+
+**0 findings**, project scope, **4727** catalogued artifacts, run 2026-09-07 against the
+tree at `05da2db7`. Derivation rather than value, per this repo's rule: run
+`./target/debug/codescout doctor` and read `summary.by_check.frontmatter_status_mismatch`.
+
+**That zero is only worth its control, and it needed two.** `missing_file` read **4** in
+the same report, so the scan demonstrably opens files and reports on them. And
+`frontmatter_id_mismatch` — the obvious sibling control — *also* read 0 on that run, so it
+could not serve: two zeroes agreeing is one blind spot counted twice.
+
+**Do not cite this as "the corpus is clean."** It is a fact about an instant, on one
+project scope, and the instrument is new enough that its first non-zero is still ahead of
+it. The prior expectation was that the two fixed write paths had left debris; they had
+not, in scope — which is a real finding and not a reason to trust the check less.
 
 ## Tests added
 
-None yet. Acceptance is an **observed RED**: construct an artifact whose file says
-`active` and whose row says `superseded`, run `doctor`, assert the violation is reported
-and names both values. Asserting only that `doctor` runs would pass today.
+Three, and the third is the one that matters.
 
+1. `check_frontmatter_status_flags_only_a_status_that_is_present_and_differs` — the
+   predicate, plus all three abstentions asserted rather than trusted.
+2. `frontmatter_status_mismatch_detail_names_both_sides` — the message. Separate on
+   purpose: because this check never repairs, its text **is** the deliverable, and a
+   predicate-only suite leaves that half untested by construction.
+3. `frontmatter_status_mismatch_is_reached_by_the_default_scan` — **the check is
+   reached**, with an agreeing row beside the diverged one so a scan reporting everything
+   answers 2 rather than 1.
+
+**Mutation evidence, on the production path rather than the test's inputs:** dropping
+`{row_status}` from the detail reds test 2 **only** and leaves test 1 green — so the two
+are independently discriminating, one kill per guarded site. The mutated text still read
+perfectly plausibly (*"but the catalog row disagrees"*), which is exactly what a
+predicate-only suite would have shipped.
+
+**Why test 3 exists is the reusable part.** The first live run returned 0 across the whole
+catalog, and a `0` from a check wired into nothing is byte-identical to a clean corpus.
+Nothing in the report distinguishes them, and the sibling that would normally serve as a
+control read 0 as well. An alarm nothing reaches is exactly as informative as no alarm.
 ## Workarounds
 
 None for measurement. For a single artifact, `doc(action="update", id=…,
@@ -103,9 +144,17 @@ to already suspect it, which is the whole problem.
 
 ## Resume
 
-Unclaimed. Write the check first; the count is a consequence of having it, and guessing
-the count without the check is what this file exists to avoid.
+**Closed 2026-09-07** at `765a1402`. The instrument exists, is reached by the default
+scan, and its first reading is 0 in project scope against a `missing_file` control of 4.
 
+No residual. The two design notes this file asked for were both honoured, and the count it
+refused to guess has been derived with its scope and its controls attached rather than
+published as a bare figure.
+
+One thing deliberately **not** done: no sweep of other project scopes. `row_checks_scoped_by_project`
+aggregates them and this check now rides that mechanism, so the numbers are available to
+whoever activates those projects — but a count taken from here would be a count of repos
+this session was not working in.
 ## References
 
 - Parent, fixed and archived:
@@ -119,4 +168,3 @@ the count without the check is what this file exists to avoid.
   file is **not** a fourth instance of it: it is the absence of the instrument that would
   have counted the first three. If that class is promoted, this belongs beside it as its
   measurement gap, not as a member.
-
