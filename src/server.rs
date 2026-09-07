@@ -3546,7 +3546,27 @@ mod tests {
     /// one sentence. Nothing was taken from a NEIGHBOURING action's description to fund
     /// this one: trimming prose I am not changing, to pay for prose I am, degrades a
     /// surface on the quiet and hides the true cost of the addition in the diff.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_646;
+    ///
+    /// 2026-09-07, +450 → 57_096. `doc(append_entry)` gained `index_row` +
+    /// `index_after_line`, which write a ledger's index-table row in the SAME file write
+    /// as the section. The bytes buy REACHABILITY and nothing else: `Args` has no
+    /// `deny_unknown_fields`, so before these were declared a caller passing `index_row`
+    /// got `Ok` with no row and no error — the capability existed in
+    /// `allocate_entry_id` and could not be used, which is `IC-3` exactly.
+    ///
+    /// What they close is a window no caller discipline can: the row cannot be written
+    /// FIRST, because the allocator counts `| PREFIX-N |` as a claimed id and it would
+    /// consume the number it names — so a second call always leaves the entry row-less
+    /// in between. Measured 2026-09-07: 21 of 49 guarded ledgers keep a row table, so
+    /// this is not a minority shape.
+    ///
+    /// Gross addition was 870; **420 was paid on the spot** by cutting my own two new
+    /// descriptions to their operative facts — `{id}` substitution, both-or-neither,
+    /// first-match-trimmed anchor, and that a missing anchor writes nothing. The
+    /// rationale above lives in the code comment and the bug file, not on a surface every
+    /// session pays for on every request. Nothing was taken from a neighbouring
+    /// description, per the rule below.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_096;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

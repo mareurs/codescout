@@ -309,6 +309,8 @@ impl Tool for Artifact {
                     "type": "string",
                     "description": "append_entry: prose ledgers — pass with `title` + `body` (all three or none; a partial set is refused naming what is missing) and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
                 },
+                "index_row": { "type": "string", "description": "append_entry: index-table row, written in the SAME file write as the section; `{id}` becomes the allocated id. Both-or-neither with `index_after_line`, and only with a section." },
+                "index_after_line": { "type": "string", "description": "append_entry: line to insert `index_row` after — FIRST match, whitespace-trimmed, usually the table separator. A line that does not exist writes nothing and allocates no id." },
                 "event": {
                     "type": "object",
                     "description": "event_create: the event to append — an immutable record anchored to git, distinct from a field patch. `kind` lives inside this object so it never shares a key with the document `kind`.",

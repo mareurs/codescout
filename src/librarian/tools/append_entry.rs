@@ -32,6 +32,22 @@ struct Args {
     body: Option<String>,
     #[serde(default)]
     anchor_heading: Option<String>,
+    /// Index-table row, written in the SAME file write as the section. Both or
+    /// neither with `index_after_line`, and only alongside a section.
+    ///
+    /// `{id}` is substituted with the allocated id — a template rather than a
+    /// literal because the caller cannot know the id before the call. Supplying
+    /// these closes the interval a two-call protocol guarantees: the row cannot be
+    /// written FIRST (the allocator counts a row as a claimed id, so it would
+    /// consume the number it names), so a caller writing it afterwards always
+    /// leaves the entry row-less in between.
+    #[serde(default)]
+    index_row: Option<String>,
+    /// Existing line to insert `index_row` immediately AFTER, compared with
+    /// surrounding whitespace trimmed. For a newest-first table that is the
+    /// separator, e.g. `|----|-------|`. Explicit, never inferred.
+    #[serde(default)]
+    index_after_line: Option<String>,
 }
 
 fn default_entry() -> Value {
@@ -179,12 +195,50 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // needs manual repair (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
         // Without `title` there is no `— <title>` to format, which is the entire
         // reason this path exists.
+        // Both-or-neither, refused at the boundary rather than half-applied. Named
+        // separately from the section triple because the missing half must be NAMED:
+        // `Args` has no `deny_unknown_fields`, so before this existed a caller passing
+        // `index_row` alone got `Ok` with no row and no error — a silent drop.
+        let index_row = match (&a.index_row, &a.index_after_line) {
+            (None, None) => None,
+            (Some(row), Some(after)) => Some(augmentation::PendingIndexRow {
+                row: row.clone(),
+                after_line: after.clone(),
+            }),
+            _ => {
+                let missing = if a.index_row.is_none() {
+                    "index_row"
+                } else {
+                    "index_after_line"
+                };
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "doc(action=\"append_entry\"): `index_row` and `index_after_line` are \
+                         both-or-neither — missing: {missing}"
+                    ),
+                    "Pass both: `index_row` is the row text with `{id}` for the allocated id, \
+                     `index_after_line` is an existing line to insert it after (for a \
+                     newest-first table, the separator).",
+                ));
+            }
+        };
         let section = match (&a.title, &a.body, &a.anchor_heading) {
+            (None, None, None) if index_row.is_some() => {
+                return Err(RecoverableError::with_hint(
+                    "doc(action=\"append_entry\"): `index_row` needs a section — pass \
+                     `title` + `body` + `anchor_heading` too"
+                        .to_string(),
+                    "A row on its own would cite an id whose entry nothing defines, which is \
+                     the dangling-citation shape this path exists to prevent."
+                        .to_string(),
+                ));
+            }
             (None, None, None) => None,
             (Some(title), Some(body), Some(anchor)) => Some(augmentation::PendingSection {
                 title: title.clone(),
                 body: body.clone(),
                 anchor_heading: anchor.clone(),
+                index_row,
             }),
             _ => {
                 let missing: Vec<&str> = [
@@ -1691,6 +1745,76 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out["id"], "R-2");
+        let _ = tmp;
+    }
+
+    /// REACHABILITY. `allocate_entry_id` gaining the capability is not the same as a
+    /// caller being able to use it — a feature registered nowhere carries a passing
+    /// suite and cannot be reached (`IC-3`, and CLAUDE.md § Testing Discipline names
+    /// two tools that shipped in exactly that state for months).
+    ///
+    /// This is the only test that fails if the tool's `Args` never learn the fields,
+    /// because `Args` has no `deny_unknown_fields`: a caller passing `index_row`
+    /// today gets no error and no row, which is a silent drop rather than a refusal.
+    #[tokio::test]
+    async fn the_tool_writes_the_index_row_in_the_same_call() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(
+            &ledger,
+            "---\nentry_prefix: R\n---\n\n| ID |\n|----|\n| R-1 |\n\n## L\n\n## R-1 — a\n",
+        )
+        .unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b",
+                "index_row": "| {id} |", "index_after_line": "|----|"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "R-2");
+
+        let text = std::fs::read_to_string(&ledger).unwrap();
+        assert!(text.contains("## R-2 — t"), "the section must land: {text}");
+        assert!(
+            text.contains("| R-2 |"),
+            "the row must land in the SAME call — this is the whole feature: {text}"
+        );
+        let _ = tmp;
+    }
+
+    /// Both or neither, refused at the boundary rather than half-applied. Mirrors the
+    /// existing `title`/`body`/`anchor_heading` triple, and the refusal must NAME the
+    /// missing half or the caller is left guessing which of two fields it was.
+    #[tokio::test]
+    async fn an_index_row_without_its_anchor_is_refused_and_names_the_missing_half() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n## L\n\n## R-1 — a\n").unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b",
+                "index_row": "| {id} |"
+            }),
+        )
+        .await
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("index_after_line"),
+            "the refusal must name the MISSING field, not merely that a pair is incomplete: {text}"
+        );
         let _ = tmp;
     }
 }

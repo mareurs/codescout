@@ -843,6 +843,30 @@ pub fn entry_high_water_key(id_prefix: &str) -> String {
 /// The already-accepted failure mode is unchanged: a crash before the write leaks an
 /// integer, which every ledger convention here tolerates. A clobbered peer mark is
 /// not tolerable, and that is the difference.
+/// A row to write into the ledger's index table, in the SAME file write as the
+/// section. Direction (3) of
+/// `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
+/// the two-call protocol guarantees an interval in which the ledger holds an entry
+/// no row names, and no discipline available to the caller closes it — writing the
+/// row first is forbidden, because the allocator counts a row as a claimed id.
+///
+/// One struct rather than two `Option`s on [`PendingSection`], so "a row with no
+/// anchor" is unrepresentable instead of refused at runtime.
+#[derive(Debug, Clone)]
+pub struct PendingIndexRow {
+    /// The row text, with `{id}` substituted for the allocated id. A template
+    /// rather than a literal because the caller cannot know the id before the
+    /// call — that is the same reason the heading is formatted here and not by
+    /// the caller.
+    pub row: String,
+    /// Existing line to insert the row immediately AFTER. Explicit, never
+    /// inferred: for a newest-first table this is the separator (`|---|---|`).
+    /// Same law as [`PendingSection::anchor_heading`]
+    /// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`) \u2014 a wrong
+    /// guess about placement on a WRITE needs manual repair.
+    pub after_line: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingSection {
     /// Entry title. The allocator formats the heading as `<level> <ID> — <title>`,
@@ -861,6 +885,10 @@ pub struct PendingSection {
     /// input-handling law is that writes accept an explicit target and never infer
     /// one (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
     pub anchor_heading: String,
+    /// Optional index-table row, written in the same `fs::write` as the section.
+    /// `None` leaves the ledger's table alone, which is correct for the 28 of 49
+    /// guarded ledgers that keep no row table (measured 2026-09-07).
+    pub index_row: Option<PendingIndexRow>,
 }
 
 /// The id namespaces a parsed frontmatter block declares via `entry_prefix`.
@@ -1114,7 +1142,7 @@ pub fn allocate_entry_id(
             // this section's last prose line. Caught by reading a mutation test's
             // failure output, which printed `the prose\n## Template for new entries`.
             let section_text = format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title);
-            crate::tools::markdown::edit_markdown::perform_section_edit_ext(
+            let with_section = crate::tools::markdown::edit_markdown::perform_section_edit_ext(
                 &updated,
                 &s.anchor_heading,
                 "insert_before",
@@ -1159,7 +1187,31 @@ pub fn allocate_entry_id(
                          verbatim, including its `#` prefix. {tail_hint}"
                     ),
                 )
-            })?
+            })?;
+            // The row goes into the SAME string the section and the high-water mark
+            // went into, so one `fs::write` carries all three. Writing it as a second
+            // call is exactly the window this closes: the row cannot be written FIRST
+            // (the allocator counts a row as a claimed id, so it would consume the
+            // number it names), so a caller doing two calls always leaves the entry
+            // row-less for the interval between them, and no discipline available to
+            // them shortens it.
+            match &s.index_row {
+                None => with_section,
+                Some(r) => {
+                    let row = r.row.replace("{id}", &id);
+                    insert_index_row(&with_section, &r.after_line, &row).map_err(|e| {
+                        RecoverableError::with_hint(
+                            format!(
+                                "allocate_entry_id: cannot place the index row for {id}: {e} — \
+                                 no id was allocated and nothing was written"
+                            ),
+                            "`index_row.after_line` must name a line that exists in the ledger, \
+                             compared with surrounding whitespace trimmed. For a newest-first \
+                             table that is the separator row, e.g. `|----|-------|`.",
+                        )
+                    })?
+                }
+            }
         }
     };
     std::fs::write(&abs_path, &updated).map_err(|e| {
@@ -1179,6 +1231,39 @@ pub fn allocate_entry_id(
         heading_level: observed_level,
         section_written: section.is_some(),
     })
+}
+
+/// Insert `row` immediately after the first line equal to `after_line`, comparing
+/// both trimmed so a caller need not reproduce trailing whitespace.
+///
+/// Errors when the anchor is absent rather than appending somewhere plausible: a
+/// write accepts an explicit target and never infers one, and a missed anchor must
+/// abort BEFORE anything is written
+/// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`). Returns the whole
+/// document so the caller splices it into the same `fs::write` as everything else.
+fn insert_index_row(doc: &str, after_line: &str, row: &str) -> std::result::Result<String, String> {
+    let needle = after_line.trim();
+    let mut out = String::with_capacity(doc.len() + row.len() + 1);
+    let mut placed = false;
+    for line in doc.split_inclusive('\n') {
+        out.push_str(line);
+        // FIRST match only. A table separator is not unique across a ledger with
+        // several tables, and silently filling every one of them would be a worse
+        // outcome than refusing; the caller picks the table by naming a line inside it.
+        if !placed && line.trim() == needle {
+            if !line.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(row);
+            out.push('\n');
+            placed = true;
+        }
+    }
+    if placed {
+        Ok(out)
+    } else {
+        Err(format!("no line matching `{after_line}`"))
+    }
 }
 
 /// Today as `YYYY-MM-DD`, UTC. `chrono` is already a workspace dependency and this
@@ -3151,6 +3236,126 @@ mod tests {
         }
     }
 
+    /// Direction (3) of
+    /// `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`:
+    /// the section and its index row land in ONE file write, closing the interval in
+    /// which the ledger holds an entry that no row names.
+    ///
+    /// Measured 2026-09-07: 21 of 49 guarded ledgers keep an entry-row table, so the
+    /// cheaper "stop instructing the row" direction is a loss for 43% of them.
+    ///
+    /// LOAD-BEARING: the fixture's table carries `| F-1 | first |` AND a `## F-1`
+    /// section, so both of the allocator's body inputs agree on the maximum. If only
+    /// one carried it, this test would also be asserting which input wins, which is a
+    /// different question with its own tests.
+    #[test]
+    fn the_section_and_its_index_row_land_in_one_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n## Index\n\n\
+             | ID | Title |\n|----|-------|\n| F-1 | first |\n\n\
+             ## F-1 — first\n\nbody\n\n## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "second".to_string(),
+            body: "the prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+            index_row: Some(PendingIndexRow {
+                row: "| {id} | second |".to_string(),
+                after_line: "|----|-------|".to_string(),
+            }),
+        };
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&section)).unwrap();
+        assert_eq!(out.id, "F-2");
+
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("## F-2 — second"),
+            "the section must still be written: {text}"
+        );
+        assert!(
+            text.contains("| F-2 | second |"),
+            "the row must be written with `{{id}}` substituted: {text}"
+        );
+        // Discriminator: kills an implementation that inserts the template verbatim,
+        // which would satisfy "a row was written" without the id ever resolving.
+        assert!(
+            !text.contains("{id}"),
+            "the placeholder must not survive into the file: {text}"
+        );
+        // Placement is explicit, never inferred — same law as `anchor_heading`
+        // (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
+        let sep = text.find("|----|-------|").unwrap();
+        let new_row = text.find("| F-2 | second |").unwrap();
+        let old_row = text.find("| F-1 | first |").unwrap();
+        assert!(
+            sep < new_row && new_row < old_row,
+            "the row must land immediately after its anchor line, above existing rows: {text}"
+        );
+    }
+
+    /// A missing row anchor must refuse BEFORE anything is written — the same
+    /// discipline `anchor_heading` already has. Otherwise a caller who mistypes the
+    /// separator burns an id AND leaves a half-written ledger.
+    ///
+    /// The retry is the discriminator: an implementation that writes the section,
+    /// fails on the row, and lets the transaction commit would issue F-3 on the
+    /// second call. Asserting only "it errored" is monotone under exactly that bug.
+    #[test]
+    fn a_missing_index_row_anchor_writes_nothing_and_allocates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        let before = "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+                      | ID | Title |\n|----|-------|\n| F-1 | first |\n\n\
+                      ## F-1 — first\n\nbody\n\n## Template for new entries\n\nboilerplate\n";
+        std::fs::write(&md, before).unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let bad = PendingSection {
+            title: "never lands".to_string(),
+            body: "x".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+            index_row: Some(PendingIndexRow {
+                row: "| {id} | never |".to_string(),
+                after_line: "| NO SUCH SEPARATOR |".to_string(),
+            }),
+        };
+        let err = allocate_entry_id(&mut cat, "art1", "F", Some(&bad)).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("index row"),
+            "the refusal must name WHICH anchor failed — the section anchor was fine: {text}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "the file must be byte-identical: the section must not land without its row"
+        );
+
+        let good = PendingSection {
+            index_row: None,
+            ..bad.clone()
+        };
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&good)).unwrap();
+        assert_eq!(
+            out.id, "F-2",
+            "the refused call must not have burned an id — F-3 here means the \
+             transaction committed through the error"
+        );
+    }
+
     /// The point of the whole path: the SERVER formats the heading, so an entry cannot
     /// be born undefined. `link_scan`'s `def_re` is
     /// `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, and a heading missing its dash-and-title
@@ -3177,6 +3382,7 @@ mod tests {
             title: "server wrote this".to_string(),
             body: "the prose".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         let out = allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
 
@@ -3241,6 +3447,7 @@ mod tests {
             title: "never lands".to_string(),
             body: "x".to_string(),
             anchor_heading: "## No Such Heading".to_string(),
+            index_row: None,
         };
         let err = allocate_entry_id(&mut cat, "art1", "R", Some(&section)).unwrap_err();
         let text = err.to_string();
@@ -3294,6 +3501,7 @@ mod tests {
             title: "never lands".to_string(),
             body: "x".to_string(),
             anchor_heading: "## No Such Heading".to_string(),
+            index_row: None,
         };
         let err = allocate_entry_id(&mut cat, "art1", "R", Some(&section)).unwrap_err();
         let text = err.to_string();
@@ -3330,6 +3538,7 @@ mod tests {
             title: "server wrote this".to_string(),
             body: "the prose".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
 
@@ -3368,6 +3577,7 @@ mod tests {
             title: "trailing whitespace".to_string(),
             body: "the prose\n\n\n".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
 
@@ -3405,6 +3615,7 @@ mod tests {
             title: "worked example".to_string(),
             body: "Example syntax:\n\n```\n**Valid:** invariant\n```\n\nthe prose".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
 
@@ -3444,6 +3655,7 @@ mod tests {
             title: "a law".to_string(),
             body: "**Valid:** invariant\n\nthe prose".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
 
@@ -3478,6 +3690,7 @@ mod tests {
             title: "a broken law".to_string(),
             body: "**Valid:** dated notadate\n\nthe prose".to_string(),
             anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
         };
         let err = allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap_err();
         let text = err.to_string();
