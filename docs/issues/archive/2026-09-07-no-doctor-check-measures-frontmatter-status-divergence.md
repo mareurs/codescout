@@ -103,10 +103,37 @@ the schema rather than about drift.
 tree at `05da2db7`. Derivation rather than value, per this repo's rule: run
 `./target/debug/codescout doctor` and read `summary.by_check.frontmatter_status_mismatch`.
 
-**That zero is only worth its control, and it needed two.** `missing_file` read **4** in
-the same report, so the scan demonstrably opens files and reports on them. And
-`frontmatter_id_mismatch` — the obvious sibling control — *also* read 0 on that run, so it
-could not serve: two zeroes agreeing is one blind spot counted twice.
+**That zero is only worth its controls, and the one first published was the weaker of the
+two. Corrected 2026-09-07, same day, before anyone cited it.**
+
+The claim as written was: *"`missing_file` read 4 in the same report, so the scan
+demonstrably opens files and reports on them."* Both halves are shakier than they read:
+
+- **`missing_file` proves a `stat`, not a read.** It fires when a row's `abs_path` is
+  **absent** from disk. This check needs the file *opened and its frontmatter parsed* — a
+  strictly longer path. A scan that enumerated rows and stat'd every one while reading none
+  would show `missing_file: 4` and `frontmatter_status_mismatch: 0`, which is precisely the
+  state the control was supposed to exclude.
+- **All four rows are in another repo** (`claude-plugins/docs/trackers/*-session-log.md`),
+  so they are outside the project scope the `0` describes. The control and the measurement
+  were not taken over the same population.
+
+**What actually carries the weight is `frontmatter_status_mismatch_is_reached_by_the_default_scan`** —
+it plants a real divergence, runs the real entry point, and asserts the finding appears,
+exercising enumerate → open → parse → compare → report end to end. That test was written
+before this correction and is why the conclusion survives it unchanged.
+
+`frontmatter_id_mismatch` also read 0 on that run, so the obvious sibling could not serve
+as a control either: two zeroes agreeing is one blind spot counted twice.
+
+**Kept rather than deleted because the method changes how the number reads.** The finding
+stands; the reason to believe it moved from a same-report figure to a planted positive. A
+reader who cites `missing_file` as this check's control is citing the wrong evidence, and
+that is exactly the class of history worth recording. (Raised by sessionId
+`89d91024-cd66-4361-9300-c55b87b179ea`, who had just retracted a `missing_file`
+hypothesis of their own after a table renderer stripped `archive/` out of the paths they
+were reading — the discriminating component destroyed by their own formatter before they
+looked at it.)
 
 **Do not cite this as "the corpus is clean."** It is a fact about an instant, on one
 project scope, and the instrument is new enough that its first non-zero is still ahead of
