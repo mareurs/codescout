@@ -252,6 +252,30 @@ Not designed. Three directions, none costed:
   evaluate counts against `HEAD ∪ pathspec ∪ the shared index`, so a coupled pair split
   across two sessions is not read as a broken count. Narrower, and it weakens the guard in
   exactly the case a genuine miscount looks the same.
+
+  > **That objection is MOOT as of 2026-09-07, measured — which makes this the cheap
+  > direction rather than the risky one.** The count gate was retired: `pre-commit-ledger-counts.py`
+  > no longer enforces a stored count, it *refuses* one (`no_class_field_states_a_bare_n`), and
+  > what it enforces instead is *"a class gaining a member must name it"* — a one-line append
+  > carrying **no number**. Measured with its control: **0** `**Members:**` lines carry a bare
+  > `n=`, against **17** `Members:` lines present. Widening the guard's index view therefore
+  > cannot reintroduce a miscount, because the miscount class no longer exists.
+  >
+  > Two further facts the probe turned up, both at the bytes. `ledger-counts` reads content via
+  > `git show :<path>`, which resolves against whatever `GIT_INDEX_FILE` names — so under a
+  > pathspec commit it already sees the **temp pathspec index** and nothing else; there is no
+  > `--git-dir` or `next-index` handling anywhere in the script. And its dispatch is now **scoped
+  > to the committer's own paths** (`scripts/pre-commit-run.sh`: it runs only when the commit
+  > touches `issue-clusters.md` or a `docs/issues/*.md`), so an already-broken ledger no longer
+  > blocks an unrelated committer — a latency bound rather than a correctness hole, as that
+  > script says at the site.
+  >
+  > **The empty intersection is still real and this does not close it** — both guards still run,
+  > and the coupled pair must still land together. What changed is that the coupled edit is now
+  > number-free, so a peer's commit cannot invalidate it between writing and committing, and the
+  > gate documents a third state: leaving the bug file **unstaged** passes, because `git ls-files`
+  > is the population and an untracked file is invisible to it. That escape is lossy and the gate
+  > says so.
 - **Per-session worktrees**, which dissolve this and most of `IC-17` — and which
   `pre-commit-unreviewed-content.sh`'s own header already names as the only complete answer.
 
@@ -325,12 +349,20 @@ guards are protecting a real defect, and the entangled case is exactly when they
 
 ## Resume
 
-Decide between the three fix directions before building. The cheapest probe: check whether
-`ledger-counts` can read the shared index *in addition to* the pathspec index under
-`GIT_INDEX_FILE=next-index-*` — `git --git-dir=... show :<path>` against the default index
-path — and whether that reintroduces the miscount it was built to catch. If it does, the
-owner-field direction is the only one left and this becomes a design task, not a hook patch.
+**The probe this section asked for was RUN on 2026-09-07 and its premise is gone. Read § *Fix*
+direction 2 before re-deriving anything.** The question was whether teaching `ledger-counts` the
+shared index reintroduces the miscount it was built to catch. **There is no longer a miscount to
+reintroduce** — stored counts are not merely absent from the ledger, they are *forbidden* by the
+same script (`no_class_field_states_a_bare_n`). Measured with its control: **0** `**Members:**`
+lines carry a bare `n=`, against **17** `Members:` lines present, so the zero is a measurement and
+not a broken pattern.
 
+So direction 2's stated cost — *"it weakens the guard in exactly the case a genuine miscount looks
+the same"* — no longer applies, and it is now the cheap direction rather than the risky one.
+
+**What is still owed** is narrower than this section used to ask: decide between direction 1 (an
+owner field on the index) and direction 2 (teach the guard the pathspec index), knowing that 2 is
+no longer trading against a correctness hole. Direction 3 stays falsified — see the block above.
 ## References
 
 - `docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
