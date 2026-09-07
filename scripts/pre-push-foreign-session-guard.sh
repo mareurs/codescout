@@ -212,6 +212,22 @@ $foreign_report
 
       CODESCOUT_PUSH_ACK="$foreign_sids" git push <args>
 
+  AN AUTHORISATION NAMES A SET; A BRANCH PUSH SENDS A PREFIX. They coincide only when
+  nothing lands between the decision and the push, which on a shared tree is the
+  unusual case rather than the normal one. So re-derive the range and compare it to
+  what was actually decided BEFORE pushing, then send the decided set by refspec:
+
+      git push origin <the-last-sha-they-authorised>:$branch
+
+  Measured 2026-09-07, and the window was ninety seconds: an operator authorised a
+  three-commit stack, a fourth commit from another session landed on top while they
+  were answering, and `git push origin $branch` would have satisfied the instruction
+  to the letter while publishing a commit they never saw. It needs no error from
+  anyone, it opens by ordinary churn, and it is INVISIBLE from the pushing side —
+  the branch name still reads as "the thing I was told to push". A decision decays
+  exactly like a rung assignment or a peer count: it is a claim about an object that
+  moves, and only the comparison catches it.
+
   TO PUBLISH ONLY YOUR OWN WORK, if the foreign commits are stacked ABOVE it:
 
       git push origin <your-last-sha>:$branch
