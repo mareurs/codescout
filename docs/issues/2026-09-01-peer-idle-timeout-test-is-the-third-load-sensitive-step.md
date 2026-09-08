@@ -1,7 +1,7 @@
 ---
 id: ee9d8d80ad5ecdc8
 kind: bug
-status: open
+status: investigating
 title: peer idle-timeout test is the third load-sensitive step in a class fixed twice per-instance
 tags:
 - cluster/repro-env-diverges-from-gate-env
@@ -679,6 +679,71 @@ as load-unmeasured; neither is estimated.
 **Pre-announcement worked again, in the other direction.** `5399543d` had messaged this
 session about the range before its failure; the red was read as load on sight, no time spent
 in `src/peer/`, and the investigation went to the *instrument* instead. Cost: one message.
+
+### Option 2 — the enumeration, done 2026-09-08 by `ad379a7c`
+
+**The count this file asked for is 14**, not three — the *"different conversation"* branch the
+Resume named. Narrowed from **36** tests carrying any real-time marker by asking which **assert a
+wall-clock bound** rather than merely passing a `Duration` as data. The classifier was not told
+the known members and found both: this test, and `claim_mux_lock_some_when_free_none_when_held`,
+the instance fixed in 2026-07.
+
+**And the load is the SUITE'S OWN, which inverts this file's standing account.** Every prior
+observation attributes the starvation to peers. Instrumented end-to-end: a run that launched at
+`load1` **1.5** with 12 processes reached **20.69** within thirty seconds and peaked at **47.95**
+with 22 — all of it `cargo test`'s own parallelism on 64 cores. Peers add to that; they do not
+cause it. **No amount of waiting for a quiet machine fixes this**, which is why two sessions spent
+the day re-running gates and calling the machine quiet.
+
+**Converted — 2 sites, via `#[tokio::test(start_paused = true)]`.** The production loop waits on
+`tokio::time::timeout(idle, listener.accept())` — a **tokio timer** — so virtual time drives it
+deterministically and the scheduler leaves the assertion entirely.
+
+| site | before | after | mutation |
+|---|---|---|---|
+| `run_exits_after_idle_timeout_with_no_connections` | 1.13s, 10s bound | **0.13s** | `break`→`continue` kills it |
+| `run_exits_quietly_when_lock_is_held` | 5s bound | **0.00s** | removing the lock-held early return kills it |
+
+**A hang is now detected FASTER, not slower** — 0.12s rather than the 10s a real clock spends
+first, because the runtime jumps to the next timer. The watchdog improved by ceasing to be a clock.
+
+**Deliberately NOT converted — 2 sites, same reason for both.**
+`cancelled_get_or_start_cleans_up_starting_map` holds the **tightest bound in the population at
+100ms** and is the most tempting; it spawns a real `sleep 99999` as a fake LSP and depends on the
+outer timeout firing *after* the child starts but *before* `initialize` responds. Under
+`start_paused` the 100ms fires before the child exists, and the cleanup assertion then passes
+because **nothing was ever started** — a vacuous pass wearing a green tick. Same for
+`killpg_reaps_grandchild_in_child_process_group`: real process groups, real `sleep`s. A subprocess
+does not observe virtual time. Both remain load-sensitive and unfixed, and the 100ms one is this
+population's most likely next member — it has not fired yet.
+
+**Documented, not touched — 10 sites, and they fail in the OPPOSITE direction.**
+`client_hello_then_tool_call` · `end_to_end_served_read_tool_and_write_denied` ·
+`peer_tool_call_ignores_smuggled_workspace_override` · `workspace_symbols_returns_project_symbols` ·
+`drop_kills_child_process` · `idle_background_task_evicts_after_ttl` ·
+`claim_mux_lock_some_when_free_none_when_held` ·
+`posix_write_lock_is_held_true_when_another_process_holds_it` ·
+`get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent` ·
+`reap_holders_of_lock_kills_an_orphan_holder`
+
+These `sleep(20ms–500ms)` then assert. The converted pair asserts *completion within a bound* and
+fails when the scheduler is too slow; these assert *enough time has passed* and fail when the
+scheduler is too slow **to have done the thing yet**. Same defect, opposite sign — which matters
+because the obvious remedy for one (raise the number) is the obvious remedy for the other, and it
+is what produced this class's two prior recurrences. Not converted because **a sleep is not a
+timer the runtime can jump**: each needs its own observable — a channel, a state poll, a process
+wait — decided per site. Real work, not started, recorded so the next reader inherits the
+classification rather than the raw grep.
+
+**Shipped at `a9cedb99`** (`experiments`), patch-id `767ea06dad89b9006c9ac40ca1678a0997f9ad02`.
+Gate green in one run: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 9101 passed, both converted tests green
+**inside the full-suite run** — the load condition that used to break them.
+
+**This bug is NOT closed and the claim is released to `investigating`.** Two of fourteen sites are
+fixed; two are ruled out with cause; ten are classified and untouched. Its own Resume asked
+whether the population was three or fifteen precisely so that answer could decide, and the answer
+is 14 — too many to fix on one session's judgement, which is why the ten are handed on with a
+classification rather than a diff.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
