@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 122
+entry_high_water_F: 123
 entry_high_water_W: 113
 ---
 
@@ -12556,6 +12556,60 @@ mechanism, and cannot be enumerated from inside it. Read the five cases as *five
 never as the population.
 
 **Status:** validated
+
+## F-123 — a hedge and a lane-level rate are the same error: the form that signals rigour removes the test
+
+**Valid:** dated 2026-09-08
+
+**Observed, twice in ten minutes, in opposite directions.**
+
+**1. The hedge.** I predicted two CI byte counts as `~12313` and `~12308`. I had the **exact**
+figures in hand, read from the previous run's logs minutes earlier, and hedged them anyway. They
+came back exact.
+
+**2. The unit.** Asked how to separate "flake" from "new" on a lane that had passed then failed, I
+prescribed pulling *the lane's rate across the day*. `59112612` pulled it and it inverts: four reds,
+**four different causes, three distinct tests**, two of them their own defect which is now fixed.
+
+```
+cea619ee  agent::write_guard::tests::releasing_the_lock_clears_the_holder_record
+579a2085  the_growth_refusal_names_the_file_holding_the_members_field   <- their defect
+09ecb58d  the_growth_refusal_names_the_file_holding_the_members_field   <- their defect
+7004fe6c  lsp::client::tests::workspace_symbols_returns_project_symbols <- n=1
+```
+
+A lane-level rate reports **4 red of 9, flaky lane**. That reading is worthless, and the real answer
+is `n=1` — which rules out *long-standing* and separates nothing else.
+
+**The shape both share: a form that signals rigour is the form that removes the test.**
+
+- A tilde **widens the acceptance region without saying by how much**, so no reader can score the
+  prediction and the author cannot fail it. It converts a falsifiable claim into an unfalsifiable
+  one *while looking more careful*.
+- A rate over a **lane** conflates causes the way a run summary conflates `cancelled` with
+  `failure`. Counting is the rigorous-looking move; counting the wrong object is what it bought.
+
+**Both are the wrong-object error, and the second is worse because it arrived inside the correction
+for the first.** I had spent the afternoon on exactly this — `cancelled` vs `failure`, the corpus
+vs the list, `git fetch -q … 2>/dev/null`'s suppressed error read as an absence — and still
+prescribed an instrument whose unit was wrong.
+
+**The discriminator, for the hedge:** ask whether you hold the exact value. If you do, a hedge is
+not caution, it is **insurance** — and it pays out precisely when you were wrong. If you do not,
+state the interval you actually mean, so the claim stays scoreable.
+
+**The discriminator, for the rate:** a count is only evidence about a *cause* if its unit **is** the
+cause. Resolve to the failing test before counting, never to the job that ran it.
+
+**Cost:** none, and that is why this is worth recording rather than shrugging off. The prediction
+was exact, so the hedge cost nothing; the rate was never acted on, because the peer pulled it
+properly instead of taking my prescription. Both were caught by someone else re-deriving rather
+than by me re-reading — which is this ledger's own standing claim about self-review.
+
+**Status:** open — the hedge half is a habit, not a mechanism, and nothing enforces it. The unit
+half now has a stated discriminator and could be checked by a reviewer, but is not gated.
+
+**Severity:** low — no wrong artifact shipped from either. Recorded for the shape.
 
 ## Template for new entries
 
