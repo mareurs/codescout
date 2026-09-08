@@ -12449,13 +12449,21 @@ sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30` against the **committed** suite
 `transcript_roots() -> return []` leaves their 68/68 green. A pre-existing property of the
 harness, not an artifact of the new work.
 
-**The generalisation, theirs:** hermeticity and default-path coverage are in **direct tension** —
-a hermetic fixture buys isolation by overriding precisely the thing a default-path mutation would
-perturb — and the tension is invisible from inside a green run. Their own six mutations that day
-had all hit the *dispatch* (which tool names count, which actions are writes) and none the
-*scope*; the fixture cannot express a scope mutation, so the missing axis left no artifact either.
-**The mutation population was itself filtered by what the harness could see** — the recording
-filter one level above where it was being applied, inside the run used to certify the fix.
+**The generalisation, and the attribution split because the halves were earned differently — at the
+credited party's own request.** The *finding* is not theirs: this session found the hole, and
+`ad379a7c` confirmed it on their own suite afterwards. What is theirs is the **scope** of the
+miss — that all six of their mutations that day hit the *dispatch* (which tool names count, which
+actions are writes) and none the *scope*, because the fixture cannot express a scope mutation, so
+the missing axis left no artifact either. **That is HINDSIGHT and must read as hindsight**: it is a
+description of a blind spot arrived at only after someone else walked into the room and pointed at
+it, and stating it flat would read as foresight it did not have. They asked for it to be recorded
+that way. Load-bearing all the same, and the part this session would not have reached alone: one
+hole was found here; *why the search itself was bounded* is theirs. Hence — hermeticity and
+default-path coverage are in **direct tension**, because a hermetic fixture buys isolation by
+overriding precisely the thing a default-path mutation would perturb, and the tension is invisible
+from inside a green run. **The mutation population was itself filtered by what the harness could
+see**: the recording filter one level above where it was being applied, inside the run used to
+certify the fix.
 
 **Remedy shipped:** a `== profile DISCOVERY ==` section that omits the override deliberately and
 says so on the fixture line, so a tidy-up back onto the shared roots reads as the regression it is.
