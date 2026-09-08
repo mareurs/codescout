@@ -183,8 +183,19 @@ while IFS=$'\t' read -r blob path; do
     else
         mine+=("$path")
     fi
-done < <(git diff --cached --raw 2>/dev/null |
+done < <(git diff --cached --raw --no-renames 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
+# `--no-renames` here for the same reason as in post-index-change-stage-log.sh, and this is
+# the SECOND site of one law -- the pipeline is copy-pasted between the two scripts, so
+# fixing the recorder alone left this reader still resolving a rename to (destination blob,
+# SOURCE path). That pair matches nothing in a correctly-recorded log, so the lookup fell to
+# `mine` and the refusal never named the destination: the recorder knew who owned the
+# archive path and the guard never asked about it.
+#
+# Caught by `tests/hooks-discrimination.sh`'s "refusal names the rename DESTINATION", which
+# failed with the recorder already fixed. Keep BOTH call sites in step; a mutation of either
+# alone leaves the other's assertion green.
+# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
 
 ((${#theirs[@]})) || exit 0
 

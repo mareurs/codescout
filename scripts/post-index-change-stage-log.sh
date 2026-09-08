@@ -345,6 +345,23 @@ fi
 : > "$tmp" || exit 0
 # `--raw` gives ":<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>"; field 4 of
 # the first tab-separated column is the staged (post-image) blob.
+#
+# `--no-renames` IS LOAD-BEARING, and the reason is this parser's own shape. With rename
+# detection on -- git's default since 2.9 -- a rename is ONE row carrying TWO paths,
+# ":<modes> <shas> R<score>\t<src>\t<dst>", and `$2` is the SOURCE. The pair recorded is
+# then (destination blob, SOURCE path): a pair that exists nowhere in the index, while the
+# destination path gets no row at all. `pre-commit-foreign-index.sh` looks a pair up by
+# (blob, path), finds no owner for the destination, and falls through to `mine` -- so the
+# guard passed a peer's staged rename. ARCHIVING A BUG FILE IS A RENAME and is the
+# commonest one here, so that was every archive move's destination.
+#
+# Turning detection OFF is the fix rather than teaching the awk a second row shape: it
+# makes the two-field assumption above TRUE instead of adding a special case, git supplies
+# the deletion's null blob rather than this script synthesising one, and `-C` copy
+# detection is covered by the same flag if anyone ever enables it. Verified: the same awk,
+# unchanged, then yields `00000000<TAB><src>` and `<dstblob><TAB><dst>` -- the delete and
+# the add, each attributable.
+# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
 while IFS=$'\t' read -r blob path; do
     [ -n "$path" ] || continue
     owner=""
@@ -396,7 +413,7 @@ while IFS=$'\t' read -r blob path; do
         route="${claim_route:-pre-staged}"
     fi
     printf '%s\t%s\t%s\t%s\n' "$owner" "$blob" "$path" "$route" >> "$tmp"
-done < <(git diff --cached --raw 2>/dev/null |
+done < <(git diff --cached --raw --no-renames 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
 # Carry forward rows whose pair is no longer staged. Ownership is a durable fact about who
 # put a blob into the index; the staged set is not, and emitting only staged pairs

@@ -168,6 +168,40 @@ echo more > s1.txt
 CLAUDE_CODE_SESSION_ID="$A" git add s1.txt
 eq "a real add still claims normally" "$(owner_of s1.txt)" "$A"
 
+# A staged RENAME must attribute its DESTINATION, not just its source.
+#
+# `git diff --cached --raw` collapses a rename into ONE row carrying TWO paths when
+# detection is on -- git's default since 2.9 -- and the recorder's awk reads `$2`, the
+# SOURCE. The pair recorded was then (destination blob, SOURCE path): a pair present
+# nowhere in the index, while the destination path got no row at all. The guard looks up
+# (blob, path), found no owner for the destination, and fell through to `mine`.
+#
+# ARCHIVING A BUG FILE IS A RENAME, and it is the commonest one in this repo, so the guard
+# was blind at every archive move's destination. It captured one on 2026-09-08.
+# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
+#
+# `git mv` and a filesystem move plus `git add -- <old> <new>` produce an IDENTICAL index,
+# and the recorder reads the index -- the real capture came via the latter.
+echo renameme > r1.txt
+CLAUDE_CODE_SESSION_ID="$A" git add r1.txt
+CLAUDE_CODE_SESSION_ID="$A" git commit -q -m seed
+mkdir -p arch
+CLAUDE_CODE_SESSION_ID="$A" git mv r1.txt arch/r1.txt
+eq "a staged rename attributes its DESTINATION" "$(owner_of arch/r1.txt)" "$A"
+eq "a staged rename attributes its source deletion" "$(owner_of r1.txt)" "$A"
+
+# CONTROL, and it is not decoration: the first assertion above also passes against a
+# recorder that emits a row for every field of every raw line. That change would write a
+# garbage pair from a two-field line's empty `$3`, so assert the log stays clean for a path
+# nobody staged. Without this, "emit more rows" is a passing fix.
+eq "a path nobody staged has no row" "$(owner_of never-staged.txt)" ""
+
+# And the LOUD direction. A peer committing over the rename must be refused, naming the
+# DESTINATION -- the whole point of recording it. Silence here is the production failure.
+out="$(guard "$B")"
+has "peer is refused over a staged rename" "$out" "EXIT=1"
+has "refusal names the rename DESTINATION" "$out" "arch/r1.txt"
+
 # Invocation form must not change attribution. `staging_op` classifies the tokens after
 # `git` in /proc/$PPID/cmdline, and git's global flags come in two shapes: `--git-dir=X`
 # is ONE token, but `-C <path>` and `--git-dir <path>` put the value in its own argv slot.
