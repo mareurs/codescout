@@ -48,21 +48,36 @@ lib failure means the Windows lanes **never reach the integration tests at all**
 
 ## Root cause
 
-**Unknown, and not investigated here.** What is established:
+**The holder record lived INSIDE the locked file, and Windows' lock is mandatory.**
 
-The three tests were introduced by
+`acquire` wrote `<epoch_ms>\t<holder>` into `.codescout/write.lock` — the file it had just
+flocked — and a contender read it back through **its own** handle. `flock(2)` is *advisory*, so
+on Unix that second handle reads freely; `LockFileEx` is *mandatory*, so on Windows it fails with
+`Os { code: 33 }`, *"another process has locked a portion of the file"*.
+
+One fact, all three failures — which is why they always failed together:
+
+| test | how it surfaced |
+|---|---|
+| `releasing_the_lock_clears_the_holder_record` | `read_to_string(&lock).unwrap()` panicked on error 33 at `:344` |
+| `a_contended_acquire_names_the_holder…` | the read returned `Err` → `None` → the anonymous branch |
+| `the_refusal_reports_elapsed_hold…` | same `None`, same branch |
+
+**This was a PRODUCTION defect, not a test artifact, and that is the part worth stopping on.**
+The record exists so a *refused* party can learn who holds the lock and message them — the whole
+point of the bug that introduced it. On Windows that read could never succeed, so every refusal
+reported *"The holder recorded no identity"* regardless of who held it. The feature was inert on
+a third of the matrix from the day it shipped, and the three red tests were the only thing
+saying so.
+
+**How it shipped.** The tests came from
 `docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md`
-(`7f023c2ec0ae7856`, status `fixed`), whose *Tests added* section names all three and asserts
-they are *"all reached in **both** gate lanes (the file is under `src/agent/`, so the lean lane
-is not vacuous for it)"*. That claim is true and insufficient in the way this repo has already
-documented: **both gate lanes are Linux.** Lane coverage was reasoned about on the feature axis
-and not on the platform axis, so a record marked `fixed` shipped three tests that have never
-passed on a third of the matrix.
-
-The likely families, none confirmed: holder identity via pid/process metadata, filesystem lock
-semantics, or timing in the elapsed-hold assertion. The messages assert on *text* built from
-runtime state, so a platform difference in any one input reds all three at once — which is
-consistent with the three failing together and nothing else in the module failing.
+(`7f023c2ec0ae7856`, status `fixed`), whose *Tests added* section asserts they are *"all reached
+in **both** gate lanes (the file is under `src/agent/`, so the lean lane is not vacuous for
+it)"*. True, carefully derived, and insufficient: **both gate lanes are Linux.** The author
+reasoned about the feature axis and the platform axis never entered the sentence — so this class
+was entered by someone actively checking their own coverage, which is harder to catch than
+forgetting to.
 
 ## Evidence
 
@@ -80,14 +95,34 @@ consistent with the three failing together and nothing else in the module failin
 
 ## Fix
 
-None attempted. Two things a fixer should know before starting:
+**Fixed 2026-09-08 — the holder record moved to a sidecar file outside the lock.**
 
-1. **The lean/default gate cannot see this**, so a Linux-only reproduction attempt will report
-   green and prove nothing. The lane to read is CI's `Test (windows-latest / *)`.
-2. **Do not delete or `#[cfg]`-skip the three tests to green the branch.** They guard the
-   holder-naming remedy their own bug file was opened for, and skipping them on Windows converts
-   a visible red into exactly the silent gap that record exists to close. If they must be
-   gated, the gate needs its own note saying what is then unguarded on Windows.
+`holder_record_path(root)` → `.codescout/write.lock.holder`. `write.lock` is now only ever
+locked and never written; the record is read and written with plain `std::fs` calls on a file
+nobody locks, so it behaves identically under advisory and mandatory locking.
+
+**The correctness argument is unchanged, deliberately.** The record is still written *after* the
+flock is taken and cleared *before* it is released, so the only process that can have written it
+is the one holding the lock. The ordering was always the guarantee and the location never was,
+which is why moving the bytes costs nothing.
+
+Ripple: `acquire` takes a `holder_path: PathBuf`; `WriteGuard` carries it and clears it on drop;
+`src/server.rs` passes `holder_record_path(&p.root)` from the same `with_project_at` closure that
+already resolves the pinned project's lock — so the sidecar inherits the same regime-3 pinning as
+the lock it accompanies, rather than acquiring a second, subtly different notion of "the project".
+
+**`.gitignore` needed its own line.** The existing `.codescout/write.lock` rule is an exact match,
+not a prefix, so `write.lock.holder` slipped past it and would have been committed.
+
+**Degradation under a concurrent read is safe and unchanged:** a torn read fails to parse →
+`None` → the anonymous branch, which reports having no identity rather than inventing one.
+
+**Verification, with its limit stated.** All 7 `agent::write_guard::tests` pass locally, and the
+three formerly-failing ones now exercise the cross-handle read on *every* platform rather than
+only where it was already safe. **But this fix cannot be verified on Linux** — the failure it
+removes is unreproducible here by construction, which is the same property that let the defect
+ship. The only real verification is CI's `Test (windows-latest / *)`; until that lane is read,
+the fix is reasoned rather than demonstrated.
 
 ## Tests added
 

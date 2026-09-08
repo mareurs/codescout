@@ -687,12 +687,13 @@ impl CodeScoutServer {
         // write_lock/file_lock, not the session default's — otherwise a
         // concurrent subagent's activate() steals the lock target.
         let override_root = Self::extract_workspace_override(input);
-        let (mutex, fd_lock, timeout_secs) = self
+        let (mutex, fd_lock, holder_path, timeout_secs) = self
             .agent
             .with_project_at(override_root.as_deref(), |p| {
                 Ok((
                     p.write_lock.clone(),
                     p.file_lock.clone(),
+                    crate::agent::holder_record_path(&p.root),
                     p.config.security.write_lock_timeout_secs,
                 ))
             })
@@ -708,6 +709,7 @@ impl CodeScoutServer {
         match crate::agent::acquire_write_guard(
             mutex,
             fd_lock,
+            holder_path,
             std::time::Duration::from_secs(timeout_secs),
             &holder,
         )

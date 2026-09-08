@@ -2,7 +2,9 @@
 
 mod write_guard;
 #[allow(unused_imports)]
-pub(crate) use write_guard::{acquire as acquire_write_guard, open_lock_file, WriteGuard};
+pub(crate) use write_guard::{
+    acquire as acquire_write_guard, holder_record_path, open_lock_file, WriteGuard,
+};
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;

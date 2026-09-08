@@ -10,8 +10,7 @@
 //! reverse order on drop (flock released first, then async mutex).
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -25,6 +24,9 @@ use crate::tools::RecoverableError;
 /// declaration order), so we declare the file-lock handle first.
 pub struct WriteGuard {
     file: Arc<File>,
+    /// Sidecar carrying the holder record. NOT the lock file — see
+    /// `holder_record_path` for why they must be different files.
+    holder_path: PathBuf,
     _async_guard: OwnedMutexGuard<()>,
 }
 
@@ -33,10 +35,10 @@ impl Drop for WriteGuard {
         // Release the flock explicitly — documents intent. Closing the fd
         // would also release it, but we keep the File alive in an Arc across
         // calls, so an explicit unlock is required.
-        // Truncate BEFORE unlocking. The reverse order leaves a window in which
+        // Clear the record BEFORE unlocking. The reverse order leaves a window in which
         // the next holder has already taken the flock and written its record,
-        // and this truncate erases it — reporting a live holder as anonymous.
-        let _ = self.file.set_len(0);
+        // and this clear erases it — reporting a live holder as anonymous.
+        let _ = std::fs::write(&self.holder_path, "");
         let _ = FileExt::unlock(&*self.file);
     }
 }
@@ -49,22 +51,19 @@ fn now_ms() -> u128 {
         .unwrap_or(0)
 }
 
-/// The holder record written into `.codescout/write.lock`: `<epoch_ms>\t<holder>`.
+/// The holder record: `<epoch_ms>\t<holder>`, written to `holder_record_path`.
 ///
 /// `IC-17` layer 2 — a shared resource carries an owner. The model is
 /// `.git/session-stage-log`, which answered in one command a question three
 /// sessions had been answering from memory.
 ///
-/// ORDERING IS THE CORRECTNESS ARGUMENT, not the format: the record is written
-/// AFTER the flock is taken and truncated BEFORE it is released, so the only
-/// process that can have written it is the one holding the lock. That is what
-/// makes it trustworthy without a second lock protecting it.
-fn write_holder_record(file: &File, holder: &str) -> std::io::Result<()> {
-    let mut f: &File = file;
-    f.set_len(0)?;
-    f.seek(SeekFrom::Start(0))?;
-    write!(f, "{}\t{}", now_ms(), holder)?;
-    f.flush()
+/// ORDERING IS THE CORRECTNESS ARGUMENT, not the format or the location: the
+/// record is written AFTER the flock is taken and cleared BEFORE it is
+/// released, so the only process that can have written it is the one holding
+/// the lock. That is what makes it trustworthy without a second lock protecting
+/// it, and moving the bytes out of the lock file does not weaken it.
+fn write_holder_record(path: &Path, holder: &str) -> std::io::Result<()> {
+    std::fs::write(path, format!("{}\t{}", now_ms(), holder))
 }
 
 /// Read the holder record, or `None` when it is absent, empty or unparseable.
@@ -72,17 +71,33 @@ fn write_holder_record(file: &File, holder: &str) -> std::io::Result<()> {
 /// Every `None` branch means "no usable owner information" and NEVER "no
 /// holder" — the flock already established that someone holds it. The caller
 /// must not turn a `None` into a claim that the lock is free.
-fn read_holder_record(file: &File) -> Option<(u128, String)> {
-    let mut f: &File = file;
-    f.seek(SeekFrom::Start(0)).ok()?;
-    let mut buf = String::new();
-    f.read_to_string(&mut buf).ok()?;
+fn read_holder_record(path: &Path) -> Option<(u128, String)> {
+    let buf = std::fs::read_to_string(path).ok()?;
     let (ts, holder) = buf.trim_end().split_once('\t')?;
     let holder = holder.trim();
     if holder.is_empty() {
         return None;
     }
     Some((ts.parse().ok()?, holder.to_string()))
+}
+
+/// Path of the holder-record sidecar: `.codescout/write.lock.holder`.
+///
+/// **It is a SEPARATE FILE from `write.lock`, and that is the entire point.**
+/// The record used to live inside the lock file, which is correct on Unix and
+/// inert on Windows: `flock(2)` is *advisory*, so a contending process opens and
+/// reads the locked file freely, while `LockFileEx` is *mandatory*, so the
+/// contender's read fails with `Os { code: 33 }` — "another process has locked a
+/// portion of the file". That `Err` becomes `None`, `None` selects the anonymous
+/// branch, and every Windows refusal read "The holder recorded no identity" no
+/// matter who held it. The feature the record exists for never worked on a third
+/// of the matrix, and three tests asserting it had never passed there.
+///
+/// Keeping the record outside the locked bytes restores it on every platform and
+/// costs nothing on Unix.
+/// See `docs/issues/2026-09-08-the-write-guard-holder-tests-fail-on-every-windows-lane.md`.
+pub fn holder_record_path(root: &Path) -> PathBuf {
+    root.join(".codescout").join("write.lock.holder")
 }
 
 /// `12m10s` rather than `730s` — the measured hold in the bug this closes was
@@ -104,9 +119,14 @@ fn human_elapsed(since_ms: u128) -> String {
 /// `tokio::time::timeout`, a queue of N tools waiting on the async mutex could
 /// each consume up to `timeout` on the flock poll individually, giving an
 /// effective ceiling of `timeout × queue_depth` — no overall deadline.
+///
+/// `holder_path` is the sidecar from `holder_record_path`, deliberately NOT the
+/// lock file: on Windows the lock is mandatory, so a contender cannot read bytes
+/// inside it. See that function for the measurement.
 pub async fn acquire(
     async_mutex: Arc<AsyncMutex<()>>,
     file: Arc<File>,
+    holder_path: PathBuf,
     timeout: Duration,
     holder: &str,
 ) -> Result<WriteGuard, RecoverableError> {
@@ -152,7 +172,7 @@ pub async fn acquire(
     .unwrap_or(false);
 
     if !acquired {
-        return Err(match read_holder_record(&file) {
+        return Err(match read_holder_record(&holder_path) {
             Some((since_ms, held_by)) => RecoverableError::with_hint(
                 format!("write lock held by {held_by}"),
                 format!(
@@ -177,10 +197,11 @@ pub async fn acquire(
     // granted acquisition because its metadata did not land would trade a real
     // capability for a diagnostic. A failed write degrades the NEXT refusal to
     // the `None` branch above, which says so rather than inventing a holder.
-    let _ = write_holder_record(&file, holder);
+    let _ = write_holder_record(&holder_path, holder);
 
     Ok(WriteGuard {
         file,
+        holder_path,
         _async_guard: async_guard,
     })
 }
@@ -211,9 +232,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let fd = open_lock_file(dir.path()).unwrap();
         let m = Arc::new(AsyncMutex::new(()));
-        let g = acquire(m, fd, Duration::from_secs(1), "codescout:t x")
-            .await
-            .unwrap();
+        let g = acquire(
+            m,
+            fd,
+            holder_record_path(dir.path()),
+            Duration::from_secs(1),
+            "codescout:t x",
+        )
+        .await
+        .unwrap();
         drop(g); // released
     }
 
@@ -230,11 +257,24 @@ mod tests {
         let m_a = Arc::new(AsyncMutex::new(()));
         let m_b = Arc::new(AsyncMutex::new(()));
 
-        let _held = acquire(m_a, fd_a, Duration::from_secs(1), "codescout:t x")
-            .await
-            .unwrap();
+        let _held = acquire(
+            m_a,
+            fd_a,
+            holder_record_path(dir.path()),
+            Duration::from_secs(1),
+            "codescout:t x",
+        )
+        .await
+        .unwrap();
 
-        let r = acquire(m_b, fd_b, Duration::from_millis(200), "codescout:t y").await;
+        let r = acquire(
+            m_b,
+            fd_b,
+            holder_record_path(dir.path()),
+            Duration::from_millis(200),
+            "codescout:t y",
+        )
+        .await;
         assert!(r.is_err(), "second process should time out");
     }
 
@@ -248,6 +288,7 @@ mod tests {
             let _g = acquire(
                 Arc::new(AsyncMutex::new(())),
                 fd_a,
+                holder_record_path(dir.path()),
                 Duration::from_secs(1),
                 "codescout:t x",
             )
@@ -258,6 +299,7 @@ mod tests {
         let r = acquire(
             Arc::new(AsyncMutex::new(())),
             fd_b,
+            holder_record_path(dir.path()),
             Duration::from_millis(500),
             "codescout:t y",
         )
@@ -289,6 +331,7 @@ mod tests {
         let _held = acquire(
             m_a,
             fd_a,
+            holder_record_path(dir.path()),
             Duration::from_secs(1),
             "codescout:sid-alpha reindex",
         )
@@ -298,6 +341,7 @@ mod tests {
         let err = acquire(
             m_b,
             fd_b,
+            holder_record_path(dir.path()),
             Duration::from_millis(200),
             "codescout:sid-beta edit_file",
         )
@@ -332,15 +376,21 @@ mod tests {
     #[tokio::test]
     async fn releasing_the_lock_clears_the_holder_record() {
         let dir = tempdir().unwrap();
-        let lock = dir.path().join(".codescout/write.lock");
+        let record = holder_record_path(dir.path());
         let fd = open_lock_file(dir.path()).unwrap();
         let m = Arc::new(AsyncMutex::new(()));
 
-        let g = acquire(m, fd, Duration::from_secs(1), "codescout:sid-gamma reindex")
-            .await
-            .unwrap();
+        let g = acquire(
+            m,
+            fd,
+            holder_record_path(dir.path()),
+            Duration::from_secs(1),
+            "codescout:sid-gamma reindex",
+        )
+        .await
+        .unwrap();
         assert!(
-            std::fs::read_to_string(&lock)
+            std::fs::read_to_string(&record)
                 .unwrap()
                 .contains("sid-gamma"),
             "control: the record must exist WHILE held, or the assertion below \
@@ -349,7 +399,7 @@ mod tests {
 
         drop(g);
         assert_eq!(
-            std::fs::read_to_string(&lock).unwrap(),
+            std::fs::read_to_string(&record).unwrap(),
             "",
             "the record must be cleared on release"
         );
@@ -372,6 +422,7 @@ mod tests {
         let _held = acquire(
             m_a,
             fd_a,
+            holder_record_path(dir.path()),
             Duration::from_secs(1),
             "codescout:sid-delta reindex",
         )
@@ -380,6 +431,7 @@ mod tests {
         let r = acquire(
             m_b,
             fd_b,
+            holder_record_path(dir.path()),
             Duration::from_millis(200),
             "codescout:sid-eps edit_file",
         )

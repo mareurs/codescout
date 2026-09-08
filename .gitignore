@@ -75,6 +75,11 @@ docs/**/.buddy/
 docs/**/.codescout/
 # Cross-process write lock file (per-project; recreated on activate)
 .codescout/write.lock
+# Its holder-record sidecar. A separate file deliberately — the lock is mandatory
+# on Windows, so a contender cannot read bytes inside it. Needs its own line: the
+# rule above is an exact match, not a prefix, so `write.lock.holder` slips past it
+# and would otherwise be committed.
+.codescout/write.lock.holder
 /.codescout/call_edges.db
 # Runtime / session files
 .codescout/cc_session_id
