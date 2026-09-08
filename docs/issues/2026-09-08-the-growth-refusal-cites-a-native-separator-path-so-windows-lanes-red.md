@@ -1,7 +1,7 @@
 ---
 id: '74eb09ca48756b9d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the growth refusal cites a native-separator path, so both Windows CI lanes red on a message a Windows reader cannot paste'
 tags:
 - cluster/repro-env-diverges-from-gate-env
@@ -9,6 +9,7 @@ tags:
 - ci
 - windows
 - pre-commit
+closed: 2026-09-08
 opened: 2026-09-08
 owner: marius
 severity: med
@@ -96,6 +97,19 @@ fixture, and a renderer that drops the path entirely.
 Mutation verified: `as_posix()` → `str(p)` reds on Linux with
 `docs\trackers\issue-clusters\IC-7-….md` in the failure text; restored byte-identical.
 
+
+Fix SHA: `94351602` — *fix(clusters): a repo path renders POSIX on every platform*
+Patch-id: `0a414c8c177d6a72455218846dadd414c419e42c`
+
+Single parent, so the patch-id is real. Gate green @ 2026-09-08 11:53:00–11:55:18Z — fmt 0,
+clippy 0, LEAN 0, DEFAULT 0.
+
+**Not yet confirmed on the platform that failed.** The local gate cannot run the Windows
+lanes, which is the whole point of this file: green here is exactly what green was before
+the defect shipped. The claim this fix earns is *"the mutation reds on Linux"*, which is
+new and checkable; the claim it does **not** yet earn is *"the Windows lanes are green"*.
+That needs a CI run on a commit containing `94351602`, and until one exists this is fixed
+and unverified-on-target rather than verified.
 ## Severity
 
 Med. No data loss and the routing still resolved by luck, but two Windows CI lanes are red
