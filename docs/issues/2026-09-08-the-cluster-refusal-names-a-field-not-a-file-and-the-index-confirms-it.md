@@ -1,15 +1,16 @@
 ---
-status: open
-opened: 2026-09-08
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
+title: The cluster growth gate's refusal names a field, not a file, and the Index confirms the wrong one
 tags:
 - cluster/hint-composed-without-the-request
-kind: bug
-title: The cluster growth gate's refusal names a field, not a file, and the Index confirms the wrong one
 topic: shared-checkout gate correctness
+closed: 2026-09-08
+opened: 2026-09-08
+owner: marius
+related: []
+severity: medium
+unverified: 'NOT archived, deliberately: the four-command gate is RED and I cannot produce a green. fmt 0, clippy 0, LEAN 101, DEFAULT 101 -- every error location in the log is `src/agent/write_guard.rs:536` and `:584`, a peer''s uncommitted addition calling `expect_err` on a type without `Debug`, which fails to COMPILE the lib test target so nothing runs in either lane. This change is verified independently at `--test issue_clusters`, 20/20 in BOTH lanes, and both regression assertions were killed by independent mutations of the production path. `get_guide("tracker-conventions")` wants gate-green before an archive move; re-run and archive once the peer''s file compiles. The fix itself is not in doubt -- what is unverified is the whole-tree gate, and the distinction is the reason this field exists.'
 ---
 
 # BUG: the cluster growth gate names a FIELD and calls its home "the ledger", which has been two files since the split
@@ -110,12 +111,17 @@ shared checkout, which is not this file's call to make. The correction lives her
 
 ## Fix
 
-Not implemented. Two candidates, and they are complements:
+**Both candidates shipped.** `experiments` `9852c474`, patch-id `47737e2383bfb0238740c09f0c996a1626ec18bf`.
 
-1. **Name the path in the refusal.** The gate already knows it. One line — *"the field lives in
-   `docs/trackers/issue-clusters/IC-N-<slug>.md`, not in the Index"* — removes every zero above.
-2. **Say it on the read surface.** One sentence at the top of the Index: this file is the roster;
-   definitions live in the per-class files. That reaches the reader who never triggers the gate.
+1. **The refusal names the path**, resolved per slug by `class_file_for`. It returns a path
+   rather than an `Option`: falling back to the Index is the *second real case*, not a default —
+   `cluster/unclassified` genuinely has no class file and its field genuinely is there — so
+   there is no "unknown" outcome to represent, and a `None` would put the old silence back one
+   layer down.
+2. **The Index carries a banner** saying it is the roster, that definitions live per-class, and
+   that a 0 from grepping your slug there means *wrong file* rather than *no such class*.
+
+Both branches exercised end to end by staging a probe bug file and reading the real refusal.
 
 ## Tests added
 
