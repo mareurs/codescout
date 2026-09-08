@@ -1,7 +1,7 @@
 ---
 id: '2b61de99742ee1d3'
 kind: bug
-status: open
+status: taken
 title: 'BUG: doc update --body appends a trailing blank line absent from its input, so every round-trip edit of a managed artifact adds one'
 owners:
 - marius
@@ -11,6 +11,8 @@ tags:
 - cli
 - tool-quirk
 topic: librarian body write normalisation
+claimed_at: 2026-09-08
+claimed_by: 59112612-5fc8-4b31-8c8c-e19220d99eac
 ---
 
 ## Summary
