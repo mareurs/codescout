@@ -1,5 +1,5 @@
 ---
-id: '53aa93b7ac6582dd'
+id: c4c14c20936fb3a1
 kind: bug
 status: fixed
 title: 'BUG: a python write through a Path-valued variable is invisible, and the cause it was filed under is not the mechanism'
@@ -10,6 +10,7 @@ tags:
 topic: provenance correctness
 claimed_at: 2026-09-08
 claimed_by: c9ab2c8d-dd74-43f4-9940-25756379a312
+closed: 2026-09-08
 opened: 2026-09-08
 severity: medium
 ---
@@ -64,6 +65,25 @@ and case F fails at three lines for an unrelated reason. A fix aimed at "look ba
 would change nothing and would test green against cases C/D/J, which already pass.
 
 ## Fix
+
+**Shipped 2026-09-08 at `4e7a43c0`** (`experiments`), patch-id
+`cfd39c0aa876bed590f0fa5c65d0d229501e6214`. Recorded as a pair at fix time: the SHA is
+positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick. Single-parent, so the patch-id is real — a merge emits no diff
+and the pipeline returns empty with exit 0.
+
+**Whole-tree gate green in a single run, in the mandated order:** `cargo fmt --all -- --check`
+exit 0 with empty output (the check form deliberately — three peer sessions shared this checkout
+and the writing form rewrites their uncommitted Rust), clippy exit 0, LEAN exit 0, DEFAULT exit 0
+with **5533 passed / 0 failed** run **last** so `target/debug/codescout` is left librarian-bearing,
+and `tests/file-provenance.sh` **110/110**.
+
+**Not verified on Windows or macOS.** Nothing here is platform-specific — the change is four
+regexes and a comment — but this ran on Linux only and CI runs on push, which has not happened.
+
+The `IC-18` member and its derivation landed in the same commit; the pre-commit gate refuses the
+split, correctly — a class gaining a member without naming it is red in one direction or the other
+until both halves land.
 
 **Done 2026-09-08.** Both narrowings widened, plus a third found while fixing them.
 
