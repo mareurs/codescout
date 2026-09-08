@@ -1,7 +1,7 @@
 ---
 id: df517af91b43a5f7
 kind: bug
-status: open
+status: investigating
 title: A claimed bug file names the author of the WIP that reds the shared build, and routing goes past it
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
@@ -117,6 +117,38 @@ Not implemented, and the shape is not obvious. Three candidates, cheapest first:
 Deliberately not chosen here: this file's job is to correct the class's Claim, which currently
 tells a router the channel does not exist.
 
+
+### Substrate repaired 2026-09-08 — option 3's instrument now works; option 3 is still unbuilt
+
+Taken by `ad379a7c` to implement option 3, and **running the reproduction first inverted the
+plan**. Option 3 proposes resolving a red's author *"from the socket enumeration +
+`scripts/file-provenance.py` at failure time"*. Run before writing anything, that probe returned
+`UNKNOWN` on every dirty file in this tree — including a bug file written through `doc()` ten
+minutes earlier. **The wiring would have shipped a confident silence into exactly the situation it
+was built for.**
+
+Cause and repair: `249dcf2690afcd35`. The probe's librarian selector still matched
+`mcp__codescout__artifact` six days after `ceb5b57a` renamed that tool to `doc`, so all 501
+write-action `doc` calls in this project were invisible. Fixed at `5ec4bac8` (patch-id
+`61e43235f4b7b9412613fff2ccd62845fef8499b`), with `doc(action="move")`'s destination at `1e90561c`
+(patch-id `fcfc1957d165ea503c5c7208018250773ca03807`) — that second one found by *using* the first
+when a peer's staged archive move blocked its own fix commit.
+
+**This bug's own claim is now demonstrated rather than argued.** Its Root cause says the channel
+exists, is correct, and is *"not consulted by anything that observes a red"*. That was true and
+incomplete: nothing consulted it, **and it would have answered wrongly if anything had.** The
+second half is repaired; the first is not.
+
+**Left open deliberately, with the two constraints measured** so whoever takes option 3 does not
+re-derive them:
+
+- The scan costs **5.0s** and does not cache, so it can only run on a *detected* red, never inline
+  on every command.
+- Native `Bash` bypasses `run_command` entirely, so a `run_command`-hosted hint has a reachability
+  ceiling — § *Testing Discipline*'s *"loudness is a property of a PATH"*. Name it at the site
+  rather than discovering it later.
+
+Claim released to `investigating` rather than `open`: work happened and this section records it.
 ## Tests added
 
 None. There is nothing to regression-test yet — the finding is that a record which exists is not
