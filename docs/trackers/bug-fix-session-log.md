@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 119
-entry_high_water_W: 109
+entry_high_water_F: 121
+entry_high_water_W: 110
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,8 @@ entry_high_water_W: 109
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-121 | 2026-09-07 | med | process/peer-verification | open | **Two sessions ran three rounds of good-faith falsification over a repair mechanism that does not exist.** R1: the discriminator is *direction* (move vs write). A bare `git mv` falsified it. R2: *trigger* — an action emitting an event a sweep hangs off. R3 refined trigger to necessary-not-sufficient and routed it to `IC-18`. **No round checked the sweep exists.** It is a documented grep in `get_guide("tracker-conventions")`; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*; `src/` contains no `sweep_citations`, only `graft.rs` re-pointing catalog ROWS. The refuting datapoint came from the theorising session — 5 archive moves left 7 stale citations, none swept, found by a deliberate grep and then cited as evidence that triggers fire. **Each round replaced a proxy with a sharper proxy, so the sequence read as convergence on the truth**; a falsification exchange is unusually good at making mutual sharpening resemble an existence check. The misleading evidence was real, not imagined: `doc(move)` reports `history_grafted{events,links,…}`, true of catalog rows, while the `cites` edges it re-points are themselves derived from the stale prose — visible automatic repair sitting upstream of what stays broken. Near-miss: a false class note into `IC-18`, a closed set other sessions read as settled; withdrawn before landing. Design item filed as `I-9` (`9c82bda4`). Kin `SKF-22`, `OB-1` |
+| F-120 | 2026-09-07 | med | test-design/evidence | fixed-verified | **Published a zero backed by a control that the exact failure mode it was chosen to exclude also satisfies.** Shipped `frontmatter_status_mismatch` (`765a1402`), reported **0 findings over 4727 artifacts**, and cited `missing_file: 4` from the same report as proof "the scan demonstrably opens files". `missing_file` fires on an **absent** path — a `stat`, not a read — so a scan that enumerated and stat'd every row while reading **none** produces exactly that pair. The four rows were also in another repo, outside the scope the `0` described, so control and measurement were never taken over one population. The obvious second control, `frontmatter_id_mismatch`, **also read 0** — two zeroes agreeing is one blind spot counted twice. What actually carried the result was a planted-positive test asserting the check is REACHED by the default scan, which survived the correction only because it **predated the doubt** (a control written after is selected by it). Raised by a peer's independent retraction; corrected same day in `0153d04f`. **Cheap generalised check: ask what the control would read if the thing under test were wholly broken. If unchanged, it is not evidence — prefer a planted positive over a same-report figure** |
 | F-119 | 2026-09-07 | high | recon | fixed-verified | **A guard's refusal text EXECUTED its own example commands, and I read the evidence correctly then argued myself out of it.** `pre-push-foreign-session-guard.sh:147` opens `cat >&2 <<EOF` — unquoted — and `:224` carries markdown backticks around `` `git push origin $branch` ``. Bash command-substitutes in an unquoted heredoc, so expanding the refusal RUNS the push, re-firing `pre-push`: 45 guard/push/ssh processes, and the banner never prints, so the authorisation question the guard exists to ask is never asked. Presents as a network hang. The process tree showed the recursion; I refuted my own correct reading because "heredoc bodies are inert text" — true only of a *quoted* delimiter, which I never checked. This inverts CLAUDE.md's heredoc tell: the four prior instances were scanners reading data as syntax, this one is bash reading prose as a program, and the interpreter is the misreader with no appeal. `bash -x` piped to `tail` returned nothing twice; the same trace redirected to a FILE held the whole answer. Filed `high`, `cluster/addressing-without-an-escape-hatch`; introduced `41377049`, already on `origin`. Kin `F-116`, `R-185`, `IC-6`. |
 | F-118 | 2026-09-07 | med | recon | fixed-verified | **A bug's Resume routed the next session to a shim its own installer refuses to create** — a wrapper does work, but cannot name the holder, so the bug reclassifies as a consequence of the unstaged-working-tree gap rather than an independent item. |
 | F-117 | 2026-09-07 | med | recon | mitigated | **A bug file scoped a shared-shape defect to the one site its reporter stood on; the live probe found three.** The `body_edits` invalid-action bug file names `apply_body_edits` and prescribes a one-line validation there. The same `if action == "edit" { … } else { plan_section_edit(…) }` dispatch exists at three sites — `apply_body_edits`, `edit_file`'s single-edit mode, and `plan_batch` — all surfacing the callee's four-member message to callers whose set is five. `plan_batch` is worse than the filed site: its missing-action error names *no* actions, so both of its discovery routes omit `edit`. The reporter reached the defect through the one surface where `edit_file` is refused outright (a guarded ledger), so the other two dispatchers were structurally outside their reproduction — the file is right about what it saw, and narrow because the reproduction was. Kin `IC-6`, § *Testing Discipline* "mutate once per guarded SITE". |
@@ -174,6 +176,7 @@ entry_high_water_W: 109
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-110 | 2026-09-07 | high | **The bug ledger cannot report a claim nobody wrote — enumerate by socket, ask, then claim.** Before starting a bug, enumerated live sessions and asked the two peers sharing this checkout. `codescout-af` named **five** bug files they were actively fixing, **all five reading `open`**; a sibling session independently measured the same population at 60 rows, **zero `taken`**. Then claimed each pick `status: taken` + `claimed_by: <sessionId>` through the catalog | Ledger-based disjointness was the obvious method and would have collided on any of the five — and silently, since two sessions fixing one bug produce two plausible diffs and whoever commits first makes the other's work read as a redundant re-fix. `status: open` is **monotone under an unwritten claim**: the state you want to detect produces exactly the value you are already reading, so "read the ledger more carefully" is the wrong instrument rather than a weaker one. Enumeration bounds who is present; only the ask attributes work. The same round-trips surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit — and later a peer staged five files into the shared index between this session's `git add` and `git commit`. `doctor` then resolved the claim as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId: **first real use of the field in this repo — the mechanism was never missing, the practice was** | validated |
 | W-107 | 2026-09-06 | high | **When adding a READ-only action, the question is not "does it write?" but "is it useful *while* something else is writing?"** `LibrarianAdapter::is_write`'s final arm is `_ => true`, and a write takes the cross-process write lock before dispatch. Correct policy — an unclassified write races on a five-session checkout, an unclassified read is merely over-serialised — but it is priced for **mutation risk**, not usefulness, and so silently mis-prices exactly the class of reads that must answer during a write. `librarian(action="status")` exists to answer *"is a reindex running?"*; a running reindex HOLDS that lock, so left to the default it would have blocked for the whole run and then reported, truthfully, that nothing was running — the new instrument reproducing the exact non-discrimination of the bug it was built to remove. **No test would have caught it:** all five `status::tests` call the action directly and never cross the adapter, so the defect ships green and its failing observation is a *hang*, at the one moment anyone needs the tool. Diagnostics are the class most likely to be added late by someone reasoning about what the action does rather than when it is called. Scouted before writing; the read-set entry is load-bearing, and `server.rs`'s gate forced it to be stated a second time after I had already made the first edit. | `90336870`; bug `6ae552cfc223cd6d`; kin `bug-fix-session-log:W-100` (verify a shipped tool change with one LIVE call after rebuild — done here too, and it is what discharged this fix's `unverified:` field), `bug-fix-session-log:W-106` |
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
 | W-104 | 2026-09-04 | med | **Probe the copy the consumer loads, not the repo the change was authored in — when a defect's two halves live in different repos, neither repo's git history answers liveness alone** | A `severity: high` bug predicting markdown reads would have *no working path* had been fixed 7h35m after filing, in the other repo (`bb24b7f`, 1.20.4 removes exactly `il4-deny-hook.mjs` + its test; all three profiles pinned there). One `read_file("README.md")` returned a heading map — no deny. Accepting the `## Fix` deferral at face value instead sends the session to delete a hook that no longer exists in source and to report a live capability loss no session on this machine can reproduce | validated |
@@ -12166,6 +12169,70 @@ folded in after the push, which is the procedure working rather than a workaroun
 **Rests on:** the 12-run `Shell suites` distribution read from `conclusion` per job (never
 `status`) on 2026-09-08; `tests/hooks-discrimination.sh:158-165` and `:76-88`, read this
 session; 3/3 local green at `9c82bda4`.
+
+## W-110 — the bug ledger cannot report a claim nobody wrote — enumerate, ask, then claim
+
+**Valid:** dated 2026-09-07
+
+**Observed:** Before starting a bug, enumerated live sessions by socket and asked the two peers in this checkout what they held. `codescout-af` named **five** bug files they were actively fixing. **All five read `open` in the ledger.** A sibling session independently measured the same population: 60 rows, **zero** `taken`.
+
+**Counterfactual:** ledger-based disjointness was the obvious method and would have collided on any of the five. The collision would not surface as an error — two sessions fixing one bug produce two plausible diffs, and whoever commits first makes the other's work read as a redundant re-fix.
+
+**Why the ledger cannot do this job:** `status: open` is satisfied both by *nobody is working on this* and by *someone is, and did not mark it*. Reading it is **monotone under the second case** — the state you want to detect produces exactly the value you are already looking at. Same shape as an absence assertion, so "read the ledger more carefully" is not a weaker remedy, it is the wrong instrument.
+
+**What discriminated:** socket enumeration plus a direct ask. Enumeration bounds *who is present*; only the ask attributes work. Both were needed — 5 sessions across 1 profile, 3 in this checkout, and `ListAgents` was complete only by the accident of one profile being live.
+
+**Closed the loop the other way:** claimed each bug `status: taken` + `claimed_by: <sessionId>` through the catalog. `doctor` resolved it as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId and printing the exact `SendMessage` address, with *"Use the id, not the name."* First real use of the field in this repo — **the mechanism was never missing, the practice was.**
+
+**Cost:** four peer round-trips before writing a line of code. They also surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit, and later a peer staged five files into the shared index between this session's `git add` and `git commit`.
+
+**Status:** validated
+**Category:** process / peer-coordination
+**Promote-when:** a third session records a collision avoided by asking. Durable home is CLAUDE.md § *Reaching a Peer Session*, which carries the addressing mechanics but not the claim-before-you-start half.
+
+## F-120 — a control satisfied by the exact failure mode it was chosen to exclude
+
+**Valid:** dated 2026-09-07
+
+**Observed:** Shipped a new `doctor` check (`frontmatter_status_mismatch`, `765a1402`) and published its first corpus reading: **0 findings across 4727 artifacts**. Backed the zero with a control from the same report — *"`missing_file` read 4, so the scan demonstrably opens files."* A peer independently established that all four `missing_file` rows sit in **another repo**, which sent me back to the claim.
+
+**The defect in the control, and it is worse than the wrong population:** `missing_file` fires when a row's `abs_path` is **absent**. My check requires the file **opened and its frontmatter parsed** — a strictly longer path. **A scan that enumerated every row and stat'd it while reading none would report `missing_file: 4` and `frontmatter_status_mismatch: 0`** — which is precisely the state the control was chosen to exclude. The control was *satisfied by its own failure mode*. Second, the four rows were out of the scope the `0` described, so control and measurement were never taken over one population.
+
+**Why the obvious second control also fails:** `frontmatter_id_mismatch`, the sibling of the same shape, **also read 0** on that run. Two zeroes agreeing is one blind spot counted twice — indistinguishable from corroboration at the point of use.
+
+**What actually carried it:** `frontmatter_status_mismatch_is_reached_by_the_default_scan` — plants a real divergence, runs the real entry point, asserts the finding appears, with an *agreeing* row beside the diverged one so a scan reporting everything answers 2 rather than 1. **It survived the correction only because it predated the doubt**; a control written after the doubt is selected by it.
+
+**Cost:** none shipped — corrected same day in `0153d04f`, before any citation. The cost was the near-miss: a published zero resting on a control that a broken world satisfies.
+
+**Generalised test, cheap to apply:** before citing a confirming result, ask *what would this control read if the thing I am checking were completely broken?* If the answer is "the same", it is not evidence. Prefer a **planted positive** over a same-report figure.
+
+**Status:** fixed-verified
+**Severity:** med — nothing shipped wrong, but the published claim would have been cited by the next reader as the reason to trust the zero.
+**Category:** test-design / evidence
+**Promote-when:** a second instance of a control satisfied by its own failure mode. Nearest existing law is CLAUDE.md § *Testing Discipline* ("demand an observed RED"), which covers assertions but not **controls cited alongside a measurement**.
+
+## F-121 — three rounds of mutual falsification over a mechanism neither party checked existed
+
+**Valid:** dated 2026-09-07
+
+**Observed:** Two sessions ran a good-faith falsification exchange across three rounds about why one kind of stale citation is repairable and another is not. Round 1: the discriminator is *direction* (move vs write). Round 2 falsified that — a bare `git mv` is a move — and replaced it with *trigger*: an action that emits an event a sweep can hang off. Round 3 refined the trigger claim (necessary, not sufficient) and routed the whole thing to `IC-18`. Each round genuinely ruled something out.
+
+**The gap:** **no round checked that the sweep exists.** It does not. The archive citation sweep is a documented grep in `get_guide("tracker-conventions")` that an agent runs by hand; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*, and a scan of `src/` for citation re-pointing returns only `graft.rs`, which re-points catalog **rows**. There is no `sweep_citations`. Three rounds refined the *properties* of a mechanism whose *existence* neither party tested.
+
+**The refuting datapoint came from the theorising session itself:** five archive moves left **seven** stale citations, **none swept** — found by a deliberate grep, then cited in the next message as evidence that triggers fire.
+
+**Why the exchange concealed it, which is the transferable part:** each round replaced a proxy with a sharper proxy, so the sequence *read as convergence on the truth*. **Two parties can agree with increasing precision about something that is not there, and a falsification exchange is unusually good at producing that** — every round feels like verification because something real is being eliminated. Peer review is a different instrument from self-review (OB § *who can see it*), but it is not an existence check, and mutual sharpening is the shape that most resembles one.
+
+**And the misleading evidence was real, not imagined:** `doc(action="move")` **does** repair automatically and reports it — every response carries `history_grafted: {events, observations, links, event_edges}`. That repair covers catalog **rows**; the `cites` edges it re-points are themselves *derived from prose by `link_scan`*, so stale prose is re-derived into stale edges on the next scan. **The visible automatic repair sits upstream of the thing that stays broken.** Both parties had read that field in their own move responses.
+
+**Cost:** three message rounds and one nearly-written class note into `IC-18` — a closed set other sessions read as settled — asserting a mechanism that does not exist. Withdrawn before landing. Design item filed instead as `I-9` (`9c82bda4`).
+
+**Generalised check:** in any exchange about *why* a mechanism behaves a certain way, one party should establish **that it exists, in code, by name** before the second round of refinement. Cost here would have been one `grep` for `sweep_citations`.
+
+**Status:** open
+**Severity:** med — nothing shipped; the near-miss was a durable false claim in the cluster ledger.
+**Category:** process / peer-verification
+**Promote-when:** a second instance of mutual refinement over an unverified mechanism. Related: `skill-frictions:SKF-22` (*a trigger the model must notice is a policy, not a mechanism*), reached independently from another subsystem.
 
 ## Template for new entries
 
