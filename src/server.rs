@@ -7801,7 +7801,30 @@ mod guide_hint_tests {
     /// conversation id is always available. Tests of the `Anonymous` (no-identity)
     /// tier construct `ServerEnv` directly instead of going through this helper.
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
-        let dir = tempfile::tempdir().unwrap();
+        // Delegates. The prefix is `tempfile`'s own default, so every existing caller's
+        // root is byte-identical to what it was before the split.
+        make_server_with_root_prefix(".tmp").await
+    }
+
+    /// `make_server`, with control over the temp root's FILENAME length. See
+    /// `make_server` for why the workspace/db/session values below are injected —
+    /// this function is its implementation and that reasoning is unchanged.
+    ///
+    /// Exists for one test and one reason: the p50 emission budget counts a block
+    /// that interpolates the project root's absolute path, so the budget was a
+    /// function of where the fixture happened to land on disk — 1 B of budget per
+    /// character of root, measured. A short Linux `/tmp` root hid that; macOS's
+    /// `/var/folders/xy/<43-char hash>/T` did not, and the same commit was green on
+    /// one and red on the other (CI run 34222332438). Giving that test a
+    /// deliberately LONG root reproduces the macOS geometry on EVERY platform, so
+    /// the normalisation guarding it reds here rather than only on a runner nobody
+    /// can attach a debugger to.
+    ///
+    /// `prefix` is a filename component, not a path — `tempfile` rejects separators.
+    ///
+    /// See `docs/issues/2026-09-08-the-emission-byte-ceiling-measures-the-fixtures-tempdir-path-length.md`.
+    async fn make_server_with_root_prefix(prefix: &str) -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let ws_path = dir.path().join("librarian-workspace.toml");
         std::fs::write(&ws_path, "").unwrap();
@@ -7823,6 +7846,7 @@ mod guide_hint_tests {
         let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
         (dir, server)
     }
+
     /// M11: nothing previously pinned that construction publishes the
     /// rendezvous slot at ALL. The module's own unit tests
     /// (`src/tools/rendezvous.rs`) call `Rendezvous::publish` directly, so they
@@ -10137,7 +10161,32 @@ mod guide_hint_tests {
         //     counting blocks rather than markers.
         const CEILING: usize = 12_244;
 
-        let (_dir, server) = make_server().await;
+        // A fixed stand-in for the fixture's absolute root inside the counted bytes.
+        // Its LENGTH is load-bearing, not its spelling: it is what makes the total a
+        // property of the guides instead of the machine. Chosen at 15 bytes to match a
+        // typical Linux `/tmp/.tmpXXXXXX` root, so CEILING keeps the calibration it was
+        // derived with rather than being silently loosened by a shorter token.
+        const FIXTURE_ROOT_TOKEN: &str = "/tmp/.tmpROOT00";
+
+        // A DELIBERATELY LONG ROOT, and its length is the whole point of the call.
+        // The budget below counts a block carrying this path verbatim, so under the
+        // default short `/tmp/.tmpXXXXXX` root the normalisation could be deleted and
+        // every Linux lane would stay green — which is exactly how this shipped. At 63
+        // characters the fixture reproduces macOS's `/var/folders/…/T` geometry on every
+        // platform, so deleting the `replace` below takes the total to ~12282 B against
+        // a 12244 ceiling and reds anywhere. THAT is what makes `total <= CEILING` the
+        // regression test for this defect rather than a second aggregate over it.
+        let (dir, server) =
+            make_server_with_root_prefix("emulates-macos-var-folders-tmpdir-geometry-bug-547725aa")
+                .await;
+
+        // The fixture's own absolute root, captured so the measurement below can take it
+        // back out. `post_process`'s once-per-activation banner (`src/server.rs:835`)
+        // interpolates it verbatim — `\n[codescout] paths are relative to {root}` — and
+        // that block is counted, so without this the budget carries a term that is a
+        // property of the MACHINE rather than of the guides.
+        let root = dir.path().to_string_lossy().into_owned();
+        let mut root_seen_raw = false;
 
         // A placeholder id="x" for every shape (the brief's literal sketch) does NOT
         // measure a real session: `call_content` only runs guide injection on the
@@ -10165,7 +10214,33 @@ mod guide_hint_tests {
             // rules and post_process's onboarding hints. Filtering by marker
             // is what made this a guide budget rather than a budget. Full
             // population note is on `CEILING`, the read surface for it.
-            let bytes: usize = guide_blocks(out).iter().map(|b| b.len()).sum();
+            // ENVIRONMENT TERM, REMOVED HERE AND NOWHERE ELSE. The fixture root is
+            // substituted for a fixed token before the bytes are counted, because it
+            // reached the total at exactly 1 B per character of `tempdir()` path —
+            // measured 2026-09-08 at TMPDIR lengths 40/60/80 → 12259/12279/12299 B, a
+            // slope of exactly 1.0, so the root appears once. That made the same commit
+            // green on Linux (`/tmp`, total 12223 B, margin 21 B) and RED on macOS
+            // (`/var/folders/xy/<43-char hash>/T`, total 12275 B) with byte-identical
+            // guide content — CI run 34222332438, where `ubuntu-latest / default` passed
+            // and `macos-latest / default` failed on this line.
+            //
+            // THE BANNER STAYS IN THE POPULATION. Counting every block after the primary
+            // was a deliberate widening (see CEILING) and is not being reverted; only the
+            // part that varies by machine is taken out. CEILING itself is UNCHANGED at
+            // 12244 — this is a re-derivation of the MEASUREMENT, not the spec amendment
+            // the failure message rightly refuses.
+            //
+            // `docs/issues/2026-09-08-the-emission-byte-ceiling-measures-the-fixtures-tempdir-path-length.md`
+            let blocks = guide_blocks(out);
+            let bytes: usize = blocks
+                .iter()
+                .map(|b| {
+                    if b.contains(&root) {
+                        root_seen_raw = true;
+                    }
+                    b.replace(&root, FIXTURE_ROOT_TOKEN).len()
+                })
+                .sum();
             total += bytes;
             // THE DISCRIMINATOR IS IN THE PAYLOAD, and no byte count at any grain can
             // substitute for it. `total > 0` sums six addends so it fails only if ALL are
@@ -10250,7 +10325,13 @@ mod guide_hint_tests {
             total <= CEILING,
             "p50 session emitted {total} B after the primary (whole librarian topic is \
              {whole} B, ceiling {CEILING} B, margin {} B). Raising CEILING is a spec \
-             amendment, not a fix — it is not the remedy for this failure. The standing \
+             amendment, not a fix — it is not the remedy for this failure. CHECK FIRST \
+             that the fixture root is still normalised out of the count: this budget \
+             counts a block carrying the project root verbatim, at 1 B per character \
+             of path, so a broken normalisation reds here while naming a guide that \
+             never grew — that is how this fired on macOS and not Linux, see \
+             `docs/issues/2026-09-08-the-emission-byte-ceiling-measures-the-fixtures-tempdir-path-length.md`. \
+             Otherwise the standing \
              remedy is decomposing § Body Editing Surfaces in the librarian guide, \
              already recorded in \
              `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` § Out of \
@@ -10260,6 +10341,21 @@ mod guide_hint_tests {
             CEILING.saturating_sub(total)
         );
         assert!(total > 0, "the session must still receive guidance");
+
+        // CONTROL, and NOT symmetry with the ceiling assertion — it is the only thing
+        // standing between the normalisation and vacuity. Substituting a root out of
+        // blocks that never contained one is trivially satisfied, so a build where
+        // `post_process`'s banner stops being emitted, or stops being counted, would
+        // sail through both aggregates above while silently dropping the very bytes
+        // CEILING exists to budget — the same disappearing-content weakness CEILING's
+        // own comment documents, arriving through the fix for a different bug.
+        assert!(
+            root_seen_raw,
+            "control: the fixture root must appear in the RAW counted blocks. If it does \
+             not, `post_process`'s `[codescout] paths are relative to <root>` banner has \
+             stopped being emitted or stopped being counted, and the normalisation is \
+             guarding nothing."
+        );
     }
     /// The session-opener branch (`types.rs`'s `call_content`) inserts the bare
     /// `SESSION_OPENING_GUIDE` ledger key and always reports
