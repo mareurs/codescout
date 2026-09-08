@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 122
-entry_high_water_W: 112
+entry_high_water_W: 113
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -177,6 +177,7 @@ entry_high_water_W: 112
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-113 | 2026-09-08 | high | **Four cross-session disagreements in one afternoon, none of them a misreading — cite the OBJECT, not the number.** Two lane counts read off different CI runs four minutes apart; a `cancelled` run that meant supersession, not a verdict; two lanes that looked like they failed a fix but aborted in `--lib` and never ran it (`grep -c <testname> <joblog>` → **0**); and a comment describing its own code wrongly. In each case a reading was correct about an object that had moved, or was not the object in question | The reflex in all four was *"the other reader erred"*, and **re-reading cannot distinguish that from carelessness — a correct reading of the wrong object is byte-identical to a careless reading of the right one.** So the move that *feels* rigorous is the one that cannot work. Each was one command from resolution and none of them was "look again": the run id, `grep -c` over the job log, the regex instead of the comment above it. **A CI run id is to a lane count what a commit SHA is to a timestamp** | validated |
 | W-112 | 2026-09-08 | high | **A hermetic fixture makes the production default unobservable, and the mutation that proves it is the one nobody runs.** After 94/94 green and 9 of 9 mutations killed, mutating `profile_dirs()` — which decides *where the tool looks at all* — to a hardcoded list **and** to `return []` both left **94/94 green**. Every case injects `FILE_PROVENANCE_*_ROOTS` to stay hermetic, and that override *is* the default's only caller | The discovery fix ships with a green suite and zero coverage — in code written minutes earlier *in direct response to a peer's correction*, i.e. the part most recently thought hardest about. Not a thin sample: the refuting outcome leaves **no artifact at any corpus size**, so "widen the sample" is a no-op against it. Independently reproduced by `ad379a7c` against the **committed** suite (`transcript_roots() -> return []` leaves 68/68 green), so it is a pre-existing harness property rather than new work. Theirs is the generalisation: **hermeticity and default-path coverage are in direct tension**, invisible from inside a green run — and their own six mutations that day had all hit the *dispatch* and none the *scope*, because the fixture cannot express a scope mutation. The mutation population was itself filtered by what the harness could see | validated |
 | W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while the commit was unreachable from the ref it was published to. That **conjunction** is the rebase-orphan signature, and only the second half discriminates; use `git merge-base --is-ancestor <sha> <ref>` rather than `git branch --contains`, which answers a laxer question (peer refinement, sessionId `89d91024`, who independently confirmed the whole route on a second commit). `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
 | W-110 | 2026-09-07 | high | **The bug ledger cannot report a claim nobody wrote — enumerate by socket, ask, then claim.** Before starting a bug, enumerated live sessions and asked the two peers sharing this checkout. `codescout-af` named **five** bug files they were actively fixing, **all five reading `open`**; a sibling session independently measured the same population at 60 rows, **zero `taken`**. Then claimed each pick `status: taken` + `claimed_by: <sessionId>` through the catalog | Ledger-based disjointness was the obvious method and would have collided on any of the five — and silently, since two sessions fixing one bug produce two plausible diffs and whoever commits first makes the other's work read as a redundant re-fix. `status: open` is **monotone under an unwritten claim**: the state you want to detect produces exactly the value you are already reading, so "read the ledger more carefully" is the wrong instrument rather than a weaker one. Enumeration bounds who is present; only the ask attributes work. The same round-trips surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit — and later a peer staged five files into the shared index between this session's `git add` and `git commit`. `doctor` then resolved the claim as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId: **first real use of the field in this repo — the mechanism was never missing, the practice was** | validated |
@@ -12468,6 +12469,52 @@ certify the fix.
 **Remedy shipped:** a `== profile DISCOVERY ==` section that omits the override deliberately and
 says so on the fixture line, so a tidy-up back onto the shared roots reads as the regression it is.
 13/13 mutations killed after. `14e07fb3`, patch-id `3ec07f35c1c5169c95bb024826a981a9661d4b0c`.
+
+**Status:** validated
+
+## W-113 — Four cross-session disagreements in one afternoon, none of them a misreading — cite the object, not the number
+
+**Valid:** dated 2026-09-08
+
+**Observed:** Four disagreements between sessions in one afternoon, all read at first as *"the
+other reader made a mistake"*, and none of them was:
+
+1. **Two lane counts.** "Five red lanes" vs "two failures, not three" — read off
+   `34222332438` (head `09ecb58d`, complete, 5 real failures) and `34221968837`
+   (head `579a2085`, superseded, 2 failures + 3 **cancelled**). Both readings correct, four
+   minutes and one commit apart. The three merely-cancelled lanes failed for real in the later run.
+2. **A cancelled run.** `cancel-in-progress` on any non-`master` ref means a `cancelled` run is
+   usually *supersession*, not a verdict — and cancelled **jobs** inside it are indistinguishable
+   from failures in a summary count. This is most of how (1) happened.
+3. **A lane that "failed the fix".** `windows-latest/default` and `Windows-gnu cross` red after
+   the path-separator fix looked like a partial flip. `cargo test` aborts after a failing target,
+   so both stopped in `--lib` and **never reached `tests/issue_clusters.rs`**: `grep -c
+   a_repo_path_renders_posix` over both job logs returns **0**. A lane that did not run the test
+   is not evidence against it, and reads as exactly that.
+4. **A comment describing its own code.** `file-provenance.py:81` said the binder matched "a
+   variable assigned one line earlier"; the binder is an unbounded whole-snippet `re.search`. A
+   session read it, reported distance as the mechanism, and relayed it twice.
+
+**Cause:** In every case a reading was *correct about an object that had moved, or was not the
+object in question*. Re-reading cannot distinguish that from carelessness, because **a correct
+reading of the wrong object is byte-identical to a careless reading of the right one**.
+
+**Counterfactual:** Each was one command from resolution and none of them was "read it again".
+(1) needed the run id; (3) needed `grep -c <testname> <joblog>`; (4) needed the regex rather than
+the comment above it. The fix that *feels* rigorous — look harder — is the one that cannot work.
+
+**The rule, and it is cheap:** **cite the object, not the number.** A CI run id is to a lane count
+what a commit SHA is to a timestamp, and a job log is to "the lane failed" what a patch-id is to a
+rebased SHA. When two readings disagree, ask *what was each reading?* before asking *who erred?*
+— the corpus-moved hypothesis is both more often right and cheaper to test.
+
+**Attribution:** the run-id formulation is `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`'s. (3) is
+`59112612-5fc8-4b31-8c8c-e19220d99eac`'s, who checked their own lanes rather than accepting my
+"2 of 4 flipped" — my framing, and wrong. (4) was diagnosed by `ad379a7c` against their own
+earlier report. This session contributed the within-run isolation for the platform question:
+one tree at `09ecb58d`, `macos/default` failed while `ubuntu/default` succeeded and both other
+macOS lanes passed — platform separated from content in a single job list, no cross-tree
+inference, which is strictly better than the local-vs-CI comparison two sessions reached for first.
 
 **Status:** validated
 
