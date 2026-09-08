@@ -105,7 +105,7 @@ fn read_holder_record(path: &Path) -> Option<(u128, String)> {
 /// text. A stale classification costs a reader one wrong sentence; the collapse it
 /// replaces cost them a wrong hypothesis.
 ///
-/// See `docs/issues/2026-09-08-the-write-lock-refusal-cannot-tell-a-cleared-record-from-an-absent-one.md`.
+/// See `docs/issues/archive/2026-09-08-the-write-lock-refusal-cannot-tell-a-cleared-record-from-an-absent-one.md`.
 fn why_no_holder_record(path: &Path) -> &'static str {
     match std::fs::metadata(path) {
         Ok(m) if m.len() == 0 => {
@@ -145,7 +145,7 @@ fn why_no_holder_record(path: &Path) -> &'static str {
 ///
 /// Keeping the record outside the locked bytes restores it on every platform and
 /// costs nothing on Unix.
-/// See `docs/issues/2026-09-08-the-write-guard-holder-tests-fail-on-every-windows-lane.md`.
+/// See `docs/issues/archive/2026-09-08-the-write-guard-holder-tests-fail-on-every-windows-lane.md`.
 pub fn holder_record_path(root: &Path) -> PathBuf {
     root.join(".codescout").join("write.lock.holder")
 }

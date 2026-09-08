@@ -1,12 +1,10 @@
 ---
 kind: bug
-status: taken
+status: fixed
 title: The write-lock refusal cannot tell a CLEARED holder record from an ABSENT one, and names neither cause
 tags:
 - cluster/hint-composed-without-the-request
 topic: write-guard diagnostics
-claimed_at: 2026-09-08
-claimed_by: 5399543d-22d6-4ed9-9ebb-876be459989f
 closed: null
 opened: 2026-09-08
 owner: marius
@@ -131,6 +129,11 @@ holding the discriminator — the two defect shapes genuinely arrive at one code
 discriminator is in hand and unused, which is `IC-22`'s claim rather than a bare conflation.
 
 ## Fix
+
+Fixed on `experiments` at **`a762dceb`**, patch-id
+**`bdc117f91c3aef701e9e286cc8e20e90ae47b53f`**. Cite the pair — `experiments` is rebased after
+every ship, so the SHA orphans while the patch-id is a content hash of the diff and survives both
+rebase and cherry-pick.
 
 Fixed at `acquire()`, exactly where the class analysis above says it belongs — `read_holder_record`'s
 signature is untouched, so the safety collapse its doc comment argues for is intact and no future
