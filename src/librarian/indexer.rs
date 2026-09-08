@@ -52,7 +52,7 @@ pub struct IndexReport {
     /// foreign keys, so the same delete leaves points that answer KNN and resolve
     /// to nothing. One code path, correct on the backend the tests use and
     /// leaking on the default one.
-    /// `docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
+    /// `docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
     pub removed_ids: Vec<String>,
 }
 

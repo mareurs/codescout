@@ -153,7 +153,7 @@ impl QdrantWrap {
     /// `sha256(abs_path)`, so archiving a file mints a new id and the vectors keep
     /// answering under the old one, which no catalog row resolves — they are
     /// returned by KNN and dropped at hydration, consuming result slots silently
-    /// (`docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`).
+    /// (`docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`).
     /// Deleting them instead is correct and lossy: the content did not change, so
     /// the artifact would leave the semantic index until someone ran a `reembed`
     /// — trading a silent degradation for a different silent degradation.

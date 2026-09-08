@@ -154,7 +154,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // orphan artifacts / 126 points measured on this checkout), while sqlite let
     // the graft's FK cascade delete the chunk rows and the
     // artifact_vec_v2_cascade_delete trigger take their vectors with them.
-    // docs/issues/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md
+    // docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md
     let (vectors_refiled, vectors_refile_error) = {
         // The guard is already gone — the block above ended its scope, which is what
         // makes this `.await` legal at all. Nothing to drop here.

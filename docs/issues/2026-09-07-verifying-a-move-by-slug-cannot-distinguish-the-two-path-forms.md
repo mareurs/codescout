@@ -80,6 +80,48 @@ both readings were correct at their own instant, and the tell that a corpus move
 reader erred was **line drift** (`:277/:311` against `:278/:340`) between two otherwise-agreeing
 readings. Neither party read it as one at the time.
 
+
+### Sixth instance, 2026-09-08 — four days of residue, and the reason the gate did not stop it
+
+Found by `59112612` while checking that its *own* new citations resolved — not by looking for
+this. The `2026-09-04` archive of
+`artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md` left
+**three** dangling citations, still live four days later at `f8523cc1`:
+
+```
+src/librarian/indexer.rs:55
+src/librarian/tools/mv.rs:157
+src/retrieval/artifact.rs:156
+```
+
+Repaired in the same commit as this note, verified in this file's own prescribed form — old
+path **0**, archive-form control **3 non-zero**, target present on disk.
+
+**This sharpens § *Tests added*, which currently reads that `audit_doc_refs` "already covers
+the outcome". Measured, that is true at the TOOL level and false at the REPORTING level, for
+two independent reasons.** I first assumed the tool simply does not scan `.rs` and checked
+before writing it down; the assumption was wrong, and the real mechanism is more specific:
+
+- **Severity cap.** Narrowed to the two files, `audit_doc_refs` finds all of them and
+  classifies each `verdict: "missing"`, `severity: "med"`, `severity_reason:
+  **`code_comment_capped`**`. CI fails on `high`. So an archive-move breakage **in a code
+  comment can never red the gate by construction**, while `CLAUDE.md` § *Parsers Over a
+  Namespace* records that the same breakage in ordinary markdown backticks gets
+  `policy_default` = `high` and does. The residue therefore accumulates specifically in
+  `.rs`, silently and without bound — which is why these three survived four days in three
+  separate files.
+- **Findings cap.** A project-wide run reports `n_refs_broken` **14637** against a
+  `findings` array capped at **50**, ordered most-severe-first. Even without the severity
+  cap, a specific new breakage is not findable in that output without already knowing the
+  path to narrow to — i.e. without already having the answer.
+
+**So the honest correction is not that the reader's confirmation step failed here — it is
+that this class has a residue the gate is DESIGNED not to fail on, and nothing counts it.**
+The cheap instrument is the one used above: `git grep -F '<old full path>' -- 'src/*'` paired
+with the archive-form control, which needs no severity policy at all. Whether
+`code_comment_capped` should stay capped is a real question and belongs to whoever owns that
+policy — a comment is lower-stakes than prose, so the cap is defensible; what is not
+defensible is that the capped population is **unmeasured**.
 ## Class
 
 Tagged `cluster/selector-narrower-than-its-population` (`IC-18`) as the closest member of the
@@ -135,4 +177,3 @@ local check, with the control.
 - Instances 2 and 4 reported by sessionIds `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b` and
   `8dba66b0-af4b-4cda-a333-54a0605b318e`, each against themselves. Filed by
   `4eac25ba-b181-4dac-a5a1-ec88502a5bc5`, who committed instance 5.
-
