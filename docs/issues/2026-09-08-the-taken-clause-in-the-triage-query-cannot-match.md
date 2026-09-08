@@ -70,26 +70,48 @@ Shared checkout, 5 live sessions across 1 profile at 2026-09-07T15:47, 3 of them
 
 ## Root cause
 
-**The read instruction and the write instruction live on surfaces with different
-audiences, and only one of them is unavoidable.**
+**The instruction reaches its audience in full, through the documented surface, and is
+insufficient. What works is being addressed in the second person with a named next action.**
+
+This supersedes an earlier reading in this file, kept below because it is the theory a
+reader arrives with and would otherwise act on.
+
+`get_guide("tracker-conventions")` is **auto-injected** — unprompted, as a full content
+block — on a `doc(action="find", kind="bug", …)` call, which is precisely the triage query
+every session is told to run at Phase 0. It carries § *Claiming a bug* complete: the exact
+`doc(action="update", patch={status: "taken", extra: {claimed_by: …}})` call, the rule to
+store the sessionId and not the name, and the release path.
+
+Two sessions received it and neither acted on it:
+
+- `codescout-92` (sid `59112612-…`) — self-reported, and the party's own report on itself is
+  the weakest evidence available; they said so first and flagged the guide injection as the
+  checkable part.
+- **The author of this file** (sid `ad379a7c-…`) — independent corroboration, and the
+  reason the point is not resting on a self-report. The same guide auto-injected into this
+  session, on the very `doc(action="find")` call that produced the `79 / 0 / 1` measurement
+  above. It was read. Nothing was claimed. A bug was fixed and archived the previous day
+  without a claim either.
+
+So the audience is not the variable. In both cases the behaviour changed only when a peer
+addressed the session directly and named the action — which is
+`skill-frictions:SKF-22`, *a trigger the model must notice is a policy, not a mechanism*,
+reaching a third subsystem.
+
+### Superseded: the audience-split reading
+
+This file originally located the defect in **where** the two halves are published:
 
 | half | surface | reached by |
 |---|---|---|
-| READ `taken` before starting | `CLAUDE.md`, activation bootstrap | every session, at startup, unavoidably |
-| WRITE `taken` when you start | `get_guide("tracker-conventions")` § *Claiming a bug* | a session that opens that guide |
+| READ `taken` before starting | `CLAUDE.md`, activation bootstrap | every session, unavoidably |
+| WRITE `taken` when you start | `get_guide("tracker-conventions")` | *— believed opt-in; it is not* |
 
-The write protocol is complete and correct where it is documented — it gives the exact
-`doc(action="update", …)` call, says to store the sessionId and not the name, and
-specifies release to `investigating`. It is simply on a surface a session reads only if it
-goes looking, while the read half is served to everyone at activation. Readers therefore
-outnumber writers structurally, and the enforcement layer only ever gets an empty
-population to check.
-
-This is `CLAUDE.md` § *Observer Blindness*, "the third position", applied to a protocol
-rather than to a number: **a bound published to an audience that does not read it.** The
-remedy named there is to move the requirement to the read surface, not to publish it
-again.
-
+**It is preserved because it is wrong in the expensive direction.** It prescribes moving
+the claiming instruction onto the always-served surface — a documentation edit, cheap,
+plausible, and measurably insufficient, since the instruction is *already* served
+unprompted to the sessions that then did not claim. Anyone re-deriving the audience theory
+would ship that edit and observe no change, with nothing to tell them why.
 ## Evidence
 
 **The mechanism works end to end — adoption is the whole gap.** Written exactly once in
@@ -111,10 +133,13 @@ again.
 
 **The count moved while this file was being written, and that is a datum rather than an
 embarrassment.** At ~08:28 on 2026-09-08 — minutes after the `79 / 0 / 1` above was taken,
-and before this file was committed — `codescout-92` (sid `59112612-…`) claimed
-`docs/issues/2026-09-05-doc-update-body-appends-a-trailing-blank-line-every-write.md`:
-`status: taken`, `claimed_by: 59112612-…`, `claimed_at: 2026-09-08`, written through the
-catalog. So the corpus's **second** write of the field landed inside the window this record
+and before this file was committed — `codescout-92` (sid `59112612-…`) claimed a bug through the catalog: `status: taken`,
+`claimed_by: 59112612-…`, `claimed_at: 2026-09-08`. **Cited as commit `e1e79b89`**, which
+is immutable and holds that exact frontmatter — deliberately not by path, because that bug
+is being fixed and archived within the hour, and `docs/issues/…` → `docs/issues/archive/…`
+would stale a path citation on the move. The artifact id (`2b61de99742ee1d3`) is no better:
+`id = sha256(abs_path)`, so it re-keys on the same move. The commit is the only one of the
+three that survives. So the corpus's **second** write of the field landed inside the window this record
 describes, and the headline number is already `1`, not `0`.
 
 What that does and does not change. It does **not** refute the finding: both writes to date
@@ -151,24 +176,31 @@ for an unobservable event; it is an observable event nobody records.
 
 ## Fix
 
-Not started. Options:
+Not started. The options below were rewritten once § *Root cause* was corrected — the
+original recommendation was a documentation move, which the correction falsifies.
 
-- **A — move the write step to the read surface.** The activation bootstrap and
-  `CLAUDE.md` already tell every session to *check* `taken` at Phase 0; have the same
-  sentence tell it to *claim* what it picks up. This is the § *Observer Blindness* remedy
-  and the only option that changes who receives the instruction.
-- **B — make the zero name its own scope.** Per
-  `docs/adrs/2026-08-27-negative-results-name-their-scope.md`, a suspicious zero should say
-  what it examined. A `taken` result of 0 across a repo with live peers is exactly such a
-  zero, and the triage surfaces could say so rather than returning silence.
-- **C — document the clause as decorative** and route collision-checking entirely to the
-  socket enumeration.
+- **A — ~~move the write step to the read surface~~. FALSIFIED, do not retry.** The
+  claiming protocol is already delivered unprompted, in full, to sessions running the
+  triage query. Two of them then did not claim. Republishing it on a second surface changes
+  the one variable already shown not to matter.
+- **B — a mechanism at the point of claiming.** The behaviour that worked was *addressed,
+  specific, at the moment of picking work up*. The tool-side analogue is for the act that
+  begins work on a bug to carry the claim, or to ask — e.g. `doc(action="update")` moving a
+  bug toward an in-progress state offering the `claimed_by` stamp, or the triage query's
+  own response naming unclaimed rows in the second person. This is SKF-22's remedy shape:
+  replace a trigger the model must notice with one it cannot miss.
+- **C — make the zero name its own scope.** Per
+  `docs/adrs/2026-08-27-negative-results-name-their-scope.md`, a `taken` count of 0 in a
+  repo with live peers is a suspicious zero and should say what it examined. Weaker than B
+  and complementary to it: it repairs the *reader's* inference without changing the
+  *writer's* behaviour.
+- **D — document the clause as decorative** and route collision-checking to the socket
+  enumeration, which is the instrument that actually worked. Defensible, and it discards a
+  built, tested mechanism over an adoption gap; it also gives up the cross-machine case
+  sockets cannot reach.
 
-**Recommendation: A, plus B.** A fixes the audience problem; B degrades honestly in the
-interim and while adoption is partial. C is listed because it is defensible — the socket
-route is strictly more reliable — but it discards a working, tested mechanism over an
-adoption gap, and gives up the cross-machine case that sockets cannot reach.
-
+**Recommendation: B, with C in the interim.** B is the only option addressing the corrected
+root cause. C degrades honestly while B does not exist.
 ## Tests added
 
 None. Note that the obvious test — asserting the ledger has at least one `taken` — would
