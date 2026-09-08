@@ -62,8 +62,12 @@ The sequence: a session running the gate hit a red build from a peer's un-wired 
 
 | # | state | instrument that existed | how it was in hand |
 |---|---|---|---|
-| 11:30 | **uncommitted** | `claimed_by: 5399543d` | in the frontmatter of a bug file this session had filed itself |
-| ~12:40 | **committed** | `Session-Id` trailer | in three commits open in the reading pane, `git grep` over that exact range being how the defect was found |
+| 1 | **uncommitted** | `claimed_by: 5399543d` | in the frontmatter of a bug file this session had filed itself |
+| 2 | **committed** | `Session-Id` trailer | in three commits open in the reading pane, `git grep` over that exact range being how the defect was found |
+
+**Both rows are anchored to git objects, not to clocks, and that is a repair rather than a style choice.** This entry first dated instance 1 `11:30`, and a peer's independent check noticed that `a762dceb` — the commit that landed the WIP in question — has committer date `11:04:14 +0300`. Read literally, the misattribution would then have followed the commit, moving instance 1 onto the **committed** row and destroying the orthogonality this entry rests on. Settled from the objects: the misattributing message was sent at `07:56:45Z` and `a762dceb`'s committer date is `08:04:14Z`, so the claim preceded the commit by **7m29s** and the state was genuinely uncommitted — as the message's own words said, *"Your **uncommitted** `write_guard.rs`"*. Instance 2 needs no such care: its subjects (`96574516`, `f008e74f`, `f149255d`) were committed four days earlier.
+
+**The `11:30` was wrong in BOTH parties' accounts, and neither noticed for three exchanges** — one session's transcript logs UTC, the other's shell reports `+03:00`, and a bare wall-clock time is silently ambiguous between them at exactly the 3-hour offset that makes a plausible-looking wrong answer. **A timestamp is not a fixed point on a shared checkout; a commit is.** State such a claim as *"before `a762dceb`"* — checkable forever, by anyone, with no timezone and no transcript access. That this class's own entry nearly inverted its central finding on a timezone, while both parties were auditing each other's counts, is the `OB-1` signature once more.
 
 The read-side gap is therefore **orthogonal to the instrument axis**: it is not that one row's instrument is weaker, it is that having an instrument and consulting it are different events on both rows. That is what a rate would have obscured, since three instances clustered on one row would have read as an instrument problem.
 
