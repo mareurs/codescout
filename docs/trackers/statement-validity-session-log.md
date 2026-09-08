@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 10
-entry_high_water_F: 10
+entry_high_water_F: 13
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -42,6 +42,9 @@ entry_high_water_F: 10
 | F-7 | 2026-08-21 | high | architectural | open | A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it |
 | F-8 | 2026-08-21 | high | architectural | fixed-verified | A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing |
 | F-10 | 2026-09-07 | low | self-friction | open | A page's measured history was quoted for a host it does not describe, and the instrument had already said so |
+| F-11 | 2026-09-07 | med | self-friction | open | A carried failure NAME agreed with the counts and disagreed with the panic, and the two names route to opposite actions |
+| F-12 | 2026-09-07 | med | self-friction | open | A display helper dropped the field component the conclusion was about, and the conclusion was about its absence |
+| F-13 | 2026-09-07 | med | architectural | open | Two sessions converged for three rounds on the properties of a sweep neither had checked exists |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1245,6 +1248,137 @@ semantics and free space appears.
 **Rests on:** `CLAUDE.md` § *Observer Blindness* — "when a tracker's number and its scope live apart, move the scope to the read surface, not the lesson." The page publishes measurements whose population is inferable only from prose further down, so a citer reaches the number before the scope.
 
 **Fix idea / Pointer:** Add a scope line to the page's opening, and cross-check `docs/PROBES.md` — `index(action="verify")` already answers this question and should be the page's first instruction rather than its unmentioned alternative.
+
+## F-11 — a carried failure NAME agreed with the counts and disagreed with the panic, and the two names route to opposite actions
+
+**Valid:** dated 2026-09-07
+
+**Observed.** A gate run reported one failure. Carried across compaction, the
+record of it named `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`
+— a load-sensitive flake with an open bug file. The saved output named
+`timemachine_smoke::timemachine_full_chain`, panicking at
+`tests/librarian/timemachine_smoke.rs:230` with *"timeline must return array"*.
+Same run: the 5505/1/31 triple matched on both readings, so nothing looked wrong.
+
+**Why it mattered, and it is not the accuracy.** The two names route to *opposite
+actions*. A known flake means retry and proceed; the real failure was a fresh red
+on a test a peer had re-wired into a cargo target 16 minutes earlier
+(`3a4ddec2`), which had drifted against a `timeline` envelope change four months
+old and needed a fix from someone. Acting on the carried name, the correct next
+step and the taken next step diverge — and the taken one closes the question.
+
+**The tell was in the artifact and nowhere else.** The panic *message* was the
+discriminator, and it survived only in the saved gate output. A failure summary
+preserves counts (which agreed) and drops the message (which did not). So the
+check that works is re-reading the saved output before citing a failure, never
+comparing totals — totals are exactly the field that agrees across a
+misattribution.
+
+**Cost.** Near-miss. It would have licensed *"gate green modulo a known flake"*
+while a genuine red stood, and five bug files were about to be archived on the
+strength of that sentence.
+
+**Severity:** med — no wrong action shipped; one re-read separated them.
+
+**Status:** open — the general form, a carried failure name outliving the
+artifact that discriminates it, has no mechanism yet.
+
+**Rests on:** the run's panic text; `3a4ddec2` (peer, sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac`); `timemachine_full_chain` green 3/3
+after that peer's fix.
+
+## F-12 — a display helper dropped the field component the conclusion was about, and the conclusion was about its absence
+
+**Valid:** dated 2026-09-07
+
+**Observed.** `doc(action="find")` returned bug rows carrying full `abs_path`
+values. I formatted them with `i['abs_path'].split('/')[-1]` — basename only —
+then read the absence of `archive/` in that output as evidence two catalog rows
+still pointed at pre-move paths. Reported it as catalog drift and began triaging
+it. The catalog was correct: both rows already read `docs/issues/archive/...`.
+The formatter discarded the directory, and the claim was *about the directory*.
+
+**Why "look harder" is the wrong instrument.** The refuting bytes were in the
+tool response, present and correct, and were destroyed by my own rendering
+before I read them. Widening the query returns more rows through the same
+formatter. This is the recording-filter law, not the member-selection one: the
+standard remedy is a no-op here, which is what makes it worse than a small
+sample — the reflex answer looks responsive.
+
+**What separated them.** `librarian(action="doctor")` — an instrument I did not
+write — returned `missing_file: 4`, all four in a different repo entirely. The
+disagreement between a wired instrument and my ad-hoc one is what forced the
+re-read. Not care, and not a second look at my own output.
+
+**Cost.** Near-miss, and outward-facing: one message from reporting fabricated
+catalog drift to a peer actively building the adjacent `frontmatter_status_mismatch`
+check, who would have spent time on it.
+
+**Severity:** med. **Status:** open.
+
+**Rests on:** doctor run 2026-09-07 (168 violations, `missing_file: 4`, all
+`claude-plugins`); `doc(action="find", filter={"rel_path":{"contains":"json-path-key-hint"}},
+include_archived=true)` returning the archive path.
+
+## F-13 — two sessions converged for three rounds on the properties of a sweep neither had checked exists
+
+**Valid:** dated 2026-09-07
+
+**Observed.** Reasoning with a peer about why stale-forward citations are
+recoverable and stale-backward ones are not, I asserted *"a move produces drift a
+sweep can hang off"*; the peer (sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`)
+sharpened it to *"a move emits an event a sweep can hang off"*. Both framings
+survived a mutual falsification exchange and a class-taxonomy check against the
+`IC-N` closed set. Neither of us read the sweep.
+
+`src/librarian/tools/doctor.rs:4187-4190` states it: *"the archive sweep in
+`get_guide("tracker-conventions")` is triggered BY an archive move, so a citation
+written before one schedules no repair at all — no event fires, no sweep runs, no
+procedure owns the fix."* The sweep is a documented step in a guide. A scan of
+`src/` for citation re-pointing finds only `graft::repoint_history`, which
+re-points catalog rows.
+
+**The refuting datapoint was the session doing the theorising.** I performed five
+archive moves in `6a2ab716`. Seven citations went stale. **None were swept.** I
+found them by running a discriminating grep deliberately, having minutes earlier
+read a bug file about slug-vs-path ambiguity. The trigger did not fire; I fired
+it, then reasoned about it as though it had fired on its own.
+
+**Why the exchange did not catch it, and this is the transferable half.** Three
+rounds each replaced a proxy with a better proxy — direction, then trigger, then
+selector — and every round was conducted over the *properties* of a mechanism
+whose *existence* neither party had checked. A well-run disagreement converges,
+and convergence reads as verification. It is not: two parties can agree with
+increasing precision about a thing that is not there, and a good-faith
+falsification exchange is unusually good at producing that, because each round
+genuinely rules something out.
+
+**The misleading evidence, which is why neither of us doubted it.**
+`doc(action="move")` *does* perform automatic repair and reports it: every move
+response carries `history_grafted: {events, observations, links, event_edges}`
+(`mv.rs:217-220`), four **catalog-row** counters. That repair is real and covers
+rows, not prose — and the `cites` edges it re-points are themselves derived from
+prose by `link_scan`, so stale prose is re-derived into stale edges on the next
+scan. The visible repair sits one layer upstream of the thing that stays broken.
+I read that field five times in one evening without asking which representation
+it covered. So the diagnosis is not *"we failed to check"*: the system emits a
+true repair report at the moment of the move, about a different layer.
+
+**What it actually is.** `skill-frictions:SKF-22` — *"a trigger the model must
+notice is a policy, not a mechanism"* — reached from a different subsystem. The
+`IC-18` axis note I had offered to write was withdrawn: a class note asserting a
+non-existent mechanism, into a closed set other sessions read as settled, is
+worse than no note.
+
+**Cost.** No wrong action shipped. Two sessions spent an evening's reasoning
+budget, and the exchange would have published the assertion into the cluster
+ledger.
+
+**Severity:** med. **Status:** open — filed by the peer as
+`test-escape-hardening:I-9`, which owns the mechanism half.
+
+**Rests on:** `doctor.rs:4187-4190`; `mv.rs:217-220`; `6a2ab716` (five moves,
+seven citations re-pointed by hand); `00e04f7c`.
 
 ## Template for new entries
 
