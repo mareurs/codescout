@@ -3588,7 +3588,7 @@ mod tests {
     /// reintroduces the gap for that shape. The two ERROR texts carry the fuller sentence
     /// and cost nothing here — they are runtime messages, not schema, and they reach the
     /// caller who is already failing at exactly this.
-    /// docs/issues/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
+    /// docs/issues/archive/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
     const TOOL_SURFACE_CHAR_BUDGET: usize = 57_296;
 
     #[tokio::test]

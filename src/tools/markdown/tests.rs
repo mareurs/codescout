@@ -1283,7 +1283,7 @@ fn scoped_edit_preamble_sentinel_does_not_reach_into_the_first_section() {
 /// So this is a REACHABILITY test, not a documentation nicety: being tested end-to-end is
 /// exactly why the gap was expensive — the feature works, nothing fails loudly, and the only
 /// observable is a caller doing something worse.
-/// docs/issues/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
+/// docs/issues/archive/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
 ///
 /// CEILING, stated because it is invisible: this buys ARRIVAL, never ANSWERABILITY. It
 /// cannot check that a surface explains *when* to reach for the sentinel, only that the

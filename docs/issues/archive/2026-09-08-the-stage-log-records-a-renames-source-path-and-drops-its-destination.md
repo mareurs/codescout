@@ -71,7 +71,9 @@ reads as *"nobody staged it"* rather than *"never looked at"*.
 
 ## Evidence — two hypotheses eliminated, both plausible
 
-A peer (`5399543d`) filed the reader-side defect at `61b88853c19d313c` and named two candidate
+A peer (`5399543d`) filed the reader-side defect at `6896c831af6dc65d`
+(`docs/issues/archive/2026-09-08-an-unrecorded-staged-pair-defaults-to-mine-so-the-capture-guard-passes.md`)
+and named two candidate
 causes for the missing row, correctly declining to choose:
 
 - **Retention** (`STAGE_LOG_MAX_RETAINED`, default 1000). The log stands at **1002** rows, so
@@ -91,6 +93,29 @@ Line 81 is worth keeping in view:
 owner `-`, null blob — the deletion half, recorded unattributable. So the source path collects
 *two* rows for one rename while the destination collects none.
 
+
+### One thing this file ASSERTED and neither party reproduced
+
+The fix commit's message says the guard *"found no owner, and fell through to `mine`"*. That is
+the mechanism by which `a762dceb` would have passed, and it is **inferred from reading the code,
+not measured**. Two observations by `5399543d` do not fit it:
+
+- `awk -F'\t' '$2=="a8bd650f" && $3=="<src path>"' .git/session-stage-log` returns a row — owner
+  `59112612`. The pair the pre-fix guard looks up was **present**, not missing.
+- Two reproductions of the shape against the **pre-fix** scripts both **refused** (`EXIT=1`), via
+  `git mv` and via `mv` + `git add -- <old> <new>`.
+
+This file's own regression test agrees: pre-fix, the failing assertion is *"refusal names the
+rename DESTINATION"* — about **naming**, not about **refusing**.
+
+So the defect is real and the fix is verified in both directions; what is *not* established is how
+`a762dceb` specifically came to pass rather than to refuse-and-misname. Recorded here so nobody
+reads the account as demonstrated when it is inferred. **The missing evidence is a reproduction of
+a pre-fix PASS**, not of a pre-fix mis-naming.
+
+Raised by `5399543d`, who measured the shipped account instead of accepting it — and whose own
+`else → mine` retraction this file's two-site result partly reverses, since reader and recorder
+turned out to be able to disagree.
 ## Hypotheses tried
 
 1. **Retention evicted it.** Tested by locating the sibling rows' line numbers against the 1000-row

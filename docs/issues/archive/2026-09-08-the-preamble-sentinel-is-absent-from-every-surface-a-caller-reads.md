@@ -1,15 +1,15 @@
 ---
-status: open
-opened: 2026-09-08
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
+title: The preamble sentinel exists, is tested, and is named on no surface a caller reads — so the region reads as unreachable
 tags:
 - cluster/doc-contradicted-by-code
-kind: bug
-title: The preamble sentinel exists, is tested, and is named on no surface a caller reads — so the region reads as unreachable
 topic: librarian-api
+closed: 2026-09-08
+opened: 2026-09-08
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: `heading: "^"` works and is invisible, so callers conclude the preamble is unwritable
@@ -105,7 +105,22 @@ safety failure — the caller is not being careless, they are being correct abou
 
 ## Fix
 
-Not implemented. Smallest first; 1 and 2 are complements and neither is sufficient alone.
+**Shipped.** `experiments` `5a84540d`, patch-id `dc85b8d1f77c50530ae7abab0cfd8d0522384ecd`.
+**Gate green @ 2026-09-08 11:49–11:53** — fmt 0, clippy 0, LEAN 0, DEFAULT 0.
+
+All three candidates below landed, and a **fourth site** surfaced during the work:
+`src/librarian/tools/update.rs` refuses a heading-less `body_edits` entry before markdown ever
+sees it, so `doc` — the surface this bug was actually met on — was its own call site. A peer's
+gate run named it; I had missed it.
+
+**Budget.** `tool_surface_under_budget` reds on schema growth, and this fix is exactly the kind
+it exists to notice. Found the bytes first: gross 462, **262 paid on the spot** by cutting all
+three descriptions to their operative facts. The remaining **+200** raises the budget to an exact
+`57_296` with a log entry — dropping any one of the three call shapes reintroduces the gap for
+that shape. The two error texts carry the fuller sentence and cost **nothing** here: runtime
+messages are not schema, and they reach the caller already failing at precisely this.
+
+Original candidates, all done:
 
 1. **Name the sentinel in the two schema descriptions.** `src/tools/edit_file/mod.rs`'s
    `"Markdown grammar: target section heading."` and `doc`'s `body_edits[].heading` become
@@ -121,13 +136,27 @@ Not implemented. Smallest first; 1 and 2 are complements and neither is sufficie
 
 ## Tests added
 
-None yet. The guard is a shape assertion and needs no fixture: assert that the `heading` schema
-description on both surfaces contains `"^"`, and that the missing-heading error text does.
+Five assertions in `every_caller_facing_surface_names_the_preamble_sentinel`
+(`src/tools/markdown/tests.rs`) — one production-path, four surface.
 
-Note the ceiling, on the test: this buys **arrival**, not **answerability** — it cannot check the
-sentence explains *when* to reach for the sentinel. And do not pin the whole description string;
-that reds on every rewording and gets deleted. Assert the token.
+The production-path one is the only assertion pinning the sentinel's **value**: `plan_batch`'s
+real missing-heading error must contain `PREAMBLE_SENTINEL`. It reds if the constant changes
+without the message following it.
 
+**All four sites mutated independently, and all four kill it.** That matters because they are
+four distinct call sites of one law, and a kill at one says nothing about the others.
+
+**The ceiling, written into the test's own comment:** this buys **arrival**, never
+**answerability**. It cannot check that a surface explains *when* to reach for the sentinel, only
+that the sentinel is named. Do not read green as "the docs are good".
+
+**A mutation trap worth more than the test.** The first `edit_markdown.rs` mutation reported
+**green**, and I began concluding the production-path assertion did not discriminate. It had
+silently failed to apply — `cargo fmt` had rewrapped the literal since the `replace()` pattern
+was written. **An unapplied mutation is indistinguishable from an uncovered site: both print
+green.** Re-run with the mutation proving `changed: True` before the test runs, and it fails
+correctly. This is `CLAUDE.md` § *Testing Discipline*'s "assert about your own re-implementation"
+hazard one level further out — in the **mutation** rather than the fixture.
 ## Workarounds
 
 Use `heading: "^"` with `action: "edit"`. It is scoped to `edit` deliberately — `insert_before`
