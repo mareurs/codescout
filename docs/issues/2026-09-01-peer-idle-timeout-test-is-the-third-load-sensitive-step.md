@@ -611,8 +611,13 @@ message.
 > They are not substitutes. Denominator now **5 fail / 3 pass** across two sessions.
 ### Thirteenth observation, 2026-09-08 — the twelfth's METRIC disagrees with the load by an order of magnitude, and the load is `rust-analyzer`
 
-Reported by `59112612`. One failure, one pass, and a correction to the *instrument* the
+Reported by `59112612`. **Two** failures, one pass, and a correction to the *instrument* the
 twelfth prescribed rather than to its method.
+
+(This entry first read *"one failure, one pass"* and was corrected within the hour by a
+second failure at 11:07:56Z, same signature, in a run whose other red was a peer's
+uncommitted file. Corrected rather than left standing, because a denominator that only ever
+rounds down is the exact defect this file records.)
 
 **The failure.** A default lane at 10:45:32Z, same signature verbatim — `run() did not exit
 within 10s of a 1s idle timeout`, `src/peer/server.rs:751` — as the only red in
@@ -659,10 +664,12 @@ navigation tooling `CLAUDE.md` Iron Law 1 *mandates* is a first-order load sourc
 test, and it is invisible to the metric this file previously endorsed. That is not a reason
 to navigate by grep; it is a reason the counter has to change.
 
-**Denominator.** One more pass under measured load, added to the twelfth's 4-fail/2-pass.
-Still probabilistic. `load1` 46–49 on 64 cores is ~0.75 × nproc — loaded, not oversubscribed
-— and the test passed there, which is the direction that needs publishing precisely because
-only failures get noticed.
+**Denominator.** One more pass under measured load, plus a second failure at 11:07:56Z — so
+this session contributes **2 fail / 1 pass**, and the running total with the twelfth's six
+runs is **6 fail / 3 pass**. Still probabilistic. `load1` 46–49 on 64 cores is ~0.75 × nproc
+— loaded, not oversubscribed — and the test passed there, which is the direction that needs
+publishing precisely because only failures get noticed. **Both** failing runs are recorded
+as load-unmeasured; neither is estimated.
 
 **Pre-announcement worked again, in the other direction.** `5399543d` had messaged this
 session about the range before its failure; the red was read as load on sight, no time spent
