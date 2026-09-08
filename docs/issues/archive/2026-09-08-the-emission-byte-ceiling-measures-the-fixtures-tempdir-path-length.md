@@ -1,7 +1,7 @@
 ---
-id: '547725aa19652455'
+id: b8c68fbafb86182e
 kind: bug
-status: taken
+status: fixed
 title: The p50 emission byte ceiling measures the fixture's tempdir path length, so it reds by platform
 tags:
 - cluster/repro-env-diverges-from-gate-env
@@ -118,21 +118,75 @@ independent of guide content. A developer on a deep checkout path can hit this w
 
 ## Fix
 
-**Committed, not yet closed — and the reason is this bug's own subject.** The fix is in and the
-four-command gate is green (FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0), with both mutations red first.
-But the claim being made is *"macOS now agrees with Linux"*, and no macOS lane has said so yet.
-Closing on a Linux gate would be the same move that shipped the defect: treating one platform's
-silence as the population. Held `taken` until a `macos-latest / default` verdict lands.
+**Verified on all four affected lanes — run `34257156731`, head `beb33b3f`, `completed / success`,
+every job green.** Held `taken` until a real verdict landed, because the claim was *"macOS now
+agrees with Linux"* and closing on a Linux gate would have been the same move that shipped the
+defect: treating one platform's silence as the population.
 
-**`LEAN exit=0` is vacuous here, derived rather than assumed.** `guide_hint_tests::` runs **0**
-times in `--no-default-features` and **46** in the default lane; control, so the zero is a
-measurement and not a broken grep: `prompts::` returns **101 in both**. Only the default lane
-exercises this change.
+**Read at the TEST, not at the job**, each with a control — because a lane that aborts in `--lib`
+never reaches the test, and `grep -c <testname>` then returns a zero that looks exactly like a
+failure (`bug-fix-session-log:W-113` case 3):
 
-Normalise the root out of the counted bytes at the measurement site, keeping the banner **in** the
-population -- the widening to "every block after the primary" was deliberate and is not being
-reverted. What is removed is only the part that varies by machine.
+| lane | control (`... ok\|FAILED` lines) | `p50_session_stays_under_the_committed_emission_byte_ceiling` |
+|---|---|---|
+| `ubuntu-latest / default` | 5534 | **ok** |
+| `macos-latest / default` | 5528 | **ok** |
+| `windows-latest / default` | 5441 | **ok** |
+| `Windows-gnu cross (MinGW + wine)` | 5150 | **ok** |
 
+Four-digit controls, so each `ok` is a measurement rather than a grep that matched nothing.
+
+**Only two lanes are evidence about this fix, and the third green is not.**
+`windows-latest / local-embed` was also red this morning and is also green now — on
+`lsp::client::tests::workspace_symbols_returns_project_symbols`, a different cause at n=1, still
+unclassified. *"All three windows lanes turned"* would be a lane-level rate conflating causes,
+which is the exact defect `bug-fix-session-log:F-123` records. Two turned on the fix; one recovered
+from something else. (Caveat raised by `59112612`.)
+
+### Two commits, and the first one is a rejected approach worth keeping
+
+| commit | patch-id | what |
+|---|---|---|
+| `91d4e3fd` | `c41d2c83fa0fed590c9ce74b21da02d79414a772` | normalise the fixture root out of the counted bytes |
+| `1545acb1` | `6eda9b5941e85dadf157c889d15d9de367fc0957` | a comment published a *prediction* (`~12282 B`, `63 characters`) as a measurement; measured is `12274` / `55` |
+| `69bad886` | `d50285175913e2fc68950c3895e582f5ce30f50d` | normalise **every rendering** of the root, not just the native one |
+
+**`91d4e3fd` regressed both Windows lanes and was green on Linux** — 12262 → **12313**, 12257 →
+**12308**. It normalised `to_string_lossy()` (the *native* rendering) while `post_process` emits
+`to_forward_slash()` (the *POSIX* one). On Linux those are byte-identical, so the local gate could
+not express the failure. **This is the approach a reader would otherwise retry**, which is why it
+stays on the record rather than being tidied into a single clean fix.
+
+The repair extracts `strip_fixture_roots(block, roots, token)` so the renderings are an **argument**
+rather than a hard-coded call — and that is the whole point. The first attempt at the repair
+enumerated all four renderings inline and passed, but mutating out the POSIX rendering is a **no-op
+on Linux**, so the guard was untestable in the only lane a developer runs. With renderings as a
+parameter, `stripping_a_fixture_root_covers_every_rendering_not_just_the_native_one` feeds it a
+Windows-shaped `native`/`posix` pair and reds on Linux.
+
+### The lean lane is doubly vacuous here — derived, not assumed
+
+`mod guide_hint_tests` carries **two** gates (`src/server.rs:7756-7757`):
+
+```rust
+#[cfg(feature = "librarian")]
+#[cfg(test)]
+mod guide_hint_tests {
+```
+
+`--no-default-features` switches `librarian` off, so these tests are **absent** from the lean lane,
+not thinly sampled: `guide_hint_tests::` runs **0** times there against **46** in the default lane,
+with `prompts::` returning **101 in both** as the control that makes the zero a measurement. Only
+the default lane exercises this change, and `LEAN exit=0` says nothing about it.
+
+### One method note, since the conclusion was right and the check was not
+
+Every hunk of `69bad886` is inside `mod guide_hint_tests` — but the check that established it
+compared hunk line numbers against `#[cfg(test)]` **start** positions, which bounds only the lower
+side. The module **closes** at `src/server.rs:10506` and the last added line is `10464`; a hunk past
+the close would have passed that check and been shipped code. Closing move, cheap on a
+rustfmt-gated file: `git show <sha>:src/server.rs | awk 'NR>7757 && /^[^ \t]/'` prints the first
+column-0 item after the gate, which is the close. (Gap found by `59112612`.)
 ## Tests added
 
 A paired assertion inside the same test, monotone in opposite directions:
