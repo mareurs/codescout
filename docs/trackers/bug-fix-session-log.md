@@ -176,7 +176,7 @@ entry_high_water_W: 111
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while `git branch --contains` returned empty. That **conjunction** is the rebase-orphan signature, and only the second half discriminates. `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
+| W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while the commit was unreachable from the ref it was published to. That **conjunction** is the rebase-orphan signature, and only the second half discriminates; use `git merge-base --is-ancestor <sha> <ref>` rather than `git branch --contains`, which answers a laxer question (peer refinement, sessionId `89d91024`, who independently confirmed the whole route on a second commit). `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
 | W-110 | 2026-09-07 | high | **The bug ledger cannot report a claim nobody wrote — enumerate by socket, ask, then claim.** Before starting a bug, enumerated live sessions and asked the two peers sharing this checkout. `codescout-af` named **five** bug files they were actively fixing, **all five reading `open`**; a sibling session independently measured the same population at 60 rows, **zero `taken`**. Then claimed each pick `status: taken` + `claimed_by: <sessionId>` through the catalog | Ledger-based disjointness was the obvious method and would have collided on any of the five — and silently, since two sessions fixing one bug produce two plausible diffs and whoever commits first makes the other's work read as a redundant re-fix. `status: open` is **monotone under an unwritten claim**: the state you want to detect produces exactly the value you are already reading, so "read the ledger more carefully" is the wrong instrument rather than a weaker one. Enumeration bounds who is present; only the ask attributes work. The same round-trips surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit — and later a peer staged five files into the shared index between this session's `git add` and `git commit`. `doctor` then resolved the claim as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId: **first real use of the field in this repo — the mechanism was never missing, the practice was** | validated |
 | W-107 | 2026-09-06 | high | **When adding a READ-only action, the question is not "does it write?" but "is it useful *while* something else is writing?"** `LibrarianAdapter::is_write`'s final arm is `_ => true`, and a write takes the cross-process write lock before dispatch. Correct policy — an unclassified write races on a five-session checkout, an unclassified read is merely over-serialised — but it is priced for **mutation risk**, not usefulness, and so silently mis-prices exactly the class of reads that must answer during a write. `librarian(action="status")` exists to answer *"is a reindex running?"*; a running reindex HOLDS that lock, so left to the default it would have blocked for the whole run and then reported, truthfully, that nothing was running — the new instrument reproducing the exact non-discrimination of the bug it was built to remove. **No test would have caught it:** all five `status::tests` call the action directly and never cross the adapter, so the defect ships green and its failing observation is a *hang*, at the one moment anyone needs the tool. Diagnostics are the class most likely to be added late by someone reasoning about what the action does rather than when it is called. Scouted before writing; the read-set entry is load-bearing, and `server.rs`'s gate forced it to be stated a second time after I had already made the first edit. | `90336870`; bug `6ae552cfc223cd6d`; kin `bug-fix-session-log:W-100` (verify a shipped tool change with one LIVE call after rebuild — done here too, and it is what discharged this fix's `unverified:` field), `bug-fix-session-log:W-106` |
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
@@ -12173,7 +12173,7 @@ session; 3/3 local green at `9c82bda4`.
 
 ## W-110 — the bug ledger cannot report a claim nobody wrote — enumerate, ask, then claim
 
-**Valid:** dated 2026-09-07
+**Valid:** dated 2026-09-08
 
 **Observed:** Before starting a bug, enumerated live sessions by socket and asked the two peers in this checkout what they held. `codescout-af` named **five** bug files they were actively fixing. **All five read `open` in the ledger.** A sibling session independently measured the same population: 60 rows, **zero** `taken`.
 
@@ -12187,9 +12187,50 @@ session; 3/3 local green at `9c82bda4`.
 
 **Cost:** four peer round-trips before writing a line of code. They also surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit, and later a peer staged five files into the shared index between this session's `git add` and `git commit`.
 
+**Second instance, 2026-09-08 — and this time the refutation caught a peer's CHECK, not their carelessness.** Asked the three peers in this checkout again. `codescout-e7` was holding
+`docs/issues/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md` unmarked for two
+hours — in the session whose whole subject is that bugs read `open` while held. Verified at the
+bytes: `492c62b5` (09:57:06) committed it carrying `status: open`; it was not marked `taken` until
+mtime 10:25:13.
+
+Minutes earlier a second peer (sessionId `89d91024`) had told me the opposite, and their
+reasoning is the transferable half: they ran `filter={"status":{"in":["taken","investigating"]}}`,
+got one `investigating` row, added their own self-report, and concluded *"`taken` really is 0
+across this project right now, and that is **a fact about the corpus rather than about the
+query**."* Every step was competent and the answer was wrong.
+
+**The rule, in their words after retracting: for any claim of the form "the field matches the
+world", no reading of the field is evidence — at any sample size.** The query reads the field;
+the claim is about the gap between field and world; so it cannot bear on it. The self-report
+covered one peer of three. **And the sentence form is the tell**: *"a fact about the corpus
+rather than about the query"* asserts precisely that the gap is closed, which is the one claim the
+instrument cannot support. Reaching for that phrasing is the trigger to name a second independent
+source rather than re-run the first.
+
+That peer then found the sharper thing themselves: `6c99e005` (10:26:40) is their essay arguing
+that the shared shape of three near-misses is *a confirming reading, correct about something
+adjacent, while the refuting evidence sits in a field nobody is reading*, closing with *"none
+would be caught by looking harder at the same surface."* They instantiated that at 09:58 and
+committed the essay 29 minutes later without recognising it. This is CLAUDE.md § *Observer
+Blindness*'s measurement — *"every one was committed by an author actively writing about that
+class"* — reproduced against the author's own commit, in the same hour.
+
+**Third session, and it generalises the mechanism rather than repeating it.** `codescout-d8`
+(sessionId `5399543d`) answered the same question by reading the catalog instead of their memory
+and found their *own* write-guard bug still `status: open` two hours after the fix shipped and CI
+confirmed it — they had reported "Windows lanes green" in prose while the queryable field said
+otherwise. So the field under-reports **closers** by the same mechanism, not only holders. That
+moves the defect from triage discipline to the **write path**: nobody writes the field on the way
+past, in either direction, so `open` is uninformative in *both* — not merely stale.
+
 **Status:** validated
 **Category:** process / peer-coordination
-**Promote-when:** a third session records a collision avoided by asking. Durable home is CLAUDE.md § *Reaching a Peer Session*, which carries the addressing mechanics but not the claim-before-you-start half.
+**Promote-when:** one more session records a collision avoided by asking — **2 of 3 as of
+2026-09-08** (2026-09-07 five files, 2026-09-08 one). Durable home is CLAUDE.md § *Reaching a Peer
+Session*, which carries the addressing mechanics but not the claim-before-you-start half. The
+field-vs-world rule above may deserve a separate home in § *Testing Discipline*, since it is not
+about peers at all: it is the population/member law's sibling, about what an instrument's own
+output can testify to.
 
 ## F-120 — a control satisfied by the exact failure mode it was chosen to exclude
 
@@ -12258,9 +12299,24 @@ Publish the confirmation so the population does not look self-correcting.
 
 **The generalisable half — the tell is the CONJUNCTION.** `git cat-file -t` returning `commit` is
 not evidence a SHA is live, and read alone it is actively reassuring: the object is still in the
-DB and will be until it is garbage-collected. `branch --contains` returning empty is the
-discriminator, and the pair `type=commit` + `contains=∅` is the exact signature of a rebase-orphan.
-Run both, and read the second.
+DB and will be until it is garbage-collected. The pair `type=commit` + *unreachable* is the exact
+signature of a rebase-orphan. Run both, and read the second.
+
+**Use `git merge-base --is-ancestor <sha> <ref>`, not `git branch --contains`.** This entry said
+`branch --contains` first and a peer (sessionId `89d91024`) supplied the sharper predicate the
+same hour, from an independent exercise of the anchor. The difference is the question each
+asks: `branch --contains` answers *"is it on ANY local branch"*, `merge-base --is-ancestor`
+answers *"did it survive on the ref I published it to"* — which is the one actually being asked,
+and the only one that stays right when the SHA is still reachable from some unrelated local
+branch. Both were run here on the same orphan and agreed; the second is correct for the right
+reason.
+
+**That peer independently confirmed the whole route on a DIFFERENT commit**, which is what makes
+this a second datapoint rather than an echo: `e1e79b89` → patch-id
+`26bfbb2d429c0d52aba8db728a3acb7739829cf5` → `35674093`. Re-verified here at the bytes — the two
+commits' patch-ids are byte-identical, `cat-file -e` passes on the orphan, and both reachability
+predicates say no. They also reported printing *"still reachable"* from `cat-file` before catching
+themselves, which is the failure this paragraph exists to prevent, observed in the wild.
 
 **Counterfactual.** Without the anchor, recovery is subject-keyword search over the log — the same
 route `CLAUDE.md` measured at 2–153 ambiguous candidates. Here it would have been worse than

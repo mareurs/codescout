@@ -21,7 +21,7 @@ A session's `buddy`-plugin reload/compaction payload can name a **different, unr
 
 ## Reproduction
 
-Not independently reproduced by this filing — reported second-hand by the affected session, which did not provide exact repro steps (only the observed symptom and the file it traced to). A plausible repro shape: two Claude Code sessions active in the same checkout, both using the `buddy` plugin; session A writes `.buddy/.current_session_id`; session B writes it after; session A later triggers a compaction/reload cycle and reads back session B's write.
+**Reproduced 2026-09-08** (see § *Verified at the bytes*). The shape the original filing guessed is the right one: two Claude Code sessions active in the same checkout, both using the `buddy` plugin; session A writes `.buddy/.current_session_id`; session B writes it after; session A later triggers a compaction/reload cycle and reads back session B's write.
 
 ## Environment
 
@@ -29,8 +29,75 @@ Shared checkout at `/home/marius/work/claude/codescout` (and any other shared ch
 
 ## Root cause
 
-*Reported, not independently verified by this filing.* Per the peer's own trace: `.buddy/.current_session_id` is written by whichever session touches it most recently, with no per-session scoping and no staleness check. This repo's own `codescout-companion:reconnaissance` skill already documents the general shape of this hazard in a different context — its statusline-marker instructions say *"`$CLAUDE_CODE_SESSION_ID` first — the order is load-bearing, because the statusline resolves the sid from the harness while `.current_session_id` is last-writer and can name a peer"* — but that guidance covers codescout's own recon statusline marker, not the `buddy` plugin's reload-payload `from=` field, which is a separate mechanism the peer traced independently.
+*Filed second-hand; **independently verified at the bytes 2026-09-08** — see the section below.* Per the peer's original trace: `.buddy/.current_session_id` is written by whichever session touches it most recently, with no per-session scoping and no staleness check. This repo's own `codescout-companion:reconnaissance` skill already documents the general shape of this hazard in a different context — its statusline-marker instructions say *"`$CLAUDE_CODE_SESSION_ID` first — the order is load-bearing, because the statusline resolves the sid from the harness while `.current_session_id` is last-writer and can name a peer"* — but that guidance covers codescout's own recon statusline marker, not the `buddy` plugin's reload-payload `from=` field, which is a separate mechanism the peer traced independently.
 
+
+### Verified at the bytes, 2026-09-08 — and the harness value was in hand the whole time
+
+A second session (`59112612-5fc8-4b31-8c8c-e19220d99eac`) hit this after a compaction, traced it
+through the plugin source, and measured the on-disk consequence. Independently corroborated by a
+third session working in the plugin repo, which had written the same trace line for line.
+The mechanism is confirmed, and it is one indirection deeper than "the payload reads the pointer".
+
+**The pointer is read into an environment variable, at `hook_entry.py`:**
+
+```python
+# Capture previous session id BEFORE overwriting the pointer (reload uses it).
+prev = ""
+pointer = buddy_dir / ".current_session_id"
+if pointer.is_file():
+    prev = pointer.read_text().strip()
+os.environ["BUDDY_PREV_SID"] = prev
+```
+
+The comment is correct on a **single-session** checkout, where the pointer's last writer
+necessarily *is* your predecessor. That is what makes it fail silently rather than loudly: the
+abstraction is exactly right until a second session exists.
+
+**`handle_session_start` then treats that value as lineage:**
+
+```python
+if prev_sid and prev_sid != incoming_sid:
+    prev_state_path = project_root / ".buddy" / prev_sid / "state.json"
+    if prev_state_path.is_file():
+        prev_state = load_state(prev_state_path)
+        carried_specialists = list(prev_state.get("active_specialists", []) or [])
+        if carried_specialists:
+            state["active_specialists"] = carried_specialists
+        state["parent_sid"] = prev_sid
+else:
+    carried_specialists = list(state.get("active_specialists", []) or [])
+```
+
+**Measured, and the two effects are not equally severe.** Distinguish them:
+
+| effect | status |
+|---|---|
+| `state["parent_sid"]` set to a live peer | **landed**, on disk, every shared-checkout compaction |
+| a peer's `active_specialists` adopted | **armed, did not fire** — the peer's list was `[]` |
+
+The reporting session's `.buddy/<sid>/state.json` recorded `parent_sid: 5399543d-…`, which
+resolved by socket enumeration to a live peer in this same checkout — not a predecessor. The
+specialist line was reached; only the inner `if carried_specialists:` guard held. That is a
+data-dependent near miss and must not be reported as an observed transfer.
+
+**On `source=compact` the sessionId is PRESERVED**, which is the fact that makes the fix one
+branch. Verified independently of the plugin: the reporting session's git `Session-Id` trailers
+are byte-identical on commits either side of its compaction, and `CLAUDE_CODE_SESSION_ID` in its
+shell matched both. So `prev_sid` is `incoming_sid` by definition on a compact, the `else` branch
+is the correct one unconditionally, and **the pointer should never be read at all** for that
+source. `hook_entry.py` computes `sid = _session_id(event)` from the harness two lines above the
+pointer read — the composer held the right input and used a different one.
+
+For `resume`/`fork` a genuine predecessor exists and the pointer is still the wrong source; it is
+merely right more often, because a resume usually follows the resumed session's own last hook.
+Where the harness supplies no parent id, **recording nothing beats recording a peer** — an absent
+`parent_sid` is legible, a wrong one is not.
+
+**Why the affected party cannot catch it.** A compacted session has no independent memory of its
+own predecessor — that is what compaction removes — so `from=<peer>` is unfalsifiable from inside
+the one context that reads it. It surfaced only through an unrelated instrument: this repo stamps
+a `Session-Id` trailer on every commit, so `git log` holds a record the plugin does not control.
 ## Evidence
 
 Quoted from the peer's cross-session message (2026-09-03):
@@ -39,7 +106,7 @@ Quoted from the peer's cross-session message (2026-09-03):
 
 ## Hypotheses tried
 
-None run by this filing — this bug is filed on the strength of a peer's self-reported trace, not independently reproduced or verified at the bytes. See Resume.
+The original filing ran none — it rested on a peer's self-reported trace. **The 2026-09-08 verification tested and settled three things**, recorded in § *Verified at the bytes*: that the sessionId is preserved across a compaction (so `from=` should equal `sid` on that source), that the composer holds the harness value it declines to use, and that the specialist-adoption path was reached but did not fire. One reading was tried and **rejected**: that the payload reads the pointer directly. It does not — the pointer is read in a different hook and passed through the `BUDDY_PREV_SID` environment variable, which is why a grep of the payload-emitting script finds nothing.
 
 ## Fix
 
@@ -55,7 +122,7 @@ A session using `buddy`'s reload payload for an authorship decision should indep
 
 ## Resume
 
-1. Independently reproduce or further trace the mechanism if pursuing this (would require reading the `buddy` plugin's own source, which is outside this repository).
+1. ~~Independently reproduce or further trace the mechanism~~ — **done 2026-09-08**, see § *Verified at the bytes*. The plugin source was read; the mechanism, the two effects and the one-branch fix are all named there. What remains is a fix in the `buddy` plugin's own repo, which is not this repository's code.
 2. **Classified 2026-09-03 as `IC-12` (`cluster/transient-shared-state-lies-to-readers`)**, per a peer session's discriminator (`ffb95976`): the remedy here is to stop trusting a piece of shared state, not to build a new reporting instrument for an unreported event, which rules out `IC-1`. Tag applied through the catalog and `+1:` appended to `IC-12`'s Members field in the same commit.
 3. No further ledger action owed for this bug.
 
