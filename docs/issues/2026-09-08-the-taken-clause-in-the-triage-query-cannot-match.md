@@ -134,12 +134,39 @@ again.
 **The count moved while this file was being written, and that is a datum rather than an
 embarrassment.** At ~08:28 on 2026-09-08 — minutes after the `79 / 0 / 1` above was taken,
 and before this file was committed — `codescout-92` (sid `59112612-…`) claimed a bug through the catalog: `status: taken`,
-`claimed_by: 59112612-…`, `claimed_at: 2026-09-08`. **Cited as commit `e1e79b89`**, which
-is immutable and holds that exact frontmatter — deliberately not by path, because that bug
-is being fixed and archived within the hour, and `docs/issues/…` → `docs/issues/archive/…`
-would stale a path citation on the move. The artifact id (`2b61de99742ee1d3`) is no better:
-`id = sha256(abs_path)`, so it re-keys on the same move. The commit is the only one of the
-three that survives. So the corpus's **second** write of the field landed inside the window this record
+`claimed_by: 59112612-…`, `claimed_at: 2026-09-08`. **Cited as commit `e1e79b89`, patch-id
+`26bfbb2d429c0d52aba8db728a3acb7739829cf5`** — the pair, not the SHA alone. It holds that
+exact frontmatter.
+
+The three candidate forms and what each survives:
+
+| form | survives the archive move? | survives a rebase? |
+|---|---|---|
+| path `docs/issues/…` | no — becomes `docs/issues/archive/…` | n/a |
+| artifact id `2b61de99742ee1d3` | no — `id = sha256(abs_path)`, re-keys on the move | n/a |
+| commit SHA `e1e79b89` | yes | **no** — positional, dies on the next rebase |
+| SHA **+ patch-id** | yes | yes — content hash of the diff |
+
+**The lesson is in how the first three were chosen, and it is this file's own subject
+again.** The question asked was *"which form survives the archive move?"*, and the commit
+is the right answer to it — correctly reasoned, correctly excluding the other two. It was
+then published as though it answered *"which form is durable?"* A rebase of this checkout
+was in flight at that moment (`ahead 8, behind 3`), and `CLAUDE.md` says in as many words
+that the SHA *"is positional and dies when `experiments` is rebased (which happens after
+every ship)"*. **A citation form is durable against a named event, never in general** — and
+the narrow answer, published unqualified, reads exactly like the general one.
+
+Re-find it after any rewrite with the documented redirect form (Iron Law 3 blocks the
+pipe):
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/ids.txt
+grep 26bfbb2d /tmp/ids.txt
+```
+
+Patch-id derived here rather than copied from the peer who supplied it; both readings
+agree byte-for-byte. So the corpus's **second** write of the field landed inside the window this record
 describes, and the headline number is already `1`, not `0`.
 
 What that does and does not change. It does **not** refute the finding: both writes to date
