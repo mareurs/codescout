@@ -10171,11 +10171,17 @@ mod guide_hint_tests {
         // A DELIBERATELY LONG ROOT, and its length is the whole point of the call.
         // The budget below counts a block carrying this path verbatim, so under the
         // default short `/tmp/.tmpXXXXXX` root the normalisation could be deleted and
-        // every Linux lane would stay green — which is exactly how this shipped. At 63
-        // characters the fixture reproduces macOS's `/var/folders/…/T` geometry on every
-        // platform, so deleting the `replace` below takes the total to ~12282 B against
-        // a 12244 ceiling and reds anywhere. THAT is what makes `total <= CEILING` the
-        // regression test for this defect rather than a second aggregate over it.
+        // every Linux lane would stay green — which is exactly how this shipped. At 55
+        // characters the prefix reproduces macOS's `/var/folders/…/T` geometry on every
+        // platform: deleting the `replace` below was MEASURED at 12274 B against a
+        // 12244 ceiling — within 1 B of the real macOS failure (12275, CI 34222332438)
+        // — and reds anywhere. THAT is what makes `total <= CEILING` the regression test
+        // for this defect rather than a second aggregate over it.
+        //
+        // Both numbers above are measurements. The first draft of this comment carried
+        // a PREDICTION (~12282 B, "63 characters") in the same voice, computed before
+        // the mutation was run and never reconciled with it afterwards — 8 B and 8
+        // characters wrong, in a comment whose whole job is to justify the fixture.
         let (dir, server) =
             make_server_with_root_prefix("emulates-macos-var-folders-tmpdir-geometry-bug-547725aa")
                 .await;
