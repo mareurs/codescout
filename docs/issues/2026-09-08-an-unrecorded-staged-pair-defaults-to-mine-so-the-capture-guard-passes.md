@@ -1,14 +1,71 @@
 ---
 id: '61b88853c19d313c'
 kind: bug
-status: open
+status: investigating
 title: An unrecorded (blob, path) pair falls to the `mine` branch, so the foreign-index guard passes on a capture
 tags:
 - cluster/guard-narrower-than-its-name
 topic: shared-checkout commit safety
+unverified: 'Root cause RETRACTED by its author the same day: the reader and recorder share one enumeration, so the row the guard needed was present (line 16, owner 59112612) and the lookup should have matched. Seven candidates eliminated with reproductions; the pass is NOT reproduced and the mechanism is unexplained. The `else -> mine` branch is real but has no demonstrated route. Do not fix from this file''s original Root cause.'
 ---
 
 # BUG: an unrecorded (blob, path) pair falls to the `mine` branch, and the guard passes
+
+## RETRACTED 2026-09-08, same day, by its own author — read this before § Root cause
+
+**The root cause stated below is wrong, and everything after this banner is the superseded
+reading.** The observation is unchanged and verified — `a762dceb` did capture `59112612`'s staged
+rename and the guard did print `Passed`. What is retracted is the *mechanism*.
+
+The claim was that an unrecorded `(blob, path)` pair falls to the `else` branch and is classified
+`mine`. **The reader and the recorder share the same enumeration**, so for a rename they agree:
+both reduce it to `(dst_blob, src_path)`. The recorder wrote that pair and the reader looks it up.
+
+Verified at the bytes rather than reasoned:
+
+```
+$ git diff --raw a762dceb^ a762dceb -- <src> <dst>
+:100644 100644 e6ec7776 a8bd650f R089\t<src>\t<dst>
+$ ... | awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }'
+a8bd650f\t<src path>                     <- what BOTH scripts compute
+$ awk -F'\t' '$2=="a8bd650f" && $3=="<src path>"' .git/session-stage-log
+59112612-…\ta8bd650f\t<src path>\tnamed\tretained      <- line 16, the row EXISTS
+```
+
+Owner `59112612` ≠ `me`, so that pair routes to `theirs` and the guard refuses. It did not.
+
+## Candidates eliminated — published so the next reader starts here rather than re-walking them
+
+Each was falsified by a reproduction or a direct read, not by argument. Two were mine, two came
+from `59112612` (`cfb3b68a`), and **the peer's rename-misfiling finding is confirmed and is a real
+recorder-side defect — it is simply not what made this guard pass.**
+
+| candidate | how it died |
+|---|---|
+| retention evicted the row | `STAGE_LOG_MAX_RETAINED=1000`, log at 1002 — eviction IS live. Refuted anyway: the row is present at line 16. |
+| a race — recorder had not yet written | The log is newest-first (`post-index-change-stage-log.sh:424`). Their rows sit at 17 and 19, **older** than my staging rows at 14–16. It predated my `git add`. |
+| the recorder misfiles a rename's destination | **True, and verified** — destination blob under source path, `$3` discarded. But the reader shares the awk, so they agree and the source row is found. Recorder-side defect, not this one. |
+| `CLAUDE_CODE_SESSION_ID` unset → `exit 0` at `:93` | Read directly: set to my sid in the committing environment. |
+| pathspec commit → `next-index-*` → `exit 0` at `:101` | `a762dceb` was a bare commit. |
+| blob-abbreviation width differs between recorder and reader | Both produce 8 chars in this repo, 7 in a fresh one — same `core.abbrev`, same value. |
+| the `pre-commit` FRAMEWORK gives the guard a different environment than the raw hook | **Measured, and it does not.** A probe hook wired exactly like `foreign-index` reports `GIT_INDEX_FILE=.git/index`, the session id propagated, and `git diff --cached --raw` seeing staged content. Published as a **denominator**: this was the best remaining hypothesis and it is dead. |
+| a peer-staged rename does not trip the guard | **Reproduced twice and it DOES trip.** `git mv` flow and the `mv` + `git add -- <old> <new>` flow both refuse with `EXIT=1`. Scripts: `repro-rename.sh`, `repro2.sh`. |
+
+## Status of the mechanism: NOT established
+
+I could not reproduce the pass. Both reproductions of the shape refuse correctly, and every
+environmental difference I could name between them and production has been checked and ruled out.
+
+**What is still true and still worth fixing** is narrower than the original claim and does not rest
+on it: `:164-185` genuinely does resolve an empty `$owner` to `mine`, and that is the direction
+`a987df96`'s ruling forbade — *"`mine` under-refuses silently"*. Whether that branch is reachable
+in practice is now open, because the recorder writes `-` rather than nothing for every state it
+can see, and a pair it cannot see at all has no demonstrated route.
+
+**So the fix is deliberately not written.** Shipping the `else → unknown-and-foreign` change today
+would be a change justified by a theory its own author has falsified, against a guard whose real
+failure is unexplained — and it would refuse legitimate commits on a cold log for a defect not
+shown to exist. The next move is to reproduce the pass, not to harden a branch.
 
 ## Summary
 
