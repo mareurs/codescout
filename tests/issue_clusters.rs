@@ -776,6 +776,61 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The growth refusal must ROUTE, not just refuse
+// ---------------------------------------------------------------------------
+
+/// The refusal must name the file holding the `**Members:**` field it demands.
+///
+/// Guards `docs/issues/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`.
+/// The predicate was always right; the message said "the ledger", which stopped denoting one
+/// file at the per-class split, and routed two sessions to the Index in one morning.
+///
+/// LOAD-BEARING, and it is why this asserts on the DIRECTORY and not on "a path": the refusal
+/// already names `docs/conventions/gate-ordering.md` and
+/// `docs/conventions/shared-checkout-commit-sequence.md` via `_emit_sequence_tail`. Measured
+/// 2026-09-08 before the fix — the body named **zero** paths and the tail named **two**, so
+/// `assert refusal names a path` passed with the routing defect fully present. Weaken this to
+/// that and it stops discriminating while still reading like a guard.
+///
+/// The `unclassified` case is the CONTROL, not a second example. Without it the pair is
+/// monotone under a change that makes every row name the class directory — which would be the
+/// same defect inverted, since `cluster/unclassified`'s field genuinely is in the Index.
+#[test]
+fn the_growth_refusal_names_the_file_holding_the_members_field() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-growth-refusal",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(b"lazy-warmup-bills-the-first-caller\nunclassified\n")
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    let text = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        text.contains("docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md"),
+        "the refusal must name the per-class file holding the `**Members:**` field, not just \
+         say \"the ledger\". Got:\n{text}"
+    );
+    assert!(
+        text.contains("cluster/unclassified -- the field is in `docs/trackers/issue-clusters.md`"),
+        "control: a slug with no per-class file must route to the Index, whose `**Members:**` \
+         really does own it. If this fails while the assertion above passes, every slug is \
+         being sent to the class directory — the same misrouting, inverted. Got:\n{text}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // `Mechanism status:` must carry a basis
 // ---------------------------------------------------------------------------

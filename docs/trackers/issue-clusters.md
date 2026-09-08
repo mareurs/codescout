@@ -19,6 +19,19 @@ entry_high_water_IC: 22
 > **Prefix:** `IC-N` — one **defect class** the bug corpus instantiates. Declared ledger; the
 > `IC` namespace is project-wide (`docs/TAXONOMY.md`).
 
+> **THIS FILE IS THE ROSTER. The definitions are not here.** Each class's `**Slug:**` and
+> `**Members:**` live in its own file under `docs/trackers/issue-clusters/`, one per class. This
+> file lists every slug in the table below — which is what you want when **choosing** a tag, and
+> the wrong file when **authoring** a `+1:` derivation.
+>
+> So `grep 'cluster/<your-slug>'` against this file returns **0**, and that zero means *wrong
+> file*, not *no such class*. A generic `cluster/` grep here returns dozens — `cluster/unclassified`
+> is the one real class whose field genuinely is in this file — which is what makes the wrong file
+> look like the right one. Two sessions paid two refusals each for this in one morning, before the
+> growth gate's refusal named the path;
+> `docs/issues/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`
+> carries the measurements.
+
 ## What this ledger is for
 
 `docs/issues/` answers *what is broken*. `docs/trackers/open-issue-work-queue.md` (`BL-N`)

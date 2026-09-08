@@ -71,6 +71,30 @@ def class_files(source: str) -> list:
     return sorted(p for p in out.splitlines() if p.endswith(".md"))
 
 
+def class_file_for(slug: str, source: str) -> str:
+    """The file whose `**Members:**` line owns `slug` -- a PATH, for the refusal to name.
+
+    Since the per-class split the word "the ledger" denotes two things, and the refusal that
+    demands a `**Members:**` edit could name neither. `docs/trackers/issue-clusters.md` is the
+    ROSTER: it lists every slug and carries a `**Members:**` for exactly one of them. The other
+    22 live one-per-file under `LEDGER_DIR`.
+
+    Falling back to `LEDGER` is CORRECT, not a default: `cluster/unclassified` genuinely has no
+    class file and its field genuinely is in the Index. The two branches are the two real cases,
+    which is why this returns a path rather than an Optional -- there is no "unknown" outcome to
+    represent, and handing the caller a None would put the old silence back one layer down.
+
+    Matched on the basename, not the whole path, so a slug that happens to be a substring of a
+    directory name cannot pull the wrong file. `IC-<n>-<slug>.md` is the naming convention;
+    matching the stem's tail rather than the whole name keeps the `IC-<n>-` prefix out of it.
+    """
+    for path in class_files(source):
+        stem = path.rsplit("/", 1)[-1].removesuffix(".md")
+        if stem == slug or stem.endswith(f"-{slug}"):
+            return path
+    return LEDGER
+
+
 def read_ledger(source: str):
     """Index file + every class file, concatenated -- the twin of ledger_text() in Rust.
 
@@ -424,6 +448,57 @@ def added_member_stems(source: str) -> dict[str, set[str]]:
     return out
 
 
+def emit_growth_refusal(undocumented: list) -> int:
+    """Compose and print the growth refusal. Extracted from `main` so it is REACHABLE.
+
+    The refusal's job is to route the author to the `**Members:**` field, and the field moved
+    when the ledger split per class. Triggering this from a test would mean staging a bug file
+    into a shared index, so the composer is separated from the detection and driven directly by
+    `--fixture-growth-refusal`. Detection is already covered; what was untested is the routing.
+
+    Returns 1: this is a refusal, and the caller returns it.
+    """
+    print(
+        "a class gained a member and its `**Members:**` does not name it:\n  "
+        + "\n  ".join(
+            f"cluster/{slug} -- the field is in `{path}`\n      "
+            "expected it to change and to contain one of: "
+            + (", ".join(f"`{x}`" for x in stems) or "(any change)")
+            for slug, stems, path in undocumented
+        )
+        + "\n\n"
+        "THE PATH ABOVE IS THE POINT -- do not go to the Index looking for the field.\n"
+        "Since the per-class split, `docs/trackers/issue-clusters.md` is the ROSTER: it lists\n"
+        "every slug and carries a `**Members:**` for exactly ONE of them\n"
+        "(`cluster/unclassified`). Grepping your slug there returns 0, and that zero means\n"
+        "WRONG FILE, not `no such class` -- while a generic `cluster/` grep returns dozens,\n"
+        "which is what makes the wrong file look like the right one.\n\n"
+        "The count used to force this edit. It no longer exists, so this asks for the half that\n"
+        "was always the valuable one: WHY this instance belongs to this class. The ledger's own\n"
+        "shape is `+1: `<slug-without-the-date>`` followed by the derivation.\n\n"
+        "This is deliberately NOT `did the line change` -- a trailing space would satisfy that,\n"
+        "and the count gate it replaces could not be satisfied by accident.\n\n"
+        "If the class gained a member by RETAG rather than by a new file, changing the line is\n"
+        "enough and this passes.\n\n"
+        "BOTH SIDES OF THIS ARE NAMED ABOVE, and that is deliberate -- the corpus side is your\n"
+        "bug file, the ledger side is the `**Members:**` line, and they must land in ONE commit\n"
+        "or the gate is red in one direction or the other. If the ledger is contended right now:\n"
+        "  - It is a WAIT, not a re-derivation. The edit is a one-line append carrying no number,\n"
+        "    so no peer's commit can invalidate it between your writing it and your committing\n"
+        "    it. That was not true of the count this replaced.\n"
+        "  - A peer mid-archive-move does NOT cause this. This check reads the INDEX\n"
+        "    (`git show :path`), never the worktree, so a file deleted from the worktree but\n"
+        "    still tracked is read normally. If you are here, a class really did gain a member.\n"
+        "  - If you genuinely cannot land both, leaving your bug file UNSTAGED is a legal state\n"
+        "    and the gate will pass -- `git ls-files` is the population, so an untracked file is\n"
+        "    invisible to it. Said out loud because it is lossy: the evidence stays off the\n"
+        "    corpus until you stage it, and nothing will remind you.",
+        file=sys.stderr,
+    )
+    _emit_sequence_tail()
+    return 1
+
+
 def main() -> int:
     source = "index"
     as_json = False
@@ -447,6 +522,17 @@ def main() -> int:
                 },
                 sort_keys=True,
             ))
+            return 0
+        elif arg == "--fixture-growth-refusal":
+            # Pure over stdin: one slug per line, composed with a synthetic stem. The LIVE
+            # corpus cannot exercise this branch -- reaching it needs a bug file STAGED into
+            # the index, and a test that stages into a shared checkout's index is a defect of
+            # its own. So detection stays corpus-driven and ROUTING is driven from here.
+            rows = [
+                (s, ["fixture-stem"], class_file_for(s, "worktree"))
+                for s in sys.stdin.read().split()
+            ]
+            emit_growth_refusal(rows)
             return 0
         elif arg == "--fixture-tags":
             # Pure over stdin, so `the_hook_script_agrees_on_both_yaml_tag_styles` can feed
@@ -545,42 +631,11 @@ def main() -> int:
         stems = new_stems.get(slug, set())
         if changed and (not stems or any(st in line for st in stems)):
             continue
-        undocumented.append((slug, sorted(stems)))
+        undocumented.append((slug, sorted(stems), class_file_for(slug, source)))
     if not undocumented:
         return 0
 
-    print(
-        "a class gained a member and its `**Members:**` does not name it:\n  "
-        + "\n  ".join(
-            f"cluster/{slug} -- expected the field to change and to contain one of: "
-            + (", ".join(f"`{x}`" for x in stems) or "(any change)")
-            for slug, stems in undocumented
-        )
-        + "\n\n"
-        "The count used to force this edit. It no longer exists, so this asks for the half that\n"
-        "was always the valuable one: WHY this instance belongs to this class. The ledger's own\n"
-        "shape is `+1: `<slug-without-the-date>`` followed by the derivation.\n\n"
-        "This is deliberately NOT `did the line change` -- a trailing space would satisfy that,\n"
-        "and the count gate it replaces could not be satisfied by accident.\n\n"
-        "If the class gained a member by RETAG rather than by a new file, changing the line is\n"
-        "enough and this passes.\n\n"
-        "BOTH SIDES OF THIS ARE NAMED ABOVE, and that is deliberate -- the corpus side is your\n"
-        "bug file, the ledger side is the `**Members:**` line, and they must land in ONE commit\n"
-        "or the gate is red in one direction or the other. If the ledger is contended right now:\n"
-        "  - It is a WAIT, not a re-derivation. The edit is a one-line append carrying no number,\n"
-        "    so no peer's commit can invalidate it between your writing it and your committing\n"
-        "    it. That was not true of the count this replaced.\n"
-        "  - A peer mid-archive-move does NOT cause this. This check reads the INDEX\n"
-        "    (`git show :path`), never the worktree, so a file deleted from the worktree but\n"
-        "    still tracked is read normally. If you are here, a class really did gain a member.\n"
-        "  - If you genuinely cannot land both, leaving your bug file UNSTAGED is a legal state\n"
-        "    and the gate will pass -- `git ls-files` is the population, so an untracked file is\n"
-        "    invisible to it. Said out loud because it is lossy: the evidence stays off the\n"
-        "    corpus until you stage it, and nothing will remind you.",
-        file=sys.stderr,
-    )
-    _emit_sequence_tail()
-    return 1
+    return emit_growth_refusal(undocumented)
 
 
 if __name__ == "__main__":
