@@ -20,7 +20,12 @@ recreate EVERY index. When you add a column, grep the migrations dir for table r
 that table before treating the add as isolated. **Mechanical guard:** the schema-invariant
 test that loops `SCHEMA_SQL`'s declared columns against every legacy-seed path
 (`src/librarian/catalog/mod.rs`); regression precedent
-`migration_v6_single_open_preserves_v9_entry_graph_shape` (`migrate_v6.rs`).
+`migration_v6_single_open_preserves_v9_entry_graph_shape` (`migrate_v6.rs`). Still current —
+`catalog/mod.rs` still auto-checks every `SCHEMA_SQL` column against every legacy-seed path
+(`parse_create_table_columns_extracts_artifact_columns`,
+`every_schema_sql_artifact_column_survives_every_migration_path`), and
+`migrate_v6.rs`'s regression test set (`migration_v6_single_open_preserves_v9_entry_graph_shape`
+et al.) is intact.
 
 ## User Strings in LIKE Patterns Must Be Wildcard-Escaped
 
@@ -38,17 +43,31 @@ if the Rust idiom appears anywhere but the helper itself. Live callers:
 that asked for them is closed —
 `docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`. Earlier
 point fixes: `4b922ac4` (worktree `covering()`), and the Stage-2 `resolve_cite_ref` bug that
-motivated the extraction.
+motivated the extraction. Still current — verified against `filter.rs` (`compile_leaf`, 4
+call sites), `catalog/augmentation.rs` (`resolve_cite_ref`), `catalog/gc.rs` (3 call sites).
 
-**SQL side — a second implementation, still unguarded.** Where the *haystack* column is
-escaped rather than the needle, the same law is expressed as a nested triple-`REPLACE`
-inside the SQL string — see `src/librarian/catalog/worktree.rs` (`covering_conn`). It is
-verbatim at four sites: `src/librarian/tools/merge_worktree.rs` (×2),
-`src/librarian/catalog/worktree.rs`, `src/librarian/tools/worktree.rs`. The Rust gate
-excludes this form **by design** (SQL string literals cannot match the Rust call signature it
-greps for), so nothing enforces it — the sites are held together by "mirrors" comments. All
-four are currently correct. Tracked as SD-2 in
-`docs/trackers/structural-debt-refactor.md`.
+**SQL side — FIXED, no longer a second unguarded implementation.** Where the *haystack*
+column is escaped rather than the needle (`src/librarian/catalog/worktree.rs`
+`covering_conn` escapes a per-row **column**, which `escape_like_pattern` can't reach since
+it only escapes a Rust-held value), the same law used to be expressed as a nested
+triple-`REPLACE` inlined verbatim at four sites — `src/librarian/tools/merge_worktree.rs`
+(×2), `src/librarian/catalog/worktree.rs`, `src/librarian/tools/worktree.rs` — held together
+only by "mirrors" comments and unreachable by the Rust-idiom gate (SQL string literals don't
+match what it greps for). **Extracted as `descendant_path_like(root_expr)`**
+(`src/librarian/util.rs`, beside `escape_like_pattern`) — closed as SD-2 in
+`docs/trackers/structural-debt-refactor.md` at `experiments:31609aa5`. All four sites now
+call the helper (verified: `catalog/worktree.rs:80`, `tools/merge_worktree.rs:68`,
+`tools/worktree.rs:173`); the duplicated unit turned out larger than first described — the
+`|| '%' ESCAPE` tail is shared too, so the whole strict-descendant predicate moved, not just
+the triple-replace. Guarded by its own DRY gate, `sql_descendant_like_is_not_inlined_outside_helper`
+(sibling of the Rust-side gate — one law, two spellings, needed two greps), plus a
+characterization test, `descendant_path_like_reproduces_the_pre_extraction_sql_exactly`,
+pinning the exact pre-extraction SQL byte-for-byte so the refactor is provably
+behaviour-preserving. Nested-`REPLACE` occurrences in `src` went 5 → 1 (the helper itself).
+This memory previously described this exact section as fixed-Rust/pending-SQL and cited
+`filter.rs:230-236` as the "canonical inline idiom" — that line is now a call to the helper
+and contains no inline `.replace`/`REPLACE` at all (tracked as SD-5, also now fixed). Full
+record: `structural-debt-refactor.md` SD-2 and SD-5.
 
 ## `length()` on TEXT counts CHARACTERS, not bytes
 

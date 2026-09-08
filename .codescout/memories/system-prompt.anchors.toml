@@ -3,11 +3,11 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "6ecf2977d29063c7ff02047c915039ad158a5a80333bca43b3d2a8f8d8596efc"
+hash = "3290e16a45f220e7796714f3aa8140d522b93aa94f79e495f0b9e081ccb1364b"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "7319b6b24a7e3068b09bc6177b10da8b14e1037cbbd74f1b293ed574660e6d1b"
+hash = "ceca7ab9d4e487f31ea8f6a81cbe8c75504e662bde86915eff910a9d61979ad1"
 
 [[anchors]]
 path = "src/tools/output.rs"
@@ -15,7 +15,7 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
+hash = "a5dbfabb0c2cd7941d92444ef8c15462f94f654b3ee2c843a39af38e94cf8791"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
@@ -23,24 +23,24 @@ hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "ea7af4233f1d2995b8111145ee00a8184f54382000b869e8e0a479bf318f66c5"
+hash = "f42a0d273160300fb6d6d285199aafb44d6222f57abddf55d2cedf202533b89c"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "9c53bcdc80848c641a02ad67cb184940957579c47ea956dbfa48676e11d8d1b0"
+hash = "7c7bd2385ebbe25023e35670d4434c3515fabff9bed7886da9fe365d1003753d"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "877da71d94ff8de17a44f3deefc6a2340250d7d30f8e0a78ff75c8d216a1d271"
+hash = "ab13ab2de479e8777609b9a4c352efd79b488b5829848d91f1b6db252e5b0ff7"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "db293a6d7933a182ef4c5816d52af547b27035a1cccc37a80ed632375ef5ccf2"
+hash = "22223f3057ffabbecf161eadc000db68c20175b2edbbceca2a7a7e2ef225e8aa"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
+hash = "adfec6638b64940c1725abbf3bb5f8c00d58933dc22e683fd6de0d09a51e10bc"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
+hash = "89e57496e752ba1ba15a5f7e0a2189f0e07b9a9f0e923495a151b2a5bbdfcbbe"

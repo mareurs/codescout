@@ -13,14 +13,18 @@ cargo test --workspace                          # default lane — runs LAST
 ```
 
 **Why the order matters, not just the commands.** The workspace shares one `target/`, and
-`tests/cli_artifact.rs` resolves `target/debug/codescout` **by path at run time**. The lean
-lane leaves a librarian-less binary there — after it, `artifact --help` exits **2**, the
-subcommand gone rather than empty. A later default-features run then execs that binary and
-dies with `unrecognized subcommand 'artifact'` on 10 of 11 tests, reading exactly like a
-librarian feature-gating regression in whatever you just committed. Ending on the default
-lane rebuilds it correctly (all **8** verbs restored — the help block prints nine lines
-because clap appends its own `help`, so count verbs, not lines), so following the gate no
-longer arms the trap for the next session. Cost of the ordering: ~8s (71.8s → 80.4s).
+`tests/cli_doc.rs` resolves `target/debug/codescout` **by path at run time** — a terminal
+lean lane leaves a librarian-less binary there, reading exactly like a feature-gating
+regression in whatever you just committed, for whichever session runs the default lane
+next. Ending on the default lane rebuilds it, so following the gate cannot arm the trap for
+anyone else — provided both lanes actually run. An older reproduction, made against the
+predecessor test file before the `artifact` CLI subcommand was collapsed into `doc`,
+measured a librarian-less binary failing most of that file's tests; that specific number is
+deliberately not restated here — re-deriving it means arming the shared trap on purpose
+while other sessions build against the same `target/`. The collapse itself is pinned by
+`the_old_artifact_subcommand_is_gone` in `tests/cli_doc.rs`, which asserts Clap's own
+"unrecognized subcommand 'artifact'" error text. Verified 2026-09-05: the target is
+`cli_doc`, it holds **15** tests, and all 15 pass against a librarian-bearing binary.
 
 **Each command is the wide form for a measured reason. Do not narrow any of them:**
 

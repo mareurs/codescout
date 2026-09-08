@@ -81,7 +81,9 @@ this call supplies*. So a single `doc(action="augment", merge=true, …)` carryi
 `params_schema` together is fully validated against the target schema — not slipped
 past a guard. The three-call alternative (permissive schema → params → real schema)
 writes shape fields twice for no gain — and did, until 2026-08-31, additionally risk the
-write-through clobber described below.
+write-through clobber described below. Still current — verified against
+`src/librarian/tools/augment.rs`: `validate_merged_against_schema` still at lines 36-52,
+comment-tagged `F-5` at its call site.
 
 **Two hazards that bite here specifically.**
 
@@ -94,12 +96,30 @@ write-through clobber described below.
   `sidecar_shape_drift`, whose design position is that when row and committed file disagree
   **the direction is undecidable without a human** — and the write-through was silently
   deciding it. Prefer atomic calls anyway, for the schema reason above rather than this one.
+  Still current — `augment.rs` still carries `sidecar_write_through`, its doc comment naming
+  exactly this refuse-to-republish behaviour, plus the regression test
+  `a_merge_call_refuses_to_republish_a_shape_field_it_did_not_set`.
 - **`append_entry`'s high-water mark collides across hosts.** It already refuses id
-  allocation from a *worktree* (`src/librarian/tools/append_entry.rs:97`) on exactly
-  these grounds, but `is_main_checkout_artifact` cannot see a second clone. Measured:
+  allocation from a *worktree* (`src/librarian/tools/append_entry.rs`, `is_main_checkout_artifact`
+  guard) on exactly these grounds, but that check alone cannot see a second clone. Measured:
   desktop `entry_high_water_R: 146`, laptop `147` unpushed, and both desktop allocator
-  inputs resolved to 147. Open bug:
-  `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+  inputs resolved to 147. **Mitigated 2026-09-02** (not fully fixed — status is
+  `mitigated`, tags `cluster/shared-resource-carries-no-owner`): `append_entry` now also
+  refuses when the target ledger has unpushed commits on its own branch
+  (`ledger_has_unpushed_commits`, guarded in `append_entry.rs`'s `call`), converting an
+  invisible cross-host divergence into a pushed one before allocating. **Three gaps remain,
+  named in the bug file's own `unverified` field, not closed by this mitigation:**
+  (1) it only catches the direction where *this* host is ahead — a peer who allocates and
+  pushes while this host hasn't fetched yet still collides undetected, since
+  `@{upstream}` is stale until fetched and an unpushed peer commit is unreachable by any
+  local check; (2) it covers prose ledgers only — a params ledger's committed index-table
+  rows (`body_claimed_indices`, `catalog/augmentation.rs`) collide the same way with no
+  guard in front of the params allocation path; (3) the sibling detector
+  (`entry_defined_twice`) has a 0-for-0 real-world track record — validated only against
+  fixtures, never yet caught a genuine collision. Bug file (archived, not deleted):
+  `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+  It moved to `archive/` on `status: mitigated`, and `mitigated` is not `fixed` — treat the
+  three gaps above as still open work, not documentation debt.
 
 **Establish sync direction empirically, never by heuristic.** "Longer field = newer"
 was wrong on 5 of 9 `render_template`s — the other host had *condensed* them. What
@@ -115,7 +135,10 @@ Six wrong "N bytes" claims in one session came from this.
 
 Full design and the rejected alternatives:
 `docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md`
-(§ 1.3a is this deadlock). Recovery plan and its 47 steps:
+(§ 1.3a is this deadlock — still current, verified against the live file: same
+`validate_merged_against_schema` citation, same schema/params mutual-rejection table,
+plus a follow-up note there that the write-through fix narrows but doesn't remove the
+argument for atomic calls). Recovery plan and its 47 steps:
 `docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md`.
 
 **A catalog-only task leaves no git anchor unless its event carries one.** When a task's

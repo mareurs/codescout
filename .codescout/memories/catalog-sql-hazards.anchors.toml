@@ -3,23 +3,23 @@
 
 [[anchors]]
 path = "src/librarian/catalog/migrate_v6.rs"
-hash = "e7f9267b6c0f2d11f23c91c91d1d5f5f8c26469690ac3809740971f84b2af608"
+hash = "703946db4b3a76633f9e7a13dd82fe6f7fcc784eecb383105ca32254fa210c58"
 
 [[anchors]]
 path = "src/librarian/catalog/mod.rs"
-hash = "1a188e9cb5dc8a818d3412300ce209c4be2f0e4e979f1ffb17250ac6ebef6ba1"
+hash = "c6bae6bc4fc0555429863953da624f0ece5181086426febbf5b4f1cd67d7f67b"
 
 [[anchors]]
 path = "src/librarian/filter.rs"
-hash = "30b79f5d8c642c10b1cc9fabae8c8ab362e0fb918965cb1c65e962981f06268a"
+hash = "b85e226f1786e3ffeb9f4acb0529ac1f66b4949fdcd4db591cb67999e31d02d9"
 
 [[anchors]]
 path = "src/librarian/catalog/augmentation.rs"
-hash = "45a446dabbafa72b1be9ac9c847a91b4e22045fbccb56a2ef335531e7c2707a8"
+hash = "f747062e5e48d16779024590c1e5a8b5e5fcd6118e2f8a1c837c36974c066d94"
 
 [[anchors]]
 path = "src/librarian/catalog/gc.rs"
-hash = "75b2737d6f524f224377e6697096e1e6fb94c7d54861b0da0694f7b0d34c4cfc"
+hash = "c1028073f6ec117207039b710e30eb756257763a4a41a738e7ff74093132f6d0"
 
 [[anchors]]
 path = "docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md"
@@ -31,16 +31,16 @@ hash = "e43ce8270c30af676b838cbb6987981687822a97fb3e3e938fe9b548c6d82a87"
 
 [[anchors]]
 path = "src/librarian/tools/merge_worktree.rs"
-hash = "3b5a2a3c716066a473d7b5eba505b4f786dcb785d1e98f2e72be17d0b04942fc"
+hash = "b76d4307b751092205bd1692bf332a8b2802ba3cd271214b06648de2734994fd"
 
 [[anchors]]
 path = "src/librarian/tools/worktree.rs"
 hash = "dab4ff6d877729d4195b3f042e723c943e13aca3999dbee0e2a953f54f759305"
 
 [[anchors]]
-path = "docs/trackers/structural-debt-refactor.md"
-hash = "f9bde8d0d67caae730fa53cecbf11743ff224cb9b498194399123da56d1700af"
-
-[[anchors]]
 path = "src/librarian/util.rs"
 hash = "5c1fb73c87c2fcf8e6453893fbe25c0358d68083bcd94b9df1874163db370166"
+
+[[anchors]]
+path = "docs/trackers/structural-debt-refactor.md"
+hash = "3c99830394406ff95f1926b5071a012810ad8ff5e425794dd8934e3545dd3229"

@@ -10,24 +10,32 @@ path = "docs/superpowers/plans/2026-07-17-worktree-overlay.md"
 hash = "3d8685d4f8c265851b5a24d29254e2c59a81f74be1ddc8832e57b515126e9163"
 
 [[anchors]]
+path = "docs/trackers/archive/worktree-overlay-session-log.md"
+hash = "36ae0bf149c0db3d3e5f7d05f43a4b32a5b37fb017f770a72c79c86303824193"
+
+[[anchors]]
 path = "docs/superpowers/specs/2026-07-10-worktree-merge-tracker-safety-design.md"
 hash = "5c4fee790143e89fedbc076e12c1fa5508aefe663a6eb8024ef182ea89669684"
 
 [[anchors]]
 path = "src/librarian/tools/augment.rs"
-hash = "711f7d299c86b882776a2468e8ba94efcb50cf10825027fe516fdc3ffe0a80b5"
+hash = "fe6253fc8edbd249103f1ce1da63da4f656b5b1cccc4bcd3f7c18998e44d1af0"
+
+[[anchors]]
+path = "docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md"
+hash = "28a29576bd76a04b56b753c1e2b6aa94d0c3427278395fd0eb77196a665442b5"
 
 [[anchors]]
 path = "src/librarian/tools/append_entry.rs"
-hash = "5e629003e0d8160b716ab46590b30e46dcaa7efa0dccf38de800d7c65c7cddf2"
+hash = "74f1e1cb5ddee1523d4a4bf9e49ea97ae61f85f901dc82d519feb24e4b752a16"
 
 [[anchors]]
-path = "docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md"
-hash = "9dde6a21683d7170ea958c4010436743a9b1dca0969ea0de8b2fd79182b12298"
+path = "docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md"
+hash = "f510665c64077add5818bfeedb85860a42a870ff78f309207e805dd6e5376da2"
 
 [[anchors]]
 path = "docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md"
-hash = "2bc1b7d3e964adbc42701482d2e5481e387dd3b9a2b2a94f88ec91eefaed0341"
+hash = "859fefa27600192ca66e3cfb5d28bd3999b5fa8b2d48ce804d101e5316db40cb"
 
 [[anchors]]
 path = "docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md"

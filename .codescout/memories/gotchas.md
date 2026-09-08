@@ -102,8 +102,11 @@ partition (9 servers + 3 muxes) on the same population.
 
 Measured 2026-09-01: a release build at 13:04:36 left **three** servers from 11:26–11:28 running
 the deleted image, still alive at 13:40 — one in this repo, two in another project. The in-repo
-one predated a 304-line `src/librarian/catalog/audit.rs` behaviour change, so its `artifact`
-writes were recording audit rows the superseded way with nothing to signal it.
+one predated a behaviour change in the catalog audit code (`src/librarian/catalog/audit/mod.rs`
+today — at the time this was measured the module was still a single ~304-line `audit.rs`; it has
+since been split into `audit/mod.rs` + `audit/shard.rs` + `audit/host.rs`, so a future re-grep for
+the old single-file path will find nothing), so its `artifact` writes were recording audit rows
+the superseded way with nothing to signal it.
 `/proc/<ppid>/environ` did **not** expose `CLAUDE_CODE_SESSION_ID`, so the sweep cannot name the
 session — `readlink /proc/<ppid>/cwd` is the discriminator that does work, and it is enough to
 tell a peer which window to reconnect.
@@ -263,7 +266,11 @@ only, never touches manual rels/supersedes). `context(anchor_id=…)`'s large-hu
 starvation is FIXED (2026-07-05, `src/librarian/tools/context.rs::call`) — the packing loop
 now reserves half the budget for neighbors and truncates an oversized anchor rather than
 letting it consume the whole budget; `doc(action="graph")` + targeted `get(heading=…)` remains
-a fine alternative but is no longer a required workaround.
+a fine alternative but is no longer a required workaround. Still current — verified against
+`src/librarian/tools/context.rs`: `pack_entry_anchor` still reserves half of `char_cap` for
+neighbors whenever the anchor has any (`anchor_reserve`), `call` carries the matching
+`anchor_reserve_cap` logic, and the regression test
+`anchor_neighbors_are_not_starved_by_oversized_anchor` is still present.
 ## link_scan Can't See Augmented-Artifact Param Rows (Only Markdown Headings)
 
 `link_scan`'s definition detector (`extract.rs::def_re`) only recognizes `## TOKEN — title`
@@ -274,7 +281,10 @@ are genuinely "defined" from the tracker's own maintenance-contract perspective.
 architectural boundary, not a bug — `link_scan` scans prose/headings, not augmentation
 params. Confirmed 2026-07-05: ~21 of a sampled dangling batch were `T-1`..`T-21` cited from
 `docs/trackers/artifact-augmentation-followups.md`, all traced to this cause. No fix planned;
-note it here so a future dangling-triage pass doesn't re-investigate from scratch.
+note it here so a future dangling-triage pass doesn't re-investigate from scratch. Still
+current — `docs/trackers/artifact-augmentation-followups.md` still exists as an active,
+unaugmented tracker (`entry_collection: null`), consistent with its `T-N` rows living as
+prose rather than params.
 
 ## Short Tracker IDs (F-N/W-N) Are Locally-Scoped — Multi-Definer Is Expected
 

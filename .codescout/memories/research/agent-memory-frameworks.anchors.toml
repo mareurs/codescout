@@ -7,11 +7,11 @@ hash = "b225568e66684e43af99da37013f347865cfad69420ae09501b84039898f34f3"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
+hash = "adfec6638b64940c1725abbf3bb5f8c00d58933dc22e683fd6de0d09a51e10bc"
 
 [[anchors]]
 path = "src/tools/memory/mod.rs"
-hash = "36dfae343b8db36e7e8597830cd85dd3deeb83fb3e53a2607692406112446fdb"
+hash = "099af774a9091ff44c430b7111eef57f86d404710482b98237906538d9e30f48"
 
 [[anchors]]
 path = "src/retrieval/memory.rs"

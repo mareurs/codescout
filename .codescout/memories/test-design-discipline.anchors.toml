@@ -3,7 +3,7 @@
 
 [[anchors]]
 path = "docs/trackers/release-promotion-session-log.md"
-hash = "06f47870bb7b42081103561fbe530be7e91c1ccf26db5fc9e4552df008679bb0"
+hash = "d14086aadc82ff19bd347476b74ac42b0c4b19ccd273fa466627b1cb719c4b4b"
 
 [[anchors]]
 path = "src/platform/windows.rs"
@@ -11,4 +11,4 @@ hash = "1d4be0e6524bb71c6b0d325f769782c2871fabc60e98a38e2f04c48a73047605"
 
 [[anchors]]
 path = "docs/RELEASE.md"
-hash = "416ca4f0ade9f304e6ecc8e765321a423152d40946a92bf004cab417654640e5"
+hash = "ad83bb7e9e08850f1d7ba237028526afd4bdf9097311351f2708afc4cd23d1c0"

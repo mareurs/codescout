@@ -13,17 +13,23 @@ All four must pass. No exceptions.
 
 **The bare `cargo clippy -- -D warnings` is not a gate step.** It lints only the root
 package's non-test targets with default features, so it passes trees CI fails. CI runs both
-forms (`ci.yml:50` narrow, `:61` wide — verified 2026-08-31); only the wide one reaches
-`#[test]` code and `codescout-embed`'s feature-gated `local` module. Running the narrow one
-locally buys nothing the wide one does not already cover.
+forms (`ci.yml:94` narrow, `:105` wide — reverified 2026-09-08, line numbers moved from the
+`:50`/`:61` this memory previously cited); only the wide one reaches `#[test]` code and
+`codescout-embed`'s feature-gated `local` module. Running the narrow one locally buys
+nothing the wide one does not already cover.
 
 **Why the lean lane runs third and the default lane last.** The workspace shares one
-`target/`, and `tests/cli_artifact.rs` resolves `target/debug/codescout` by path at run
-time. The lean lane leaves a librarian-less binary there, so a later default-features run
-execs it and fails 10 of 11 tests with `unrecognized subcommand 'artifact'` — reading
-exactly like a feature-gating regression in whatever you just committed. Ending on the
-default lane rebuilds it correctly, so following the gate cannot leave the trap armed for
-the next session. Costs ~8s.
+`target/`, and `tests/cli_doc.rs` resolves `target/debug/codescout` by path at run time
+(the CLI's `artifact` subcommand was collapsed into `doc`; `cli_doc.rs` carries
+`the_old_artifact_subcommand_is_gone` as the regression test for that collapse). The lean
+lane leaves a librarian-less binary there, so
+a later default-features run execs it and reds `cli_doc.rs` — reading exactly like a
+feature-gating regression in whatever you just committed. Ending on the default lane
+rebuilds it correctly, so following the gate cannot leave the trap armed for the next
+session. Do not restate a fresh red/pass count here — CLAUDE.md deliberately declines to
+re-derive one (re-deriving it means overwriting the shared `target/debug/codescout` binary
+and arming the trap for other sessions); its own verified figure is `cli_doc` holding
+**15** tests, all passing against a librarian-bearing binary (verified 2026-09-05).
 
 **Both test lanes carry `--workspace`, and the lean one is `test` not `check`.** Bare
 `cargo test` builds only the root package's targets, so every workspace-member test is
@@ -99,7 +105,7 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 Any tool rename, addition, or behavior change requires updating all three prompt surfaces.
 The build-time test `prompt_surfaces_reference_only_real_tools` catches stale tool names; `claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`.
 Bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes — never for `server_instructions`.
-The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below the measured 2048-**char** client cliff (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`, `src/prompts/mod.rs:39`). Count characters, not bytes — the old rule said "2200 bytes", which was both the wrong unit and above the cliff it existed to protect, and stayed green for months. Never raise it; move content to a `get_guide(topic)` **and wire the topic's trigger**. Full operational detail (bump matrix, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
+The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below the measured 2048-**char** client cliff (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`, `src/prompts/mod.rs:29`). Count characters, not bytes — the old rule said "2200 bytes", which was both the wrong unit and above the cliff it existed to protect, and stayed green for months. Never raise it; move content to a `get_guide(topic)` **and wire the topic's trigger**. Full operational detail (bump matrix, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
 
 
 ## Bug Tracking

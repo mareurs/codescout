@@ -7,19 +7,19 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "ea7af4233f1d2995b8111145ee00a8184f54382000b869e8e0a479bf318f66c5"
+hash = "f42a0d273160300fb6d6d285199aafb44d6222f57abddf55d2cedf202533b89c"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
+hash = "a5dbfabb0c2cd7941d92444ef8c15462f94f654b3ee2c843a39af38e94cf8791"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "9c53bcdc80848c641a02ad67cb184940957579c47ea956dbfa48676e11d8d1b0"
+hash = "7c7bd2385ebbe25023e35670d4434c3515fabff9bed7886da9fe365d1003753d"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
+hash = "adfec6638b64940c1725abbf3bb5f8c00d58933dc22e683fd6de0d09a51e10bc"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
@@ -35,7 +35,7 @@ hash = "6a2781daed325953afabc327add312c6827df3e12bf96287198a64831c54f522"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "53b988f75f8f3e2104b384367a95d08b30a440c4debc61af5a14d534c8859aa8"
+hash = "1a8a55ec5330f5e84e3d036ba8add34c275fcb9a34385eea0cc5b9577df3bd61"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -51,8 +51,8 @@ hash = "1dfa2682cc0a01a5830e2f986e37ad2ac4f333c7f10e5abf71824e2ecbdad19e"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "6ecf2977d29063c7ff02047c915039ad158a5a80333bca43b3d2a8f8d8596efc"
+hash = "3290e16a45f220e7796714f3aa8140d522b93aa94f79e495f0b9e081ccb1364b"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
-hash = "ec269942aa229cdf317b8a8bca43e6f5555c55b2ef803735762102bc9e3863b0"
+hash = "56e9a3811ef3ddfe7f5a26121e928908484934d3cd1ad58b5702cbbfbfd5cd1b"
