@@ -1,14 +1,14 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/addressing-without-an-escape-hatch
+closed: 2026-09-07
 opened: 2026-09-07
-closed:
-severity: high
 owner: marius
 related:
-  - docs/trackers/observer-blindness.md
-kind: bug
-tags:
-  - cluster/addressing-without-an-escape-hatch
+- docs/trackers/observer-blindness.md
+severity: high
 ---
 
 # BUG: the pre-push guard's refusal text EXECUTES its own example commands — an unquoted heredoc turns a documented `git push` into a recursive one, and the refusal never prints
@@ -116,8 +116,9 @@ returned nothing, so the first two attempts to read it produced no evidence at a
 
 ## Fix
 
-**Fixed 2026-09-07 on `experiments`.** Escape the backticks so bash passes them through as
-text, keeping `$branch` expanded as every other command in the banner does:
+**Fixed 2026-09-07 on `experiments` — `9dd4792f`, patch-id
+`29dfd7ca487e46c7780df8de465652e11fa2a359`.** Escape the backticks so bash passes them through
+as text, keeping `$branch` expanded as every other command in the banner does:
 
 ```
   were answering, and \`git push origin $branch\` would have satisfied the instruction
