@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/repro-env-diverges-from-gate-env
+closed: 2026-09-08
 opened: 2026-09-08
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md
-  - docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
-kind: bug
-tags:
-  - cluster/repro-env-diverges-from-gate-env
+- docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md
+- docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
+severity: medium
 ---
 
 # BUG: the three write-guard holder tests fail on every Windows lane, and they are now the only thing keeping `experiments` red
@@ -95,7 +95,14 @@ forgetting to.
 
 ## Fix
 
-**Fixed 2026-09-08 — the holder record moved to a sidecar file outside the lock.**
+**Fixed 2026-09-08 on `experiments` — `d2900ecb`, patch-id
+`071904e3879455b0a8aa7957f9db8240e4fa3b91`. The holder record moved to a sidecar file outside
+the lock.**
+
+**VERIFIED IN CI, which is the only instrument that could do it.** At `d2900ecb` all three
+`Test (windows-latest / *)` lanes went **red → green** (17 of 18 jobs green; the only remaining
+red was `Windows-gnu cross`, an unrelated `apt` failure at setup). The Fix section below was
+written while this was still *reasoned rather than demonstrated*; it is now demonstrated.
 
 `holder_record_path(root)` → `.codescout/write.lock.holder`. `write.lock` is now only ever
 locked and never written; the record is read and written with plain `std::fs` calls on a file
