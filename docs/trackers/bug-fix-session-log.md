@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 122
-entry_high_water_W: 111
+entry_high_water_W: 112
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -177,6 +177,7 @@ entry_high_water_W: 111
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-112 | 2026-09-08 | high | **A hermetic fixture makes the production default unobservable, and the mutation that proves it is the one nobody runs.** After 94/94 green and 9 of 9 mutations killed, mutating `profile_dirs()` — which decides *where the tool looks at all* — to a hardcoded list **and** to `return []` both left **94/94 green**. Every case injects `FILE_PROVENANCE_*_ROOTS` to stay hermetic, and that override *is* the default's only caller | The discovery fix ships with a green suite and zero coverage — in code written minutes earlier *in direct response to a peer's correction*, i.e. the part most recently thought hardest about. Not a thin sample: the refuting outcome leaves **no artifact at any corpus size**, so "widen the sample" is a no-op against it. Independently reproduced by `ad379a7c` against the **committed** suite (`transcript_roots() -> return []` leaves 68/68 green), so it is a pre-existing harness property rather than new work. Theirs is the generalisation: **hermeticity and default-path coverage are in direct tension**, invisible from inside a green run — and their own six mutations that day had all hit the *dispatch* and none the *scope*, because the fixture cannot express a scope mutation. The mutation population was itself filtered by what the harness could see | validated |
 | W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while the commit was unreachable from the ref it was published to. That **conjunction** is the rebase-orphan signature, and only the second half discriminates; use `git merge-base --is-ancestor <sha> <ref>` rather than `git branch --contains`, which answers a laxer question (peer refinement, sessionId `89d91024`, who independently confirmed the whole route on a second commit). `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
 | W-110 | 2026-09-07 | high | **The bug ledger cannot report a claim nobody wrote — enumerate by socket, ask, then claim.** Before starting a bug, enumerated live sessions and asked the two peers sharing this checkout. `codescout-af` named **five** bug files they were actively fixing, **all five reading `open`**; a sibling session independently measured the same population at 60 rows, **zero `taken`**. Then claimed each pick `status: taken` + `claimed_by: <sessionId>` through the catalog | Ledger-based disjointness was the obvious method and would have collided on any of the five — and silently, since two sessions fixing one bug produce two plausible diffs and whoever commits first makes the other's work read as a redundant re-fix. `status: open` is **monotone under an unwritten claim**: the state you want to detect produces exactly the value you are already reading, so "read the ledger more carefully" is the wrong instrument rather than a weaker one. Enumeration bounds who is present; only the ask attributes work. The same round-trips surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit — and later a peer staged five files into the shared index between this session's `git add` and `git commit`. `doctor` then resolved the claim as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId: **first real use of the field in this repo — the mechanism was never missing, the practice was** | validated |
 | W-107 | 2026-09-06 | high | **When adding a READ-only action, the question is not "does it write?" but "is it useful *while* something else is writing?"** `LibrarianAdapter::is_write`'s final arm is `_ => true`, and a write takes the cross-process write lock before dispatch. Correct policy — an unclassified write races on a five-session checkout, an unclassified read is merely over-serialised — but it is priced for **mutation risk**, not usefulness, and so silently mis-prices exactly the class of reads that must answer during a write. `librarian(action="status")` exists to answer *"is a reindex running?"*; a running reindex HOLDS that lock, so left to the default it would have blocked for the whole run and then reported, truthfully, that nothing was running — the new instrument reproducing the exact non-discrimination of the bug it was built to remove. **No test would have caught it:** all five `status::tests` call the action directly and never cross the adapter, so the defect ships green and its failing observation is a *hang*, at the one moment anyone needs the tool. Diagnostics are the class most likely to be added late by someone reasoning about what the action does rather than when it is called. Scouted before writing; the read-set entry is load-bearing, and `server.rs`'s gate forced it to be stated a second time after I had already made the first edit. | `90336870`; bug `6ae552cfc223cd6d`; kin `bug-fix-session-log:W-100` (verify a shipped tool change with one LIVE call after rebuild — done here too, and it is what discharged this fix's `unverified:` field), `bug-fix-session-log:W-106` |
@@ -12423,6 +12424,42 @@ themselves, which is the failure this paragraph exists to prevent, observed in t
 route `CLAUDE.md` measured at 2–153 ambiguous candidates. Here it would have been worse than
 average, because the rebase also landed three sibling commits with near-identical `docs(issues,
 clusters):` subjects from two sessions.
+
+**Status:** validated
+
+## W-112 — A hermetic fixture makes the production default unobservable, and the mutation that proves it is the one nobody runs
+
+**Valid:** dated 2026-09-08
+
+**Observed:** After `tests/file-provenance.sh` went 94/94 green on a new registry-join feature,
+mutating the production path killed 9 of 9. Mutating one function further — `profile_dirs()`,
+which decides *where the tool looks at all* — reverting it to a hardcoded profile list **and**
+making it `return []` both left **94/94 green**.
+
+**Cause:** Every case in that suite injects `FILE_PROVENANCE_ROOTS` /
+`FILE_PROVENANCE_REGISTRY_ROOTS` to stay hermetic. That override *is* the production default's
+only caller, so a default-path mutation perturbs nothing the recording contains. Not a thin
+sample — the refuting outcome leaves **no artifact at any corpus size**, so "widen the sample"
+is a no-op against it.
+
+**Counterfactual:** Without the mutation pass the discovery fix ships with a green 94-case suite
+and zero coverage — in code written minutes earlier *in direct response to a peer's correction*,
+i.e. the part of the patch most recently thought hardest about. Independently reproduced by
+sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30` against the **committed** suite:
+`transcript_roots() -> return []` leaves their 68/68 green. A pre-existing property of the
+harness, not an artifact of the new work.
+
+**The generalisation, theirs:** hermeticity and default-path coverage are in **direct tension** —
+a hermetic fixture buys isolation by overriding precisely the thing a default-path mutation would
+perturb — and the tension is invisible from inside a green run. Their own six mutations that day
+had all hit the *dispatch* (which tool names count, which actions are writes) and none the
+*scope*; the fixture cannot express a scope mutation, so the missing axis left no artifact either.
+**The mutation population was itself filtered by what the harness could see** — the recording
+filter one level above where it was being applied, inside the run used to certify the fix.
+
+**Remedy shipped:** a `== profile DISCOVERY ==` section that omits the override deliberately and
+says so on the fixture line, so a tidy-up back onto the shared roots reads as the regression it is.
+13/13 mutations killed after. `14e07fb3`, patch-id `3ec07f35c1c5169c95bb024826a981a9661d4b0c`.
 
 **Status:** validated
 
