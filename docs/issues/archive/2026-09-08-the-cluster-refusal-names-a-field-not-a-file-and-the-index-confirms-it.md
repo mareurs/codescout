@@ -10,7 +10,6 @@ opened: 2026-09-08
 owner: marius
 related: []
 severity: medium
-unverified: 'NOT archived, deliberately: the four-command gate is RED and I cannot produce a green. fmt 0, clippy 0, LEAN 101, DEFAULT 101 -- every error location in the log is `src/agent/write_guard.rs:536` and `:584`, a peer''s uncommitted addition calling `expect_err` on a type without `Debug`, which fails to COMPILE the lib test target so nothing runs in either lane. This change is verified independently at `--test issue_clusters`, 20/20 in BOTH lanes, and both regression assertions were killed by independent mutations of the production path. `get_guide("tracker-conventions")` wants gate-green before an archive move; re-run and archive once the peer''s file compiles. The fix itself is not in doubt -- what is unverified is the whole-tree gate, and the distinction is the reason this field exists.'
 ---
 
 # BUG: the cluster growth gate names a FIELD and calls its home "the ledger", which has been two files since the split
@@ -112,6 +111,19 @@ shared checkout, which is not this file's call to make. The correction lives her
 ## Fix
 
 **Both candidates shipped.** `experiments` `9852c474`, patch-id `47737e2383bfb0238740c09f0c996a1626ec18bf`.
+
+**Gate green @ 2026-09-08 11:00–11:03** — fmt 0, clippy 0, LEAN 0, DEFAULT 0. The stamp is not
+decoration: on a checkout with four live sessions a whole-tree gate result has a validity window
+*shorter than the gate's own runtime*, so it describes a tree at a time rather than a property of
+the change. An earlier run of this same gate reported `LEAN 101, DEFAULT 101` against a tree that
+had already stopped existing — a peer's uncommitted compile error, fixed 20 seconds before the
+commit body quoting it was written. (Point and derivation: sessionId `ad379a7c`.)
+
+DEFAULT needed a second run. The first failed on
+`peer::server::tests::run_exits_after_idle_timeout_with_no_connections` — the known open flake
+`ee9d8d80ad5ecdc8`, in a subsystem this change does not touch — and cargo stops at the failing
+binary, so `issue_clusters` did not run in that lane at all. The re-run is what that bug file's
+own workaround prescribes, and it passed with both the flake and this fix's regression test green.
 
 1. **The refusal names the path**, resolved per slug by `class_file_for`. It returns a path
    rather than an `Option`: falling back to the Index is the *second real case*, not a default —

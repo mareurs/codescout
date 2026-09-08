@@ -81,6 +81,56 @@ fn read_holder_record(path: &Path) -> Option<(u128, String)> {
     Some((ts.parse().ok()?, holder.to_string()))
 }
 
+/// Why `read_holder_record` returned `None` — for DIAGNOSIS only, never for the
+/// decision about whether the lock is free.
+///
+/// `read_holder_record` collapses *absent*, *empty* and *unparseable* into one
+/// `None`, and that collapse is right for the safety decision it serves: no branch
+/// of it may ever become "nobody holds this". It is wrong for the *message*, and
+/// the two purposes shared one return value until this function existed. The
+/// discriminator was never missing — `holder_path` is a live local in `acquire`,
+/// thirty lines from the text that needed it.
+///
+/// LOAD-BEARING, and the reason the empty arm comes first: **`Drop` truncates the
+/// record, it does not delete it** (`write(path, "")`), so *exists, 0 bytes* is the
+/// state left behind by every clean release. It is by far the commonest cause of an
+/// anonymous refusal, and the superseded text named it "an older codescout" — the
+/// rarest cause. That sent a peer to run `strings` on the running binary to check
+/// its vintage; the binary was current and they had simply lost a benign race.
+///
+/// The re-read here can disagree with `read_holder_record`'s under a concurrent
+/// release. That is acceptable, and specifically not the bug being fixed: every arm
+/// below prescribes retry or investigation and **none of them claims the lock is
+/// free**, so the safety property lives in the caller's `Err` rather than in this
+/// text. A stale classification costs a reader one wrong sentence; the collapse it
+/// replaces cost them a wrong hypothesis.
+///
+/// See `docs/issues/2026-09-08-the-write-lock-refusal-cannot-tell-a-cleared-record-from-an-absent-one.md`.
+fn why_no_holder_record(path: &Path) -> &'static str {
+    match std::fs::metadata(path) {
+        Ok(m) if m.len() == 0 => {
+            "The holder cleared its record on release while you were acquiring — an \
+             ordinary lost race, not a fault. Retry immediately; the next attempt \
+             either succeeds or names the new holder."
+        }
+        Ok(_) => {
+            "The holder record exists but does not parse — corruption, not a race. \
+             Inspect `.codescout/write.lock.holder` rather than retrying; a retry \
+             will report this same state."
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            "No holder record was ever written — an older codescout, or an exit \
+             between taking the lock and writing the record. Check for a running \
+             reindex before retrying."
+        }
+        Err(_) => {
+            "The holder record could not be read — check permissions on \
+             `.codescout/write.lock.holder`. The lock itself is held either way, so \
+             this is a diagnosis failure rather than a lock failure."
+        }
+    }
+}
+
 /// Path of the holder-record sidecar: `.codescout/write.lock.holder`.
 ///
 /// **It is a SEPARATE FILE from `write.lock`, and that is the entire point.**
@@ -186,9 +236,7 @@ pub async fn acquire(
             ),
             None => RecoverableError::with_hint(
                 "another codescout instance is writing to this project",
-                "The holder recorded no identity — an older codescout, or an exit \
-                 between taking the lock and writing the record. Check for a running \
-                 reindex before retrying.",
+                why_no_holder_record(&holder_path),
             ),
         });
     }
@@ -450,6 +498,107 @@ mod tests {
             !rendered.contains("shortly"),
             "must not promise a deadline it cannot know — the superseded text was \
              wrong by two orders of magnitude against a 12m10s reindex: {rendered}"
+        );
+    }
+
+    /// A CLEARED record and an ABSENT one have opposite remedies — retry right
+    /// now, or go looking for an old binary — and the superseded text served the
+    /// second one for both. This is the case that actually occurred in the field.
+    ///
+    /// LOAD-BEARING: the record is **truncated, not deleted**. `Drop` clears it
+    /// with `write(path, "")`, so *exists, 0 bytes* is what every clean release
+    /// leaves behind, and is therefore the commonest cause of an anonymous
+    /// refusal. A tidy-up that `remove_file`s it here instead leaves this test
+    /// passing against the ABSENT state — which the next test already covers, so
+    /// the pair would assert one thing twice and nothing at all about this one.
+    ///
+    /// LOAD-BEARING: the flock is taken DIRECTLY, never through `acquire`.
+    /// `acquire` writes a holder record on success, so a contender against it
+    /// takes the *named* branch and never reaches the anonymous one under test.
+    #[tokio::test]
+    async fn a_cleared_holder_record_reports_a_lost_race_not_an_old_binary() {
+        let dir = tempdir().unwrap();
+        let record = holder_record_path(dir.path());
+
+        let holder_fd = open_lock_file(dir.path()).unwrap();
+        holder_fd.try_lock_exclusive().unwrap();
+        // The post-release state, written explicitly: cleared, NOT removed.
+        std::fs::write(&record, "").unwrap();
+
+        let err = acquire(
+            Arc::new(AsyncMutex::new(())),
+            open_lock_file(dir.path()).unwrap(),
+            record.clone(),
+            Duration::from_millis(200),
+            "codescout:sid-zeta edit_file",
+        )
+        .await;
+        let err = match err {
+            Ok(_) => panic!("a second open-file-description must contend"),
+            Err(e) => e,
+        };
+
+        let rendered = format!("{} {:?}", err.message, err.guidance);
+        assert!(
+            rendered.contains("cleared its record on release"),
+            "a truncated record is a lost race and the hint must say so: {rendered}"
+        );
+        // The regression itself. This sentence is correct for an ABSENT record and
+        // was being served for a cleared one — which is what sent a reader to run
+        // `strings` on the running binary to check a vintage that was fine.
+        assert!(
+            !rendered.contains("an older codescout"),
+            "must not blame the binary's vintage for the state every clean release \
+             leaves behind: {rendered}"
+        );
+    }
+
+    /// The control for the test above, and NOT mere symmetry — this is the one
+    /// that can red. Without it the pair is monotone under a change that makes
+    /// *every* anonymous refusal say "released, retry": the same defect inverted,
+    /// with the cleared-case assertion still green and nothing else in the suite
+    /// reaching this arm.
+    ///
+    /// LOAD-BEARING: the record file is never created. `holder_record_path` only
+    /// computes a path, so declining to write it IS the absent state — there is no
+    /// setup line to delete here, which is exactly why the sibling test above
+    /// carries the annotation about truncation instead.
+    #[tokio::test]
+    async fn an_absent_holder_record_still_reports_a_missing_writer() {
+        let dir = tempdir().unwrap();
+        let record = holder_record_path(dir.path());
+
+        let holder_fd = open_lock_file(dir.path()).unwrap();
+        holder_fd.try_lock_exclusive().unwrap();
+        assert!(
+            !record.exists(),
+            "control: this test is about the ABSENT state, so nothing may have \
+             written the record — `open_lock_file` must not create it"
+        );
+
+        let err = acquire(
+            Arc::new(AsyncMutex::new(())),
+            open_lock_file(dir.path()).unwrap(),
+            record.clone(),
+            Duration::from_millis(200),
+            "codescout:sid-eta edit_file",
+        )
+        .await;
+        let err = match err {
+            Ok(_) => panic!("a second open-file-description must contend"),
+            Err(e) => e,
+        };
+
+        let rendered = format!("{} {:?}", err.message, err.guidance);
+        assert!(
+            rendered.contains("No holder record was ever written"),
+            "an absent record means nothing current wrote one, and the hint that \
+             was wrong for the cleared case is right here: {rendered}"
+        );
+        assert!(
+            !rendered.contains("cleared its record on release"),
+            "must not report a lost race when no record was ever written — that is \
+             the fix applied in the wrong direction: {rendered}"
         );
     }
 }
