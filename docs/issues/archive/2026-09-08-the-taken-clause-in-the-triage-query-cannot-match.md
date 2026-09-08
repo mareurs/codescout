@@ -1,5 +1,5 @@
 ---
-id: 2b9ddd39f99d98cc
+id: '2b9ddd39f99d98cc'
 kind: bug
 status: fixed
 title: 'BUG: the triage query''s `taken` clause cannot match — an enforced field nobody writes reads as a collision check that performs none'
@@ -13,7 +13,6 @@ opened: 2026-09-08
 owner: marius
 related: []
 severity: medium
-unverified: 'Not exercised against a running MCP server: the live binary predates a31c0197. Gate green and a reachability test cover the call path, but no end-to-end run through the real tool boundary has happened. Re-check after the next `cargo rb` + /mcp reconnect.'
 ---
 
 ## Summary
@@ -295,9 +294,55 @@ furniture is unread — which reproduces this defect one layer out.
 Gate green 2026-09-08 at `a31c0197`: FMT=0, CLIPPY=0, LEAN=0 (3633 tests), DEFAULT=0 (5613
 tests, 0 failures, 1760 `librarian::`).
 
-**Not yet verified against a running MCP server** — the fix is in source; the live binary
-predates it. Nothing in the tests depends on that, and the reachability test is what covers
-the path an end-to-end check would exercise.
+**Verified end-to-end against a running MCP server, 2026-09-08**, by sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac` after a `cargo rb` + `/mcp` reconnect — which is
+the exact re-check condition the `unverified:` field named, so the field is now cleared.
+
+`doc(action="find", kind="bug", filter={status in [open, taken, investigating, zombie]})`
+returned `hints.claimable` carrying that session's **real** sessionId, not the placeholder:
+`resolve_self` took none of its three declining paths. The verifier cross-checked the id
+against two sources independent of this code — their scratchpad path component and
+`CLAUDE_CODE_SESSION_ID` — and all three agreed.
+
+**Scope of that evidence, stated because it is narrower than "verified":**
+
+- **Happy path only at runtime.** No case was constructed in which `resolve_self` *should*
+  decline, so the three declining branches have unit coverage and no runtime exercise. That
+  gap is small by construction — those branches turn on registry state, not on the MCP
+  boundary the field was doubting — but it is not zero, and the verifier named it unprompted.
+- **One session, not two.** This file's author could not reproduce it: their own server
+  process still predates `a31c0197`, and the same query from that session returns no
+  `hints.claimable` at all. Which is itself a small confirmation — the hint appears exactly
+  where the fix is compiled in and nowhere else.
+- **The binary's mtime is NOT the proof.** The release build (10:44:52) postdates
+  `a31c0197` (10:33:48), and that is corroboration only: commit time records when someone
+  committed, not when the code existed, so the comparison is invalid in general. It was
+  invalid earlier the same day pointing the *unfavourable* way, and pointing favourably
+  does not repair it. The runtime output is the proof.
+
+Eleven tests, all in the default lane, read out by name rather than inferred from a total.
+
+**`src/librarian/session_registry.rs` — four on `resolve_self`,** three of which assert it
+*declines*: zero ppid, no matching row, and two rows disagreeing on one pid. The Windows
+one pins a contract nothing was checking — `rendezvous::parent_pid` returns `0` there and
+its own comment argues that is safe because zero *"degrades to never-matched rather than to
+a WRONG match"*, which holds only if consumers honour it. `resolve_self(0)` is now asserted
+`None` **even against a row literally storing pid 0**, so the producer's stated reasoning
+has a consumer-side proof.
+
+**`src/librarian/tools/find.rs` — five on shape, two on REACHABILITY.** The split is the
+point: `cargo build` emitted `function claim_hint is never used` while all five shape tests
+were already green. That is `cluster/declared-not-wired`, and § *Testing Discipline*'s
+*"an alarm nothing reaches is exactly as informative as no alarm"*. Deleting
+`a_bug_page_carries_the_claim_hint_through_the_real_call_path` would let the wiring be
+removed with five green tests still vouching for it.
+
+The **negative** reachability test earns its place equally:
+`a_non_bug_page_carries_no_claim_hint`. A hint attached to every response is furniture, and
+furniture is unread — which reproduces this defect one layer out.
+
+Gate green 2026-09-08 at `a31c0197`: FMT=0, CLIPPY=0, LEAN=0 (3633 tests), DEFAULT=0 (5613
+tests, 0 failures, 1760 `librarian::`).
 ## Workarounds
 
 Ask. The socket enumeration in `CLAUDE.md` § *Reaching a Peer Session* plus a direct
