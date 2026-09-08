@@ -591,6 +591,65 @@ content, and I am the load"*. All four failures were read as load on sight, no i
 opened, no time spent in `src/peer/`. Pre-announcement is the only remedy in this file observed
 working, and it works because it arrives **before** the observer forms a hypothesis. Cost: one
 message.
+
+### Thirteenth observation, 2026-09-08 — the twelfth's METRIC disagrees with the load by an order of magnitude, and the load is `rust-analyzer`
+
+Reported by `59112612`. One failure, one pass, and a correction to the *instrument* the
+twelfth prescribed rather than to its method.
+
+**The failure.** A default lane at 10:45:32Z, same signature verbatim — `run() did not exit
+within 10s of a 1s idle timeout`, `src/peer/server.rs:751` — as the only red in
+`5248 passed; 1 failed`. Diff under `src/peer/`: none; the session's changes were
+`src/librarian/tools/mv.rs` and two guides.
+
+**I have NO load figure for that run, and am deliberately not supplying one.** The twelfth
+established that a launch-instant sample is *anti*-correlated with the quantity it names,
+and a figure taken after the fact is worse. An unmeasured run is recorded as unmeasured.
+
+**The pass, instrumented throughout, and the correction.** The re-run was sampled every 10s
+for its whole duration — the twelfth's method, applied. It **passed**, and the samples say
+why that is interesting:
+
+| time | `load1` | `pgrep -c 'cargo\|rustc'` |
+|---|---|---|
+| 10:46:50Z | 39.62 | 1 |
+| 10:47:10Z | 29.47 | 2 |
+| 10:47:51Z | 42.44 | 1 |
+| 10:48:11Z | **49.41** | **1** |
+
+**The two instruments disagree by an order of magnitude at the same instant.** The twelfth
+counted `cargo`/`rustc` and read **16** concurrent at `load1` 48.80; here `load1` reaches
+49.41 with **one**. Counting cargo processes would have called this machine quiet at
+precisely its busiest sampled moment — so the twelfth's *method* (instrument throughout, not
+at launch) is right and survives, while its *metric* does not generalise. **Name which
+counter you read; the two are not substitutes.**
+
+**What the load actually is** (`ps -eo pcpu,comm --sort=-pcpu`, same window, 64 cores,
+`load1` 52.26):
+
+```
+36.6 rust-analyzer
+13.8 codescout
+ 5.7 kscreenlocker_g
+ 4.9 teams-for-linux
+ 4.6 clickhouse-serv
+```
+
+`rust-analyzer` dominates, and `pgrep -c 'cargo|rustc'` **cannot match it** — the pattern
+is `rustc`, the process is `rust-analyzer`. Codescout starts and holds an LSP warm per
+workspace, and every `symbols` / `edit_code` / `references` call feeds it. So the
+navigation tooling `CLAUDE.md` Iron Law 1 *mandates* is a first-order load source for this
+test, and it is invisible to the metric this file previously endorsed. That is not a reason
+to navigate by grep; it is a reason the counter has to change.
+
+**Denominator.** One more pass under measured load, added to the twelfth's 4-fail/2-pass.
+Still probabilistic. `load1` 46–49 on 64 cores is ~0.75 × nproc — loaded, not oversubscribed
+— and the test passed there, which is the direction that needs publishing precisely because
+only failures get noticed.
+
+**Pre-announcement worked again, in the other direction.** `5399543d` had messaged this
+session about the range before its failure; the red was read as load on sight, no time spent
+in `src/peer/`, and the investigation went to the *instrument* instead. Cost: one message.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
