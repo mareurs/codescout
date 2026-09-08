@@ -57,6 +57,29 @@ readiness, flock reclaim and idle-timeout expiry are three different observation
 underlying quantity — whether this process got CPU inside a fixed wall-clock window.
 
 ## Evidence
+
+### Reproduced twice, 2026-09-08 — published because it CONFIRMS, which is when a datapoint is
+usually dropped
+
+Two consecutive `cargo test --workspace` runs on `a762dceb` (an `agent::write_guard` change):
+both `exit=101`, both **5245 passed / 1 failed**, both this test and nothing else. Immediately
+after, **3/3 in isolation** in 1.15s each.
+
+Recording a confirmation rather than only surprises, per § *Testing Discipline*'s recording-filter
+law: a class whose ledger holds only the runs that surprised someone looks rarer than it is, and
+the denominator is the thing no one writes down. **This is a denominator entry, not a catch.**
+
+The load was nameable and self-inflicted, which is worth stating because it is the variable the
+test is sensitive to: 11 live codescout sessions on this checkout at the time, and this session
+had a second `--workspace` run in flight. `src/peer/` holds **zero** references to `write_guard`,
+`WriteGuard` or `holder_record`, so there is no path from the diff under test to the failure.
+
+One procedural note for whoever picks this up. The near-miss recorded in
+`docs/issues/2026-09-08-a-claimed-bug-file-names-the-author-of-the-wip-that-reds-the-build.md` is
+this test's failure mode aimed at people rather than at code: a session sees a red it did not
+cause and reaches for its own diff. **Pre-announcing the red to the tree worked** — told in
+advance that this one was load, two sessions correctly declined to investigate their own changes.
+That is cheap and is currently the only thing standing in for the fix.
 ### Why this is a class instance, not a new bug
 The prior fix's own text names the shape: *"the original fix had covered only the reclaim
 step; the holder step flaked under a full parallel run."* That is fix-per-observed-instance
