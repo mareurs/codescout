@@ -395,7 +395,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         time_scope: a.time_scope.clone(),
         extra: a.extra.clone(),
     };
-    let content = crate::librarian::frontmatter::write(&fm, &format!("\n{}\n", a.body));
+    let content = crate::librarian::frontmatter::write(
+        &fm,
+        &crate::librarian::frontmatter::render_body(&a.body),
+    );
     let now = chrono::Utc::now().timestamp_millis();
     let row = ArtifactRow {
         id: id.clone(),

@@ -218,6 +218,34 @@ pub fn write(fm: &Frontmatter, body: &str) -> String {
     format!("---\n{yaml}---\n{body}")
 }
 
+/// Wrap an artifact body for [`write`]: **exactly one** blank line separating the
+/// frontmatter block from the first line of content, and **exactly one** trailing
+/// newline.
+///
+/// [`write`] emits `---\n{yaml}---\n{body}` and appends nothing, so the leading `\n`
+/// here is what produces the blank line a reader expects after the frontmatter, and the
+/// trailing one is what makes the file newline-terminated.
+///
+/// **Both ends are normalised, and normalising is the whole point.** Both call sites
+/// previously inlined `format!("\n{body}\n")`, which is idempotent only for a body
+/// carrying neither newline — and a body read back out of an artifact carries the
+/// trailing one by construction. So every round-trip edit of a managed artifact grew the
+/// file by one blank line, attributed in the diff to whoever made the unrelated change.
+/// Round-tripping is the sanctioned way to edit a ledger section too large for
+/// `body_edits`, so those writes are not rare.
+///
+/// The head had the identical defect and was filed as though it did not: the bug's
+/// § Mechanism reads *"normalisation at the head and apparently unconditional appending
+/// at the tail"*. There was no head normalisation — the head merely receives input
+/// without a leading newline in the common path, so it looked well-behaved.
+/// `docs/issues/archive/2026-09-05-doc-update-body-appends-a-trailing-blank-line-every-write.md`
+///
+/// Extracted rather than fixed twice: two call sites had already inlined it, and a third
+/// would re-introduce the defect silently. Same shape as `test-escape-hardening:I-2`.
+pub fn render_body(body: &str) -> String {
+    format!("\n{}\n", body.trim_matches('\n'))
+}
+
 /// Whether a string scalar can be emitted WITHOUT quotes on a `key: value`
 /// frontmatter line. Two conditions must hold: it is structurally safe on a
 /// single plain-scalar line (no newline, no YAML-significant punctuation, no

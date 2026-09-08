@@ -529,7 +529,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
             _ => new_body.clone(),
         };
-        let rendered_body = format!("\n{actual_body}\n");
+        let rendered_body = crate::librarian::frontmatter::render_body(&actual_body);
         // A body overwrite has no business re-emitting the frontmatter, and a
         // field patch alongside it usually splices. Fall back to `write` only
         // when a splice cannot express the change — an absent key, a sequence
@@ -1372,6 +1372,106 @@ text
         assert!(
             on_disk.contains("status: fixed"),
             "frontmatter must agree with the row: {on_disk}"
+        );
+    }
+
+    /// **The round-trip must be a fixed point.** Read a body, write it back unchanged,
+    /// and the file must be byte-identical — that is the property actually wanted, and
+    /// the one no test named before this.
+    ///
+    /// It matters because round-tripping is the *sanctioned* way to make a targeted edit
+    /// to a managed ledger whose section is too large for `body_edits`, so these writes
+    /// are not rare. A body that grows one line per write is unexplained whitespace churn
+    /// attributed to an author who did not write it.
+    ///
+    /// Asserting on the FILE, not on the returned body: the defect is in what reaches
+    /// disk, and a response-level assertion would pass while the file drifted.
+    #[tokio::test]
+    async fn writing_back_an_unchanged_body_is_a_fixed_point() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "rt.md",
+                "kind": "spec", "title": "T", "body": "# Heading\n\nsome text\n"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+
+        // One full round-trip: read the body back the way a caller does, write it back
+        // unchanged, record the bytes. Then do it again.
+        let mut snapshots = Vec::new();
+        for _ in 0..2 {
+            let got = crate::librarian::tools::get::call(
+                &ctx,
+                serde_json::json!({"id": id, "full": true}),
+            )
+            .await
+            .unwrap();
+            let body = got["body"].as_str().unwrap().to_string();
+            call(&ctx, serde_json::json!({"id": id, "patch": {"body": body}}))
+                .await
+                .unwrap();
+            snapshots.push(std::fs::read_to_string(&abs).unwrap());
+        }
+
+        assert_eq!(
+            snapshots[0], snapshots[1],
+            "round-tripping an unchanged body must not alter the file.\n\
+             --- after write 1 ---\n{:?}\n--- after write 2 ---\n{:?}",
+            snapshots[0], snapshots[1]
+        );
+        assert!(
+            !snapshots[0].ends_with("\n\n"),
+            "body must end with exactly one newline, got: {:?}",
+            &snapshots[0][snapshots[0].len().saturating_sub(20)..]
+        );
+    }
+
+    /// The head has the *same* unconditional wrap as the tail, and the bug filed against
+    /// the tail described the head as "normalised" — it is not. A body arriving with the
+    /// frontmatter-separating blank already present must not gain a second one.
+    ///
+    /// Pinned separately from the fixed-point test above because that one only exercises
+    /// the shape `get` happens to return; this one states the head's contract directly, so
+    /// a future change to `get`'s trimming cannot silently retire the coverage.
+    #[tokio::test]
+    async fn a_body_that_already_leads_with_a_blank_line_does_not_gain_a_second() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "head.md",
+                "kind": "spec", "title": "T", "body": "x"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "\n# Heading\n\ntext\n"}}),
+        )
+        .await
+        .unwrap();
+
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let on_disk = std::fs::read_to_string(&abs).unwrap();
+        assert!(
+            !on_disk.contains("---\n\n\n"),
+            "exactly one blank line separates frontmatter from the body; got:\n{on_disk}"
         );
     }
 
