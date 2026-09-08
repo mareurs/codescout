@@ -6,7 +6,7 @@ title: peer idle-timeout test is the third load-sensitive step in a class fixed 
 tags:
 - cluster/repro-env-diverges-from-gate-env
 closed: ''
-last_observed: 2026-09-01
+last_observed: 2026-09-03
 opened: 2026-09-01
 owner: marius
 related:
@@ -428,6 +428,50 @@ because nobody else is positioned to notice the coincidence, not because it is a
 
 **No per-instance fix requested**, per this file's standing position.
 
+
+### Tenth observation, 2026-09-03 — the passing and failing runs differ by NO bytes under `src/peer/`
+
+An SDD run in a fresh worktree (`.worktrees/bug-claim-liveness`, branch cut from
+`experiments` @ `44c6baca`) hit this test twice in one task's gate.
+
+| run | commit | lane 4 result |
+|---|---|---|
+| baseline, before any task work | `44c6baca` | **passed** — 5276 passed / 0 failed, 31 binaries |
+| task fix round, run 1 | `432ad94d` | failed on `run_exits_after_idle_timeout_with_no_connections` |
+| task fix round, run 2 | `432ad94d` | failed on the same test |
+| isolated re-run ×2 | `432ad94d` | passed, 1.14s |
+
+**What makes this datum different from observations 4-9: the two commits are
+byte-identical under `src/peer/`.** `git diff --name-only 44c6baca..432ad94d` returns
+exactly two paths, `src/librarian/mod.rs` and `src/librarian/session_registry.rs`, and
+`session_registry.rs` was a new file at `44c6baca`+1. So the passing run and both failing
+runs compiled the same `peer` sources from the same dependency graph, in the same
+worktree, on the same machine, within roughly an hour. Whatever varies, it is not the
+code under test and not the tree.
+
+**No load condition is claimed here, deliberately.** I did not count concurrent cargo
+processes, sessions, or lock waits at either moment, so I have no measurement to offer —
+and this file already records one load claim retracted by its own author the same day
+(§ *RETRACTED, same day*). What I can say is narrower and checkable: the baseline ran
+while this session had dispatched no subagents, and both failing runs ran while it had at
+least one other agent live. That is a difference in *this session's* activity, not a
+measurement of machine load, and it is offered as a direction to instrument rather than a
+condition.
+
+**Bearing on the `unverified:` field's "this session's four runs refute total load (the
+HEAVIEST run passed, a lighter one failed)".** This run points the other way — its
+lightest run passed and its two busier runs failed — so the refutation is not general.
+Two sessions now disagree about the sign of the load correlation, which is itself
+informative: it means neither has isolated the variable, and a third session reporting
+"load" without a count adds nothing. **The next observation worth recording is one that
+counts something** — concurrent `rustc` processes, run queue depth, or the test's own
+elapsed-vs-budget margin — because the qualitative reports have now saturated at ten and
+produced no discriminator.
+
+**Not attributable to the diff under test**, on this file's own no-call-path argument:
+the change is confined to `src/librarian/`, adds one new module plus a `mod`
+declaration, and has no call path into `src/peer/`. Task was allowed to proceed on that
+basis.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
