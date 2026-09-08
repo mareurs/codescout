@@ -1,7 +1,7 @@
 ---
 id: '2b9cbd34630cf340'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: file-provenance.py scans Bash but not run_command, so every write through codescout''s own shell is invisible to the instrument built to attribute it'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - provenance
 - multi-session
 topic: the working-tree provenance channel and what it cannot see
+closed: 2026-09-08
 ---
 
 ## Summary
@@ -129,7 +130,25 @@ design worked. Its coverage did not.
 
 ## Fix
 
-Not fixed. The change is small and the decision is not:
+**Shipped 2026-09-08 at `5ec4bac8`** (`experiments`), patch-id
+`61e43235f4b7b9412613fff2ccd62845fef8499b`. The three steps below were followed as written; they
+are kept because the second is an obligation this file placed on its own fix, and it was
+discharged rather than skipped.
+
+It landed inside a larger repair of the same function, `94afb1ade8d7e40a` — the librarian branch
+was matching `mcp__codescout__artifact` six days after `ceb5b57a` renamed that tool to `doc`.
+Same selector, same class, same file. Folding them was not convenience: the `Bash` widening and
+the `doc` repair are one edit to one dispatch, and splitting them would have shipped two commits
+neither of which made the function correct.
+
+**Residual re-derived, per the second bullet below.** Against the production `write_targets()`:
+`run_command` **1.8%** of 21421 calls carry a mutating form the matcher does not resolve, against
+`Bash` **2.9%** of 7516. The `Bash` column is the control — it independently reproduces the 2.8%
+in this file's header, which is what makes the `run_command` figure more than a number from a
+selector its own author wrote. It earned that role immediately: the first pass returned 22.5%
+because the selector counted `2>&1` as a file write.
+
+The original plan, followed:
 
 - **Route `run_command` through the same branch.** Its payload key is `command`, identical to
   `Bash`, so `elif name in ("Bash", "mcp__codescout__run_command")` reuses every existing
