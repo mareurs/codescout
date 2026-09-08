@@ -166,7 +166,35 @@ grep 26bfbb2d /tmp/ids.txt
 ```
 
 Patch-id derived here rather than copied from the peer who supplied it; both readings
-agree byte-for-byte. So the corpus's **second** write of the field landed inside the window this record
+agree byte-for-byte.
+
+**Confirmed end-to-end by the event it was written against, 2026-09-08T09:56** — published
+because a re-derivation that *confirms* is a denominator, and absent confirmations are what
+make a population look self-correcting (`CLAUDE.md` § *Testing Discipline*).
+
+The rebase landed roughly forty minutes after the amendment. Measured across it:
+
+| commit | before | after |
+|---|---|---|
+| the cited claim `e1e79b89` | on branch | **orphaned** |
+| this file's four commits | on branch | **orphaned**, rewritten |
+| `bd3d0973`, `4012dcd7`, `488a959e` (already pushed) | on branch | **unchanged SHAs** |
+
+So the discriminator is *pushed vs unpushed*, not age. And the recovery ran clean:
+`grep 26bfbb2d` over the `git patch-id --stable` index returned **exactly one** hit,
+`35674093`, reachable from HEAD, same subject. Zero ambiguity.
+
+**A dead SHA that still `git log`s is the trap worth naming.** `git log -1 e1e79b89`
+succeeded *after* the rebase and printed the right subject — an orphaned object resolves
+until garbage collection, so the check most people reach for reports success on a commit
+that is no longer on any branch. `git merge-base --is-ancestor <sha> HEAD` is the check
+that separates them.
+
+**The SHA above is deliberately NOT being updated to `35674093`.** Chasing it is the
+follow-up the pair convention exists to abolish — *"record the pair once at fix time…
+nothing is owed later"* — and the new SHA would be orphaned by the next rebase anyway. The
+patch-id is the half that resolves; the SHA is a human-readable convenience that is
+expected to rot. So the corpus's **second** write of the field landed inside the window this record
 describes, and the headline number is already `1`, not `0`.
 
 What that does and does not change. It does **not** refute the finding: both writes to date
