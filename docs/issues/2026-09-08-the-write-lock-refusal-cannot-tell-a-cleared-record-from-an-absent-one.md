@@ -149,6 +149,42 @@ Annotate the fixture: **the holder file must be truncated, not deleted**, and th
 whole test. A tidy-up that deletes it instead leaves the assertion passing against the wrong
 state.
 
+**Cite the precedent in the same file rather than inventing the shape.**
+`releasing_the_lock_clears_the_holder_record` already carries exactly this control, annotated as
+such on the test:
+
+```
+/// LOAD-BEARING: the pre-drop assertion is the control. Without it, a build
+/// in which the record is never written at all would satisfy the post-drop
+/// assertion and this test would be monotone under the feature's removal.
+```
+
+Its post-drop assertion is also what establishes truncate-not-delete, and it does so twice over:
+`read_to_string(&record).unwrap()` pins **existence** (it would panic on a deleted file) and
+`assert_eq!(…, "")` pins **emptiness**.
+
+
+### The author had already defended the neighbouring case, which is what makes this a gap rather than an oversight
+
+The same test's doc comment reasons about a **fourth** state and rules it out by design:
+
+> Releasing must clear the record. Otherwise the NEXT holder — one whose own record write failed
+> — is reported under the PREVIOUS holder's name, which is strictly worse than anonymous: it
+> sends a refused party to message someone who has already exited.
+
+That is the same harm class this bug describes — **a refusal message routing the reader
+somewhere useless** — identified and closed, in this function, by whoever wrote it. Truncation on
+release exists precisely to prevent a stale identity being reported as a live one.
+
+So the contract this bug rests on was not undocumented. It was written down, in the subsystem,
+by someone who had thought about exactly this failure mode. Two sessions still reasoned about it
+from `stat` output instead, because neither had a reason to open a test file while diagnosing a
+refusal — `CLAUDE.md` § *Observer Blindness*, third position: published to an audience that never
+reads that surface.
+
+The gap is the sibling of the case that *was* closed. Preventing a **stale** identity from being
+reported as live is done; distinguishing **no identity yet** from **identity deliberately
+cleared** is not, and only the second has "just retry" as its remedy.
 ## Workarounds
 
 On seeing "recorded no identity", check `.codescout/write.lock.holder` directly. A zero-byte
