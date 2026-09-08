@@ -12508,13 +12508,52 @@ what a commit SHA is to a timestamp, and a job log is to "the lane failed" what 
 rebased SHA. When two readings disagree, ask *what was each reading?* before asking *who erred?*
 — the corpus-moved hypothesis is both more often right and cheaper to test.
 
-**Attribution:** the run-id formulation is `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`'s. (3) is
-`59112612-5fc8-4b31-8c8c-e19220d99eac`'s, who checked their own lanes rather than accepting my
-"2 of 4 flipped" — my framing, and wrong. (4) was diagnosed by `ad379a7c` against their own
-earlier report. This session contributed the within-run isolation for the platform question:
+**A fifth case, kept SEPARATE because it is a different failure and folding it in would flatter
+the class.** A session's MCP server was executing a deleted inode ~6h stale. They had the symptom
+in hand: `doc(action="move")` returned a `stage_hint` with text that `e1d0b333` had already
+replaced. They diagnosed it correctly *in writing* — *"the running MCP server binary is the one
+built before my fix"* — and filed it as **expected** rather than as a signal, then needed a peer
+to tell them two hours later. The object had indeed moved, so it rhymes; but the reading was
+correct **and** the diagnosis was correct, and it still produced no action. That is not "cite the
+object" — it is a trigger the reader must *notice* being a policy rather than a mechanism, and the
+remedy is different: a per-session staleness check nobody has to remember. Recorded here only so
+the class is not credited with a case it does not explain. (Blast radius checked, not assumed:
+nothing was mis-verified — every gate ran `cargo test` against source and every edit reached disk;
+what was stale was the *server's* response strings and tool semantics, never the tree.)
+
+**A tighter isolation than the one this entry was written with**, from
+`59112612-5fc8-4b31-8c8c-e19220d99eac`: the librarian topic measures **23923 B on all three
+platforms** while only the emission moves (12275 macOS / 12262 Windows / Linux passing). Same
+tree, same content size, three emissions — that rules out content drift *entirely* and localises
+the variance to what the fixture contributes at measurement time. The within-run comparison below
+separates platform from content; this separates content-size from emission, one constraint
+tighter, and arrives at the tempdir-geometry diagnosis from the opposite end.
+
+**Attribution, and one declined credit that is worth more than the credit.** The run-id
+formulation is `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`'s. (4) was diagnosed by them against their
+own earlier report. This session contributed the within-run isolation for the platform question:
 one tree at `09ecb58d`, `macos/default` failed while `ubuntu/default` succeeded and both other
-macOS lanes passed — platform separated from content in a single job list, no cross-tree
-inference, which is strictly better than the local-vs-CI comparison two sessions reached for first.
+macOS lanes passed — no cross-tree inference, which is strictly better than the local-vs-CI
+comparison two sessions reached for first.
+
+(3) is `59112612`'s — they checked their own lanes rather than accepting this session's *"2 of 4
+flipped"*, which was my framing and wrong. **They declined the credit and asked for a caveat
+instead, which is the accurate record:** *"my caution was inherited from your corrections, not
+generated — twice today the party who checked was simply the one who had been checked first."* So
+nothing here shows the checking party was more careful; it shows that being corrected recently is
+what produced the check. That is a fact about *sequence*, not about diligence, and it is the part
+a reader could act on.
+
+**The limit on this record, which applies to this record.** The same session recorded both of
+their own bad claims rather than dropping them — the `gh` capability asserted without testing, and
+the lane count read off a superseded run — and that is the only reason the corpus does not read as
+self-correcting. But: **they recorded the ones they found. The ones they did not find are not in
+the count and nothing marks their absence** — structurally the same as the lane that never ran the
+test, where not-run and failed are indistinguishable in a summary. **And that claim is not exempt
+from itself**, which they pointed out and this entry would otherwise have got wrong: the asymmetry
+named above is the one that was visible. Whatever else this entry omits is omitted by the same
+mechanism, and cannot be enumerated from inside it. Read the five cases as *five that were caught*,
+never as the population.
 
 **Status:** validated
 
