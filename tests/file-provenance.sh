@@ -324,6 +324,18 @@ has "doc(augment) counts -- the arm _augment used to carry" "$(runc --all docs/d
 tool_use "$A" mcp__codescout__doc '{"action":"create","rel_path":"docs/created_by_doc.md","kind":"bug","title":"t"}'
 has "doc(create) attributes its rel_path" "$(runc --all docs/created_by_doc.md)" "MINE"
 
+# LOAD-BEARING, and found by dogfooding this very repair against a peer's staged archive
+# move: `move` RE-KEYS the artifact (id = sha256(abs_path)), so by the time anyone reads the
+# transcript the recorded `id` names a catalog row that no longer exists. The lookup returns
+# None and the call yields nothing at all. `new_rel_path` is the only key in that input which
+# still resolves -- and archiving is a bug file's NORMAL end state, so this is not an edge
+# case but the librarian write most likely to be asked about.
+#
+# The id here is deliberately ABSENT from the catalog. Seeding it would test the pre-move
+# world, which is the one state this call can never be observed in.
+tool_use "$B" mcp__codescout__doc '{"action":"move","id":"deadbeef00000009","new_rel_path":"docs/archive/moved_by_doc.md"}'
+has "doc(move) attributes new_rel_path after the re-key" "$(runc --all docs/archive/moved_by_doc.md)" "$PEER"
+
 # THE CONTROL, and the only one here that can red under the obvious wrong fix: counting EVERY
 # doc() call satisfies all five assertions above while making a reader an author. find/get are
 # 315 of this project's 816 doc calls, so that mutation would mis-attribute more than it fixed.

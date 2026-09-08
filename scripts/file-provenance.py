@@ -218,8 +218,14 @@ def write_targets(name: str, inp: dict, root: Path):
                   "mcp__codescout__artifact",          # legacy: pre-ceb5b57a name
                   "mcp__codescout__artifact_augment"):  # legacy: now doc(action="augment")
         if inp.get("action") in ARTIFACT_WRITE_ACTIONS or name.endswith("_augment"):
-            if isinstance(inp.get("rel_path"), str):
-                yield inp["rel_path"]
+            # `new_rel_path` is move's destination, and it is load-bearing rather than
+            # thorough: a move re-keys the artifact (id = sha256(abs_path)), so the `id`
+            # recorded in the transcript names a row the move itself deleted and the catalog
+            # lookup below can never resolve it. Without this key an archive move — a bug
+            # file's normal end state — attributes to nobody.
+            for key in ("rel_path", "new_rel_path"):
+                if isinstance(inp.get(key), str):
+                    yield inp[key]
             for key in ("id", "src_id", "dst_id", "into_id", "artifact_id"):
                 got = catalog_paths().get(inp.get(key))
                 if got:
