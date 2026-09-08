@@ -329,10 +329,21 @@ jobs:
         # to and when. Re-check with `wine --version` locally against `WINE_PIN`, and note
         # scripts/build-windows.sh already prints the lane's wine at the top of every `test`
         # run so a local and a lane log are directly comparable.
-        #   Matched to local `wine-11.16` (Arch, 2026-09-02).
-        #   Available for this dist as `winehq-devel=11.16~<codename>-1`.
+        #   Matched to local `wine-11.17` (Arch, 2026-09-08). Was `11.16` (2026-09-02).
+        #   Available for this dist as `winehq-devel=11.17~<codename>-1`.
+        #
+        #   WHY IT MOVED, stated precisely because the obvious reading is wrong: local wine
+        #   went 11.16 -> 11.17, which is the documented trigger for this bump on its own.
+        #   The lane ALSO failed at `d2900ecb` with `winehq-devel : Depends: wine-devel
+        #   (= 11.16~noble-1)` / "held broken packages", exit 100 at setup — but that failure
+        #   was NOT reproducible from outside the runner. Queried the same indices by hand
+        #   2026-09-08: winehq-devel, wine-devel, wine-devel-amd64 and wine-devel-i386 all
+        #   carry 11.16~noble-1 in BOTH binary-amd64 and binary-i386. So the bump is justified
+        #   by the matching rule above, NOT by a diagnosed unavailability, and if the lane is
+        #   still red at 11.17 the cause was never the pin — look at runner apt state or a
+        #   half-published WineHQ update instead of bumping again.
         env:
-          WINE_PIN: "11.16"
+          WINE_PIN: "11.17"
         run: |
           set -euo pipefail
           . /etc/os-release
@@ -431,8 +442,8 @@ jobs:
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
       #   Locally (wine 11.16, zero skips): exactly these fail.
-      #   On THIS lane (wine 9.0 — the PRE-PIN lane; it runs 11.16 since 2026-09-02, so read
-      #   this row as history rather than as current state, run 32975930504): dropping 22
+      #   On THIS lane (wine 9.0 — the PRE-PIN lane; it has run the pinned WineHQ build since
+      #   2026-09-02, so read this row as history rather than as current state, run 32975930504): dropping 22
       #   stale entries passed 21 of
       #   22 — so the local measurement transferred almost perfectly, and the ONE that did
       #   not turned out to share a cause with a skip already here (group 6).
@@ -562,7 +573,7 @@ jobs:
       # Six skips remain and none is a wine-version question: groups 1, 3, 4 and 5 above are
       # a bisect-proven pre-existing cluster and three documented permanents. Group 1 is the
       # only plausible candidate for a future pass — "pre-existing wine failures" was
-      # established under 9.0 and has not been re-measured under 11.16. That is a PASS 3, on
+      # established under 9.0 and has not been re-measured under the pinned wine. That is a PASS 3, on
       # its own, for the same reason this was a pass 2.
       #
       # NOT by editing either test, and NOT by raising timeout_secs, which would only make a

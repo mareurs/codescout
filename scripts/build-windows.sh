@@ -62,7 +62,7 @@
 # failing on MSVC, because wine implements Windows byte-range locks permissively where real
 # Windows makes them MANDATORY — so wine could neither reproduce that defect nor verify its
 # fix (`ee9d9844`). Nor is a green run here a green wine LANE — though the gap narrowed on
-# 2026-09-02: the lane now PINS wine to 11.16 via the WineHQ apt repo, matching this box, so
+# 2026-09-02: the lane now PINS wine to a specific WineHQ build matching this box, so
 # the two are comparable rather than two majors apart. They can still diverge, because the pin
 # is a constant and a dev box tracks its distro; that is why the versions are printed below
 # rather than assumed equal. History:
@@ -119,9 +119,20 @@ case "$CMD" in
     # reading as fact — the shape docs/trackers/issue-clusters.md files as IC-11.
     # Print what THIS box runs, name where CI's is decided, and let the reader
     # compare two live values rather than one live and one remembered.
+    #
+    # CI's half is now READ FROM ci.yml rather than restated here, and the reason is
+    # that this block previously did the thing its own comment forbids: it hardcoded
+    # `11.16` on the line directly below the warning against hardcoding, and by
+    # 2026-09-08 the pin had moved to 11.17 and this line was printing a stale number
+    # into every lane log — the exact "one live and one remembered" it argues against.
+    # A grep against the single source of truth cannot decay; if it ever prints
+    # `unreadable`, the pin's spelling in ci.yml changed and THAT is the thing to fix.
+    ci_pin="$(grep -m1 -oE 'WINE_PIN:[[:space:]]*"[0-9.]+"' \
+        "$PROJECT_ROOT/.github/workflows/ci.yml" 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+' || true)"
     echo ">>> wine here:  $(wine --version 2>/dev/null || echo unknown)" >&2
-    echo ">>> wine in CI: pinned to 11.16 (WineHQ devel), .github/workflows/ci.yml WINE_PIN" >&2
-    echo ">>>             — a constant matched to this box on 2026-09-02, not a live read." >&2
+    echo ">>> wine in CI: pinned to ${ci_pin:-unreadable} (WineHQ devel), .github/workflows/ci.yml WINE_PIN" >&2
+    echo ">>>             — a constant matched to this box, read live from ci.yml, not a live read of CI." >&2
     echo ">>> A green run here is NOT a green wine LANE — nor a green windows-latest." >&2
     echo ">>>   docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"
