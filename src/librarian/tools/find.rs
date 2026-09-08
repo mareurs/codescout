@@ -143,6 +143,85 @@ fn filter_mentions_status(node: &FilterNode) -> bool {
     }
 }
 
+/// The pre-filled claim call for unclaimed bugs on a bug-triage page.
+///
+/// **Why this exists, and why it is the SECOND-best shape.**
+/// `docs/issues/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md`
+/// measured the `taken` field at 0 writes across 79 open bugs, and its corrected root
+/// cause is *not* that the claiming protocol is unpublished. `get_guide("tracker-
+/// conventions")` auto-injects the complete protocol on this very call, and two
+/// sessions received it in full and still did not claim. The audience is not the
+/// variable.
+///
+/// What changed the behaviour, both times, was a peer naming the action in the second
+/// person at the moment of picking work up. That is what this reproduces: the caller's
+/// **own** sessionId, already substituted, beside the specific rows it applies to.
+/// The guide asks the reader to notice a general rule applies, recall their id, and
+/// compose a call; this collapses all three.
+///
+/// `CLAUDE.md` § *Observer Blindness* ranks remedies, and this is the second rung —
+/// "an unconditional policy tied to a trigger that happens anyway" — not the first,
+/// "make the correct path end in a safe state". The first rung is unavailable: no tool
+/// call means *"I am starting work on bug X"*, so nothing can carry the claim as a side
+/// effect. Auto-stamping on any catalog edit was rejected rather than overlooked — it
+/// would claim bugs a session is merely annotating, and a false `taken` names the wrong
+/// session, which is this defect inverted and worse, because it stops the next reader
+/// asking the peer directly.
+///
+/// Returns `None` when nothing is claimable, so the hint never becomes furniture on
+/// pages it cannot act on — a signal present on every response is one nobody reads.
+fn claim_hint(items: &[Value], self_session: Option<&str>, today: &str) -> Option<Value> {
+    // The non-terminal, unheld states. `taken` is excluded because it IS the claim;
+    // terminal states (`fixed`/`mitigated`/`wontfix`) are excluded because prompting a
+    // claim on finished work trains the reader to dismiss the hint.
+    const CLAIMABLE: [&str; 3] = ["open", "investigating", "zombie"];
+
+    let unclaimed: Vec<&str> = items
+        .iter()
+        .filter(|i| i["kind"].as_str() == Some("bug"))
+        .filter(|i| i["status"].as_str().is_some_and(|s| CLAIMABLE.contains(&s)))
+        .filter_map(|i| i["id"].as_str())
+        .collect();
+    if unclaimed.is_empty() {
+        return None;
+    }
+
+    // `<id>` stays a placeholder on purpose — the reader chooses which bug. The
+    // sessionId is the part they cannot cheaply supply, so it is the part that must
+    // arrive concrete.
+    let sid = self_session.unwrap_or("<your-session-id>");
+    let call = format!(
+        "doc(action=\"update\", id=\"<id>\", patch={{\"status\": \"taken\", \"extra\": \
+         {{\"claimed_by\": \"{sid}\", \"claimed_at\": \"{today}\"}}}})"
+    );
+
+    let mut hint = serde_json::Map::new();
+    hint.insert(
+        "note".into(),
+        json!(format!(
+            "{} of these are held by nobody. If you are picking one up, claim it FIRST: a \
+             peer running this same query sees `open` and cannot tell it is yours. Release \
+             with status `investigating` when you stop.",
+            unclaimed.len()
+        )),
+    );
+    hint.insert("unclaimed".into(), json!(unclaimed));
+    hint.insert("call".into(), json!(call));
+    // Null, never a fabricated value. `resolve_self` declines on Windows, on an
+    // ambiguous pid, and when no registry row matches; each of those must read as
+    // "unknown" here rather than as some other session's id.
+    hint.insert("your_session_id".into(), json!(self_session));
+    if self_session.is_none() {
+        hint.insert(
+            "how_to_find_your_session_id".into(),
+            json!("This server could not resolve its own session (no matching registry row, \
+                   an ambiguous parent pid, or a platform without getppid). Your id is a path \
+                   component of your scratchpad directory: /tmp/claude-<uid>/<project>/<SESSION-ID>/scratchpad"),
+        );
+    }
+    Some(Value::Object(hint))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_hints(
     cat: &crate::librarian::catalog::Catalog,
@@ -1211,6 +1290,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "hint": hint,
         });
     }
+    // The claim nudge. Placed last so it reads after the result, at the moment a
+    // reader is choosing a row — which is the timing the whole mechanism rests on.
+    // Resolved per call rather than cached: the registry is written by other processes
+    // and a session's row can appear or move between calls.
+    if let Some(items) = response["items"].as_array() {
+        let home = crate::platform::home_dir();
+        let registry = home.map(|h| {
+            crate::librarian::session_registry::SessionRegistry::load(
+                &crate::librarian::session_registry::default_profile_dirs(&h),
+            )
+        });
+        let self_session = registry
+            .as_ref()
+            .and_then(|r| r.resolve_self(crate::tools::rendezvous::parent_pid() as i64));
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        if let Some(hint) = claim_hint(items, self_session, &today) {
+            response["hints"]["claimable"] = hint;
+        }
+    }
     Ok(response)
 }
 
@@ -1304,6 +1402,61 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(v["count"].as_u64(), Some(2));
+    }
+
+    /// Reachability, not shape. The unit tests above prove what `claim_hint` RETURNS;
+    /// this proves `call` actually invokes it. Until the wiring landed, `cargo build`
+    /// emitted `function claim_hint is never used` — a fully tested function that no
+    /// caller reached, which is `cluster/declared-not-wired` and exactly the state
+    /// CLAUDE.md § *Testing Discipline* names: "an alarm nothing reaches is exactly as
+    /// informative as no alarm". Deleting this test would let the wiring be removed
+    /// with five green unit tests still vouching for it.
+    #[tokio::test]
+    async fn a_bug_page_carries_the_claim_hint_through_the_real_call_path() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_row("a", "a bug nobody holds");
+        row.kind = "bug".into();
+        row.status = "open".into();
+        artifact::upsert(&cat, &row).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"kind": "bug"})).await.unwrap();
+        assert_eq!(v["count"].as_u64(), Some(1));
+
+        let hint = &v["hints"]["claimable"];
+        assert!(
+            !hint.is_null(),
+            "a bug page must carry the claim hint; got hints: {:#?}",
+            v["hints"]
+        );
+        assert_eq!(hint["unclaimed"][0].as_str(), Some("a"));
+        assert!(
+            hint["call"]
+                .as_str()
+                .unwrap()
+                .contains("\"status\": \"taken\""),
+            "the hint must carry the literal claim call: {:#?}",
+            hint["call"]
+        );
+    }
+
+    /// The other direction: silence where it does not apply. A hint attached to every
+    /// response is furniture, and furniture is not read — which would reproduce the
+    /// defect this mechanism exists to fix, one layer out.
+    #[tokio::test]
+    async fn a_non_bug_page_carries_no_claim_hint() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "alpha")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
+            .await
+            .unwrap();
+        assert!(
+            v["hints"]["claimable"].is_null(),
+            "non-bug pages must stay quiet: {:#?}",
+            v["hints"]
+        );
     }
 
     #[tokio::test]
@@ -1677,6 +1830,93 @@ mod tests {
         assert!(
             v["hints"]["more_in_scope"].is_null(),
             "nothing capped → no more_in_scope signal"
+        );
+    }
+
+    fn bug_item(id: &str, status: &str) -> serde_json::Value {
+        serde_json::json!({"id": id, "kind": "bug", "status": status, "title": "t"})
+    }
+
+    #[test]
+    fn claim_hint_is_absent_for_a_non_bug_query() {
+        let items = vec![serde_json::json!({"id": "a", "kind": "tracker", "status": "active"})];
+        assert!(claim_hint(&items, Some("sid-mine"), "2026-09-08").is_none());
+    }
+
+    #[test]
+    fn claim_hint_is_absent_when_every_returned_bug_is_already_claimed() {
+        let items = vec![bug_item("a", "taken"), bug_item("b", "taken")];
+        assert!(
+            claim_hint(&items, Some("sid-mine"), "2026-09-08").is_none(),
+            "nothing is claimable, so the hint would be noise on every future query"
+        );
+    }
+
+    #[test]
+    fn claim_hint_is_absent_for_terminal_bugs() {
+        // `fixed`/`wontfix` are done. Prompting a claim on them would train the reader
+        // to dismiss the hint, which is how a signal stops being read.
+        let items = vec![bug_item("a", "fixed"), bug_item("b", "wontfix")];
+        assert!(claim_hint(&items, Some("sid-mine"), "2026-09-08").is_none());
+    }
+
+    #[test]
+    fn claim_hint_prefills_the_callers_own_session_id_and_names_the_unclaimed_ids() {
+        // The whole point: the guide already documents this call in full and two sessions
+        // read it without acting. What this adds is the caller's OWN id, already
+        // substituted, beside the specific rows it applies to -- address, specificity and
+        // timing, which is the only difference the evidence identified.
+        let items = vec![
+            bug_item("a", "open"),
+            bug_item("b", "taken"),
+            bug_item("c", "investigating"),
+        ];
+        let hint = claim_hint(&items, Some("sid-mine"), "2026-09-08").expect("hint expected");
+        let call = hint["call"].as_str().unwrap();
+        assert!(
+            call.contains("sid-mine"),
+            "caller's id must be substituted: {call}"
+        );
+        assert!(
+            call.contains("2026-09-08"),
+            "claimed_at must be filled: {call}"
+        );
+        // `<id>` legitimately stays a placeholder -- the reader picks WHICH bug. The
+        // session id is the part they cannot cheaply supply, so that is the part that
+        // must arrive concrete.
+        assert!(
+            !call.contains("<your-session-id>"),
+            "the session placeholder must be gone when the id is known: {call}"
+        );
+        let ids: Vec<&str> = hint["unclaimed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["a", "c"], "taken row must be excluded");
+    }
+
+    #[test]
+    fn claim_hint_degrades_to_a_placeholder_rather_than_inventing_a_session_id() {
+        // `resolve_self` returns None on Windows, on an ambiguous pid, and when no row
+        // matches. The hint must still fire -- the rows really are unclaimed -- but it
+        // must never emit a sessionId, because a wrong `claimed_by` makes `taken` name
+        // the wrong session, which is the defect this exists to fix, inverted.
+        let items = vec![bug_item("a", "open")];
+        let hint = claim_hint(&items, None, "2026-09-08").expect("hint still expected");
+        let call = hint["call"].as_str().unwrap();
+        assert!(
+            call.contains("<your-session-id>"),
+            "must be an obvious placeholder, not a guess: {call}"
+        );
+        assert!(
+            hint["your_session_id"].is_null(),
+            "an unknown id must be null, never a fabricated value"
+        );
+        assert!(
+            hint["how_to_find_your_session_id"].is_string(),
+            "a placeholder the reader cannot resolve is worse than no hint"
         );
     }
 

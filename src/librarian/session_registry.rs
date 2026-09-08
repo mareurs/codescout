@@ -221,6 +221,49 @@ impl SessionRegistry {
         }
         first_dead.expect("matches is non-empty, so at least one Dead outcome was recorded")
     }
+
+    /// The caller's own sessionId, resolved from the pid of this server's parent.
+    ///
+    /// The codescout MCP server is spawned by the Claude session it serves, so
+    /// `getppid()` names that session's process and a registry row keyed on that pid
+    /// names the session. This is the registry route `CLAUDE.md` § *Reaching a Peer
+    /// Session* documents for identifying a PEER from the socket its message arrived
+    /// on, pointed inward. Same caveat applies: the row is written by that session's
+    /// own process, so the id is self-asserted — one level short of proof, and far
+    /// above asking a model to recall its own id.
+    ///
+    /// **`None` on every uncertain input, never a guess.** The value is destined for a
+    /// `claimed_by` stamp, and a wrong sessionId there makes `taken` name the wrong
+    /// session: the very defect the claim mechanism exists to fix, inverted. A false
+    /// claim is worse than an absent one, because absence invites a peer to ask while a
+    /// confident wrong answer stops the next reader looking.
+    pub fn resolve_self(&self, parent_pid: i64) -> Option<&str> {
+        // 0 is `rendezvous::parent_pid()`'s Windows sentinel for "no getppid here",
+        // whose own doc argues a zero must degrade to "never matched" rather than to a
+        // wrong match. That reasoning holds only if consumers honour it — this is the
+        // consumer half. No real session runs under pid 0 either, so both readings
+        // agree: unknown.
+        if parent_pid <= 0 {
+            return None;
+        }
+        let mut ids = self
+            .rows
+            .iter()
+            .filter(|r| r.pid == parent_pid)
+            .map(|r| r.session_id.as_str());
+        let first = ids.next()?;
+        // Several rows on one pid is safe ONLY when they name the same session — a
+        // duplicate row left under an old profile by a resume or restart, which
+        // CLAUDE.md records as routine on this machine. Disagreement means a dead
+        // session's row lingered and the OS reused its pid for our parent. Which of the
+        // two is live is precisely what this function has no probe to decide, so it
+        // declines instead of picking one.
+        if ids.any(|id| id != first) {
+            return None;
+        }
+        Some(first)
+    }
+
     /// Liveness for exactly one row — the socket/process/procStart conjunction.
     /// Never returns `UnresolvableHere`; that outcome belongs to `resolve`, which
     /// knows whether any row matched at all.
@@ -420,6 +463,60 @@ mod tests {
             }
             other => panic!("expected UnresolvableHere, got {other:?}"),
         }
+    }
+
+    /// Self-identification: the server's parent IS the Claude session process, so a
+    /// registry row keyed on that pid names the caller. This is the read half of the
+    /// claim mechanism -- without it a pre-filled claim call cannot exist.
+    #[test]
+    fn resolve_self_returns_the_session_id_of_the_row_matching_the_parent_pid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = seed_profile(tmp.path(), ".claude", &row("sid-mine", 4242, "79345929"));
+        let reg = SessionRegistry::load(&[dir]);
+        assert_eq!(reg.resolve_self(4242), Some("sid-mine"));
+    }
+
+    /// The Windows contract, pinned rather than skipped. `rendezvous::parent_pid()` is
+    /// `#[cfg(windows)] -> 0` BY DESIGN, arguing a zero degrades to "never matched"
+    /// rather than to a WRONG match. That reasoning only holds if every consumer treats
+    /// 0 as unknown, so this asserts the consumer's half of it.
+    #[test]
+    fn resolve_self_is_none_for_a_zero_parent_pid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = seed_profile(tmp.path(), ".claude", &row("sid-mine", 0, "79345929"));
+        let reg = SessionRegistry::load(&[dir]);
+        assert_eq!(
+            reg.resolve_self(0),
+            None,
+            "a zero ppid must never resolve, even against a row that literally stores pid 0"
+        );
+    }
+
+    /// Ambiguity resolves to NOTHING, never to a guess. Two rows can share a pid when a
+    /// dead session's row lingers and the OS reuses its pid for this server's parent.
+    /// Returning either one would stamp a claim naming the wrong session -- which makes
+    /// the `taken` field lie in the opposite direction to the defect the claim mechanism
+    /// exists to fix, and a false claim is worse than an absent one because it stops the
+    /// next reader looking.
+    #[test]
+    fn resolve_self_is_none_when_two_rows_share_the_parent_pid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = seed_profile(tmp.path(), ".claude", &row("sid-one", 4242, "79345929"));
+        let b = seed_profile(tmp.path(), ".claude-sdd", &row("sid-two", 4242, "99999999"));
+        let reg = SessionRegistry::load(&[a, b]);
+        assert_eq!(
+            reg.resolve_self(4242),
+            None,
+            "two rows on one pid is ambiguous; a wrong sessionId is worse than none"
+        );
+    }
+
+    #[test]
+    fn resolve_self_is_none_when_no_row_matches_the_parent_pid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = seed_profile(tmp.path(), ".claude", &row("sid-other", 1111, "79345929"));
+        let reg = SessionRegistry::load(&[dir]);
+        assert_eq!(reg.resolve_self(4242), None);
     }
 
     #[test]

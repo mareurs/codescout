@@ -176,13 +176,13 @@ impl Rendezvous {
 }
 
 #[cfg(unix)]
-fn parent_pid() -> u32 {
+pub(crate) fn parent_pid() -> u32 {
     // SAFETY: getppid takes no arguments and cannot fail.
     unsafe { libc::getppid() as u32 }
 }
 
 #[cfg(windows)]
-fn parent_pid() -> u32 {
+pub(crate) fn parent_pid() -> u32 {
     // No getppid here. The hook walks ancestry itself, so a zero degrades to
     // "never matched" rather than to a WRONG match — the safe direction.
     0
