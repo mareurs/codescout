@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 121
-entry_high_water_W: 110
+entry_high_water_W: 111
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -176,6 +176,7 @@ entry_high_water_W: 110
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while `git branch --contains` returned empty. That **conjunction** is the rebase-orphan signature, and only the second half discriminates. `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
 | W-110 | 2026-09-07 | high | **The bug ledger cannot report a claim nobody wrote — enumerate by socket, ask, then claim.** Before starting a bug, enumerated live sessions and asked the two peers sharing this checkout. `codescout-af` named **five** bug files they were actively fixing, **all five reading `open`**; a sibling session independently measured the same population at 60 rows, **zero `taken`**. Then claimed each pick `status: taken` + `claimed_by: <sessionId>` through the catalog | Ledger-based disjointness was the obvious method and would have collided on any of the five — and silently, since two sessions fixing one bug produce two plausible diffs and whoever commits first makes the other's work read as a redundant re-fix. `status: open` is **monotone under an unwritten claim**: the state you want to detect produces exactly the value you are already reading, so "read the ledger more carefully" is the wrong instrument rather than a weaker one. Enumeration bounds who is present; only the ask attributes work. The same round-trips surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit — and later a peer staged five files into the shared index between this session's `git add` and `git commit`. `doctor` then resolved the claim as `claim_held_by_live_session`, deriving pid → name → cwd from the stored sessionId: **first real use of the field in this repo — the mechanism was never missing, the practice was** | validated |
 | W-107 | 2026-09-06 | high | **When adding a READ-only action, the question is not "does it write?" but "is it useful *while* something else is writing?"** `LibrarianAdapter::is_write`'s final arm is `_ => true`, and a write takes the cross-process write lock before dispatch. Correct policy — an unclassified write races on a five-session checkout, an unclassified read is merely over-serialised — but it is priced for **mutation risk**, not usefulness, and so silently mis-prices exactly the class of reads that must answer during a write. `librarian(action="status")` exists to answer *"is a reindex running?"*; a running reindex HOLDS that lock, so left to the default it would have blocked for the whole run and then reported, truthfully, that nothing was running — the new instrument reproducing the exact non-discrimination of the bug it was built to remove. **No test would have caught it:** all five `status::tests` call the action directly and never cross the adapter, so the defect ships green and its failing observation is a *hang*, at the one moment anyone needs the tool. Diagnostics are the class most likely to be added late by someone reasoning about what the action does rather than when it is called. Scouted before writing; the read-set entry is load-bearing, and `server.rs`'s gate forced it to be stated a second time after I had already made the first edit. | `90336870`; bug `6ae552cfc223cd6d`; kin `bug-fix-session-log:W-100` (verify a shipped tool change with one LIVE call after rebuild — done here too, and it is what discharged this fix's `unverified:` field), `bug-fix-session-log:W-106` |
 | W-105 | 2026-09-04 | high | **A fix plan that needs a repo root must first ask whether one EXISTS at every scope it will run under — not merely whether the function has it in hand.** The plan for the `rel_path` filter defect said "normalise the caller's value against the scope's `git_root`". Scouting `compile` → `catalog/find.rs` → `apply_scope` before writing code found no root at either of the first two, and then the finding that killed the approach: `Scope::Umbrella` composes an OR over SEVERAL repo roots, so there is no single root to normalise against **in principle**. | Root-normalisation would have compiled, passed a project-scoped test, and been silently wrong for every `scope="umbrella"` query — the same clean-zero failure mode as the bug it was fixing, in a scope this repo uses. Findings 1–2 alone would still have cost a signature change across `compile`/`compile_composition`/`compile_leaf` plus ~24 call sites. Shipped instead: root-agnostic boundary anchoring, no signature change, correct under every scope, 5 live probes green. The scout also surfaced BL-47's comment twelve lines above the defect describing the identical failure and its remedy. | validated |
@@ -12233,6 +12234,40 @@ session; 3/3 local green at `9c82bda4`.
 **Severity:** med — nothing shipped; the near-miss was a durable false claim in the cluster ledger.
 **Category:** process / peer-verification
 **Promote-when:** a second instance of mutual refinement over an unverified mechanism. Related: `skill-frictions:SKF-22` (*a trigger the model must notice is a policy, not a mechanism*), reached independently from another subsystem.
+
+## W-111 — the patch-id anchor was exercised live, end to end, ten minutes after the SHA it replaced was published
+
+**Valid:** dated 2026-09-08
+
+**Observed.** I reported a bug-file commit to the user as `3516185e`. Minutes later the user
+rebased and pushed. `git cat-file -t 3516185e` still returned `commit` — the object survives — but
+`git branch --contains 3516185e` returned **nothing**: orphaned, reachable by no ref. The SHA in a
+message the user had already read was dead.
+
+`git show 3516185e | git patch-id --stable` gave `8feee2116db2b27b2ee900a12aee3b8822e52839`.
+Dumping `git log origin/experiments -30 -p` through `git patch-id --stable` matched it to
+**`e3c50390`** on the first try, confirmed independently by subject line.
+
+**Why this is a DENOMINATOR, not a catch.** The rule was already in `CLAUDE.md`, already followed,
+and behaved exactly as documented. Nothing was saved that the rule had not already promised, so
+recording it as a save would inflate the class. What it supplies is the thing the rule did not
+have: the 2026-08-19 justification is a *retrospective* count — 10 of 63 archived files that had
+**already** lost their SHA — which measures the wound and never the remedy. This is the remedy
+observed working forward, under a real rebase, on a citation whose death was ~10 minutes old.
+Publish the confirmation so the population does not look self-correcting.
+
+**The generalisable half — the tell is the CONJUNCTION.** `git cat-file -t` returning `commit` is
+not evidence a SHA is live, and read alone it is actively reassuring: the object is still in the
+DB and will be until it is garbage-collected. `branch --contains` returning empty is the
+discriminator, and the pair `type=commit` + `contains=∅` is the exact signature of a rebase-orphan.
+Run both, and read the second.
+
+**Counterfactual.** Without the anchor, recovery is subject-keyword search over the log — the same
+route `CLAUDE.md` measured at 2–153 ambiguous candidates. Here it would have been worse than
+average, because the rebase also landed three sibling commits with near-identical `docs(issues,
+clusters):` subjects from two sessions.
+
+**Status:** validated
 
 ## Template for new entries
 
