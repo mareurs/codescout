@@ -104,7 +104,7 @@ hasnt "peer write is not MINE" "$out" "MINE"
 
 tool_use "$A" mcp__codescout__create_file '{"path":"docs/new.md","content":"hi"}'
 has "create_file counts" "$(run docs/new.md)" "MINE"
-tool_use "$A" mcp__codescout__edit_markdown '{"path":"docs/md.md","heading":"## X","action":"replace","content":"y"}'
+tool_use "$A" mcp__codescout__edit_markdown '{"path":"docs/md.md","heading":"## X","action":"replace","content":"y"}'  # legacy: retired tool name, still present in older transcripts
 has "edit_markdown counts" "$(run docs/md.md)" "MINE"
 
 echo
@@ -259,24 +259,101 @@ c.commit()
 CATALOG_SEED
 runc() { REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" FILE_PROVENANCE_CATALOG="$CAT"          CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1; }
 
-tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"deadbeef00000001","patch":{"body":"x"}}'
+tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"deadbeef00000001","patch":{"body":"x"}}'  # legacy: retired tool name, still present in older transcripts
 has "artifact(update) by id resolves through the catalog" "$(runc --all docs/tracked.md)" "MINE"
 
-tool_use "$B" mcp__codescout__artifact '{"action":"append_entry","id":"deadbeef00000001","id_prefix":"F","entry":{}}'
+tool_use "$B" mcp__codescout__artifact '{"action":"append_entry","id":"deadbeef00000001","id_prefix":"F","entry":{}}'  # legacy: retired tool name, still present in older transcripts
 has "artifact(append_entry) counts too" "$(runc --all docs/tracked.md)" "$PEER"
 
 # Discrimination: the READ actions of the same tool must not make an author of a reader.
-tool_use "$B" mcp__codescout__artifact '{"action":"get","id":"deadbeef00000002"}'
-tool_use "$B" mcp__codescout__artifact '{"action":"find","kind":"bug"}'
+tool_use "$B" mcp__codescout__artifact '{"action":"get","id":"deadbeef00000002"}'  # legacy: retired tool name, still present in older transcripts
+tool_use "$B" mcp__codescout__artifact '{"action":"find","kind":"bug"}'  # legacy: retired tool name, still present in older transcripts
 out="$(runc --all docs/untouched_artifact.md)"
 has "artifact(get)/(find) are not writes" "$out" "UNKNOWN"
 
 # An id absent from the catalog cannot be resolved. It must not be guessed at, and must
 # not crash the run.
-tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"ffffffffffffffff","patch":{"body":"x"}}'
+tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"ffffffffffffffff","patch":{"body":"x"}}'  # legacy: retired tool name, still present in older transcripts
 out="$(runc --all docs/tracked.md)"
 has "an unresolvable id does not break the run" "$out" "THIS session"
 has "and the resolvable ones still answer" "$out" "SHARED"
+
+echo
+echo "== doc() is that SAME tool renamed, and the rename made every librarian write invisible =="
+# The block above kept passing across a rename that broke the thing it guards. The tool was
+# `artifact` until ceb5b57a (2026-09-02) and is `doc` now; the fixture re-types the same dead
+# string the matcher holds, so both halves agreed with each other and neither with the running
+# server. Measured 2026-09-08: 501 write-action doc() calls in this project invisible for six
+# days, while docs/PROBES.md said the route was handled. UNKNOWN is the failure mode, and the
+# script's own docstring forbids reading it as "not mine" -- so the blindness presented as the
+# tool being appropriately humble.
+#
+# LOAD-BEARING: these cases keep their OWN artifact id and path. Reusing docs/tracked.md would
+# inherit the writes above, making every verdict here SHARED and unable to distinguish MINE.
+# LOAD-BEARING: do NOT fold these into the artifact block. The legacy name must keep its own
+# cases -- old transcripts still hold it -- and these must red if `doc` alone is dropped.
+python3 - "$CAT" "$T/repo" <<'CATALOG_SEED_DOC'
+import sqlite3, sys, os
+db, root = sys.argv[1], sys.argv[2]
+c = sqlite3.connect(db)
+for aid, rel in (("deadbeef00000003", "docs/doc_tracked.md"),
+                 ("deadbeef00000004", "docs/doc_augmented.md"),
+                 ("deadbeef00000005", "docs/doc_read_only.md")):
+    c.execute("INSERT INTO artifact VALUES (?,?)", (aid, os.path.join(root, rel)))
+c.commit()
+CATALOG_SEED_DOC
+
+tool_use "$A" mcp__codescout__doc '{"action":"update","id":"deadbeef00000003","patch":{"body":"x"}}'
+has "doc(update) by id resolves through the catalog" "$(runc --all docs/doc_tracked.md)" "MINE"
+
+tool_use "$B" mcp__codescout__doc '{"action":"append_entry","id":"deadbeef00000003","id_prefix":"F","entry":{}}'
+has "doc(append_entry) counts too" "$(runc --all docs/doc_tracked.md)" "$PEER"
+
+# augment was a SEPARATE TOOL (artifact_augment), carried in write_targets by a
+# `name.endswith("_augment")` test. As a doc() ACTION that test never fires, so the action set
+# has to name it -- which is why repairing the tool name alone leaves this case red.
+#
+# LOAD-BEARING: its OWN artifact id and path, and it must stay the only write to that path.
+# Asserted against docs/doc_tracked.md this was VACUOUS -- B's append_entry above already
+# satisfies "$PEER", so dropping "augment" from the set killed zero assertions (measured, it
+# survived the mutation). An aggregate cannot answer a question about one member.
+tool_use "$B" mcp__codescout__doc '{"action":"augment","id":"deadbeef00000004","augment":{"prompt":"p"}}'
+has "doc(augment) counts -- the arm _augment used to carry" "$(runc --all docs/doc_augmented.md)" "$PEER"
+
+# create carries rel_path rather than an id: a new artifact has no catalog row to resolve yet.
+tool_use "$A" mcp__codescout__doc '{"action":"create","rel_path":"docs/created_by_doc.md","kind":"bug","title":"t"}'
+has "doc(create) attributes its rel_path" "$(runc --all docs/created_by_doc.md)" "MINE"
+
+# THE CONTROL, and the only one here that can red under the obvious wrong fix: counting EVERY
+# doc() call satisfies all five assertions above while making a reader an author. find/get are
+# 315 of this project's 816 doc calls, so that mutation would mis-attribute more than it fixed.
+#
+# LOAD-BEARING: the id must be one the catalog RESOLVES. Written against an absent id this was
+# vacuous -- the lookup returned None under the mutation too, so the case passed for a reason
+# having nothing to do with get/find being excluded (measured: `if True:` survived it). A
+# control that cannot reach the failing value is not a control.
+tool_use "$B" mcp__codescout__doc '{"action":"get","id":"deadbeef00000005"}'
+tool_use "$B" mcp__codescout__doc '{"action":"find","kind":"bug"}'
+has "doc(get)/(find) are not writes" "$(runc --all docs/doc_read_only.md)" "UNKNOWN"
+hasnt "and name no author" "$(runc --all docs/doc_read_only.md)" "$PEER"
+
+echo
+echo "== run_command is codescout's own shell, and writes through it are writes =="
+# 2b9cbd34630cf340: the shell branch was keyed on the harness's `Bash` alone, so every
+# redirect, `sed -i` and `rm` issued through codescout's own shell was invisible to the
+# instrument built to attribute exactly those. Same function and same class as the doc() miss,
+# which is why both land together. Both tools carry the command under `command`.
+tool_use "$A" mcp__codescout__run_command '{"command":"echo hi > docs/via_run_command.md"}'
+has "run_command redirect names its target" "$(runc --all docs/via_run_command.md)" "MINE"
+
+tool_use "$B" mcp__codescout__run_command '{"command":"sed -i s/a/b/ docs/sed_by_run_command.md"}'
+has "run_command sed -i names its target" "$(runc --all docs/sed_by_run_command.md)" "$PEER"
+
+# THE CONTROL. run_command is overwhelmingly a READ tool here, so a branch that attributed
+# every path it mentions would make an author of every grep -- the same over-attribution the
+# script's docstring rejects for mention-counting, arriving through a different door.
+tool_use "$B" mcp__codescout__run_command '{"command":"grep -n fn docs/read_by_run_command.md"}'
+has "a read-only run_command is not a write" "$(runc --all docs/read_by_run_command.md)" "UNKNOWN"
 
 echo
 echo "== a python heredoc that writes a file is a write =="

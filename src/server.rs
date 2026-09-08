@@ -3820,6 +3820,142 @@ mod tests {
         );
     }
 
+    /// The same drift guard as `prompt_surfaces_reference_only_real_tools`, one directory
+    /// over, for the PROBES — which were outside its population until 2026-09-08.
+    ///
+    /// `scripts/file-provenance.py` answers *"which session wrote this working-tree file?"*
+    /// by matching tool names in Claude Code transcripts — the positive identifier
+    /// `CLAUDE.md` § *Reaching a Peer Session* sends you to when a shared-`target/` red
+    /// carries no author. On 2026-09-02 `ceb5b57a` renamed the `artifact` tool to `doc`. The
+    /// probe kept matching `artifact` and went blind to **every librarian write for six
+    /// days** (501 write-action calls in this project) while `docs/PROBES.md` still
+    /// advertised the route as handled.
+    ///
+    /// Its 58 CI-enforced cases all stayed green, and that is why `tests/file-provenance.sh`
+    /// is in the population beside the probe: the FIXTURE re-types the same dead string the
+    /// matcher holds, so the two halves agreed with each other and neither with the running
+    /// server (§ *Testing Discipline* — *"mutate the PRODUCTION path, not the test's
+    /// inputs"*). Gating only the probe would leave the suite free to keep vouching for a
+    /// name nothing answers to.
+    ///
+    /// TWO DIRECTIONS, and only the first catches the defect above:
+    ///
+    /// - **Positive** — every write-capable tool must APPEAR in the probe. A live write tool
+    ///   *missing* is the defect; a dead name merely sitting in a set is inert, because it
+    ///   only ever fails to match. This is the half that reds on a rename.
+    /// - **Negative** — no unmarked dead name. Weaker alone: its cheapest repair is to mark
+    ///   the old name legacy, which leaves the blindness exactly where it was. It earns its
+    ///   place by forcing a DECISION at each site instead of letting a rename pass in
+    ///   silence.
+    ///
+    /// `legacy` on the line is the escape, and it is OWED rather than a convenience: retired
+    /// names are still present in older transcripts, so the probe must keep matching them. A
+    /// gate over a namespace with no escape refuses work you can describe (§ *Parsers Over a
+    /// Namespace*).
+    #[tokio::test]
+    async fn provenance_probes_reference_only_real_tool_names() {
+        use std::collections::HashSet;
+
+        const PROBE_PY: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/file-provenance.py"
+        ));
+        const PROBE_SH: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/file-provenance.sh"
+        ));
+        let surfaces: &[(&str, &str)] = &[
+            ("scripts/file-provenance.py", PROBE_PY),
+            ("tests/file-provenance.sh", PROBE_SH),
+        ];
+
+        // Kept explicit because the registry cannot answer it: `Tool` carries no
+        // writes-files flag, and inferring one from the name is precisely how `doc` — which
+        // does not look like an editor — was missed. The list is checked back against the
+        // registry below so it cannot itself go stale.
+        let write_capable: &[&str] = &[
+            "create_file",
+            "doc",
+            "edit_code",
+            "edit_file",
+            "run_command",
+        ];
+
+        // NON-VACUITY FIRST. Every check below is a filter, and a filter over an empty input
+        // passes — so a broken extraction would report a clean gate. Same reason as
+        // `the_guard_is_not_vacuous` in tests/feature_lanes.rs.
+        assert!(
+            !write_capable.is_empty(),
+            "write_capable is empty — the positive half cannot fail"
+        );
+        let re = regex::Regex::new(r"mcp__codescout__([a-z][a-z_0-9]*)").unwrap();
+        let occurrences: usize = surfaces.iter().map(|(_, b)| re.find_iter(b).count()).sum();
+        assert!(
+            occurrences > 0,
+            "no mcp__codescout__ tokens found across {} surfaces — the extraction is broken \
+             and every assertion below would pass on nothing",
+            surfaces.len()
+        );
+
+        let mut problems = Vec::<String>::new();
+
+        for tool in write_capable {
+            if !PROBE_PY.contains(&format!("mcp__codescout__{tool}")) {
+                problems.push(format!(
+                    "scripts/file-provenance.py never names `mcp__codescout__{tool}`, a \
+                     write-capable tool — so every write through it is invisible to the \
+                     instrument built to attribute writes. This is the shape of the \
+                     2026-09-02 doc() regression, which returned UNKNOWN rather than an \
+                     error and went unnoticed for six days."
+                ));
+            }
+        }
+
+        // Registry-dependent, so librarian-only. `--no-default-features` drops every
+        // librarian tool from `server.tools` while these two files do not vary by feature, so
+        // the lean lane would report `doc` as drift when the probe is correct — the same
+        // asymmetry documented in prompt_surfaces_reference_only_real_tools above.
+        if cfg!(feature = "librarian") {
+            let (_dir, server) = make_server().await;
+            let real: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+
+            for (surface, body) in surfaces {
+                for line in body.lines() {
+                    if line.contains("legacy") {
+                        continue;
+                    }
+                    for cap in re.captures_iter(line) {
+                        let ident = cap.get(1).unwrap().as_str();
+                        if real.contains(ident) {
+                            continue;
+                        }
+                        problems.push(format!(
+                            "{surface}: `mcp__codescout__{ident}` names no registered tool. \
+                             Point it at the live tool, or — if the probe must keep matching \
+                             it for older transcripts — mark that line `legacy`."
+                        ));
+                    }
+                }
+            }
+
+            for tool in write_capable {
+                if !real.contains(tool) {
+                    problems.push(format!(
+                        "write_capable names `{tool}`, which is not a registered tool — this \
+                         list has drifted and is asserting about something that no longer \
+                         exists"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "provenance-probe tool-name drift:\n  {}",
+            problems.join("\n  ")
+        );
+    }
+
     /// A param a prompt surface names for a tool must be a param that tool advertises.
     ///
     /// Sibling of [`prompt_surfaces_reference_only_real_tools`], which checks backticked

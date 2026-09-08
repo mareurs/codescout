@@ -57,19 +57,25 @@ from pathlib import Path
 CS_WRITE_TOOLS = {
     "mcp__codescout__edit_file",
     "mcp__codescout__edit_code",
-    "mcp__codescout__edit_markdown",
     "mcp__codescout__create_file",
-    "mcp__codescout__replace_symbol",   # legacy name, still in older transcripts
+    "mcp__codescout__edit_markdown",    # legacy: folded into edit_file
+    "mcp__codescout__replace_symbol",   # legacy: name, still in older transcripts
     "mcp__codescout__insert_code",      # legacy
     "mcp__codescout__remove_symbol",    # legacy
 }
 NATIVE_WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
-# artifact() writes markdown but is addressed by `id`, so its calls carry no path at all.
-# In this repo trackers and bug files go through it almost exclusively -- omitting it made
-# the tool report UNKNOWN for three files its own author had just edited.
+# doc() writes markdown but is addressed by `id`, so its calls carry no path at all. In this
+# repo trackers and bug files go through it almost exclusively -- omitting it made the tool
+# report UNKNOWN for three files its own author had just edited.
+#
+# LOAD-BEARING: `augment` is in this set because it was once a SEPARATE TOOL
+# (artifact_augment), caught in write_targets by a `name.endswith("_augment")` test. As a
+# doc() ACTION that test never fires, so removing it here silently un-covers every
+# augmentation write and no other assertion notices.
+# `event_create` is deliberately absent: it writes a catalog row, not the file.
 ARTIFACT_WRITE_ACTIONS = {"create", "update", "move", "delete", "graft", "link",
-                          "append_entry", "update_entry"}
+                          "append_entry", "update_entry", "augment"}
 
 # Python snippets run through Bash. The target lives inside the script body, either as a
 # literal or as a variable assigned one line earlier.
@@ -208,7 +214,9 @@ def write_targets(name: str, inp: dict, root: Path):
         for key in ("path", "file_path"):
             if isinstance(inp.get(key), str):
                 yield inp[key]
-    elif name in ("mcp__codescout__artifact", "mcp__codescout__artifact_augment"):
+    elif name in ("mcp__codescout__doc",
+                  "mcp__codescout__artifact",          # legacy: pre-ceb5b57a name
+                  "mcp__codescout__artifact_augment"):  # legacy: now doc(action="augment")
         if inp.get("action") in ARTIFACT_WRITE_ACTIONS or name.endswith("_augment"):
             if isinstance(inp.get("rel_path"), str):
                 yield inp["rel_path"]
@@ -219,7 +227,11 @@ def write_targets(name: str, inp: dict, root: Path):
     elif name in NATIVE_WRITE_TOOLS:
         if isinstance(inp.get("file_path"), str):
             yield inp["file_path"]
-    elif name == "Bash":
+    # run_command is codescout's own shell and carries the command under the same key, so a
+    # write issued through it is the same event as a Bash write. Keying on "Bash" alone made
+    # every redirect / sed -i / rm through codescout invisible to this tool
+    # (docs/issues/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md).
+    elif name in ("Bash", "mcp__codescout__run_command"):
         cmd = inp.get("command")
         if isinstance(cmd, str):
             for pat in BASH_WRITE_PATTERNS:
