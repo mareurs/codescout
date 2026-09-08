@@ -1,13 +1,14 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
 - peer-sessions
 - authorship
 - provenance
+claimed_at: 2026-09-08
 claimed_by: c9ab2c8d-dd74-43f4-9940-25756379a312
-closed: null
+closed: 2026-09-08
 opened: 2026-09-01
 owner: marius
 related:
@@ -234,6 +235,23 @@ join covers **live** writers only, which is the common case precisely because
 `file-provenance.py` is windowed to recent writes.
 
 ## Fix
+
+**Shipped 2026-09-08 at `14e07fb3`** (`experiments`), patch-id
+`3ec07f35c1c5169c95bb024826a981a9661d4b0c`. Recorded as a pair at fix time: the SHA is
+positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and
+survives rebase and cherry-pick. Single-parent commit, so the patch-id is real — a merge emits no
+diff and the pipeline would return empty with exit 0.
+
+**Whole-tree gate green in a single run, 2026-09-08, in the mandated order:** `cargo fmt --all --
+--check` exit 0 with **empty output** (the check form, deliberately — the writing form rewrites
+every peer's uncommitted Rust, and three peer sessions shared this checkout at the time), clippy
+exit 0, LEAN exit 0, DEFAULT exit 0 with **5533 passed / 0 failed** and run **last** so the shared
+`target/debug/codescout` is left librarian-bearing. Plus `tests/file-provenance.sh` **102/102** and
+a **13/13** mutation kill against the production path.
+
+**Not verified on Windows or macOS** — nothing here is platform-specific (no path separators are
+constructed; `/proc` is not read, `os.kill(pid, 0)` is the liveness probe), but this ran on Linux
+only and CI runs on push, which has not happened.
 
 Two parts. **Both are now done**, and they were done at different times by different
 sessions — part 1 had already landed before this fix was picked up.
