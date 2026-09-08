@@ -733,7 +733,23 @@ mod tests {
         assert!(logged.contains("\"id\":\"a:1\""));
     }
 
-    #[tokio::test]
+    /// LOAD-BEARING `start_paused`, measured rather than stylistic. The production loop
+    /// waits on `tokio::time::timeout(idle, listener.accept())` — a TOKIO timer — so
+    /// virtual time drives the idle timeout deterministically and the scheduler leaves
+    /// the assertion entirely.
+    ///
+    /// Under real time this asserted an exit within 10s of a 1s timeout: a 9x margin a
+    /// loaded scheduler still beat in 5 of 8 full-suite runs on 2026-09-08. The load is
+    /// the SUITE'S OWN — instrumented at `load1` 48 on 64 cores from a launch where the
+    /// machine sat at 1.5 — so this is not a peer-coordination problem and no amount of
+    /// waiting for a quiet machine fixes it.
+    ///
+    /// Do NOT simplify back to `#[tokio::test]`: that reintroduces
+    /// `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`,
+    /// which cost three sessions eight red gate runs in one day. Still discriminating —
+    /// mutating the loop's `break` to `continue` kills it, in 0.12s rather than the 10s
+    /// a real clock spends first.
+    #[tokio::test(start_paused = true)]
     async fn run_exits_after_idle_timeout_with_no_connections() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
@@ -750,13 +766,19 @@ mod tests {
         .await;
         assert!(
             res.is_ok(),
-            "run() did not exit within 10s of a 1s idle timeout"
+            "run() did not exit after its idle timeout fired — the loop's Err(_elapsed) \
+             arm must end it. The 10s above is VIRTUAL under `start_paused`: a \
+             hang-detector the runtime jumps to instantly, never a wall-clock budget."
         );
         assert!(res.unwrap().is_ok(), "run() returned an error");
         assert!(!sock.exists(), "socket file should be cleaned up on exit");
     }
 
-    #[tokio::test]
+    /// LOAD-BEARING `start_paused`: the 5s below is a hang-detector, not a budget. This
+    /// path returns before reaching any timer — the lock is held, so `run_with_lock`
+    /// bails at `try_lock_exclusive` — which is why virtual time is safe here, and why
+    /// the bound must never be read as "it was fast enough".
+    #[tokio::test(start_paused = true)]
     async fn run_exits_quietly_when_lock_is_held() {
         use fs4::fs_std::FileExt;
         let dir = tempfile::tempdir().unwrap();
