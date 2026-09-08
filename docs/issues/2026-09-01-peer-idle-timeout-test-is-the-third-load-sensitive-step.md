@@ -608,7 +608,12 @@ message.
 > machine quiet at its busiest sampled moment.
 >
 > **Sample `load1` ALONGSIDE a process count, never instead of it, and name which you read.**
-> They are not substitutes. Denominator now **5 fail / 3 pass** across two sessions.
+> They are not substitutes. **This entry's own tally is `ad379a7c`'s six runs only — 4 fail /
+> 2 pass** — deliberately, because a cross-session total is a number this entry cannot keep
+> current: the version written here an hour ago said *5 fail / 3 pass* and was stale within it,
+> when `59112612` corrected their own contribution from 1/1 to 2/1. A count must arrive with its
+> unit **and** its scope, and the scope a section can honestly own is its author's. **The
+> cross-session total lives in the thirteenth**, whose author can maintain it.
 ### Thirteenth observation, 2026-09-08 — the twelfth's METRIC disagrees with the load by an order of magnitude, and the load is `rust-analyzer`
 
 Reported by `59112612`. **Two** failures, one pass, and a correction to the *instrument* the
