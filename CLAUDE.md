@@ -307,9 +307,15 @@ appears to.**
 | discovery — `ListAgents` | `$CLAUDE_CONFIG_DIR/sessions/*.json` | **per-profile** |
 | delivery — `SendMessage` | `/run/user/<uid>/cc-socks/<pid>.sock` | **per-user, shared** |
 
-This machine runs three profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`), so
-`ListAgents` returns *your profile's* registry minus yourself and presents that short count as
-the population, with nothing marking it a subset. **Measured 2026-09-01: `ListAgents` reported
+This machine may run several profiles, so `ListAgents` returns *your profile's* registry minus
+yourself and presents that short count as the population, with nothing marking it a subset. **The
+number is deliberately not stated here.** It is a per-machine fact — the same reason umbrella
+membership is not recorded in this repo — and the count that used to sit in this sentence had
+decayed by 2026-09-08: it named three profiles when seven config dirs existed, five of them
+holding a `sessions/`. Nothing in the argument depends on it, and Step 1 of the skill below
+enumerates the live set. Where the operator's *working* set is declared is their own global
+`CLAUDE.md`, which is what governs config-application scope; that is a different question from
+discovery and the two must not be conflated. **Measured 2026-09-01: `ListAgents` reported
 2 peers; the real figure was 16 sessions across 3 profiles, 6 of them in this checkout.** Three
 sessions in this very tree were invisible to it and reachable throughout.
 
