@@ -169,8 +169,17 @@ catalog layer the move is atomic; on disk it is a tracked *deletion* plus an unt
 *addition*, so every selector defined over index entries — `git add -u`, `git commit
 -a` — enumerates only the deletion and commits an archive that silently un-happened.
 There is no count of what was missed, because an untracked file is never a skipped
-candidate: it is never enumerated. `git status --short` showing one `R` rename line per
-pair is the positive confirmation; a ` D` plus a `??` is half-staged. The `move`
+candidate: it is never enumerated. The positive confirmation is that **both halves are lettered in column 1** of `git
+status --short` — either one `R` line, or a `D` plus an `A`; a leading space (` D`) or a
+`??` is half-staged. **Do not confirm on the `R` alone.** `R` is git's *similarity*
+verdict, so it is monotone in both directions and has failed in each: it vanishes
+exactly when the archive is most correct — writing the outcome, fix SHA and patch-id
+into a bug file before moving it drops similarity under git's 50% default (44% at
+`f7d61237`) — and it appears identically when the destination holds a **stale** copy of
+its source (similar enough to pair — a broken move then renders the same as a good one). It answers
+neither *"are both halves staged"* nor *"does the destination hold the bytes I just
+wrote"*; for the second, check the destination for a token you wrote just before the
+move. The `move`
 response carries `stage_together` and `stage_hint` saying exactly this — both paths
 were always reported, and reporting them was measured insufficient: one session read
 them six times across six moves and still had to be told the action.

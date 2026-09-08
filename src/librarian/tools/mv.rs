@@ -248,9 +248,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Deliberately path-free. `stage_together` is relativized by
         // `path_strip::PATH_KEYS` and a prose string is not, so a path embedded here
         // would render absolute beside a relative sibling.
+        //
+        // The confirmation names two PROPERTIES — staged-ness and content — and warns
+        // against the LETTER, because `R` is monotone in both directions and failed in
+        // each. It vanishes when the archive is most correct (writing the outcome, SHA
+        // and patch-id into the body before moving drops similarity to 44%, under git's
+        // 50% default), and it appears when the archive is most broken (a destination
+        // holding a stale copy is ~95% similar, so a bad move renders identically).
+        // Two sessions were misled in opposite directions by the same sentence:
+        // docs/issues/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
+        // docs/trackers/bug-fix-session-log.md § F-111
         "stage_hint": "Stage both halves of this move together — `git add -- <old> <new>` \
-                       using the two entries of `stage_together` — then confirm that `git \
-                       status --short` shows a single `R` rename line. `git add -u` and `git \
+                       using the two entries of `stage_together` — then confirm in `git \
+                       status --short` that both halves are STAGED, i.e. lettered in \
+                       column 1: either one `R` line, or a `D` plus an `A`. A leading \
+                       space (` D`) or a `??` is half-staged. Do NOT confirm on the `R` \
+                       alone — it is a SIMILARITY verdict, not a staging or a content one: \
+                       it drops out when the move also rewrote the body (measured 44%, \
+                       under git's 50% default), and it appears identically when the \
+                       destination holds a STALE copy. For content, check the destination \
+                       for something you wrote just before the move. `git add -u` and `git \
                        commit -a` are defined over paths that already have an index entry, \
                        so they take the deletion and never enumerate the addition, which \
                        undoes the archive without reporting anything.",
@@ -487,9 +504,107 @@ mod tests {
             "the hint must name the selector that silently half-stages: {hint}"
         );
         assert!(
-            hint.contains('R'),
-            "the hint must name the rename line that confirms both halves landed: {hint}"
+            hint.contains("git status --short"),
+            "the hint must name the command that confirms the staging landed: {hint}"
         );
+        // WHAT that command must show is asserted by
+        // `the_archive_confirmation_names_staged_ness_and_content_on_both_surfaces`.
+        // This assertion read `hint.contains('R')` until 2026-09-08 and was doubly wrong:
+        // it pinned the letter this bug removed, and a bare `contains('R')` matches any
+        // capital R in any word, so it never discriminated the rename line at all.
+    }
+
+    /// The archive confirmation must name two PROPERTIES — staged-ness and content — on
+    /// BOTH surfaces that state it, and must not rest on git's `R` letter.
+    ///
+    /// `R` is a SIMILARITY verdict, and it is monotone in opposite directions across the
+    /// two failures that actually happened, so a check written on the letter is blind to
+    /// both:
+    ///
+    /// - It VANISHES when the archive is most correct. Writing the outcome, fix SHA and
+    ///   patch-id into a bug file before moving it is the *normal* archive flow, and it
+    ///   drops similarity under git's 50% default — measured 44% at `f7d61237`, six
+    ///   points under. A correct, fully staged move then renders `D` + `A`, a shape the
+    ///   old wording named nowhere, so a correct archive read as unconfirmed.
+    ///   docs/issues/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
+    /// - It APPEARS when the archive is most broken. A destination holding a stale copy
+    ///   of its source is similar enough to pair, so a bad move renders `R` identically
+    ///   to a good one (F-111 estimates ~95%; not re-measured here — what is certain is
+    ///   that it paired, which is how that session was misled). One session cited that
+    ///   `R` as proof the destination held fresh bytes, twice in one day.
+    ///   docs/trackers/bug-fix-session-log.md § F-111
+    ///
+    /// **Both surfaces are asserted here because nothing else checks that they agree.**
+    /// The hint and the guide were written together and say the same thing, so a reader
+    /// who cross-checks one against the other finds agreement and learns nothing — two
+    /// surfaces, one claim, no independent check. This is that check.
+    ///
+    /// The guide assertions are SCOPED to the staging paragraph, and the scoping is
+    /// load-bearing rather than tidiness: `stale` occurs 10 times elsewhere in
+    /// `tracker-conventions.md`, so an unscoped `contains("stale")` stays green with this
+    /// entire paragraph deleted. The slice is asserted non-empty for the same reason — if
+    /// either anchor string moves, an empty slice makes every assertion below vacuous
+    /// instead of red.
+    ///
+    /// Mutation per guarded SITE, since one kill says nothing about the other: reverting
+    /// EITHER surface to "shows a single `R` rename line" reds this test, and neither
+    /// reversion is caught by the other surface's assertions.
+    #[tokio::test]
+    async fn the_archive_confirmation_names_staged_ness_and_content_on_both_surfaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let hint = result["stage_hint"]
+            .as_str()
+            .expect("stage_hint must be emitted on every move");
+
+        let guide = crate::prompts::topic_body("tracker-conventions")
+            .expect("the tracker-conventions guide must compile in");
+        let from_anchor = guide
+            .find("stage BOTH halves")
+            .map(|i| &guide[i..])
+            .expect("the staging paragraph's opening anchor must exist in the guide");
+        let section = match from_anchor.find("**Then re-point") {
+            Some(i) => &from_anchor[..i],
+            None => from_anchor,
+        };
+        assert!(
+            section.len() > 400,
+            "non-vacuity: the staging paragraph must be a real slice, not a collapsed one \
+             ({} bytes) — if the anchors moved, every assertion below passes on nothing",
+            section.len()
+        );
+
+        for (surface, text) in [("stage_hint", hint), ("tracker-conventions guide", section)] {
+            let lower = text.to_ascii_lowercase();
+            assert!(
+                lower.contains("column 1"),
+                "{surface} must state the STAGED-NESS discriminator — both halves lettered \
+                 in column 1 — rather than a letter whose presence depends on how much of \
+                 the body the archiver rewrote: {text}"
+            );
+            assert!(
+                lower.contains("similarit"),
+                "{surface} must say `R` is a SIMILARITY verdict; without that, a reader \
+                 takes the letter for a staging check or a content check: {text}"
+            );
+            assert!(
+                lower.contains("stale"),
+                "{surface} must name the STALE-destination case, which renders `R` \
+                 identically to a correct move (F-111): {text}"
+            );
+        }
     }
 
     /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
