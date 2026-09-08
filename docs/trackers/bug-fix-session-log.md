@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 121
+entry_high_water_F: 122
 entry_high_water_W: 111
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 111
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-122 | 2026-09-08 | med | self-friction | open | **Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open.** Both READ-side, which is what makes them new rather than more of `IC-10` — every prior member is write-side, and both of that class's remedies (ship a channel; stop at "not mine") are no-ops when the channel was already open. The two fall on OPPOSITE rows of `IC-10`'s instrument table (uncommitted/`claimed_by`, committed/`Session-Id` trailer), so the gap is orthogonal to the instrument axis: having an instrument and consulting it are different events. Instance 2 is the first recorded failure of that table's committed row, which had stood since 2026-09-01 as a claim about *availability* rather than consultation. Candidate mechanism survives `SKF-22` because composing the message IS the trigger. Anchor such claims to a git object, never a clock — a `11:30` wrong in BOTH parties' accounts nearly inverted the finding |
 | F-121 | 2026-09-07 | med | process/peer-verification | open | **Two sessions ran three rounds of good-faith falsification over a repair mechanism that does not exist.** R1: the discriminator is *direction* (move vs write). A bare `git mv` falsified it. R2: *trigger* — an action emitting an event a sweep hangs off. R3 refined trigger to necessary-not-sufficient and routed it to `IC-18`. **No round checked the sweep exists.** It is a documented grep in `get_guide("tracker-conventions")`; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*; `src/` contains no `sweep_citations`, only `graft.rs` re-pointing catalog ROWS. The refuting datapoint came from the theorising session — 5 archive moves left 7 stale citations, none swept, found by a deliberate grep and then cited as evidence that triggers fire. **Each round replaced a proxy with a sharper proxy, so the sequence read as convergence on the truth**; a falsification exchange is unusually good at making mutual sharpening resemble an existence check. The misleading evidence was real, not imagined: `doc(move)` reports `history_grafted{events,links,…}`, true of catalog rows, while the `cites` edges it re-points are themselves derived from the stale prose — visible automatic repair sitting upstream of what stays broken. Near-miss: a false class note into `IC-18`, a closed set other sessions read as settled; withdrawn before landing. Design item filed as `I-9` (`9c82bda4`). Kin `SKF-22`, `OB-1` |
 | F-120 | 2026-09-07 | med | test-design/evidence | fixed-verified | **Published a zero backed by a control that the exact failure mode it was chosen to exclude also satisfies.** Shipped `frontmatter_status_mismatch` (`765a1402`), reported **0 findings over 4727 artifacts**, and cited `missing_file: 4` from the same report as proof "the scan demonstrably opens files". `missing_file` fires on an **absent** path — a `stat`, not a read — so a scan that enumerated and stat'd every row while reading **none** produces exactly that pair. The four rows were also in another repo, outside the scope the `0` described, so control and measurement were never taken over one population. The obvious second control, `frontmatter_id_mismatch`, **also read 0** — two zeroes agreeing is one blind spot counted twice. What actually carried the result was a planted-positive test asserting the check is REACHED by the default scan, which survived the correction only because it **predated the doubt** (a control written after is selected by it). Raised by a peer's independent retraction; corrected same day in `0153d04f`. **Cheap generalised check: ask what the control would read if the thing under test were wholly broken. If unchanged, it is not evidence — prefer a planted positive over a same-report figure** |
 | F-119 | 2026-09-07 | high | recon | fixed-verified | **A guard's refusal text EXECUTED its own example commands, and I read the evidence correctly then argued myself out of it.** `pre-push-foreign-session-guard.sh:147` opens `cat >&2 <<EOF` — unquoted — and `:224` carries markdown backticks around `` `git push origin $branch` ``. Bash command-substitutes in an unquoted heredoc, so expanding the refusal RUNS the push, re-firing `pre-push`: 45 guard/push/ssh processes, and the banner never prints, so the authorisation question the guard exists to ask is never asked. Presents as a network hang. The process tree showed the recursion; I refuted my own correct reading because "heredoc bodies are inert text" — true only of a *quoted* delimiter, which I never checked. This inverts CLAUDE.md's heredoc tell: the four prior instances were scanners reading data as syntax, this one is bash reading prose as a program, and the interpreter is the misreader with no appeal. `bash -x` piped to `tail` returned nothing twice; the same trace redirected to a FILE held the whole answer. Filed `high`, `cluster/addressing-without-an-escape-hatch`; introduced `41377049`, already on `origin`. Kin `F-116`, `R-185`, `IC-6`. |
@@ -487,6 +488,83 @@ questions were live tonight; only the first is now cheap.
 (`eec03606`, `81f7f923`, `63fae4ea`, `da78f3fa`) are ancestors of `28de2827` — a
 check that took one command and no timing arithmetic, replacing the whole
 start-time-versus-build-time apparatus this entry was written about.
+## F-122 — Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open
+
+**Valid:** dated 2026-09-08
+
+**Severity:** med
+**Category:** self-friction
+**Status:** open — the positive identifier exists and is not consulted; no mechanism
+
+**Observed.** Twice in one session I attributed a write to a peer by *adjacency* — the topic
+looked like theirs — while a positive identifier sat in data I already had open.
+
+1. Told `ad379a7c` their `write_guard.rs` edit had reddened both lanes. It was `5399543d`'s.
+   The identifier (`claimed_by: 5399543d`) was in the frontmatter of a bug file **I had filed
+   myself**.
+2. Told `ad379a7c` that a `2026-09-04` archive of `artifact-vector-delete-…` had left three
+   dangling citations, calling it *"your archive"*. It was `66523284`'s. I had run `git grep`
+   over those very commits to find the dangling refs, and **all three carry a `Session-Id`
+   trailer**. `ad379a7c` has no commit in this repo before 2026-09-08 at all.
+
+**Both are READ-side, and that is what makes them new rather than more of `IC-10`.** Every
+prior member of that class is write-side — *the channel does not exist, so build one* — and
+both remedies it carries (ship a provenance channel; stop at *"not mine"*) are **no-ops**
+here. The channel existed, was correct, was already open, and cost one command. The gap is
+that **nothing in the act of noticing a defect prompts the lookup**: you find a bad line, you
+hold a path and a peer list, and the identifier is one indirection away somewhere you are not
+looking.
+
+**The two fall on OPPOSITE rows of `IC-10`'s instrument table, which is a stronger claim than
+a rate would have been.** Instance 1 was uncommitted state with `claimed_by` in hand;
+instance 2 was committed state with the trailer in hand. So the read-side gap is *orthogonal
+to the instrument axis* — having an instrument and consulting it are different events on both
+rows. Instance 2 is the first recorded failure of that table's **committed** row, which had
+stood since 2026-09-01 as *"positive, exact, one `git log`"* — a claim about **availability**,
+which is not consultation.
+
+**Anchor such a claim to a git object, never to a clock.** This entry's first draft dated
+instance 1 `11:30`; `a762dceb` (the commit that landed the WIP) has committer date
+`11:04:14 +0300`, which read literally puts the misattribution *after* the commit and flips it
+onto the committed row, destroying the orthogonality above. Settled from objects: the message
+went at `07:56:45Z`, `a762dceb` committed at `08:04:14Z` — the claim preceded it by **7m29s**,
+and my own wording at the time read *"Your **uncommitted** `write_guard.rs`"*. The `11:30` was
+wrong in **both** parties' accounts and survived three exchanges of mutual auditing, because
+one session's transcript logs UTC and the other's shell reports `+03:00`, and a bare wall-clock
+time is silently ambiguous at exactly the offset that yields a *plausible* wrong answer. Say
+*"before `a762dceb`"* — checkable forever, no timezone, no transcript.
+
+**Candidate mechanism, and why it survives `SKF-22`.** Precede any assertion that a peer
+authored a *committed* line with
+`git log -1 --format='%(trailers:key=Session-Id,valueonly)' -- <path>`. It is not a trigger the
+model must remember, because **composing the message is the trigger** — the assertion cannot be
+written without naming the peer, and naming the peer is the moment the lookup is owed. Note the
+instruments are not substitutes and neither is a superset: committed state → the trailer;
+uncommitted state → `scripts/file-provenance.py` or the socket route. `file-provenance.py`
+returned `UNKNOWN` for instance 2, correctly and with an honest coverage caveat, because a
+committed line is not a question the transcripts can answer. Reaching for the wrong one returns
+a *plausible non-answer rather than an error* — the same shape as the defect.
+
+**What caught what, unsmoothed, because the pattern is the finding.** Three wrong claims about
+attribution discipline were produced and endorsed by both parties before being checked: a peer's
+invented third instance, the `11:30`, and a tally I endorsed without checking. **Reach and
+trigger are independent axes.** The peer's outbound-audit had full reach throughout and did not
+fire until I pushed back (34s); my read-the-class-file-first fired unprompted and caught my own
+re-derivation of `IC-10`'s instrument split — which I had been one edit from shipping back to
+that file as a discovery. So a self-firing control does catch its author; what it cannot reach
+is evidence held in someone else's context, and what it may lack is not reach but a trigger. The
+counterpart's contribution in every case was **the reason to look**, not the evidence — cheaper
+to need than a second context and harder to self-supply, because the moment an assertion feels
+checkable is exactly the moment the impulse to check is suppressed.
+
+**Rests on:** `96574516` / `f008e74f` / `f149255d`, all trailers reading
+`66523284-814b-49b8-b8f8-820dc2b00be2` (exited before the repair at `2211d0e8`, so it could not
+be reported to them). `a762dceb`'s committer date for the instance-1 anchor. Instance 2
+corrected by `ad379a7c`, who also found the `11:30` and retracted their own invented instance
+on their own audit. Class refinements recorded at `b8eaa58a`, `9eb2f974`, `e70ab6d5`,
+`1be434c4`, `579a2085` in
+`docs/trackers/issue-clusters/IC-10-authorship-unrecoverable-after-the-fact.md`.
+
 ## F-N entry template
 
 Copy this block when appending a new friction. Allocate the next free
