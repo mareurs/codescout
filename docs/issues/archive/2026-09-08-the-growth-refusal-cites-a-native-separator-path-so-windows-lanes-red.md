@@ -1,5 +1,5 @@
 ---
-id: '74eb09ca48756b9d'
+id: 6b653409a4c92cd9
 kind: bug
 status: fixed
 title: 'BUG: the growth refusal cites a native-separator path, so both Windows CI lanes red on a message a Windows reader cannot paste'
@@ -104,12 +104,36 @@ Patch-id: `0a414c8c177d6a72455218846dadd414c419e42c`
 Single parent, so the patch-id is real. Gate green @ 2026-09-08 11:53:00–11:55:18Z — fmt 0,
 clippy 0, LEAN 0, DEFAULT 0.
 
-**Not yet confirmed on the platform that failed.** The local gate cannot run the Windows
-lanes, which is the whole point of this file: green here is exactly what green was before
-the defect shipped. The claim this fix earns is *"the mutation reds on Linux"*, which is
-new and checkable; the claim it does **not** yet earn is *"the Windows lanes are green"*.
-That needs a CI run on a commit containing `94351602`, and until one exists this is fixed
-and unverified-on-target rather than verified.
+**VERIFIED ON TARGET 2026-09-08** — run `34234035223`, head `e7519080`, which contains
+`94351602`. Two `windows-latest` lanes ran the previously-failing test **and my new
+regression test**, on real Windows:
+
+```
+Test (windows-latest / no-features)   the_growth_refusal_names_the_file_holding_the_members_field ... ok
+                                      a_repo_path_renders_posix_even_when_the_platform_flavour_is_windows ... ok
+Test (windows-latest / local-embed)   both ... ok
+```
+
+That is the claim this file could not make when it was written, and it is now made from the
+platform that failed rather than from a green local gate.
+
+**The two Windows lanes that are still red carry no information about this fix, and the
+reason is worth recording rather than asserting.** `windows-latest/default` and
+`Windows-gnu cross` both fail on
+`server::guide_hint_tests::a_p50_session_stays_under_the_committed_emission_byte_ceiling`
+— a **different** defect (`5399543d`'s: the p50 budget measured its own tempdir path, so
+it red by platform; fixed in `91d4e3fd`, unpushed at time of writing). `cargo test` aborts
+after a failing target, so those lanes stopped in `--lib` (`5157 passed; 1 failed`) and
+**never reached `tests/issue_clusters.rs` at all** — my tests do not appear in their logs in
+either direction. A lane that did not run the test is not evidence against it, and would
+have read as one in a summary count.
+
+`macos-latest/default` fails on the same `p50` test and was never this defect: macOS uses
+forward slashes. The within-run isolation is in run `34222332438`, one tree (`09ecb58d`),
+where `macos-latest/default` failed while `ubuntu-latest/default` succeeded — platform
+separated from content without any cross-tree inference. (I first reached for a
+local-vs-CI comparison across *different* trees and distrusted it correctly; `c9ab2c8d`
+pointed out the stronger evidence was already in the same job list.)
 ## Severity
 
 Med. No data loss and the routing still resolved by luck, but two Windows CI lanes are red
