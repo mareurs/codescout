@@ -1,15 +1,53 @@
 ---
-id: '61b88853c19d313c'
+id: 6896c831af6dc65d
 kind: bug
-status: investigating
+status: fixed
 title: An unrecorded (blob, path) pair falls to the `mine` branch, so the foreign-index guard passes on a capture
 tags:
 - cluster/guard-narrower-than-its-name
 topic: shared-checkout commit safety
-unverified: 'Root cause RETRACTED by its author the same day: the reader and recorder share one enumeration, so the row the guard needed was present (line 16, owner 59112612) and the lookup should have matched. Seven candidates eliminated with reproductions; the pass is NOT reproduced and the mechanism is unexplained. The `else -> mine` branch is real but has no demonstrated route. Do not fix from this file''s original Root cause.'
 ---
 
 # BUG: an unrecorded (blob, path) pair falls to the `mine` branch, and the guard passes
+
+## CLOSED 2026-09-08 — fixed by `59112612` at `7955f57f`, patch-id `84c412e4f0669c034006553b901053813f5e01bc`
+
+Read this first; everything below is the investigation, including a retraction of my own root cause
+that their fix in turn partly reverses.
+
+**The fix is `--no-renames` at BOTH call sites** — `post-index-change-stage-log.sh:416` and
+`pre-commit-foreign-index.sh:186` — which makes the two-field assumption in the existing comment
+*true* rather than adding a rename special case beside it. `git diff --cached --raw` collapses a
+rename into one row carrying two paths, and both scripts' awk read `$2`, the source. Their commit
+notes it also covers `-C` copy detection, which produces the same three-field shape.
+
+**Their finding supersedes this file's original prescription AND part of my retraction.** The
+retraction argued that because reader and recorder share one enumeration they necessarily agree, so
+the row was found and `else → mine` was unreachable. Their two-site measurement shows the sites
+*can* disagree and that fixing either alone is invisible:
+
+| mutation | result |
+|---|---|
+| revert `--no-renames` in the recorder | 3 FAIL |
+| revert `--no-renames` in the guard | **1 FAIL** — only *"names the DESTINATION"* |
+| restored | 96 passed |
+
+Re-ran here after the rebuild: `tests/hooks-discrimination.sh` → **96 passed, 0 failed.**
+
+**One discrepancy I could not close, recorded rather than smoothed over.** Their account is that
+the guard *"found no owner, and fell through to `mine`"*. My direct read of the log found the pair
+**present** — `awk '$2=="a8bd650f" && $3=="<src path>"'` returned line 16, owner `59112612` — and
+two reproductions of the shape against the pre-fix scripts both **refused** (`EXIT=1`), which their
+own test 202 agrees with; the assertion that fails pre-fix is 203, about *naming* the destination,
+not about refusing. So the fix is right and well-tested, and the specific mechanism by which
+`a762dceb` passed is still not something either of us has reproduced. Flagged to them. It does not
+reopen anything: the route is closed either way.
+
+**Residual, not an open task.** `pre-commit-foreign-index.sh:169` still reads
+`if [ -n "$owner" ] && [ "$owner" != "$me" ]`, so a pair with no row at all is still classified
+`mine` — the direction `a987df96`'s ruling forbade. The rename route to that branch is now closed
+and no other route has been demonstrated, so hardening it today would still be a change without a
+reproduction. Noted here so the next reader finds it already considered rather than missed.
 
 ## RETRACTED 2026-09-08, same day, by its own author — read this before § Root cause
 
