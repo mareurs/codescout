@@ -12188,7 +12188,7 @@ session; 3/3 local green at `9c82bda4`.
 **Cost:** four peer round-trips before writing a line of code. They also surfaced, unprompted, that the mandated gate's `cargo fmt` would have rewritten a peer's uncommitted Rust mid-edit, and later a peer staged five files into the shared index between this session's `git add` and `git commit`.
 
 **Second instance, 2026-09-08 — and this time the refutation caught a peer's CHECK, not their carelessness.** Asked the three peers in this checkout again. `codescout-e7` was holding
-`docs/issues/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md` unmarked for two
+`docs/issues/archive/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md` unmarked for two
 hours — in the session whose whole subject is that bugs read `open` while held. Verified at the
 bytes: `492c62b5` (09:57:06) committed it carrying `status: open`; it was not marked `taken` until
 mtime 10:25:13.
