@@ -109,6 +109,26 @@ the id, not the name."* The claim was released by completion when the bug was fi
 archived. So the field went 0 → 1 → 0 within a day, correctly, and the count today is 0
 again.
 
+**The count moved while this file was being written, and that is a datum rather than an
+embarrassment.** At ~08:28 on 2026-09-08 — minutes after the `79 / 0 / 1` above was taken,
+and before this file was committed — `codescout-92` (sid `59112612-…`) claimed
+`docs/issues/2026-09-05-doc-update-body-appends-a-trailing-blank-line-every-write.md`:
+`status: taken`, `claimed_by: 59112612-…`, `claimed_at: 2026-09-08`, written through the
+catalog. So the corpus's **second** write of the field landed inside the window this record
+describes, and the headline number is already `1`, not `0`.
+
+What that does and does not change. It does **not** refute the finding: both writes to date
+came from one session that had been told about the gap by a peer, not from a session
+following the documented surfaces — which is the audience problem in § *Root cause*, intact.
+It **does** establish that adoption is cheap once the instruction reaches someone, that the
+read and write halves compose correctly in practice, and that this file's own
+§ *Resume* instruction to re-derive rather than cite was worth writing: it paid inside
+twenty minutes.
+
+A reader arriving later should expect the number to have moved again in either direction,
+and should treat a non-zero `taken` as the question *"did the audience change, or was the
+writer told?"* rather than as the finding being closed.
+
 **Cluster tag, and the runner-up rejected with cause.** Tagged
 `cluster/assertion-that-cannot-fail` (`IC-16`): the defining property measured here is that
 the clause *cannot match*, which is the class's claim exactly.
@@ -177,4 +197,3 @@ than confirming it.
 - `CLAUDE.md` § *Querying active trackers*, § *Observer Blindness*, § *Reaching a Peer Session*
 - `src/librarian/tools/doctor.rs:508` (`scan_claim_liveness`), `src/librarian/tools/create.rs:91-95`
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
-
