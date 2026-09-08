@@ -1,7 +1,7 @@
 ---
-id: df517af91b43a5f7
+id: f78453d36d18c818
 kind: bug
-status: taken
+status: fixed
 title: A claimed bug file names the author of the WIP that reds the shared build, and routing goes past it
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
@@ -189,6 +189,50 @@ only. The recipient of a correctly-routed alarm still cannot repair another sess
 uncommitted Rust, so the move it enables is *ask*, not *fix* — and the output says so in
 those words. Naming the holder is also not naming the culprit: the text says it names who
 WROTE the file, never who broke the build.
+**Fix:** `de546287`, patch-id `555cf20c539e87f5a23677c37a7e6e367a5eb6f6`. Gate green —
+fmt, clippy, lean 3578, default 5544, plus 39 + 110 shell cases; the ten new Rust cases
+read by name out of the default lane rather than inferred from its total.
+
+**Ceiling 1 is now MEASURED, and it is one run in five.** The section above named native
+`Bash` as a reachability ceiling without sizing it. Across 3 profiles and 72 sessions with
+any cargo activity in this project: **1058 of 5256 invocations (20.1%) go through native
+`Bash`**, and **8 of the 72 are 100% `Bash`** — sessions that would never see the hint
+once. One of them is `59112612`, whose gate runs are entirely `Bash`, *including the run
+that produced this bug*. So the mechanism would not have reached the session that nearly
+shipped against the stale red, which is the sharpest possible statement of the limit and
+is theirs — they reported it against their own transcript rather than letting it be found
+later.
+
+The count comes from **transcripts, not `usage.db`**: that database records MCP calls
+only and would have returned `Bash = 0`, i.e. the instrument that looks natural for this
+question is blind in precisely the direction being measured.
+
+This makes the tool an instance of **`IC-14`** (guard narrower than its name) — it
+attributes a red *that came through `run_command`* — recorded at the site and in
+`docs/PROBES.md` rather than left to be inferred from a silence that reads as reassuring.
+
+**What the reader should actually do with the hint, corrected by `5399543d` who was both
+parties in the original incident.** The `ask` remedy inherits this repo's already-measured
+answerability ceiling: enumerate what the author can reply and there is a fourth state —
+*"it's mine, and I hold no clearance to commit"* — which is the **default** here, since
+*"commit or push only when the user asks"* is every session's standing instruction. Their
+remedy needs nobody:
+
+```bash
+git worktree add /tmp/gate-$$ HEAD && cd /tmp/gate-$$ && cargo test --workspace
+```
+
+Committed state only, so a peer's dirty tree is *absent* rather than stashed, reverted or
+negotiated. The half of the hint that fully works is the **binary** — *is this mine?* —
+which terminates an unbounded activity (*"I am debugging a compile error in a file I have
+never opened"*) at print time, with no reply required from anyone.
+
+**The unbuilt half is author-side, and it is the one that would have prevented this.** The
+reader can route around a lock; only the author can end it, and the author never sees this
+hint — `5399543d` did not know they had reddened anyone until a peer told them, minutes
+later, after two sessions had paid. That is § *Observer Blindness* position 3, the check
+that runs when nobody is worried, and at the moment it mattered the author was not
+worried at all.
 ## Tests added
 
 **39 cases** in `tests/attribute-red.sh`, **10 of 10** production mutations killed — including

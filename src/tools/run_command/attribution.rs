@@ -42,16 +42,52 @@
 //! of these:
 //!
 //! 1. **Native `Bash` bypasses `run_command` entirely.** A session running its gate
-//!    through `Bash` gets nothing and cannot tell that from "nothing to report". This is
-//!    the ceiling the bug file asked to have named; closing it needs a `PostToolUse` hook
-//!    in `codescout-companion`, which is cross-repo and inert until its version bumps in
-//!    every profile.
+//!    through `Bash` gets nothing and cannot tell that from "nothing to report" — the
+//!    sharper failure, because it degrades *silently to reassuring* rather than to an
+//!    error.
+//!
+//!    **The quotable figure is a SESSION count, not a percentage.** Measured 2026-09-08
+//!    across 3 profiles and 72 sessions with any cargo activity in this project:
+//!    **8 of those 72 run their cargo entirely through `Bash`** and would never receive
+//!    this hint once. Coverage is not fungible across sessions — such a session is not
+//!    "20% degraded", it gets nothing, and no volume of covered invocations elsewhere
+//!    buys it a single hint. One of the eight is the session that nearly shipped against
+//!    the stale red this feature was built for.
+//!
+//!    The call-level ratio (1058 of 5256 invocations, 20.1%) is reported here only as a
+//!    **proxy**, and it invites the wrong reading — "~80% covered" is a per-population
+//!    claim standing in for a per-member one. Two things bound it further, both worth
+//!    more than the number:
+//!    - **The right denominator is REDS, not invocations, and it is not measured.** A
+//!      green command spawns nothing, so only a failing invocation can carry the hint. A
+//!      session running 200 green `cargo` calls through `run_command` and its one failing
+//!      gate through `Bash` scores ~99.5% by this proxy and receives zero. The two are
+//!      equal only if shell choice is independent of failure, which memory `gotchas`
+//!      gives direct reason to doubt (the env divergence makes `cargo test` behave
+//!      differently under `Bash`).
+//!    - **The denominator is under active manipulation.** `.codescout/project.toml`'s
+//!      `shell_command_mode` is a live eval arm comparing the two shells, so these
+//!      transcripts span an experiment in flight. Decomposed: only 6 of the 72 sessions
+//!      carry the auto-mode directive, and they account for **182 of 1062** `Bash` cargo
+//!      runs (17%) — so the lane is mostly *not* mode-driven and will not vanish when the
+//!      eval ends, but the figure will move for reasons unrelated to tool ergonomics.
+//!
+//!    Counted from **transcripts**, never `usage.db`: that database records MCP calls
+//!    only and would have returned `Bash = 0` — a clean-looking number, no error, and
+//!    exactly backwards. Closing the ceiling needs a `PostToolUse` hook in
+//!    `codescout-companion`, cross-repo and inert until its version bumps in every
+//!    profile. Reported and decomposed by sessionId
+//!    `59112612-5fc8-4b31-8c8c-e19220d99eac`, whose own gate runs are entirely `Bash`;
+//!    the per-member correction is `5399543d-22d6-4ed9-9ebb-876be459989f`'s.
 //! 2. **A red that exits 0 is invisible.** The gate here is the exit code, so a harness
 //!    that swallows a failure into a successful exit never reaches stage 1.
 //! 3. **No `python3`, no answer.** The spawn failing and the tree being clean produce the
 //!    same silence at this layer.
 //!
-//! Ceiling 1 is the measured one; 2 and 3 are structural and cost nothing to state.
+//! Ceiling 1 is measured; 2 and 3 are structural and cost nothing to state. **The tool's
+//! name is wider than its coverage** — it attributes a red *that came through
+//! `run_command`* — which is `IC-14`, guard-narrower-than-its-name, and is recorded here
+//! rather than left for a reader to discover from the silence.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
