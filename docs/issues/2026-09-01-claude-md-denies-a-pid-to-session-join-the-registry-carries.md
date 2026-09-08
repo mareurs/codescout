@@ -1,11 +1,12 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/doc-contradicted-by-code
 - peer-sessions
 - authorship
 - provenance
+claimed_by: c9ab2c8d-dd74-43f4-9940-25756379a312
 closed: null
 opened: 2026-09-01
 owner: marius
@@ -234,17 +235,136 @@ join covers **live** writers only, which is the common case precisely because
 
 ## Fix
 
-Two parts, neither started.
+Two parts. **Both are now done**, and they were done at different times by different
+sessions — part 1 had already landed before this fix was picked up.
 
-1. Correct the `CLAUDE.md` sentence. It should say the join exists in the registry and is
-   per-profile, so it must be swept across all profiles like every other peer instrument —
-   the same scope rule the surrounding paragraph already establishes.
-2. Teach `scripts/file-provenance.py` to resolve each session id it prints to
-   `name`, `pid`, `profile`, `socket` when a live registry entry exists, and to say
-   *"session exited — ask is unavailable"* when it does not. That converts the script's output
-   from evidence into an address, and it is the § *Observer Blindness* mechanism shape: it runs
-   whenever provenance is run, with nobody having to remember this file.
+1. ~~Correct the `CLAUDE.md` sentence.~~ **Already true when this was re-opened**, 2026-09-08.
+   The denial sentence is gone (`grep -n "no pid→session join" CLAUDE.md` → no match) and
+   § *Reaching a Peer Session* now publishes the route positively at `CLAUDE.md:341`, with the
+   per-profile scope rule attached and the caveat that the registry row is still self-asserted —
+   one level short of proof, one full level above a self-report. Nothing was owed here.
 
+2. **Done.** `scripts/file-provenance.py` now joins each named sessionId against every profile's
+   live registry and prints `[LIVE]` with the `uds:` socket to `SendMessage`, or
+   `[not live — cannot be asked]`.
+
+### What the second part actually required, beyond the sentence above
+
+**Liveness had to be checked, not inferred from the row.** A registry file outlives its session,
+so `sessions/<pid>.json` existing is not reachability. The reason that matters more than it
+sounds: routing to a dead session ENOENTs, and that error is *byte-identical* to a cross-profile
+**name** refusal — which the peer skill tells you to answer by switching to the `uds:` form. So an
+unchecked row does not merely mislead; it sends the reader down a documented remedy for a
+different problem, and they retry instead of re-attributing. Liveness is socket-present **and**
+pid-alive; `PermissionError` from `kill(pid, 0)` counts as alive, or a live foreign-profile
+session reports as exited.
+
+**The dead majority collapses to one inline marker; only reachable sessions expand.** Measured on
+this repo: `--all` over `docs/trackers/issue-clusters.md` names **35** lifetime authors of which
+**1** is reachable. The first cut printed a full "you cannot ask it" sentence per session and
+buried the single row the reader came for.
+
+**The address given is `uds:`, never the name.** A name resolves only inside its own profile and
+is re-minted by compaction, resume or a restart elsewhere; the sessionId is not. The name is
+printed as a label beside it.
+
+**A sid in two live rows is reported, not resolved.** `IC-6`'s no-disambiguator half — silently
+addressing one of two is a coin flip.
+
+**`UNKNOWN` is untouched.** The join must not manufacture an address where there was no
+attribution, so that verdict keeps its coverage caveat and acquires no session line and no footer.
+
+**The footer carries unit, scope and instant** — `N of M named session(s) live at <ts>, across K
+profile(s)`. The instant reads as decoration and is the half that gets dropped: two honest
+enumerations hours apart share almost no pids, so an unstamped count makes ordinary churn present
+as a tooling defect and sends the reader to debug a working instrument.
+
+### One thing this fix got wrong first, and the peer who caught it
+
+The first cut hardcoded three profiles — `.claude`, `.claude-sdd`, `.claude-kat` — which is the
+per-profile-subset hazard *this very bug file is about*, reproduced inside the instrument that
+fixes it. Raised by sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`, who named
+`default_profile_dirs()` in `src/librarian/session_registry.rs` as the Rust function that had
+already made the opposite choice, deliberately, for the same reason.
+
+Verified rather than accepted, and it was **worse than reported**: this machine carries **7**
+`.claude*` directories and **5** with a `sessions/`, so the hardcoded list was already a subset of
+*this* box, not merely of some future host. Both `registry_roots()` and its pre-existing twin
+`transcript_roots()` now share one discovered `profile_dirs(leaf)` helper — fixing one and leaving
+the other is how a class survives being fixed.
+
+The `.claude`**`-`** separator is load-bearing: a bare `startswith(".claude")` also admits
+`.claudeish`, which is the same prefix-swallow as the git-verb regex that refused read-only
+plumbing.
+## Tests added
+
+`tests/file-provenance.sh` grew from **68** to **102** cases, in two sections.
+
+**`== a sessionId is an ADDRESS, not just evidence ==`** (26 cases) drives the join through
+synthetic registry fixtures: a live peer resolving to name/status/pid/profile/`uds:` socket; a row
+whose socket is gone; a row whose pid is dead (socket present, so it fails if only the socket half
+is checked); an unregistered sid that must still be *named* even though it cannot be asked; a peer
+found in the **second** profile; the footer's unit/scope/instant; one sid in two live rows; and
+`UNKNOWN` acquiring neither a liveness claim nor a footer. The dead-pid case derives its pid by
+scanning `/proc` rather than hardcoding one — a hardcoded "dead" pid becomes a live one the day
+the kernel reuses it, and the case would then pass for the wrong reason instead of failing.
+
+**`== profile DISCOVERY ==`** (8 cases) exists because of a measured hole, not by symmetry.
+
+### The observed reds — 13 mutations of the production path, 0 survivors
+
+Run against `scripts/file-provenance.py` itself, not against a re-implementation in the fixture.
+Each killed a **named** assertion rather than collapsing the suite:
+
+| mutation | result |
+|---|---|
+| liveness check removed entirely | KILLED (5) |
+| socket checked, pid not | KILLED (2) |
+| pid checked, socket not | KILLED (3) |
+| only the first registry root scanned | KILLED (5) |
+| address printed as name, not `uds:` | KILLED (1) |
+| sid collision silently resolved to first | KILLED (1) |
+| footer drops the live/named counts | KILLED (1) |
+| profile label taken from the leaf dir | KILLED (2) |
+| footer printed unconditionally | KILLED (1) |
+| discovery reverted to the hardcoded 3 | KILLED (3) |
+| discovery returns nothing at all | KILLED (4) |
+| `.claude-` separator relaxed to a bare prefix | KILLED (1) |
+| existence filter dropped from discovery | KILLED (2) |
+
+### Why the last four are the ones worth reading
+
+The first nine were green on the first mutation run. The last four **survived** it — `discovery
+reverted to a hardcoded list` and `discovery returns nothing at all` both left **94/94 green**.
+
+Every case in the suite injects `FILE_PROVENANCE_ROOTS` / `FILE_PROVENANCE_REGISTRY_ROOTS` to stay
+hermetic, and that same override filters the production default out of the recording. This is not
+a thin sample that a wider corpus would fix: the refuting outcome leaves **no artifact**, at any
+corpus size. The `profile DISCOVERY` section omits the override deliberately so the default branch
+is observable at all — do not "tidy" those cases onto the shared fixture roots.
+
+The hole was found by mutating rather than by reading, and it was in code written **in direct
+response to** a peer's correction — that is, in the part of the patch its author had most recently
+thought hardest about.
+
+**Independently reproduced, and it is not an artifact of this patch.** `ad379a7c` ran the same
+mutation against the **committed** suite, before any of this work: `transcript_roots() -> return
+[]` leaves their **68/68 green**. So the function deciding *where the tool looks at all* could
+return nothing and the shipped suite would call the tool correct. Both fixture helpers — `run()`
+at `:86` and `runc()` at `:260` — inject `FILE_PROVENANCE_ROOTS`, so the default was filtered out
+of the recording in all 68.
+
+**And the sharper form, which is theirs.** They had run six mutations that day and reported six
+kills — every one against the **dispatch** (which tool names count, which actions are writes), and
+none against the **scope**. That was not restraint: the fixture cannot *express* a scope mutation,
+so the missing axis left no artifact either. Their mutation population was itself filtered by what
+the harness could see — the recording-filter law one level above where it was being applied, inside
+the run used to certify the fix.
+
+The generalisation worth keeping: **hermeticity and default-path coverage are in direct tension.**
+A hermetic fixture buys isolation by overriding precisely the thing a default-path mutation would
+perturb, and the tension is invisible from inside a green run. `== profile DISCOVERY ==` is the
+right shape *because* it breaks hermeticity deliberately and says so on the fixture line.
 ## Notes
 
 **Not** filed as a bug in the harness. The registry contents are exactly right; the defect is

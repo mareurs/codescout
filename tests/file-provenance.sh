@@ -427,5 +427,171 @@ tool_use "$B" mcp__codescout__edit_file '{"path":"src/never_committed.rs","old_s
 has "an uncommitted path keeps its full history" "$(run src/never_committed.rs)" "$PEER"
 
 echo
+echo "== a sessionId is an ADDRESS, not just evidence -- the registry join =="
+#
+# The bug: the tool named a session and stopped, so every answer cost a round trip
+# through a peer's turn to become actionable -- and a reader could not tell an
+# exited session from a reachable one without a separate manual walk.
+# docs/issues/2026-09-01-claude-md-denies-a-pid-to-session-join-the-registry-carries.md
+#
+# LIVENESS is the load-bearing half. A registry file OUTLIVES its session, so
+# "a row exists" is not "you can ask it": routing to a dead session ENOENTs, and
+# that error is byte-identical to a cross-profile name refusal, which the peer skill
+# tells you to answer by switching address form. So the reader retries instead of
+# re-attributing. Cases B/C/G exist to keep that discrimination.
+
+REG_A="$T/regA/sessions"
+REG_B="$T/regB/sessions"
+REG="$REG_A:$REG_B"
+SOCKDIR="$T/socks"
+mkdir -p "$REG_A" "$REG_B" "$SOCKDIR"
+
+# A pid that is provably absent, derived rather than assumed -- a hardcoded "dead"
+# pid silently becomes a LIVE one the day the kernel reuses it, and the case would
+# then pass for the wrong reason instead of failing.
+DEADPID="$(python3 -c "
+import os
+p = 4000000
+while p > 300 and os.path.exists('/proc/%d' % p):
+    p -= 1
+print(p)")"
+
+# registry_row <sessions-dir> <pid> <sid> <name> <socket-path> [status]
+registry_row() {
+    python3 - "$1" "$2" "$3" "$4" "$5" "${6:-idle}" <<'PY'
+import json, sys
+d, pid, sid, name, sock, status = sys.argv[1:7]
+json.dump({"pid": int(pid), "sessionId": sid, "name": name,
+           "messagingSocketPath": sock, "status": status,
+           "cwd": "/home/x/repo"}, open(f"{d}/{pid}.json", "w"))
+PY
+}
+
+runr() { REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" \
+    FILE_PROVENANCE_REGISTRY_ROOTS="$REG" \
+    CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1; }
+
+# A never-committed path, so the derived floor cannot hide the write.
+tool_use "$B" mcp__codescout__edit_file \
+    '{"path":"src/registry_probe.rs","old_string":"a","new_string":"b"}'
+
+# -- A. a LIVE peer resolves to an address the reader can act on -----------------
+touch "$SOCKDIR/live.sock"
+registry_row "$REG_A" "$$" "$PEER" "peer-name-42" "$SOCKDIR/live.sock" busy
+out="$(runr src/registry_probe.rs)"
+has "a live session is marked LIVE"            "$out" "[LIVE]"
+has "and names the session"                    "$out" "peer-name-42"
+has "and its status"                           "$out" "[busy]"
+has "and its pid"                              "$out" "pid $$"
+has "and the PROFILE it lives under"           "$out" "profile regA"
+has "and the uds: form, the only cross-profile address" \
+    "$out" "ask it: SendMessage to=\"uds:$SOCKDIR/live.sock\""
+hasnt "a live session is not called unreachable" "$out" "not live"
+
+# -- B. a registry row whose SOCKET is gone is not reachable ---------------------
+# The row persists after the session exits; only the socket disappears.
+rm -f "$SOCKDIR/live.sock"
+out="$(runr src/registry_probe.rs)"
+has "a row without its socket is not live"     "$out" "not live — cannot be asked"
+hasnt "and is not offered as an address"       "$out" "ask it:"
+hasnt "and its stale name is not printed"      "$out" "peer-name-42"
+
+# -- C. a registry row whose PID is dead is not reachable ------------------------
+# Socket present this time, so this case fails if only the socket half is checked.
+touch "$SOCKDIR/live.sock"
+rm -f "$REG_A"/*.json
+registry_row "$REG_A" "$DEADPID" "$PEER" "ghost-name" "$SOCKDIR/live.sock"
+out="$(runr src/registry_probe.rs)"
+has "a row with a dead pid is not live"        "$out" "not live — cannot be asked"
+hasnt "and its name is not offered"            "$out" "ghost-name"
+
+# -- D. no registry row at all -> still an answer, still not an address ----------
+rm -f "$REG_A"/*.json "$REG_B"/*.json
+out="$(runr src/registry_probe.rs)"
+has "an unregistered sid is not live"          "$out" "not live — cannot be asked"
+has "but is STILL named -- attribution survives" "$out" "$PEER"
+has "and the verdict is unchanged"             "$out" "PEER"
+
+# -- E. the OTHER profile is reached ---------------------------------------------
+# The whole point: one profile's registry is what ListAgents reads and it reports
+# as complete. A join that only searched the first root would pass every case
+# above and still be the subset bug it exists to fix.
+registry_row "$REG_B" "$$" "$PEER" "other-profile-peer" "$SOCKDIR/live.sock"
+out="$(runr src/registry_probe.rs)"
+has "a peer in the SECOND profile is found"    "$out" "other-profile-peer"
+has "and is labelled with that profile"        "$out" "profile regB"
+
+# -- F. the footer carries unit, scope and instant -------------------------------
+has "the footer counts live against named"     "$out" "1 of 1 named session(s) live at"
+has "and names the scope it searched"          "$out" "across 2 profile(s)"
+has "and says which field is durable"          "$out" "the sessionId does not"
+
+# -- G. one sid, two live rows -> say so rather than pick ------------------------
+# IC-6's no-disambiguator half: silently addressing one of two is a coin flip.
+registry_row "$REG_A" "$$" "$PEER" "twin-in-A" "$SOCKDIR/live.sock"
+out="$(runr src/registry_probe.rs)"
+has "a duplicated sid is reported, not resolved" "$out" "2 live rows carry this sessionId"
+has "and both are named -- A"                  "$out" "twin-in-A"
+has "and both are named -- B"                  "$out" "other-profile-peer"
+
+# -- H. UNKNOWN is untouched by all of this --------------------------------------
+# The join must not create an address where there was no attribution; UNKNOWN's
+# coverage caveat is the one verdict that must never acquire a session line.
+out="$(runr src/no_such_write.rs)"
+has "UNKNOWN survives the join"                "$out" "UNKNOWN"
+hasnt "and gains no liveness claim"            "$out" "not live"
+hasnt "and gains no footer"                    "$out" "named session(s) live at"
+
+echo
+echo "== profile DISCOVERY: the default path every case above bypasses =="
+#
+# Every case above injects FILE_PROVENANCE_*_ROOTS to stay hermetic -- which also
+# makes the production default unobservable to all of them. Measured 2026-09-08:
+# reverting discovery to a hardcoded three-profile list, AND making it return
+# nothing at all, both left 94/94 green. That is not a thin sample it could be
+# widened out of; the refuting outcome leaves no artifact in a recording that
+# filters the default path out. Only a case that omits the override can see it.
+#
+# Discovery matters because the profile set is per-machine: this box has 7
+# .claude* directories, 5 of them carrying sessions/, against the 3 a fixed list
+# named -- so a hardcoded default is the per-profile-subset hazard this whole tool
+# exists to defeat, reappearing inside the instrument, reporting as complete.
+
+FAKEHOME="$T/fakehome"
+mkdir -p "$FAKEHOME/.claude/sessions" \
+         "$FAKEHOME/.claude-sdd/sessions" \
+         "$FAKEHOME/.claude-brandnew/sessions" \
+         "$FAKEHOME/.claude-noreg" \
+         "$FAKEHOME/.claudeish/sessions" \
+         "$FAKEHOME/notclaude/sessions" \
+         "$FAKEHOME/.claude-brandnew/projects/-x-y"
+
+# No FILE_PROVENANCE_REGISTRY_ROOTS: this is the branch real runs take.
+disco="$(env -u FILE_PROVENANCE_REGISTRY_ROOTS HOME="$FAKEHOME" python3 -c "
+import importlib.util
+s = importlib.util.spec_from_file_location('fp', '$TOOL')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print('\n'.join(str(p) for p in m.registry_roots()))")"
+has "discovery finds the default profile"        "$disco" "/.claude/sessions"
+has "and a suffixed profile"                     "$disco" "/.claude-sdd/sessions"
+has "and one on NO hardcoded list -- the point"  "$disco" "/.claude-brandnew/sessions"
+hasnt "but not a profile lacking sessions/"      "$disco" ".claude-noreg"
+# .claudeish shares the ".claude" prefix without the separator. A startswith(".claude")
+# test admits it -- the same prefix-swallow that made a git-verb regex refuse
+# read-only plumbing. The separator is load-bearing; do not relax it to a prefix.
+hasnt "and not a lookalike without the dash"     "$disco" ".claudeish"
+hasnt "and nothing outside the .claude* family"  "$disco" "notclaude"
+
+# transcript_roots must share that discovery, or fixing one leaves its twin.
+disco_t="$(env -u FILE_PROVENANCE_ROOTS HOME="$FAKEHOME" python3 -c "
+import importlib.util
+from pathlib import Path
+s = importlib.util.spec_from_file_location('fp', '$TOOL')
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print('\n'.join(str(p) for p in m.transcript_roots(Path('/x/y'))))")"
+has "transcripts discover the same way"          "$disco_t" "/.claude-brandnew/projects/-x-y"
+hasnt "and skip profiles without this project"   "$disco_t" ".claude-sdd/projects"
+
+echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

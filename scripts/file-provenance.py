@@ -50,6 +50,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Tool calls whose input names a write TARGET. Read tools are deliberately absent:
@@ -180,6 +181,27 @@ def repo_root() -> Path:
     return Path(out.stdout.strip() or ".").resolve()
 
 
+def profile_dirs(leaf: str) -> list[Path]:
+    """Every `<home>/.claude*/<leaf>` directory that EXISTS.
+
+    Discovered, never hardcoded — and the distinction is not theoretical. Measured
+    2026-09-08 on this machine: 7 `.claude*` directories, 5 of them carrying a
+    `sessions/`, against the 3 a fixed list named. A hardcoded set is the
+    per-profile-subset hazard this whole file exists to defeat, reappearing one
+    level in, inside the instrument — and it reports as complete.
+
+    Mirrors default_profile_dirs() in src/librarian/session_registry.rs, which is
+    the same decision taken in Rust for the same reason: the set is per-machine.
+    """
+    try:
+        entries = sorted(Path.home().iterdir())
+    except OSError:
+        return []
+    return [p / leaf for p in entries
+            if (p.name == ".claude" or p.name.startswith(".claude-"))
+            and (p / leaf).is_dir()]
+
+
 def transcript_roots(root: Path) -> list[Path]:
     """Every profile's transcript directory for this project.
 
@@ -189,8 +211,119 @@ def transcript_roots(root: Path) -> list[Path]:
     if env:
         return [Path(p) for p in re.split(r"[:,]", env) if p]
     slug = "-" + str(root).lstrip("/").replace("/", "-")
-    return [Path.home() / prof / "projects" / slug
-            for prof in (".claude", ".claude-sdd", ".claude-kat")]
+    return profile_dirs(f"projects/{slug}")
+
+
+def registry_roots() -> list[Path]:
+    """Every profile's session-registry directory.
+
+    Same per-profile subset hazard as transcript_roots(), one layer over: a single
+    profile's registry is exactly what ListAgents reads, and it presents that subset
+    as the whole population with nothing marking it a subset
+    (docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md).
+    """
+    env = os.environ.get("FILE_PROVENANCE_REGISTRY_ROOTS")
+    if env:
+        return [Path(p) for p in re.split(r"[:,]", env) if p]
+    return profile_dirs("sessions")
+
+
+def _pid_alive(pid: object) -> bool:
+    """True when a process with this pid exists.
+
+    PermissionError means it exists and is owned by someone else — alive, not absent.
+    Collapsing that to False would report a live foreign-profile session as exited.
+    """
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def live_sessions() -> dict[str, list[dict]]:
+    """sessionId -> live registry rows, across every profile.
+
+    A registry row carries sessionId, pid, name, cwd and messagingSocketPath in ONE
+    record, so a sid resolves to a reachable address offline, with nothing to ask.
+    On disk the rows are keyed by PID, so this is the reverse index.
+
+    LIVENESS IS CHECKED, and that is the load-bearing part. A registry file outlives
+    the session that wrote it, so the file's existence is not liveness; rendering a
+    dead session as reachable sends the reader to a socket that ENOENTs, and the
+    error it returns is byte-identical to a cross-profile name refusal
+    (skills/reaching-peer-sessions § "Two readings to get right"), so the reader
+    mis-diagnoses it as an addressing mistake and retries.
+
+    NEVER CACHE THIS. Measured 2026-09-07: a peer's pid AND registry name both moved
+    in a single hop while a message was in flight. The sessionId is the only durable
+    component; every other field here is valid at its instant and no longer.
+    """
+    out: dict[str, list[dict]] = {}
+    for d in registry_roots():
+        # ~/.claude/sessions -> ".claude". A fixture root that is not named
+        # "sessions" labels itself, so tests read as their own directory names.
+        prof = d.parent.name if d.name == "sessions" else d.name
+        try:
+            files = sorted(d.glob("*.json"))
+        except OSError:
+            continue
+        for f in files:
+            try:
+                rec = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            sid, sock = rec.get("sessionId"), rec.get("messagingSocketPath") or ""
+            if not sid or not sock:
+                continue
+            if not Path(sock).exists() or not _pid_alive(rec.get("pid")):
+                continue
+            out.setdefault(sid, []).append({
+                "name": rec.get("name") or "?",
+                "pid": rec.get("pid"),
+                "profile": prof or str(d),
+                "socket": sock,
+                "cwd": rec.get("cwd") or "?",
+                "status": rec.get("status") or "?",
+            })
+    return out
+
+
+def address_lines(sid: str, live: dict[str, list[dict]], indent: str) -> tuple[str, list[str]]:
+    """Render a sessionId as something the reader can ACT on, or say they cannot.
+
+    Returns (suffix, extra_lines) — the suffix marks the `written by` line itself and
+    the extra lines expand a reachable address beneath it.
+
+    THE ASYMMETRY IS DELIBERATE. A dead session collapses to one inline marker; only
+    a live one expands. Measured 2026-09-08 on this repo: `--all` over
+    docs/trackers/issue-clusters.md names 35 lifetime authors of which 1 is
+    reachable, so giving all 35 equal vertical weight buries the single row the
+    reader came for.
+
+    The `uds:` form is given rather than the name because it is the one address that
+    works from every profile; a bare name resolves only within the sender's own, and
+    a name is re-minted by compaction, resume or a restart under another profile
+    while the sessionId is not. The name here is a label, never the address.
+    """
+    rows = live.get(sid) or []
+    if not rows:
+        return ("  [not live — cannot be asked]", [])
+    out = []
+    if len(rows) > 1:
+        # A sid in two live registry rows is the no-disambiguator half of IC-6:
+        # picking either silently addresses a coin flip. Name them all instead.
+        out.append(f"{indent}{len(rows)} live rows carry this sessionId — they are "
+                   f"not interchangeable; address one explicitly")
+    for r in rows:
+        out.append(f"{indent}{r['name']} [{r['status']}] — pid {r['pid']}, "
+                   f"profile {r['profile']}, cwd {r['cwd']}")
+        out.append(f'{indent}  ask it: SendMessage to="uds:{r["socket"]}"')
+    return ("  [LIVE]", out)
 
 
 def normalize(p: str, root: Path) -> str | None:
@@ -334,6 +467,10 @@ def main(argv: list[str]) -> int:
     root = repo_root()
     me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     owners = scan(root)
+    # Resolved ONCE per invocation, deliberately: a snapshot the whole run shares is
+    # honest about being an instant, where a per-path re-read would silently mix two.
+    live = live_sessions()
+    named_sids: set[str] = set()
 
     unknown = 0
     for arg in paths:
@@ -381,7 +518,22 @@ def main(argv: list[str]) -> int:
         for w in peers:
             mark = "  [undated — could not be placed in the window]" if (
                 w in undated and w not in in_window) else ""
-            print(f"          written by {w}{mark}")
+            named_sids.add(w)
+            suffix, extra = address_lines(w, live, " " * 21)
+            print(f"          written by {w}{mark}{suffix}")
+            for line in extra:
+                print(line)
+
+    if named_sids:
+        # Unit, scope and INSTANT, all three. The instant reads as decoration and is
+        # the one that gets dropped: two honest enumerations hours apart share almost
+        # no pids, so an unstamped count makes ordinary churn present as a tooling
+        # defect — sending the reader to go debug a working instrument.
+        n_live = sum(1 for s in named_sids if live.get(s))
+        print(f"-- registry: {n_live} of {len(named_sids)} named session(s) live at "
+              f"{datetime.now().astimezone().isoformat(timespec='seconds')}, across "
+              f"{len(registry_roots())} profile(s). pid, name and socket decay "
+              f"continuously; the sessionId does not — re-derive at use.")
     return 1 if unknown == len(paths) else 0
 
 
