@@ -556,6 +556,41 @@ it without a denominator.
 **Not attributable to any diff:** the two lanes compiled from one working tree with no edit
 between them, so this observation carries no code delta at all — the strongest form of
 observation 10's argument, since there is not even a commit range to inspect.
+
+### Twelfth observation, 2026-09-08 — a RATE, a loaded run that PASSED, and every prior load figure sampled at the wrong instant
+
+Reported by `ad379a7c`. Two things, and the second retracts a claim this observation nearly made.
+
+**A denominator.** Every prior observation records a failure, so the population is selected such
+that no member can show the test passing under load — § *Testing Discipline*'s recording-filter
+law holding about this file itself, where widening the corpus of *failures* reaches nothing. Six
+default-lane runs in one session, same tree, no bytes under `src/peer/` in the diff: **4 failed,
+2 passed.** One of the passes was under real concurrent load. So load is **probabilistic, not
+determinative**, which no count of failures could have established. The test exits in **1.13s**
+against a **10s** allowance in isolation — a 9x margin a loaded scheduler still defeats about
+two-thirds of the time, which is much worse than the margin suggests and is the number option 2's
+enumeration actually needs. Isolation control re-derived 3/3 after *each* failure rather than
+cited from the first.
+
+**And the correction, which is the part worth keeping: I twice called the machine "quiet" and was
+wrong both times.** Both readings were `pgrep -c cargo` at the *launch* instant. A default-lane
+run takes minutes and peers start their own gates continuously, so that sample is taken at the
+moment of least load by construction. The sixth run was instrumented **throughout** — every 10s
+for its whole duration — and measured `load1` **20.30 → 48.80** with **16** concurrent
+`cargo`/`rustc` processes, on a machine that had shown **zero** thirty seconds before it started.
+
+So a launch-instant load figure is not weak evidence, it is *anti*-correlated with the quantity it
+names. **Every load figure in the observations above is a point sample**, and this file's own
+advice — *"load COUNTED rather than inferred"* (eighth) — is satisfied by counting at the wrong
+moment. That is `CLAUDE.md`'s stamp-the-instant rule, which this corpus states for peer counts,
+holding for a measurement nobody thought of as instantaneous.
+
+**The eleventh's remedy was exercised across sessions and worked.** `5399543d` named this test to
+`ad379a7c` **before** its first failure — *"if you see that red in the next while: it is load, not
+content, and I am the load"*. All four failures were read as load on sight, no investigation
+opened, no time spent in `src/peer/`. Pre-announcement is the only remedy in this file observed
+working, and it works because it arrives **before** the observer forms a hypothesis. Cost: one
+message.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
