@@ -1,15 +1,15 @@
 ---
-status: open
-opened: 2026-09-08
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
+title: The stage log records a staged rename under its SOURCE path with the DESTINATION blob, so the destination path has no row and the capture guard reads that zero as "mine"
 tags:
 - cluster/selector-narrower-than-its-population
-kind: bug
-title: The stage log records a staged rename under its SOURCE path with the DESTINATION blob, so the destination path has no row and the capture guard reads that zero as "mine"
 topic: shared-checkout gate correctness
+closed: 2026-09-08
+opened: 2026-09-08
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: a staged rename is recorded at its source path, so its destination is unattributable
@@ -102,33 +102,71 @@ owner `-`, null blob — the deletion half, recorded unattributable. So the sour
 
 ## Fix
 
-Not implemented. The enumeration must emit a row per path, not per row:
+**Shipped.** `experiments` `7955f57f`, patch-id `84c412e4f0669c034006553b901053813f5e01bc`. One flag, at **two** call sites.
+
+**Gate green @ 2026-09-08 11:27–11:30** — fmt 0, clippy 0, LEAN 0, DEFAULT 0, first run.
+`tests/hooks-discrimination.sh` 96/96.
 
 ```bash
-git diff --cached --raw | awk -F'\t' '{
-    split($1, a, " ");
-    print a[4] "\t" $2;
-    if (NF >= 3) print a[4] "\t" $3;   # rename/copy destination
-}'
+git diff --cached --raw --no-renames | awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }'
 ```
 
-Decide two things rather than assume them:
+**This supersedes the fix this file originally proposed, which was wrong.** That version kept
+`print a[4] "\t" $2` and *added* `if (NF >= 3) print a[4] "\t" $3`. It would have made the
+destination attributable while preserving the phantom pair `(destination blob, SOURCE path)` — a
+pair that exists nowhere in the index, and one a peer who later stages the old path can match,
+turning a reporting gap into a misattribution.
 
-- **Whether the source path should still get the destination blob.** Today it does, and that is
-  its own hazard: a peer who later stages the *old* path can match a pair recorded for someone
-  else's rename. Emitting the destination row does not remove that.
-- **`-C` (copy detection).** Off by default, but if enabled the same three-field shape appears and
-  the same fix covers it — worth handling in the parser rather than relying on the config.
+Turning detection **off** is better than teaching the parser a second row shape:
 
+- It makes the two-field assumption in the existing comment **true** rather than adding a special
+  case beside a comment that documents only one form.
+- Git supplies the deletion's null blob; the script does not synthesise one, so no abbreviation
+  length is hard-coded.
+- `-C` copy detection produces the same three-field shape and is covered by the same flag.
+
+Verified against the real rename before implementing — the **unchanged** awk then yields
+`00000000⇥<src>` and `<dstblob>⇥<dst>`, the delete and the add, each attributable.
+
+### It is TWO sites, and fixing one is invisible
+
+`scripts/pre-commit-foreign-index.sh` carries the identical pipeline, copy-pasted. With only the
+recorder fixed, the log held `(dstblob, dstpath)` while the reader still resolved the rename to
+`(dstblob, SRCpath)` — which matches nothing in a correctly-recorded log, so the lookup fell
+through to `mine` and the refusal never named the destination. **The recorder knew who owned the
+archive path and the guard never asked about it.**
+
+Found by the test, not by reading: `refusal names the rename DESTINATION` failed with the
+recorder already fixed. This is `CLAUDE.md` § *Testing Discipline*'s *mutate once per guarded
+SITE* — one law, two call sites, and a kill at one says nothing about the other.
 ## Tests added
 
-None yet. It needs no race: seed a temp repo, stage a rename, run the recorder, and assert a row
-exists for the **destination** path.
+Five cases in `tests/hooks-discrimination.sh` (41 → 96 assertions in that suite; CI runs it at
+`.github/workflows/ci.yml`). No race required — stage a rename, read the log.
 
-Pair it with an ordinary single-path staging that asserts exactly one row — without that control
-the test is monotone under a change that emits both `$2` and `$3` unconditionally, which would
-write a garbage second row from a two-field line's empty `$3`.
+| assertion | guards |
+|---|---|
+| a staged rename attributes its DESTINATION | the regression itself |
+| a staged rename attributes its source deletion | the other half of the rename |
+| a path nobody staged has no row | **control** |
+| peer is refused over a staged rename | the guard's loud direction |
+| refusal names the rename DESTINATION | the guard call site |
 
+**Both production sites were mutated independently, and they die to DIFFERENT assertions** —
+which is the whole reason both are needed:
+
+```
+revert --no-renames in the recorder  ->  3 FAIL (incl. "attributes its DESTINATION")
+revert --no-renames in the guard     ->  1 FAIL (only "names the rename DESTINATION")
+restored                             ->  96 passed
+```
+
+The guard site is covered by **exactly one** assertion. Delete it and that call site reverts
+silently while the suite stays green.
+
+The control is not decoration. The destination assertion also passes against a recorder that
+emits a row per field of every raw line — which would write a garbage pair from a two-field
+line's empty `$3`. Without the control, *"emit more rows"* is a passing fix.
 ## Workarounds
 
 After staging an archive move, check attribution by the **source** path, not the destination —

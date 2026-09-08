@@ -178,7 +178,7 @@ eq "a real add still claims normally" "$(owner_of s1.txt)" "$A"
 #
 # ARCHIVING A BUG FILE IS A RENAME, and it is the commonest one in this repo, so the guard
 # was blind at every archive move's destination. It captured one on 2026-09-08.
-# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
+# docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
 #
 # `git mv` and a filesystem move plus `git add -- <old> <new>` produce an IDENTICAL index,
 # and the recorder reads the index -- the real capture came via the latter.

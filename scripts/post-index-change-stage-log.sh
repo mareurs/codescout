@@ -361,7 +361,7 @@ fi
 # detection is covered by the same flag if anyone ever enables it. Verified: the same awk,
 # unchanged, then yields `00000000<TAB><src>` and `<dstblob><TAB><dst>` -- the delete and
 # the add, each attributable.
-# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
+# docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
 while IFS=$'\t' read -r blob path; do
     [ -n "$path" ] || continue
     owner=""

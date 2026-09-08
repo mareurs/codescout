@@ -195,7 +195,7 @@ done < <(git diff --cached --raw --no-renames 2>/dev/null |
 # Caught by `tests/hooks-discrimination.sh`'s "refusal names the rename DESTINATION", which
 # failed with the recorder already fixed. Keep BOTH call sites in step; a mutation of either
 # alone leaves the other's assertion green.
-# docs/issues/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
+# docs/issues/archive/2026-09-08-the-stage-log-records-a-renames-source-path-and-drops-its-destination.md
 
 ((${#theirs[@]})) || exit 0
 
