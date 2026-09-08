@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 123
-entry_high_water_W: 113
+entry_high_water_W: 114
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -177,6 +177,7 @@ entry_high_water_W: 113
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-114 | 2026-09-08 | med | **A peer's claim about MY OWN authorship is the one attribution claim no reflex fires on.** `59112612` reported two untracked files as *"your in-flight work"*; they were `c9ab2c8d`'s (`codescout-b9`, `.claude-sdd`, **busy, writing them at that moment**) — `file-provenance.py` says `PEER`, the bug's frontmatter says `claimed_by: c9ab2c8d`, and the mtime moved 20:17:03 → 20:28:03 between two of my reads while I wrote nothing | The peer-skepticism rule covers claims about **the world**; a claim naming *me* as author reads as a **status report on my own state**, so it never enters the category of things to check. The natural next action on "your uncommitted work" is to commit or clean it — capturing a live peer's file mid-write. **Caught by prior recon, not by skepticism**: `claimed_by` was already in context from orienting 8 min earlier, so the ordering was luck. **Cheap rule: a file you own does not change while you read it and write nothing** | validated |
 | W-113 | 2026-09-08 | high | **Four cross-session disagreements in one afternoon, none of them a misreading — cite the OBJECT, not the number.** Two lane counts read off different CI runs four minutes apart; a `cancelled` run that meant supersession, not a verdict; two lanes that looked like they failed a fix but aborted in `--lib` and never ran it (`grep -c <testname> <joblog>` → **0**); and a comment describing its own code wrongly. In each case a reading was correct about an object that had moved, or was not the object in question | The reflex in all four was *"the other reader erred"*, and **re-reading cannot distinguish that from carelessness — a correct reading of the wrong object is byte-identical to a careless reading of the right one.** So the move that *feels* rigorous is the one that cannot work. Each was one command from resolution and none of them was "look again": the run id, `grep -c` over the job log, the regex instead of the comment above it. **A CI run id is to a lane count what a commit SHA is to a timestamp** | validated |
 | W-112 | 2026-09-08 | high | **A hermetic fixture makes the production default unobservable, and the mutation that proves it is the one nobody runs.** After 94/94 green and 9 of 9 mutations killed, mutating `profile_dirs()` — which decides *where the tool looks at all* — to a hardcoded list **and** to `return []` both left **94/94 green**. Every case injects `FILE_PROVENANCE_*_ROOTS` to stay hermetic, and that override *is* the default's only caller | The discovery fix ships with a green suite and zero coverage — in code written minutes earlier *in direct response to a peer's correction*, i.e. the part most recently thought hardest about. Not a thin sample: the refuting outcome leaves **no artifact at any corpus size**, so "widen the sample" is a no-op against it. Independently reproduced by `ad379a7c` against the **committed** suite (`transcript_roots() -> return []` leaves 68/68 green), so it is a pre-existing harness property rather than new work. Theirs is the generalisation: **hermeticity and default-path coverage are in direct tension**, invisible from inside a green run — and their own six mutations that day had all hit the *dispatch* and none the *scope*, because the fixture cannot express a scope mutation. The mutation population was itself filtered by what the harness could see | validated |
 | W-111 | 2026-09-08 | med | **The patch-id anchor, exercised live under a real rebase — published as a DENOMINATOR, not a catch.** Reported a commit to the user as `3516185e`; minutes later the tree was rebased and pushed. `git cat-file -t` still returned `commit` — reassuring and wrong — while the commit was unreachable from the ref it was published to. That **conjunction** is the rebase-orphan signature, and only the second half discriminates; use `git merge-base --is-ancestor <sha> <ref>` rather than `git branch --contains`, which answers a laxer question (peer refinement, sessionId `89d91024`, who independently confirmed the whole route on a second commit). `git patch-id --stable` matched the diff to `e3c50390` on the first try, confirmed by subject. The rule was already in `CLAUDE.md` and already followed, so nothing was saved that it had not promised: what is new is that its 2026-08-19 justification counts SHAs **already lost** (10 of 63), measuring the wound and never the remedy. This is the remedy observed working forward, on a citation ~10 minutes dead | Without the anchor, recovery is subject-keyword search — `CLAUDE.md` measures that at 2–153 ambiguous candidates, and it would have been worse than average here: the same rebase landed three sibling commits with near-identical `docs(issues,clusters):` subjects from two sessions | validated |
@@ -12610,6 +12611,60 @@ than by me re-reading — which is this ledger's own standing claim about self-r
 half now has a stated discriminator and could be checked by a reviewer, but is not gated.
 
 **Severity:** low — no wrong artifact shipped from either. Recorded for the shape.
+
+## W-114 — A peer's claim about MY OWN authorship is the one attribution claim no reflex fires on — and the catch was prior recon, not skepticism
+
+**Valid:** dated 2026-09-08
+
+**Observed:** `codescout-92` (`59112612`) pushed three of my commits and closed its message with
+*"Your in-flight work is untouched. `scripts/attribute-red.py`, `tests/attribute-red.sh` and the
+modified bug file are all still uncommitted and unstaged; I pushed commits, not the tree."*
+
+Every clause of that is true except whose the files are. They are `c9ab2c8d`'s —
+`codescout-b9`, pid 2329405, profile `.claude-sdd`, **busy**, writing them at that moment.
+Positively identified, not by elimination:
+
+- `scripts/file-provenance.py` at 20:28:20 → `PEER … written by c9ab2c8d-… [LIVE]` for both files.
+- `df517af91b43a5f7`'s frontmatter carries `claimed_by: c9ab2c8d`, `status: taken` — the bug
+  `attribute-red.py` is the `H`-target for, and the file's own docstring cites it.
+- `attribute-red.py`'s mtime moved **20:17:03 → 20:28:03** between two of my reads, with
+  `attribute-red.py.bak` and `tests/attribute-red.sh` appearing in between. I have made zero
+  writes this session.
+
+**Cause — and it is not "took a peer at face value".** The standing rule (CLAUDE.md § *Reaching a
+Peer Session*, and the harness's own note that peers are teammates rather than oracles) is about
+claims regarding **the world** or **other parties**. A claim naming *me* as author does not
+present as a claim at all — it presents as a **status report about my own state, on which I am the
+authority**. Nothing in it asks to be checked. That is why the reflex does not fire: the sentence
+is grammatically about me and epistemically about them.
+
+`92` reached it by proximity — the documented anti-pattern — in a tree where three sessions wrote
+within the hour. Worth naming without blame: the misattribution arrived **in the same message that
+pushed `c22310ab`**, and `c9ab2c8d` is building `attribute-red.py` specifically so a red naming an
+uncommitted file says whose it is. The class has a mechanism in flight; this is an instance
+(`IC-10`), not a new class.
+
+**Counterfactual, with the cost named.** The natural next action on *"your in-flight work is
+uncommitted"* is to commit it or clean it. Either would have captured a live peer's file
+**mid-write** — the failure already recorded at
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`, one instance of
+which was caught mid-write too. The window was real: the file changed twice inside eleven minutes.
+
+**The honest part, which is what makes this worth an entry rather than a boast.** I did not catch
+it by being skeptical of `92`. I already held the answer: eight minutes earlier, orienting after
+compaction, I had read the bug file's `claimed_by: c9ab2c8d` and enumerated sockets, so
+`c9ab2c8d = codescout-b9 (.claude-sdd)` was in context before `92`'s message arrived. **The
+ordering was luck.** Had the message come first I cannot say I would have checked, because the
+category of "claims to verify" did not contain it. Recon done for an unrelated reason held the
+answer — which is an argument for the *cadence*, not for my judgement in the moment.
+
+**The rule, and it costs one `stat`:** a file you own does not change while you are reading it and
+writing nothing. When any party — peer, tool, or your own memory — asserts that an untracked file
+is **yours**, treat it as an attribution claim like any other and resolve it positively:
+`stat -c %y` twice, then `scripts/file-provenance.py`. And note the asymmetry that makes this
+worth the line: **`ListAgents` could not have seen `c9ab2c8d` from either of our rows** — it is on
+a different profile — so the two sessions best placed to route around each other were the two
+least equipped to.
 
 ## Template for new entries
 
