@@ -3568,7 +3568,28 @@ mod tests {
     /// rationale above lives in the code comment and the bug file, not on a surface every
     /// session pays for on every request. Nothing was taken from a neighbouring
     /// description, per the rule below.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_096;
+    ///
+    /// **57_096 → 57_296 (2026-09-08, +200): the preamble sentinel, named where a caller
+    /// reads.** `heading: "^"` targets the text before the first heading. It shipped
+    /// 2026-08-21, is tested end to end, and was named on no caller-facing surface — so a
+    /// session met three correct refusals in a row, concluded the region was unreachable by
+    /// any sanctioned path, edited around the librarian guard with `python3`, and published
+    /// that false conclusion in a commit message. Being tested end-to-end is precisely why
+    /// it was expensive: the feature works, nothing fails loudly, and the only observable is
+    /// a caller doing something worse.
+    ///
+    /// Gross addition was 462; **262 was paid on the spot** by cutting all three
+    /// descriptions to their operative facts — the token, the region's name, and
+    /// `action="edit"` only. Why the region is unaddressable, and why `insert_before` on the
+    /// first heading already covers appending, live in the bug file and in
+    /// `PREAMBLE_SENTINEL`'s own doc comment, not on a surface every session pays for on
+    /// every request. The remaining 200 buys the sentinel on all three call shapes
+    /// (`edit_file` single, `edit_file` batch, `doc`'s `body_edits`); dropping any one
+    /// reintroduces the gap for that shape. The two ERROR texts carry the fuller sentence
+    /// and cost nothing here — they are runtime messages, not schema, and they reach the
+    /// caller who is already failing at exactly this.
+    /// docs/issues/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_296;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

@@ -245,7 +245,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
         let heading = edit["heading"].as_str().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'heading' field"),
-                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}.",
+                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}. Editing text BEFORE the first heading? That is the preamble, it belongs to no section, and `heading: \"^\"` targets it with action=\"edit\".",
             )
         })?;
         let action = edit["action"].as_str().ok_or_else(|| {

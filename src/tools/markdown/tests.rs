@@ -1272,6 +1272,90 @@ fn scoped_edit_preamble_sentinel_does_not_reach_into_the_first_section() {
     assert_eq!(result, "hi preamble\n## First\nhello world\n");
 }
 
+/// Every surface a CALLER reads must name the preamble sentinel.
+///
+/// The capability shipped 2026-08-21 and was named only in `PREAMBLE_SENTINEL`'s own doc
+/// comment and in the two tests above — surfaces a caller failing at this never opens. A
+/// session met three correct refusals in a row, concluded the region was unreachable by any
+/// sanctioned path, and edited around the librarian guard with `python3`. It then published
+/// that false conclusion in a commit message. The capability was available throughout.
+///
+/// So this is a REACHABILITY test, not a documentation nicety: being tested end-to-end is
+/// exactly why the gap was expensive — the feature works, nothing fails loudly, and the only
+/// observable is a caller doing something worse.
+/// docs/issues/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
+///
+/// CEILING, stated because it is invisible: this buys ARRIVAL, never ANSWERABILITY. It
+/// cannot check that a surface explains *when* to reach for the sentinel, only that the
+/// sentinel is named at all. Do not read a green here as "the docs are good".
+#[test]
+fn every_caller_facing_surface_names_the_preamble_sentinel() {
+    use crate::tools::markdown::edit_markdown::{plan_batch, PREAMBLE_SENTINEL};
+
+    // The production path first: this is the error a caller actually hits, and the only
+    // assertion here that pins the sentinel's VALUE rather than the concept's name. It
+    // reds if `PREAMBLE_SENTINEL` changes without the message following it.
+    let err = plan_batch("preamble\n## S\nbody\n", &[serde_json::json!({})], false)
+        .expect_err("an edit with no heading must be refused");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains(PREAMBLE_SENTINEL),
+        "the missing-heading error must name the preamble sentinel — it is emitted to a \
+         caller who has just discovered the heading grammar does not fit their target. \
+         Got: {msg}"
+    );
+
+    // Then the schema surfaces. `include_str!` rather than rendering the tools, because the
+    // point is the committed text an agent reads before ever making a call.
+    const EDIT_FILE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/tools/edit_file/mod.rs"
+    ));
+    const DOC: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/librarian/tools/artifact.rs"
+    ));
+    // `doc`'s own body_edits error, and the one the filing session actually hit. It is a
+    // SEPARATE call site from `plan_batch`'s above: `doc` refuses a heading-less edit in
+    // update.rs before markdown ever sees it, so a mutation of either leaves the other's
+    // assertion green. Four surfaces, four sites.
+    const DOC_UPDATE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/librarian/tools/update.rs"
+    ));
+    let surfaces: &[(&str, &str)] = &[
+        ("src/tools/edit_file/mod.rs", EDIT_FILE),
+        ("src/librarian/tools/artifact.rs", DOC),
+        ("src/librarian/tools/update.rs", DOC_UPDATE),
+    ];
+
+    // NON-VACUITY FIRST. Every assertion below is a `contains` over an included file, and a
+    // `contains` over an empty string fails loudly while a missing include fails to COMPILE —
+    // but an empty list passes silently, which is the shape that reports a clean gate.
+    assert!(
+        !surfaces.is_empty(),
+        "surfaces is empty — the positive half cannot fail"
+    );
+
+    for (name, src) in surfaces {
+        assert!(
+            !src.is_empty(),
+            "{name}: included as empty, so every check below is vacuous"
+        );
+        // The CONCEPT's name, not the prose around it, and case-insensitively: the schema
+        // descriptions shout it and the error hints say it in a sentence. A rewrite that
+        // keeps the word survives; deleting the mention reds. Asserting the sentinel's
+        // literal `"^"` here instead would be near-vacuous — a caret inside quotes occurs
+        // in regexes.
+        assert!(
+            src.to_ascii_uppercase().contains("PREAMBLE"),
+            "{name}: nothing here names the PREAMBLE region. A caller reading this surface \
+             cannot learn the region is addressable, and the errors they hit while failing \
+             are the only other place it could be said."
+        );
+    }
+}
+
 #[test]
 fn scoped_edit_preamble_sentinel_not_found_reports_closest_match() {
     let content = "Some preamble text.\n## First\nbody\n";

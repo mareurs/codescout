@@ -698,9 +698,14 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
     let mut planned: Vec<PlannedEdit> = Vec::new();
 
     for (i, edit) in edits.iter().enumerate() {
-        let heading = edit["heading"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'heading' field", i))?;
+        let heading = edit["heading"].as_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "edits[{}]: missing required 'heading' field. Editing text BEFORE the \
+                     first heading? That is the preamble, it belongs to no section, and \
+                     `heading: \"^\"` targets it with action=\"edit\".",
+                i
+            )
+        })?;
         // Both of this dispatcher's discovery routes used to omit `edit`: the missing-action
         // error named no actions at all, and an invalid one fell through to
         // `plan_section_edit`'s four. Batch mode was therefore the one surface with no route

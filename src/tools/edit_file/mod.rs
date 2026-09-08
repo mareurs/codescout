@@ -405,7 +405,7 @@ impl Tool for EditFile {
                 "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
                 "insert": { "type": "string", "enum": ["prepend", "append"], "description": "Insert at file start/end (old_string not required)." },
-                "heading": { "type": "string", "description": "Markdown only: target section heading (fuzzy matched). Required unless using edits[] batch mode." },
+                "heading": { "type": "string", "description": "Markdown only: target section heading (fuzzy matched). Required unless using edits[] batch mode. \"^\" targets the PREAMBLE (text before the first heading), action=\"edit\" only." },
                 "occurrence": { "type": "integer", "minimum": 1, "description": "Markdown only: 1-indexed selector when `heading` matches several sections." },
                 "action": {
                     "type": "string",
@@ -444,7 +444,7 @@ impl Tool for EditFile {
                             "old_string": { "type": "string", "description": "Text grammar: exact text to find." },
                             "new_string": { "type": "string", "description": "Text grammar: replacement text." },
                             "replace_all": { "type": "boolean" },
-                            "heading": { "type": "string", "description": "Markdown grammar: target section heading." },
+                            "heading": { "type": "string", "description": "Markdown grammar: target section heading, or \"^\" for the PREAMBLE (action=\"edit\" only)." },
                             "occurrence": { "type": "integer", "minimum": 1 },
                             "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"] },
                             "content": { "type": "string" },
