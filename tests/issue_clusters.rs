@@ -783,7 +783,7 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
 
 /// The refusal must name the file holding the `**Members:**` field it demands.
 ///
-/// Guards `docs/issues/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`.
+/// Guards `docs/issues/archive/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`.
 /// The predicate was always right; the message said "the ledger", which stopped denoting one
 /// file at the per-class split, and routed two sessions to the Index in one morning.
 ///

@@ -29,7 +29,7 @@ entry_high_water_IC: 22
 > is the one real class whose field genuinely is in this file — which is what makes the wrong file
 > look like the right one. Two sessions paid two refusals each for this in one morning, before the
 > growth gate's refusal named the path;
-> `docs/issues/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`
+> `docs/issues/archive/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`
 > carries the measurements.
 
 ## What this ledger is for
