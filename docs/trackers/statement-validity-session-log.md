@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 10
-entry_high_water_F: 13
+entry_high_water_F: 14
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -45,6 +45,7 @@ entry_high_water_F: 13
 | F-11 | 2026-09-07 | med | self-friction | open | A carried failure NAME agreed with the counts and disagreed with the panic, and the two names route to opposite actions |
 | F-12 | 2026-09-07 | med | self-friction | open | A display helper dropped the field component the conclusion was about, and the conclusion was about its absence |
 | F-13 | 2026-09-07 | med | architectural | open | Two sessions converged for three rounds on the properties of a sweep neither had checked exists |
+| F-14 | 2026-09-08 | med | self-friction | open | I verified a claim about the field/world gap by reading the field, then wrote up the class 28 minutes later |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1379,6 +1380,64 @@ ledger.
 
 **Rests on:** `doctor.rs:4187-4190`; `mv.rs:217-220`; `6a2ab716` (five moves,
 seven citations re-pointed by hand); `00e04f7c`.
+
+## F-14 — I verified a claim about the field/world gap by reading the field, then wrote up the class 28 minutes later
+
+**Valid:** dated 2026-09-08
+
+**Observed.** A peer asked which bug files I held, noting the ledger showed
+`taken == 0` and that `W-110` had measured that as the unreliable reading. I ran
+`filter={"status":{"in":["taken","investigating"]}}`, got one row (`investigating`,
+no live owner), and replied: *"`taken` really is 0 across this project right now,
+and that is a fact about the corpus rather than about the query."*
+
+The first clause was true. The second does not follow, and was false.
+`codescout-e7` replied about two minutes later holding
+`docs/issues/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md`,
+unmarked, for two hours — in the session whose entire subject is that bugs read
+`open` while held.
+
+**Timeline, because the gap is the finding.**
+
+    09:57  e7 commits that file, `status: open`, while holding it
+    09:58  I run the query, get 0, and publish "a fact about the corpus"
+    10:25  e7 marks it `taken`
+    10:26  I commit F-11/F-12/F-13 — an essay whose thesis is that a CONFIRMING
+           reading, correct about something adjacent, is the shared shape, and
+           that "none would be caught by looking harder at the same surface"
+
+Twenty-eight minutes between instantiating the class and writing it up, with no
+recognition. This reproduces § *Observer Blindness*'s measured claim exactly:
+knowing the class prevents nothing.
+
+**Why the check could not have worked, which is the transferable part.** I
+verified by running the same query and adding my own self-report. A query
+agreeing with itself is not evidence about unmarked holders — it reads the
+field, and the claim was about the gap between the field and the world. The
+self-report covers one peer of three. **For any claim of the form "the field
+matches the world", no reading of the field is evidence.** The instrument is the
+ask, which is what the peer was doing when I answered them with a query result.
+
+**The sentence form is the tell.** *"a fact about X rather than about the
+instrument"* asserts precisely that the gap is closed, and is the one claim the
+instrument cannot support. Reach for it and the next obligation is to name a
+second, independent source — not to re-run the first.
+
+**And the mechanism runs both ways.** `codescout-d8` found their own write-guard
+bug still reading `open` two hours after the fix shipped and CI confirmed it,
+having reported "Windows lanes green" in prose while the field said otherwise.
+So the ledger under-reports closers by the same mechanism it under-reports
+holders — a property of the write path rather than of triage discipline, which
+makes `open` uninformative in both directions rather than merely stale.
+
+**Cost.** Published a false claim to a peer who was making a routing decision on
+it. Caught by that peer in minutes, at no cost beyond the correction.
+
+**Severity:** med. **Status:** open — `W-110`'s mechanism half belongs to the
+peer who measured it.
+
+**Rests on:** `492c62b5` (e7's file at `status: open`, committed 09:57); that
+file at `status: taken`, mtime 10:25:13; `6c99e005` committed 10:26:40.
 
 ## Template for new entries
 
