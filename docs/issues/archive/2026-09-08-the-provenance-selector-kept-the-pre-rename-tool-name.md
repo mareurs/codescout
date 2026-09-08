@@ -1,5 +1,5 @@
 ---
-id: '94afb1ade8d7e40a'
+id: 249dcf2690afcd35
 kind: bug
 status: fixed
 title: The provenance selector kept the pre-rename tool name, and every librarian write went unattributable
@@ -202,7 +202,7 @@ archive move blocked this bug's own fix commit, and routing it returned `UNKNOWN
 
 ### Residual, re-derived rather than carried over
 
-`2b9cbd34630cf340`'s Fix section requires this explicitly: its **2.8%** is a figure about `Bash`
+`6896fe1df195b18a`'s Fix section requires this explicitly: its **2.8%** is a figure about `Bash`
 calls and is not one about `run_command`. Measured against the production `write_targets()`:
 
 | tool | calls | carry a mutating form the matcher does not resolve |
@@ -256,7 +256,7 @@ hint has a reachability ceiling worth stating at the site.
 
 - `docs/issues/2026-09-08-a-claimed-bug-file-names-the-author-of-the-wip-that-reds-the-build.md`
   (`df517af91b43a5f7`) — the incident that sent me here; its option 3 remains unbuilt.
-- `docs/issues/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md`
-  (`2b9cbd34630cf340`) — the sibling, fixed in the same commit.
+- `docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md`
+  (`6896fe1df195b18a`) — the sibling, fixed in the same commit.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md` — the class.
 - `docs/PROBES.md` — vouched for the dead route; corrected here.

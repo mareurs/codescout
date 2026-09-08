@@ -91,7 +91,7 @@ Not fixed. Three directions, cheapest first, none costed:
 2. **Refuse `git add -A` / `-u` at the hook**, or warn when a single index write claims paths
    the session has never written. The recorder cannot currently tell, which is the point — it
    would need a write-side signal, and `file-provenance.py` is the obvious source and is blind
-   to `run_command` (`docs/issues/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md`).
+   to `run_command` (`docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md`).
 3. **Record the relation, not the actor** — a pair would carry *first observed writer* rather
    than *last stager*. This is the honest fix and the expensive one; it needs a write-side
    channel the working tree does not have, which is `IC-17`'s `NONE` row.

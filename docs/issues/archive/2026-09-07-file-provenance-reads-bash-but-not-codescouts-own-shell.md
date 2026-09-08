@@ -1,5 +1,5 @@
 ---
-id: '2b9cbd34630cf340'
+id: 6896fe1df195b18a
 kind: bug
 status: fixed
 title: 'BUG: file-provenance.py scans Bash but not run_command, so every write through codescout''s own shell is invisible to the instrument built to attribute it'
@@ -135,7 +135,7 @@ design worked. Its coverage did not.
 are kept because the second is an obligation this file placed on its own fix, and it was
 discharged rather than skipped.
 
-It landed inside a larger repair of the same function, `94afb1ade8d7e40a` — the librarian branch
+It landed inside a larger repair of the same function, `249dcf2690afcd35` — the librarian branch
 was matching `mcp__codescout__artifact` six days after `ceb5b57a` renamed that tool to `doc`.
 Same selector, same class, same file. Folding them was not convenience: the `Bash` widening and
 the `doc` repair are one edit to one dispatch, and splitting them would have shipped two commits

@@ -236,7 +236,7 @@ def write_targets(name: str, inp: dict, root: Path):
     # run_command is codescout's own shell and carries the command under the same key, so a
     # write issued through it is the same event as a Bash write. Keying on "Bash" alone made
     # every redirect / sed -i / rm through codescout invisible to this tool
-    # (docs/issues/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md).
+    # (docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md).
     elif name in ("Bash", "mcp__codescout__run_command"):
         cmd = inp.get("command")
         if isinstance(cmd, str):
