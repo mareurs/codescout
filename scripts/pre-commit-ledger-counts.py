@@ -49,6 +49,30 @@ def _git(*args: str) -> str:
     return r.stdout
 
 
+def _repo_path(p: pathlib.PurePath) -> str:
+    """Render a path the way this repo CITES paths: POSIX, on every platform.
+
+    `class_files`' git sources already return POSIX -- git emits forward slashes whatever
+    the host -- while the worktree source builds `Path` objects, which render with the
+    NATIVE separator. Nothing reconciled the two, so on Windows the growth refusal cited
+    `docs\\trackers\\issue-clusters\\IC-7-....md` from one branch and
+    `docs/trackers/issue-clusters.md` (a literal) from the other, in the same message.
+
+    Two costs, and the second is the one that made this worth a helper rather than a cast.
+    A backslash path is a string the reader cannot paste into `git`, `grep`, or any of this
+    repo's citation tooling, and `audit_doc_refs` keys on backticked path-shaped tokens so
+    it cannot resolve one either -- the refusal is documentation-shaped and its whole point
+    is that the path is greppable. And `class_file_for` splits on `"/"` to take a basename:
+    a backslash path does not split at all, leaving `stem` as the entire path. That routing
+    survived only on the `endswith(f"-{slug}")` fallback, i.e. by luck.
+
+    Callers pass the `Path` itself, never `str(p)` -- the object knows its own flavour and
+    `as_posix()` is what converts. That is also what makes the defect testable from Linux,
+    where `str(p)` and `p.as_posix()` are byte-identical: see `--fixture-repo-path`.
+    """
+    return p.as_posix()
+
+
 def class_files(source: str) -> list:
     """Every per-class file, read from the SAME source as the ledger text.
 
@@ -67,7 +91,7 @@ def class_files(source: str) -> list:
         out = _git("ls-files", LEDGER_DIR)
     else:
         d = pathlib.Path(LEDGER_DIR)
-        return sorted(str(p) for p in d.glob("*.md")) if d.is_dir() else []
+        return sorted(_repo_path(p) for p in d.glob("*.md")) if d.is_dir() else []
     return sorted(p for p in out.splitlines() if p.endswith(".md"))
 
 
@@ -533,6 +557,21 @@ def main() -> int:
                 for s in sys.stdin.read().split()
             ]
             emit_growth_refusal(rows)
+            return 0
+        elif arg == "--fixture-repo-path":
+            # Windows-shaped paths over stdin, through the SAME renderer the worktree
+            # branch of `class_files` uses.
+            #
+            # This fixture exists because the defect is INVISIBLE ON POSIX BY
+            # CONSTRUCTION: `str(p)` and `p.as_posix()` are byte-identical on Linux and
+            # macOS, so no assertion over real `class_files` output can discriminate
+            # there, and the Rust test that caught this in CI
+            # (`the_growth_refusal_names_the_file_holding_the_members_field`) is green on
+            # every developer machine in this project while being red on Windows.
+            # `PureWindowsPath` carries the foreign flavour without needing the foreign
+            # OS, so the Linux gate can red on the mutation that shipped.
+            for line in sys.stdin.read().split():
+                print(_repo_path(pathlib.PureWindowsPath(line)))
             return 0
         elif arg == "--fixture-tags":
             # Pure over stdin, so `the_hook_script_agrees_on_both_yaml_tag_styles` can feed

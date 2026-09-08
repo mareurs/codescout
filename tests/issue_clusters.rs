@@ -831,6 +831,66 @@ fn the_growth_refusal_names_the_file_holding_the_members_field() {
     );
 }
 
+/// A repo path must render POSIX on every platform, including Windows.
+///
+/// **This is the test the one above could not be.**
+/// `the_growth_refusal_names_the_file_holding_the_members_field` asserts a hardcoded
+/// POSIX form, so it is green on Linux and macOS and RED ON WINDOWS by construction: the
+/// worktree branch of `class_files` rendered its `Path` objects with `str()`, i.e. with
+/// the native separator. CI run `34221968837` on `579a2085` failed both Windows lanes on
+/// exactly that assertion while all 13 POSIX lanes passed — the fix for one defect
+/// shipping another, invisible to every gate its author could run.
+///
+/// **A platform-conditional defect needs a platform-independent discriminator, and no
+/// assertion over real output is one.** `str(p)` and `p.as_posix()` are byte-identical
+/// here, so a test reading actual `class_files` output is MONOTONE under the mutation:
+/// it passes just as happily with the bug restored, which is § *Testing Discipline*'s
+/// first law with the platform as the axis rather than the assertion's direction.
+/// `--fixture-repo-path` closes it by pushing a `PureWindowsPath` through the same
+/// renderer production calls — the foreign flavour without the foreign OS.
+///
+/// Mutation this kills: `_repo_path` returning `str(p)` rather than `p.as_posix()` —
+/// which is precisely the code that shipped. Verified red on Linux, which is the whole
+/// point of the fixture.
+///
+/// Neither cost is cosmetic. A backslash path cannot be pasted into `git` or `grep`, and
+/// `audit_doc_refs` keys on backticked path-shaped tokens so it cannot resolve one —
+/// while the refusal exists to hand a reader a greppable path. And `class_file_for`
+/// takes its basename with `rsplit("/", 1)`, which does not split a backslash path at
+/// all, leaving the whole path as the stem; that routing survived on the
+/// `endswith("-{slug}")` fallback alone.
+#[test]
+fn a_repo_path_renders_posix_even_when_the_platform_flavour_is_windows() {
+    let mut child = Command::new("python3")
+        .args(["scripts/pre-commit-ledger-counts.py", "--fixture-repo-path"])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(b"docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md\n")
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        !text.contains('\\'),
+        "a repo path must carry no backslash whatever the platform flavour — this is the \
+         string a reader pastes into `git` or `grep`, and the one `audit_doc_refs` must \
+         resolve. Got:\n{text}"
+    );
+    assert!(
+        text.contains("docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md"),
+        "non-vacuity: the absence assertion above is satisfied by empty output, by a \
+         crashed fixture, and by a renderer that drops the path entirely — all three are \
+         backslash-free. The positive form is what makes the pair discriminate. Got:\n{text}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // `Mechanism status:` must carry a basis
 // ---------------------------------------------------------------------------
