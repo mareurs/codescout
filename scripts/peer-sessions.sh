@@ -4,10 +4,18 @@
 # WHY THIS EXISTS
 #
 # `ListAgents` is scoped to ONE profile's session registry, while the socket
-# directory is machine-global. This machine runs three profiles (~/.claude,
-# ~/.claude-sdd, ~/.claude-kat), so a session started under a different profile is
-# invisible to it — and the omission is silent: the short count is reported as
-# complete, with no hint that it is a subset.
+# directory is machine-global. A session started under a different profile is
+# therefore invisible to it — and the omission is silent: the short count is
+# reported as complete, with no hint that it is a subset.
+#
+# The profile COUNT is deliberately not stated here. It is a per-machine fact;
+# this script discovers it at run time by reading CLAUDE_CONFIG_DIR out of
+# /proc, so nothing below ever used a hardcoded list. The count that used to sit
+# in this comment had decayed anyway — it named three profiles when seven
+# `.claude*` config dirs existed, five of them holding a `sessions/` (measured
+# 2026-09-08). CLAUDE.md § Reaching a Peer Session carried the identical
+# sentence and lost it for the same reason: a per-machine fact copied into a
+# tracked file has no owner and decays silently.
 #
 # MECHANISM, measured 2026-08-31 (was inferred until then). Two layers, different
 # scopes:
