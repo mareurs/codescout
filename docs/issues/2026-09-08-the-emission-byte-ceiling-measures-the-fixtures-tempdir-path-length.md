@@ -14,6 +14,37 @@ claimed_by: 5399543d-22d6-4ed9-9ebb-876be459989f
 
 ## Summary
 
+**WIDENED 2026-09-08, after the fix, by `c9ab2c8d` reading the run I had stopped reading.** This
+file was written as a macOS finding. It is **three lanes across two platforms**, and every one of
+them failed on *this* test — verified in run `34222332438`, one FAILED test per job:
+
+| lane | total | over |
+|---|---|---|
+| `macos-latest / default` | 12275 B | +31 |
+| `windows-latest / default` | 12262 B | +18 |
+| `Windows-gnu cross (MinGW + wine)` | 12257 B | +13 |
+
+Windows temp paths are longer than `/tmp/.tmpXXXXXX` too. The `local-embed` and `no-features`
+siblings went green **not because they were unaffected but because this test only exists under
+`default`** — which is why the platform split read as macOS-only: the two lanes that would have
+corroborated it were being read as the separator bug's, and the separator bug really did own the
+other two.
+
+**And it masked a peer's verification.** `windows-latest / default` and `Windows-gnu cross` never
+ran `59112612`'s separator regression test at all: `cargo test` aborts after the `--lib` binary
+fails, so the `tests/` integration binaries never started. Measured, with a control, because the
+first version of this check used a `^test ` anchor that matches nothing in a timestamped CI log and
+returned a vacuous zero:
+
+```
+CONTROL  lines matching 'test .+ \.\.\. ok'   5157 / 5148    <- the grep works
+         92's separator regression test          0 /    0
+         'test result:' lines                    1 /    1    <- only --lib ran
+```
+
+So for two lanes, **this defect was the reason a different session's fix could not be verified**,
+and nothing in either job's output said so — the report named my test and stopped.
+
 `server::guide_hint_tests::a_p50_session_stays_under_the_committed_emission_byte_ceiling`
 (`src/server.rs:10249`) exists to catch **guides growing**. It also measures the **length of the
 fixture's temp-directory path**, at exactly 1 byte of budget per character, against a ceiling whose
