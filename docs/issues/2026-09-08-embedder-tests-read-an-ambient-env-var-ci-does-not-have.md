@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/repro-env-diverges-from-gate-env
+closed: 2026-09-08
 opened: 2026-09-08
-closed:
-severity: high
 owner: marius
 related:
-  - docs/conventions/test-env-isolation.md
-  - docs/issues/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md
-kind: bug
-tags:
-  - cluster/repro-env-diverges-from-gate-env
+- docs/conventions/test-env-isolation.md
+- docs/issues/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it.md
+severity: high
 ---
 
 # BUG: the embedder tests read an ambient env var every local shell has and CI has none of, so `experiments` has been red for 36 hours with no owner and every local gate run green
@@ -112,7 +112,9 @@ should not be quoted as one.
 
 ## Fix
 
-**Fixed 2026-09-08 — the tests now use the env-free constructor.** ~22 call sites in
+**Fixed 2026-09-08 on `experiments` — `ab33f4ff`, patch-id
+`4dde4a69650e0b21a6aef23fe5e2e25c2b4fbffd`. The tests now use the env-free constructor.** ~22
+call sites in
 `src/retrieval/embedder.rs` and one in `src/tools/semantic/semantic_search.rs` moved from
 `EmbedderHttp::new(dense, sparse, dim)` to
 `EmbedderHttp::with_config(dense, sparse, dim, "m", "")`.
