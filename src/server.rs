@@ -8039,6 +8039,62 @@ mod guide_hint_tests {
             .collect()
     }
 
+    /// Substitute every known rendering of a fixture root out of one emitted block.
+    ///
+    /// Extracted from `a_p50_session_stays_under_the_committed_emission_byte_ceiling`
+    /// for ONE reason, and it is not tidiness: inline, the substitution could only be
+    /// exercised on a platform where the renderings actually differ. Linux spells the
+    /// native and forward-slash forms identically, so deleting either from the caller's
+    /// list is a no-op there and no mutation on the gating platform can red — which is
+    /// precisely how the first version of this fix shipped a Windows regression
+    /// (12262 → 12313 B, CI 34235396900) inside the commit fixing the same class for
+    /// macOS.
+    ///
+    /// As a named function it takes its renderings as an argument, so a test can hand it
+    /// a Windows-shaped pair on any machine. `roots` must be ordered longest-first: a
+    /// shorter rendering that prefixes a longer one would consume its head and strand
+    /// the tail.
+    fn strip_fixture_roots(block: &str, roots: &[String], token: &str) -> (String, bool) {
+        let mut s = block.to_string();
+        let mut hit = false;
+        for r in roots {
+            if s.contains(r.as_str()) {
+                hit = true;
+                s = s.replace(r.as_str(), token);
+            }
+        }
+        (s, hit)
+    }
+
+    /// The guard the inline version could not have: a Windows-shaped root pair, on
+    /// whatever platform happens to be running.
+    ///
+    /// LOAD-BEARING: the two renderings differ only in separator, which is the case
+    /// Linux cannot produce and therefore cannot test by mutation. Drop either entry
+    /// from `roots` and this reds here, today, on the gating platform.
+    #[test]
+    fn stripping_a_fixture_root_covers_every_rendering_not_just_the_native_one() {
+        let native = r"C:\Users\runner\AppData\Local\Temp\emulates-macos-x".to_string();
+        let posix = "C:/Users/runner/AppData/Local/Temp/emulates-macos-x".to_string();
+        let roots = vec![native.clone(), posix.clone()];
+
+        // One block per rendering — the shape `post_process` and the workspace notice
+        // produce between them, and the shape that made the miss invisible: whichever
+        // one IS replaced satisfies an existence check on behalf of the one that is not.
+        let block = format!("banner {native}\nnotice {posix}\n");
+        let (out, hit) = strip_fixture_roots(&block, &roots, "<R>");
+
+        assert!(
+            hit,
+            "control: at least one rendering must have been present"
+        );
+        assert!(
+            !out.contains("emulates-macos-x"),
+            "every rendering must be substituted, not merely one — the prefix has no \
+             separator in it, so its survival proves a rendering escaped: {out}"
+        );
+    }
+
     #[tokio::test]
     async fn a_refusal_carries_the_gate_condition_once_per_family() {
         let (_dir, server) = make_server().await;
@@ -10168,6 +10224,13 @@ mod guide_hint_tests {
         // derived with rather than being silently loosened by a shorter token.
         const FIXTURE_ROOT_TOKEN: &str = "/tmp/.tmpROOT00";
 
+        // The prefix, as its own constant, because it is what the assertion after the
+        // measurement keys on. It contains NO path separator, so it survives every
+        // rendering of the root — native, POSIX, canonicalised, short-name or long — and
+        // is therefore the one string whose absence proves the substitution reached ALL
+        // of them, including a rendering nobody enumerated.
+        const FIXTURE_ROOT_PREFIX: &str = "emulates-macos-var-folders-tmpdir-geometry-bug-547725aa";
+
         // A DELIBERATELY LONG ROOT, and its length is the whole point of the call.
         // The budget below counts a block carrying this path verbatim, so under the
         // default short `/tmp/.tmpXXXXXX` root the normalisation could be deleted and
@@ -10182,17 +10245,35 @@ mod guide_hint_tests {
         // a PREDICTION (~12282 B, "63 characters") in the same voice, computed before
         // the mutation was run and never reconciled with it afterwards — 8 B and 8
         // characters wrong, in a comment whose whole job is to justify the fixture.
-        let (dir, server) =
-            make_server_with_root_prefix("emulates-macos-var-folders-tmpdir-geometry-bug-547725aa")
-                .await;
+        let (dir, server) = make_server_with_root_prefix(FIXTURE_ROOT_PREFIX).await;
 
-        // The fixture's own absolute root, captured so the measurement below can take it
-        // back out. `post_process`'s once-per-activation banner (`src/server.rs:835`)
-        // interpolates it verbatim — `\n[codescout] paths are relative to {root}` — and
-        // that block is counted, so without this the budget carries a term that is a
-        // property of the MACHINE rather than of the guides.
-        let root = dir.path().to_string_lossy().into_owned();
+        // The fixture's own root, in EVERY rendering the banner might carry. Getting this
+        // wrong is not hypothetical: the first version of this fix took only
+        // `to_string_lossy()` — the NATIVE form — and `post_process` emits
+        // `to_forward_slash(&root)` (`src/server.rs:833`). On Linux those are identical,
+        // so it passed; on Windows they differ, the substitution matched nothing, and the
+        // long fixture root below made the overshoot WORSE — 12262 → 12313 B on
+        // `windows-latest / default`, 12257 → 12308 on the wine lane, in the very commit
+        // that fixed the same class of blindness for macOS. Measured, CI 34235396900.
+        //
+        // Canonicalised too, because `canonicalize` resolves macOS's `/var` → `/private/var`
+        // and Windows short-name → long-name, and the sibling tests at `:6097`/`:6155`
+        // already pair it with `to_forward_slash` for exactly that reason.
+        //
+        // Longest first: a shorter rendering that is a prefix of a longer one would
+        // otherwise consume its head and leave a tail behind.
+        let mut roots = vec![
+            dir.path().to_string_lossy().into_owned(),
+            to_forward_slash(dir.path()),
+        ];
+        if let Ok(c) = std::fs::canonicalize(dir.path()) {
+            roots.push(c.to_string_lossy().into_owned());
+            roots.push(to_forward_slash(&c));
+        }
+        roots.sort_by_key(|r| std::cmp::Reverse(r.len()));
+        roots.dedup();
         let mut root_seen_raw = false;
+        let mut surviving: Vec<String> = Vec::new();
 
         // A placeholder id="x" for every shape (the brief's literal sketch) does NOT
         // measure a real session: `call_content` only runs guide injection on the
@@ -10241,10 +10322,15 @@ mod guide_hint_tests {
             let bytes: usize = blocks
                 .iter()
                 .map(|b| {
-                    if b.contains(&root) {
-                        root_seen_raw = true;
+                    let (s, hit) = strip_fixture_roots(b, &roots, FIXTURE_ROOT_TOKEN);
+                    root_seen_raw |= hit;
+                    // ANY rendering that escaped still carries the prefix, which has no
+                    // separator in it and so cannot be spelled differently. Recorded
+                    // rather than asserted here so the failure names the block.
+                    if s.contains(FIXTURE_ROOT_PREFIX) {
+                        surviving.push(s.clone());
                     }
-                    b.replace(&root, FIXTURE_ROOT_TOKEN).len()
+                    s.len()
                 })
                 .sum();
             total += bytes;
@@ -10347,6 +10433,34 @@ mod guide_hint_tests {
             CEILING.saturating_sub(total)
         );
         assert!(total > 0, "the session must still receive guidance");
+
+        // THE ASSERTION THE BOOLEAN ABOVE CANNOT MAKE, and the reason this fix needed a
+        // second attempt. `root_seen_raw` is an EXISTENCE check: it fires on the first
+        // block that contained a root and is thereafter satisfied forever, so it is
+        // monotone under UNDER-replacement — a block whose root is rendered in a form
+        // the loop did not enumerate is silently not substituted, while some earlier
+        // block keeps the flag true. That is exactly what shipped: the first version
+        // replaced only `to_string_lossy()`, `post_process` emits `to_forward_slash`
+        // (`:833`), the two agree on Linux and differ on Windows, and the 55-char
+        // fixture root turned an invisible miss into +51 B — 12262 → 12313 on
+        // `windows-latest / default` (CI 34235396900), in the commit fixing this class
+        // for macOS.
+        //
+        // This assertion is separator-BLIND by construction: `FIXTURE_ROOT_PREFIX` is a
+        // single filename component, so every rendering of the root contains it and no
+        // rendering can spell it differently. It therefore catches a form nobody
+        // enumerated, which a count of enumerated-forms-replaced still could not.
+        assert!(
+            surviving.is_empty(),
+            "{} counted block(s) still carry the fixture root after normalisation — some \
+             rendering escaped the substitution, so the budget is once again partly a \
+             measurement of this machine's temp path. First offender:\n{}",
+            surviving.len(),
+            surviving
+                .first()
+                .map(|s| s.chars().take(400).collect::<String>())
+                .unwrap_or_default()
+        );
 
         // CONTROL, and NOT symmetry with the ceiling assertion — it is the only thing
         // standing between the normalisation and vacuity. Substituting a root out of
