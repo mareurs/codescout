@@ -78,20 +78,58 @@ NATIVE_WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 ARTIFACT_WRITE_ACTIONS = {"create", "update", "move", "delete", "graft", "link",
                           "append_entry", "update_entry", "augment"}
 
-# Python snippets run through Bash. The target lives inside the script body, either as a
-# literal or as a variable assigned one line earlier.
+# Python snippets run through Bash or run_command. The target lives inside the script
+# body -- as a literal, or as a variable bound ANYWHERE in the snippet. The binder is a
+# whole-snippet `re.search` and has never had a line bound.
+#
+# This comment used to say "assigned one line earlier", which was never true of the code
+# beside it. It cost a real diagnosis on 2026-09-08: a session reading it reported that
+# distance was the limitation, and the fix it implied ("look back further") would have
+# changed nothing while testing green against the cases that already passed. The two real
+# narrowings were the CALL shape and the quote form. Doc-vs-code drift is the defect class
+# where reading carefully is the failure mode -- a precise wrong comment closes the
+# question that a vague one would have left open.
+#
 # The quote may arrive backslash-escaped: `python3 -c "... Path(\\"p\\").write_text(x)"` is
 # how a shell embeds a quoted string inside a double-quoted -c argument, and it is the
-# common form in real transcripts.
+# common form in real transcripts. `_Q` therefore belongs in every quote position here --
+# including the binder, which went without it until 2026-09-08.
 _Q = r"""\\?['"]"""
 PY_WRITE_LITERAL = [
     re.compile(r"""open\(\s*%s([^'"\\]+)%s\s*,\s*['"][wax]""" % (_Q, _Q)),
     re.compile(r"""Path\(\s*%s([^'"\\]+)%s\s*\)\s*\.write_""" % (_Q, _Q)),
 ]
 PY_WRITE_VAR = [
-    re.compile(r"""open\(\s*([A-Za-z_]\w*)\s*,\s*['"][wax]"""),
+    re.compile(r"""open\(\s*([A-Za-z_]\w*)\s*,\s*%s[wax]""" % _Q),
     re.compile(r"""Path\(\s*([A-Za-z_]\w*)\s*\)\s*\.write_"""),
+    # A variable ALREADY holding a Path, written directly: `F.write_text(x)`. The two
+    # patterns above both require the name to be wrapped at the call site, which is not
+    # how anyone writes a multi-line snippet -- so this is the common form, not the
+    # exotic one. `\.write_` and not `\.write` deliberately: a bare `fh.write(x)` is a
+    # file OBJECT, and the `open(...,"w")` that produced it is already matched above,
+    # so accepting it would only add ways to be wrong. `Path(p).write_text` cannot
+    # double-match here -- the character before `.write_` is `)`, not a word char.
+    re.compile(r"""\b([A-Za-z_]\w*)\s*\.write_"""),
 ]
+
+# What binds a variable to a path. The search is over the WHOLE snippet, and always
+# was -- distance has never been the limitation, despite the residual twice being
+# described as "a variable assigned one line earlier". `Path("lit")` and
+# `pathlib.Path("lit")` count alongside a bare `"lit"`, because a snippet that writes
+# through a variable has almost always built it with Path().
+#
+# DELIBERATELY NOT WIDENED to "any assignment": binding is not writing. A path the
+# snippet only ever read_text()s must stay out, or this collapses into the
+# mention-as-authorship failure the whole tool exists to refuse -- which returns a
+# confident WRONG name rather than a vague one. The discriminator is the CALL; this
+# resolver only says where a name points once a write call has already selected it.
+#
+# `_Q`, not a bare quote: a transcript records a shell-quoted snippet, so the quotes
+# around the path routinely arrive BACKSLASH-ESCAPED (`Path(\"x\")`). PY_WRITE_LITERAL
+# has always known that; this resolver did not, so `p=\"lit\"` bound nothing -- a
+# narrowing that predates the Path-valued widening and is fixed with it.
+PY_ASSIGN = (r"""\b%s\s*=\s*(?:(?:\w+\.)?Path\(\s*)?"""
+             + _Q + r"""([^'"\\]+)""" + _Q)
 
 
 def python_write_targets(cmd: str):
@@ -103,7 +141,7 @@ def python_write_targets(cmd: str):
     for pat in PY_WRITE_VAR:
         for m in pat.finditer(cmd):
             var = m.group(1)
-            assign = re.search(r"""\b%s\s*=\s*['"]([^'"]+)['"]""" % re.escape(var), cmd)
+            assign = re.search(PY_ASSIGN % re.escape(var), cmd)
             if assign:
                 yield assign.group(1)
 

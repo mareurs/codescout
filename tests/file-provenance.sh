@@ -385,6 +385,85 @@ bash_cmd "$B" 'python3 -c "s=open(\"docs/only_read.md\").read()"'
 out="$(runc --all docs/only_read.md)"
 has "open() without a write mode is not a write" "$out" "UNKNOWN"
 
+# -- a variable ALREADY holding a Path, which is how snippets are actually written -----
+# The two patterns above both require the name to be WRAPPED at the call site
+# (`Path(p).write_text`), so the ordinary multi-line form was invisible. Measured
+# 2026-09-08: ad379a7c wrote src/peer/server.rs exactly this way, the tool returned
+# UNKNOWN, and two other sessions each spent a round trip attributing one file by hand.
+bash_cmd "$B" 'python3 - <<PY
+from pathlib import Path
+F = Path("docs/via_path_var.md")
+txt = F.read_text()
+F.write_text(txt)
+PY'
+has "a bare var.write_text names its target" "$(runc --all docs/via_path_var.md)" "$PEER"
+
+# The other narrowing, independent of the first: the resolver bound only `var = "literal"`,
+# so a Path()-wrapped binding reaching open() resolved to nothing.
+bash_cmd "$B" 'python3 - <<PY
+from pathlib import Path
+p = Path("docs/via_path_open.md")
+open(p, "w").write(s)
+PY'
+has "open(var) resolves a Path()-bound name" "$(runc --all docs/via_path_open.md)" "$PEER"
+
+bash_cmd "$B" 'python3 -c "from pathlib import Path; F=Path(\"docs/via_bytes.bin\"); F.write_bytes(b)"'
+has "write_bytes is the same construct" "$(runc --all docs/via_bytes.bin)" "$PEER"
+
+# The MODULE-QUALIFIED form. `import pathlib` + `pathlib.Path(...)` is as common as the
+# `from pathlib import Path` form above, and narrowing the resolver to bare `Path(` killed
+# nothing until this case existed.
+bash_cmd "$B" 'python3 - <<PY
+import pathlib
+F = pathlib.Path("docs/via_qualified.md")
+F.write_text(x)
+PY'
+has "pathlib.Path(...) binds as well as Path(...)" \
+    "$(runc --all docs/via_qualified.md)" "$PEER"
+
+# THE REGRESSION GUARD FOR THAT WIDENING, and the reason it is not optional.
+# Binding is not writing. Widening the ASSIGNMENT side -- "any path bound in the snippet"
+# -- is the tempting fix and would make every path a snippet merely READS into an author:
+# the mention-as-authorship failure this whole tool exists to refuse, which returns a
+# confident WRONG name rather than a vague one. The discriminator must stay the CALL.
+bash_cmd "$B" 'python3 - <<PY
+from pathlib import Path
+cfg = Path("docs/only_read_pathvar.md")
+d = cfg.read_text()
+print(d)
+PY'
+has "a Path-valued var that is only READ is not a write" \
+    "$(runc --all docs/only_read_pathvar.md)" "UNKNOWN"
+
+# The mode check has to guard the VARIABLE path too. Found by mutation, not by reading:
+# the read-only case above addresses open() with a LITERAL, so deleting `[wax]` from the
+# variable pattern -- making every `open(p)` a write -- killed nothing and the suite
+# called it correct. One mutation answers a question about one SITE; a law implemented at
+# two call sites needs two.
+bash_cmd "$B" 'python3 - <<PY
+p = "docs/only_read_var.md"
+s = open(p).read()
+PY'
+has "open(var) without a write mode is not a write" \
+    "$(runc --all docs/only_read_var.md)" "UNKNOWN"
+
+# ...and an EXPLICIT read mode, because the case above passes no mode at all, so widening
+# the [wax] class to [waxr] was invisible to it. The mode class is the discriminator;
+# guard the character, not just the argument's absence.
+bash_cmd "$B" 'python3 - <<PY
+p = "docs/explicit_read_var.md"
+s = open(p, "r").read()
+PY'
+has "open(var, r) is a read, not a write" \
+    "$(runc --all docs/explicit_read_var.md)" "UNKNOWN"
+
+# An f-string target stays missed ON PURPOSE -- the path is not in the snippet, so no
+# static reading recovers it. Annotated as INERT for coverage: this case proves the
+# residual is bounded and named, not that the matcher handles the construct.
+bash_cmd "$B" 'python3 -c "from pathlib import Path; Path(f\"docs/{n}.md\").write_text(x)"'
+has "an f-string target remains an honest UNKNOWN" \
+    "$(runc --all docs/via_fstring.md)" "UNKNOWN"
+
 echo
 echo "== the DEFAULT window derives from git, and is the load-bearing half =="
 # Mutation-driven: every window case above passes --since explicitly, so `floor = None`
