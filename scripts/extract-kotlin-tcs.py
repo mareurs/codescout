@@ -17,7 +17,14 @@ from datetime import datetime, timedelta
 
 WINDOW_SECS = 300
 MIN_EXPECTED = 1
-TARGET_TOOLS = ("read_file", "edit_file", "symbols", "edit_code", "read_markdown", "edit_markdown")
+TARGET_TOOLS = (
+    "read_file",
+    "edit_file",
+    "symbols",
+    "edit_code",
+    "read_markdown",   # legacy -> read_file: folded into read_file
+    "edit_markdown",   # legacy -> edit_file: folded into edit_file
+)
 
 
 def parse_ts(s: str) -> datetime:

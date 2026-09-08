@@ -3869,6 +3869,24 @@ mod tests {
     ///   place by forcing a DECISION at each site instead of letting a rename pass in
     ///   silence.
     ///
+    /// TWO FORMS, and the second was added 2026-09-08 after the first shipped without it. The
+    /// qualified `mcp__codescout__<name>` form is what a transcript carries. The **bare** form
+    /// is what `usage.db` carries, and it is invisible to the qualified check — which was
+    /// stated as this gate's measured ceiling and then immediately cost two more probes:
+    /// `probe_entry_read_grain.py`'s *recent* bucket read **0** for every row while the
+    /// behaviour it measures was happening 252 times, and `probe_librarian_scope.py` was short
+    /// **916 of 10110** calls, moving every ratio it prints.
+    ///
+    /// The bare form is addressable only because the convention was already there to find:
+    /// every tool-name list in `scripts/` is a module-level `*_TOOLS` constant. Outside such a
+    /// block a bare `"artifact"` is indistinguishable from prose, so **hoisting an inline
+    /// comparison into one is part of the fix rather than tidying** — it is what makes the
+    /// site checkable at all.
+    ///
+    /// PascalCase entries are skipped: those are host-harness tools (`Edit`, `Write`,
+    /// `MultiEdit`), which no codescout registry contains. Same discriminator, and the same
+    /// reasoning, as the sibling test's snake_case scope above.
+    ///
     /// `legacy` on the line is the escape, and it is OWED rather than a convenience: retired
     /// names are still present in older transcripts, so the probe must keep matching them. A
     /// gate over a namespace with no escape refuses work you can describe (§ *Parsers Over a
@@ -3968,6 +3986,133 @@ mod tests {
                     ));
                 }
             }
+
+            // BARE-NAME FORM — every module-level `*_TOOLS` constant under scripts/.
+            let scripts_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
+            let decl = regex::Regex::new(r"^[A-Z][A-Z_0-9]*_TOOLS\s*=").unwrap();
+            let lit = regex::Regex::new("\"([A-Za-z][A-Za-z_0-9]*)\"").unwrap();
+            let (mut blocks, mut names) = (0usize, 0usize);
+            // (file, block-ordinal, name). A successor declared by a `legacy ->` marker must
+            // appear as a live name in the SAME block — block-scoped, because a successor
+            // present in a different constant does not make this one non-blind.
+            let mut successors_required: Vec<(String, usize, String)> = Vec::new();
+            let mut live_in_block: Vec<(String, usize, String)> = Vec::new();
+
+            let mut entries: Vec<_> = std::fs::read_dir(scripts_dir)
+                .expect("scripts/ must exist — this gate is defined over it")
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "py"))
+                .collect();
+            entries.sort();
+
+            for path in entries {
+                let Ok(body) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let file = path.file_name().unwrap().to_string_lossy().into_owned();
+                let mut depth = 0i32;
+                for line in body.lines() {
+                    let opening = depth == 0 && decl.is_match(line);
+                    if opening {
+                        blocks += 1;
+                    }
+                    if opening || depth > 0 {
+                        // Track bracket depth so a multi-line tuple is one block and the
+                        // statement after it is not swept in.
+                        for ch in line.chars() {
+                            match ch {
+                                '(' | '[' | '{' => depth += 1,
+                                ')' | ']' | '}' => depth -= 1,
+                                _ => {}
+                            }
+                        }
+                        // `legacy` is line-scoped, so a retired name can sit beside a live one
+                        // without exempting it — which is why these lists are written one name
+                        // per line.
+                        //
+                        // A marker may name the retired tool's SUCCESSOR — `# legacy -> doc:` —
+                        // and that turns the escape into the positive check. Without it this
+                        // half is negative-only, and negative-only is satisfied BY the defect:
+                        // deleting `"doc"` from a block leaves every remaining name live-or-
+                        // legacy, so the gate passes while the probe goes blind. Measured — the
+                        // first version of this scan SURVIVED exactly that mutation on two
+                        // separate probes.
+                        if let Some(succ) = line
+                            .split("legacy ->")
+                            .nth(1)
+                            .and_then(|t| t.split(':').next())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            successors_required.push((file.clone(), blocks, succ.to_string()));
+                        }
+                        if !line.contains("legacy") {
+                            for cap in lit.captures_iter(line) {
+                                let ident = cap.get(1).unwrap().as_str();
+                                if ident.starts_with(char::is_uppercase) {
+                                    continue; // host-harness tool
+                                }
+                                // A `*_TOOLS` block may hold either form: `file-provenance.py`
+                                // reads transcripts, which carry the qualified name, while the
+                                // usage.db probes carry the bare one. Normalise rather than
+                                // splitting the population — caught by this gate's own first
+                                // run, which reported three live tools as unregistered.
+                                let ident = ident.strip_prefix("mcp__codescout__").unwrap_or(ident);
+                                names += 1;
+                                if !real.contains(ident) {
+                                    problems.push(format!(
+                                        "scripts/{file}: a `*_TOOLS` constant names `{ident}`, \
+                                         which is not a registered tool. Point it at the live \
+                                         name, or mark that line `legacy -> <successor>:` if \
+                                         the corpus it reads still contains the retired one."
+                                    ));
+                                }
+                                live_in_block.push((file.clone(), blocks, ident.to_string()));
+                            }
+                        }
+                        if depth <= 0 {
+                            depth = 0;
+                        }
+                    }
+                }
+            }
+
+            assert!(
+                blocks > 0 && names > 0,
+                "scanned {blocks} `*_TOOLS` blocks and {names} bare names under scripts/ — \
+                 the extraction is broken and the bare-form half would pass on nothing"
+            );
+
+            // THE POSITIVE HALF, and the one that reds on a rename. A retired name whose
+            // successor is missing from its own block is the exact shape that blinded three
+            // probes to `doc` for six days: the block stays internally consistent, every check
+            // above passes, and the probe silently reports a shrinking share of reality.
+            for (file, block, succ) in &successors_required {
+                let present = live_in_block
+                    .iter()
+                    .any(|(f, b, n)| f == file && b == block && n == succ);
+                if !present {
+                    problems.push(format!(
+                        "scripts/{file}: a `*_TOOLS` constant marks a name `legacy -> {succ}` \
+                         but never lists `{succ}` itself. The retired name is matched and its \
+                         live successor is not, so every call through the current tool is \
+                         invisible to this probe — which is the 2026-09-02 rename defect \
+                         exactly. Add `{succ}` to that same constant."
+                    ));
+                }
+                if !real.contains(succ.as_str()) {
+                    problems.push(format!(
+                        "scripts/{file}: `legacy -> {succ}` names a successor that is not a \
+                         registered tool — the marker itself has gone stale."
+                    ));
+                }
+            }
+            assert!(
+                !successors_required.is_empty(),
+                "no `legacy -> <successor>` marker found under scripts/ — the positive half \
+                 has nothing to check and would pass on any amount of drift"
+            );
         }
 
         assert!(

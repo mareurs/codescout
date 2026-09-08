@@ -78,11 +78,12 @@ from collections import Counter
 from datetime import datetime
 
 LIBRARIAN_TOOLS = (
-    "artifact",
+    "doc",
     "librarian",
-    "artifact_augment",
-    "artifact_event",
-    "artifact_refresh",
+    "artifact",           # legacy -> doc: pre-ceb5b57a name for `doc`
+    "artifact_augment",   # legacy -> doc: now doc(action="augment")
+    "artifact_event",     # legacy -> doc: now doc(action="event_create")
+    "artifact_refresh",   # legacy -> doc: folded into doc
 )
 
 # See ROUTING in the module docstring. Anything absent defaults to id_addressed.

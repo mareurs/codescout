@@ -77,6 +77,23 @@ from pathlib import Path
 
 ENTRY_TOKEN = re.compile(r"[A-Z]{1,3}-\d+")
 ARTIFACT_ID = re.compile(r"^[0-9a-f]{16}$")
+
+# The librarian's document tool, under every name usage.db holds for it.
+#
+# BOTH names are required and neither is optional: the corpus is HISTORICAL. Measured
+# 2026-09-08 in this project's usage.db -- 6089 `artifact` rows against 838 `doc` and
+# climbing, because a session keeps its old binary until `cargo rb` + `/mcp`. Dropping
+# `artifact` loses the past; dropping `doc` loses the present and the loss grows every day.
+# Either way the probe returns a smaller number, never an error.
+#
+# NAMED rather than inlined, and that is the load-bearing part: these comparisons were four
+# bare `r["tool_name"] == "artifact"` tests, and a bare string is indistinguishable from prose
+# to any gate, so nothing could see them go stale. As a `*_TOOLS` constant they are reachable
+# by `provenance_probes_reference_only_real_tool_names` (src/server.rs).
+DOC_TOOLS = (
+    "doc",
+    "artifact",   # legacy -> doc: pre-ceb5b57a name, still the majority of the corpus
+)
 HANDLE_LEN = 14  # '@tool_' / '@file_' (6) + 8 hex
 
 # Reopen trigger, from spec §6. Named constants so the threshold is auditable
@@ -199,9 +216,9 @@ def main() -> int:
         if r["input_json"] and jget(r["input_json"], "action") is None:
             # 'action' is present on every artifact/librarian call; its absence on a
             # non-empty blob means the blob did not parse.
-            if r["tool_name"] in ("artifact", "librarian"):
+            if r["tool_name"] in (*DOC_TOOLS, "librarian"):
                 unparseable += 1
-        if r["tool_name"] == "artifact":
+        if r["tool_name"] in DOC_TOOLS:
             s["artifact_calls"] += 1
             if jget(r["input_json"], "action") == "append_entry":
                 s["append_entry"] += 1
@@ -225,7 +242,7 @@ def main() -> int:
     mints: dict[tuple[str, str], str] = {}  # (session, @tool_) -> artifact id
     seen_handles: dict[str, set[str]] = {}  # @tool_ -> sessions that minted it
     for r in rows:
-        if r["tool_name"] != "artifact":
+        if r["tool_name"] not in DOC_TOOLS:
             continue
         h = handle_in(r["output_json"], "@tool_")
         if not h:

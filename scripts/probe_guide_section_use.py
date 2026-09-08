@@ -117,7 +117,11 @@ PROFILES = [".claude", ".claude-sdd", ".claude-kat"]
 # `mcp__codescout__docs_*`. No such tool exists in the registry today. If one is added,
 # tighten `is_mechanism_tool` to match the full `mcp__codescout__<name>` form rather than
 # widening this tuple further -- widening is what made this defect possible.
-MECHANISM_TOOLS = ("artifact", "doc", "librarian")
+MECHANISM_TOOLS = (
+    "doc",
+    "librarian",
+    "artifact",   # legacy -> doc: pre-ceb5b57a name; usage.db is historical so both must match
+)
 
 GUIDE_DIR = Path(__file__).resolve().parent.parent / "src" / "prompts" / "guides"
 FROZEN_FRAME = (

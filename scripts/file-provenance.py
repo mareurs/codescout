@@ -58,10 +58,10 @@ CS_WRITE_TOOLS = {
     "mcp__codescout__edit_file",
     "mcp__codescout__edit_code",
     "mcp__codescout__create_file",
-    "mcp__codescout__edit_markdown",    # legacy: folded into edit_file
-    "mcp__codescout__replace_symbol",   # legacy: name, still in older transcripts
-    "mcp__codescout__insert_code",      # legacy
-    "mcp__codescout__remove_symbol",    # legacy
+    "mcp__codescout__edit_markdown",    # legacy -> edit_file: folded into edit_file
+    "mcp__codescout__replace_symbol",   # legacy -> edit_code: name, still in older transcripts
+    "mcp__codescout__insert_code",      # legacy -> edit_code:
+    "mcp__codescout__remove_symbol",    # legacy -> edit_code:
 }
 NATIVE_WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
@@ -215,8 +215,8 @@ def write_targets(name: str, inp: dict, root: Path):
             if isinstance(inp.get(key), str):
                 yield inp[key]
     elif name in ("mcp__codescout__doc",
-                  "mcp__codescout__artifact",          # legacy: pre-ceb5b57a name
-                  "mcp__codescout__artifact_augment"):  # legacy: now doc(action="augment")
+                  "mcp__codescout__artifact",          # legacy -> doc: pre-ceb5b57a name
+                  "mcp__codescout__artifact_augment"):  # legacy -> doc: now doc(action="augment")
         if inp.get("action") in ARTIFACT_WRITE_ACTIONS or name.endswith("_augment"):
             # `new_rel_path` is move's destination, and it is load-bearing rather than
             # thorough: a move re-keys the artifact (id = sha256(abs_path)), so the `id`
