@@ -13,6 +13,7 @@ opened: 2026-09-08
 owner: marius
 related: []
 severity: high
+unverified: 'NOT archived. tracker-conventions wants gate-green before the archive move and I cannot produce one today: DEFAULT is 101 on peer::server::tests::run_exits_after_idle_timeout_with_no_connections (ee9d8d80ad5ecdc8, open, load-sensitive), which failed 4 of 6 default-lane runs while three peers ran their own gates. FMT/CLIPPY/LEAN are 0 and the fix itself is verified -- six mutations, all killing, each verified applied. What is unverified is the WHOLE-TREE gate, and keeping those apart is why this field exists. Archive when a run comes back clean; nothing else is owed.'
 ---
 
 # BUG: two more probes were keyed on the retired tool name, and one reported zero for the question it exists to answer
