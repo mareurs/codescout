@@ -6,13 +6,13 @@ title: peer idle-timeout test is the third load-sensitive step in a class fixed 
 tags:
 - cluster/repro-env-diverges-from-gate-env
 closed: ''
-last_observed: 2026-09-03
+last_observed: 2026-09-08
 opened: 2026-09-01
 owner: marius
 related:
 - '64efc41ac6686afb'
 severity: low
-unverified: 'Pre-existence is NOT established — no bisect against 0ed6cb18 was run, and it remains INFEASIBLE: the rate is too low to separate signal from noise. The no-call-path argument makes causation by the T-7 diff implausible. Obs. 5-6 (peer, 2026-09-01) add two more full-`--workspace` failures on a ~6-session box but supply NO condition — the reporter''s "concurrent cargo holding the target lock" claim was retracted the same day by their own second run, which had zero lock waits and failed anyway. This session''s four runs refute total load (the HEAVIEST run passed, a lighter one failed). Sole surviving candidate is async-executor churn, and it does not survive its own first check either (equal other-failure counts produced opposite outcomes). No discriminating factor is known.'
+unverified: 'Pre-existence is NOT established — no bisect against 0ed6cb18 was run, and it remains INFEASIBLE: the rate is too low to separate signal from noise. The no-call-path argument makes causation by the T-7 diff implausible. Obs. 5-6 (peer, 2026-09-01) add two more full-`--workspace` failures on a ~6-session box but supply NO condition — the reporter''s "concurrent cargo holding the target lock" claim was retracted the same day by their own second run, which had zero lock waits and failed anyway. This session''s four runs refute total load (the HEAVIEST run passed, a lighter one failed). Sole surviving candidate is async-executor churn, and it does not survive its own first check either (equal other-failure counts produced opposite outcomes). Obs. 11 (2026-09-08) is the first WITHIN-RUN pair — lean passed and default failed minutes apart on one tree, same 16 `peer::` tests by name — and it EXONERATES the feature set as a code difference (default features, `peer::` only: 5/5 green). It does NOT identify the factor: 5 small runs have no power against this base rate, and reading them as one would repeat this file''s own retracted mistake. Its contribution is that both prior load claims likely measured a proxy, which is why their signs disagreed. No discriminating factor is known.'
 ---
 
 ## Summary
@@ -472,6 +472,67 @@ produced no discriminator.
 the change is confined to `src/librarian/`, adds one new module plus a `mod`
 declaration, and has no call path into `src/peer/`. Task was allowed to proceed on that
 basis.
+
+### Eleventh observation, 2026-09-08 — a WITHIN-RUN pair: lean passed and default failed, minutes apart, same tree
+
+The two test lanes of one gate run, `experiments` @ `d2900ecb`, one machine (64 cores), no
+rebuild between them.
+
+| lane | lib-binary tests | lib-binary wall time | `peer::` tests | this test |
+|---|---:|---:|---:|---|
+| 3 — `cargo test --workspace --no-default-features` | 3368 | **6.79s** | 16 | **ok** |
+| 4 — `cargo test --workspace` | 5233 | **69.33s** | 16 | **FAILED** |
+
+Then 3/3 isolated passes at 1.12–1.13s immediately after.
+
+**Why this pair is worth more than a load count.** `src/peer/` is not feature-gated: both
+lanes ran the same 16 `peer::` tests, by name. So the passing and failing runs share the code
+under test, the tree, the machine and the minute — and differ in exactly one thing anyone can
+name, the **process the test ran inside**. That is a variable neither earlier observation
+isolated, and it is internal to the binary rather than a property of the box.
+
+**It also explains why observations 4 and 10 disagreed about the SIGN of the load
+correlation.** Both counted machine-level activity — one found the heaviest run passing, the
+other found the lightest passing. If the operative variable is the composition of the single
+lib test binary, then machine load is a proxy that tracks it only incidentally, and two
+honest sessions measuring it would be expected to get opposite signs. This does not vindicate
+either report; it suggests both measured the wrong thing.
+
+**The margin, since observation 10 asked for it.** The assertion is a 10s deadline on a 1s
+idle timeout — a **10× budget**, and it is wall-clock. Isolated, the whole test takes 1.12s.
+So the failing run overshot a budget it beats by roughly an order of magnitude when the
+process is quiet.
+
+**What this does NOT establish, stated plainly.** The 10× lane wall-time gap is *not*
+demonstrated to be contention. `librarian::` tests are absent from lean by construction
+(re-derived this run: **0** in lean against a `prompts::` control of **101 in both**), and
+they are SQLite- and filesystem-backed, so they are individually slower and I/O-blocking.
+Per-test the lanes are 2.0ms vs 13.2ms, which composition alone could produce. The claim
+here is only that **the process environment differs sharply between the lane that passed and
+the lane that failed**, not that scheduling latency is the mechanism. n=1 pair.
+
+**The cheap next check, and it needs no race.** Run the *default-feature* lib binary filtered
+to `peer::` alone — small and fast, same features as the failing lane.
+
+**Run, same session: 5/5 passed, 18 tests, 1.35–1.80s.** Read this narrowly. It **exonerates
+the feature set as a code difference**: before it, "the librarian feature changes what `peer`
+compiles to" was live, and it is now not — identical features, identical `peer::` sources,
+5/5 green. That is the whole of what it buys.
+
+**It does NOT show population size is the cause, and saying so would be this file's own
+retracted mistake in a new costume.** The base rate is roughly one failure per several full
+runs, so 5 small runs have almost no power to detect its absence — 5/5 green is exactly the
+output a still-racy test gives. What remains after this check is a *narrowed* candidate, not
+a finding: the difference between the passing and failing lanes is not the feature flag's
+effect on compiled `peer` code, so it lies in the run environment those features produce.
+
+The check with actual power is `--test-threads`, varied on the **full** default binary and
+run enough times to see the base rate move. That one is not cheap, and nobody should report
+it without a denominator.
+
+**Not attributable to any diff:** the two lanes compiled from one working tree with no edit
+between them, so this observation carries no code delta at all — the strongest form of
+observation 10's argument, since there is not even a commit range to inspect.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
