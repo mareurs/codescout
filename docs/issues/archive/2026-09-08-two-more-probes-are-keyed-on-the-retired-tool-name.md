@@ -1,5 +1,5 @@
 ---
-id: e78057d4df6c2d27
+id: b79c640af2ca036e
 kind: bug
 status: fixed
 title: Two more probes are keyed on the retired tool name, and one reports zero for the question it exists to answer
@@ -13,7 +13,6 @@ opened: 2026-09-08
 owner: marius
 related: []
 severity: high
-unverified: 'NOT archived. tracker-conventions wants gate-green before the archive move and I cannot produce one today: DEFAULT is 101 on peer::server::tests::run_exits_after_idle_timeout_with_no_connections (ee9d8d80ad5ecdc8, open, load-sensitive), which failed 4 of 6 default-lane runs while three peers ran their own gates. FMT/CLIPPY/LEAN are 0 and the fix itself is verified -- six mutations, all killing, each verified applied. What is unverified is the WHOLE-TREE gate, and keeping those apart is why this field exists. Archive when a run comes back clean; nothing else is owed.'
 ---
 
 # BUG: two more probes were keyed on the retired tool name, and one reported zero for the question it exists to answer
@@ -105,10 +104,16 @@ the mutation caught it.
 
 ## Fix
 
-**Shipped 2026-09-08 at `cc160413`** (`experiments`), patch-id
+**Shipped 2026-09-08 at `cc160413`** (`experiments`, now on `origin`), patch-id
 `bf95a5e5c367e4fe0ec4d36a637439c26a3aca5f`. Recorded as a pair at fix time: the SHA is positional
 and dies when `experiments` is rebased; the patch-id is a content hash of the diff and survives
 rebase and cherry-pick.
+
+**Whole-tree gate green in a single run, 2026-09-08:** `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 9101
+passed, 1760 `librarian::` tests in the default lane. The `unverified:` field this record carried
+for two hours — naming `ee9d8d80ad5ecdc8`'s load-sensitive flake as the only red — is cleared,
+not deleted-and-forgotten: it did its job, which was to keep *fixed* and *whole-tree verified*
+apart in a field a query can read.
 
 **The escape hatch was made to do double duty.** A `legacy` marker now declares the retired tool's
 successor — `# legacy -> doc:` — and the gate requires that successor to appear as a live name in
