@@ -1323,10 +1323,12 @@ mod classify_search_error_tests {
             .create_async()
             .await;
 
-        let e = crate::retrieval::embedder::EmbedderHttp::new(
+        let e = crate::retrieval::embedder::EmbedderHttp::with_config(
             dense_server.url(),
             sparse_server.url(),
             3,
+            "m",
+            "",
         );
         // `embed_batch` rather than the private per-sub-batch unit: it is the entry
         // point production actually calls, so this exercises the chunking driver and

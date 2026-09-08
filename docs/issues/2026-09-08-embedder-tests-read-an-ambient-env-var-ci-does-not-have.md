@@ -112,23 +112,68 @@ should not be quoted as one.
 
 ## Fix
 
-Not applied — it belongs to the tests, not to `9c03b32f`, and the direction is a choice:
+**Fixed 2026-09-08 — the tests now use the env-free constructor.** ~22 call sites in
+`src/retrieval/embedder.rs` and one in `src/tools/semantic/semantic_search.rs` moved from
+`EmbedderHttp::new(dense, sparse, dim)` to
+`EmbedderHttp::with_config(dense, sparse, dim, "m", "")`.
 
-1. **Have the tests supply the name.** Construct the embedder with an explicit model rather than
-   letting it read the environment. Correct, and the only option that removes the ambient
-   dependency instead of satisfying it.
-2. **Export the variable in CI.** Cheap, and wrong in the way this class always is: it makes CI
-   match one developer's shell rather than removing the dependency, and the next variable
-   repeats it.
+**This is not a new API, and that is the notable part.** `with_config` already existed and its
+own doc comment already said so: *"Construct without reading process env vars. Use this from
+tests and any caller that wants explicit control... `new()` is the env-reading convenience for
+production callers."* A handful of tests already used it — one carrying an in-file comment
+citing `docs/conventions/test-env-isolation.md`. **The house pattern was correct, documented,
+and left half-applied**, which is why no reviewer caught the rest: each `new()` call looked like
+every other `new()` call beside it.
 
-(1) is the fix; (2) would unblock the branch today if someone needs a green urgently. **Do not
-revert `9c03b32f`** — the contract it added is right, and reverting trades a visible red for the
-silent blank-model behaviour it was written to stop.
+Production is untouched. `src/retrieval/client.rs:232` and `:406` still call `new()`, which is
+what it is for.
+
+**Verified under the failing condition, not merely under the passing one:**
+
+| | before | after |
+|---|---|---|
+| `CODESCOUT_EMBEDDER_MODEL_NAME= cargo test --lib retrieval::embedder::tests` | 12 failed | **28 passed, 0 failed** |
+| same, `classify_search_error_tests` | failing | **20 passed, 0 failed** |
+| control, variable set as normal | 28 passed | 28 passed |
+
+**Neither option (2) nor a revert was taken**, per the reasoning that stood before the fix:
+exporting the variable in CI would make CI match one developer's shell rather than remove the
+dependency, and reverting `9c03b32f` would trade a visible red for the silent blank-model
+behaviour it was written to stop.
 
 ## Tests added
 
-None yet. What is owed is a guard that fails when a test reads a `CODESCOUT_*` variable it did
-not set — the class-level answer, since this is the second env-divergence bug filed today.
+`tests/embedder_env_isolation.rs` — two assertions, and it is **a source scan rather than a
+behavioural test on purpose**. The failure mode is a test that reads `std::env` and therefore
+asserts about the developer's shell; you cannot catch that with another test *in the same
+environment*, because it passes there by construction. That is precisely why every local gate
+run was green for 36 hours while CI was red. The only observer that can see it reads the source.
+
+1. `no_embedder_test_constructs_through_the_env_reading_path` — `EmbedderHttp::new(` must not
+   appear in either file. Its failure message names the file, the cause, the remedy call, and
+   this bug file.
+2. `the_env_isolation_scan_is_not_vacuous` — **the control, and the half that makes (1) worth
+   anything.** `assert_eq!(hits, 0)` is monotone under removal: rename the type, move the tests,
+   or mistype the needle and (1) finds nothing and passes while looking at the wrong thing. So
+   each file must still hold at least as many `with_config(` calls as it did when the guard was
+   written. A failure there means the guard went blind, not that the code broke, and it says so.
+
+**Observed RED, not merely asserted.** Reintroducing one `new()` call site reds (1) while (2)
+correctly stays green — they are different questions — and the tree was restored byte-identical
+afterwards.
+
+**Deliberately narrow.** It pins two files and one constructor, not "no test reads env". A guard
+whose name is wider than its trigger is its own class here (`cluster/guard-narrower-than-its-name`),
+so the name says `embedder`. Extend the list when a second constructor earns it.
+
+**A repo-wide sweep for sibling instances was ATTEMPTED AND FAILED, recorded so nobody credits
+it:** taking the first `#[cfg(test)]` in each file and scanning past it mixes in production env
+reads, which are legitimate by design (`new()`, `reranker`, `sync`, `transport` all read env on
+purpose). It returns a plausible list and answers a different question. No population figure is
+claimed from it. The one unambiguous hit checked by hand — `src/tools/config/tests.rs:445` — is
+the **opposite** pattern and correct: it reads env to derive the expected value independently of
+the implementation, so the test stays right on any shell. Adapting to the environment is not the
+same defect as assuming one.
 
 ## Workarounds
 

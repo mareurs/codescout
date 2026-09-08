@@ -1335,7 +1335,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let chunk = vec![
             "a".to_string(),
             "".to_string(),
@@ -1408,7 +1408,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let chunk = vec!["".to_string(), "".to_string(), "".to_string()];
         let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
 
@@ -1461,7 +1461,8 @@ mod tests {
         // The sparse base is deliberately unroutable: if `dense_only` ever stopped
         // suppressing the sparse leg, this test would fail loudly rather than
         // quietly contacting a real service.
-        let e = EmbedderHttp::new(dense_server.url(), "http://sparse.invalid", 3).dense_only(true);
+        let e = EmbedderHttp::with_config(dense_server.url(), "http://sparse.invalid", 3, "m", "")
+            .dense_only(true);
         let out = e
             .embed_batch(&[
                 "".to_string(),
@@ -1513,7 +1514,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let chunk = vec!["  \t ".to_string(), "real".to_string()];
         let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
 
@@ -1549,7 +1550,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), "http://sparse.invalid", 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), "http://sparse.invalid", 3, "m", "");
         let v = e
             .dense_document("")
             .await
@@ -1590,7 +1591,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let chunk = vec!["a".to_string(), "b".to_string()];
         let err = e.embed_one_batch(chunk).await.expect_err(
             "dense returning 1 embedding for 2 inputs must error, not silently truncate",
@@ -1630,7 +1631,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let chunk = vec!["a".to_string(), "b".to_string()];
         let err = e.embed_one_batch(chunk).await.expect_err(
             "sparse returning 1 row for 2 non-empty inputs must error, not substitute an empty vector",
@@ -1683,7 +1684,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let out = e
             .embed_one_batch(vec!["x".to_string()])
             .await
@@ -1741,7 +1742,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(30),
             e.embed_one_batch(vec!["x".to_string()]),
@@ -1790,7 +1791,7 @@ mod tests {
                 .create_async()
                 .await;
 
-            let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+            let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
             let out = e
                 .embed_one_batch(vec!["x".to_string()])
                 .await
@@ -1818,7 +1819,7 @@ mod tests {
                 .create_async()
                 .await;
 
-            let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+            let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
             let err = e
                 .embed_one_batch(vec!["y".to_string()])
                 .await
@@ -1862,7 +1863,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let err = e
             .embed("a query")
             .await
@@ -1901,7 +1902,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let msg = e
             .embed("a query")
             .await
@@ -2028,7 +2029,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "");
         let out = e
             .embed_one_batch(vec!["x".to_string()])
             .await
@@ -2063,8 +2064,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e =
-            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
+        let e = EmbedderHttp::with_config("http://unused.invalid", server.url(), 768, "m", "")
+            .with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 32);
     }
 
@@ -2085,8 +2086,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e =
-            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
+        let e = EmbedderHttp::with_config("http://unused.invalid", server.url(), 768, "m", "")
+            .with_batch_override(None);
         assert_eq!(
             e.resolve_batch_size().await,
             8,
@@ -2104,7 +2105,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768)
+        let e = EmbedderHttp::with_config("http://unused.invalid", server.url(), 768, "m", "")
             .with_batch_override(Some("4".to_string()));
         assert_eq!(e.resolve_batch_size().await, 4);
     }
@@ -2120,8 +2121,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e =
-            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
+        let e = EmbedderHttp::with_config("http://unused.invalid", server.url(), 768, "m", "")
+            .with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 32);
         assert_eq!(e.resolve_batch_size().await, 32);
         m.assert_async().await; // exactly one /info request
@@ -2142,8 +2143,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e =
-            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
+        let e = EmbedderHttp::with_config("http://unused.invalid", server.url(), 768, "m", "")
+            .with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 8);
         assert_eq!(e.resolve_batch_size().await, 8);
         m.assert_async().await; // exactly one /info request despite two calls
@@ -2194,8 +2195,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e =
-            EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3).with_batch_override(None);
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "")
+            .with_batch_override(None);
         let texts: Vec<String> = (0..12).map(|i| format!("text-{i}")).collect();
         let out = e.embed_batch(&texts).await.expect("embed_batch");
 
@@ -2370,7 +2371,7 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3)
+        let e = EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "m", "")
             .dense_only(true)
             .with_batch_override(Some("2".into()));
         let texts: Vec<String> = (0..6).map(|i| format!("t{i}")).collect();
