@@ -388,13 +388,13 @@ main checkout's catalog instead of a wholesale fork:
 <!-- serves: doc.move, doc.delete -->
 
 Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
-get_guide("tracker-conventions"). At the artifact layer, `doc(action="move",
-new_rel_path=...)` is the safe path — it updates the catalog atomically.
+get_guide("tracker-conventions"); `doc(action="move", new_rel_path=...)` is the safe
+path — it updates the catalog atomically.
 
-**A move mints a new id.** Catalog identity is `id = sha256(abs_path)`, so moving a
-file necessarily re-keys it. `move` seeds the row at the new id, grafts the artifact's
-events, links, observations and augmentation across, and drops the old row — all of
-that in one call. The response reports both ends:
+**A move mints a new id.** Catalog identity is `id = sha256(abs_path)`, so a move
+re-keys the file. `move` seeds the row at the new id, grafts its events, links,
+observations and augmentation across, and drops the old row — one call. The response
+reports both ends:
 
 ```
 {"id": "<new>", "previous_id": "<old>", "id_changed": true,
@@ -402,7 +402,9 @@ that in one call. The response reports both ends:
  "stage_together": ["<old>", "<new>"], "stage_hint": "...", "moved": true}
 ```
 
-**Stage both halves: `git add -- <old> <new>` — expect one `R` line, never ` D` + `??`.**
+**Stage both halves: `git add -- <old> <new>`; confirm both lettered in column 1 of `git
+status --short` — one `R`, or `D`+`A`. Never `R` alone: a *similarity* verdict, absent
+when the body changed too, present when the destination is stale.**
 Derivation: get_guide("tracker-conventions") § *Bug files*.
 
 Two consequences worth planning for:
@@ -418,9 +420,9 @@ the next `reindex` mints a fresh id for the new one — with no graft, so the ev
 with the old row.
 
 To remove an artifact entirely, `doc(action="delete", id=...)` deletes the file **and**
-the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to the artifact's augmentation,
-links, observations, and events — no orphaned rows. The artifact must live under a managed
-workspace root; a missing file is tolerated (the catalog row is still dropped, so `delete` also
+the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to its augmentation,
+links, observations and events — no orphaned rows. The artifact must live under a managed
+workspace root; a missing file is tolerated (the row is still dropped, so `delete` also
 repairs a stale entry). Prefer `move` for relocation — `delete` is irreversible.
 ## Common Mistakes
 

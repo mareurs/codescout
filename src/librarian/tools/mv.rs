@@ -256,7 +256,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // 50% default), and it appears when the archive is most broken (a destination
         // holding a stale copy is ~95% similar, so a bad move renders identically).
         // Two sessions were misled in opposite directions by the same sentence:
-        // docs/issues/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
+        // docs/issues/archive/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
         // docs/trackers/bug-fix-session-log.md § F-111
         "stage_hint": "Stage both halves of this move together — `git add -- <old> <new>` \
                        using the two entries of `stage_together` — then confirm in `git \
@@ -526,7 +526,7 @@ mod tests {
     ///   drops similarity under git's 50% default — measured 44% at `f7d61237`, six
     ///   points under. A correct, fully staged move then renders `D` + `A`, a shape the
     ///   old wording named nowhere, so a correct archive read as unconfirmed.
-    ///   docs/issues/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
+    ///   docs/issues/archive/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md
     /// - It APPEARS when the archive is most broken. A destination holding a stale copy
     ///   of its source is similar enough to pair, so a bad move renders `R` identically
     ///   to a good one (F-111 estimates ~95%; not re-measured here — what is certain is
@@ -534,23 +534,37 @@ mod tests {
     ///   `R` as proof the destination held fresh bytes, twice in one day.
     ///   docs/trackers/bug-fix-session-log.md § F-111
     ///
-    /// **Both surfaces are asserted here because nothing else checks that they agree.**
-    /// The hint and the guide were written together and say the same thing, so a reader
-    /// who cross-checks one against the other finds agreement and learns nothing — two
+    /// **All THREE surfaces are asserted here because nothing else checks that they
+    /// agree.** They were written together and say the same thing, so a reader
+    /// cross-checking one against another finds agreement and learns nothing — three
     /// surfaces, one claim, no independent check. This is that check.
+    ///
+    /// The bug file said *two* surfaces and this test covered two. The third
+    /// (`get_guide("librarian")` § *Archiving / Moving Trackers*) surfaced only when the
+    /// tool auto-injected it during the fix's own archive move, still reading "expect one
+    /// `R` line, never ` D` + `??`" — a defect surviving in the guide that was explaining
+    /// the very operation being fixed. Enumerating the call sites from the bug file's
+    /// list, rather than from the corpus, would have shipped it.
     ///
     /// The guide assertions are SCOPED to the staging paragraph, and the scoping is
     /// load-bearing rather than tidiness: `stale` occurs 10 times elsewhere in
-    /// `tracker-conventions.md`, so an unscoped `contains("stale")` stays green with this
-    /// entire paragraph deleted. The slice is asserted non-empty for the same reason — if
-    /// either anchor string moves, an empty slice makes every assertion below vacuous
-    /// instead of red.
+    /// `tracker-conventions.md` and 5 more in `librarian.md`, so an unscoped
+    /// `contains("stale")` stays green with the entire paragraph deleted.
     ///
-    /// Mutation per guarded SITE, since one kill says nothing about the other: reverting
-    /// EITHER surface to "shows a single `R` rename line" reds this test, and neither
-    /// reversion is caught by the other surface's assertions.
+    /// Each slice is then bounded ABOVE rather than below, which is the non-obvious half.
+    /// A missing OPEN anchor panics. A missing CLOSE anchor is the one that hurts — the
+    /// slice runs to end-of-body and absorbs unrelated prose, so the assertions pass on
+    /// the wrong text; a lower bound is monotone under exactly that failure and cannot
+    /// see it. The first version used a lower bound and it did active harm: it fired
+    /// before the content assertions and masked them, reddening site 3 for the wrong
+    /// reason.
+    ///
+    /// Mutation once per guarded SITE, since one kill says nothing about the others:
+    /// reverting ANY surface to the `R`-letter form reds this test, each naming its own
+    /// surface in the failure message, and no reversion is caught by another surface's
+    /// assertions.
     #[tokio::test]
-    async fn the_archive_confirmation_names_staged_ness_and_content_on_both_surfaces() {
+    async fn the_archive_confirmation_names_staged_ness_and_content_on_every_surface() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = mk_ctx(tmp.path());
 
@@ -569,24 +583,54 @@ mod tests {
             .as_str()
             .expect("stage_hint must be emitted on every move");
 
-        let guide = crate::prompts::topic_body("tracker-conventions")
-            .expect("the tracker-conventions guide must compile in");
-        let from_anchor = guide
-            .find("stage BOTH halves")
-            .map(|i| &guide[i..])
-            .expect("the staging paragraph's opening anchor must exist in the guide");
-        let section = match from_anchor.find("**Then re-point") {
-            Some(i) => &from_anchor[..i],
-            None => from_anchor,
+        let guide_slice = |topic: &str, open: &str, close: &str| -> &'static str {
+            let body = crate::prompts::topic_body(topic)
+                .unwrap_or_else(|| panic!("the {topic} guide must compile in"));
+            let from = body.find(open).unwrap_or_else(|| {
+                panic!("{topic}: the staging paragraph's opening anchor {open:?} must exist")
+            });
+            let rest = &body[from..];
+            match rest.find(close) {
+                Some(i) => &rest[..i],
+                None => rest,
+            }
         };
-        assert!(
-            section.len() > 400,
-            "non-vacuity: the staging paragraph must be a real slice, not a collapsed one \
-             ({} bytes) — if the anchors moved, every assertion below passes on nothing",
-            section.len()
+        let tracker_conventions = guide_slice(
+            "tracker-conventions",
+            "stage BOTH halves",
+            "**Then re-point",
         );
+        let librarian = guide_slice("librarian", "**Stage both halves:", "Two consequences");
 
-        for (surface, text) in [("stage_hint", hint), ("tracker-conventions guide", section)] {
+        // Each slice is bounded ABOVE, and the direction is the whole point. A missing
+        // OPEN anchor panics in `guide_slice`. A missing CLOSE anchor is the dangerous
+        // one: the slice runs to end-of-body and silently absorbs unrelated prose —
+        // measured, `librarian` would reach 3151 bytes and pick up 2 further `stale`
+        // hits, so every content assertion below would pass on text that is not this
+        // paragraph. A lower bound cannot see that direction at all. Worse, a lower
+        // bound large enough to be interesting fires FIRST and MASKS the content
+        // assertions it was meant to protect: the first mutation run reddened site 3 on
+        // "not a real slice" rather than on the missing discriminator, which is a red
+        // that proves sensitivity to the file without proving the assertions discriminate.
+        const SLICE_CEILING: usize = 2_000; // slices measured 1655 and 462
+        for (surface, text) in [
+            ("tracker-conventions guide", tracker_conventions),
+            ("librarian guide", librarian),
+        ] {
+            assert!(
+                !text.is_empty() && text.len() < SLICE_CEILING,
+                "non-vacuity: {surface}'s slice is {} bytes, outside (0, {SLICE_CEILING}) — a \
+                 closing anchor that moved lets the slice absorb unrelated prose, and every \
+                 assertion below then passes on the wrong text",
+                text.len()
+            );
+        }
+
+        for (surface, text) in [
+            ("stage_hint", hint),
+            ("tracker-conventions guide", tracker_conventions),
+            ("librarian guide", librarian),
+        ] {
             let lower = text.to_ascii_lowercase();
             assert!(
                 lower.contains("column 1"),

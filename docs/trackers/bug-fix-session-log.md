@@ -11007,16 +11007,17 @@ content check beside the `R` check it already names.
 
 **Mitigated 2026-09-08.** This entry named its own natural home — *"the `stage_hint`
 itself, which could name a content check beside the `R` check it already names"* — and that
-is where the fix landed. Both surfaces that state the confirmation (`stage_hint` and
-`get_guide("tracker-conventions")` § *Bug files*) now say `R` is a SIMILARITY verdict, name
+is where the fix landed. All three surfaces that state the confirmation (`stage_hint`,
+`get_guide("tracker-conventions")` § *Bug files*, and `get_guide("librarian")` §
+*Archiving / Moving Trackers*) now say `R` is a SIMILARITY verdict, name
 the stale-destination case outright, and state the confirmation as two PROPERTIES — both
 halves lettered in column 1, and the destination holding what you just wrote — rather than
-as a letter. Pinned on both surfaces by
-`librarian::tools::mv::tests::the_archive_confirmation_names_staged_ness_and_content_on_both_surfaces`,
+as a letter. Pinned on every surface by
+`librarian::tools::mv::tests::the_archive_confirmation_names_staged_ness_and_content_on_every_surface`,
 mutation-verified once per site.
 
 **It was fixed from the opposite direction, which is the part worth keeping.** The author of
-`docs/issues/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md`
+`docs/issues/archive/2026-09-08-the-archive-move-confirmation-signal-is-a-letter-not-staged-ness.md`
 hit the SAME sentence failing the other way: a correct, fully staged archive rendering `D` +
 `A` with no `R` at all, because writing the outcome and patch-id into the body before moving
 it drops similarity to 44% — under git's 50% default. So one sentence misled two sessions in
