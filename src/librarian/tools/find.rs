@@ -146,7 +146,7 @@ fn filter_mentions_status(node: &FilterNode) -> bool {
 /// The pre-filled claim call for unclaimed bugs on a bug-triage page.
 ///
 /// **Why this exists, and why it is the SECOND-best shape.**
-/// `docs/issues/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md`
+/// `docs/issues/archive/2026-09-08-the-taken-clause-in-the-triage-query-cannot-match.md`
 /// measured the `taken` field at 0 writes across 79 open bugs, and its corrected root
 /// cause is *not* that the claiming protocol is unpublished. `get_guide("tracker-
 /// conventions")` auto-injects the complete protocol on this very call, and two

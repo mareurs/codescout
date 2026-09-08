@@ -1,18 +1,19 @@
 ---
-id: '2f2aec31efcaf47a'
+id: 2b9ddd39f99d98cc
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the triage query''s `taken` clause cannot match — an enforced field nobody writes reads as a collision check that performs none'
 owners:
 - marius
 tags:
 - cluster/assertion-that-cannot-fail
 topic: bug claiming and cross-session collision avoidance
-closed: ''
+closed: 2026-09-08
 opened: 2026-09-08
 owner: marius
 related: []
 severity: medium
+unverified: 'Not exercised against a running MCP server: the live binary predates a31c0197. Gate green and a reachability test cover the call path, but no end-to-end run through the real tool boundary has happened. Re-check after the next `cargo rb` + /mcp reconnect.'
 ---
 
 ## Summary
@@ -231,38 +232,72 @@ for an unobservable event; it is an observable event nobody records.
 
 ## Fix
 
-Not started. The options below were rewritten once § *Root cause* was corrected — the
-original recommendation was a documentation move, which the correction falsifies.
+Fixed at `a31c0197`, patch-id `4fe255c39c131bac6510e28924dc5bbedded8e24` (label:
+**`experiments`**), by sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`.
 
-- **A — ~~move the write step to the read surface~~. FALSIFIED, do not retry.** The
-  claiming protocol is already delivered unprompted, in full, to sessions running the
-  triage query. Two of them then did not claim. Republishing it on a second surface changes
-  the one variable already shown not to matter.
-- **B — a mechanism at the point of claiming.** The behaviour that worked was *addressed,
-  specific, at the moment of picking work up*. The tool-side analogue is for the act that
-  begins work on a bug to carry the claim, or to ask — e.g. `doc(action="update")` moving a
-  bug toward an in-progress state offering the `claimed_by` stamp, or the triage query's
-  own response naming unclaimed rows in the second person. This is SKF-22's remedy shape:
-  replace a trigger the model must notice with one it cannot miss.
-- **C — make the zero name its own scope.** Per
-  `docs/adrs/2026-08-27-negative-results-name-their-scope.md`, a `taken` count of 0 in a
-  repo with live peers is a suspicious zero and should say what it examined. Weaker than B
-  and complementary to it: it repairs the *reader's* inference without changing the
-  *writer's* behaviour.
-- **D — document the clause as decorative** and route collision-checking to the socket
-  enumeration, which is the instrument that actually worked. Defensible, and it discards a
-  built, tested mechanism over an adoption gap; it also gives up the cross-machine case
-  sockets cannot reach.
+**Shipped option B — a mechanism at the point of claiming, and documented in the code as
+the SECOND-best shape rather than sold as the best.** `doc(action="find", kind="bug", …)`
+now returns `hints.claimable` carrying the caller's **own** sessionId, already substituted,
+beside the ids it applies to. `SessionRegistry::resolve_self` resolves that id from the pid
+of the server's parent — the server is spawned by the session it serves, so `getppid` names
+it. Same registry route `CLAUDE.md` documents for identifying a peer from the socket its
+message arrived on, pointed inward, with the same caveat that the row is self-asserted.
 
-**Recommendation: B, with C in the interim.** B is the only option addressing the corrected
-root cause. C degrades honestly while B does not exist.
+Why it is second-best, stated plainly because the distinction is the finding: § *Observer
+Blindness* ranks *"make the correct path end in a safe state"* above *"an unconditional
+policy tied to a trigger that happens anyway"*. The first rung is **unavailable** — no tool
+call means *"I am starting work on bug X"*, so nothing can carry the claim as a side
+effect. This is the second rung, and calling it a mechanism would overstate it.
+
+**What it adds over the guide that failed.** `get_guide("tracker-conventions")` already
+delivers the complete protocol, unprompted, on this exact call. It asks the reader to
+notice a general rule applies, recall their sessionId, and compose a call. This collapses
+all three into a literal, pre-filled line beside the specific rows.
+
+**Declining is the load-bearing behaviour.** Zero ppid (`rendezvous::parent_pid`'s Windows
+sentinel), no matching row, or two rows disagreeing on a reused pid all yield `None`, and
+the hint degrades to a visible `<your-session-id>` placeholder plus the scratchpad route.
+A wrong sessionId would be stamped into `claimed_by`, making `taken` name the wrong
+session — this defect inverted, and worse, because a false claim stops the next reader
+asking the peer directly.
+
+**A — ~~move the write step to the read surface~~. FALSIFIED, do not retry.** See
+§ *Root cause*. **C** (name the zero's scope) and **D** (declare the clause decorative)
+were not taken; C remains a reasonable complement if adoption stays low.
+
+**Auto-stamping `claimed_by` on any catalog edit was rejected, not overlooked.** It is the
+first-rung shape and it fails on a real case: a session annotating a bug it is not working
+— adding a cross-reference, correcting a count — would silently claim it. This file's own
+author annotated an unrelated archived bug the previous day while fixing something else.
 ## Tests added
 
-None. Note that the obvious test — asserting the ledger has at least one `taken` — would
-be a test of the corpus rather than of the code, and would red whenever the repo happened
-to be quiet. Any guard here belongs on the *instruction surfaces*, in the family of
-`claude_md_gate_lists_its_four_commands_in_the_load_bearing_order`.
+Eleven, all in the default lane, read out by name rather than inferred from a total.
 
+**`src/librarian/session_registry.rs` — four on `resolve_self`,** three of which assert it
+*declines*: zero ppid, no matching row, and two rows disagreeing on one pid. The Windows
+one pins a contract nothing was checking — `rendezvous::parent_pid` returns `0` there and
+its own comment argues that is safe because zero *"degrades to never-matched rather than to
+a WRONG match"*, which holds only if consumers honour it. `resolve_self(0)` is now asserted
+`None` **even against a row literally storing pid 0**, so the producer's stated reasoning
+has a consumer-side proof.
+
+**`src/librarian/tools/find.rs` — five on shape, two on REACHABILITY.** The split is the
+point: `cargo build` emitted `function claim_hint is never used` while all five shape tests
+were already green. That is `cluster/declared-not-wired`, and § *Testing Discipline*'s
+*"an alarm nothing reaches is exactly as informative as no alarm"*. Deleting
+`a_bug_page_carries_the_claim_hint_through_the_real_call_path` would let the wiring be
+removed with five green tests still vouching for it.
+
+The **negative** reachability test earns its place equally:
+`a_non_bug_page_carries_no_claim_hint`. A hint attached to every response is furniture, and
+furniture is unread — which reproduces this defect one layer out.
+
+Gate green 2026-09-08 at `a31c0197`: FMT=0, CLIPPY=0, LEAN=0 (3633 tests), DEFAULT=0 (5613
+tests, 0 failures, 1760 `librarian::`).
+
+**Not yet verified against a running MCP server** — the fix is in source; the live binary
+predates it. Nothing in the tests depends on that, and the reachability test is what covers
+the path an end-to-end check would exercise.
 ## Workarounds
 
 Ask. The socket enumeration in `CLAUDE.md` § *Reaching a Peer Session* plus a direct
