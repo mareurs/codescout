@@ -98,6 +98,16 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
     Some(msg)
 }
 
+/// Build the response for a command that ran to completion — at any exit code.
+///
+/// The name says "successful" about the *process*, not the *outcome*: a failing
+/// `cargo test` reaches here too, and that is the path `wip_authors` exists for.
+///
+/// Eight parameters against clippy's seven. Bundling them into a struct was considered
+/// and rejected: every one is consumed exactly once by a different concern (two move
+/// large `String`s, one is a drop guard), so a struct buys a name and costs the move
+/// semantics that keep the copies down on the hot path.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_successful_output(
     original_command: &str,
     raw_stdout: String,
@@ -105,6 +115,10 @@ pub(crate) async fn handle_successful_output(
     exit_code: i32,
     buffer_only: bool,
     unfiltered_tmpfile: Option<TmpfileGuard>,
+    // Where the command actually ran. Needed because the WIP-author diagnostic resolves a
+    // repo from its child's cwd, and `ctx` carries no working directory — only the caller
+    // has it, from `resolve_work_dir`.
+    work_dir: &std::path::Path,
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
@@ -219,6 +233,16 @@ pub(crate) async fn handle_successful_output(
     // the diagnostic has to cover every output shape — buffered summary included.
     let shell_cause = substitution_diagnostic(original_command, &raw_stderr);
 
+    // Same placement, same reason. The non-zero-exit gate lives inside the callee, not
+    // here, so the one place that decides "is this a red" is the one place documenting
+    // what it costs to be wrong about it. A green command spawns nothing at all.
+    let wip_authors = super::attribution::wip_author_diagnostic(
+        exit_code,
+        &format!("{raw_stdout}\n{raw_stderr}"),
+        work_dir,
+    )
+    .await;
+
     // --- Step 6: Decide whether to buffer + summarize ---
     let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
         if buffer_only {
@@ -290,6 +314,9 @@ pub(crate) async fn handle_successful_output(
             // bottom of the function cannot reach it.
             if let Some(cause) = shell_cause {
                 result["shell_cause"] = json!(cause);
+            }
+            if let Some(who) = wip_authors {
+                result["wip_authors"] = json!(who);
             }
             return Ok(result);
         }
@@ -374,6 +401,9 @@ pub(crate) async fn handle_successful_output(
     if let Some(cause) = shell_cause {
         result["shell_cause"] = json!(cause);
     }
+    if let Some(who) = wip_authors {
+        result["wip_authors"] = json!(who);
+    }
 
     Ok(result)
 }
@@ -432,6 +462,17 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     // `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
     if let Some(cause) = result["shell_cause"].as_str() {
         s.push_str(&format!("\n⚠ cause: {cause}"));
+    }
+
+    // Last, and unconditional across output shapes for the same reason. This one is
+    // about WHO holds the file rather than what went wrong, so it reads after the cause
+    // — and it must be rendered here or it reaches nobody, exactly as above. It is
+    // already multi-line and self-labelled, so it is appended verbatim rather than
+    // prefixed: re-wrapping it would strip the scope footer that keeps its silence from
+    // being read as an exoneration.
+    if let Some(who) = result["wip_authors"].as_str() {
+        s.push('\n');
+        s.push_str(who);
     }
 
     s

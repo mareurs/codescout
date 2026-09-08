@@ -1,11 +1,13 @@
 ---
 id: df517af91b43a5f7
 kind: bug
-status: investigating
+status: taken
 title: A claimed bug file names the author of the WIP that reds the shared build, and routing goes past it
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
 topic: shared-checkout authorship
+claimed_at: 2026-09-08
+claimed_by: c9ab2c8d-dd74-43f4-9940-25756379a312
 ---
 
 # BUG: a claimed bug file names the author of the WIP that reds the build, and routing goes past it
@@ -149,11 +151,71 @@ re-derive them:
   rather than discovering it later.
 
 Claim released to `investigating` rather than `open`: work happened and this section records it.
+### Option 3 built 2026-09-08 — `scripts/attribute-red.py`, wired into `run_command`
+
+The consumer this file says does not exist now exists. A red that names a file with
+uncommitted changes resolves that file's author and, when they are live, prints the `uds:`
+socket to reach them — automatically, on any non-zero `run_command` exit.
+
+**Two stages, because the answer is not cheap and the common case must stay free.** Both
+numbers re-measured rather than carried down from the section above: `git status
+--porcelain` costs **0.01 s**, the transcript scan **7.0 s** (6.98 / 7.02, two consecutive
+runs, no caching). The 5.0 s recorded above was right on 2026-09-02 and is a **40%
+understatement** six days later — the cost tracks the corpus, so re-derive it rather than
+citing either figure. So: is anything dirty at all (0.01 s, usually ends it) → does the red
+name one of those paths (free, pure text) → only then, who wrote it (7.0 s). A green
+command spawns nothing whatsoever.
+
+**Running the reproduction inverted the plan a second time.** The first version used
+`fp.scan()`'s records wholesale and so reported a path's **lifetime** authors. Tried against
+this tree it named two peers for a bug file *this session had edited minutes earlier*, and
+did not name the actual editor — a confident wrong name delivered at the exact moment
+someone is looking for a party to blame, which is worse than the silence it replaced. The
+floor has to be derived per path from `git log -1 --format=%cI`, exactly as
+`file-provenance.py`'s own `main()` does. That is now the suite's *THE WINDOW* section.
+
+**The ceilings are named at the site**, per the constraint left above. Three, all silent:
+native `Bash` bypasses `run_command`; a red that exits **0** never reaches stage 1; no
+`python3`, no answer. `--explain` distinguishes those from a clean tree and the wired path
+deliberately does not — a diagnostic about the diagnostic lands inside a failure the reader
+is already parsing.
+
+The scripts are `include_str!`'d into the binary and materialized to a temp dir. Reading
+them from the workspace under analysis was considered and rejected: it hands arbitrary code
+execution to any checkout a failing command runs in.
+
+**What it still does not do, and this file's failure 2 is why.** It answers *misrouting*
+only. The recipient of a correctly-routed alarm still cannot repair another session's
+uncommitted Rust, so the move it enables is *ask*, not *fix* — and the output says so in
+those words. Naming the holder is also not naming the culprit: the text says it names who
+WROTE the file, never who broke the build.
 ## Tests added
 
-None. There is nothing to regression-test yet — the finding is that a record which exists is not
-read. A test would have to assert about a consumer that has not been built.
+**39 cases** in `tests/attribute-red.sh`, **10 of 10** production mutations killed — including
+both halves of the window (floor never derived; comparison inverted), the self-vs-peer split,
+the dirty intersection, the diagnostic-path anchors widened to a bare token, and deletion of
+the scope footer. One mutation had to be re-run: replacing the footer with invalid Python
+failed **27** assertions including stage-1 ones the footer cannot reach, which is a crashed
+interpreter reading as a kill. The count is the tell; a real deletion killed **2**.
 
+**10 Rust cases** across `src/tools/run_command/attribution.rs` and `tests.rs`. **Four exist
+because a mutation survived**, and all four are one shape — an assertion satisfied by
+something other than the thing it names:
+
+| survivor | why the assertion could not see it |
+|---|---|
+| both `wip_authors` attachment sites | every other case called `wip_author_diagnostic` or `format_run_command` **directly**; nothing traversed `handle_successful_output`, so the wiring was the un-wired-function shape with a green suite over it |
+| …and then survived **again** | the replacement cases carried a `let Some(who) = … else { skip }` tolerance for a missing `python3` — satisfied by exactly the state a deleted attachment produces. The environment check is now a separate observation taken first |
+| the opt-out | asserted `is_none()` against a red naming a **clean** path, so stage 2 produced the silence and deleting the opt-out changed nothing |
+| `materialize` | passed against files a **previous run** had left in the content-hashed temp dir; `materialize_into` now takes its base as a parameter |
+
+The second row is the one worth carrying forward: a skip-guard written for a genuine
+environmental gap made the test **monotone under the deletion it existed to catch**, and it
+was added *while fixing* the first survivor.
+
+Not covered, stated rather than implied: write-then-rename **atomicity** has no assertion —
+replacing the rename with a direct write leaves no stray `.tmp`, so the existing check cannot
+see it. The case for it is a concurrent-reader race a test cannot schedule.
 ## Workarounds
 
 Run `cargo fmt -- --check` before the gate's rewriting `cargo fmt` step (read-only, whole

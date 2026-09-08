@@ -1,6 +1,7 @@
 //! RunCommand tool — executes shell commands with buffered output, interactive
 //! mode, background tasks, and session-scoped @cmd_* ref buffers.
 
+mod attribution;
 mod inner;
 mod interactive;
 mod output;

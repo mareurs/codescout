@@ -559,6 +559,7 @@ pub(crate) async fn run_command_inner(
                 output.status.code().unwrap_or(-1),
                 buffer_only,
                 unfiltered_tmpfile,
+                &work_dir,
                 ctx,
             )
             .await

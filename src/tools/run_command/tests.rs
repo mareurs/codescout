@@ -2974,6 +2974,7 @@ async fn an_unreadable_tee_capture_drops_the_whole_key_group_without_panicking()
         0,
         false,
         Some(missing),
+        std::path::Path::new("."),
         &ctx,
     )
     .await
@@ -4762,4 +4763,133 @@ fn classify_slow_command_none_for_quick_commands() {
     assert_eq!(classify_slow_command("ls -la"), None);
     assert_eq!(classify_slow_command("git status"), None);
     assert_eq!(classify_slow_command("echo hello"), None);
+}
+
+// ---------------------------------------------------------------------------------
+// WIP-author attribution: the field must survive the ARM it is attached in.
+//
+// `handle_successful_output` has two attachment sites for every diagnostic — one inside
+// the buffer-only arm, which returns early, and one at the bottom of the function. They
+// are separate lines implementing one rule, so a mutation run against either says nothing
+// about the other (`CLAUDE.md` § Testing Discipline, "mutate once per guarded SITE").
+// Both survived a mutation deleting them until these two tests existed: every other test
+// of this feature calls `wip_author_diagnostic` or `format_run_command` directly, which is
+// the un-wired-function shape — a full green suite over code no caller reaches.
+// ---------------------------------------------------------------------------------
+
+/// A throwaway git repo holding one file that is dirty relative to HEAD.
+///
+/// No transcript exists for a tempdir minted seconds ago under any profile, so the engine
+/// reaches stage 3 and reports the file as a COVERAGE gap. That is a real end-to-end run
+/// — materialize, spawn, git, engine — with no environment variable involved.
+fn dirty_git_fixture() -> Option<tempfile::TempDir> {
+    let dir = tempfile::tempdir().ok()?;
+    let p = dir.path();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    };
+    git(&["init", "-q"])?;
+    git(&["config", "user.email", "t@t"])?;
+    git(&["config", "user.name", "t"])?;
+    std::fs::create_dir_all(p.join("src")).ok()?;
+    std::fs::write(p.join("src/held.rs"), "fn main() {}\n").ok()?;
+    git(&["add", "-A"])?;
+    git(&["commit", "-q", "-m", "seed"])?;
+    std::fs::write(p.join("src/held.rs"), "fn main() { broken\n").ok()?;
+    Some(dir)
+}
+
+const HELD_RED: &str = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+
+#[tokio::test]
+async fn a_red_attaches_wip_authors_on_the_main_arm() {
+    let Some(dir) = dirty_git_fixture() else {
+        eprintln!("skipping: git unavailable");
+        return;
+    };
+    let ctx = project_ctx_at(dir.path()).await;
+    // Establish that the engine can answer AT ALL here, as its own observation. Folding
+    // this into the assertion below -- "no field? maybe python3 is missing, skip" -- is
+    // satisfied by precisely the state a deleted attachment produces, and both of these
+    // cases survived a mutation deleting their site until the two were separated.
+    if super::attribution::wip_author_diagnostic(101, HELD_RED, dir.path())
+        .await
+        .is_none()
+    {
+        eprintln!("skipping: engine produced nothing here (python3 absent?)");
+        return;
+    }
+
+    let result = super::output::handle_successful_output(
+        "cargo check",
+        String::new(),
+        HELD_RED.to_string(),
+        101,
+        false,
+        None,
+        dir.path(),
+        &ctx,
+    )
+    .await
+    .expect("a failing command still returns a response");
+
+    let who = result["wip_authors"]
+        .as_str()
+        .expect("the engine answers in this environment, so the main arm must attach it");
+    assert!(
+        who.contains("src/held.rs"),
+        "the attached hint must name the dirty file; got: {who}"
+    );
+}
+
+#[tokio::test]
+async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
+    let Some(dir) = dirty_git_fixture() else {
+        eprintln!("skipping: git unavailable");
+        return;
+    };
+    let ctx = project_ctx_at(dir.path()).await;
+    // Establish that the engine can answer AT ALL here, as its own observation. Folding
+    // this into the assertion below -- "no field? maybe python3 is missing, skip" -- is
+    // satisfied by precisely the state a deleted attachment produces, and both of these
+    // cases survived a mutation deleting their site until the two were separated.
+    if super::attribution::wip_author_diagnostic(101, HELD_RED, dir.path())
+        .await
+        .is_none()
+    {
+        eprintln!("skipping: engine produced nothing here (python3 absent?)");
+        return;
+    }
+
+    // The buffer-only arm is reached only when `needs_summary` is true, i.e. combined
+    // output over 4 * MAX_INLINE_TOKENS bytes. The padding is load-bearing: shrink it and
+    // this test silently re-tests the main arm, which the case above already covers, and
+    // the early-return attachment goes back to being unguarded.
+    let padded = format!("{HELD_RED}{}", "note: filler\n".repeat(2_000));
+    let result = super::output::handle_successful_output(
+        "cargo check",
+        padded,
+        String::new(),
+        101,
+        true,
+        None,
+        dir.path(),
+        &ctx,
+    )
+    .await
+    .expect("a failing command still returns a response");
+
+    let who = result["wip_authors"]
+        .as_str()
+        .expect("the engine answers in this environment, so the buffer-only arm must attach it");
+    assert!(
+        who.contains("src/held.rs"),
+        "the early-return arm must attach the hint too; got: {who}"
+    );
 }

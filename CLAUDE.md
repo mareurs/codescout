@@ -339,8 +339,16 @@ session".
 - **Never route by adjacency.** `git diff --stat` names insertions and names no author, and a
   file touched by three sessions in an hour makes proximity *anti*-evidence. To attribute a
   write: intersect the socket enumeration with `scripts/file-provenance.py`, then resolve the
-  survivors. **Prefer the CHANNEL over the ANSWER — derive the sid from the socket a message
-  arrived on, which the sender does not control:**
+  survivors. **When the write you are attributing is one a BUILD RED names, you no longer have
+  to remember any of that** — `run_command` runs `scripts/attribute-red.py` on every non-zero
+  exit and attaches the answer, so the standing instruction is *read the `wip_authors` line
+  the failure already carries* rather than *think to go looking*. Its ceiling is that native
+  `Bash` bypasses `run_command` entirely, so **on a `Bash` gate the silence means nothing and
+  the manual route above is still yours to run.** It names who WROTE the file, never who broke
+  the build, and the move it enables is *ask*, not *fix*: the holder may be mid-edit, and
+  repairing their uncommitted Rust is its own filed defect. **Prefer the CHANNEL over the
+  ANSWER — derive the sid from the socket a message arrived on, which the sender does not
+  control:**
 
       /run/user/<uid>/cc-socks/<PID>.sock        the from= address, not a claim
         -> tr '\0' '\n' < /proc/<PID>/environ | grep ^CLAUDE_CONFIG_DIR=
