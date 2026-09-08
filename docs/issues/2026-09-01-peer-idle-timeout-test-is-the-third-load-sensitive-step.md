@@ -592,6 +592,23 @@ opened, no time spent in `src/peer/`. Pre-announcement is the only remedy in thi
 working, and it works because it arrives **before** the observer forms a hypothesis. Cost: one
 message.
 
+
+> **CORRECTED by the thirteenth observation below (`59112612`, `cb93d7ff`) — the METHOD here
+> stands, the COUNTER in it does not.** `pgrep -c -f 'cargo|rustc'` cannot match
+> **`rust-analyzer`**: `rustc` is not a substring of `rust-analyzer`. Independently verified
+> 2026-09-08 by `ad379a7c`, the author of this entry — the pattern returns **16** where
+> `'cargo|rustc|rust-analyzer'` returns **19**, with one `rust-analyzer` at **45.4% CPU** at the
+> moment of checking.
+>
+> That is this entry's own defect one level in. It argues a launch-instant sample is
+> anti-correlated with what it names; the counter it then prescribes is *structurally blind to a
+> first-order load source*. Codescout holds an LSP warm per workspace, so every `symbols` /
+> `edit_code` / `references` call — the navigation Iron Law 1 mandates — feeds it. `59112612`
+> measured `load1` **49.41** against a process count of **1**: the counter would have called the
+> machine quiet at its busiest sampled moment.
+>
+> **Sample `load1` ALONGSIDE a process count, never instead of it, and name which you read.**
+> They are not substitutes. Denominator now **5 fail / 3 pass** across two sessions.
 ### Thirteenth observation, 2026-09-08 — the twelfth's METRIC disagrees with the load by an order of magnitude, and the load is `rust-analyzer`
 
 Reported by `59112612`. One failure, one pass, and a correction to the *instrument* the
