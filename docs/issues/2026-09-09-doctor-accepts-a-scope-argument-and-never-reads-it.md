@@ -8,12 +8,14 @@ tags:
 - doctor
 - schema-drift
 - cluster/accepted-parameter-silently-dropped
+- cluster/declared-not-wired
 closed: null
 opened: 2026-09-09
 owner: marius
 related:
 - a00b99a98e5401dd
 severity: medium
+unverified: Typed/validated/echoed only (26b60af8). The population selector still ignores `scope` — the headline 636-row under-report is LIVE. Verified at the bytes 2026-09-09.
 ---
 
 > **Cluster:** `cluster/accepted-parameter-silently-dropped` (`IC-15`, n=20 before this
@@ -122,7 +124,12 @@ A typed `Args` alone is necessary and not sufficient — adding `doctor` to `sco
 leaves it last in the slash list, where the selector still will not see it. Raised by a
 peer session (sessionId `5399543d-22d6-4ed9-9ebb-876be459989f`) as a binary — probe defect
 or missing admission — and it is neither; the third option is the selector. Tracked as
-`docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md`.
+`docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md` — **fixed
+and archived 2026-09-09** (`80c4fd1e`, patch-id `3f662b6154f5c76751495977cbab12b650518e8f`).
+That fix falsifies the sentence just above: with the selector now looping every slash
+token, a `doctor` token sitting **last** in `scope`'s label would be swept. So adding
+`doctor` to that label is live work rather than a dead end — and the probe should then red
+on this very bug, because `doctor` still discards `scope` at the population selector.
 
 *measured 2026-09-09: the four `summary.total` readings above, plus a `grep` over
 `doctor::call` for `scope` returning no match. Mechanism read from source **and**
@@ -180,6 +187,33 @@ and publish no count, so a reader cannot tell whether `terminal_status_without_f
    **Evidence link:** § Root cause.
 
 ## Fix
+
+> **PARTIAL as of 2026-09-09 — do NOT archive; the headline symptom is still live.**
+> `26b60af8` (patch-id `39641840397a72f257450e7d36b72e197a1c67bf`, **experiments**) typed
+> `doctor`'s args, so `scope` is now deserialised, an unknown value is refused rather
+> than ignored, and the applied scope is echoed in the response. Two regression tests
+> cover that much: `an_unknown_scope_value_is_refused_rather_than_ignored` and
+> `the_applied_scope_is_echoed_in_the_response`.
+>
+> **The population selector still does not read it.** Verified at the bytes 2026-09-09:
+> `effective_scope` has exactly two uses in `src/librarian/tools/doctor.rs` — the
+> `resolve_scope` binding, and echoing itself back in the `"scope"` block of the
+> response. Every scan takes `roots`, and `roots = super::managed_roots(ctx)`, derived
+> from the context alone. So `scope="all"` still returns a project-scoped report and the
+> 636 dropped rows are still dropped.
+>
+> **And the shape changed in a direction worth naming.** Before, the param was discarded
+> in silence. Now the response *asserts* `scope: all` over a population that is
+> project-scoped — the report states a scope it did not apply, which a caller has no way
+> to distinguish from a correctly widened one. That is the same class one layer out: the
+> declaration is well-formed and validated, and nothing wires it to the selector
+> (`cluster/declared-not-wired`).
+>
+> Remaining work is the original Fix below: thread `effective_scope` into `managed_roots`
+> (or into the row filter) so the scanned population actually widens. A regression test
+> must assert a **row-count difference** between `scope="project"` and `scope="all"` over
+> a two-root fixture — asserting the echoed value cannot fail against this bug, since the
+> echo is precisely the half that already works.
 
 **Ship the implement path, not the reject path — the opposite of the `audit_doc_refs`
 precedent, and the difference is load-bearing.** That bug rejected `repo`/`umbrella`
@@ -263,7 +297,7 @@ Filed separately.
   param-probe exemption, which covers `fix`/`offset` and NOT `scope`)
 - `src/tools/param_probe.rs:108` (the first-slash-token selector that never reached
   `doctor:scope`) — its own bug file:
-  `docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md`
+  `docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md`
 - `src/librarian/tools/scope.rs` (`Scope`, `UmbrellaPolicy`, `resolve_scope`, `apply_scope`)
 - `src/librarian/filter.rs:92` (`compile`), `src/librarian/catalog/find.rs:20-26` (the splice)
 - Precedent, same class, same param, different action:

@@ -110,10 +110,11 @@ where
         // token left every later action unswept while `checked` still rose once per key, so
         // the coverage loss read as coverage: deleting `doc`'s whole `"gather" =>` dispatch
         // arm left the lib suite at 5007 passed, 0 failed
-        // (docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md, and
-        // 2026-09-02-param-probe-reads-only-the-first-slash-token…, the same defect filed
-        // twice a week apart). A floor compared against a per-key count cannot see a lost
-        // label, which is the one thing the floor exists for.
+        // (docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md
+        // and docs/issues/archive/
+        // 2026-09-02-param-probe-reads-only-the-first-slash-token-so-later-actions-are-unswept.md,
+        // the same defect filed twice a week apart). A floor compared against a per-key
+        // count cannot see a lost label, which is the one thing the floor exists for.
         let label = desc.split(':').next().unwrap_or_default();
 
         let declared = spec_v["type"].as_str().unwrap_or("string");
@@ -152,7 +153,8 @@ where
 /// rather than chosen — see each site's comment for the reading and its date. A floor
 /// carrying a per-key figure is satisfied by a sweep that lost every shared key's later
 /// actions, which is the defect
-/// `docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md` records: the
+/// `docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md`
+/// records: the
 /// margin between floor and count is exactly the number of labels that can go missing in
 /// silence, so these are set at the measurement and a schema shrink must move them
 /// deliberately.

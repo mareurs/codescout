@@ -246,7 +246,8 @@ So this step is two edits, in this order:
         // so `scope`, labelled for four actions, was probed for `context` alone. An
         // unchecked pair that is not in `accepts_any_json` is worse than an admitted one:
         // the admission list is where blindness is declared, and this blindness was
-        // undeclared. See docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md
+        // undeclared. See
+        // docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md
         let Some(label) = desc.split(':').next() else { continue };
         for action in label.split('/') {
             if !spec.actions.contains(&action) {
