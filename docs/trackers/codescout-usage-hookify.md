@@ -560,9 +560,9 @@ month. Registration resolves at process launch, so it is committed, not live, un
 Shipped: `codescout-companion/hooks/suspicious-zero-hint.mjs`, PostToolUse on `Bash`.
 `claude-plugins:07bceca`, patch-id `df3244db91fd154b9e45c6836129e87fa9a7622b`.
 `H-10`'s hook is `claude-plugins:813a28d`, patch-id `a7ae9efb9735afcc1c927acb496396d4892646c9`.
-**Both SHAs are local at the time of writing** — that repo is ahead of `origin/main` — so the
-patch-ids are the halves that resolve anywhere; re-derive with `git show <sha> | git patch-id
---stable` if either is rebased.
+Both are on `origin/main`. The patch-ids are recorded beside them because a SHA is positional
+and does not survive a rebase; re-derive with `git show <sha> | git patch-id --stable` if
+either moves.
 
 **The class.** `grep`, `awk` and `sed` match LINE BY LINE. A phrase that wraps across a newline
 cannot match however present the text is; a range expression fails the same way when an
