@@ -1210,6 +1210,52 @@ wrong for 5.9% of entries. Probe the heading *and* the index row; disagreement i
 Second, this is the honest scope of the trailer: it is an excellent positive instrument going
 forward and it does nothing for the past. The ten are not a backlog to resolve, they are the
 measured cost of having added the instrument late.
+## Instance 12 — 2026-09-09, the guard's own refusal opened the window the capture came through
+
+**Captured:** `docs/trackers/prompt-hamsa-audit-log.md`, held by sessionId
+`90326024-f3cf-4ff3-914c-d182ab68cf55` (`codescout-7e`, `.claude-sdd`).
+**Capturing commit:** `7bd4e268` *"docs(issues): a wrong confirmation is not a
+denominator, it is a foreclosure"*, sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`
+(`fix-push-guard-predicate`, pid 1399082, `.claude`). Content intact — verified in HEAD as
+38 body sections / 38 index rows, with the A-37 row and A-12's `Follow-up CLOSED` both
+present — so this is misattribution, not loss. Not repaired, per § *Candidate remedies* and
+the sequence's own step 6; reported to the capturing session instead.
+
+**What is new here, and it is uncomfortable: the two sessions met the guard from opposite
+sides within the same minute, and it worked perfectly in one direction and had nothing to
+say in the other.**
+
+1. `codescout-7e` ran `git add <its file>` then a bare `git commit -F <msg>`.
+2. The hook **refused**, correctly, because the shared index held
+   `fix-push-guard-predicate`'s staged path. Its message was good enough to be followed on
+   the first read: it named the peer, named the sessionId, printed the `SendMessage`
+   address, and gave the pathspec form.
+3. `codescout-7e` re-formed the command as instructed.
+4. In that gap, `fix-push-guard-predicate` committed its whole index — taking
+   `codescout-7e`'s already-staged file with it.
+
+**So the refusal is not merely adjacent to the capture; it is what lengthened the window.**
+The guard's remedy asks the refused session to stop, re-read, and re-issue — seconds during
+which its work sits *staged*, which is exactly the state that makes it capturable. A
+session that had been allowed to commit immediately would not have been exposed.
+
+The asymmetry underneath is structural rather than a bug in the check: **the guard runs on
+the committer's intent, and a whole-index commit expresses none.** There is no pathspec to
+compare a foreign staged path against, so the side doing the capturing presents nothing to
+inspect. Every earlier instance here is the same shape; what this one adds is that the
+*victim* can be a session that just did everything right, including obeying this guard.
+
+**Not proposed as a fix, deliberately.** "Refuse whole-index commits too" is the obvious
+reading and it is worse than it looks: it would refuse the ordinary solo case, and on a
+busy tree it converts every commit into a negotiation. The honest statement is that the
+refusal has a cost that was not previously priced, and that the cost lands on the party
+the guard just protected.
+
+**Valid:** dated 2026-09-09
+
+**Rests on:** `7bd4e268`'s own `--stat` (two files, one per session) and the `Session-Id`
+trailer on it; the hook's printed refusal text quoted above.
+
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
