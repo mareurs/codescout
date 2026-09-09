@@ -9,7 +9,7 @@ closed: null
 opened: 2026-09-02
 owner: marius
 related:
-- docs/issues/2026-09-02-workspace-schema-requires-an-action-the-code-does-not.md
+- docs/issues/archive/2026-09-02-workspace-schema-requires-an-action-the-code-does-not.md
 severity: low
 unverified: site count is a candidate list of ten, not a census — only read_markdown and read_file were probed; the other eight declare required:[path] but were not confirmed to route through the alias resolvers
 ---
@@ -159,6 +159,12 @@ instance (cause B) is owned by `codescout-0a`'s `tool-collapse` Task 3, together
 schema-shape gate, which replaced the single-site test that branch originally specified.
 This file owns **cause A**, the alias half, which no task on that branch touches.
 
+**Note added 2026-09-09:** cause B (`workspace`) is now fixed and archived — `dac1068a`,
+patch-id `371bee7c5081481311866cd797d7591abb2c5bc3`, which also shipped the schema-shape gate
+as `required_names_no_key_that_has_a_declared_alias` (`src/server.rs:2842`). **Cause A, the
+alias half this file owns, is not closed by that** — verify it against the gate before
+archiving this file, since the gate's existence is not the same claim as the alias instances
+being gone.
 ## Tests added
 
 None. The gate described above is the test, and it lands with cause A's fix.
@@ -180,11 +186,10 @@ must read. Then fix the schemas the gate names.
 
 ## References
 
-- `docs/issues/2026-09-02-workspace-schema-requires-an-action-the-code-does-not.md` — cause B,
+- `docs/issues/archive/2026-09-02-workspace-schema-requires-an-action-the-code-does-not.md` — cause B,
   owned by `tool-collapse` Task 3.
 - `src/fs/mod.rs:227-262` — the alias constant and both resolvers.
 - `src/tools/config/mod.rs:46,51-57` — the conditional default.
 - `src/librarian/tools/mod.rs:578` — `assert_required_are_advertised`, the converse check.
 - `655c0b6f` (patch-id `2ae27c8a135edae59191b0b840b90956bb97ca6d`) — the description-vs-enum
   gate whose derive-the-population shape this should copy.
-

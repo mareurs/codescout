@@ -1,11 +1,14 @@
 ---
-id: cecb14883dc189ea
+id: 54c25b97fdea21c2
 kind: bug
-status: open
+status: fixed
 title: A git-verb regex swallows longer subcommands sharing its prefix, so read-only plumbing is refused as a mutation
 tags:
 - cluster/addressing-without-an-escape-hatch
 closed: null
+fix_patch_id: 1ec8d70c31e5df900096617793b9b0fa17a0abb5
+fix_sha: claude-plugins:7a95dffb6ee7da00d7a79c74919aabc02dcb98b7
+fixed: 2026-09-09
 opened: 2026-09-02
 owner: marius
 severity: low
@@ -93,24 +96,34 @@ passed immediately, exempted by `EXPLICIT_C` at `:67`.
 
 ## Fix
 
-Not fixed. Two candidate shapes, neither implemented:
+Fixed by **candidate 1** (anchor each alternative) in `claude-plugins:7a95dffb6ee7da00d7a79c74919aabc02dcb98b7`,
+patch-id `1ec8d70c31e5df900096617793b9b0fa17a0abb5`. The fix lives in a **sibling repo**, which is why
+no codescout gate ever reddened while this file sat `open`.
 
-1. **Anchor each alternative** — require the subcommand to be followed by whitespace or end of
-   segment, e.g. `(?:commit|push|rebase|merge|…)(?=\s|$)`. Cheapest, and directly expresses "whole
-   subcommand". Note `reset\s+--hard` and `checkout\s+-b` already carry their own suffix and would
-   need the lookahead placed after it.
-2. **Enumerate the exclusions** — add a negative alternative for the known read-only siblings.
-   Rejected on sight: it is a closed list against an open namespace, and git adds subcommands.
+`hooks/git-worktree-guard.mjs` now reads:
 
-Candidate 1 is preferred. The class's own rule applies — a parser over a namespace owes a
-disambiguator, and the disambiguator here is "the verb ends where the subcommand ends".
+```js
+const TRIGGER = /git\s+(commit|push|reset\s+--hard|rebase|merge|checkout\s+-b)(\s|$)/;
+```
 
+The boundary moved from `\b` to `(\s|$)`. A hyphen is a non-word character, so `\b` *succeeded*
+between `merge` and `-base`; whitespace-or-end does not, which is the disambiguator the class asks
+for — "the verb ends where the subcommand ends". Candidate 2 (enumerate exclusions) was rejected as
+filed: a closed list against an open namespace.
 ## Tests added
 
-None — nothing is fixed. A regression test would assert `git merge-base --is-ancestor A B` passes
-the guard while `git merge origin/main` is refused, which is the two-sided pair this class needs:
-a one-sided "merge-base passes" test is monotone under the guard never firing at all.
+`claude-plugins:tests/test-git-worktree-guard.sh` — **two-sided**, as this file's plan required:
 
+- **Allow side** (`:104-123`): six hyphenated read-only plumbing commands — `merge-base`,
+  `merge-file`, `merge-tree`, `merge-index`, `commit-tree`, `commit-graph`.
+- **Deny side** (`:29`): the pre-existing bare-mutation block, which is what keeps the allow side
+  from being monotone under "the guard never fires at all".
+
+The fixture carries its load-bearing detail on the block itself — *"The anchor is `(\s|$)`; if it
+regresses to `\b`, every case here flips"* — so a tidy-up that removes the annotation cannot leave
+a passing-but-no-longer-discriminating test unremarked.
+
+Suite verified 2026-09-09: **38 passed, 0 failed**.
 ## Workarounds
 
 Use the explicit form the refusal already recommends: `git -C /abs/path merge-base …`. It is
@@ -118,10 +131,9 @@ exempted at `:67` and is good practice on a multi-worktree checkout regardless.
 
 ## Resume
 
-Decide between candidate 1 and 2 above, then patch
-`claude-plugins/codescout-companion/hooks/git-worktree-guard.mjs:65` and add the two-sided test.
-The hook is in a sibling repo, not this one — changing it needs a commit there.
-
+Nothing outstanding. Fix and two-sided regression test are both live in `claude-plugins`; verified
+2026-09-09 by running the suite (38/38) and by evaluating the shipped `TRIGGER` regex against all
+11 named cases (6 allow, 5 deny) — all correct.
 ## References
 
 - Hook: `claude-plugins/codescout-companion/hooks/git-worktree-guard.mjs:61-113`

@@ -175,7 +175,7 @@ scope. Read `## Fix` before touching `declared_patch_ids`.
   the over-detection direction. This is under-detection by a selector narrower than its
   population, which is `IC-18`'s claim almost verbatim — *"runs to completion over a
   subset and returns a plausible answer."*
-- `docs/issues/2026-09-02-a-git-verb-regex-swallows-longer-subcommands-sharing-its-prefix.md`
+- `docs/issues/archive/2026-09-02-a-git-verb-regex-swallows-longer-subcommands-sharing-its-prefix.md`
   — `IC-6`'s shell-gate member, offered as a cross-reference by the same peer. Related
   in shape (a boundary token the pattern cannot express) and a different class in
   direction (it matches too much; this matches too little).
