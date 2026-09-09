@@ -117,6 +117,8 @@ use crate::librarian::{current_project, ids};
 
 use super::{RecoverableError, ToolContext};
 
+mod scope;
+
 /// Declares every check `doctor` can emit, generating the enum and its `ALL`
 /// list from ONE list so the two cannot drift apart.
 ///
@@ -410,8 +412,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // separate "another workspace's row" from "orphan". Needs the connection, so
     // it runs inside the lock.
     let known_elsewhere = known_workspace_roots(ctx, &cat.conn);
+    let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
     let (artifact_path_violations, outside_scoped_by_project) =
-        scan_artifact_paths(&cat.conn, &roots, &known_elsewhere)?;
+        scan_artifact_paths(&cat.conn, &roots, &known_elsewhere, &mut doctor_scope)?;
     all_violations.extend(artifact_path_violations);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
@@ -617,6 +620,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .or_insert(0) += 1;
             false
         });
+    }
+    // `doctor_scope`'s own scoped-out rows (currently only
+    // `abs_path_outside_managed_roots`, via `scan_artifact_paths`'s `scope.admit`
+    // branch) fold into the SAME map, additively — never assign, since the retain
+    // above still contributes the seven `SCOPED_ROW_CHECKS` checks' counts until a
+    // later task removes it.
+    for (group, n) in doctor_scope.scoped_out() {
+        *row_checks_scoped_by_project
+            .entry(group.clone())
+            .or_insert(0) += n;
     }
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
@@ -1732,14 +1745,14 @@ fn outside_roots_group(path: &str) -> String {
     }
 }
 
-/// Pulls every `(id, abs_path)` row once and runs six per-row checks
+/// Pulls every `(id, abs_path)` row once and runs seven per-row checks
 /// (abs_path_must_be_absolute / backslash / ads_colon / dotdot /
-/// missing_file / outside_managed_roots). Single SQL fetch + in-memory passes
-/// is cheaper than six separate queries. `abs_path_must_be_absolute` runs
-/// first because it is the gating shape check — a relative-path row should be
-/// evicted, not further analyzed, so the managed-root check is skipped for it
-/// (a relative path resolves under nothing, and reporting both would be one
-/// defect wearing two names).
+/// missing_file / frontmatter_id_mismatch / outside_managed_roots). Single SQL
+/// fetch + in-memory passes is cheaper than seven separate queries.
+/// `abs_path_must_be_absolute` runs first because it is the gating shape check — a
+/// relative-path row should be evicted, not further analyzed, so the managed-root
+/// check is skipped for it (a relative path resolves under nothing, and reporting
+/// both would be one defect wearing two names).
 ///
 /// `roots` is the managed-root list from [`super::managed_roots`]. Empty means
 /// the caller had no active project and no `[[roots]]`, in which case the
@@ -1753,10 +1766,19 @@ fn outside_roots_group(path: &str) -> String {
 /// `catalog_health.outside_roots_by_project` so the global count is unchanged.
 /// Pass an empty slice to get the pre-2026-08-27 behaviour of reporting every
 /// firing row.
+///
+/// `scope` is a second, independent narrowing of the SAME finding
+/// (`abs_path_outside_managed_roots`) applied only to a row `known_elsewhere`
+/// did not already claim — a row can be scoped out by "another workspace knows
+/// it" or by "it's outside the active scope", and the two tallies stay
+/// separate (`scoped` here vs. `scope.scoped_out()`) because they answer
+/// different questions. The caller folds `scope.scoped_out()` into
+/// `row_checks_scoped_by_project`, not into the map this function returns.
 fn scan_artifact_paths(
     conn: &rusqlite::Connection,
     roots: &[PathBuf],
     known_elsewhere: &[PathBuf],
+    scope: &mut scope::DoctorScope,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     // `ORDER BY abs_path` is load-bearing, not tidiness. The outside-roots
     // findings are sampled downstream, and without an ORDER BY the kept rows
@@ -1765,7 +1787,8 @@ fn scan_artifact_paths(
     // change at all. A stable order is also what makes the `offset` parameter
     // mean anything. See
     // docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let sql = "SELECT id, abs_path FROM artifact ORDER BY abs_path";
+    let mut stmt = conn.prepare(sql)?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
@@ -1804,6 +1827,11 @@ fn scan_artifact_paths(
                 // Counted, not reported.
                 if super::containing_root(known_elsewhere, Path::new(abs_path)).is_some() {
                     *scoped.entry(outside_roots_group(abs_path)).or_insert(0) += 1;
+                } else if !scope.admit(id, abs_path) {
+                    // Outside the active scope too — tallied inside `scope`
+                    // itself (folded by the caller into
+                    // `row_checks_scoped_by_project`), not into `scoped` above:
+                    // a different question from "another workspace knows it".
                 } else {
                     violations.push(v);
                 }
@@ -6407,6 +6435,80 @@ mod tests {
             "an unexported delta a reader cannot act on is decoration: {audit}"
         );
     }
+    /// Ruling B (2026-09-09): replaces `scope_all_reports_strictly_more_than_scope_project`,
+    /// whose `assert!(a > p)` verified a POPULATION-level property (`summary.total`
+    /// under two different scopes) to stand in for a PER-MEMBER claim (this one
+    /// foreign row is dropped, and its drop is announced) — vacuous per this repo's
+    /// testing law: a population count can move for reasons unrelated to the one row
+    /// under test. Per-member on both halves: the foreign row's violation is absent
+    /// from `violations`, AND `row_checks_scoped_by_project` names the specific root
+    /// that owns it.
+    #[tokio::test]
+    async fn project_scope_drops_a_foreign_row_and_announces_the_drop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        // A REAL sibling root under the same tempdir, not a literal
+        // `/home/other/...` path — `seed_ledger` writes an actual file to disk,
+        // and a bare `seed_artifact` row (no file) would instead trip
+        // `missing_file` for the foreign row, which isn't scoped by project at
+        // all, masking the one property this test exists to check
+        // (`abs_path_outside_managed_roots` being scoped out cleanly).
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "mine", &root.join("docs/mine.md"), "# mine\n");
+        seed_ledger(
+            &cat,
+            "theirs",
+            &sibling_root.join("docs/theirs.md"),
+            "# theirs\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        let foreign_present = out["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["path"].as_str().unwrap_or_default().contains("theirs"));
+        assert!(
+            !foreign_present,
+            "the foreign row must not appear as a violation at the default (project) scope: {out:#?}"
+        );
+
+        let scoped = out["catalog_health"]["row_checks_scoped_by_project"]
+            .as_object()
+            .expect("the drop must be announced, not silent");
+        let key = scoped
+            .keys()
+            .find(|k| k.contains("sibling-project"))
+            .unwrap_or_else(|| panic!("scoped-out root must name the foreign root: {scoped:#?}"));
+        assert_eq!(scoped[key], json!(1));
+    }
+
+    /// The umbrella guard `resolve_scope` applies to an explicit `all` — confirmed
+    /// correct behavior, not something this task changes. Same fixture as the sibling
+    /// test above: no umbrella is configured, so widening must be refused rather than
+    /// silently reinterpreted as some other scope.
+    #[tokio::test]
+    async fn an_explicit_all_scope_without_an_umbrella_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/mine.md"), "# mine\n").unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "mine", &root.join("docs/mine.md").to_string_lossy());
+        seed_artifact(&cat, "theirs", "/home/other/repo/docs/theirs.md");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let err = call(&ctx, json!({ "scope": "all" })).await.expect_err(
+            "scope=\"all\" without a configured umbrella must be refused, not silently widened",
+        );
+        assert!(
+            err.to_string().contains("umbrella"),
+            "refusal must name the umbrella requirement: {err}"
+        );
+    }
 
     /// An absolute, forward-slash-normalised root that does not exist, on any
     /// platform.
@@ -8972,7 +9074,9 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "anywhere", "/somewhere/entirely/else/a.md");
 
-        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[]).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[], &mut ds).unwrap();
         assert!(
             !v.iter()
                 .any(|x| x.check == "abs_path_outside_managed_roots"),
@@ -8993,7 +9097,9 @@ mod tests {
         #[cfg(not(windows))]
         let roots = vec![PathBuf::from("/home/dev/work/codescout")];
 
-        let (v, _) = scan_artifact_paths(&cat.conn, &roots, &[]).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &roots, &[], &mut ds).unwrap();
         assert!(
             v.iter().any(|x| x.check == "abs_path_must_be_absolute"),
             "the gating check must still fire"
@@ -9034,7 +9140,9 @@ mod tests {
 
         let roots = vec![active.clone()];
         let known = vec![sibling.clone()];
-        let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known, &mut ds).unwrap();
 
         let outside: Vec<&str> = violations
             .iter()
@@ -9083,7 +9191,9 @@ mod tests {
             &sibling.join("docs").join("b.md").to_string_lossy(),
         );
 
-        let (violations, scoped) = scan_artifact_paths(&cat.conn, &[active], &[]).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let (violations, scoped) = scan_artifact_paths(&cat.conn, &[active], &[], &mut ds).unwrap();
         assert_eq!(
             violations
                 .iter()
@@ -11099,7 +11209,9 @@ mod tests {
 
         // No managed roots: the outside-roots check is skipped entirely, so
         // this existing assertion set is unchanged by its addition.
-        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[]).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[], &mut ds).unwrap();
         let mut by_check: std::collections::BTreeMap<&str, usize> = Default::default();
         for x in &v {
             *by_check.entry(x.check.as_str()).or_insert(0) += 1;
@@ -12122,21 +12234,49 @@ mod tests {
             kept[0]
         );
 
+        // Ruling A (2026-09-09) additively folds `DoctorScope::scoped_out()` into this
+        // SAME map. That row loop in `scan_artifact_paths` now ALSO runs
+        // `abs_path_outside_managed_roots` per row with `scope.admit`, so two more
+        // rows join the sibling-root `frontmatter_id_mismatch` drop already asserted
+        // above: the sibling row is outside the active project's managed roots too
+        // (a second, independent check dropping the SAME row), and so is the
+        // worktree row — which is exactly the intended effect, not a regression: the
+        // `worktree_scoped_row` CHECK is deliberately exempt from scoping (asserted
+        // below), but `abs_path_outside_managed_roots` is a different check on the
+        // same row, and Project scope legitimately excludes a root this ctx's
+        // `main_root: None` does not know is related. Per-member, not just a total:
+        // assert the exact contribution of each root, not only their sum.
         let scoped = &out["catalog_health"]["row_checks_scoped_by_project"];
-        let total: u64 = scoped
+        let scoped_obj = scoped
             .as_object()
-            .expect("the drop must be announced, not silent")
-            .values()
-            .map(|n| n.as_u64().unwrap())
+            .expect("the drop must be announced, not silent");
+        let sibling_count: u64 = scoped_obj
+            .iter()
+            .filter(|(k, _)| k.contains("sibling-project"))
+            .map(|(_, v)| v.as_u64().unwrap())
             .sum();
-        assert_eq!(total, 1, "the dropped row must be COUNTED: {scoped:#?}");
-        assert!(
-            scoped
-                .as_object()
-                .unwrap()
-                .keys()
-                .any(|k| k.contains("sibling-project")),
-            "attributed to the project that owns it: {scoped:#?}"
+        assert_eq!(
+            sibling_count, 2,
+            "sibling-project contributes frontmatter_id_mismatch (1, pre-existing) \
+             AND abs_path_outside_managed_roots (1, new under Ruling A's fold-in), \
+             both keyed to the same root: {scoped:#?}"
+        );
+        let worktree_count: u64 = scoped_obj
+            .iter()
+            .filter(|(k, _)| k.contains(".worktrees"))
+            .map(|(_, v)| v.as_u64().unwrap())
+            .sum();
+        assert_eq!(
+            worktree_count, 1,
+            "the worktree row is outside the active project's managed roots for \
+             abs_path_outside_managed_roots purposes (this ctx has no main_root \
+             linking it) even though worktree_scoped_row itself stays unscoped: \
+             {scoped:#?}"
+        );
+        let total: u64 = scoped_obj.values().map(|n| n.as_u64().unwrap()).sum();
+        assert_eq!(
+            total, 3,
+            "sibling-project (2) + worktree (1); the dropped rows must be COUNTED: {scoped:#?}"
         );
 
         assert_eq!(
