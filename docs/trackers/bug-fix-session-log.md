@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 125
+entry_high_water_F: 126
 entry_high_water_W: 117
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 117
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-126 | 2026-09-09 | med | process/git | open | **An authorisation names a SET; `git push <remote> <branch>` sends a PREFIX.** Measured twice the same evening, same method, opposite outcomes: mine named 6 commits to the operator and sent 6 (**drift 0**); `5399543d` was asked at **11** and by the time they acted the range was **14** — the same command would have published three commits their operator never saw. They pushed `<sha>:experiments` instead | **My zero is the dangerous row, not theirs.** A clean result from an unsafe method is indistinguishable from a safe one — no warning, no diff, no count out of place — and re-deriving the range at push time would have *raised* my confidence, because a confirming re-derivation of a quantity that happens not to have moved looks identical to one that cannot. The method's safety is a property of the WINDOW, invisible from inside a successful push. Remedy is one word longer: **push the SHA, not the branch.** Composes with `CODESCOUT_PUSH_ACK` rather than replacing it — the ack authorises *who*, the refspec pins *what*. Not `W-116` restated: that is about ROUTING the question, this is about the LATENCY between the answer and the act, which parallel routing shortens and does not close. The guard's own text said this before either instance and I had read it | open |
 | F-125 | 2026-09-09 | med | process/verification | open | **Proved `doctor` ignores `scope` using the one comparison a WORKING param also satisfies.** I reported no-scope → `total = 170` and `scope="project"` → `169` as the evidence. A peer noted those are exactly what a *working* param defaulting to `project` produces — the comparison cannot separate "ignored" from "honoured and redundant", at any sample size. The discriminator is a scope that must **widen**: `scope="all"` → `169`, `by_check` identical, response buffer byte-identical, while the same run's `catalog_health` reports **636** rows scoped out, so a working `all` owed ~805. General form: **to show a parameter is ignored you need a reading in which its value MUST change the answer, and default-vs-absent is the single comparison that cannot supply one.** The *source* read — `doctor::call` reads only `fix`/`confirm`/`root`/`old_root`/`new_root`/`limit`/`offset` — was already done and strictly stronger; a confirming number felt like better evidence than an absence in the code. Violated the recon skill's own Phase 3 law while running that skill, after `R-125` and `F-78` |
 | F-124 | 2026-09-09 | med | process/attribution | open | **Seven misattributions and instrument failures in one evening, every one by a party actively writing about the class** — including a correction of a misattribution that carried a fresh one of the same class, sent to the party being corrected, ten minutes later. Two discriminators, neither mine. **Credit a SENTENCE to the socket it arrived on** (`ad379a7c`): *"this session participated"* is not *"this session said this"*, the existing attribute-by-sessionId rule is about which **identifier** to trust rather than which **claim** it answers, and the negative needs no registry because the socket is in the envelope. **A true adjacent fact lending credibility to an unchecked claim** (`59112612`): pid decay is real and documented, so my probe's swallowed `NameError` reading as *the sessions moved* was credible; the shared-`target/` hazard is real, so their unchecked mutant-binary claim was too. Neither was a reasoning error and both were one command from resolution | The remedy is one shape in every instance: **a second field that cannot lie the same way** — `error[E####]` vs a bare `error:`, a pid that cannot silently change while its session runs, an exit code beside a summariser, a test *path* that dates the compile that emitted it. Three of my own instruments failed this way: `awk -F'[ ;]'` printing `failed=0` beside `exit=101` because a `FAILED.` line shifts the fields; the `NameError` probe; and asserting a rebuild was mine inside the paragraph warning against exactly that. A courtesy caveat — *I cannot attribute this rebuild* — is what led a peer to withdraw a **remedy** they were about to publish, which was worse than the claim it replaced because it read as closed. **4 of 7 caught by the misattributed party, 3 by a third session's log, 0 by the author**: on a shared checkout every gate result is partly a measurement of everyone else's uncommitted work, in both directions, and nobody is told |
 | F-122 | 2026-09-08 | med | self-friction | open | **Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open.** Both READ-side, which is what makes them new rather than more of `IC-10` — every prior member is write-side, and both of that class's remedies (ship a channel; stop at "not mine") are no-ops when the channel was already open. The two fall on OPPOSITE rows of `IC-10`'s instrument table (uncommitted/`claimed_by`, committed/`Session-Id` trailer), so the gap is orthogonal to the instrument axis: having an instrument and consulting it are different events. Instance 2 is the first recorded failure of that table's committed row, which had stood since 2026-09-01 as a claim about *availability* rather than consultation. Candidate mechanism survives `SKF-22` because composing the message IS the trigger. Anchor such claims to a git object, never a clock — a `11:30` wrong in BOTH parties' accounts nearly inverted the finding |
@@ -12964,6 +12965,64 @@ Two things this is an instance of, both already in the corpus rather than new: t
 **Promote-when:** A second instance where "the abstraction exists" and "the abstraction is consumable at the call site" came apart. On its own this is one datapoint and belongs here, not in CLAUDE.md.
 
 **Status:** validated
+
+## F-126 — An authorisation names a SET and a branch push sends a PREFIX — my zero drift was luck, not method
+
+**Observed:** An authorisation names a **SET**; `git push <remote> <branch>` sends a
+**PREFIX**. The two agree only while nothing lands between the question and the act, and on a
+shared checkout that gap is exactly where new commits appear.
+
+Measured 2026-09-09, twice, same evening, same method, **opposite outcomes**:
+
+| | commits named to the operator | commits the push would send | drift |
+|---|---|---|---|
+| mine, ~03:00Z | 6 | 6 | **0** |
+| `5399543d`, ~04:4xZ | 11 | 14 | **3** |
+
+I asked my operator with all six commits and all four sids enumerated, then ran
+`git push origin experiments` — the prefix form. It happened to publish exactly the six I had
+named. `5399543d` was asked at 11, and by the time they acted `4103f31e` and two of
+`b80a27d4`'s had landed; the same command would have published three commits their operator
+never saw. They pushed `<sha>:experiments` instead — the decided set, by refspec.
+
+**The finding is that my zero is not evidence, and it is the more dangerous of the two rows.**
+A clean result from an unsafe method reads exactly like a safe method. Nothing in my run
+distinguished them: no warning, no diff, no count out of place. Had I re-derived the range at
+push time I would have found it unchanged and been *more* confident, because a confirming
+re-derivation of a quantity that happens not to have moved is indistinguishable from one that
+cannot. **The method's safety is a property of the WINDOW, not of the run**, and the window is
+invisible from inside a successful push.
+
+**Remedy, and it is one word longer than the unsafe form: push the SHA, not the branch.**
+
+```
+git push origin <sha-you-named>:experiments     # the decided set
+git push origin experiments                     # the prefix, whatever it now contains
+```
+
+This is the shape `CLAUDE.md` § *Observer Blindness* asks for: the correct path ends in a state
+where drift cannot occur, rather than in one where you must remember to re-check. It composes
+with the `CODESCOUT_PUSH_ACK` guard rather than replacing it — the ack authorises *who*, the
+refspec pins *what*.
+
+**Why this is not `W-116` restated.** That entry is about **routing** the question — ask the
+authors and the operator in parallel, because the authors' answers are context rather than a
+gate. This is about the **latency between the answer and the act**, which parallel routing
+shortens and does not close. Both were needed tonight and neither implies the other.
+
+**Valid:** invariant
+
+**Rests on:** the pre-push foreign-session guard's own text (*an authorisation names a SET; a
+branch push sends a PREFIX*), which stated this before either instance and which I had read
+and not acted on; `bug-fix-session-log:W-116` for the routing half.
+
+**Status:** open
+
+**Severity:** med — zero damage in both measured cases, because the drifting one was caught by
+the guard refusing and the non-drifting one got lucky. Filed at `med` rather than `low` because
+the failure publishes another operator's unreviewed work under a decision they did not make,
+and the successful case gives the reader no signal at all. Credit for the catch and the
+refspec is `5399543d`'s, independently reached by `b80a27d4` for a different reason.
 
 ## Template for new entries
 
