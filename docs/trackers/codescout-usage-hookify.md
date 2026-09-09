@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 10
+entry_high_water_H: 11
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -552,3 +552,58 @@ discriminate only because a fifth test proves the hook can speak.
 **Status:** shipped, warn stage. Promotion to deny is unwarranted until a false-positive class
 is observed — the bar this ledger already uses is zero warn-stage false positives across one
 month. Registration resolves at process launch, so it is committed, not live, until a restart.
+
+### H-11 — Name a zero whose selector could not have matched
+
+**Valid:** dated 2026-09-09
+
+Shipped: `codescout-companion/hooks/suspicious-zero-hint.mjs`, PostToolUse on `Bash`.
+`claude-plugins:07bceca`, patch-id `df3244db91fd154b9e45c6836129e87fa9a7622b`.
+`H-10`'s hook is `claude-plugins:813a28d`, patch-id `a7ae9efb9735afcc1c927acb496396d4892646c9`.
+**Both SHAs are local at the time of writing** — that repo is ahead of `origin/main` — so the
+patch-ids are the halves that resolve anywhere; re-derive with `git show <sha> | git patch-id
+--stable` if either is rebased.
+
+**The class.** `grep`, `awk` and `sed` match LINE BY LINE. A phrase that wraps across a newline
+cannot match however present the text is; a range expression fails the same way when an
+endpoint is not a line of its own. The zero is well-formed and reads as *not present* when it
+means *could not be expressed* — `IC-18`, whose author-facing half is recorded as unmechanised
+because an ad-hoc grep typed into a shell has no output surface on which to annotate its own
+scope. **A PostToolUse hook is that surface**, which is the contribution here; the class was
+already named.
+
+**Why it does not fire on every zero.** `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
+clause 2 — *"a warning on every zero is equivalent to no warning"* — and its Alternative 3
+pre-rejects a blanket every-zero rule because no mechanical check can decide which negatives are
+trustworthy. So this does not try. It fires only where the **selector itself** carries a
+line-structure assumption: a multi-word phrase, or a range. A single-token miss is silent, and
+that is an assertion, not an intention.
+
+**Why not `run_command`, and why the ADR is untouched.** The first design annotated zeros in
+codescout's `run_command`, citing the ADR's own *Revisit-when* trigger. Two things killed it.
+The trigger governs the ADR's population — codescout's `grep` and `symbols` — and both measured
+cases came from native `Bash`, so citing them would have forced evidence into the
+nearest-sounding class. And a `run_command` mechanism **would not have caught either case**, for
+the same reason. A shell result is not a codescout tool result, so the ADR's population is
+untouched and needs no amendment.
+
+**Measured, 2026-09-09, twice in one evening in two sessions** — a `grep` for a phrase that
+wrapped in the file, diagnosed *"wrong tree"* when the tree was right; and an `awk` range over an
+**index** file whose entries live in 22 per-class files, diagnosed *"IC-18 is a table row"* when
+that file has no entry sections at all. Neither was resolved by a better selector; both by
+opening the artifact, after a second party intervened. Both wrong diagnoses were plausible enough
+to **stop the search**, which is what makes this worth a mechanism rather than a resolution to
+read more carefully.
+
+**A test that was green and measuring nothing.** The third mutation — deleting the search-tool
+gate — initially killed no test. The gate's test used `ls -la /some/empty/dir`, which has no
+quoted argument, so the hook exited at the *pattern* gate and the tool gate was never reached.
+Rewritten to `echo 'a long phrase here'`, where every other predicate is satisfied and only
+*"echo is not a searcher"* can produce the silence; it then killed the mutation. Recorded because
+the suite was green throughout, and because it is the same shape as the defect the hook exists
+to catch.
+
+**Status:** shipped, warn stage. Registration resolves at process launch, so it is committed, not
+live, until a Claude Code restart — verified by disagreement rather than assumed: a live `Bash`
+call satisfying every predicate was silent, while the identical input piped straight to the hook
+emitted correctly. Sound code, absent registration.
