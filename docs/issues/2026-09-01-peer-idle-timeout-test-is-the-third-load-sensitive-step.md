@@ -1,12 +1,11 @@
 ---
 id: ee9d8d80ad5ecdc8
 kind: bug
-status: taken
+status: fixed
 title: peer idle-timeout test is the third load-sensitive step in a class fixed twice per-instance
 tags:
 - cluster/repro-env-diverges-from-gate-env
-claimed_by: ad379a7c-a0cf-4c61-bcdb-f0696fea8c30
-closed: ''
+closed: 2026-09-09
 last_observed: 2026-09-08
 opened: 2026-09-01
 owner: marius
@@ -809,6 +808,57 @@ classification rather than a diff.
   the same commit.
 
 ## Fix
+
+**Option 2 was taken and is complete.** Fixed at `f10eefe2` on `experiments`, patch-id
+`d1331208d10a9477fdc31f3969ea526375913078`. The SHA is positional and dies on the next rebase; the
+patch-id is a content hash of the diff and survives rebase and cherry-pick.
+
+**The count nobody had is 2.** The enumeration ran 2026-09-08 and its first result — *"10
+sites"* — was **wrong for 8 of the 10 and is retracted in § Option 2 below**, with the original
+text preserved beneath it. The selector was a grep for `sleep`; the claim was about a *shape*.
+Four hits are already bounded retry loops, three already block on a child's stdout write (a real
+happens-before edge, strictly better than the poll this file prescribes), and one is literally
+the 2026-07 fix. Two carry the shape.
+
+Per-site decisions, which is what option 2 asked for:
+
+| site | decision |
+|---|---|
+| `idle_background_task_evicts_after_ttl` | event-driven bounded poll; observed RED |
+| `drop_kills_child_process` | **neither** budget nor poll — the test is inert against both kill paths, so it was annotated rather than repaired, and filed as its own bug |
+
+So the class is smaller than a fourth budget-raise would have implied, and the answer differs
+per member — which is the argument option 2 was making, arrived at by measuring rather than by
+assuming three.
+
+### Deliberately NOT archived — read this before moving it
+
+`status: fixed` and still in `docs/issues/`, which the convention would normally archive.
+The reason is a number: **13 files cite this one by path** at tree `622c23cd`
+(`git grep -l '2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step' HEAD`),
+and three of them are source — `src/lsp/client.rs`, `src/lsp/manager.rs`,
+`src/peer/server.rs`.
+
+**There is no resolver fallback to lean on, and that was checked rather than assumed.** For
+an already-archived file, `docs/issues/archive/2026-09-05-process-alive-reports-a-nonexistent-process-as-alive.md`,
+citations of its **pre-archive** path number **0** and citations of its archive path number
+3 — so this repo's practice is that every inbound citation is rewritten at archive time.
+Moving this file without that sweep leaves 13 live citations pointing at nothing, which
+`audit_doc_refs` scores `high` and reds CI: ordinary backticks are not an escape.
+
+So archiving is a 13-file commit, two of whose targets (`docs/trackers/bug-fix-session-log.md`,
+`docs/trackers/reconnaissance-patterns.md`) were being edited by other sessions when this was
+written. That is a sweep to schedule, not to slip into a close-out.
+
+**The generalisable part, since nothing surfaces it:** the archive flow's cost scales with
+inbound citation count, and `doc(action="move")` reports what it grafted in the *catalog*
+(events, links, observations) while saying nothing about prose citations — even though
+`librarian(action="link_scan")` already derives exactly those edges. The number that decides
+whether an archive is one commit or thirteen is computable before the move and is not shown
+at it. Run the `git grep -l` above before archiving anything with a long life.
+
+## Superseded — the two options as originally written
+
 Two options, and the second is the one worth taking.
 
 1. **Raise this test's budget**, as 2026-07-03 and 2026-07-05 each did for their step. Cheap,
@@ -824,7 +874,27 @@ because the contention is CPU starvation from the *other* ~4800 tests, which ser
 among themselves does not relieve.
 
 ## Tests added
-N/A — not started. Note the prior file recorded *"Tests added: None — the regression signal is
+`idle_background_task_evicts_after_ttl` (`src/lsp/manager.rs:2033`) — converted from a fixed
+sleep to a bounded poll with early exit, and **given an observed RED**: breaking `evict_idle`'s
+filter (`> ttl_for_language(...)` → `* 1000`) reds it in 10.58s, which also proves the poll
+spins its whole budget before asserting. Hazard checked at the source first — `active_languages()`
+reads `clients` and never touches `last_used`, so polling cannot refresh the idle timer it waits
+on.
+
+`drop_kills_child_process` (`src/lsp/client.rs`) — **no test added, deliberately**, and an INERT
+annotation added instead so nobody credits it with coverage. No mutation reds it; three redundant
+mechanisms reap the child and removing any two leaves it green. Filed separately as
+`docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
+(`cluster/assertion-that-cannot-fail`). No assertion fixes that — the child has to be one that
+survives SIGPIPE.
+
+The prior file's *"the regression signal is the existing suite staying green"* is still the thing
+a low-rate flake defeats; what changed is that one of the two sites no longer asserts about the
+scheduler at all.
+
+## Superseded note
+
+This section previously read *"N/A — not started."* Note the prior file recorded *"Tests added: None — the regression signal is
 the existing suite staying green"*, and that signal is precisely what a low-rate flake defeats.
 
 ## Workarounds
@@ -832,9 +902,8 @@ the existing suite staying green"*, and that signal is precisely what a low-rate
 green parallel run as evidence the class is gone.
 
 ## Resume
-Start with option 2's enumeration — the count is the thing nobody has. If it is three sites,
-fix all three now; if it is fifteen, that is a different conversation and worth knowing before
-raising a fourth budget.
+N/A — done. The enumeration ran, and the count was **2**, not three and not fifteen. Both
+members are addressed; see § Fix.
 
 ## References
 - `docs/issues/archive/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md` (fixed,
