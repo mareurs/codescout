@@ -1,6 +1,6 @@
 //! Central orchestrator: manages projects, tool registry, and shared state.
 
-mod build_check;
+pub(crate) mod build_check;
 mod write_guard;
 #[allow(unused_imports)]
 pub(crate) use write_guard::{
@@ -3458,6 +3458,70 @@ mod tests {
         // Set must be empty after drain
         assert!(agent.drain_dirty_files().await.is_empty());
     }
+
+    /// THE WIRING, not the rules. Every other `build_check` test drives a pure function
+    /// directly; this is the only assertion that the trigger is REACHED. Six mutations
+    /// killed six tests in `agent::build_check` and none of them would have noticed the
+    /// call below going missing — a module can be correct, tested, and unreachable, which
+    /// is exactly how `ListFunctions`/`ListDocs` carried a passing suite for months while
+    /// no agent could reach a line of it (CLAUDE.md § Testing Discipline).
+    ///
+    /// Delete `self.note_source_write_for(...)` from `mark_file_dirty_for` and this reds.
+    /// Nothing else in the suite does.
+    ///
+    /// Asserts on `edits` rather than on the resulting state deliberately: `edits` is
+    /// recorded before the `enabled` gate, so this test reads nothing from the
+    /// environment. Branching on `CODESCOUT_NO_BUILD_CHECK` would make it a skip-guard,
+    /// and a skip-guard is monotone under the deletion it exists to catch.
+    #[tokio::test]
+    async fn marking_a_rust_file_dirty_reaches_the_build_check() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let f = dir.path().join("src/written_by_me.rs");
+        agent.mark_file_dirty_for(None, f.clone()).await;
+
+        let edits = agent
+            .build_check
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .edits
+            .clone();
+        assert!(
+            edits.iter().any(|p| p.ends_with("src/written_by_me.rs")),
+            "mark_file_dirty_for must reach the build check — the trigger hangs off this \
+             one method precisely so the nine write-tool call sites cannot each forget it. \
+             recorded: {edits:?}"
+        );
+    }
+
+    /// The extension filter is reached THROUGH the wiring, not merely present in the
+    /// module. Without this, `note_write`'s `.rs` check could be inverted and only a
+    /// unit test would notice — while the shipped path recorded every markdown edit and
+    /// queued a `cargo check` for each.
+    #[tokio::test]
+    async fn marking_a_non_rust_file_dirty_records_no_build_edit() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        agent
+            .mark_file_dirty_for(None, dir.path().join("docs/notes.md"))
+            .await;
+
+        let edits = agent
+            .build_check
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .edits
+            .clone();
+        assert!(
+            edits.is_empty(),
+            "a non-Rust write must not arm a cargo check: {edits:?}"
+        );
+    }
+
     #[tokio::test]
     async fn session_write_roots_empty_by_default() {
         let dir = tempdir().unwrap();

@@ -6287,6 +6287,77 @@ mod tests {
         );
     }
 
+    /// THE OTHER HALF OF THE WIRING. `agent::build_check`'s own tests prove
+    /// `take_notice` renders once and stays silent otherwise; not one of them proves the
+    /// notice ever reaches a response. This is the only assertion that `post_process`
+    /// attaches it — delete the `take_build_notice` block and this reds alone.
+    ///
+    /// The state is seeded directly rather than by driving a real `cargo check`: the
+    /// production path under test is the ATTACHMENT, and making the test spawn cargo
+    /// would buy nothing here while making it slow and environment-dependent. What the
+    /// seeding must not do is re-implement the rendering, so it sets the same
+    /// `Done { my_break }` shape the real runner writes and lets `render_notice` produce
+    /// the text.
+    #[tokio::test]
+    async fn post_process_delivers_a_pending_build_notice_exactly_once() {
+        let (dir, server) = make_server().await;
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        {
+            let mut st = server
+                .agent
+                .build_check
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            st.state = crate::agent::build_check::BuildCheckState::Done {
+                my_break: Some("  src/mine.rs:12  mismatched types".to_string()),
+                delivered: false,
+            };
+        }
+
+        let joined = |r: CallToolResult| -> String {
+            r.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let first = joined(
+            server
+                .post_process(
+                    CallToolResult::success(vec![Content::text("body")]),
+                    "read_file",
+                    Some(&root),
+                )
+                .await,
+        );
+        assert!(
+            first.contains("src/mine.rs:12"),
+            "post_process must deliver a pending build notice; got: {first}"
+        );
+        assert!(
+            first.contains("not a request"),
+            "the notice must arrive whole, including the clause that keeps it \
+             informational; got: {first}"
+        );
+
+        let second = joined(
+            server
+                .post_process(
+                    CallToolResult::success(vec![Content::text("body")]),
+                    "read_file",
+                    Some(&root),
+                )
+                .await,
+        );
+        assert!(
+            !second.contains("src/mine.rs:12"),
+            "a delivered notice must not repeat on the next response — an advisory that \
+             reprints on every call becomes noise and then gets switched off; got: {second}"
+        );
+    }
+
     #[tokio::test]
     async fn call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace() {
         // FINDING (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,

@@ -453,12 +453,19 @@ pub(crate) fn on_source_write(
     path: &Path,
 ) {
     let env = BuildCheckEnv::from_env();
-    if !env.enabled {
-        return;
-    }
     let edits = {
         let Ok(mut st) = slot.lock() else { return };
+        // Recorded BEFORE the `enabled` gate, deliberately. `edits` answers "what did this
+        // session write", which is true whether or not we go on to check it — and keeping
+        // the record unconditional is what lets the wiring test assert on it without
+        // reading the environment. A test that branched on `enabled` would carry a
+        // skip-guard, and a skip-guard is monotone under the very deletion it exists to
+        // catch (measured on this repo 2026-09-09, `59112612`).
         if !st.note_write(path) {
+            return;
+        }
+        if !env.enabled {
+            st.state = BuildCheckState::Skipped(SkipReason::Disabled);
             return;
         }
         if !st.may_start(Instant::now(), env.debounce) {
