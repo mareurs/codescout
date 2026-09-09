@@ -562,15 +562,18 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // 58 labelled keys across the 17 actions as of 2026-09-02 (Task 6 folded in
-        // `gather`/`list_stale`). The floor leaves room for the schema to shrink
-        // without a false alarm while still catching a break in the `<action>:` label
-        // convention.
+        // Floor is **action/key pairs**, not keys, and measured not chosen: 80 pairs over
+        // the 17 actions, read 2026-09-09 from `sweep`'s own `checked`. The previous 30 was
+        // half of a 58-KEY reading, and both halves of that were wrong for the same reason —
+        // `sweep` only ever probed a shared key's first action, so 58 undercounted the pairs
+        // it should have covered and 30 could not have detected the shortfall. Set at the
+        // measurement: the gap between floor and count is how many labels can go missing
+        // silently, so a deliberate schema shrink moves this number.
         assert_all_honored(
             "doc",
             &Artifact.input_schema(),
             &probe_spec(),
-            30,
+            80,
             |args| async move { Artifact.call(&mk_ctx(), args).await },
         )
         .await;
