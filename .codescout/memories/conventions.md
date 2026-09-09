@@ -4,7 +4,10 @@
 
 Four commands, and **the order is load-bearing** — not a checklist you may reorder:
 
-1. `cargo fmt`
+1. `./scripts/fmt-mine.sh` — NOT bare `cargo fmt`, which rewrites every peer's
+   uncommitted Rust on a shared checkout. Formats only what this session wrote and
+   refuses the rest, naming the owner. Outside a Claude session it exits 2 and points
+   you at `cargo fmt`, which is right for a solo checkout.
 2. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`
 3. `cargo test --workspace --no-default-features` — the **LEAN** lane, runs **THIRD**
 4. `cargo test --workspace` — the default lane, runs **LAST**

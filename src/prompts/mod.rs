@@ -2335,6 +2335,14 @@ mod tests {
     /// CLAUDE.md § Development Commands and
     /// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
     ///
+    /// **Step 1 changed on 2026-09-09** from `cargo fmt` to `./scripts/fmt-mine.sh`, and
+    /// this test moved with the sentence rather than being deleted, per that section's own
+    /// instruction. The reason for the substitution is in the section; the reason it is
+    /// pinned here is unchanged — the gate is the contract every session pays on every
+    /// task. If the first command reverts to bare `cargo fmt`, this test must red, because
+    /// that reversion silently restores a step that rewrites other sessions' uncommitted
+    /// Rust (`docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
+    ///
     /// Two traps this test is shaped around, both measured against CLAUDE.md on
     /// 2026-08-31 rather than reasoned about:
     ///
@@ -2351,10 +2359,11 @@ mod tests {
     ///    arbitrary. So this scopes to the directive sentence FIRST, then asserts
     ///    order within that slice.
     ///
-    /// Mutations it must die on, both demonstrated rather than assumed:
-    /// swapping the last two commands (ordering assertion), and deleting the
-    /// directive line outright (the `expect` on START) — two distinct failures,
-    /// because "the gate line is missing" must never read as "the order is fine".
+    /// Mutations it must die on, all demonstrated rather than assumed:
+    /// swapping the last two commands (ordering assertion), deleting the
+    /// directive line outright (the `expect` on START), and reverting step 1 to
+    /// `cargo fmt` (the GATE[0] needle) — three distinct failures, because "the gate
+    /// line is missing" must never read as "the order is fine".
     #[test]
     fn claude_md_gate_lists_its_four_commands_in_the_load_bearing_order() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
@@ -2362,14 +2371,16 @@ mod tests {
             std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
 
         // Scope first — see trap 2 above.
-        const START: &str = "**Run `cargo fmt`";
+        const START: &str = "**Run `./scripts/fmt-mine.sh`";
         const END: &str = "before completing any task.**";
 
         let start = claude_md.find(START).unwrap_or_else(|| {
             panic!(
                 "CLAUDE.md has no gate directive: expected a run beginning {START:?}. \
                  The gate is the contract every session pays on every task, so if it \
-                 moved, move this test with it — do not delete it."
+                 moved, move this test with it — do not delete it. If step 1 was reverted \
+                 to bare `cargo fmt`, that is the regression this needle exists to catch: \
+                 it rewrites every peer's uncommitted Rust."
             )
         });
         let rest = &claude_md[start..];
@@ -2383,7 +2394,7 @@ mod tests {
         // a presence one. A presence check would survive the exact swap this exists
         // to catch.
         const GATE: [&str; 4] = [
-            "`cargo fmt`",
+            "`./scripts/fmt-mine.sh`",
             "`cargo clippy --workspace --all-targets --features local-embed -- -D warnings`",
             "`cargo test --workspace --no-default-features`",
             "`cargo test --workspace`",
@@ -2439,7 +2450,10 @@ mod tests {
             .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
 
         // Same scoping discipline as the sibling test: find the gate section first.
-        const START: &str = "**Run `cargo fmt`";
+        // Anchor updated 2026-09-09 with the directive's step 1 (`cargo fmt` ->
+        // `./scripts/fmt-mine.sh`); this is the "move this test with it" its own panic
+        // message asks for, and there are TWO tests anchored on that sentence, not one.
+        const START: &str = "**Run `./scripts/fmt-mine.sh`";
         const END: &str = "The gate sentence above is pinned byte-for-byte by";
 
         let start = claude_md.find(START).unwrap_or_else(|| {

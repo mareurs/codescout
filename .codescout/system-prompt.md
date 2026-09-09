@@ -35,7 +35,7 @@
 
 ## Project Rules
 
-- The gate is FOUR commands and the ORDER is load-bearing: `cargo fmt` → `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` → `cargo test --workspace --no-default-features` (lean, THIRD) → `cargo test --workspace` (default, LAST, chained with `;` not `&&`). Detail: memory `development-commands`
+- The gate is FOUR commands and the ORDER is load-bearing: `./scripts/fmt-mine.sh` → `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` → `cargo test --workspace --no-default-features` (lean, THIRD) → `cargo test --workspace` (default, LAST, chained with `;` not `&&`). Detail: memory `development-commands`
 - `cargo build` (dev) does not refresh the live MCP binary — only `cargo build --release`/`cargo rb`, then `/mcp`
 - Write tools return `json!("ok")` only — never echo content back
 - `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
