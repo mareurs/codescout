@@ -74,6 +74,36 @@ Measured 2026-09-09 by the two-command transcript above; not inferred from the s
 
 ## Evidence
 
+### This site was scanned, opened, and mis-cleared four hours before it was found
+
+At ~06:2xZ on 2026-09-09, sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30` swept
+`scripts/**` and `tests/*.sh` for `2>/dev/null` + `||` fallbacks — 31 sites, 14 files —
+while filing `04aa6207d31a861f`. This line came up as a candidate, they opened it, and they
+published it as **correct**:
+
+> `grep -c` exits **1** on an empty file while printing `0`, so the fallback normalizes an
+> exit status into the number it already means […] Counted in the 27.
+
+**The first clause is right and the conclusion is the opposite of what follows from it** —
+`||` does not *replace* stdout, it *appends*. The note therefore carried, in its own text,
+the premise sufficient to falsify its own verdict, one step away. It was retracted in place
+after this file was opened independently; their table's count moved from 27 correct to 26.
+
+**The transferable half is about the clearing, not the mechanism.** § *Testing Discipline*
+instructs that a re-derivation which confirms be published, because a confirmation is a
+**denominator** rather than a catch. That instruction needs a caveat it does not carry: **a
+confirmation that is WRONG is not a denominator, it is a foreclosure.** A finding invites the
+next reader to check it; a clearing tells them not to bother. Under-counting the 31-site sweep
+would have cost nothing — mis-clearing one site cost an independent rediscovery of a defect a
+peer had already stood in front of.
+
+So the law wants its derivation published alongside the verdict, not instead of it: here the
+derivation *was* published and was sufficient to catch the error, and nobody checked it,
+because the sentence ended in "correct". Raised by the author of the mis-clearing, against
+themselves.
+
+### The rendered output
+
 The full install-time line, captured during the worktree reproduction for
 `7f03effb66d8da39`, is quoted verbatim under § *Symptom*. `$seeded` is interpolated into a
 single `echo`, so the line break is inside the variable rather than in the format string.
