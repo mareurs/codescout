@@ -1,17 +1,16 @@
 ---
-id: '0ca13ad23c9c4bc3'
+id: 1783b7ae8912ca61
 kind: bug
-status: open
+status: fixed
 title: ResilientStdin's only test asserts about a copy of ResilientStdin, so the shipped type has zero coverage
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
 topic: test coverage that reads as coverage
-closed: ''
+closed: 2026-09-09
 opened: 2026-09-08
 severity: medium
-unverified: The mutation that would OBSERVE the blindness was deliberately not run - src/server.rs is a shared checkout and an armed mutation is the hazard docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md records. The claim rests on reachability (the test body never names ResilientStdin), which entails the blindness but does not observe it.
 ---
 
 # BUG: `ResilientStdin`'s only test asserts about a copy of `ResilientStdin`
@@ -139,28 +138,77 @@ author named the limitation honestly, and the code then shipped as coverage.
 
 ## Fix
 
-Not fixed. The obstacle the doc comment names is removable in one line:
+Fixed on `experiments` at **`fe507715`**, patch-id
+**`0565b468887e503a52e2af7f3854ca9f99a2fd28`**. (Both recorded now: the SHA is
+positional and dies when `experiments` is rebased; the patch-id is a content hash
+of the diff and survives rebase and cherry-pick. Nothing is owed later.)
+
+`ResilientStdin` is now generic over its reader with the production type as the
+default, so the obstacle the old doc comment named — *"hard-coded to
+`tokio::io::Stdin`"* — is gone and the production call site is unchanged:
 
 ```rust
-struct ResilientStdin<R = tokio::io::Stdin> {
-    inner: R,
-    backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
-}
+struct ResilientStdin<R = tokio::io::Stdin> { inner: R, backoff: … }
+impl<R> ResilientStdin<R> { fn new(inner: R) -> Self { … } }
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for ResilientStdin<R> { … }
 ```
 
-The production call site (`src/server.rs:2034`) keeps working via the default
-type parameter. The test then wraps the **real** type around the existing
-`WouldBlockThenData`, the function-local `ResilientReader` is deleted, and the
-mock moves inside a `#[cfg(test)]` block — which also retires the
-`#[allow(dead_code)]` and the ungated tail.
+The test now wraps the **real** type around the existing `WouldBlockThenData`
+mock; the function-local `ResilientReader<R>` mirror is deleted. Both secondary
+defects go with it: the mock moved inside a `#[cfg(test)] mod
+resilient_stdin_tests`, which retires the `#[allow(dead_code)]` and the ungated
+tail block.
 
+**That module is gated `#[cfg(test)]` alone, deliberately NOT paired with
+`#[cfg(feature = "librarian")]`** the way `guide_hint_tests` above it is.
+`ResilientStdin` is not feature-gated, so copying the neighbouring gate would
+have dropped this test from the lean lane — the lane where the code under test
+still ships. The old test ran in both lanes by accident of being ungated; this
+one does it on purpose.
+
+**Two tooling notes, because both cost a step.** `edit_code` refused the impl
+header with *"would have dropped sibling symbols: ResilientStdin/new"* and
+pointed at `edit_file`; `edit_file` refused the same edit under IL-2 and pointed
+back at `edit_code`. The two tools deadlock on a generic-parameter change to an
+impl block. And the restore check after the mutation must be `diff` against the
+pre-mutation backup, never `git diff` — `git diff` compares to HEAD, so with an
+uncommitted fix in the same file it shows a large diff whether or not the
+mutation is gone.
 ## Tests added
 
-None yet. The regression test is the fix: `resilient_stdin_absorbs_would_block`
-rewritten to poll `ResilientStdin<WouldBlockThenData>`. Its acceptance criterion
-is an **observed red** — deleting the backoff arm from `src/server.rs:1858-1885`
-must fail it — which the current test does not satisfy.
+`server::resilient_stdin_tests::resilient_stdin_absorbs_would_block`
+(`src/server.rs:10564`) — rewritten, not added. Same name, same mock, different
+subject: it now polls `ResilientStdin` (`src/server.rs:1832`) instead of a copy
+declared inside itself.
 
+**Acceptance criterion met and OBSERVED**, which is the only thing separating
+this from the version it replaced. Deleting the `WouldBlock` arm from
+`ResilientStdin::poll_read`:
+
+```
+exit=101
+test result: FAILED. 0 passed; 1 failed; 0 ignored
+panicked at src/server.rs:10561:45:
+  should not error: Custom { kind: WouldBlock, error: "EAGAIN" }
+```
+
+The same deletion against the old test **passed**. Measured 2026-09-09 03:08–03:09:48Z.
+
+The mutation was armed on a shared checkout and announced to all three live
+sessions beforehand, per
+`docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`.
+Not ceremony: one peer was mid `cargo test --workspace` when the warning landed
+and would otherwise have hit an unexplained `FAILED` in a file they had not
+touched, while about to commit. Both halves belong in the record — the policy
+worked, and it worked because the arming session remembered, which is exactly
+what `skill-frictions:SKF-22` says a policy cannot be relied on to do.
+
+Gate green and **uncontaminated** — `ad379a7c` committed `src/lsp/client.rs`
+first, leaving `src/server.rs` the only modified Rust in the tree, so the result
+is attributable. `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. Per-lane with a control:
+this test 1/1, `prompts::` 101/101 (the counting method works), `librarian::`
+0/1760 (the lean lane really is vacuous for librarian, so the 1 is a measurement
+rather than a broken grep).
 ## Workarounds
 
 None needed; nothing is broken for users. For a reviewer touching
@@ -170,17 +218,7 @@ lands.
 
 ## Resume
 
-Make `ResilientStdin` generic over `R: AsyncRead + Unpin` with
-`R = tokio::io::Stdin` as the default (`src/server.rs:1832`), point the test at
-the real type, and move `WouldBlockThenData` inside a `#[cfg(test)]` block.
-
-**Before claiming it fixed, run the mutation that this file could not:** delete
-the `WouldBlock` arm from `ResilientStdin::poll_read` (`src/server.rs:1858-1885`)
-and confirm `cargo test --workspace resilient_stdin_absorbs_would_block` goes
-RED. Restore under a `trap`, and check `git diff` is empty before doing anything
-else — `src/server.rs` is on a shared checkout and several sessions build
-against the same `target/`.
-
+N/A — fixed, gate green, acceptance red observed.
 ## References
 
 - `docs/issues/archive/2026-04-22-resilient-stdin-spin-flood.md` — the original

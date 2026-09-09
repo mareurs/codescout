@@ -1836,7 +1836,7 @@ struct ResilientStdin<R = tokio::io::Stdin> {
     /// asserted about the copy — coverage of this type was zero while reading
     /// as coverage. The default type parameter keeps every production call
     /// site (`ResilientStdin::new(tokio::io::stdin())`) unchanged.
-    /// `docs/issues/2026-09-08-resilient-stdin-is-tested-only-through-a-copy-of-itself.md`
+    /// `docs/issues/archive/2026-09-08-resilient-stdin-is-tested-only-through-a-copy-of-itself.md`
     inner: R,
     /// Short sleep armed on `WouldBlock` to prevent CPU spinning.
     backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
