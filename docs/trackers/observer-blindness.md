@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 22
+entry_high_water_OB: 23
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-23 | 2026-09-09 | **a notification that changes the recipient's behaviour cannot also measure it** — the remedy for a blindness is an intervention on the very population that would have observed it. Announcing does not CREATE observers; it informs whoever happens to be looking, and the response it prescribes (do not investigate; stand down) is what removes them. So the better it works, the less it can observe. Not a signal routed to the wrong party (`OB-19`) and not an armer who gets no signal (`OB-2`): the routing is perfect, the recipient is exactly right, they act correctly, and the acting is the damage | the **announcing session**, structurally — what comes back is compliance and silence, the two outcomes it wanted, indistinguishable from coverage; the cost is an absence produced by its own success. **And the complying peer, symmetrically**, who cannot see that standing down destroyed evidence while holding the belief that standing down is correct — the belief the announcement supplied | wrong instrument, unusually cleanly: the announcement was correct, the stand-down was correct, the all-clear was correct. The missing evidence was produced by three parties each doing the right thing, so no additional care by any of them reaches it | none yet — two cheap candidates. **Ask, do not broadcast:** *"is anyone building?"* is a query that leaves the population intact and returns a count; *"here is what you will see"* is an intervention. Only the query can report *"this window had no witness"*. And **prefer a record the acting party writes itself, unconditionally, at the moment of the act** — it depends on no peer doing anything, so compliance cannot dismiss it |
 | OB-20 | 2026-09-06 | **Authorship is recoverable by asking; AUTHORISATION is not recoverable at all** — it lives in a conversation between a session and its operator that no peer can see, query or infer, and a commit deliberately withheld pending an operator's say-so is BYTE-IDENTICAL to one merely not-yet-pushed. On a shared branch any peer's push publishes it. **The state that does not exist:** "commit but hold the push" reads like a withholding mechanism and is not one — the unit of publication is the BRANCH, the unit of decision is the SESSION, so there are only two real states (uncommitted, which risks peer sweep and the stash window; or committed, i.e. published on anyone's next push) | the **pusher**, structurally — `git log --stat` answers *what am I sending* and *who wrote it*, and there is no field anywhere in git that answers *may this be published*. The fact is not in the substrate, so no amount of reading it produces the answer | wrong instrument, demonstrably: `codescout-7f` read `git log origin/experiments..HEAD --stat` BEFORE pushing rather than after — more than any stated rule asks — and it could not have caught this. Correct attribution would also have changed nothing, since the authorisation is not in the repository | one candidate, `codescout-7f`'s, and it holds WITHOUT coordination: **a session that cannot publish must not COMMIT to a shared branch.** Note the reflex alternative is unavailable — "use a scratch branch" is wrong on a shared CHECKOUT, where `git checkout -b` moves the working tree for every session. Do not repair a published withheld commit either: report it, never revert |
 | OB-19 | 2026-09-06 | **a mechanism emits a clear, timestamped, real-time signal and routes it to the one party for whom it is uninteresting, while the party it damages receives nothing** — not "nobody can see it" (`OB-6`, `OB-15`) and not "the author cannot see it" (`OB-1`, `OB-12`): the observation is perfect, immediate, correctly formatted, and in the wrong terminal. `pre-commit` prints `Stashing unstaged files` / `Restored changes` in the COMMITTER's terminal while reverting a PEER's in-flight work to HEAD for the hook's duration | the session whose work is stashed — it happens in another process, leaves the file byte-identical afterwards, and by the time that session could look, the state is back | wrong instrument on both sides: the affected party cannot check for a state that no longer exists, and the committer would have to already know it matters to someone, which is knowledge about another session's activity rather than their own | none — today's mitigation is a committer who understands the lines choosing to say so, i.e. politeness. Two uncosted directions: stop stashing (several hooks already read the index via `git show :<path>`), or make the stash line NAME the files it took, which is cheap because the signal already exists |
 | OB-18 | 2026-08-31 | a comment in repo A asserting a fact about repo B goes stale silently — and manufactures a plausible design (inverse of OB-4: a **liveness** marker read as **event history**) | anyone designing from the comment's own repo | wrong instrument | **none yet** — worklist |
@@ -2366,6 +2367,36 @@ a pathspec commit, and learned they existed only when they reported it. The repo
 during that evening named *"4 sessions"* repeatedly and consistently, and the consistency is
 what made it feel established. **Reported by the omitted party**, which is the only channel this
 class leaves open.
+
+## OB-23 — a notification that changes the recipient's behaviour cannot also measure it
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Observer Blindness*, position 3 — *the check that runs when nobody is worried*. This class is that position's limit case: the check here is a **message**, and a message that reaches a person changes what that person does.
+
+**Class:** the remedy for a blindness is an **intervention on the very population that would have observed it**. Announcing does not *create* observers — it informs whoever happens to be looking — and the prescribed response to the announcement (do not investigate; stand down) is what removes them. So the better the announcement works, the less it can observe. Not a message routed to the wrong party (`OB-19`) and not an armer who gets no signal (`OB-2`): the routing is perfect, the recipient is exactly right, they act correctly, and the acting is the damage.
+
+**Blind party:** the **announcing session**, structurally. What it receives back is compliance and silence, which are the two outcomes it wanted and which are indistinguishable from coverage. It cannot see the cost because the cost is an absence produced by its own success. **And the complying peer, symmetrically** — they cannot see that standing down destroyed evidence *while holding the belief that standing down is the correct response*, which is the belief the announcement supplied.
+
+**Who can see it:** a third party holding neither the authorship nor the compliance. Here it was resolvable only after the framing *"the announcement's value is that it creates observers whose logs survive when the artifact does not"* had been retired by someone who held neither role — and the complying session could then see its own compliance, which it could not do while the framing stood.
+
+**Plausible-answer property:** **silence.** *"No peer reported a red"* has two causes — nobody hit one, or nobody looked — and they produce identical observations. Compliance makes the second strictly more likely exactly when the announcement was most effective, so the failure mode strengthens with the remedy.
+
+**Vigilance:** wrong instrument, and unusually cleanly so. Every party was careful and every act was correct: the announcement was correct, the stand-down was correct, the all-clear was correct. The missing evidence was produced by all three doing the right thing, so no amount of additional care by any of them reaches it.
+
+**Mechanism status:** none yet. Two candidates, both cheap:
+
+- **Ask, do not broadcast.** *"Is anyone building right now?"* is a **query** — it leaves the population intact and returns a count. *"Here is what you will see"* is an **intervention** that reads as a request to stand down. Only the first can report *"this window had no witness"*, which is the fact an unwitnessed all-clear currently hides.
+- **Prefer a record the acting party writes itself, unconditionally, at the moment of the act.** Such a record depends on no peer doing or not doing anything, so compliance cannot dismiss it. This is the shape adopted for the pre-push guard's `push-published.log` — written by the guard at push time, for the push it is guarding anyway.
+
+**Instances:**
+
+- The 2026-09-09 04:16Z mutation window (`5399543d`). Announced to three peers; `c9ab2c8d` held off building **because** of the announcement; `59112612` was in plan mode; the window may have had **zero** witnesses. Its one anomaly — a real E-coded compile error present in a batched run and absent in isolation from the same one-character patch — is precisely what a concurrent build log would have resolved, and it remains unexplained. The all-clear was published with that stated rather than left to imply coverage.
+- The 2026-09-09 03:22Z window, same session, which **was** well covered — by luck, two peers happening to be mid-run — and was being cited as evidence that the announcement produced the coverage. It produced the *labelling* of a red someone was going to see anyway.
+
+**Status:** open — 2 instances, 3 sessions, 2026-09-09.
+
+**Attribution, split because the halves were earned separately and flattening it would lose the only thing the class teaches.** The framing *"announcements create observers"* was `c9ab2c8d`'s, and they acted on it. `59112612` retired it (*announcing does not create observers, and "no peer reported a red" has two indistinguishable causes*) and later supplied the general form above. `5399543d`'s window made the cost concrete; they did not find it. `c9ab2c8d` then saw that **their own compliance** had removed the witness — which they could not see while holding the framing that produced it — and asked that it not be filed as any one party's. That request is the mechanism demonstrating itself: **the observer who can see it is never the one holding it.**
 
 ## Template for new entries
 
