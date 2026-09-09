@@ -416,22 +416,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (artifact_path_violations, mut outside_scoped_by_project) =
         scan_artifact_paths(&cat.conn, &roots, &known_elsewhere, &mut doctor_scope)?;
     all_violations.extend(artifact_path_violations);
-    // Ruling 17, Critical 1 (2026-09-09 review): rows `DoctorScope::admit` refused
-    // for `abs_path_outside_managed_roots` never became `Violation`s and are not in
-    // `known_elsewhere`'s `scoped` map either — without this fold they vanished from
-    // BOTH `outside_by_project` (the global census, built below) and
-    // `outside_roots_scoped_by_project` (its announced sibling), which is the exact
-    // false-negative Ruling 17 forbids: the metric shrinking when the worklist did.
-    // Folded here, additively, into the SAME map `known_elsewhere`'s rows already
-    // populate — one merge point feeds both downstream destinations rather than two.
-    if let Some(scope_refused) = doctor_scope
-        .scoped_out()
-        .get("abs_path_outside_managed_roots")
-    {
-        for (group, n) in scope_refused {
-            *outside_scoped_by_project.entry(group.clone()).or_insert(0) += n;
-        }
-    }
+    // `doctor_scope`'s scoped-out rows are folded in LATER, after every scan_* call in
+    // this function has had the chance to call `admit()` — see the fold site right
+    // after the `SCOPED_ROW_CHECKS` retain() block below. (2026-09-09 review, round 2:
+    // an earlier revision folded here, immediately after this one call site, which was
+    // an ordering hazard for Tasks 3-5's ~13 further `admit()` call sites among the
+    // scans below — any one introduced between this line and the old fold site would
+    // have tallied into `scoped_out` but reached no published map.)
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
     // The CONTENT half of the file/catalog pair, and the direction that had no instrument
@@ -637,13 +628,37 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             false
         });
     }
-    // `doctor_scope`'s scoped-out rows are NOT folded in here (2026-09-09 review,
-    // Critical 1). Its only populated check today, `abs_path_outside_managed_roots`,
-    // is folded into `outside_scoped_by_project` immediately after `scan_artifact_paths`
-    // runs instead — that check's own destination pair, not this one's. A future
-    // `admit()` call site for one of the seven `SCOPED_ROW_CHECKS` names would fold its
-    // own check's sub-map (`doctor_scope.scoped_out().get(check)`) in here; none exists
-    // yet, so there is nothing to fold.
+    // Ruling 17, Critical 1 (2026-09-09 review, round 2 — PROMOTED this round to fix
+    // an ordering hazard): fold `doctor_scope`'s scoped-out rows into their own
+    // check's destination map HERE, after every scan_* call above — including this
+    // file's own `scan_artifact_paths` — has had the chance to call `admit()`. The
+    // original fix folded `abs_path_outside_managed_roots` immediately after
+    // `scan_artifact_paths` returned, which was safe only because nothing else called
+    // `admit()` yet; Tasks 3-5 add roughly 13 more call sites among the scans above,
+    // and any one introduced between that old fold site and this comment would have
+    // tallied into `scoped_out` but reached no published map — the false negative
+    // Ruling 17 forbids, reintroduced by ordering rather than by omission. Moving the
+    // fold to run LAST, after every admit()-capable scan, removes the hazard instead
+    // of documenting around it: there is no longer an earlier fold site to miss.
+    //
+    // `outside_scope_refused_by_project` is kept as its own map, not merged in place,
+    // so the hint text below can name "claimed elsewhere" (`known_elsewhere`, already
+    // folded into `outside_scoped_by_project` by `scan_artifact_paths`'s own return
+    // value) and "outside the active scope" (`doctor_scope`'s refusals, this map) as
+    // the two different reasons they are — see the `hint_parts` block below.
+    let outside_scope_refused_by_project: std::collections::BTreeMap<String, usize> = doctor_scope
+        .scoped_out()
+        .get("abs_path_outside_managed_roots")
+        .cloned()
+        .unwrap_or_default();
+    let outside_known_elsewhere_by_project = outside_scoped_by_project.clone();
+    for (group, n) in &outside_scope_refused_by_project {
+        *outside_scoped_by_project.entry(group.clone()).or_insert(0) += n;
+    }
+    // A future `admit()` call site for one of the seven `SCOPED_ROW_CHECKS` names
+    // would fold its own check's sub-map (`doctor_scope.scoped_out().get(check)`)
+    // into `row_checks_scoped_by_project` HERE too, in this same fold site — none
+    // exists yet, so there is nothing to fold for that map today.
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -878,16 +893,38 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              so nothing on this machine claims it and doc(move)/doc(delete) have nothing to resolve it against."
         ));
     }
-    if !outside_scoped_by_project.is_empty() {
-        let total: usize = outside_scoped_by_project.values().sum();
-        let n_projects = outside_scoped_by_project.len();
+    if !outside_known_elsewhere_by_project.is_empty() {
+        let total: usize = outside_known_elsewhere_by_project.values().sum();
+        let n_projects = outside_known_elsewhere_by_project.len();
         hint_parts.push(format!(
             "{total} outside-managed-roots row(s) across {n_projects} project root(s) were scoped OUT of this \
              report because they belong to a workspace this machine knows about — an umbrella sibling of the \
              active project, or a repo the catalog holds commits for. See \
              catalog_health.outside_roots_scoped_by_project. The metric is unscoped: \
-             outside_roots_by_project still counts them, so cross-repo exposure is not understated — only the \
-             worklist is limited to rows nothing on this machine claims."
+             outside_roots_by_project still counts them, so cross-repo exposure is not understated."
+        ));
+    }
+    if !outside_scope_refused_by_project.is_empty() {
+        let total: usize = outside_scope_refused_by_project.values().sum();
+        let n_projects = outside_scope_refused_by_project.len();
+        // 2026-09-09 review, Important (round 2): a prior single hint described every
+        // row in `outside_scoped_by_project` as "belongs to a workspace this machine
+        // knows about", which is false for these — they reach `DoctorScope::admit`
+        // ONLY when `known_elsewhere` did NOT already claim them (`scan_artifact_paths`'s
+        // `else if`), so by construction nothing on this machine claims them either.
+        // They are scoped out for a different reason: they fall outside the ACTIVE
+        // SCOPE's own roots (reachable only from a worktree session, for a row that
+        // belongs to the main checkout). The old hint's closing clause — "only the
+        // worklist is limited to rows nothing on this machine claims" — inverted this:
+        // an unclaimed row was DROPPED from the worklist here, not kept in it.
+        hint_parts.push(format!(
+            "{total} further outside-managed-roots row(s) across {n_projects} project root(s) were scoped OUT \
+             of this report for a DIFFERENT reason: nothing on this machine claims them — not an umbrella \
+             sibling, not a repo the catalog holds commits for — but they fall outside the active scope's own \
+             roots. See catalog_health.outside_roots_scoped_by_project, the SAME published map (both reasons \
+             are folded into one map there). The metric is unscoped: outside_roots_by_project still counts \
+             them, so cross-repo exposure is not understated — only the worklist is limited to the active \
+             scope."
         ));
     }
     if !entry_validity_scoped_by_project.is_empty() {
@@ -1783,16 +1820,30 @@ fn outside_roots_group(path: &str) -> String {
 /// `scope` is a second, independent narrowing of the SAME finding
 /// (`abs_path_outside_managed_roots`) applied only to a row `known_elsewhere`
 /// did not already claim — a row can be scoped out by "another workspace knows
-/// it" or by "it's outside the active scope", and the two tallies stay
-/// separate (`scoped` here vs. `scope.scoped_out()`) because they answer
-/// different questions. **The caller folds `scope.scoped_out().get("abs_path_outside_managed_roots")`
-/// into `outside_scoped_by_project` — this function's own return value, the
-/// same map `known_elsewhere`-scoped rows already populate — never into
-/// `row_checks_scoped_by_project`, which belongs to a disjoint set of seven
-/// row-grain checks this function does not run.** (2026-09-09 review, Critical 1:
-/// an earlier revision of this comment claimed the opposite, and the caller's
-/// code agreed with the comment, not with Ruling 17 — the scope-refused count
-/// silently vanished from every catalog_health aggregate.)
+/// it" or by "it's outside the active scope", two different reasons the caller
+/// is careful to keep nameable separately even though both retire the same
+/// finding. **The two tallies are PRODUCED separately: this function's own
+/// `scoped` return value is populated ONLY from the `known_elsewhere` match
+/// above, and `scope.scoped_out()` is populated ONLY from `scope.admit`'s own
+/// refusals — this function never writes to the other's map.** The caller
+/// folds `scope.scoped_out().get("abs_path_outside_managed_roots")` into
+/// `outside_scoped_by_project` (which starts as a clone of `scoped`, kept
+/// under `outside_known_elsewhere_by_project` before the fold) for
+/// `catalog_health.outside_roots_scoped_by_project` — one published map, both
+/// reasons counted — while keeping the un-folded `scope.scoped_out()` value
+/// around too, under `outside_scope_refused_by_project`, so the report's hint
+/// text can still name each reason on its own (2026-09-09 review, round 2,
+/// Important: an earlier revision folded the two together before the hint
+/// text was built, so the
+/// hint kept telling the reader every scoped-out row here "belongs to a
+/// workspace this machine knows about" — false for the `scope.admit`-refused
+/// half, which is unclaimed by construction and excluded for an unrelated
+/// reason). Never folded into `row_checks_scoped_by_project`, which belongs to
+/// a disjoint set of seven row-grain checks this function does not run.
+/// (2026-09-09 review, Critical 1: an earlier revision of this comment claimed
+/// the opposite, and the caller's code agreed with the comment, not with
+/// Ruling 17 — the scope-refused count silently vanished from every
+/// catalog_health aggregate.)
 ///
 /// **This check is structurally vacuous by construction at the default
 /// (`Project`/`Repo`) scope.** `managed_roots` always contains `cp.git_root`
@@ -1803,11 +1854,16 @@ fn outside_roots_group(path: &str) -> String {
 /// not the active project's, and hiding it from the default-scope report is
 /// the whole point of scoping. The `else if scope.admit(...)` branch below is
 /// reachable only from a worktree session, for a MAIN-checkout row (`scope`'s
-/// roots include `main_root`, `known_elsewhere` does not claim it). A
-/// consequence, not fixed here: `limit`/`offset` on the outside-roots sample
-/// are therefore inert at the default scope too — nothing reaches the window
-/// they page — tracked as bug `a06de4dfc30c2e8d` (CLI half; this doc comment
-/// is the source-level half of the same note).
+/// roots include `main_root`, `known_elsewhere` does not claim it) — and when
+/// `admit` returns `true` there, that row becomes a real Violation of this
+/// check like any other, so it DOES reach the sample window below. A
+/// consequence, not fixed here (2026-09-09 review, round 2: softened — the
+/// prior wording claimed no exception): outside a worktree session,
+/// `limit`/`offset` on the outside-roots sample are inert at the default
+/// scope — nothing reaches the window they page, because every firing row is
+/// claimed by `known_elsewhere` or refused by `scope.admit`, never admitted —
+/// tracked as bug `a06de4dfc30c2e8d` (CLI half; this doc comment is the
+/// source-level half of the same note).
 fn scan_artifact_paths(
     conn: &rusqlite::Connection,
     roots: &[PathBuf],
@@ -6527,6 +6583,66 @@ mod tests {
             .find(|k| k.contains("sibling-project"))
             .unwrap_or_else(|| panic!("scoped-out root must name the foreign root: {outside:#?}"));
         assert_eq!(outside[key], json!(1));
+    }
+
+    /// 2026-09-09 review, round 2, Important: the hint keyed on
+    /// `outside_roots_scoped_by_project` used to describe every row in that map as
+    /// "belongs to a workspace this machine knows about" — true only for rows
+    /// `known_elsewhere` claims, and false for rows `DoctorScope::admit` refuses (which
+    /// are, by construction via `scan_artifact_paths`'s `else if`, rows nothing on this
+    /// machine claims at all). This fixture fires BOTH reasons in one call: `known`
+    /// carries a `commits.git_root` row (claimed elsewhere), `unknown` carries neither
+    /// an umbrella membership nor a commits row (scope-refused). Asserts the SHAPE per
+    /// this repo's testing law — that two independent hint sentences fire, one per
+    /// reason — not the prose of either sentence.
+    #[tokio::test]
+    async fn outside_roots_hint_names_both_scoped_out_reasons_when_both_fire() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let known_root = tmp.path().join("known-sibling");
+        let unknown_root = tmp.path().join("unknown-sibling");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "mine", &root.join("docs/mine.md"), "# mine\n");
+        seed_ledger(
+            &cat,
+            "known",
+            &known_root.join("docs/known.md"),
+            "# known\n",
+        );
+        seed_ledger(
+            &cat,
+            "unknown",
+            &unknown_root.join("docs/unknown.md"),
+            "# unknown\n",
+        );
+        seed_commit(&cat, "deadbeef", &known_root.to_string_lossy());
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        let hint = out["catalog_health"]["hint"]
+            .as_str()
+            .expect("hint must be a string");
+        let mentions = hint.matches("outside-managed-roots row(s)").count();
+        assert_eq!(
+            mentions, 2,
+            "both reasons a row can be scoped out of the outside-roots report — \
+             claimed by a known workspace, and outside the active scope — must each get \
+             their own hint sentence when both fire in the same report; got {mentions} \
+             in: {hint}"
+        );
+
+        let outside = out["catalog_health"]["outside_roots_scoped_by_project"]
+            .as_object()
+            .expect("both drops must still land in the one published map");
+        assert!(
+            outside.keys().any(|k| k.contains("known-sibling")),
+            "the known-elsewhere root must still be named: {outside:#?}"
+        );
+        assert!(
+            outside.keys().any(|k| k.contains("unknown-sibling")),
+            "the scope-refused root must still be named: {outside:#?}"
+        );
     }
 
     /// The umbrella guard `resolve_scope` applies to an explicit `all` — confirmed

@@ -168,6 +168,17 @@ impl DoctorScope {
     /// already carries the id `admit` will need, rather than risking a
     /// signature change later that silently misses one of them.
     pub(super) fn admit(&mut self, check: &str, id: &str, abs_path: &str) -> bool {
+        // 2026-09-09 review, round 2, PROMOTED: `Violation::new` (`src/librarian/tools/
+        // doctor.rs`) validates its own `check` argument this same way, on the
+        // reasoning that an undeclared name is a programming error, not data — a
+        // typo'd check name here would tally silently into a `scoped_out` bucket no
+        // fold ever reads, which is the exact false-negative Ruling 17 forbids, just
+        // one layer earlier than the fold itself.
+        debug_assert!(
+            super::Check::from_wire(check).is_some(),
+            "undeclared doctor check name {check:?} — add it to declare_checks! or \
+             scoped_out() will hold a bucket no fold ever reads"
+        );
         let _ = id;
         if self.contains(Path::new(abs_path)) {
             return true;
@@ -254,7 +265,11 @@ mod tests {
     fn scope_all_admits_every_path_and_tallies_nothing() {
         let ctx = unscoped_ctx();
         let mut s = DoctorScope::new(Scope::All, &ctx).unwrap();
-        assert!(s.admit("some_check", "a1", "/anywhere/at/all/docs/x.md"));
+        assert!(s.admit(
+            "abs_path_outside_managed_roots",
+            "a1",
+            "/anywhere/at/all/docs/x.md"
+        ));
         assert!(s.scoped_out().is_empty());
     }
 
@@ -271,11 +286,15 @@ mod tests {
         let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
         assert_eq!(s.scope, Scope::Project, "the requested scope is retained, for callers that need to branch on it (e.g. an Umbrella-specific hint)");
         assert!(s.admit(
-            "some_check",
+            "abs_path_outside_managed_roots",
             "mine",
             &root.join("docs/mine.md").to_string_lossy()
         ));
-        assert!(!s.admit("some_check", "theirs", "/home/other/repo/docs/theirs.md"));
+        assert!(!s.admit(
+            "abs_path_outside_managed_roots",
+            "theirs",
+            "/home/other/repo/docs/theirs.md"
+        ));
         assert_eq!(
             s.scoped_out()
                 .values()
@@ -300,7 +319,7 @@ mod tests {
         let ctx = ctx_at(&root);
         let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
         let sibling = format!("{}terfuge/docs/x.md", root.to_string_lossy());
-        assert!(!s.admit("some_check", "sib", &sibling));
+        assert!(!s.admit("abs_path_outside_managed_roots", "sib", &sibling));
     }
 
     /// `Scope::Repo => &cp.git_root` — no other test in this file constructs
@@ -329,13 +348,17 @@ mod tests {
 
         let mut project_scope = DoctorScope::new(Scope::Project, &ctx).unwrap();
         assert!(
-            !project_scope.admit("some_check", "sib", &sibling_pkg_file.to_string_lossy()),
+            !project_scope.admit("abs_path_outside_managed_roots", "sib", &sibling_pkg_file.to_string_lossy()),
             "a sibling package under git_root but outside abs_path must be refused at Project scope"
         );
 
         let mut repo_scope = DoctorScope::new(Scope::Repo, &ctx).unwrap();
         assert!(
-            repo_scope.admit("some_check", "sib", &sibling_pkg_file.to_string_lossy()),
+            repo_scope.admit(
+                "abs_path_outside_managed_roots",
+                "sib",
+                &sibling_pkg_file.to_string_lossy()
+            ),
             "the same path must be admitted at Repo scope — it is under git_root"
         );
     }
@@ -364,7 +387,11 @@ mod tests {
 
         let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
         assert!(
-            s.admit("some_check", "main-row", &main_only_file.to_string_lossy()),
+            s.admit(
+                "abs_path_outside_managed_roots",
+                "main-row",
+                &main_only_file.to_string_lossy()
+            ),
             "a row under the main checkout must be admitted from a worktree session's \
              Project scope, not just rows under the worktree itself"
         );
@@ -403,7 +430,7 @@ mod tests {
         let mut s = DoctorScope::new(Scope::Umbrella, &ctx).unwrap();
         assert!(
             s.admit(
-                "some_check",
+                "abs_path_outside_managed_roots",
                 "mine-row",
                 &mine.join("docs/x.md").to_string_lossy()
             ),
@@ -413,14 +440,18 @@ mod tests {
         );
         assert!(
             s.admit(
-                "some_check",
+                "abs_path_outside_managed_roots",
                 "sib-row",
                 &sibling.join("docs/x.md").to_string_lossy()
             ),
             "a declared umbrella member's rows must be admitted too"
         );
         assert!(
-            !s.admit("some_check", "far-row", "/nowhere/near/either/docs/x.md"),
+            !s.admit(
+                "abs_path_outside_managed_roots",
+                "far-row",
+                "/nowhere/near/either/docs/x.md"
+            ),
             "a path outside both the active project and the declared umbrella members \
              stays out of scope"
         );
@@ -449,9 +480,17 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let ctx = ctx_at(&root); // umbrella: None
         let err = DoctorScope::new(Scope::Umbrella, &ctx).unwrap_err();
+        // 2026-09-09 review, round 2, TAKE 1: `.contains("umbrella")` alone cannot
+        // discriminate this error from the SIBLING test's ("scope=umbrella requires an
+        // active project", which also contains the literal substring "umbrella" via
+        // its `scope={}` interpolation) — this test would pass even if `DoctorScope::
+        // new` returned the wrong one of the two umbrella error paths. "no umbrella
+        // declared" is unique to this path (`src/librarian/tools/scope.rs`'s
+        // `"scope=umbrella but no umbrella declared for {}..."`).
         assert!(
-            err.to_string().contains("umbrella"),
-            "refusal must name the umbrella requirement: {err}"
+            err.to_string().contains("no umbrella declared"),
+            "refusal must name the no-declared-umbrella error, not just mention the word \
+             \"umbrella\" (which the sibling test's error also does): {err}"
         );
     }
 }
