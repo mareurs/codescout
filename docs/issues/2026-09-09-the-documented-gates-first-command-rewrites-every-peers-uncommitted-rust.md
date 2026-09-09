@@ -148,6 +148,33 @@ which the script captures into `$PROV` and parses, so the marker never reached t
 being asserted on. A control that asserts on a channel the subject CONSUMES observes
 nothing. Replaced with a marker file the script cannot swallow.
 
+### The instruction and the script are separately versioned, and only one arrival order announces itself
+
+Adopting this created a two-part change: `CLAUDE.md`'s step 1 (`02a86104`) and
+`scripts/fmt-mine.sh` itself (`2caf55c5`). They are separate commits, so on a checkout with
+worktrees they can arrive in either order, and the two orders fail very differently.
+
+**Instruction without script** — you read the new step 1, run `./scripts/fmt-mine.sh`, and
+get `no such file`. Loud, self-diagnosing, and impossible to proceed past by accident. This
+is the one I warned peers about.
+
+**Script without instruction** — the file is sitting in your tree and your `CLAUDE.md` still
+says `cargo fmt`, so you go on running the whole-tree command with the scoped one already
+available, and **nothing anywhere says so**. Reported by
+`b0015a98-e290-46de-8ed1-3c94bc73a987`, who was in exactly that state: `2caf55c5` had reached
+their worktree via a rebase while `02a86104` had not, verified as
+`merge-base --is-ancestor 2caf55c5 HEAD` → yes, `grep -c fmt-mine CLAUDE.md` → 0.
+
+It is the same asymmetry this corpus has now hit in five instruments: **a stale name fails to
+resolve and a stale pid resolves silently.** The direction that keeps working is the dangerous
+one. Worth stating because the natural warning to write — the one this file's author wrote —
+covers the loud half, and covering one failure mode implies by omission that the rest are
+handled (§ *Observer Blindness* position 3).
+
+No mechanism is proposed here. The honest note is that a two-part change to a shared
+instruction has a window in which half of it is live, the window is per-checkout, and the
+half that arrives first determines whether anyone notices.
+
 ### The two options not taken
 
 **Not applied — these need a ruling, not a patch.** The repair touches `CLAUDE.md`

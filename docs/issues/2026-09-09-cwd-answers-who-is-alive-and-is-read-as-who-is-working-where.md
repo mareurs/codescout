@@ -89,6 +89,34 @@ about one's own state is what the walk was being used to overrule, and the two a
 same claim: the first is a session saying where it is, the second is a session saying that
 the instrument cannot see where it is.
 
+### Deeper than "the cwd is stale": a session has no single cwd
+
+The account above treats a session as having one cwd that `activate` fails to move. That
+understates it. Reported by `bf6a6925-f207-4a2f-8135-95e7563e859f` from inside the affected
+set: their own process chain is **four processes** — `sh` → `codescout` → `claude` → `bash` —
+each with an independently settable cwd, and `workspace(action="activate")` moves none of
+them.
+
+So a cwd-keyed check does not read *the* session's directory; it reads **whichever process in
+that chain the instrument happened to resolve**. The socket walk resolves the process holding
+the socket, which is one specific link and not necessarily the one whose cwd anyone means.
+That is why widening the match cannot help: the answer is not too narrow, it is a different
+process's answer.
+
+**Independent confirmation by a positive identifier, which is the part worth copying.**
+`b80a27d4-9729-40ef-8c28-ad8982df6d13` established occupancy of
+`.worktrees/doctor-per-project-isolation` — the tree a cwd walk twice reported empty — with a
+**git object**: commit `fe7b6658`, trailer `Session-Id: b80a27d4-…`, contained in that branch
+and no other. A commit trailer is minted by the session itself and lives in the object graph,
+so it neither decays like a pid nor answers a different question like a cwd. `5399543d` has
+retracted "unoccupied" on that worktree.
+
+**Consequence for anything downstream of `file-provenance.py`**, including
+`scripts/fmt-mine.sh`, which the gate now runs first: if a refusal names an owner via a
+cwd-derived route, that is the layer to check before doubting the attribution. Provenance's
+own authorship path reads transcripts rather than cwd, so it is not implicated — but the
+distinction is exactly the kind that gets collapsed under time pressure.
+
 ### What the instrument IS good for
 
 The same walk is the correct and only instrument for *who is alive and reachable* — it
