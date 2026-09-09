@@ -233,6 +233,69 @@ impl Check {
             Check::ClaimHeldByLiveSession | Check::ClaimUnresolvableHere
         )
     }
+
+    /// Whether this check's `admit()` call site passes a genuine artifact id as its
+    /// `id` argument — the precondition for Task 7's cited-from-here relevance
+    /// exemption to mean anything. An explicit, enumerated allow-list rather than a
+    /// `!= Check::CitedPrefixWithNoDefiner` deny-list (2026-09-09 review round 1,
+    /// Minor 8, promoted): the deny form is ALSO true for `None` — an unrecognized
+    /// wire name — so a call site naming a check that does not exist yet would get
+    /// the exemption automatically, silently, and the `debug_assert!` in `admit`
+    /// that would otherwise catch an undeclared name compiles out entirely in
+    /// release builds. Tasks 8-9 are about to add more `admit` call sites; the safe
+    /// polarity is the one where a NEW check must opt in here deliberately, not the
+    /// one where it opts in by omission.
+    ///
+    /// `CitedPrefixWithNoDefiner` is the one exclusion, and it stays excluded for the
+    /// reason `admit`'s own doc comment gives: it is a per-PREFIX check with no
+    /// owning row, so its `id` is a namespace prefix, never an artifact id —
+    /// looking that up in `cited_from_here` (which holds artifact ids) would be a
+    /// category error, not merely a guaranteed miss.
+    ///
+    /// Every other declared check passes its own finding's artifact id — confirmed
+    /// by reading each of this file's `.admit(...)` call sites, not assumed.
+    pub(super) fn admits_relevance_exemption(self) -> bool {
+        matches!(
+            self,
+            Check::AbsPathMustBeAbsolute
+                | Check::AbsPathOutsideManagedRoots
+                | Check::AdsColonInAbsPath
+                | Check::ArchivedFixShaUnresolvable
+                | Check::AugmentationDeclarationUnparseable
+                | Check::AugmentationDeclaredButAbsent
+                | Check::BackslashInAbsPath
+                | Check::BackslashInGitRoot
+                | Check::ClaimHeldByDeadSession
+                | Check::ClaimHeldByLiveSession
+                | Check::ClaimUnresolvableHere
+                | Check::ClaimWithoutClaimant
+                | Check::DeclaredRootMissing
+                | Check::DotdotSegmentInAbsPath
+                | Check::EntryCitedFromOutsideButUndeclared
+                | Check::EntryConditionalPastDue
+                | Check::EntryDatedStale
+                | Check::EntryDefinedTwice
+                | Check::EntryWithoutDefinition
+                | Check::FrontmatterIdIsNotACatalogId
+                | Check::FrontmatterIdMismatch
+                | Check::FrontmatterStatusMismatch
+                | Check::LedgerDefinesNothing
+                | Check::MissingFile
+                | Check::NonTerminalStatusWithFixAnchor
+                | Check::OpenBugCitedFromSource
+                | Check::ParamsBehindBody
+                | Check::ParamsStatusDrift
+                | Check::PrematureArchiveCitation
+                | Check::SidecarShapeDrift
+                | Check::SidecarUnparseable
+                | Check::SnapshotDrift
+                | Check::TerminalStatusWithCaveat
+                | Check::TerminalStatusWithoutFixAnchor
+                | Check::UnterminatedFence
+                | Check::ValidityUnparseable
+                | Check::WorktreeScopedRow
+        )
+    }
 }
 
 declare_checks! {
@@ -1055,20 +1118,42 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // src/librarian/tools/link_scan/resolve.rs). Naming a hint that cannot actually
     // help is the defect this repo has already measured once; this hint names the form
     // that works.
-    if doctor_scope.cross_root_cites_edges() == 0 {
-        hint_parts.push(
-            "0 cross_root_cites_edges: no cites edge (artifact_link or entry_cite) \
-             crosses this scope's root boundary, so DoctorScope::admit's relevance \
-             exemption has nothing to admit right now — inert on this catalog, not \
-             broken. To create one: doc(action=\"append_entry\", cites=[...]) or \
-             doc(action=\"link\", rel=\"cites\") from a local artifact naming a foreign \
-             one directly. librarian(action=\"link_scan\", scope=\"umbrella\", \
-             write=true) can also derive one from prose, but only for a bare artifact \
-             id or an entry token that resolves uniquely within a declared [[umbrella]] \
-             — a repo-qualified `<repo>:TOKEN` citation will not become a cross-root \
-             edge that way, by design."
-                .to_string(),
-        );
+    //
+    // 2026-09-09 review round 1, Important 1: `Some(0)` and `None` are NOT the same
+    // state and must not share a hint. `None` (`Scope::All`) means the query never
+    // ran — `roots` was empty, so there was no boundary to cross in the first place —
+    // and the remedy below is specifically unreachable from that state: it tells the
+    // operator to create a local-to-foreign edge, but "local" needs an active project,
+    // which is exactly what is missing. An operator who follows it and re-runs gets
+    // the same reading forever, not because the remedy failed but because the query
+    // still never ran. So `None` gets a distinct, remedy-free note instead.
+    match doctor_scope.cross_root_cites_edges() {
+        Some(0) => {
+            hint_parts.push(
+                "0 cross_root_cites_edges: no cites edge (artifact_link or entry_cite) \
+                 crosses this scope's root boundary, so DoctorScope::admit's relevance \
+                 exemption has nothing to admit right now — inert on this catalog, not \
+                 broken. To create one: doc(action=\"append_entry\", cites=[...]) or \
+                 doc(action=\"link\", rel=\"cites\") from a local artifact naming a \
+                 foreign one directly. librarian(action=\"link_scan\", \
+                 scope=\"umbrella\", write=true) can also derive one from prose, but \
+                 only for a bare artifact id or an entry token that resolves uniquely \
+                 within a declared [[umbrella]] — a repo-qualified `<repo>:TOKEN` \
+                 citation will not become a cross-root edge that way, by design."
+                    .to_string(),
+            );
+        }
+        None => {
+            hint_parts.push(
+                "cross_root_cites_edges: not computed at this scope — Scope::All has \
+                 no root boundary to cross (nothing is out of scope), so the query \
+                 never ran. This is not a measured zero; there is no remedy to run \
+                 here. Activate a project, or pass an explicit scope, to get a real \
+                 count."
+                    .to_string(),
+            );
+        }
+        Some(_) => {}
     }
     if hidden_rows > 0 {
         hint_parts.push(format!(
@@ -1150,7 +1235,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         );
     }
     // Task 7: published unconditionally, including 0 — the zero-case hint above is
-    // what keeps 0 legible as "inert" rather than "broken".
+    // what keeps 0 legible as "inert" rather than "broken". 2026-09-09 review round 1,
+    // Important 1: `Option<usize>` serializes `None` (Scope::All — the query never
+    // ran) as JSON `null`, distinct from `Some(0)` (a real measured zero) — do not
+    // read `null` here as "zero crossings."
     catalog_health.insert(
         "cross_root_cites_edges".to_string(),
         json!(doctor_scope.cross_root_cites_edges()),
@@ -2012,24 +2100,31 @@ fn outside_roots_group(path: &str) -> String {
 /// catalog_health aggregate.)
 ///
 /// **This check is structurally vacuous by construction at the default
-/// (`Project`/`Repo`) scope.** `managed_roots` always contains `cp.git_root`
-/// and `cp.abs_path`, so a row outside every managed root is necessarily
-/// outside `scope`'s roots too — every firing row is claimed by either
-/// `known_elsewhere` or `scope.admit`'s refusal, and `violations` gets none of
-/// them. That is intended: a row outside every managed root is by definition
-/// not the active project's, and hiding it from the default-scope report is
-/// the whole point of scoping. The `else if scope.admit(...)` branch below is
-/// reachable only from a worktree session, for a MAIN-checkout row (`scope`'s
-/// roots include `main_root`, `known_elsewhere` does not claim it) — and when
-/// `admit` returns `true` there, that row becomes a real Violation of this
-/// check like any other, so it DOES reach the sample window below. A
-/// consequence, not fixed here (2026-09-09 review, round 2: softened — the
-/// prior wording claimed no exception): outside a worktree session,
-/// `limit`/`offset` on the outside-roots sample are inert at the default
-/// scope — nothing reaches the window they page, because every firing row is
-/// claimed by `known_elsewhere` or refused by `scope.admit`, never admitted —
-/// tracked as bug `a06de4dfc30c2e8d` (CLI half; this doc comment is the
-/// source-level half of the same note).
+/// (`Project`/`Repo`) scope, EXCEPT for the relevance exemption.** `managed_roots`
+/// always contains `cp.git_root` and `cp.abs_path`, so a row outside every managed
+/// root is necessarily outside `scope`'s roots too — absent an exemption, every
+/// firing row is claimed by either `known_elsewhere` or `scope.admit`'s refusal,
+/// and `violations` gets none of them. That is intended: a row outside every
+/// managed root is by definition not the active project's, and hiding it from the
+/// default-scope report is the whole point of scoping. Two DIFFERENT routes now
+/// reach `scope.admit` with a chance of `true` even at the default scope, from a
+/// non-worktree session (2026-09-09 review round 1, Important 5 amended this
+/// paragraph — it previously named only the first): (1) the `else if
+/// scope.admit(...)` branch below is reachable for a MAIN-checkout row in a
+/// worktree session (`scope`'s roots include `main_root`, `known_elsewhere` does
+/// not claim it); (2) a `known_elsewhere` row that
+/// `scope.known_elsewhere_row_is_relevant` accepts (cited from here AND a
+/// declared umbrella member) now skips the `known_elsewhere` short-circuit
+/// entirely and falls through to the same `scope.admit(...)` call — see that
+/// branch's own inline comment. In either case, when `admit` returns `true`,
+/// that row becomes a real Violation of this check like any other, so it DOES
+/// reach the sample window below. A consequence, not fixed here (2026-09-09
+/// review, round 2: softened — the prior wording claimed no exception): outside
+/// those two routes, `limit`/`offset` on the outside-roots sample are inert at
+/// the default scope — nothing reaches the window they page, because every
+/// other firing row is claimed by `known_elsewhere` or refused by `scope.admit`,
+/// never admitted — tracked as bug `a06de4dfc30c2e8d` (CLI half; this doc
+/// comment is the source-level half of the same note).
 fn scan_artifact_paths(
     conn: &rusqlite::Connection,
     roots: &[PathBuf],
@@ -2081,8 +2176,20 @@ fn scan_artifact_paths(
                 // Belongs to a workspace this machine knows about (umbrella
                 // sibling, or a repo the catalog has commits for)? Then it is
                 // real, it is someone's, and it is not this developer's work.
-                // Counted, not reported.
-                if super::containing_root(known_elsewhere, Path::new(abs_path)).is_some() {
+                // Counted, not reported — UNLESS the row is BOTH cited from the
+                // active project AND specifically an umbrella member (2026-09-09
+                // review round 1, Important 5, a coordinator finding: this branch
+                // used to short-circuit before `scope.admit` ever ran, so Task
+                // 7's relevance exemption had no way to reach a `known_elsewhere`
+                // row no matter how relevant it was). Naively swapping branch
+                // order would be wrong instead — `known_elsewhere` is strictly
+                // wider than "declared umbrella member" (it also includes every
+                // `commits.git_root` the catalog has ever indexed), so
+                // `known_elsewhere_row_is_relevant` checks umbrella membership
+                // specifically, not `known_elsewhere` membership again.
+                if super::containing_root(known_elsewhere, Path::new(abs_path)).is_some()
+                    && !scope.known_elsewhere_row_is_relevant(id, Path::new(abs_path))
+                {
                     *scoped.entry(outside_roots_group(abs_path)).or_insert(0) += 1;
                 } else if scope.admit("abs_path_outside_managed_roots", id, abs_path) {
                     violations.push(v);
@@ -6942,6 +7049,45 @@ mod tests {
         );
     }
 
+    /// 2026-09-09 review round 1, Important 1: a plain `doctor()` call with no active
+    /// project resolves to `Scope::All` (`resolve_scope` returning `(Scope::All,
+    /// true)` — pinned by `a_project_request_without_an_active_project_reports_its_
+    /// fallback` above), which gives `DoctorScope::new` an empty `roots` and skips
+    /// `cross_root_cites` entirely — the query never runs. Before this fix, that
+    /// state published `cross_root_cites_edges: 0` and fired the SAME zero-case
+    /// remedy as a real measured zero: "run `doc(action=\"append_entry\",
+    /// cites=[...])`" — creating a local-to-foreign edge, which needs an active
+    /// project to be the local side of. An operator with none, following that
+    /// remedy exactly and re-running, gets the identical reading forever: not
+    /// because the remedy failed, but because the query the remedy is supposed to
+    /// move never ran either time. This test pins the fix: `null`, not `0`, and no
+    /// remedy sentence at all.
+    #[tokio::test]
+    async fn cross_root_cites_edges_is_null_with_no_remedy_when_scope_is_all() {
+        let ctx = unscoped_ctx();
+
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["scope"]["applied"], "all",
+            "sanity check on the fixture: a plain call with no active project must \
+             resolve to Scope::All"
+        );
+        assert_eq!(
+            out["catalog_health"]["cross_root_cites_edges"],
+            serde_json::Value::Null,
+            "Scope::All never ran the query — this must read as \"not computed\", \
+             never as a measured zero: {:#?}",
+            out["catalog_health"]
+        );
+        let hint = out["catalog_health"]["hint"].as_str().unwrap_or_default();
+        assert!(
+            !hint.contains("append_entry") && !hint.contains("doc(action=\"link\""),
+            "no remedy sentence may fire at Scope::All — there is nothing an operator \
+             can do from here that a re-run would ever reflect: {hint}"
+        );
+    }
+
     /// The umbrella guard `resolve_scope` applies to an explicit `all` — confirmed
     /// correct behavior, not something this task changes. Same fixture as the sibling
     /// test above: no umbrella is configured, so widening must be refused rather than
@@ -9862,6 +10008,108 @@ mod tests {
             "counted under its own project root; got {scoped:?}"
         );
     }
+    /// Task 7 (relevance exemption), 2026-09-09 review round 1, Important 5 (a
+    /// coordinator finding, not the reviewer's): before this fix,
+    /// `scan_artifact_paths`'s `known_elsewhere` branch counted a foreign row and
+    /// `continue`d WITHOUT ever calling `scope.admit`, so a `known_elsewhere` row
+    /// could never receive Task 7's relevance exemption no matter how relevant it
+    /// was to the active project — pre-empting Task 7's whole premise for every
+    /// row that reached this branch. `known_elsewhere_row_is_relevant` closes that
+    /// gap, gated on BOTH halves of the user's own requirement (*"at most show
+    /// problems in connections to other projects in an umbrella, and only if it
+    /// affects the current project"*): cited from here, AND specifically an
+    /// umbrella member (not `known_elsewhere` membership in general, which is
+    /// strictly wider).
+    ///
+    /// Four rows probe all four quadrants of that 2x2, so a mutation collapsing
+    /// either half of the AND to a no-op (or dropping the gate entirely) is
+    /// caught: `relevant` (cited + umbrella member) must surface as a real
+    /// violation; `member_not_cited` (umbrella member, not cited) and
+    /// `cited_not_member` (cited, but its root is only `known_elsewhere` via the
+    /// git_root union, not a declared umbrella member) must each stay silently
+    /// counted; `neither` is the same fixture's control from the sibling test
+    /// above, re-asserted here so this test does not depend on that one running
+    /// first.
+    #[test]
+    fn known_elsewhere_row_relevant_to_active_project_via_umbrella_and_citation_surfaces_instead_of_being_scoped_out(
+    ) {
+        let cat = Catalog::open_in_memory().unwrap();
+        let base = std::env::temp_dir();
+        let active = base.join("cs-a5-active");
+        let umbrella_member = base.join("cs-a5-umbrella-member");
+        let other_known_root = base.join("cs-a5-other-known-root");
+
+        let p = |root: &std::path::Path, name: &str| {
+            root.join("docs").join(name).to_string_lossy().into_owned()
+        };
+
+        seed_artifact(&cat, "citer", &p(&active, "citer.md"));
+        seed_artifact(&cat, "relevant", &p(&umbrella_member, "relevant.md"));
+        seed_artifact(&cat, "member-not-cited", &p(&umbrella_member, "quiet.md"));
+        seed_artifact(&cat, "cited-not-member", &p(&other_known_root, "quiet.md"));
+
+        crate::librarian::catalog::links::insert(
+            &cat,
+            &crate::librarian::catalog::links::LinkRow {
+                src_id: "citer".to_string(),
+                dst_id: "relevant".to_string(),
+                rel: crate::librarian::tools::link_scan::diff::CITES_REL.to_string(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        crate::librarian::catalog::links::insert(
+            &cat,
+            &crate::librarian::catalog::links::LinkRow {
+                src_id: "citer".to_string(),
+                dst_id: "cited-not-member".to_string(),
+                rel: crate::librarian::tools::link_scan::diff::CITES_REL.to_string(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: active.clone(),
+            git_root: active.clone(),
+            main_root: None,
+            umbrella: Some("team".to_string()),
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "team".to_string(),
+                members: vec![umbrella_member.clone()],
+            }])
+            .build();
+
+        let roots = vec![active.clone()];
+        let known = vec![umbrella_member.clone(), other_known_root.clone()];
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known, &mut ds).unwrap();
+
+        let outside: std::collections::BTreeSet<&str> = violations
+            .iter()
+            .filter(|v| v.check == "abs_path_outside_managed_roots")
+            .map(|v| v.path.as_str())
+            .collect();
+
+        assert!(
+            outside.iter().any(|p| p.contains("relevant.md")),
+            "cited-from-here AND umbrella-member row must surface as a real violation, not be silently counted; got {outside:?}"
+        );
+        assert!(
+            !outside.iter().any(|p| p.contains("quiet.md")),
+            "neither half-satisfying row may surface; got {outside:?}"
+        );
+
+        let scoped_total: usize = scoped.values().sum();
+        assert_eq!(
+            scoped_total, 2,
+            "only the two half-satisfying rows (member-not-cited, cited-not-member) stay counted, not the relevant one; got {scoped:?}"
+        );
+    }
 
     /// The escape hatch stays open: an empty `known_elsewhere` reproduces the
     /// pre-split behaviour exactly. Without this, a caller that cannot compute the
@@ -11362,6 +11610,43 @@ mod tests {
              ROW_GRAIN_SCOPED_CHECKS (or the const names a check with no admit() call site \
              left) — both the fold loop and the hint legend silently drop whatever this diff \
              shows"
+        );
+    }
+
+    /// Guards `Check::admits_relevance_exemption`'s allow-list against silent drift
+    /// when a new `Check` variant is declared (2026-09-09 review round 1, Minor 8).
+    /// The predicate is deliberately an explicit, enumerated `matches!` rather than
+    /// `Check::ALL` minus one exclusion — the whole point is that a brand-new
+    /// variant does NOT opt in by omission. But that means nothing forces a
+    /// developer to make the deliberate choice either, unless something reds when
+    /// they skip it. This test is that something: `Check::ALL.len()` (via
+    /// `declare_checks!`, which the enum, `as_str` and `from_wire` all derive from
+    /// the same macro arms) minus the allow-list's own count must equal exactly 1 —
+    /// today's sole exclusion, `CitedPrefixWithNoDefiner`, named explicitly so the
+    /// failure message points at the right variant rather than an arithmetic
+    /// mismatch. Adding `Check::Foo` without touching `admits_relevance_exemption`
+    /// changes `Check::ALL.len()` and not the allow-list's count, so the two sides
+    /// of the equality below stop agreeing — the developer must then look at
+    /// `Foo` and decide, on purpose, whether it belongs in the `matches!` arms or
+    /// joins `CitedPrefixWithNoDefiner` as a second named exclusion.
+    #[test]
+    fn admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all() {
+        let allow_listed = Check::ALL
+            .iter()
+            .filter(|c| c.admits_relevance_exemption())
+            .count();
+        assert!(
+            !Check::CitedPrefixWithNoDefiner.admits_relevance_exemption(),
+            "CitedPrefixWithNoDefiner must stay excluded — its id is a namespace \
+             prefix, not an artifact id"
+        );
+        assert_eq!(
+            Check::ALL.len() - allow_listed,
+            1,
+            "Check::ALL grew or shrank without a matching, deliberate update to \
+             admits_relevance_exemption's matches! arms — a new check defaults to \
+             EXCLUDED (the safe polarity), but that exclusion must be a choice this \
+             test forces, not an accident it stays silent about"
         );
     }
 

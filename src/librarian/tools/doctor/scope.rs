@@ -116,7 +116,34 @@ pub(super) struct DoctorScope {
     /// until an operator creates one; publishing this count alongside it is what keeps
     /// that inertness visible instead of decorative. See `catalog_health.
     /// cross_root_cites_edges` and the zero-case hint on `admit`'s doc comment.
-    cross_root_cites_edges: usize,
+    ///
+    /// `None`, not `Some(0)`, at `Scope::All` (2026-09-09 review round 1, Important 1)
+    /// — `roots.is_empty()` short-circuits [`Self::new`] before `cross_root_cites`
+    /// ever runs, so `Scope::All` is not "measured zero crossings," it is "never
+    /// asked the question." Collapsing that into a bare `0` fed the zero-case hint's
+    /// own remedy sentence to an operator who cannot act on it: `doc(action=
+    /// "append_entry", cites=[...])` creates a LOCAL-to-foreign edge, which needs an
+    /// active project to be the local side of — re-running with no project active
+    /// still has no `roots`, still short-circuits, still publishes the same reading,
+    /// forever. `Some(n)` (including `Some(0)`, a real measurement) keeps the
+    /// existing remedy; `None` is instead reported as "not computed" and the remedy
+    /// is suppressed outright.
+    cross_root_cites_edges: Option<usize>,
+    /// Declared-umbrella member roots (`umbrella_member_roots(ctx)`), computed
+    /// UNCONDITIONALLY here regardless of `scope` — 2026-09-09 review round 1,
+    /// Important 5 (a coordinator finding, not the reviewer's). Before this field
+    /// existed, `umbrella_member_roots` was called only inside the `Scope::Umbrella`
+    /// arm above, to widen `roots` itself; a `Project`/`Repo`/`All` scan had no way
+    /// to ask "is this specific foreign row an umbrella member" without re-deriving
+    /// the umbrella lookup a second, divergent way. [`Self::known_elsewhere_row_is_relevant`]
+    /// is the sole reader — see its doc comment for why umbrella membership,
+    /// specifically, is the second half of that predicate rather than
+    /// `known_elsewhere` membership in general (`known_elsewhere` also includes every
+    /// `commits.git_root` the catalog has ever indexed, which is not what "problems
+    /// in connections to other projects in an umbrella" asked for). Empty whenever
+    /// the active project declares no umbrella, exactly like `umbrella_member_roots`
+    /// itself.
+    umbrella_roots: Vec<PathBuf>,
 }
 
 impl DoctorScope {
@@ -136,6 +163,12 @@ impl DoctorScope {
             ctx.current_project.as_deref(),
             &[],
         )?;
+
+        // Computed unconditionally, regardless of `scope` — see the
+        // `umbrella_roots` field doc (2026-09-09 review round 1, Important 5) for
+        // why a `Project`/`Repo`/`All` scan still needs this list even though only
+        // the `Scope::Umbrella` arm below folds it into `roots` itself.
+        let umbrella_roots = umbrella_member_roots(ctx);
 
         // What this builds: for `Project`/`Repo`, an exact lexical twin of
         // `apply_scope`'s clause — `Scope::Project` over a linked worktree
@@ -166,7 +199,7 @@ impl DoctorScope {
                     roots.push(main.clone());
                 }
                 if matches!(scope, Scope::Umbrella) {
-                    roots.extend(umbrella_member_roots(ctx));
+                    roots.extend(umbrella_roots.clone());
                 }
             }
         }
@@ -175,11 +208,15 @@ impl DoctorScope {
         // `admit` stays a pure lookup with no query of its own. Skipped entirely when
         // `roots` is empty — that state is `Scope::All` exclusively (see the field
         // doc), which already admits everything, so a cited-from-here set would be
-        // computed only to be consulted by nothing.
+        // computed only to be consulted by nothing. `None`, not `Some(0)`, is what
+        // that skip publishes (2026-09-09 review round 1, Important 1) — see the
+        // field doc for why collapsing "never asked" into "measured zero" fed a
+        // dead-end remedy to an operator who could never satisfy it.
         let (cited_from_here, cross_root_cites_edges) = if roots.is_empty() {
-            (BTreeSet::new(), 0)
+            (BTreeSet::new(), None)
         } else {
-            cross_root_cites(ctx, &roots)?
+            let (cited_from_here, edges) = cross_root_cites(ctx, &roots)?;
+            (cited_from_here, Some(edges))
         };
 
         Ok(Self {
@@ -188,6 +225,7 @@ impl DoctorScope {
             scoped_out: BTreeMap::new(),
             cited_from_here,
             cross_root_cites_edges,
+            umbrella_roots,
         })
     }
 
@@ -252,7 +290,17 @@ impl DoctorScope {
         // trusting to string mismatch alone. See that call site's own doc comment
         // (`scan_cited_prefix_with_no_definer`, `doctor.rs`) for why its `admit` return
         // is already dead-by-construction; this branch must not resurrect it.
-        if super::Check::from_wire(check) != Some(super::Check::CitedPrefixWithNoDefiner)
+        //
+        // 2026-09-09 review round 1, Minor 8 (promoted): `check`'s gate is an explicit
+        // ALLOW-list (`Check::admits_relevance_exemption`), not a
+        // `!= CitedPrefixWithNoDefiner` deny-list. The deny form was ALSO true for
+        // `None` — an undeclared check name — so an unrecognized check got this
+        // exemption by default, and the `debug_assert!` above that would normally
+        // catch an undeclared name is compiled out in release builds. The allow-list
+        // form means a brand-new check (Tasks 8-9 are about to add several) must be
+        // deliberately added to `admits_relevance_exemption`'s `matches!` arms before
+        // it can be exempted — silence now means excluded, not included.
+        if super::Check::from_wire(check).is_some_and(super::Check::admits_relevance_exemption)
             && self.cited_from_here.contains(id)
         {
             return true;
@@ -264,6 +312,37 @@ impl DoctorScope {
             .entry(super::outside_roots_group(abs_path))
             .or_insert(0) += 1;
         false
+    }
+    /// Task 7 (relevance exemption), 2026-09-09 review round 1, Important 5 (a
+    /// coordinator finding, not the reviewer's). `scan_artifact_paths`'s
+    /// `known_elsewhere` branch (`src/librarian/tools/doctor.rs`) counts a foreign
+    /// row into its own `scoped` map — silently, "counted, not reported" — WITHOUT
+    /// ever calling [`Self::admit`], so Task 7's relevance exemption never had a
+    /// chance to reach it, no matter how relevant that row is to the active
+    /// project. This is the predicate that gives it that chance, gated on BOTH
+    /// halves of the user's own requirement — *"at most show problems in
+    /// connections to other projects in an umbrella, and only if it affects the
+    /// current project"* — never either alone:
+    ///
+    /// - **"affects the current project"**: `id` is cited from inside `roots`
+    ///   (`self.cited_from_here`), exactly the same membership `admit`'s own
+    ///   exemption reads.
+    /// - **"connections to other projects in an umbrella"**: `abs_path` resolves
+    ///   under a declared UMBRELLA member specifically (`self.umbrella_roots`), not
+    ///   under `known_elsewhere` in general. `known_elsewhere` is strictly WIDER —
+    ///   umbrella members UNION every `commits.git_root` the catalog has ever
+    ///   indexed — so naively reordering `scan_artifact_paths`'s two branches (call
+    ///   `admit` before the `known_elsewhere` check) would also surface a cited row
+    ///   under any unrelated indexed repo, which the requirement does not ask for.
+    ///
+    /// A row satisfying both should NOT be silently counted — the caller is
+    /// expected to skip its own `known_elsewhere` short-circuit for exactly this
+    /// row and fall through to `admit` instead, so the row gets the same
+    /// tally-or-surface treatment as any other `admit` call (Ruling 17's per-check
+    /// global metric still sees it either way).
+    pub(super) fn known_elsewhere_row_is_relevant(&self, id: &str, abs_path: &Path) -> bool {
+        self.cited_from_here.contains(id)
+            && containing_root(&self.umbrella_roots, abs_path).is_some()
     }
 
     /// Rows refused by [`Self::admit`], keyed by check name then by project
@@ -280,8 +359,12 @@ impl DoctorScope {
     /// silently widening the worklist on a rule that never fires would be
     /// indistinguishable from no rule at all, so this count ships alongside it.
     /// `catalog_health.cross_root_cites_edges` publishes it unconditionally, at
-    /// every scope, including 0 — the value measured on today's catalog.
-    pub(super) fn cross_root_cites_edges(&self) -> usize {
+    /// every scope, including `Some(0)` — the value measured on today's catalog.
+    ///
+    /// `None` at `Scope::All` (2026-09-09 review round 1, Important 1) — see the
+    /// field doc. Do not collapse this to `0` at the call site; that is exactly the
+    /// conflation this type exists to prevent.
+    pub(super) fn cross_root_cites_edges(&self) -> Option<usize> {
         self.cross_root_cites_edges
     }
 }
@@ -801,7 +884,7 @@ mod tests {
         let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
         assert_eq!(
             s.cross_root_cites_edges(),
-            2,
+            Some(2),
             "one crossing edge per grain, both counted"
         );
 
@@ -849,6 +932,207 @@ mod tests {
                 .sum::<usize>(),
             1,
             "the uncited control row must be the only tally"
+        );
+    }
+
+    /// Task 7 (relevance exemption), 2026-09-09 review round 1, Important 2: the
+    /// `<dst_slug>:<local>` branch of `cross_root_cites`'s `dst_ref` resolution
+    /// (`Some((dst_slug, _local)) => by_slug.get(dst_slug).cloned()`) had no test of
+    /// its own — every existing fixture seeded only the bare-id form. This is not a
+    /// theoretical gap: `resolve_cite_ref` (`src/librarian/catalog/augmentation.rs`,
+    /// arm 2) stores a `<slug>:<local>` ref VERBATIM, and `append_entry(cites=[...])`
+    /// — the exact remedy `catalog_health`'s zero-case hint recommends — is the only
+    /// cross-root-capable writer that produces this form. A hint recommending a
+    /// remedy this code cannot actually admit would be exactly the "loudness without
+    /// a working path" defect CLAUDE.md's Testing Discipline names.
+    ///
+    /// Confirmed by mutation, not merely by this test passing: changing
+    /// `Some((dst_slug, _local)) => by_slug.get(dst_slug).cloned()` to
+    /// `Some(_) => None` left the rest of this file's suite green and turned only
+    /// this test red (reported alongside this fix, not asserted here — a self-test
+    /// of a mutation cannot outlive the mutation it names).
+    #[test]
+    fn admit_exempts_a_foreign_id_cited_via_the_slug_colon_local_dst_ref_form() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let foreign_root = tmp.path().join("foreign");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
+        let ctx = ctx_at(&root);
+
+        {
+            let cat = ctx.catalog.lock();
+
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("local-citer")
+                    .with_abs_path(root.join("docs/local-citer.md"))
+                    .build(),
+            )
+            .unwrap();
+            let local_slug = artifact::ensure_slug(&cat.conn, "local-citer").unwrap();
+
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("foreign-slugged")
+                    .with_abs_path(foreign_root.join("docs/foreign-slugged.md"))
+                    .build(),
+            )
+            .unwrap();
+            let foreign_slug = artifact::ensure_slug(&cat.conn, "foreign-slugged").unwrap();
+
+            // The production shape `resolve_cite_ref` writes verbatim for arm 2
+            // (`<slug>:<local>`) — the local half (`E-9`) is never consulted by
+            // `cross_root_cites`, which discards it via `_local`, so any token proves
+            // the branch.
+            entry_cite::insert_with(
+                &cat.conn,
+                &entry_cite::EntryCiteRow {
+                    src_slug: local_slug,
+                    src_local: "E-1".to_string(),
+                    dst_ref: format!("{foreign_slug}:E-9"),
+                    rel: CITES_REL.to_string(),
+                    origin: entry_cite::ORIGIN_SCAN.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+
+            // Control: a foreign artifact cited by nothing, to confirm this is a
+            // targeted exemption rather than a widened one.
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("not-cited-via-slug")
+                    .with_abs_path(foreign_root.join("docs/not-cited-via-slug.md"))
+                    .build(),
+            )
+            .unwrap();
+        }
+
+        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        assert_eq!(
+            s.cross_root_cites_edges(),
+            Some(1),
+            "the slug:local dst_ref must resolve and count as one crossing edge"
+        );
+
+        assert!(
+            s.admit(
+                "abs_path_outside_managed_roots",
+                "foreign-slugged",
+                &foreign_root
+                    .join("docs/foreign-slugged.md")
+                    .to_string_lossy(),
+            ),
+            "a foreign id cited via the slug:local dst_ref form must be admitted"
+        );
+        assert!(
+            s.scoped_out().is_empty(),
+            "an exempted row must not tally into scoped_out: {:?}",
+            s.scoped_out()
+        );
+
+        assert!(
+            !s.admit(
+                "abs_path_outside_managed_roots",
+                "not-cited-via-slug",
+                &foreign_root
+                    .join("docs/not-cited-via-slug.md")
+                    .to_string_lossy(),
+            ),
+            "an uncited foreign id must still be refused"
+        );
+    }
+    /// Task 7 (relevance exemption), 2026-09-09 review round 1, Important 3: the
+    /// `Check::admits_relevance_exemption` allow-list gate inside `admit` — the clause
+    /// that keeps `cited_prefix_with_no_definer` OUT of the exemption, per that
+    /// method's own doc comment (a namespace prefix is not an artifact id, so looking
+    /// it up in `cited_from_here` would be a category error even when it happens to
+    /// string-match) — had no test of its own gating EFFECT. Every other test either
+    /// never calls `admit` with that check name, or never seeds a `cited_from_here` id
+    /// that could collide with it, so deleting the gate clause (or widening the
+    /// allow-list to include `CitedPrefixWithNoDefiner`) left the whole suite green.
+    /// This test seeds exactly one `cited_from_here` id and calls `admit` twice with
+    /// that SAME id — once under `cited_prefix_with_no_definer` (must stay refused)
+    /// and once under an allow-listed check (must be admitted) — so the refusal is
+    /// pinned to the check gate specifically, not to a missing `cited_from_here`
+    /// membership the first assertion alone could not rule out.
+    #[test]
+    fn admit_refuses_cited_prefix_with_no_definer_even_when_its_id_is_cited_from_here() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let foreign_root = tmp.path().join("foreign");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
+        let ctx = ctx_at(&root);
+
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("local-citer")
+                    .with_abs_path(root.join("docs/local-citer.md"))
+                    .build(),
+            )
+            .unwrap();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("foreign-cited")
+                    .with_abs_path(foreign_root.join("docs/foreign-cited.md"))
+                    .build(),
+            )
+            .unwrap();
+            links::insert(
+                &cat,
+                &links::LinkRow {
+                    src_id: "local-citer".to_string(),
+                    dst_id: "foreign-cited".to_string(),
+                    rel: CITES_REL.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+        }
+
+        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        assert_eq!(
+            s.cross_root_cites_edges(),
+            Some(1),
+            "sanity check on the fixture: exactly one crossing edge"
+        );
+
+        // Same `id`, used as `cited_prefix_with_no_definer`'s "prefix" argument (a
+        // category error per that check's own contract, but exactly the string the
+        // gate exists to keep from being read as a real cited-from-here membership)
+        // must NOT be exempted.
+        assert!(
+            !s.admit(
+                "cited_prefix_with_no_definer",
+                "foreign-cited",
+                &foreign_root.join("docs/foreign-cited.md").to_string_lossy(),
+            ),
+            "cited_prefix_with_no_definer must never receive the relevance exemption, \
+             even when its `id` string happens to match a real cited_from_here id"
+        );
+        assert_eq!(
+            s.scoped_out()
+                .values()
+                .flat_map(|m| m.values())
+                .sum::<usize>(),
+            1,
+            "the refused cited_prefix_with_no_definer call must tally into scoped_out"
+        );
+
+        // Same id, an allow-listed check this time: must be admitted — proving the
+        // refusal above traces to the check gate, not to a missing cited_from_here
+        // entry for "foreign-cited".
+        assert!(
+            s.admit(
+                "abs_path_outside_managed_roots",
+                "foreign-cited",
+                &foreign_root.join("docs/foreign-cited.md").to_string_lossy(),
+            ),
+            "the same cited-from-here id must be admitted under an allow-listed check"
         );
     }
 }
