@@ -66,19 +66,38 @@ fn find_heading_section<'q>(
 /// Staying `isError: false` is deliberate and unchanged; see the comment at
 /// `src/usage/db.rs` on why `doc(get)` reports a heading miss in `body_meta`
 /// instead of raising. Only the *label* was wrong, and then only the *hint*.
-fn heading_miss_meta(name: &str, err: &crate::tools::RecoverableError) -> serde_json::Value {
+///
+/// `line_offset` converts `occurrences` from body-relative (what `resolve_section_range`
+/// computed) to file-relative, matching `grep`/`link_scan`. See
+/// docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
+/// and bug-fix-session-log:F-128 for why this is offset here but `start_line`/`end_line`
+/// deliberately are not.
+fn heading_miss_meta(
+    name: &str,
+    err: &crate::tools::RecoverableError,
+    line_offset: usize,
+) -> serde_json::Value {
     // One expression, so the two arms cannot drift on this field the way they already did
     // once. A hint is always present in practice — both `resolve_section_range` failure
     // paths use `with_hint` — but `unwrap_or_default` keeps this total rather than
     // asserting that from another module.
     let hint = err.hint().unwrap_or_default();
     match err.extra.get("occurrences") {
-        Some(occurrences) => json!({
-            "heading": name,
-            "heading_ambiguous": true,
-            "occurrences": occurrences,
-            "heading_hint": hint,
-        }),
+        Some(occurrences) => {
+            let occurrences = json!(occurrences
+                .as_array()
+                .map(|arr| arr
+                    .iter()
+                    .map(|v| json!(v.as_u64().unwrap_or(0) + line_offset as u64))
+                    .collect::<Vec<_>>())
+                .unwrap_or_default());
+            json!({
+                "heading": name,
+                "heading_ambiguous": true,
+                "occurrences": occurrences,
+                "heading_hint": hint,
+            })
+        }
         None => json!({
             "heading": name,
             "heading_missing": true,
@@ -94,6 +113,37 @@ fn slice_lines(body: &str, start: usize, end: usize) -> String {
     }
     let end = std::cmp::min(end, lines.len());
     lines[start - 1..end].join("\n")
+}
+
+/// Convert `headings[*].line` / `last_heading.line` in a preview JSON value from
+/// body-relative (what `preview::extract` returns — its own doc comment says
+/// "`body` is the markdown body with frontmatter already stripped") to file-relative,
+/// so a `doc(get)` heading map lines up with `grep`/`link_scan`, which both number
+/// from the start of the file.
+///
+/// Applied at the `get.rs` response boundary rather than inside `preview::extract` or
+/// `headings::parse`: those stay frontmatter-agnostic and independently testable, and
+/// `get.rs` is the one call site that already has the offset (`file_content` and
+/// `parsed_body` come from a single parse here). See
+/// docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md.
+fn offset_preview_heading_lines(preview: &mut Value, line_offset: usize) {
+    if line_offset == 0 {
+        return;
+    }
+    if let Some(headings) = preview.get_mut("headings").and_then(Value::as_array_mut) {
+        for h in headings {
+            if let Some(line) = h.get("line").and_then(Value::as_u64) {
+                h["line"] = json!(line + line_offset as u64);
+            }
+        }
+    }
+    if let Some(line) = preview
+        .get("last_heading")
+        .and_then(|lh| lh.get("line"))
+        .and_then(Value::as_u64)
+    {
+        preview["last_heading"]["line"] = json!(line + line_offset as u64);
+    }
 }
 
 fn apply_soft_cap(body: &str) -> (String, Option<(usize, usize, Vec<String>)>) {
@@ -638,7 +688,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     if let Some(body) = parsed_body.as_deref() {
-        let preview = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
+        let line_offset = file_content
+            .as_deref()
+            .map(|content| frontmatter::body_line_offset(content, body))
+            .unwrap_or(0);
+        out["frontmatter_lines"] = json!(line_offset);
+
+        let mut preview = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
+        offset_preview_heading_lines(&mut preview, line_offset);
         // `body_selected` (already in scope, computed above from `a.full` / `a.heading` /
         // `a.headings` / `a.start_line` / `a.end_line` — do not recompute it here) is the
         // DEFAULT for whether the preview gets stubbed. It is corrected to `false` below,
@@ -659,7 +716,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         // neither is "the caller got what they asked for", so both restore the
                         // full preview rather than only the strictly-absent case.
                         stub_this_preview = false;
-                        (String::new(), None, heading_miss_meta(name, &e))
+                        (
+                            String::new(),
+                            None,
+                            heading_miss_meta(name, &e, line_offset),
+                        )
                     }
                 }
             } else if let Some(ref list) = a.headings {
@@ -1315,6 +1376,98 @@ mod tests {
             .as_array()
             .expect("an ambiguous heading must also keep the full heading array");
         assert_eq!(headings.len(), 4, "# T, ## A, ## B, ## A: {headings:?}");
+    }
+
+    /// Regression for docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
+    /// (scoped fix: heading-map lines only — see bug-fix-session-log:F-128 for why
+    /// `start_line`/`end_line` semantics are deliberately untouched).
+    ///
+    /// The expected line is derived independently from the raw fixture text
+    /// (`.lines().position`), never by re-deriving the offset the production code
+    /// under test computes — see the bug file's own "## Tests added" section.
+    #[tokio::test]
+    async fn heading_map_lines_are_file_relative_not_body_relative() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let fixture = "---\nkind: spec\n---\n\n# Title\n\n## Alpha\n\nalpha body\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
+
+        let expected_line = fixture.lines().position(|l| l == "## Alpha").unwrap() + 1;
+        assert_eq!(
+            expected_line, 7,
+            "fixture shape changed; recompute expected_line"
+        );
+
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+        let headings = v["preview"]["headings"].as_array().unwrap();
+        let alpha = headings
+            .iter()
+            .find(|h| h["text"] == "Alpha")
+            .expect("Alpha heading present");
+        assert_eq!(alpha["line"], json!(expected_line));
+    }
+
+    /// Sibling of `duplicate_heading_reports_ambiguous_not_missing`, which asserted
+    /// document ORDER only and said why: "the frontmatter-stripping frame is exactly
+    /// what this bug's sibling is about." This is that sibling — asserting the
+    /// literal file lines, independently counted from the fixture text.
+    #[tokio::test]
+    async fn ambiguous_heading_occurrences_are_file_relative() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let fixture =
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n\n## A\n\nsecond\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
+
+        let a_lines: Vec<usize> = fixture
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| *l == "## A")
+            .map(|(i, _)| i + 1)
+            .collect();
+        assert_eq!(a_lines, vec![7, 15], "fixture shape changed; recompute");
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## A"}))
+            .await
+            .unwrap();
+        let occ: Vec<u64> = v["body_meta"]["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_u64().unwrap())
+            .collect();
+        assert_eq!(occ, vec![7, 15]);
+    }
+
+    /// `start_line`/`end_line` stay body-relative (see bug-fix-session-log:F-128), so
+    /// this field is the disambiguator a caller needs to convert a body-relative
+    /// number to a file-relative one themselves.
+    #[tokio::test]
+    async fn response_reports_frontmatter_line_count_for_offset_conversion() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let fixture = "---\nkind: spec\n---\n\n# T\n\nbody\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
+
+        let expected_offset = fixture.lines().position(|l| l == "# T").unwrap();
+        assert_eq!(expected_offset, 4, "fixture shape changed; recompute");
+
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(v["frontmatter_lines"], json!(expected_offset));
+    }
+
+    #[tokio::test]
+    async fn response_reports_zero_frontmatter_lines_when_there_is_no_frontmatter() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(dir.path().join("a.md"), "# T\n\nbody\n").unwrap();
+
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(v["frontmatter_lines"], json!(0));
     }
 
     /// The over-correction guard: a heading that genuinely is not there must still say

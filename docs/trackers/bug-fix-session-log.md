@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 127
+entry_high_water_F: 128
 entry_high_water_W: 119
 ---
 
@@ -13101,6 +13101,16 @@ I had answered their three-state question identically all night — **NOT WITHHE
 **Attribution:** the instance and the concession are `b0015a98-e290-46de-8ed1-3c94bc73a987`'s; they asked that it be recorded and could not write it themselves — `append_entry` refuses id allocation from a worktree checkout on ledger-wide-state grounds, independent of upstream, so clearing the push did not clear that. Written here at their request.
 
 **Status:** open
+
+## F-128 — Bug 64049952's preferred fix (Option 1) is incompatible with two pinned regression tests for start_line/end_line
+
+**Valid:** dated 2026-09-09
+
+**Observed:** `docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md` recommends Option 1 — make `doc(get)` file-relative everywhere, including "interpreting incoming `start_line`/`end_line`" as file-relative to match `grep`/`link_scan`. Scouting `src/librarian/tools/get.rs` before editing found two existing tests that explicitly pin the CURRENT body-relative contract as correct: `line_slice_returns_requested_range` (fixture has no blank separator, comment says "so that start_line=1 corresponds to L1 in the parsed body") and `line_slice_start_line_1_returns_first_visible_content_line` (docstring: "start_line=1 must mean the first VISIBLE line ... not that invisible separator" — itself a regression test for a prior related fix). Changing `start_line`/`end_line` to file-relative would silently move both tests' expected slices onto frontmatter lines / an empty result, contradicting a deliberately authored contract for every existing `doc(get, start_line=…)` caller, not just this bug's failure mode.
+
+**Decision:** scope this fix to the non-breaking half of Option 1 only — file-relative `preview.headings[*].line`, `last_heading.line`, and the ambiguous-heading `occurrences` array (the part the bug's own Evidence section demonstrates broken, and the part with no existing pinned contract). Leave `start_line`/`end_line` input/output semantics body-relative as today, and instead surface the frontmatter offset as a new `body_meta` field so a caller who wants to convert can — Option 2's spirit, applied only to the one surface Option 1 can't safely touch. Reusing `frontmatter::body_line_offset()`, which already exists (added for the analogous chunk/embedding line-range bug, `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`) but was never wired into `doc(get)` — a second call site with the identical defect shape that the first fix's helper was built to prevent, but didn't reach.
+
+**Cost avoided:** would have broken 2 tests silently changed maybe unnoticed if not the assertions had been read; caught before any edit via reconnaissance rather than via a failed `cargo test` run.
 
 ## Template for new entries
 
