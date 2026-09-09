@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 9
+entry_high_water_H: 10
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -510,3 +510,45 @@ number is wrong; they answer questions about different trees, and a hook quoting
 
 **Status:** proposed. Warn-first; the trigger is rare enough that a deny stage is unwarranted until
 a false-positive class is observed.
+
+### H-10 — Warn at EDIT time when the target file is already dirty
+
+**Valid:** dated 2026-09-09
+
+Shipped rather than proposed: `codescout-companion/hooks/pre-edit-dirty-check.mjs`,
+registered on `Edit|Write|mcp__codescout__(edit_code|edit_file|create_file)`
+(`claude-plugins:813a28d`).
+
+**The gap it fills is a phase, not a check.** `scripts/pre-commit-unreviewed-content.sh`
+already refuses a pathspec commit carrying unstaged content — at COMMIT time, by which point
+your edit and a peer's have merged in the working tree and the only move left is to
+disentangle them. That file's own remedy table records that explicit pathspecs do **not**
+defeat the co-edited-file layer (instance 5, `e0525462`), and the bug file says so directly:
+*"It narrows the window, it does not close it."* This hook fires before entry into the window.
+
+**Silent unless the path is dirty AND carries no marker from this session**, so ordinary work
+sees nothing; one warning per path per session bounds the noise. The session marker is what
+separates dirt you inherited from dirt you made — written on every edit, clean or dirty.
+
+**It claims only what `git status --porcelain` proves, and deliberately does not name a peer.**
+An earlier session of your own leaves an identical trace, and naming an unchecked cause ends
+the search for the real one. It *names* `scripts/file-provenance.py` as the next step rather
+than calling it: that scan costs ~7s, grows with the corpus, and on a solo checkout would fire
+on the user's own stale edit.
+
+**Ceiling, carried in the hook's header rather than only here.** Matchers see TOOL CALLS, so
+`sed -i`, `tee` and heredoc writes through native `Bash` are invisible to it — a path agents
+actually use, and the one the session that wrote this hook was using at the time. Linked
+worktrees share no working tree, so a peer in one is neither visible nor a hazard. Already
+committed peer work is not uncommitted state.
+
+**Three guarded sites, each mutated on the production path, each killing a distinct test** —
+drop the clean-status guard and *"clean file: silent"* reds; never write the marker and *"same
+path twice"* plus *"dirt this session made"* red; treat git's `null` as dirty and *"non-git
+dir: silent"* reds. Recorded because the four silence assertions passed **vacuously** before
+the hook existed: no hook, no output, nothing for an absence assertion to catch. They
+discriminate only because a fifth test proves the hook can speak.
+
+**Status:** shipped, warn stage. Promotion to deny is unwarranted until a false-positive class
+is observed — the bar this ledger already uses is zero warn-stage false positives across one
+month. Registration resolves at process launch, so it is committed, not live, until a restart.
