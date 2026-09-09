@@ -8,7 +8,6 @@ tags:
 - doctor
 - schema-drift
 - cluster/accepted-parameter-silently-dropped
-- cluster/declared-not-wired
 closed: null
 opened: 2026-09-09
 owner: marius
@@ -202,12 +201,24 @@ and publish no count, so a reader cannot tell whether `terminal_status_without_f
 > from the context alone. So `scope="all"` still returns a project-scoped report and the
 > 636 dropped rows are still dropped.
 >
-> **And the shape changed in a direction worth naming.** Before, the param was discarded
-> in silence. Now the response *asserts* `scope: all` over a population that is
-> project-scoped — the report states a scope it did not apply, which a caller has no way
-> to distinguish from a correctly widened one. That is the same class one layer out: the
-> declaration is well-formed and validated, and nothing wires it to the selector
-> (`cluster/declared-not-wired`).
+> **And the shape changed in a direction worth naming — without changing the class.**
+> Before, the param was discarded in silence. Now the response *asserts* `scope: all` over
+> a population that is project-scoped, which a caller cannot distinguish from a correctly
+> widened one. The pre-fix silence at least under-claimed. That reads at first like
+> `IC-3` (declaration is not execution), and it was briefly retagged so — wrongly. **The
+> class stays `IC-15`, on this ledger's own precedent:** IC-15 moved
+> `cli-artifact-drops-time-scope-and-extra` out to IC-3 *because no CLI flag existed, so
+> nothing was accepted*, and states its own claim as "a value the caller passed and the
+> system took, then did not use". `scope` is accepted here — parsed, type-checked and
+> enum-validated — and then not used, which is that sentence exactly. What `26b60af8`
+> changed is the **feedback**, not the class: acceptance is now explicit rather than
+> silent, the same wrinkle IC-15 already records for `read-only-true-is-inert-at-every-root`,
+> whose echoed `read_only: false` put a discriminator in a field nobody reads.
+>
+> (Recorded because the wrong turn is instructive: a fix for the sibling class can make an
+> IC-15 member *look* like an IC-3 one, since every stage of wiring is now present except
+> the one that reads the value. The discriminator is whether the parameter is accepted at
+> all — not how much machinery sits between acceptance and the drop.)
 >
 > Remaining work is the original Fix below: thread `effective_scope` into `managed_roots`
 > (or into the row filter) so the scanned population actually widens. A regression test
