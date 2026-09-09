@@ -213,6 +213,58 @@ about to publish. Attribution was never the missing piece here — it worked, an
 what made the ack precise. What was missing is a channel for *asking*, and the two are
 not the same instrument.
 
+
+### Instance 2026-09-09 — the author was LIVE, IN DIALOGUE, and still not asked
+
+Strictly stronger than the founding instance, where the withholding author was invisible in the
+artifact. Here the author was **reachable, mid-conversation with the pusher, and had stated the
+hold in writing** — and the commit went out anyway, correctly, by the route the guard prescribes.
+
+Sequence, all 2026-09-09:
+
+1. `c86ebb51-7ae3-477d-b755-f25db6180782` commits `f3e7c08b`, then **declines to push it**:
+   `d71f0aac` (`b80a27d4-9729-40ef-8c28-ad8982df6d13`) is its ancestor, so no push form publishes
+   one without the other, and `d71f0aac` post-dated the set that session's operator had
+   authorised. It surfaces the decision to its operator and says so to the peer.
+2. `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`, holding its **own** operator's *"push all"*, sees
+   `f3e7c08b` in its range, acks both foreign sids and pushes the branch form.
+   `c7de80bb..f3e7c08b`, exit 0, 14:12:26Z.
+3. The messages crossed. The pusher discloses it unprompted, states it assumed rather than asked,
+   and asks the author to tell its operator the commit went out under a peer's authorisation.
+
+**What this adds to the root cause.** `CODESCOUT_PUSH_ACK` is granted by the **pusher's** operator
+over **other sessions'** commits. There is no channel by which the acked author consents, refuses,
+or is even notified — the ack names their sid *to the guard*, not *to them*. So the guard's
+authorisation model is sound about the branch (one operator owns it) and silent about the
+commit (its author is not a party). An author actively holding a commit and an author who never
+existed are **byte-identical to the ack**, which is this file's claim extended one level: not only
+does git not record the withholding, the guard's own consent mechanism has no slot for it.
+
+**And the diligent path does not help, which is the tell.** The pusher read its range, resolved
+every author, obtained its operator's authorisation and used the prescribed ack. The author
+committed, verified, declined to push and surfaced upward. Both behaved correctly by every rule
+written down, and the outcome is a commit published against its author's stated intent. *"Ask the
+author first"* is the missing step and it is **not** in the guard's text, which routes the pusher
+to their operator and stops.
+
+**A liveness detail worth carrying, because it nearly inverted the reading.** One call before the
+push, the guard's own output rendered `b80a27d4`'s address as `[]` where minutes earlier it had
+shown `[LIVE]`. Had that been read as *"author gone, nobody to ask"* the ack would have looked
+like the only route rather than one of two. The address decayed; the sid did not — § *Observer
+Blindness*'s rule about which component to attribute by, arriving inside the decision it governs.
+
+**Also falsifies the fallback this file's § *Workarounds* leans on.** A sha refspec does **not**
+pin "only my commits": `git push origin <sha>:<branch>` sends everything **reachable** from that
+sha, so where the uncleared commit is an *ancestor* there is no refspec that excludes it.
+Verified: `git merge-base --is-ancestor d71f0aac f3e7c08b` → true. Both sessions believed the
+refspec route was available as a fallback and neither had it. Compounding this, the refspec form
+is independently **broken** as a guard input —
+`docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`
+— so the recommended escape is both narrower than advertised and, when it does apply, silent.
+
+**Not filed as a new bug.** Same mechanism, same class; recorded here so the count is a count and
+not two half-records. Reported by the pusher, `26cb9b5b`, who disclosed it before the author read
+it off the remote.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
