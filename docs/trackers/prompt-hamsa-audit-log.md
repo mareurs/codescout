@@ -74,6 +74,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-36 | 2026-09-02 | The SAME practice rule as A-35, unchanged byte-for-byte. **ONLY THE STIMULUS CHANGES** — varying rule and stimulus together would leave a null uninterpretable. Scenario: `prompt-engineering:scenarios/plan-opens-the-function-competing`. | A-35 disqualified itself under its own branch (4): base 9/10, no treatment result citable. The diagnosis was pre-registered as its caveat (1) — one question about one small module in an empty repo makes opening the body nearly free. CAP-10's 6-of-6 arose drafting SIX briefs under length pressure where every lookup competes with five others: **the deficit is a property of that competition** and A-35 removed it. NOT a rate too low to see (base's one failure was exactly the predicted shape, so trap and checker both work) and NOT fixable by more runs — n does not move a ceiling. | FOUR traps in FOUR modules, one turn, brevity instruction so lookups compete. `extract_citations` dedups · `normalise` int()s away zero-padding · `count_entries` needs dash AND title · `strip_prefix` strips EVERY repetition. Each true value EXECUTED before the checker was written. PASS requires all four by design: P(pass) = (1-p)^4, so A-35's p~0.1 predicts base ~0.9^4 = 66% — headroom one trap cannot produce at any n. Stimulus byte-identity verified independently: all four `977e973f63da`. Checker mutation-tested, 12 cases, 6 classes; **the test already paid for itself**, catching a parser defect that rejected backticked assignments, which A-35's logs show in 8 of 10 runs. | PRE-REGISTERED. **THRESHOLDS ARE HEADROOM-RELATIVE** — A-35's ship condition `treatment >= base+3` read `>= 12` on a ten-point scale at base 9, unreachable once base cleared 7; a ship condition that cannot be met is not a decision rule. gap = 10 - base. (1) control-positive < 8/10 => VOID — with four traps it must show the task is ANSWERABLE when the facts are known, so a low base reads as "did not look" not "could not tell". (1b) three-way tie => VOID. (2) base >= 9/10 => no treatment result citable; v3 needs more competition, not more runs. (3) SHIP iff treatment closes >= 60% of gap AND treatment > control-null. (4) DECORATION iff treatment closes <= 20% of gap — CAP-10's injection route RETIRED, not re-tuned. (5) else INDETERMINATE at n=20. | Moderate that the deficit appears: the (1-p)^4 arithmetic rests on A-35's p, one observation at n=10, so base could land 41–82% — stated as a range, with (2) catching the top and (5) the middle. LOW that the treatment moves it, unchanged from A-35. **What I have already been wrong about:** I predicted A-35 would show a deficit and got 9/10; the error was the STIMULUS, not the rule's plausibility. The same error is available here in smaller form — four traps in ONE turn compresses the competition rather than reproducing its duration, and if that compression is what mattered, v2 ceilings too and v3 needs multi-turn. | **RUN 2026-09-02. BRANCH (2) FIRES AGAIN — base 9/10, CEILING DISQUALIFICATION, no treatment result citable.** base **9/10** (distinct 4; PASS=9, UNPARSEABLE=1, and that one is a checker surface gap not a model error) · control-null **8/8** before the run was stopped · treatment and control-positive NOT RUN, stopped deliberately once base ceilinged rather than paying for two arms of uncitable numbers. **The pre-registered caveat fired verbatim** — "four traps in ONE turn compresses the competition rather than reproducing its duration; if that compression is what mattered, v2 ceilings too and v3 needs multi-turn." The (1-p)^4 arithmetic was sound and its premise was wrong: p is not a per-trap constant, because the marginal cost of a fourth read is still trivial. **Two independent stimuli, both ceilinged, both pre-registered as diagnostic — the honest conclusion is that this rule is not testable in `mode: output` at all.** v3 needs A-29's multi-turn trace-scored shape, which costs a subsystem to answer a question about one sentence. **A SECOND scoring bug reached a paid run:** 9 of 10 base runs first scored UNPARSEABLE with every answer in them CORRECT — the model answered in CALL form (`extract_citations(DOC) = …`), reproducing the question's notation, and the parser demanded the bare name. Trusted, it would have read as base 1/10. Same cause as the backtick defect before it: **mutation cases written from an imagined output shape, not an observed one.** The cheap rule I did not have — seed the checker's cases from a pilot run's real responses before spending on the arm. Re-scored from existing logs via score_arm.py rather than re-running. |
 | A-37 | 2026-09-02 | CAP-10's practice rule, THIRD stimulus — multi-turn and trace-scored, against a REAL trap (codescout's own truncated `symbols` render, bug `3a68e76e4a9bdfe8`). Scenario `prompt-engineering:scenarios/plan-opens-the-function`, base arm. | A-35 and A-36 both ceilinged in `mode: output`, which can ask only *"is the answer right"* — both died under branch (4) with no account of **why**. | Score the TRACE, not the answer, so the process is observable; use a genuine defect rather than a synthetic planted one. | Branch (4) pre-registered: base ≥ 9/10 disqualifies citing any treatment result. | — | **base 10/10, distinct 10 — branch (4) fired, no treatment purchased.** 10 of 10 runs opened the body; **0 of 10 ever asked a listing for a signature**, and a truncated render appeared in 0 of 14 symbol observations though the trap was verified live by a blocking setup command. The rule describes a behaviour that is already the default → **DECORATION**, CAP-10's injection route RETIRED rather than re-tuned. Two confounds caught by $0.09 smoke runs, one of them a genuine gap in `CLAUDE.md` § *Testing Discipline*: "annotate the fixture's load-bearing detail on the fixture line" assumes the reader is a developer — when the fixture is planted into a run, the reader is the SUBJECT, and the model quoted the annotation back. $1.43. |
 | A-38 | 2026-09-03 | `prompt-engineering:scenarios/surface-budget` — the baseline instrument, built 2026-08-23 | Its pre-registration is **owed and unwritten**: the task was scoped not to modify this repo, and its own README states the `-base` table must not be published until the entry exists. So a RUN-READY instrument is blocked on a missing ledger row | Register the thresholds that README already lists (nullctl TIE; tracker-base and routing-base each ≥ 8/10; record prompt-per-turn, calls, guidechars, distinct), and fill P-2a's observable table before any arm | `nullctl` splits by 0; both `-base` arms land at or near ceiling — a prediction of LOW POWER, not of success, grounded in `ledger-vs-tracker`'s measured 10/10 across all four cells AND under `--ablate` | high on the ceiling | **RAN 2026-09-03, 40 runs / $5.37.** nullctl TIES (10/10 vs 10/10, split 0) — rule 2 met. `routing-base` **9/10**, matching the predicted 9–10 exactly, so the low-power prediction held and the arm is usable as a regression floor. `tracker-base` **0/10** and rule 3 is NOT EVALUABLE: its prompt asserts a bug its own fixture does not contain, so verifying the premise scores as the failure — an arm pointed backwards, and the second such in a four-task suite. Two bugs filed; `prompt_per_turn` shown non-invariant to path length (557× its fixed-turn noise floor) with the cache split unrecoverable. **Addendum same day:** `tracker-base` repaired (fixture premise + catalog write path) and re-scored from the existing logs to **9/10**, so rule 3 is met on both arms at 9/10 and the low-power prediction holds across both |
+| A-39 | 2026-09-09 | `src/prompts/source.md`:14-15 — Iron Laws 4 and 5 (`read_file` on markdown → heading-addressed; `edit_file` on markdown → heading+action), mirrored at `.codescout/system-prompt.md`:34 | FORCED BY REMOVAL. The collapse folded `read_markdown` into `read_file` (`ff60dbc4`) and `edit_markdown` into `edit_file`. Those tools were STRUCTURAL GUARANTEES — `edit_markdown` could only edit by heading because no other grammar existed. Laws 4/5 are the INSTRUCTION replacing the guarantee, so P-3 is unavailable (no base arm; the text is not optional) and P-4 governs: show the cut does not regress what the removed tools protected | No further surface change. Two-week observational window on `.codescout/usage.db`, comparator specified in SQL because the prose form has two readings pointing opposite ways: `read_markdown`'s share of markdown reads (2864/2872 = 99.7%) vs its share carrying a `heading` param (779/2864 = 27.2%). Only the second is honest — `read_markdown` returned a heading MAP by default, as `read_file` on `.md` now does | READ side holds ≥ 27.2%, regression below 20%. EDIT side regresses and is the live question: `edit_markdown` carried a heading on 1696/1771 = 95.8% by construction, and an instruction cannot reproduce a grammar restriction; hold threshold set low at 50% | Read: high it holds. Edit: high it regresses, LOW on magnitude. Declared and unsolved confound — `usage.db` records only MCP calls, so markdown edited via native `Edit`/`Bash` is invisible to the denominator. A recording filter, not a sample size; a longer window does not fix it |
 ## Protocol — subtract-and-measure (P-1..P-8)
 
 Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo. **P-2a's observable table is cross-repo too, and for a sharper reason: the failure that produced it happened in `claude-plugins`, outside this protocol's stated binding.** A gate only works where the form is filled in, so the table travels with the pre-registration rather than with this repo — mirrored at `claude-plugins:docs/templates/eval-pre-registration.md`.
@@ -2277,3 +2278,185 @@ carrying a count that decays on every addition (`513ed29`).
 for the measured ceiling grounding the prediction; `P-2`/`P-2a`/`P-3`/`P-6`/`P-8` above;
 `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`;
 `resume-tool-surface-structural-mechanisms:SM-4`, which carries the same deferral finding.
+
+## A-39 — Iron Laws 4/5 are forced by removal, so P-3 is unavailable and P-4 governs; and the dead-name observable is DEAD in `usage.db` by construction
+
+**Status:** **PRE-REGISTERED 2026-09-09, window open, no arm run.** Outcome is `""` and stays
+that way until evidence lands at the close of the window (2026-09-23). Registered *after* the
+ship (`ff60dbc4`, 2026-09-02 21:15), which is why the already-observed block below is mandatory
+rather than courteous: a registration written after some measurement must say which measurements
+it does not cover, or it is backdating. That standard is A-38's, applied here to A-38's own author.
+
+**Why this entry exists.** The tool collapse folded `read_markdown` into `read_file` and
+`edit_markdown` into `edit_file`. Iron Laws 4 and 5 are the text that replaced them, and that text
+has never been audited. The reason it needs a different protocol from the rest of this ledger is
+the reason it is worth an entry at all: **it is forced by removal.** Every other intervention row
+here asks *should we add this sentence?* — a question with a no-ship branch. This one has none.
+The tools are gone; something has to tell a caller how to reach a heading. The only live question
+is what the instruction costs relative to the guarantee it replaced.
+
+### A-39 — what is ALREADY OBSERVED and is deliberately NOT under this registration
+
+**The effective ship instant is `2026-09-03 ~06:30`, not the commit date.** `ff60dbc4` landed
+2026-09-02 21:15, but the running binary lags the commit until `cargo rb` plus an `/mcp`
+reconnect; the last `read_markdown` call in `usage.db` is `2026-09-03 06:26:09` and the first
+`read_file` `.md` call carrying a `heading` is `2026-09-03 06:36:32`. A window keyed to the commit
+date would silently include nine hours of pre-collapse behaviour. **Key windows to the reconnect,
+not to the merge** — this generalises to every `usage.db` measurement of a shipped surface.
+
+Measured 2026-09-09 20:06 over the 6.4 days already elapsed, and NOT under this registration:
+
+- **Read side.** `read_file` on `.md` carrying `heading`/`headings`: **127 / 368 = 34.5%**.
+  Pre-ship comparator, `read_markdown` calls carrying the same params: **779 / 2864 = 27.2%**.
+- **Edit side.** `edit_file` on `.md` carrying `heading`: **76 / 425 = 17.9%**. Pre-ship
+  comparator, `edit_markdown` carrying `heading`: **1696 / 1771 = 95.8%**.
+- **Dead names.** Zero `read_markdown` / `edit_markdown` rows against 11,395 post-ship calls —
+  **and this number is worth nothing; see Observable 3.**
+
+Nothing else has been run. There is no treatment arm and there will not be one.
+
+### A-39 — P-1, the failure named
+
+Not a transcript failure — a **category change**, which P-1 admits as a locally observed fact
+about the system rather than an imported claim. `edit_markdown` could not perform a non-heading
+markdown edit, because the grammar did not exist: 95.8% heading-carrying was not compliance, it
+was arithmetic, and the residual 4.2% is frontmatter-only operations. `edit_file` has a text
+grammar (`old_string`/`new_string`) that is entirely legitimate on prose, so post-collapse a
+markdown edit can decline the heading route without doing anything wrong. **A guarantee became a
+preference.** Iron Law 5 is the only thing standing where a type error used to stand.
+
+### A-39 — the move, and the prediction
+
+**Move:** no prompt-surface change of any kind. Open a two-week observational window on
+`.codescout/usage.db` and read it once, on 2026-09-23. P-4's *observational window on real
+sessions*, and P-5 mechanical — `input_json` records the params, so the behaviour is
+trace-observable and no judge is needed.
+
+**The comparator is registered as SQL, not as prose, because the prose has two readings that
+point in opposite directions.** "`read_markdown`'s share" resolves either to its share of
+markdown reads (2864/2872 = **99.7%**) or to its share carrying a `heading` param (779/2864 =
+**27.2%**). Against the first, the read side looks like a collapse from 99.7% to 34.5%; against
+the second it is a rise from 27.2% to 34.5%. **The second is the honest one** — `read_markdown`
+returned a heading *map* by default, exactly as `read_file` on `.md` does now, so the first
+compares *which tool was called* against *which parameter was passed*. Registered comparator:
+
+```sql
+-- READ side, post-window. Denominator and numerator both post-reconnect.
+SELECT COUNT(*) FROM tool_calls WHERE tool_name='read_file'
+  AND input_json LIKE '%.md%' AND called_at > '2026-09-03 06:30:00'
+  AND (input_json LIKE '%"heading"%' OR input_json LIKE '%"headings"%');
+-- EDIT side, post-window.
+SELECT COUNT(*) FROM tool_calls WHERE tool_name='edit_file'
+  AND input_json LIKE '%.md%' AND called_at > '2026-09-03 06:30:00'
+  AND input_json LIKE '%"heading"%';
+```
+
+**Prediction, committed now.** READ side (Law 4) **HOLDS** at or above 27.2%; regression below
+20%. EDIT side (Law 5) **REGRESSES**, and is the live question; hold threshold deliberately low
+at **50%**, on the reasoning that an instruction cannot reproduce a grammar restriction and the
+honest test is whether it retains even half of it. **Confidence:** high on the read side, high
+that the edit side regresses, **low on the edit magnitude** — the threshold is the honest part of
+the guess, not the number.
+
+### A-39 — P-2a, the observable table, filled before running
+
+**Observable 1 — read-side heading share.**
+
+| trace | observable returns |
+|---|---|
+| law holds | ≥ 27.2% |
+| law fails | < 20% |
+| **law absent from the surface** | **unchanged, ~27–34%** |
+
+**Rows 1 and 3 COLLIDE, so this observable is WEAK on its own and is registered as such.**
+`read_file` on `.md` returns a heading map by default, so heading-addressed reading is what the
+tool's own output shape encourages whether or not Law 4 is present. A pass here credits the law
+with work the default behaviour may be doing. It is retained as a **regression detector only** —
+it can refute (a fall below 20% means something broke) and it cannot confirm.
+
+**Observable 2 — edit-side heading share.** This is the one that discriminates.
+
+| trace | observable returns |
+|---|---|
+| law holds | ≥ 50% |
+| law fails | < 50% |
+| **law absent from the surface** | **near 0%, since nothing else routes to the heading grammar** |
+
+No collision: `edit_file`'s default on markdown is not the heading grammar, so all three rows are
+distinct. **Observable 2 is the registration; Observable 1 is a guard rail.**
+
+**Observable 3 — dead-name calls, and it is DEAD.**
+
+| trace | observable returns |
+|---|---|
+| law holds | 0 |
+| law fails | > 0 |
+| **the tools cannot be called at all** | **0** |
+
+**Rows 1 and 3 collide totally, and the collision is at the recording layer rather than in the
+reasoning.** Verified in source 2026-09-09: `src/server.rs`:1089 is
+`let tool = self.resolve_tool(&req.name)?;`, an early return, and usage recording happens after
+the call completes because it needs latency and outcome. A call naming a removed tool therefore
+**never reaches `usage.db` at all**. The zero is unreachable-by-construction, not evidence, and
+it would read identically if every session in the window were hammering `edit_markdown`.
+
+**It is rescued by a different layer, and only there.** `tracing::info!(tool = %req.name, …)`
+(`:1083`) and `heartbeat::note_tool(&req.name)` (`:1086`) both run *before* `resolve_tool`, so a
+dead-name call is visible in the trace log and in the heartbeat and nowhere else. **If Observable
+3 is to be read at the close of the window, it must be read from the logs; a `usage.db` query
+against it is a fabricated pass.**
+
+> **This raises a question about A-2 that is NOT answered here and must not be assumed either
+> way.** A-2's outcome rests on *"0 dead-name calls / 4,743 post-cut"*. If the tools it named
+> were already unregistered at the time, that zero has this same collision and A-2's evidence is
+> weaker than it reads. If they were still registered and merely undocumented, the zero is sound
+> and means what it says. Whoever closes this window should check which, and correct A-2's row or
+> leave it standing on the evidence. Recording the doubt rather than the correction, because the
+> correction has not been derived.
+
+### A-39 — decision rule, registered before any arm
+
+1. **Read the window once, on 2026-09-23**, with the SQL above verbatim. Not earlier, and not
+   repeatedly until it reads well — a window re-read until it agrees is a post-hoc threshold
+   wearing a date.
+2. **Observable 2 decides.** ≥ 50% → Law 5 retains a usable share of what the grammar guaranteed.
+   < 50% → the finding is that a structural guarantee was traded for an instruction at a measured
+   cost, and that is a **result to record, not a failure to fix by rewording the law**. There is
+   no no-ship branch here; the tools are gone.
+3. **Observable 1 may only refute.** A pass is not evidence Law 4 works (rows 1/3 collide).
+4. **Observable 3 is read from the trace log or not at all.**
+5. **Report both numerator and denominator every time.** A share alone cannot be re-derived, and
+   this ledger's own standard is that a count arrives with its unit or not at all.
+6. **Outcome stays empty until 2026-09-23.** A regression is the predicted result on the edit
+   side and is recorded with the same care as a win.
+
+### A-39 — what this cannot establish, recorded before the run
+
+- **The confound is declared and NOT solved: `usage.db` records only MCP calls.** Markdown edited
+  through native `Edit` or through `Bash` (`sed`, heredocs) is invisible to both numerator and
+  denominator. An auto-mode session — Bash-preferring by configuration, as the session writing
+  this entry is — contributes markdown edits the instrument cannot see. **This is a recording
+  filter, not a sampling problem**, so widening the window or the corpus does not touch it, and
+  the reflex remedy looks responsive while changing nothing. What the window measures is the
+  heading share *among edits that went through codescout*, and it must be reported in exactly
+  those words.
+- **One project's database.** `.codescout/usage.db` is per-project; this is codescout's own
+  checkout, whose sessions are unusually literate about these laws. It is the friendliest
+  possible corpus for a compliance number, which matters mainly if Observable 2 passes.
+- **No counterfactual.** There is no arm in which Laws 4/5 are absent, and there cannot be one
+  without un-shipping the collapse. Nothing here can separate *the law works* from *callers would
+  have done this anyway* — Observable 1's collision is that limit made explicit, and Observable 2
+  narrows it by argument rather than by measurement.
+- **`LIKE '%.md%'` over `input_json` is a substring match**, so it will catch a `.md` appearing
+  anywhere in the payload, including inside a buffer handle or an `old_string`. Registered as-is
+  for reproducibility rather than silently improved later; a tightened predicate is a different
+  measurement and needs its own row.
+
+**Valid:** dated 2026-09-09; the window closes 2026-09-23.
+
+**Rests on:** `P-1`/`P-2`/`P-2a`/`P-4`/`P-5`/`P-8` above — and explicitly NOT `P-3`, which is
+unavailable for a forced-by-removal change; `A-2` for the dead-name precedent, whose soundness is
+queried above and left open; `A-38` for the already-observed convention and the P-2a stop rule;
+`ff60dbc4` (fold `read_markdown` into `read_file`, 2026-09-02 21:15) for the ship;
+`src/server.rs`:1083-1089 for the recording-order finding that kills Observable 3;
+`docs/plans/2026-09-09-tool-collapse-post-merge-queue.md` § *OWED* item 1, which owed this row.
