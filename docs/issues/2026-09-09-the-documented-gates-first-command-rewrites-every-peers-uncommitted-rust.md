@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/blast-radius-exceeds-visibility
 closed: null
@@ -8,6 +8,7 @@ opened: 2026-09-09
 owner: marius
 related: []
 severity: high
+unverified: 'The guard exists and is CI-enforced, but CLAUDE.md''s gate still names bare `cargo fmt`, so a session following the documented path still reaches the unsafe command. Adoption is an operator call: the gate sentence is pinned byte-for-byte by a test and changing it changes the gate every session on this shared checkout runs.'
 ---
 
 # BUG: the documented gate's first command rewrites every peer's uncommitted Rust
@@ -104,7 +105,52 @@ reaches the same write with nothing to defeat.
 
 ## Fix
 
-**Not applied — this needs a ruling, not a patch.** The repair touches `CLAUDE.md`
+**Option 2 BUILT, 2026-09-09: `scripts/fmt-mine.sh`, guarded by `tests/fmt-mine.sh`
+(29 assertions) in its own CI job `fmt-mine-tests`.** Status is `mitigated` and not
+`fixed` on purpose — see § Resume: the tool exists and the documented gate still names
+the unsafe command, so anyone following `CLAUDE.md` literally still reaches bare
+`cargo fmt`.
+
+What it does: stage 1 is `cargo fmt -- --check`, which the gate pays for anyway, and on a
+tree needing no reformatting it exits there having spent nothing extra. Only when something
+WOULD be rewritten does it pay for stage 2, the transcript scan. It then formats only the
+files `scripts/file-provenance.py` attributes to this session and refuses the rest, naming
+the owner's sessionId, their `[LIVE]` marker and the `uds:` socket to reach them.
+
+`SHARED` and `UNKNOWN` are refused alongside `PEER`. `UNKNOWN` in particular is never read
+as "safe to format": absence is a statement about coverage, and reading it as "nobody owns
+this" is the same substitution the provenance tool's own docstring forbids in the opposite
+direction. There is deliberately **no `--force`** — a flag that reformats a peer's file on
+your say-so re-admits the defect under a spelling that reads as deliberate, and the honest
+escape already exists: run `cargo fmt` yourself, which is the same act minus the false
+assurance that a guard sanctioned it.
+
+**It shipped one defect, and how it was caught is the transferable part.** The first
+partition used `sed -n 's|^\(SHARED\|PEER\|UNKNOWN\)...|'` — where `|` was both the
+`s///` delimiter and the intended alternation. sed reads an escaped delimiter as a
+literal, so the pattern matched the string `SHARED|PEER|UNKNOWN` and never fired.
+`NOT_MINE` was always empty and every refusal fell through to a branch reporting *"nothing
+attributable to this session needs formatting"* for a file a live peer owned.
+
+**It still refused, and still wrote nothing.** Exit code correct, bytes correct. A suite
+asserting on outcomes alone is green against it — verified by mutation: restoring that
+`sed` reds **8** assertions, every one of them about the MESSAGE (`names the owning sid`,
+`names the socket`, `names the LIVE marker`, `says why there is no --force`), while
+`PEER exits 1` and `PEER left the file unwritten` stay green. That is § *Testing
+Discipline*'s remedy-text law with a measurement attached, met inside the fix for a bug
+about the same law.
+
+Four mutations, four kills: the `sed` defect (8), dropping `SHARED` from the not-mine set
+(1), gutting the no-`--force` rationale (1), removing the clean-tree fast path (2).
+
+The suite's own non-vacuity control was vacuous first: the stub announced itself on stderr,
+which the script captures into `$PROV` and parses, so the marker never reached the output
+being asserted on. A control that asserts on a channel the subject CONSUMES observes
+nothing. Replaced with a marker file the script cannot swallow.
+
+### The two options not taken
+
+**Not applied — these need a ruling, not a patch.** The repair touches `CLAUDE.md`
 § *Development Commands*, whose gate sentence is pinned byte-for-byte by
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`),
 and changing a project instruction because a session decided to is not this session's
@@ -135,6 +181,19 @@ yours.
 
 ## Resume
 
+**One step left, and it is not a session's to take.** `scripts/fmt-mine.sh` exists, is
+tested and is CI-enforced, but `CLAUDE.md` § *Development Commands* still opens the gate
+with bare `cargo fmt` — so the documented path still reaches the unsafe command and this
+stays `mitigated`. Making it gate step 1 edits a project instruction whose sentence is
+pinned byte-for-byte by `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order`,
+and it changes the gate every other session on this checkout runs. Six sessions were live
+here when this was written. That is an operator call, not a session's.
+
+If it is taken: move the pinning test with the sentence rather than deleting it, per that
+section's own instruction, and announce it — a session mid-gate whose step 1 changed under
+them reads it as a broken tool.
+
+Original ruling text, superseded by the above:
 Take a ruling on the three options in § Fix. If option 1 or 2, move
 `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` with the sentence
 rather than deleting it, as § *Development Commands* instructs.
