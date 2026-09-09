@@ -25,6 +25,21 @@
 #      write at all. Rendering it as "nobody" or "not yours" is the failure mode
 #      file-provenance.py refuses, and it costs more here.
 #
+# A FOURTH THING, AND IT IS THE ONE THIS SUITE ALREADY GOT WRONG ONCE. A case can be able
+# to falsify and still be useless, if it can only falsify in a shape the field never
+# produces. Before 2026-09-09 three cases here covered "a red naming ONLY clean files" and
+# all three fire on the ordering mutation -- so a count of guarding assertions said 3 and
+# read as coverage. But a real compile error names a dirty file AND a clean one in the same
+# text (an E0061 whose secondary span points into an untouched file), and NOTHING covered
+# that. The co-occurring case was added and is the only one of the four that catches it.
+#
+# This is the population law in its harder direction: the usual failure is a corpus that
+# cannot falsify at all, which mutation finds immediately. This one falsifies happily on an
+# input that does not occur. Mutation alone does not surface it either -- the run comes back
+# "4 killed" and looks healthy. What surfaces it is asking WHICH of the killers fires on the
+# realistic input, and that is a question about the shape of the corpus rather than about
+# the assertions. Named by sessionId 5399543d-22d6-4ed9-9ebb-876be459989f.
+#
 # Fixtures are synthetic transcripts against a real throwaway git repo: the window is
 # derived from `git log -1 --format=%cI`, so it cannot be tested without one.
 set -u
