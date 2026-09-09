@@ -118,10 +118,32 @@ finding is a misattributed commit minus the diff, and harder to catch:** the par
 has no reason to look, and the party being credited has no reason to object — `b80a27d4`'s
 formulation, made while declining credit that cost them nothing to accept.
 
-**Mechanism, since a resolution to be careful is what this ledger exists to refuse:** apply the
-same rule to a claim about a peer that the corpus already gets — if it names who did what, resolve
-it (`git log -S`, `scripts/file-provenance.py`, the Session-Id trailer) *before* sending, not after
-being corrected. The check is identical; only the destination differed.
+**Mechanism status: NONE YET — and the first form of this row got that wrong, which is the row
+happening again one level up.** It read *"Mechanism, since a resolution to be careful is what this
+ledger refuses"* and then prescribed *"if it names who did what, resolve it before sending"* —
+which is a **policy tied to noticing**, the exact thing this section exists to refuse, labelled as
+its opposite.
+
+**The structural cause, which is `b80a27d4`'s and is worth more than the attribution case because
+it names a population rather than an instance: care was never what was doing the work at the
+artifact.** A corpus write passes through surfaces that **refuse** — the pre-commit gate rejects a
+pathspec commit carrying a peer's staged paths; `doc()` refuses a direct edit to a ledger with a
+declared `entry_prefix`; `append_entry` allocates the id rather than trusting the caller's; the
+cluster gate blocks a bug file whose `**Members:**` append is missing. **`SendMessage` validates
+nothing and refuses nothing.** So the asymmetry is not two attitudes, it is **one guarded surface
+and one unguarded one**, and the general form is: *a claim leaving by an unguarded surface is
+unchecked regardless of how careful its author is everywhere else.* Everything that exits that way
+inherits it — a count, a peer's sid, a file's authorship, a range — not just attribution. The
+mechanism-shaped answer is a hook on the outbound surface; nothing of the kind exists, so this row
+is a **design worklist item** in the sense `H-N` and `I-N` consume, not a solved problem.
+
+**And the detection was luck of position, not a detector — which the first form of this row
+implied away by noting both errors were caught.** `b80a27d4` was, in both cases, the **one party
+able to refute the claim**: the first was about their own commit, the second about their own sends.
+Neither was found by a check, a reader, or the author. **A third message-only attribution error
+tonight, aimed at anyone else, would still be sitting there uncorrected** — their own point, and
+the reason "both were caught" is a fact about who happened to be addressed rather than evidence of
+a working correction path.
 
 
 **Row 5 is the sharpest and is stated by its author.** Told that a peer was retracting *"I dressed
