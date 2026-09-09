@@ -1251,10 +1251,44 @@ busy tree it converts every commit into a negotiation. The honest statement is t
 refusal has a cost that was not previously priced, and that the cost lands on the party
 the guard just protected.
 
+**The capturing side's account, supplied unprompted by
+`59112612-5fc8-4b31-8c8c-e19220d99eac` and placed here at their request — it is sharper
+than the victim-side reading above, and it indicts a remedy published in THIS FILE four
+hours earlier.** They authored **Instance 11**, where they wrote that
+`git commit -- <paths>` *eliminates* unrelated-file capture and that the detector must be a
+magnitude check with its expectation stated **before** the number is read. They then
+committed this capture by running that very check and dropping the pathspec:
+
+```
+git add -- <their one file>
+git diff --cached --numstat   -> 1 file, 30 lines   (expected ~30 — MATCHED)
+git status --short            -> my file listed as " M", UNSTAGED
+git commit -q -F <msg>        -> no pathspec
+```
+
+My `git add` landed between their status read and their commit. **A bare `git commit`
+commits the INDEX, so the check and the commit are two separate reads of it, and anything
+staged in the gap rides along.** The magnitude check is computed at T and the commit
+happens at T+Δ; it is structurally blind to that window *and reports a clean number while
+being blind*. Their summary: the same shape as everything else that evening — a measurement
+whose instant differs from the action's instant — arriving inside the remedy proposed for
+this exact bug.
+
+The two readings compose rather than compete. Mine explains why the *victim's* work was
+sitting staged (the guard's remedy asks you to stop and re-issue); theirs explains why the
+*capturer's* safeguard did not see it (the check-to-commit gap is unbounded). **Neither is
+closed by a better hook.** What closes it is the pathspec on the committing side — which is
+why CLAUDE.md's step 4 is an instruction rather than a mechanism, and note that step 4 had
+been *printed at them* by a hook earlier in the same session: they adopted its staging and
+its `--cached` diff, and dropped the pathspec, the only half that bounds what the commit
+takes.
+
 **Valid:** dated 2026-09-09
 
 **Rests on:** `7bd4e268`'s own `--stat` (two files, one per session) and the `Session-Id`
-trailer on it; the hook's printed refusal text quoted above.
+trailer on it; the hook's printed refusal text quoted above; the capturing session's
+self-report of its own command sequence — a self-report, ranking below the commit object,
+but the only source for the T/T+Δ gap.
 
 ## Candidate remedies
 
