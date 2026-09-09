@@ -1,17 +1,16 @@
 ---
-id: '567e4dd81e345273'
+id: e08e935cec1ade7e
 kind: bug
-status: open
+status: fixed
 title: the heredoc backtick scanner selects one delimiter, and its non-vacuity control catches a renamed opener but not an added one
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
 topic: test controls and selector scope
-closed: ''
+closed: 2026-09-09
 opened: 2026-09-09
 severity: medium
-unverified: The triggering edit was not made - no second heredoc was added to the guard, and the scanner was not mutated, because a peer session was building against this shared checkout. The claim rests on reading the awk selector and counting openers, which entails the blindness without observing it.
 ---
 
 # BUG: the heredoc backtick scanner sees one delimiter, and its non-vacuity control is blind in the direction that matters
@@ -139,30 +138,58 @@ is live"*. Those coincide today by 14 lines.
 
 ## Fix
 
-Not applied. Replace the proportional floor with two checks that are invariant to prose
-volume, keeping the emptiness assertion itself unchanged:
+Fixed on `experiments` at **`13b721f1`**, patch-id
+**`c6fe2f8ea5467957b944bbedf2e9b5087c06e0b9`**.
 
-- **A coverage floor, not a size floor.** Assert `bodies_found == <count of unquoted heredoc
-  openers in $GUARD>`, both derived from the file. This is the assertion that reds on
-  `<<WARN`, and it is one line.
-- **A positive control by mutation.** Copy `$GUARD` to a throwaway, inject one unescaped
-  backtick into **each** body, run the same scanner over the copy, and assert one hit per
-  body. That pins *"the scanner is live right now"* directly — invariant to banner length,
-  invariant to rewording, and red exactly when the selector goes stale or a new opener form
-  appears. The repo's own `.codescout/memories/test-design-discipline.md` prescribes this
-  shape: *"'never selects the wrong one' and 'never selects one at all' are the same
-  assertion until something pins the accepting case."*
+Fixed as part of the change that would otherwise have **triggered** it: the pre-push banner
+shrank from 114 to 42 non-blank lines, which reds the old floor for a reason the floor does
+not name.
 
-And separately: make the failure message report what it measured (`found N lines`) without
-naming a cause it did not test.
+Three changes:
 
+- **The scanner is delimiter-agnostic.** `/^cat >&2 <<EOF$/` became a match on any unquoted
+  heredoc opener, with the delimiter captured and used as the terminator. It is now a named
+  function, `scan_heredoc_bodies`, so the positive control below exercises **the code that
+  ships** rather than a second copy of it.
+- **Coverage floor replaces the size floor.** Scanner openers must equal the count of
+  unquoted heredoc openers, and that count uses a **deliberately different** expression —
+  it admits the `<<-` indented form and a trailing space, which the scanner's does not — so
+  it is not the scanner agreeing with itself. Quoted openers are excluded from both: they
+  cannot interpolate, so counting them would red on a construct that is safe by definition.
+- **A positive control by mutation.** One live backtick is injected into every body of a
+  copy, and the scanner must return one hit per body.
+
+The failure text no longer names a cause it did not measure.
+
+**Scope note:** the scanner now covers *every* unquoted heredoc, not only `cat >&2 <<…`
+message banners. The two data heredocs feeding `$commit_rows` are in scope as a result. That
+is deliberate — any unquoted heredoc can command-substitute, and drawing the boundary at
+"message" heredocs would be the same narrowing this bug is about, one level up.
 ## Tests added
 
-None yet. The two replacements above **are** the test change. Acceptance criterion is an
-observed RED in the direction that is currently blind: add a `cat >&2 <<WARN … WARN` block to
-a throwaway copy of the guard and confirm the coverage floor fails. The existing floor passes
-that same fixture, which is the whole finding.
+Two, both in `tests/pre-push-foreign-session-guard.sh`, replacing the single
+`BODY_LINES >= 100` floor:
 
+- `the scanner reaches every unquoted heredoc` — the coverage assertion.
+- `and it detects an injected backtick in every body` — the positive control.
+
+**Both have an OBSERVED RED**, and the reds were taken against *copies* rather than by
+mutating the tree, because five sessions were live on this checkout and an armed mutation is
+the hazard
+`docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
+records:
+
+```
+baseline (real guard)                      2 of 2   GREEN   /   2 of 2 ticks   GREEN
+append `cat >&2 <<-TAIL` (unseeable form)  2 of 3   RED     <- coverage discriminates
+break the scanner's opener regex           0 of 2 ticks     RED  <- control discriminates
+```
+
+The pair matters more than either: coverage alone would pass a scanner that matched every
+opener and read no bodies; the injection control alone would pass a scanner that read one
+body perfectly and never saw the second.
+
+Suite 73 → 75 assertions, 0 failed. Gate green — `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 ## Workarounds
 
 If you add a second heredoc to `scripts/pre-push-foreign-session-guard.sh`, **delimit it
@@ -171,11 +198,7 @@ which is why it is a workaround and not the fix.
 
 ## Resume
 
-Edit `tests/pre-push-foreign-session-guard.sh:642-646`: replace the `BODY_LINES >= 100` floor
-with the opener-count coverage assertion, add the mutation-based positive control, and drop
-the unmeasured cause from the failure text. Confirm the observed RED with a `<<WARN` fixture
-before claiming it fixed.
-
+N/A — fixed, with an observed red in the direction that was blind.
 ## References
 
 - `tests/pre-push-foreign-session-guard.sh:632-646` — the scanner, the emptiness assertion,
