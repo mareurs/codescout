@@ -627,23 +627,66 @@ has "and the banner actually printed"            "$OUT" "REFUSING THE PUSH"
 has "inline example survived as literal text"    "$OUT" '`git push origin main`'
 
 echo
-echo "== no unescaped backtick survives in the unquoted heredoc body =="
+echo "== no unescaped backtick survives in any unquoted heredoc body =="
 # The site-specific assertion above cannot see the NEXT inline example someone adds. This is
-# the class-level guard: scan the heredoc body for a backtick that is not backslash-escaped.
-HEREDOC_BODY="$(awk '/^cat >&2 <<EOF$/{inbody=1; next} inbody && /^EOF$/{inbody=0} inbody' "$GUARD")"
+# the class-level guard: scan every unquoted heredoc body for a backtick that is not
+# backslash-escaped.
+#
+# THE SCANNER IS DELIMITER-AGNOSTIC, and that is a fix rather than a flourish. It used to pin
+# the literal `<<EOF`, so a second banner opened as `<<WARN` was silently never scanned while
+# the old non-vacuity control still passed on the strength of the first body. Subtraction was
+# caught, addition was not. See docs/issues/2026-09-09-the-heredoc-scanner-sees-one-delimiter
+# -and-its-control-is-blind-to-an-added-opener.md.
+#
+# Defined as a function so the POSITIVE CONTROL below exercises this exact code rather than a
+# re-implementation of it — a second copy asserting about itself is indistinguishable from
+# coverage until you break the one that ships.
+scan_heredoc_bodies() {   # $1 = file
+    awk '
+        !inb && /<<[A-Za-z_][A-Za-z_0-9]*$/ { d = $0; sub(/^.*<</, "", d); inb = 1; next }
+        inb && $0 == d                     { inb = 0; next }
+        inb                                { print }
+    ' "$1"
+}
+HEREDOC_BODY="$(scan_heredoc_bodies "$GUARD")"
 LIVE_TICKS="$(printf '%s\n' "$HEREDOC_BODY" | grep -nE '(^|[^\\])`' || true)"
-is_empty() { [ -z "$2" ] && ok "$1" || no "$1" "unescaped backtick(s) in the heredoc body:
+is_empty() { [ -z "$2" ] && ok "$1" || no "$1" "unescaped backtick(s) in a heredoc body:
 $2"; }
-is_empty "heredoc body has no live backtick"     "$LIVE_TICKS"
-# NON-VACUITY CONTROL, and it is the reason the check above is worth anything. An emptiness
-# assertion is monotone under removal: rename the opener, or reflow it onto two lines, and
-# the awk matches nothing, LIVE_TICKS is empty, and this passes while scanning air. So pin
-# that the scanner found a real body -- the banner is ~145 lines, so 100 is a floor no
-# healthy edit crosses and no broken selector reaches.
-BODY_LINES="$(printf '%s\n' "$HEREDOC_BODY" | grep -c . || true)"
-[ "${BODY_LINES:-0}" -ge 100 ] \
-    && ok "and the scanner reached a real body ($BODY_LINES lines)" \
-    || no "and the scanner reached a real body" "found $BODY_LINES lines; the opener selector is stale, so the check above scanned nothing"
+is_empty "no heredoc body has a live backtick"   "$LIVE_TICKS"
+
+# CONTROL 1 — COVERAGE, not size. The floor this replaces was `BODY_LINES >= 100` against a
+# 114-line banner, which encodes "the banner is long" and not "the scanner is live"; the two
+# coincided by 14 lines. It reddened on an ordinary prose trim and stayed green on an added
+# opener, and its failure text named a cause ("the selector is stale") it had not measured.
+#
+# Counted with a DELIBERATELY DIFFERENT expression from the scanner's own regex, so this is
+# not the scanner agreeing with itself. The broad form admits the `<<-` indented variant and
+# a trailing space; the scanner's does not. Quoted openers (`<<'EOF'`) are excluded from both
+# on purpose — they do not interpolate, so they cannot substitute, and counting them would
+# red on a construct that is safe by definition.
+UNQUOTED_OPENERS="$(grep -cE '<<-?[A-Za-z_][A-Za-z_0-9]*[[:space:]]*$' "$GUARD" || true)"
+SCANNED_OPENERS="$(awk '!inb && /<<[A-Za-z_][A-Za-z_0-9]*$/{n++; inb=1; d=$0; sub(/^.*<</,"",d); next} inb && $0==d{inb=0} END{print n+0}' "$GUARD")"
+[ "${SCANNED_OPENERS:-0}" -eq "${UNQUOTED_OPENERS:-0}" ] \
+    && ok "the scanner reaches every unquoted heredoc ($SCANNED_OPENERS of $UNQUOTED_OPENERS)" \
+    || no "the scanner reaches every unquoted heredoc" "scanned $SCANNED_OPENERS of $UNQUOTED_OPENERS unquoted heredoc opener(s) — one is outside the selector, so its body was never checked above"
+
+# CONTROL 2 — POSITIVE, by mutating the production scanner's INPUT. "Never selects the wrong
+# one" and "never selects one at all" are the same assertion until something pins the
+# accepting case (.codescout/memories/test-design-discipline.md). So inject one live backtick
+# into every body of a COPY and require the scanner to find one hit per body. Invariant to
+# banner length and to rewording; red exactly when the selector goes stale or an opener form
+# appears that it cannot see.
+MUT="$(mktemp)"
+awk '
+    !inb && /<<[A-Za-z_][A-Za-z_0-9]*$/ { d = $0; sub(/^.*<</, "", d); print; print "  injected `probe` line"; inb = 1; next }
+    inb && $0 == d                     { inb = 0 }
+    { print }
+' "$GUARD" > "$MUT"
+MUT_HITS="$(scan_heredoc_bodies "$MUT" | grep -cE '(^|[^\\])`' || true)"
+[ "${MUT_HITS:-0}" -eq "${UNQUOTED_OPENERS:-0}" ] \
+    && ok "and it detects an injected backtick in every body ($MUT_HITS of $UNQUOTED_OPENERS)" \
+    || no "and it detects an injected backtick in every body" "found $MUT_HITS of $UNQUOTED_OPENERS injected ticks — the scanner is not reading the bodies it appears to"
+rm -f "$MUT"
 
 echo
 echo "-------------------------------------------"

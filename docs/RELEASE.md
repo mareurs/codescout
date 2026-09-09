@@ -380,3 +380,54 @@ When working on a shared branch alongside another active agent or session:
 - **The `git status --short` readback cannot catch this, and it is important to know why.** The rule below requires the add/status/commit chain to run as ONE command, because a separate `git add` leaves a window for a peer's commit to sweep it. That is correct and should not change — but it means the status output is printed *after the commit has already run*. It is a log, not a gate: in the incident above it displayed `A docs/issues/2026-08-30-bench-worktree-…` and changed nothing. **So the protection has to be in the pathspec being safe by construction, not in reading the output.** An instrument that reports faithfully and cannot act is the failure mode this repo keeps meeting; here it is load-bearing by design, and the remedy is upstream of it.
 - **Staging explicit paths is not enough — the index is shared too. Commit with a pathspec, in one command.** `git add <paths>` followed by a separate `git commit` leaves a window in which the *other* session's commit sweeps up whatever you staged, because a checkout has exactly one index and their `git commit -a` (or their own broad `git add`) does not distinguish your rows from theirs. Use `git commit -- <paths>` instead: a pathspec on `git commit` implies `--only`, so it commits the working-tree content of exactly those paths and ignores every other staged change, whoever staged it. The work is never lost — it lands, correctly, inside someone else's commit — but the commit message then describes one file out of eight, and every later session that greps history for a fix's provenance is reading a message about something else. Measured 2026-08-18: seven staged doc/tracker files (an archive move, four citation re-points and a new bug file) were committed by a peer session as `62533fee`, whose subject names only their own `guide_ledger.rs` review fixes. **And it does not end there — their next `--amend` dropped all seven back into the working tree**, rewriting `62533fee` to `514da3fd` and leaving the files uncommitted again while the commit that had briefly held them became unreachable. So the failure is not merely a mislabeled commit: after a sweep, your work's committed-ness is whatever the peer's next history edit leaves it, and `git status` is the only authority on that. Re-check it, then commit by pathspec (landed as `f80fbd58`). **Do not try to repair a sweep by rewriting their commit** — `--amend` and `reset` on a commit another session may already be building on trade a wrong message for lost work. Record the provenance in a follow-up commit and move on; a stale SHA in an already-landed message is corrected in the file's text, not by rewriting the message.
 - **When a write genuinely cannot wait**, a `git worktree` on your branch is the correct isolation — but note that a worktree session forks librarian artifacts into shadow rows on first write and needs `librarian(action="merge_worktree")` afterwards (memory `worktree-merge-catalog-reconciliation`). For a couple of doc edits, waiting is cheaper than the reconciliation.
+
+### Publishing a stack several sessions wrote — the ladder
+
+`.git/hooks/pre-push` refuses a push carrying another session's commits and prints the live
+stack with each foreign author resolved to a socket. **These are the derivations behind that
+banner**; it points here rather than restating them, because a 145-line refusal is a refusal
+nobody finishes reading, and `.pre-commit-config.yaml` already records why: *a noisy pre-push
+hook teaches `--no-verify`.*
+
+- **The ladder clears any stack with zero acks, and it is the resolution rather than a
+  fallback.** Each commit becomes pushable *by its own author* the moment the one below it is
+  published. You push yours by refspec, say "done", they push theirs, up to the top. Every
+  commit is published by whoever wrote it, no operator is ever asked to authorise someone
+  else's work, and no sid is ever acked. Demonstrated 2026-09-07 on a six-deep stack shared by
+  three sessions: two rungs cleared inside a minute once the property was noticed, after the
+  stack had stood blocked while both parties correctly refused to publish each other's work.
+  Four sessions missed it for eight hours.
+- **Use a refspec at every rung.** Pushing the branch name publishes the whole stack including
+  commits above yours, and so does taking a rung out of order. `git rev-list --count
+  origin/<branch>..<your-sha>` must be `1` — check it *before* the push, not after: the push
+  output tells you what happened, the count tells you what is about to, and only the second
+  can stop you.
+- **First precondition — every commit must have an identified author.** That is what the
+  `Session-Id` trailer buys. Attribute the stack by adjacency instead and the ladder is
+  destroyed: you cannot know whose rung is whose, so there is no order to take them in and
+  every step is a guess about someone else's work.
+- **Second precondition, which stalls it — every author must also be CLEARED, not merely
+  identified.** An author who is *not withheld but uncleared* cannot take their rung, and
+  every rung above theirs stalls behind it. Measured 2026-09-07, one rung after the guard's
+  text first claimed the ladder "holds at any depth and any interleaving": it does not. One
+  uncleared author mid-stack turns it back into the original question, put to *your* operator.
+  That is a fair question, not a defect.
+- **A rung assignment expires, and it fails silently toward the thing the guard prevents.**
+  *"I am last, blocking nobody"* is true when formed and decays with no signal — and a session
+  that believes it is last stops using refspecs, because being last is exactly when pushing
+  the branch name is safe. By the time the belief is stale, that push publishes everyone
+  beneath them. Carry the instant inside the sentence you tell yourself: *"I am last as of
+  05:49:00Z"* can expire; *"I am last"* does not know how to.
+- **An authorisation names a SET; a branch push sends a PREFIX.** They coincide only when
+  nothing lands between the decision and the push, which on a shared tree is the unusual case.
+  Measured 2026-09-07, window ninety seconds: an operator authorised a three-commit stack, a
+  fourth commit from another session landed on top while they were answering, and `git push
+  origin <branch>` would have satisfied the instruction to the letter while publishing a
+  commit they never saw. It needs no error from anyone and is invisible from the pushing side.
+  Re-derive the range, compare it to what was decided, then send the decided set by sha.
+- **The ship flow is exempt and that is deliberate.** The guard is inert when
+  `CLAUDE_CODE_SESSION_ID` is unset, so a human at a terminal is never refused — absence is
+  honest, and a guessed session id would be worse than none.
+
+Why the guard exists at all, and the class it belongs to:
+[`docs/trackers/observer-blindness.md`](trackers/observer-blindness.md) § *OB-20*.
