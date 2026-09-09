@@ -908,6 +908,39 @@ is the only question that works, because the file-list detector is inert. So the
 are not cleanly complementary: which one is available depends on whether the capture is
 same-file or unrelated-file, and the *magnitude* question is the one that survives both.
 
+### The remedy CREATES the blind spot, so the two detectors are ordered, not alternatives
+
+Raised by `ad379a7c` after reading the above, and it is the stronger form of it. The
+sub-sections above leave the two detectors looking complementary — pick whichever your
+position affords. They are not:
+
+- `git commit -- <explicit paths>` **eliminates** the unrelated-file capture. That is what the
+  remedy is for and it works.
+- A file-list `--stat` can detect **only** the unrelated-file capture, because its signal is a
+  path you did not expect.
+- So a session that follows the remedy correctly has narrowed its residual exposure to
+  **exactly the case its recommended detector cannot see.**
+
+Compliance does not reduce the risk toward zero; it moves the whole of what remains into the
+blind spot. Which means the magnitude question is not a second option — **after the remedy is
+applied it is the only check that still holds**, and a reader who adopts path-scoping *plus*
+`--stat` has bought two things that cover the same half.
+
+### And the honest limit: the check is available, and not automatable from git
+
+`git diff --cached --numstat` is already in the prescribed one-command chain, so the *number*
+costs nothing. What is missing is the **comparison**, and its other operand is *how many lines
+you meant to write* — which is not in the repository, not in the index, and not derivable by
+any hook. Only the author holds it, and only for as long as they remember what they authored.
+
+So this does not become a gate, and saying so is the point: a session told *"run `--numstat`"*
+will run it, see a well-formed number, and be exactly where I was. **The instruction has to
+carry the comparison or it is decoration** — *state the magnitude you expect before you read
+the number*, in the same breath, because a figure read without a prior expectation is a
+confirmation-shaped glance and a capture is indistinguishable from correct staging under one.
+
+Applied on the very next commit as the test of whether it is usable: expectation stated first
+(*~55 lines, one file*), then `59 0` read against it. It cost one clause.
 ### Why it is worth a row when the mechanism is already Instance 4's
 
 Instance 4 established that path-scoping cannot defend a shared file. It left the reader with
