@@ -299,7 +299,11 @@ does apply**, which are two independent defects in one recommended hatch:
    `git merge-base --is-ancestor d71f0aac f3e7c08b` → true. Both sessions believed the refspec
    route was available as a fallback and neither had it.
 2. In the cases it *does* cover, the form bypasses the guard entirely —
-   `docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`.
+   `docs/issues/archive/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`
+(register 1 fixed `d6847322`, patch-id `03c1fcd5aee6ca1fb98399a0386437e33c586b06`; **the fix makes
+the guard SEE that form, it does not make the form safe to reach for** — the reachability point
+above is unaffected, and register 2 stays live at
+`docs/issues/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md`).
 
 So a reader who reaches for it in the one case it fits **gets exit 0 from a check that never ran.**
 

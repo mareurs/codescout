@@ -880,7 +880,7 @@ echo "== which FIELD names the branch depends on the push form =="
 # many words ("use a refspec at EVERY rung"). So no mutation could reach it: following the
 # refusal correctly disarmed the guard that printed it. Measured 2026-09-09, 29 commits
 # from seven sessions published with the guard silent.
-# docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md
+# docs/issues/archive/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md
 new_repo
 commit "$ALICE" "alice base"
 FIELD_BASE="$(sha)"

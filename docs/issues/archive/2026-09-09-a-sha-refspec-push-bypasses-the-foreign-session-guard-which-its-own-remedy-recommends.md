@@ -1,7 +1,7 @@
 ---
-id: f359dc9c75a217ca
+id: 94b97a30a89d3271
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a sha-refspec push bypasses the foreign-session guard entirely — and the guard''s own refusal text recommends that exact form'
 owners:
 - marius
@@ -9,6 +9,9 @@ tags:
 - cluster/guard-narrower-than-its-name
 - git
 - guards
+fix_patch_id: 03c1fcd5aee6ca1fb98399a0386437e33c586b06
+fix_sha: d68473222e84830618e347e290ab0d656f49fa0f
+fixed: 2026-09-09
 ---
 
 ## Summary
@@ -114,78 +117,56 @@ that it was deliberately discarded.
 
 ## Fix
 
-Not applied, and **unowned on purpose** — `status: open`, no claim. `taken` means a live session
-holds it, and neither this file's author nor sessionId
-`26cb9b5b-2c9c-489e-97d9-3a907c8b2941` is working it; a claim on an untouched file is what
-`doctor`'s `claim_liveness` exists to catch.
-
-Decide the branch from **field 3** when field 1 is not a ref name, rather than skipping the row:
+**Register 1 FIXED 2026-09-09.** `scripts/pre-push-foreign-session-guard.sh` now decides the
+branch from **field 3** when field 1 has no ref name to give:
 
 ```sh
 case "$local_ref" in
     refs/heads/*) ;;
-    *) case "$_remote_ref" in refs/heads/*) ;; *) continue ;; esac ;;
+    *) case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac ;;
 esac
 ```
 
-`_remote_ref` must lose its underscore. Deletions stay handled by the existing `$ZERO` check on
-`local_sha`, which is unaffected.
+`_remote_ref` lost its underscore — it had exactly one occurrence in the file, verified before
+renaming, so the underscore's claim that it was unused was true. Deletions stay handled by the
+existing `$ZERO` check above; tag pushes still fall out because neither field is `refs/heads/*`.
 
-**Do not fix by removing the refspec advice from the remedy text.** The advice is correct and
-addresses a real, separately-measured hazard (an authorisation names a set; a branch push sends a
-prefix). The defect is that the guard cannot see the form it recommends.
+**Registers 2 and 3 are NOT closed by this, and register 2 now has its own live file** —
+`docs/issues/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md`
+(`cluster/hint-composed-without-the-request`, `IC-22`). Split deliberately: this file archives as
+fixed, and leaving register 2 inside it would archive a live defect. Register 3 needs nothing — it
+is the observation that the refspec sentence is *correct* for a pusher who owns commits, which is
+why neither repair may delete it.
 
-**The remedy text is wrong in three registers, and a fix that addresses only the first leaves two
-standing:**
-
-1. **Disarming** — the recommended sha form bypasses the guard entirely (this file's finding).
-2. **Inapplicable** — a pusher with no commits of their own in the range owns no sha to name, so
-   the advice cannot be followed and pushes them toward the branch form it warns against
-   (§ *Tests added* row 5).
-3. **Correct and load-bearing** — the prefix hazard it describes is real, which is why registers 1
-   and 2 must be fixed *without* deleting the sentence.
-
-After the field-3 fix, register 1 closes and `git push origin <sha>:<branch>` refuses like any
-other push — making the rung advice usable as written for the first time. Register 2 needs a
-separate branch in the message, not a code change.
+**What the fix does NOT buy, stated because the archived status will imply otherwise:** the guard
+now *sees* the refspec form; it does not make the refspec form safe to reach for. A refspec sends
+everything **reachable**, so where an uncleared commit is an ancestor there is still no refspec
+that excludes it — recorded as a falsification of § *Workarounds* in
+`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`.
 ## Tests added
 
-None — nothing is fixed. The regression test is the A/B pair above and must be **two-sided**: a
-sha-form row must be refused, *and* a refname-form row must still be refused. A one-sided
-"sha form now refuses" assertion is monotone under the guard refusing everything, including tag
-pushes and deletions it is supposed to skip — so pin a tag-push row and a deletion row as still
-skipped in the same block.
+Added to `tests/pre-push-foreign-session-guard.sh` — section *"which FIELD names the branch
+depends on the push form"*, six assertions. Suite **96 passed, 0 failed** (was 90).
 
-`tests/pre-push-foreign-session-guard.sh` already has the fixture and helpers; this is a new
-section there, not a new file.
+**Observed reds, by mutating the production path in two directions** — each row's discriminating
+direction has its own witness, which a single-sided pair cannot have:
 
-**Five rows, not four.** The fifth was contributed by sessionId
-`26cb9b5b-2c9c-489e-97d9-3a907c8b2941` from using the guard rather than reading it, and it is the
-row no A/B over `local_ref` would have produced:
+| mutation | result |
+|---|---|
+| revert to the one-field filter | **94/2** — both *sha refspec form* rows red; rows 1 and 3 green |
+| widen the fallback to accept any field-3 value | **94/2** — *tag push* red (plus an existing `tag push: allowed`); row 2 green |
 
-| row | field 1 | expected |
-|---|---|---|
-| 1 | `refs/heads/<branch>` | refuse (the positive control) |
-| 2 | bare sha | refuse (the defect) |
-| 3 | `refs/tags/<tag>` | skip |
-| 4 | sha `= $ZERO` (deletion) | skip |
-| 5 | pusher owns **zero commits in the range** | refuse, with a remedy that does not name a refspec |
+**And one row is INERT, annotated as such on the fixture rather than left to be credited.** The
+branch-deletion row discriminates **none** of three mutations — including removal of the `$ZERO`
+check it appears to test, which leaves the suite at **96/0**. The reason is worth carrying: with
+that check gone, a deletion row falls through and the range becomes `<base>..0000000`, naming no
+valid object, so `git log` yields nothing, `commit_rows` stays empty and the guard exits 0 anyway.
+The row reaches the right answer by a route unrelated to what it appears to assert. It is kept as
+a documentation pin of the intended contract and explicitly **not** as a regression guard — false
+coverage is the failure mode that stops the next person looking.
 
-Row 5 is what the remedy text has no answer for. A session whose own work was swept into a peer's
-pathspec commit on a shared ledger owns **no sha to name** — measured live 2026-09-09: that
-session's `F-129`/`W-120` writes landed *inside* another session's commit, so its range held one
-commit and none of it was theirs. *"Use a refspec at EVERY rung"* is then not merely disarming
-(row 2) but **inapplicable**, and the reader's natural next move is the branch form the same text
-warns against. Assert that the refusal shown to a zero-commit pusher routes to *ask the rung's
-author*, never to a refspec they cannot form.
-
-**This is the class's own lesson about itself:** that suite has 90 assertions and every one is
-about the guard's predicate — *who is refused*. None is about the remedy text, so no mutation
-reaches the sentence recommending the bypass. `CLAUDE.md` § *Testing Discipline* names this exact
-gap and the cheap partial answer: assert the remedy's **shape**, e.g. that any command form the
-refusal text recommends is itself covered by a refusing test. Row 5 extends that from *the form is
-unguarded* to *the form does not exist for this reader*, which is a second way a remedy can be
-wrong while its predicate is right.
+**Row 5 is deliberately absent** and annotated absent in the fixture: it belongs to register 2 and
+is owned by that register's own bug file.
 ## Workarounds
 
 Push by branch name (`git push origin experiments`) and satisfy the guard with
