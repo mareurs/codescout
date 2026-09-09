@@ -22,7 +22,7 @@ topic: doctor per-project isolation
 
 **Tech Stack:** Rust · `rusqlite` · `serde` · `tokio` (tests) · the librarian catalog at `~/.local/share/librarian/catalog.db`
 
-**Spec:** `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `d4b61746950b86b7`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` (`a06de4dfc30c2e8d`) — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target.
+**Spec:** `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `d4b61746950b86b7`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/archive/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target. **FIXED and archived 2026-09-09** at `953c98f3` (patch-id `8de7522768dd6dacacd293eae5d881442470422a`), in the prescribed order: the typed `Args` landed first (`26b60af8`), the wrapper second. Note its id changed on archiving — the old `a06de4dfc30c2e8d` no longer resolves.
 
 ## Global Constraints
 

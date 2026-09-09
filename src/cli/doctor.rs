@@ -8,8 +8,8 @@
 //! input", which was false when written and stated the wrong reason for the emptiness: the
 //! scanner takes eight typed params and the wrapper was passing `Map::new()`, so every
 //! repair and both paging controls were unreachable from a command line
-//! (`docs/issues/2026-08-30-cli-doctor-exposes-no-fix-flag.md`,
-//! `docs/issues/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md`).
+//! (`docs/issues/archive/2026-08-30-cli-doctor-exposes-no-fix-flag.md`,
+//! `docs/issues/archive/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md`).
 //! The invariant that replaces the sentence is executable: see
 //! `every_scanner_param_is_reachable_from_the_cli_or_named_as_omitted`.
 
@@ -293,7 +293,7 @@ mod tests {
             "these params of `doctor`'s scanner cannot be set from `codescout doctor`, and \
              are not declared in SCANNER_PARAMS_THE_CLI_OMITS: {unreachable:?}. Add a flag, \
              or add the param to that list WITH a reason — an undeclared omission is the \
-             defect (docs/issues/2026-08-30-cli-doctor-exposes-no-fix-flag.md)."
+             defect (docs/issues/archive/2026-08-30-cli-doctor-exposes-no-fix-flag.md)."
         );
     }
 

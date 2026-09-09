@@ -1,19 +1,20 @@
 ---
-id: a06de4dfc30c2e8d
+id: 5cb675fc547b97c6
 kind: bug
-status: open
+status: fixed
 title: 'BUG: cli doctor passes an empty args map, so no fix mode or sample paging is reachable — and its doc comment says the scanner takes no input'
 tags:
 - cli
 - doctor
 - librarian
 - cluster/doc-contradicted-by-code
-closed: null
+closed: 2026-09-09
 opened: 2026-09-09
 owner: marius
 related:
 - d4b61746950b86b7
 severity: low
+unverified: Seven of the scanner's eight params are wired; `--scope` is deliberately omitted (declared in SCANNER_PARAMS_THE_CLI_OMITS) because its selector is still broken — d4b61746950b86b7. Tests are librarian-gated, so they do not run in the lean lane.
 ---
 
 > **Cluster:** `cluster/doc-contradicted-by-code` (`IC-11`, n=32, verdict *clears both
@@ -118,20 +119,61 @@ this in the same commit as `d4b61746950b86b7`** (the `scope` bug) — that one a
 `Args` struct to `doctor`, which changes the projection this wrapper would target, so
 sequencing it second avoids rewriting the same lines twice.
 
-**SHA:** N/A — not yet fixed.
-**patch-id:** N/A — not yet fixed.
+Fixed by **wiring it** — the first direction. Seven of the eight params are now flags:
+`--fix`, `--confirm`, `--root`, `--old-root`, `--new-root`, `--limit`, `--offset`.
+
+The sequencing this file prescribed was followed: `26b60af8` added the typed `Args` to
+`doctor` first, and this wrapper was targeted second, so those lines were written once.
+
+**`--scope` is the eighth and is deliberately absent**, declared in
+`SCANNER_PARAMS_THE_CLI_OMITS` with its reason rather than silently skipped. The scanner
+accepts `scope`, validates it, echoes it back, and never widens the scanned population
+with it (`d4b61746950b86b7`, open). A flag whose only observable effect is making the
+report *assert* a scope it did not apply is worse than no flag.
+
+The doc comment at `:5` no longer asserts the scanner takes no input, and states the
+reason the old sentence was wrong rather than just deleting it.
+
+**Verified at the binary, not only at the seam** — which matters here because the defect
+was a wrapper that read correctly in source: `--limit 1` → 1 outside row, `--limit 3` → 3,
+default → 10, with `summary.total` steady at 166 while `shown` moves 157/159/166.
+
+**SHA:** `953c98f3a9b16c5e9165537d9521b58c359e0b4a` (**experiments**)
+**patch-id:** `8de7522768dd6dacacd293eae5d881442470422a`
 
 ## Tests added
 
-None. A regression test is only meaningful once the direction is chosen: wiring it makes
-`doctor_cli_forwards_limit_to_the_scanner` the guard; documenting it makes the guard a
-prose assertion no test should pin (per § *Testing Discipline* — pinning sentences reds on
-every rewording).
+Four, in `src/cli/doctor.rs`. The direction chosen was "wire it", so per this file's own
+note the guard is a real test rather than a prose assertion — but not the
+`doctor_cli_forwards_limit_to_the_scanner` shape suggested above. `BL-65` argued for a
+**key-set coverage test over a fourth round of flags**, and that is what shipped: a
+per-flag test reds when a flag breaks, where the failure mode that produced this bug three
+times is a param being **added to the scanner and not to the CLI**.
 
-Note the existing test in this file, `an_informational_only_report_does_not_trip_the_exit_1_path`
-(`src/cli/doctor.rs:76`), is unaffected either way — it tests `fails_the_gate`, not
-argument projection.
+- `every_scanner_param_is_reachable_from_the_cli_or_named_as_omitted` — reads the field
+  names out of the scanner's own `struct Args` source and asserts each is either emitted or
+  declared-omitted-with-a-reason. Watched red naming all seven:
+  `["fix", "confirm", "root", "old_root", "new_root", "limit", "offset"]`, with `scope`
+  correctly absent because its omission was already declared.
+- `the_scanner_field_scan_is_not_vacuous` — a source-scanning coverage test has two ways to
+  pass while checking nothing. Rename `struct Args` and the scan finds no fields, so every
+  coverage claim built on it empties in silence.
+- `every_declared_omission_names_a_real_param_and_gives_a_reason` — the omission list is an
+  admission, not a pass (the same contract as `param_probe`'s `accepts_any_json`), so it
+  must not name a param that no longer exists nor carry an empty reason.
+- `a_set_flag_reaches_the_args_map_with_its_value` — positive control; without it, a
+  `to_tool_args` emitting every key with a *wrong value* satisfies the coverage test. Also
+  pins that unset flags are ABSENT: `limit: null` overrides nothing while `limit: 0`
+  suppresses the whole sample, and `confirm: false` asserts a dry-run choice the caller
+  never made.
 
+`an_informational_only_report_does_not_trip_the_exit_1_path` was indeed unaffected, as this
+file predicted.
+
+**These tests do NOT run in the lean lane.** `cli/doctor.rs` is behind
+`feature = "librarian"`, which `--no-default-features` switches off, so the lean lane's
+green says nothing about them. Recorded because reporting a two-lane gate as coverage here
+would be the vacuity CLAUDE.md § *Development Commands* measures.
 ## Workarounds
 
 Use the MCP surface for anything beyond a bare scan:
