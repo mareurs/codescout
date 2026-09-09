@@ -3,7 +3,7 @@ prompt: |-
   Maintain the SD-N table in params; keep per-finding prose in the body as `### SD-N — <title>` sections.
 
   Rules:
-  - Append new findings with artifact(action="append_entry", id_prefix="SD", entry_collection="items") — never hand-assign an id.
+  - Append new findings with doc(action="append_entry", id_prefix="SD", entry_collection="items") — never hand-assign an id.
   - A finding flips to `fixed` only with a commit SHA in `closed_by`, cited per docs/TAXONOMY.md § Citation format (`experiments:<sha>, not-yet-on-master` or `master:<sha>`). Never a bare SHA.
   - `fixed` → `verified` requires the baseline re-run recorded in the body History section: test count, clippy, audit-doc-refs. A colour is not a baseline; record the number.
   - If a finding turns out to produce wrong behaviour, promote it to a bug file under docs/issues/ and flip the row to `superseded` with the bug path in `notes`. Do not fix it here.

@@ -12,7 +12,7 @@ prompt: |-
   - `status_note` carries the human-readable status cell verbatim (markdown, commit shas,
     qualifying prose) and is what `render_template` prints, so the rendered table matches the
     committed snapshot character-for-character. When a status changes, update BOTH fields.
-  - `bug` is the bug artifact's 16-hex id, or null when no bug file exists. `artifact(move)`
+  - `bug` is the bug artifact's 16-hex id, or null when no bug file exists. `doc(action="move")`
     re-keys an artifact, so re-read the id after any archive step instead of trusting the
     stored one.
   - `next` is a one-line pointer to that bug's `## Resume`, never the instruction itself.
@@ -20,8 +20,8 @@ prompt: |-
   This tracker does NOT own bug status — the bug file is authoritative. If a row says `open`
   and the bug says `fixed`, the bug is right and the row is stale. Never close a bug from here.
 
-  Add rows with `artifact(action="append_entry", entry_collection="tasks", id_prefix="BL")`;
-  change one with `artifact(action="update_entry", entry_collection="tasks", entry_id="BL-N",
+  Add rows with `doc(action="append_entry", entry_collection="tasks", id_prefix="BL")`;
+  change one with `doc(action="update_entry", entry_collection="tasks", entry_id="BL-N",
   fields={...})`. Never hand-build the `tasks` array — a params merge-patch replaces the
   collection wholesale (that is BL-20). Every new BL-N also needs a `### BL-N — <title>`
   section in the body: that heading is the only shape `link_scan` accepts as a definition, so
