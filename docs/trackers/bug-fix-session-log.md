@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 123
-entry_high_water_W: 114
+entry_high_water_W: 116
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -177,6 +177,8 @@ entry_high_water_W: 114
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-116 | 2026-09-09 | high | **The push guard's own ordering manufactures the standoff it documents — ask the authors and the operator in PARALLEL.** A push was refused with 4 commits from 3 other sessions below mine; `git rev-list --count origin/experiments..<my-earliest>` = **4**, so no rung and no refspec — the ack to my operator was the only route. I sent the three-state question to all three authors *and* put the decision to my operator in the same turn. All three answered **not withheld, UNCLEARED**, and every answer arrived **after** the operator had decided | Serial routing reads as diligence and the guard's own text is ordered that way (*"ASK THE AUTHOR … THEN ASK YOUR OPERATOR"*), but the first step's output is **context** for the second, not an input to it. On this machine the first link is answered *"I hold nothing to give you"* by construction — *"push only when the user asks"* is standing, so an author mid-task is in neither branch of a withheld/cleared binary (`OB-20`). The measured serial outcome is **four sessions held eight hours**, pile 2 → 14. **What the parallel form owes:** the operator must be told the authors are uncleared, never have their silence read as assent — two authors independently warned me against exactly that compression. Two errors of mine, recorded because the pattern only works if the question is well-posed: I called the foreign commits *"complete units, not WIP"* — true of the **commits**, false of the **sessions**, and the general form is `ad379a7c`'s: **the property you can see is not the property the question asks about**, reading as diligence because a commit is complete by construction and so can never come back negative. And I told a peer they sat *above* me when they sat below — `rev-list = 4` was right and I inverted its meaning. **An ack is spent when used**: it names one set for one push, and the stack gained a fourth author while the question was in flight | validated |
+| W-115 | 2026-09-09 | high | **A skip-guard written for a real environmental gap made a test monotone under the deletion it guarded — and it was added while fixing the previous survivor.** Two `wip_authors` attachment sites survived mutation because nothing traversed `handle_successful_output`. I added end-to-end tests, watched them pass, and **the same two mutations survived again**: the new cases carried `let Some(who) = … else { eprintln!("skipping: python3 absent?"); return }`, and *field absent* is byte-identical to what the mutation produces. Fixed by taking the environment check as a **separate observation, first** — then 7/7 Rust, 10/10 Python | Not the monotone law restated: that law is about the **assertion**, and this assertion was a correct `contains()`. The blindness was installed by a **guard in front of it** — the shape you reach for whenever a test has a genuine environmental dependency — and a skipped case and a passing case are the same line of output. **The review that catches "no end-to-end test" passes the replacement.** Two further survivors, same family: the opt-out asserted `is_none()` against a red naming a **clean** path (stage 2 supplied the silence), and `materialize` passed against files a **previous run** left in a content-hashed temp dir — the worse one, since it asserts about state no run in the suite created, so the refuting outcome leaves no artifact and widening the corpus does nothing. Plus one **false KILL** caught by its count: a mutant that failed to parse reported **27** assertions including ones its blast radius cannot reach; a valid deletion killed **2** | validated |
 | W-114 | 2026-09-08 | med | **A peer's claim about MY OWN authorship is the one attribution claim no reflex fires on.** `59112612` reported two untracked files as *"your in-flight work"*; they were `c9ab2c8d`'s (`codescout-b9`, `.claude-sdd`, **busy, writing them at that moment**) — `file-provenance.py` says `PEER`, the bug's frontmatter says `claimed_by: c9ab2c8d`, and the mtime moved 20:17:03 → 20:28:03 between two of my reads while I wrote nothing | The peer-skepticism rule covers claims about **the world**; a claim naming *me* as author reads as a **status report on my own state**, so it never enters the category of things to check. The natural next action on "your uncommitted work" is to commit or clean it — capturing a live peer's file mid-write. **Caught by prior recon, not by skepticism**: `claimed_by` was already in context from orienting 8 min earlier, so the ordering was luck. **Cheap rule: a file you own does not change while you read it and write nothing** | validated |
 | W-113 | 2026-09-08 | high | **Four cross-session disagreements in one afternoon, none of them a misreading — cite the OBJECT, not the number.** Two lane counts read off different CI runs four minutes apart; a `cancelled` run that meant supersession, not a verdict; two lanes that looked like they failed a fix but aborted in `--lib` and never ran it (`grep -c <testname> <joblog>` → **0**); and a comment describing its own code wrongly. In each case a reading was correct about an object that had moved, or was not the object in question | The reflex in all four was *"the other reader erred"*, and **re-reading cannot distinguish that from carelessness — a correct reading of the wrong object is byte-identical to a careless reading of the right one.** So the move that *feels* rigorous is the one that cannot work. Each was one command from resolution and none of them was "look again": the run id, `grep -c` over the job log, the regex instead of the comment above it. **A CI run id is to a lane count what a commit SHA is to a timestamp** | validated |
 | W-112 | 2026-09-08 | high | **A hermetic fixture makes the production default unobservable, and the mutation that proves it is the one nobody runs.** After 94/94 green and 9 of 9 mutations killed, mutating `profile_dirs()` — which decides *where the tool looks at all* — to a hardcoded list **and** to `return []` both left **94/94 green**. Every case injects `FILE_PROVENANCE_*_ROOTS` to stay hermetic, and that override *is* the default's only caller | The discovery fix ships with a green suite and zero coverage — in code written minutes earlier *in direct response to a peer's correction*, i.e. the part most recently thought hardest about. Not a thin sample: the refuting outcome leaves **no artifact at any corpus size**, so "widen the sample" is a no-op against it. Independently reproduced by `ad379a7c` against the **committed** suite (`transcript_roots() -> return []` leaves 68/68 green), so it is a pre-existing harness property rather than new work. Theirs is the generalisation: **hermeticity and default-path coverage are in direct tension**, invisible from inside a green run — and their own six mutations that day had all hit the *dispatch* and none the *scope*, because the fixture cannot express a scope mutation. The mutation population was itself filtered by what the harness could see | validated |
@@ -12665,6 +12667,150 @@ is **yours**, treat it as an attribution claim like any other and resolve it pos
 worth the line: **`ListAgents` could not have seen `c9ab2c8d` from either of our rows** — it is on
 a different profile — so the two sessions best placed to route around each other were the two
 least equipped to.
+
+## W-115 — A skip-guard for a real environmental gap made a test monotone under the deletion it guarded
+
+**Observed:** Wiring `scripts/attribute-red.py` into `run_command`, a mutation matrix over
+the Rust production path killed 2 of 7. Two survivors were both `wip_authors` attachment
+sites in `handle_successful_output` — unguarded because every other case called
+`wip_author_diagnostic` or `format_run_command` **directly** and nothing traversed the
+function that ships. I added two end-to-end tests, watched them pass, and **the same two
+mutations survived again.**
+
+The cause was a tolerance I had written into the new tests myself:
+
+```rust
+let Some(who) = result["wip_authors"].as_str() else {
+    eprintln!("skipping: no diagnostic produced (python3 absent?)");
+    return;                       // <- reports `ok`
+};
+```
+
+`python3` genuinely can be absent, and the feature's own third ceiling says that is silence
+rather than failure — so the guard is defensible in isolation. But **the state it tolerates
+is byte-identical to the state the mutation produces**: field absent. The test was monotone
+under exactly the deletion it existed to catch.
+
+**Why this is not simply the monotone law restated.** That law is about the *assertion* —
+`is_empty()` cannot see removal. Here the assertion was a correct `contains()`. The
+blindness was installed by a **skip guard in front of it**, which is the shape you reach for
+whenever a test has a real environmental dependency. And a skipped case and a passing case
+are the same line of output, so it hides in the one place nobody re-reads.
+
+**Remedy, and it generalises: take the environmental observation SEPARATELY, and FIRST.**
+
+```rust
+if wip_author_diagnostic(101, HELD_RED, dir.path()).await.is_none() {
+    eprintln!("skipping: engine produced nothing here (python3 absent?)");
+    return;
+}
+// It answers. So the response MUST carry it -- absence is now the attachment site.
+let who = result["wip_authors"].as_str().expect("...");
+```
+
+Both mutations died immediately. Final: **7/7 Rust, 10/10 Python.**
+
+**Two further survivors, same family — an assertion satisfied by something other than the
+thing it names.** The opt-out case asserted `is_none()` against a red naming a **clean**
+path, so stage 2 supplied the silence and deleting the opt-out changed nothing. The
+`materialize` case passed against files a **previous run** had left in a content-hashed
+temp dir; that one is the worse of the two, because it asserts about state *no run in the
+suite created* — the refuting outcome leaves no artifact in the run that would show it,
+which is the recording-filter law rather than the monotone one, and widening the corpus
+does nothing. `materialize_into` now takes its base as a parameter so the function is
+observed instead of the filesystem's memory of it.
+
+**And one false KILL, caught by its count.** A Python mutation deleting a scope footer
+reported **27** failed assertions including stage-1 ones the footer cannot reach — a crashed
+interpreter, not a detection. Re-run as a syntactically valid deletion it killed **2**. A
+kill count far larger than the mutation's blast radius is the tell; assert the mutant
+parses before believing it died.
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* — "demand an observed RED, never an
+assertion's existence", and "mutate the PRODUCTION path, not the test's inputs". This entry
+is the corollary those two do not cover: a guard *in front of* an assertion can make it
+monotone without the assertion changing at all.
+
+**Status:** validated
+
+**Counterfactual:** four tests reading as coverage over a mechanism no caller reached, in a
+feature whose entire purpose is refusing to let silence be read as an answer. The second
+survivor is the load-bearing half — it was introduced *while fixing the first*, so the
+review that catches "no end-to-end test" would have passed the replacement.
+
+## W-116 — Ask the authors and the operator in PARALLEL — the guard's own ordering manufactures its standoff
+
+**Observed:** `git push origin experiments` was refused by the pre-push foreign-session
+guard: 4 commits from 3 other sessions sat under mine. `git rev-list --count
+origin/experiments..<my-earliest>` returned **4**, so there was no rung and no refspec — the
+ack to my operator was the only route.
+
+The guard's recorded failure mode is a standoff: measured 2026-09-06, **four sessions held
+for eight hours**, each correctly refusing to decide something none had authority over, pile
+2 → 14 commits. Resolved in one exchange the moment a human was asked.
+
+**What worked was asking the authors and the operator IN PARALLEL, not in sequence.** I sent
+the three-state question to all three authors and put the decision to my operator in the same
+turn. All three answered **not withheld, UNCLEARED** — and every one of those answers arrived
+*after* the operator had already decided. **None of them would have changed it**, which is
+the finding: the authors' answers were never on the critical path, because "not withheld" is
+a fact about their intent and the decision needed an authorisation none of them holds.
+
+Serial routing is what manufactures the standoff. It reads as diligence — *ask the author
+first, then escalate* — and the guard's own text is ordered that way (*"ASK THE AUTHOR …
+THEN ASK YOUR OPERATOR"*). But the first step's output is not an input to the second step's
+decision; it is **context** for it. Ordering them turns a parallelisable pair into a chain
+whose first link, on this machine, is answered *"I hold nothing to give you"* by construction
+— *"push only when the user asks"* is every session's standing instruction, so an author
+mid-task is in neither branch of a withheld/cleared binary. That is `OB-20`'s ceiling, and
+the remedy is not a better question. It is **not making the operator wait on it.**
+
+**What the parallel form still owes, and it is the whole of the honesty here:** the operator
+must be asked with *the authors' state named as unknown-or-uncleared*, never with their
+silence read as assent. My question listed all six commits, all four sids, the rev-list=4
+topology, and the explicit fact that no refspec can skip an ancestor. Two authors
+independently warned me not to compress their answer into clearance on the way up — the
+bypass `CLAUDE.md` § *Testing Discipline* records verbatim — and they were right to; the
+protection is that the operator decided *knowing none had cleared*, not that the authors
+were quiet.
+
+**Two errors of mine, both in front of the operator, both recorded because the pattern only
+works if the question is well-posed:**
+
+- I described the foreign commits as *"complete docs/test units, not WIP"*. True of the
+  **commits**, false of the **sessions** — two authors describe themselves as mid-task. **The
+  general form is `ad379a7c`'s rather than mine: the property you can SEE is not the property
+  the question ASKS about.** The ack asks about sessions; the diff shows commits. And what
+  makes it read as diligence is that **a commit is complete by construction the moment it
+  exists**, so that evidence can never come back negative — monotone, and I reported tidiness
+  as though it answered a question about people. A per-member claim answered from an aggregate,
+  where the aggregate is the *artifact* and the member is the *author*.
+- I had told a peer *"you sit above me, so a push of mine cannot carry yours"*. Inverted:
+  their commit was **below** mine. I had `rev-list = 4` correct and drew the opposite
+  conclusion from it, which is worse than miscounting — the number was right and the
+  inference reversed its meaning.
+
+**An ack is spent when it is used.** It names a specific set for one push and does not extend
+forward; a peer queuing a later commit *"under the same ack"* will meet a fresh refusal
+against a set that has since changed. The stack grew by one author *while the question was in
+flight*.
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* (`OB-20`) — a guard's remedy text buys
+ARRIVAL and never ANSWERABILITY; enumerate the states the addressee's answer can take. This
+entry adds the scheduling corollary: where one addressee provably cannot answer, ask them
+anyway **and in parallel**, because their answer is context rather than a gate.
+
+**Status:** validated
+
+**Counterfactual:** the serial reading of the guard's own instruction, followed correctly,
+produces the eight-hour standoff it documents. Here the parallel form resolved it in one
+exchange with strictly more information reaching the operator — all three author states were
+known to *me* before the push completed, and every one of them was the state that cannot
+authorise.
 
 ## Template for new entries
 
