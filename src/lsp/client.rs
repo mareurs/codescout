@@ -1599,20 +1599,26 @@ impl Drop for LspClient {
                 handle.abort();
             }
         }
-        // Kill the child process as a safety net.
-        // The graceful shutdown path (shutdown_all -> shutdown) sends LSP
-        // shutdown/exit first.  This ensures the process dies even if the
-        // graceful path was skipped (e.g., panic, abrupt exit).
+        // Kill the child process. This is the PRIMARY killer, not a safety net:
+        // the graceful path (shutdown_all -> shutdown) runs only on an orderly
+        // shutdown, so in the ordinary drop this SIGTERM is what reaps the child.
+        // Measured 2026-09-08 by strace — `kill(<pid>, SIGTERM)` from this line
+        // lands FIRST, and the `kill_on_drop(true)` SIGKILL that follows arrives
+        // against a process already dead.
         // For socket-connected clients there is no child to kill.
         if let LspTransport::Process {
             child_pid: Some(pid),
         } = &self.transport
         {
-            // SAFETY: `pid` was captured from `child.id()` immediately after spawn and remains
-            // valid for the lifetime of this `LspClient` (we hold the child handle). SIGTERM
-            // (signal 15) is safe to send to a child process — it requests clean termination
-            // without undefined behaviour. The `u32 as i32` cast is safe because Linux PIDs
-            // are assigned from a range that fits in i32 (maximum 4,194,304 on 64-bit kernels).
+            // No SAFETY block is owed here: `terminate_process` is safe, and it owns
+            // the `unsafe` and the pid-addressability argument (`platform::unix`'s
+            // `addressable_pid` REFUSES a pid that would signal a group, rather than
+            // casting). What is worth saying is what this site alone controls: the
+            // `Child` lives in the reader task, which the block above just aborted,
+            // so nothing here holds the pid open. Recycling it inside that window
+            // would take ~4M intervening spawns, so this is sound in practice and
+            // not by construction — see
+            // docs/issues/2026-09-09-a-safety-comment-outlived-both-its-unsafe-block-and-its-own-rationale.md
             let _ = crate::platform::terminate_process(*pid);
         }
     }
