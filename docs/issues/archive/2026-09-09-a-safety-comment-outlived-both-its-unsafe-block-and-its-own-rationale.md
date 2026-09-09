@@ -197,8 +197,19 @@ would be a way to silence it. The shipped rule has nothing to widen: the next li
 is neither blank nor a line comment must contain `unsafe`.
 
 Measured at `f10eefe2`: **16** `// SAFETY:` comments under `src/`, `crates/`, `tests/`
-— **15** satisfy the rule, **1** does not, and the one is this bug. Zero false
-positives.
+— **15** satisfy the rule, **1** does not, and the one is this bug.
+
+> **RETRACTED, same day.** This paragraph originally ended *"Zero false positives."* That
+> claim was false, and the way it was false is the point: the 16-comment corpus contained
+> no `unsafe` wrapped in a multi-line macro call, so **no member of it could falsify the
+> rule in the direction the rule was wrong**. Within the hour, a peer's untracked
+> `src/agent/build_check.rs` produced two — `// SAFETY:` over
+> `assert_eq!(\n    unsafe { libc::flock(...) },` where the first code line is
+> `assert_eq!(`. The gate red the shared build against correct code, and its remedy text
+> told the author to delete a live safety justification. Fixed by making the span the
+> **statement** (to delimiter balance) rather than the first line; four mutations, four
+> kills. Full record:
+> `docs/issues/2026-09-09-the-safety-gate-checked-one-line-where-its-name-promised-the-construct.md`.
 
 **Observed RED, on the production path.** The five lines above were restored verbatim
 into the working tree and the mutation confirmed present in the file before the run —
