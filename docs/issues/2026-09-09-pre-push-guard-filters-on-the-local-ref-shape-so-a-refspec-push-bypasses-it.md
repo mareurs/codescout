@@ -143,6 +143,23 @@ the range examined* from *nothing was examined*.** As written it reports the sam
 both, and for the second case that sentence is a false reassurance. An ack that matched
 nothing because the population was empty should say the population was empty.
 
+Third, a semantic gap in `CODESCOUT_PUSH_ACK` itself, raised by sessionId
+`b0015a98-e290-46de-8ed1-3c94bc73a987` and not addressed by either change above. The guard's
+banner already carries one half of this: *a peer can report what they were told; a peer
+cannot grant.* **The mirror is missing — a pusher's ack cannot grant on the AUTHOR's behalf
+either.** An ack records exactly one fact: that the pusher's operator decided to publish a
+named set. It is silent on whether each named author's operator would have, and it is not a
+consent aggregator. Nothing in the guard's text says so, and an ack naming six sessionIds
+reads as six authorisations while being one decision.
+
+Measured 2026-09-09 on this checkout: 39 commits published under an ack naming six sids,
+including 11 commits whose author had not been asked and whose operator had not requested a
+push. No harm — nothing was withheld — but the *record* of that push is indistinguishable
+from one where every author had consented, which is the property that makes it worth a line
+in the banner. It is the same three-state structure the guard already reasons about
+(*not withheld*, *uncleared*), with an external decision to publish as a fourth state that
+collapses into neither.
+
 ## Tests added
 
 None yet. The regression test must supply a **SHA-shaped `local_ref`** on stdin — the one
