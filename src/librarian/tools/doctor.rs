@@ -366,7 +366,12 @@ struct Args {
 /// and `augmentation_declaration_unparseable` that must each be added here (and
 /// gated) independently; see the comment at that function's second admit site for
 /// the full reasoning, kept there too because the reader gating a call site and the
-/// reader adding a row here are different audiences.
+/// reader adding a row here are different audiences. `scan_claim_liveness` (Task 5)
+/// is the same trap at four sites rather than two: one row loop, one branch per
+/// resolved liveness outcome, four independently-gated `scope.admit(...)` calls and
+/// four rows here (`ClaimWithoutClaimant`, `ClaimHeldByLiveSession`,
+/// `ClaimHeldByDeadSession`, `ClaimUnresolvableHere`) — see the comment at that
+/// scan's first admit site for why a single shared gate was rejected.
 const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::FrontmatterIdMismatch,
     Check::FrontmatterIdIsNotACatalogId,
@@ -380,6 +385,15 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::SnapshotDrift,
     Check::AugmentationDeclaredButAbsent,
     Check::AugmentationDeclarationUnparseable,
+    Check::ArchivedFixShaUnresolvable,
+    Check::TerminalStatusWithoutFixAnchor,
+    Check::NonTerminalStatusWithFixAnchor,
+    Check::OpenBugCitedFromSource,
+    Check::UnterminatedFence,
+    Check::ClaimWithoutClaimant,
+    Check::ClaimHeldByLiveSession,
+    Check::ClaimHeldByDeadSession,
+    Check::ClaimUnresolvableHere,
 ];
 
 /// MCP entry point. Runs every invariant check and returns a structured
@@ -557,16 +571,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // out to `catalog_health` below, because a clean result over 54 of 350 archived files
     // must not read as "every archived fix resolves".
     let (fix_sha_violations, archived_fix_shas) =
-        scan_archived_fix_sha_unresolvable(ctx, &cat.conn)?;
+        scan_archived_fix_sha_unresolvable(ctx, &mut doctor_scope, &cat.conn)?;
     all_violations.extend(fix_sha_violations);
     // The complement of the check above: it validates a declared anchor, this one reports
     // a record that declares none. Scoped to LIVE terminal bug files — 297 of 355 archived
     // files predate the rule, and the guide calls those stale instructions rather than debt.
-    all_violations.extend(scan_terminal_status_without_fix_anchor(ctx, &cat.conn)?);
+    all_violations.extend(scan_terminal_status_without_fix_anchor(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
     // The mirror of the check above, and the direction that had no instrument: a record whose
     // BODY declares a patch-id while its status still says `open`. Detectable only by reading
     // bodies, which is why the two cheap frontmatter-keyed checks exist and this one did not.
-    all_violations.extend(scan_non_terminal_status_with_fix_anchor(ctx, &cat.conn)?);
+    all_violations.extend(scan_non_terminal_status_with_fix_anchor(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
     // The check above needs the bug FILE to declare something. This one needs it to declare
     // NOTHING, and reads the source tree instead — the case where a fix landed and the record
     // was never touched at all, which is how four live `high` records went stale in one week
@@ -574,13 +594,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `catalog_health` below for the same reason as `archived_fix_shas`: a zero here is scoped
     // to settled, single-line, non-markdown citations and must not read as "no bug is stale".
     let (cited_from_source_violations, open_bug_source_citations) =
-        scan_open_bug_cited_from_source(ctx, &cat.conn)?;
+        scan_open_bug_cited_from_source(ctx, &mut doctor_scope, &cat.conn)?;
     all_violations.extend(cited_from_source_violations);
     // Both checks above answer "is a fix pointer declared?". This one answers why that
     // answer can be confidently wrong: an unterminated fence mutes every line-anchored
     // scan below it, so a "nothing declared" finding may be about the parse and not the
     // file. Ordered here so the two readings sit together in the report.
-    all_violations.extend(scan_unterminated_fence(ctx, &cat.conn)?);
+    all_violations.extend(scan_unterminated_fence(&mut doctor_scope, &cat.conn)?);
 
     // The reader half of `status: taken`. Without this line the check compiles, its own
     // tests pass, and `librarian(action="doctor")` never calls it — which is exactly the
@@ -594,7 +614,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // degrades honestly instead — every claim resolves `UnresolvableHere`, and the detail
     // says no registries were found rather than naming an empty scope.
     all_violations.extend(scan_claim_liveness(
-        ctx,
+        &mut doctor_scope,
         &cat.conn,
         &crate::platform::home_dir()
             .map(|h| crate::librarian::session_registry::default_profile_dirs(&h))
@@ -5436,6 +5456,7 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
 /// patch-id, which is a search, not a repair.
 fn scan_archived_fix_sha_unresolvable(
     ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<(Vec<Violation>, Value)> {
     let Some(cp) = ctx.current_project.as_deref() else {
@@ -5468,7 +5489,7 @@ fn scan_archived_fix_sha_unresolvable(
     let (mut scanned, mut skipped, mut cross_repo, mut out) = (0usize, 0usize, 0usize, Vec::new());
     for (id, abs_path) in &rows {
         let path = Path::new(abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+        if !scope.admit("archived_fix_sha_unresolvable", id, abs_path) {
             continue;
         }
         let Ok(content) = std::fs::read_to_string(path) else {
@@ -5625,12 +5646,9 @@ fn commit_like_hashes(content: &str) -> Vec<String> {
 /// Reports only; there is no `fix=`. Recovering a fix SHA is research, and a wrong anchor is
 /// worse than an absent one.
 fn scan_terminal_status_without_fix_anchor(
-    ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
-    let Some(cp) = ctx.current_project.as_deref() else {
-        return Ok(Vec::new());
-    };
     let mut stmt = conn.prepare(
         "SELECT id, abs_path, status FROM artifact \
          WHERE kind = 'bug' AND status IN ('fixed', 'mitigated') \
@@ -5649,9 +5667,6 @@ fn scan_terminal_status_without_fix_anchor(
     let mut out = Vec::new();
     for (id, abs_path, status) in &rows {
         let path = Path::new(abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
-            continue;
-        }
         // Archived records are out of scope. Match a path COMPONENT rather than a substring,
         // so a repo that happens to live under a directory named `archive` does not silence
         // its entire issue tree.
@@ -5706,6 +5721,9 @@ fn scan_terminal_status_without_fix_anchor(
                 tail
             )
         };
+        if !scope.admit("terminal_status_without_fix_anchor", id, abs_path) {
+            continue;
+        }
         out.push(Violation::new(
             "terminal_status_without_fix_anchor",
             Some(id.clone()),
@@ -5860,12 +5878,9 @@ fn declared_patch_ids(content: &str) -> Vec<String> {
 /// and a partial fix cancels terminality outright — flipping it here would be the confident
 /// wrong answer this module refuses to give.
 fn scan_non_terminal_status_with_fix_anchor(
-    ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
-    let Some(cp) = ctx.current_project.as_deref() else {
-        return Ok(Vec::new());
-    };
     let mut stmt = conn.prepare(
         "SELECT id, abs_path, status FROM artifact \
          WHERE kind = 'bug' AND status IN ('open', 'taken', 'investigating') \
@@ -5884,9 +5899,6 @@ fn scan_non_terminal_status_with_fix_anchor(
     let mut out = Vec::new();
     for (id, abs_path, status) in &rows {
         let path = Path::new(abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
-            continue;
-        }
         // Same path-COMPONENT test as the sibling: a repo living under a directory named
         // `archive` must not silence its whole issue tree.
         if path
@@ -5916,6 +5928,9 @@ fn scan_non_terminal_status_with_fix_anchor(
         }
 
         let shown: Vec<String> = anchors.iter().take(2).map(|p| format!("`{p}`")).collect();
+        if !scope.admit("non_terminal_status_with_fix_anchor", id, abs_path) {
+            continue;
+        }
         out.push(Violation::new(
             "non_terminal_status_with_fix_anchor",
             Some(id.clone()),
@@ -6063,6 +6078,7 @@ fn paths_touched_since(
 /// fix anchor, or nothing at all — and the check cannot tell which, by construction.
 fn scan_open_bug_cited_from_source(
     ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<(Vec<Violation>, Value)> {
     /// How long a citation must sit unchanged before it counts as settled. Seven days is
@@ -6113,7 +6129,7 @@ fn scan_open_bug_cited_from_source(
         Default::default();
     for (id, abs_path, status) in rows {
         let path = Path::new(&abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+        if !scope.admit("open_bug_cited_from_source", &id, &abs_path) {
             continue;
         }
         // Same path-COMPONENT test as the sibling checks: a repo living under a directory
@@ -6271,12 +6287,9 @@ fn scan_open_bug_cited_from_source(
 /// Reports only; there is no `fix=`. The repair is deleting or closing one delimiter, and
 /// which of the two is correct is a content judgement about the surrounding prose.
 fn scan_unterminated_fence(
-    ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
-    let Some(cp) = ctx.current_project.as_deref() else {
-        return Ok(Vec::new());
-    };
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -6285,9 +6298,6 @@ fn scan_unterminated_fence(
     let mut out = Vec::new();
     for (id, abs_path) in &rows {
         let path = Path::new(abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
-            continue;
-        }
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
@@ -6319,6 +6329,9 @@ fn scan_unterminated_fence(
             None => "an unlocatable line".to_string(),
         };
 
+        if !scope.admit("unterminated_fence", id, abs_path) {
+            continue;
+        }
         out.push(Violation::new(
             "unterminated_fence",
             Some(id.clone()),
@@ -6376,16 +6389,13 @@ fn scan_unterminated_fence(
 /// `claim_unresolvable_here` with a detail naming that condition. Degrading loudly is the
 /// point — skipping the scan would make a claim-laden repo look clean.
 fn scan_claim_liveness(
-    ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
     profile_dirs: &[std::path::PathBuf],
     probe: &dyn crate::librarian::session_registry::ProcProbe,
 ) -> Result<Vec<Violation>> {
     use crate::librarian::session_registry::{ClaimLiveness, DeadReason, SessionRegistry};
 
-    let Some(cp) = ctx.current_project.as_deref() else {
-        return Ok(Vec::new());
-    };
     let mut stmt = conn.prepare(
         "SELECT id, abs_path FROM artifact \
          WHERE kind = 'bug' AND status = 'taken' \
@@ -6403,9 +6413,6 @@ fn scan_claim_liveness(
     let mut out = Vec::new();
     for (id, abs_path) in &rows {
         let path = Path::new(abs_path);
-        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
-            continue;
-        }
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
@@ -6420,6 +6427,19 @@ fn scan_claim_liveness(
         .filter(|s| !s.is_empty());
 
         let Some(sid) = claimed_by else {
+            // Gated independently of the other three branches below — this scan emits
+            // FOUR distinct check names from one row loop, and `ROW_GRAIN_SCOPED_CHECKS`'s
+            // own doc comment names exactly this shape as a trap: gating once, at the top
+            // of the loop, would read as "one gate, one check" and silently make the other
+            // three checks' `admit` calls dead code the moment anyone tried to add them
+            // beside it. `scan_augmentation_declared_but_absent` established the two-site
+            // precedent this follows; here it is four sites because the branch, not the
+            // row, decides which check name applies — a live session, a dead one, an
+            // unresolvable-here host, and a claim naming nobody are four different findings
+            // about the same row, not one finding reported four ways.
+            if !scope.admit("claim_without_claimant", id, abs_path) {
+                continue;
+            }
             out.push(Violation::new(
                 "claim_without_claimant",
                 Some(id.clone()),
@@ -6442,6 +6462,9 @@ fn scan_claim_liveness(
             } => {
                 let who = name.unwrap_or_else(|| "unnamed".to_string());
                 let where_ = cwd.unwrap_or_else(|| "unknown cwd".to_string());
+                if !scope.admit("claim_held_by_live_session", id, abs_path) {
+                    continue;
+                }
                 out.push(Violation::new(
                     "claim_held_by_live_session",
                     Some(id.clone()),
@@ -6472,6 +6495,9 @@ fn scan_claim_liveness(
                     }
                 };
                 let who = name.unwrap_or_else(|| "unnamed".to_string());
+                if !scope.admit("claim_held_by_dead_session", id, abs_path) {
+                    continue;
+                }
                 out.push(Violation::new(
                     "claim_held_by_dead_session",
                     Some(id.clone()),
@@ -6497,7 +6523,7 @@ fn scan_claim_liveness(
                 // "… on this machine ()." — an empty parenthetical, in the one check that
                 // cites `docs/adrs/2026-08-27-negative-results-name-their-scope.md` by
                 // name. An unnamed scope is exactly what that ADR forbids.
-                let scope = if profiles_searched.is_empty() {
+                let scope_desc = if profiles_searched.is_empty() {
                     "no Claude Code session registries (`<home>/.claude*/sessions`) exist on \
                      this host at all, so NO claim can be resolved here and this row says \
                      nothing whatsoever about this particular claim"
@@ -6508,12 +6534,15 @@ fn scan_claim_liveness(
                         profiles_searched.join(", ")
                     )
                 };
+                if !scope.admit("claim_unresolvable_here", id, abs_path) {
+                    continue;
+                }
                 out.push(Violation::new(
                     "claim_unresolvable_here",
                     Some(id.clone()),
                     abs_path.clone(),
                     format!(
-                        "status is `taken`, claimed by session `{sid}`: {scope}. This is NOT \
+                        "status is `taken`, claimed by session `{sid}`: {scope_desc}. This is NOT \
                          evidence the claim is dead — a claim made on another host is \
                          unresolvable here by construction. Check on the claiming machine, or \
                          demote to `investigating` if the work has been abandoned."
@@ -8100,7 +8129,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
         assert_eq!(v.len(), 1, "only the dead pointer fires: {v:#?}");
@@ -8132,7 +8162,8 @@ mod tests {
 
         let (v, _) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1);
         assert!(
@@ -8163,7 +8194,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
         assert!(
@@ -8193,15 +8225,30 @@ mod tests {
         );
         let ctx = ctx_rooted_at(cat, &root);
 
+        // Scope::All would admit the other repo's row too, defeating the very
+        // exclusion this test exists to check — this needs a REAL project scope
+        // tied to ctx's own root so the other repo's bug is refused, not admitted.
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            scan_archived_fix_sha_unresolvable(&ctx, &mut ds, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
             "another repo's SHA is not ours to resolve: {v:#?}"
         );
         assert_eq!(health["scanned"], 0);
+        let scoped_out = ds
+            .scoped_out()
+            .get("archived_fix_sha_unresolvable")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the other repo's row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
+        );
     }
 
     /// A `<repo>:<sha>` pointer names a commit in a SIBLING repo, and this check is
@@ -8239,7 +8286,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
         let fired: Vec<&str> = v.iter().filter_map(|x| x.artifact_id.as_deref()).collect();
@@ -8310,7 +8358,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the unanchored record fires: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("bare"));
@@ -8338,7 +8387,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 2);
         let decoy = v.iter().find(|x| x.path.contains("decoy")).unwrap();
@@ -8368,7 +8418,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
     }
@@ -8400,7 +8451,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("hollow"));
@@ -8418,10 +8470,53 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "wontfix owes no anchor: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("done"));
+    }
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_does_not_report_a_row_under_a_sibling_root() {
+        // Mirrors `conditional_past_due_does_not_report_a_row_under_a_sibling_root`: a
+        // real `Scope::Project` must refuse a row outside the active project's root and
+        // COUNT the refusal under this check's own name, not silently drop it.
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "bare",
+            "fixed",
+            "",
+            "Nothing here names a commit.",
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("terminal_status_without_fix_anchor")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
+        );
     }
 
     // ---- non_terminal_status_with_fix_anchor ------------------------------------------
@@ -8458,7 +8553,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the anchored open record fires: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("anchored"));
@@ -8485,7 +8581,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
@@ -8535,7 +8632,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "none of these declares an anchor: {v:#?}");
     }
@@ -8571,7 +8669,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 2, "both shapes are declarations: {v:#?}");
     }
@@ -8591,7 +8690,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
             v.len(),
@@ -8621,7 +8721,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
             v.len(),
@@ -8653,7 +8754,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("hollow"));
@@ -8689,7 +8791,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
     }
@@ -8743,10 +8846,50 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the Fix-section anchor counts: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("anchored"));
+    }
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "anchored",
+            "open",
+            "",
+            &format!("## Fix\n\nFixed at `abc1234`, patch-id `{FIXTURE_PATCH_ID}`."),
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_non_terminal_status_with_fix_anchor(&mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("non_terminal_status_with_fix_anchor")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
+        );
     }
 
     // ---- open_bug_cited_from_source ---------------------------------------------------
@@ -8822,7 +8965,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the cited bug fires: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("stale"));
@@ -8839,7 +8983,8 @@ mod tests {
         // The whole justification for this check existing.
         let sibling = {
             let cat = ctx.catalog.lock();
-            scan_non_terminal_status_with_fix_anchor(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(
             sibling.is_empty(),
@@ -8864,7 +9009,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "a day-old citation has not settled: {v:#?}");
         // Counted, not merely dropped: an uncounted suppression makes a suppressed corpus
@@ -8896,7 +9042,8 @@ mod tests {
 
         let (v, _health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
@@ -8928,7 +9075,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "markdown is not source: {v:#?}");
         assert_eq!(
@@ -8961,11 +9109,62 @@ mod tests {
 
         let (v, _health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
             "an archived bug cited from source is the success state: {v:#?}"
+        );
+    }
+    #[tokio::test]
+    async fn open_bug_cited_from_source_does_not_report_a_row_under_a_sibling_root() {
+        // Same shape as `conditional_past_due_does_not_report_a_row_under_a_sibling_root`:
+        // the bug row lives OUTSIDE the active project's root, so a real `Scope::Project`
+        // must refuse it before it is even resolved against `cp.git_root`, and the refusal
+        // must be COUNTED under this check's own name.
+        let (_tmp, root) = git_fixture_with_backdated_source(
+            "src/thing.rs",
+            "//! Shaped this way because of docs/issues/stale.md\npub fn f() {}\n",
+            30,
+        );
+        let sibling_tmp = tempfile::tempdir().unwrap();
+        let sibling_root = sibling_tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "stale",
+            "open",
+            "",
+            "## Fix\n\nNot implemented.",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_open_bug_cited_from_source(&ctx, &mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        assert_eq!(
+            health["live_bugs_in_scope"], 0,
+            "the sibling-root row must not count toward the in-scope denominator: {health}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("open_bug_cited_from_source")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
         );
     }
 
@@ -9007,7 +9206,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_open_bug_cited_from_source(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
@@ -9192,7 +9392,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the unterminated file fires: {v:#?}");
         assert_eq!(v[0].artifact_id.as_deref(), Some("left-open"));
@@ -9218,7 +9419,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert!(
             v.is_empty(),
@@ -9241,13 +9443,53 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert!(
             v[0].detail.contains("line 10"),
             "detail must name the opener's FILE line (10), got: {}",
             v[0].detail
+        );
+    }
+    #[tokio::test]
+    async fn unterminated_fence_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "left-open",
+            "open",
+            "",
+            "```\ncode\n\nprose\n",
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_unterminated_fence(&mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("unterminated_fence")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
         );
     }
 
@@ -9274,7 +9516,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
             v.len(),
@@ -16331,7 +16574,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_live_session");
@@ -16368,7 +16612,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_dead_session");
@@ -16404,7 +16649,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_dead_session");
@@ -16449,7 +16695,14 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, std::slice::from_ref(&sessions), &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(
+                &mut scope,
+                &cat.conn,
+                std::slice::from_ref(&sessions),
+                &probe,
+            )
+            .unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(
@@ -16482,7 +16735,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(
@@ -16544,7 +16798,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(
             v.len(),
@@ -16591,7 +16846,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &SocketButNoProcess).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &SocketButNoProcess).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_dead_session");
@@ -16647,7 +16903,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[dir], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[dir], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
         assert_eq!(v[0].check, "claim_held_by_dead_session");
@@ -16688,7 +16945,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[], &probe).unwrap()
         };
         assert_eq!(
             v.len(),
@@ -16739,7 +16997,14 @@ body
 
         let live_only = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, std::slice::from_ref(&sessions), &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(
+                &mut scope,
+                &cat.conn,
+                std::slice::from_ref(&sessions),
+                &probe,
+            )
+            .unwrap()
         };
         assert_eq!(live_only.len(), 1, "{live_only:#?}");
         assert_eq!(live_only[0].check, "claim_held_by_live_session");
@@ -16769,7 +17034,8 @@ body
         seed_session(&root, "sid-dead", 9999, "111");
         let both = {
             let cat = ctx.catalog.lock();
-            scan_claim_liveness(&ctx, &cat.conn, &[sessions], &probe).unwrap()
+            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(both.len(), 2, "{both:#?}");
         let dead = both
@@ -16785,6 +17051,153 @@ body
             1,
             "a resolved-but-dead claim IS a defect and must be counted as one: {both:#?}"
         );
+    }
+    /// `scan_claim_liveness` emits FOUR distinct check names from one row loop (see the
+    /// long comment at the `claim_without_claimant` gate) and each must be scoped
+    /// independently — these four tests are the per-branch analogue of
+    /// `conditional_past_due_does_not_report_a_row_under_a_sibling_root`, one per branch,
+    /// so a regression that gates only the first branch reached cannot hide behind the
+    /// other three still passing.
+    #[tokio::test]
+    async fn claim_without_claimant_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &sibling_root, "unclaimed", "taken", "", "body\n");
+        let sessions = seed_session(&sibling_root, "sid-x", 1, "1");
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(),
+        };
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert!(v.is_empty(), "{v:#?}");
+        let scoped_out = ds
+            .scoped_out()
+            .get("claim_without_claimant")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(scoped_out.values().sum::<usize>(), 1, "{scoped_out:?}");
+    }
+
+    #[tokio::test]
+    async fn claim_held_by_live_session_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "held",
+            "taken",
+            "claimed_by: sid-live\n",
+            "body\n",
+        );
+        let sessions = seed_session(&sibling_root, "sid-live", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let probe = TestProbe {
+            live_pid: Some(4242),
+            starttime: "555".into(),
+        };
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert!(v.is_empty(), "{v:#?}");
+        let scoped_out = ds
+            .scoped_out()
+            .get("claim_held_by_live_session")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(scoped_out.values().sum::<usize>(), 1, "{scoped_out:?}");
+    }
+
+    #[tokio::test]
+    async fn claim_held_by_dead_session_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "stale",
+            "taken",
+            "claimed_by: sid-dead\n",
+            "body\n",
+        );
+        let sessions = seed_session(&sibling_root, "sid-dead", 4242, "555");
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "555".into(),
+        };
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
+        };
+        assert!(v.is_empty(), "{v:#?}");
+        let scoped_out = ds
+            .scoped_out()
+            .get("claim_held_by_dead_session")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(scoped_out.values().sum::<usize>(), 1, "{scoped_out:?}");
+    }
+
+    #[tokio::test]
+    async fn claim_unresolvable_here_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "foreign",
+            "taken",
+            "claimed_by: sid-elsewhere\n",
+            "body\n",
+        );
+        let sessions = seed_session(&sibling_root, "sid-somebody-else", 1, "1");
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let probe = TestProbe {
+            live_pid: None,
+            starttime: "1".into(),
+        };
+
+        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_claim_liveness(&mut ds, &cat.conn, std::slice::from_ref(&sessions), &probe)
+                .unwrap()
+        };
+        assert!(v.is_empty(), "{v:#?}");
+        let scoped_out = ds
+            .scoped_out()
+            .get("claim_unresolvable_here")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(scoped_out.values().sum::<usize>(), 1, "{scoped_out:?}");
     }
 
     /// `summary` must publish BOTH numbers. A reader asking "how many rows will I see?"
