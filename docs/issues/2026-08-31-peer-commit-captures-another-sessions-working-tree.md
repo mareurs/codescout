@@ -1251,8 +1251,8 @@ busy tree it converts every commit into a negotiation. The honest statement is t
 refusal has a cost that was not previously priced, and that the cost lands on the party
 the guard just protected.
 
-**The capturing side's account, supplied unprompted by
-`59112612-5fc8-4b31-8c8c-e19220d99eac` and placed here at their request — it is sharper
+**The capturing side's account — supplied by `59112612-5fc8-4b31-8c8c-e19220d99eac` after
+being named in this instance, and placed here by the author of this entry. It is sharper
 than the victim-side reading above, and it indicts a remedy published in THIS FILE four
 hours earlier.** They authored **Instance 11**, where they wrote that
 `git commit -- <paths>` *eliminates* unrelated-file capture and that the detector must be a
