@@ -347,6 +347,31 @@ struct Args {
     offset: Option<usize>,
 }
 
+/// The row-grain checks whose `scan_*` function calls `DoctorScope::admit` in its own row
+/// loop (Task 4) and folds its scoped-out sub-map into `catalog_health.row_checks_scoped_by_project`
+/// — the single source of truth for both the fold loop and the hint legend below, so the two
+/// can never name a different set (2026-09-09 review, Important 2 / Minor 7). Two row-grain
+/// checks are deliberately absent: `abs_path_outside_managed_roots` folds into its own
+/// dedicated `outside_scope_refused_by_project` map instead (see the comment at the fold
+/// site), and `worktree_scoped_row` is never scoped at all (`fix=reseat_worktree` is
+/// catalog-wide with no root, so narrowing its report would understate what `confirm=true`
+/// is about to do). `row_checks_scoped_by_project_covers_every_admitting_check` below guards
+/// this array against falling behind a new `scope.admit(...)` call site.
+const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
+    Check::FrontmatterIdMismatch,
+    Check::FrontmatterIdIsNotACatalogId,
+    Check::FrontmatterStatusMismatch,
+    Check::LedgerDefinesNothing,
+    Check::EntryWithoutDefinition,
+    Check::EntryDefinedTwice,
+    Check::TerminalStatusWithCaveat,
+    Check::ParamsBehindBody,
+    Check::ParamsStatusDrift,
+    Check::SnapshotDrift,
+    Check::AugmentationDeclaredButAbsent,
+    Check::AugmentationDeclarationUnparseable,
+];
+
 /// MCP entry point. Runs every invariant check and returns a structured
 /// report. Reads-only; safe to invoke against a live catalog.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -624,23 +649,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     for (group, n) in &outside_scope_refused_by_project {
         *outside_scoped_by_project.entry(group.clone()).or_insert(0) += n;
     }
-    // The eleven row-grain checks converted onto `DoctorScope::admit` (Task 4) fold
-    // their own scoped-out sub-maps into `row_checks_scoped_by_project` HERE, in this
-    // same fold site — after every scan_* call above has had the chance to call
-    // `admit()`, same ordering reasoning as `outside_scope_refused_by_project` above.
-    for check in [
-        Check::FrontmatterIdMismatch.as_str(),
-        Check::FrontmatterIdIsNotACatalogId.as_str(),
-        Check::FrontmatterStatusMismatch.as_str(),
-        Check::LedgerDefinesNothing.as_str(),
-        Check::EntryWithoutDefinition.as_str(),
-        Check::EntryDefinedTwice.as_str(),
-        Check::TerminalStatusWithCaveat.as_str(),
-        Check::ParamsBehindBody.as_str(),
-        Check::ParamsStatusDrift.as_str(),
-        Check::SnapshotDrift.as_str(),
-        Check::AugmentationDeclaredButAbsent.as_str(),
-    ] {
+    // The row-grain checks converted onto `DoctorScope::admit` (Task 4) fold their own
+    // scoped-out sub-maps into `row_checks_scoped_by_project` HERE, in this same fold site —
+    // after every scan_* call above has had the chance to call `admit()`, same ordering
+    // reasoning as `outside_scope_refused_by_project` above. `ROW_GRAIN_SCOPED_CHECKS` is the
+    // shared source of truth for this loop and for the hint legend below (2026-09-09 review,
+    // Important 2) — a check that calls `admit()` into this map but is missing from that array
+    // silently vanishes from both.
+    for check in ROW_GRAIN_SCOPED_CHECKS.iter().map(|c| c.as_str()) {
         if let Some(sub) = doctor_scope.scoped_out().get(check) {
             for (group, n) in sub {
                 *row_checks_scoped_by_project
@@ -977,10 +993,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if !row_checks_scoped_by_project.is_empty() {
         let total_scoped: usize = row_checks_scoped_by_project.values().sum();
         let n_projects = row_checks_scoped_by_project.len();
+        let check_list = ROW_GRAIN_SCOPED_CHECKS
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(" / ");
         hint_parts.push(format!(
-            "{total_scoped} row-grain finding(s) (frontmatter_id_mismatch / \
-             frontmatter_id_is_not_a_catalog_id / ledger_defines_nothing / \
-             entry_without_definition / entry_defined_twice / terminal_status_with_caveat) across \
+            "{total_scoped} row-grain finding(s) ({check_list}) across \
              {n_projects} other \
              project root(s) were scoped OUT of this report — see \
              catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
@@ -3987,6 +4006,9 @@ fn scan_undefined_entries(
                 ),
             ));
         } else {
+            if !scope.admit("entry_without_definition", &ledger.id, &ledger.abs_path) {
+                continue;
+            }
             let (cited_undefined, uncited): (Vec<String>, Vec<String>) = undefined
                 .iter()
                 .cloned()
@@ -4110,9 +4132,6 @@ fn scan_undefined_entries(
                 )
             };
 
-            if !scope.admit("entry_without_definition", &ledger.id, &ledger.abs_path) {
-                continue;
-            }
             out.push(Violation::new(
                 "entry_without_definition",
                 Some(ledger.id),
@@ -4478,6 +4497,55 @@ fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Vi
     Ok(out)
 }
 
+/// `params_behind_body`: an augmented ledger's markdown body anchors entry ids that its
+/// `params` hold no row for — the inverse of [`scan_snapshot_drift`].
+///
+/// Every drift surface codescout had asked one direction of one question: *has the
+/// **body** kept up with `params`?* `update_entry`'s `snapshot_stale`, `append_entry`'s
+/// `snapshot_missing` and `scan_snapshot_drift` all compute
+/// `claimed.difference(&in_body)`. Nothing computed the reverse, so a body that had run
+/// **ahead** — rows written into the file by hand, or written before their params row was
+/// ever appended — read as perfectly healthy on every surface.
+/// docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md
+///
+/// **The remedy is the opposite of `snapshot_drift`'s, which is why this is a separate
+/// check rather than more samples in that one.** There the body is stale and re-rendering
+/// it from `params` is repair. Here `params` is stale, and re-rendering would DELETE the
+/// newer record. The measured near-miss: generating BL-39's defining headings from the WIN
+/// ledger's `params` would have published `WIN-28`/`WIN-29` as `open` when both were
+/// `fixed`, and emitted no section at all for six further entries — in the pass whose
+/// whole purpose was making entries citable.
+///
+/// **Ids only, never statuses.** A status mismatch between a params row and a rendered
+/// table cell needs a text comparison against a column whose format is each tracker's own
+/// choice — fragile, and a separate decision. The id-set difference is exact, and it is
+/// what caught the WIN case.
+///
+/// **Not gated on `body_keeps_snapshot`**, for the reason spelled out on
+/// [`scan_undefined_entries`]: that gate answers the *row* question, where a
+/// params-canonical tracker anchoring a few ids in passing must not be nagged. Reusing it
+/// here would silence a body id the catalog has never seen, which is the entire finding.
+/// Pinned by `params_behind_body_is_not_gated_on_body_keeps_snapshot`.
+///
+/// **Neither `append_entry` nor `update_entry` can perform this repair, and the message
+/// must not name them.** It did, on first ship, and the claim was false twice over.
+/// `append_entry` ends with `obj.insert("id", new_id)` — it overwrites whatever id the
+/// caller passed — and allocates `params_next.max(body_max + 1)`, folding in the very body
+/// ids this check is reporting; on the WIN ledger it would mint `WIN-37`, not the missing
+/// `WIN-30`. `update_entry` patches a row that already exists and is pinned never to change
+/// the row count. The only surface that can create a row at a GIVEN id is the wholesale
+/// params write, which is why the message names that and warns that a partial array
+/// replaces rather than merges.
+///
+/// The same first-ship message also claimed an unallocated id "can be reissued". Also
+/// false, for the same reason: the `body_max` fold makes reissue impossible while the body
+/// still claims the id. It becomes possible only after a compaction moves those rows to an
+/// archive companion, and then only for a ledger with no committed
+/// `entry_high_water_<PREFIX>` — which is a narrower and conditional claim than the
+/// message asserted.
+///
+/// Reports only; there is no `fix=`. The missing rows carry a status and dates that no
+/// scan can infer from an id.
 fn scan_params_behind_body(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -5035,6 +5103,9 @@ fn scan_augmentation_declared_but_absent(
         let sidecar_rel = match parse_declaration(raw) {
             Declaration::Absent => continue,
             Declaration::Unparseable => {
+                if !scope.admit("augmentation_declaration_unparseable", id, abs_path) {
+                    continue;
+                }
                 out.push(Violation::new(
                     "augmentation_declaration_unparseable",
                     Some(id.clone()),
@@ -5051,6 +5122,15 @@ fn scan_augmentation_declared_but_absent(
             }
             Declaration::Declared { sidecar } => sidecar,
         };
+
+        // Gated here, before `detail`'s multi-branch format!(), rather than at the
+        // out.push() below: skip formatting work on a scoped-out row, and match the other
+        // eight row-grain sites. One scan whose two outputs (this one and
+        // `augmentation_declaration_unparseable` above) scope differently is a trap for the
+        // next reader who assumes gating one gates both — gate each explicitly.
+        if !scope.admit("augmentation_declared_but_absent", id, abs_path) {
+            continue;
+        }
 
         // A declared sidecar that EXISTS on disk is a different finding from one that does
         // not: the first is one command from repaired, the second needs a machine that
@@ -5095,9 +5175,6 @@ fn scan_augmentation_declared_but_absent(
             )
         };
 
-        if !scope.admit("augmentation_declared_but_absent", id, abs_path) {
-            continue;
-        }
         out.push(Violation::new(
             "augmentation_declared_but_absent",
             Some(id.clone()),
@@ -10723,13 +10800,25 @@ mod tests {
     /// precedent `scope_repo_admits_a_path_under_git_root_that_project_scope_refuses`
     /// in `scope.rs`: a monorepo-shaped fixture where `abs_path` is a SUBDIRECTORY of
     /// `git_root`, so a sibling subdirectory's tracker is outside `Project` scope but
-    /// inside `Repo` scope. `params_behind_body` stands in for all eleven converted
-    /// checks — one guarded site, per this repo's mutation-per-site law.
+    /// inside `Repo` scope. **`params_behind_body` is ONE guarded site, not a stand-in
+    /// for the other eleven** — per this repo's mutation-per-site law, one guarded site
+    /// says nothing about the rest. This test exercises only the scan-LAYER
+    /// discrimination (Project excludes a git_root sibling, Repo admits it); per-site
+    /// coverage for the remaining checks comes from
+    /// `row_checks_scoped_by_project_table_driven` below, which seeds one scoped-out
+    /// finding per remaining `admit()` call site and asserts both silence (`v.is_empty()`)
+    /// and an announced drop (`DoctorScope::scoped_out()`).
     #[test]
     fn params_behind_body_scopes_by_abs_path_not_by_git_root() {
         let tmp = tempfile::tempdir().unwrap();
         let git_root = tmp.path().join("repo");
+        // load-bearing: abs_path must be a CHILD of git_root, or Project scope (which
+        // matches on abs_path) and Repo scope (which matches on git_root) would agree —
+        // the whole discrimination below depends on the two roots actually differing.
         let abs_path = git_root.join("packages/mine");
+        // inert: containing_root()'s scope check is lexical (path-prefix comparison), so
+        // no directory needs to exist on disk — kept only so a reader doesn't wonder why
+        // a path this test never opens is missing.
         std::fs::create_dir_all(&abs_path).unwrap();
         let sibling_dir = git_root.join("packages/theirs");
         std::fs::create_dir_all(&sibling_dir).unwrap();
@@ -10772,6 +10861,299 @@ mod tests {
             "the same tracker must be admitted at Repo scope — it is under git_root: {repo_v:?}"
         );
         assert_eq!(repo_v[0].check, "params_behind_body");
+    }
+
+    /// `ROW_GRAIN_SCOPED_CHECKS` is the single source of truth for the fold loop AND the
+    /// hint legend (2026-09-09 review, Important 2 / Minor 7) — this test guards against it
+    /// silently falling behind a new `scope.admit("<check>", ...)` call site. It scans this
+    /// file's own source for every LITERAL check-name argument to `scope.admit(`, adds by
+    /// hand the one call site that admits dynamically (`scan_artifact_paths`'s
+    /// `scope.admit(&v.check, ...)`, whose two possible names are asserted separately below
+    /// so a rename there cannot go unnoticed either), excludes the checks that fold into a
+    /// DIFFERENT destination map on purpose (`abs_path_outside_managed_roots` →
+    /// `outside_scope_refused_by_project`; the four entry-validity checks →
+    /// `entry_validity_scoped_by_project`; `cited_prefix_with_no_definer` is admitted only
+    /// via `Check::CitedPrefixWithNoDefiner.as_str()`, never a literal, so the regex below
+    /// never sees it and it needs no exemption), and asserts what remains is exactly
+    /// `ROW_GRAIN_SCOPED_CHECKS`'s own check set.
+    #[test]
+    fn row_checks_scoped_by_project_covers_every_admitting_check() {
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/librarian/tools/doctor.rs"
+        ))
+        .expect("src/librarian/tools/doctor.rs must be readable");
+
+        let literal_re = regex::Regex::new(r#"scope\.admit\(\s*"([a-z_]+)""#).unwrap();
+        let mut admitting: std::collections::BTreeSet<String> = literal_re
+            .captures_iter(&src)
+            .map(|c| c[1].to_string())
+            .collect();
+
+        // The dynamic frontmatter-id admit site — asserted present so a rewording of it
+        // cannot silently drop these two names out of this test's coverage.
+        assert!(
+            src.contains("if scope.admit(&v.check, id, abs_path) {"),
+            "the dynamic frontmatter-id admit site in scan_artifact_paths moved or was \
+             reworded — update this test's hand-added names below to match, or this guard \
+             stops covering them"
+        );
+        admitting.insert("frontmatter_id_mismatch".to_string());
+        admitting.insert("frontmatter_id_is_not_a_catalog_id".to_string());
+
+        let exempt: std::collections::BTreeSet<&str> = [
+            "abs_path_outside_managed_roots",
+            "entry_conditional_past_due",
+            "entry_dated_stale",
+            "entry_cited_from_outside_but_undeclared",
+            "validity_unparseable",
+        ]
+        .into_iter()
+        .collect();
+        admitting.retain(|c| !exempt.contains(c.as_str()));
+
+        let expected: std::collections::BTreeSet<String> = ROW_GRAIN_SCOPED_CHECKS
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect();
+
+        assert_eq!(
+            admitting, expected,
+            "a scope.admit(...) call site's check name is not covered by \
+             ROW_GRAIN_SCOPED_CHECKS (or the const names a check with no admit() call site \
+             left) — both the fold loop and the hint legend silently drop whatever this diff \
+             shows"
+        );
+    }
+
+    /// Table-driven per-site coverage for the row-grain checks (2026-09-09 review, Important
+    /// 4a/4b), replacing the eight remaining mutation tests the original Task 4 report proposed
+    /// and never wrote. Each row seeds ONE scoped-out finding — a fixture under `sibling_dir`
+    /// (`git_root/packages/theirs`), a sibling of the fixture's `abs_path`
+    /// (`git_root/packages/mine`) that is under `git_root` but NOT under `abs_path`, the same
+    /// discrimination `params_behind_body_scopes_by_abs_path_not_by_git_root` uses — then runs
+    /// the owning `scan_*` function at `Scope::Project` and asserts BOTH halves of Ruling 17:
+    /// the row is silent (`v.is_empty()`) AND its drop is announced under its own wire name
+    /// (`DoctorScope::scoped_out()`), never merely dropped. That second half had no coverage at
+    /// all before this test for nine of `ROW_GRAIN_SCOPED_CHECKS`'s twelve members — including
+    /// `params_behind_body`, whose only prior scope test asserts silence but never inspects
+    /// `scoped_out()`.
+    ///
+    /// One row per `scan_*` function, not per check — a function that emits two checks
+    /// (`scan_undefined_entries`, `scan_augmentation_declared_but_absent`, `scan_artifact_paths`)
+    /// gets one row exercising ONE of its two, chosen for the simplest fixture. The three
+    /// checks this leaves without a row here (`entry_without_definition`,
+    /// `augmentation_declaration_unparseable`, `frontmatter_id_is_not_a_catalog_id`) still have
+    /// their `admit()` call sites named by
+    /// `row_checks_scoped_by_project_covers_every_admitting_check` above, which is what catches
+    /// either of them being dropped from the fold array — this test's job is per-site
+    /// announcement coverage, not an exhaustive re-statement of that guard.
+    #[test]
+    fn row_checks_scoped_by_project_table_driven() {
+        // Named aliases rather than the bare `Box<dyn Fn(...)>` spelled out on the struct
+        // fields — clippy::type_complexity flags the inline form, and the alias is also just
+        // more readable at each of the nine call sites below.
+        type RowSetup = Box<dyn Fn(&Catalog, &std::path::Path)>;
+        // Runs the owning scan_* function; wraps `scan_artifact_paths`'s extra
+        // `roots`/`known_elsewhere` params (both `&[]` in its row below — irrelevant to
+        // `frontmatter_id_mismatch`, which does not gate on them) and its `(violations,
+        // scoped)` tuple return down to the shared `Vec<Violation>` shape.
+        type RowRun =
+            Box<dyn Fn(&mut scope::DoctorScope, &rusqlite::Connection) -> Result<Vec<Violation>>>;
+
+        struct Row {
+            name: &'static str,
+            expected_check: &'static str,
+            /// Seeds a single scoped-out finding under `dir`.
+            setup: RowSetup,
+            run: RowRun,
+        }
+
+        let rows: Vec<Row> = vec![
+            Row {
+                name: "scan_frontmatter_status_mismatches",
+                expected_check: "frontmatter_status_mismatch",
+                setup: Box::new(|cat, dir| {
+                    let path = dir.join("status-mismatch.md");
+                    std::fs::write(&path, "---\nstatus: open\n---\nbody\n").unwrap();
+                    let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+                    // Direct INSERT rather than `seed_artifact`: that helper pins
+                    // `status: 'active'`, and this row needs a catalog status that DIFFERS
+                    // from the file's frontmatter `status: open` to trigger the mismatch.
+                    cat.conn
+                        .execute(
+                            "INSERT INTO artifact \
+                             (id, abs_path, kind, status, created_at, updated_at, file_mtime, \
+                              file_sha256) \
+                             VALUES ('status-mismatch', ?1, 'spec', 'superseded', 0, 0, 0, '')",
+                            rusqlite::params![abs],
+                        )
+                        .unwrap();
+                }),
+                run: Box::new(scan_frontmatter_status_mismatches),
+            },
+            Row {
+                name: "scan_entry_defined_twice",
+                expected_check: "entry_defined_twice",
+                setup: Box::new(|cat, dir| {
+                    let path = dir.join("dup.md");
+                    // `entry_prefix: [BL]` is required by `declared_entry_prefixes` — without
+                    // it the file's own duplicate headings below are invisible to this scan.
+                    std::fs::write(
+                        &path,
+                        "---\nentry_prefix: [BL]\n---\n# L\n\n## BL-1 — first\n\ntext\n\n\
+                         ## BL-1 — second\n",
+                    )
+                    .unwrap();
+                    let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+                    seed_artifact(cat, "dup", &abs);
+                }),
+                run: Box::new(scan_entry_defined_twice),
+            },
+            Row {
+                name: "scan_undefined_entries (ledger_defines_nothing)",
+                expected_check: "ledger_defines_nothing",
+                setup: Box::new(|cat, dir| {
+                    // A body with NO `## BL-N` heading anywhere: `defined` comes back empty,
+                    // which is specifically what routes to `ledger_defines_nothing` rather
+                    // than its sibling `entry_without_definition`.
+                    seed_tracker(cat, "nodef", dir, "prose only, no headings\n", &["BL-1"]);
+                }),
+                run: Box::new(scan_undefined_entries),
+            },
+            Row {
+                name: "scan_snapshot_drift",
+                expected_check: "snapshot_drift",
+                setup: Box::new(|cat, dir| {
+                    // claimed={1,2,3}, in_body={1,2} via the two `|`-anchored rows below —
+                    // 2*2=4 > 3 clears `body_keeps_snapshot`'s majority gate, and BL-3 is the
+                    // one row missing from the body.
+                    seed_tracker(
+                        cat,
+                        "snap",
+                        dir,
+                        "| ID |\n| BL-1 |\n| BL-2 |\n",
+                        &["BL-1", "BL-2", "BL-3"],
+                    );
+                }),
+                run: Box::new(scan_snapshot_drift),
+            },
+            Row {
+                name: "scan_params_behind_body",
+                expected_check: "params_behind_body",
+                setup: Box::new(|cat, dir| {
+                    // Same fixture shape as
+                    // `params_behind_body_scopes_by_abs_path_not_by_git_root` — reused here
+                    // to close THAT test's own gap: it never inspects `scoped_out()`.
+                    seed_tracker(
+                        cat,
+                        "ahead",
+                        dir,
+                        "| ID |\n| BL-1 |\n| BL-2 |\n| BL-3 |\n",
+                        &["BL-1", "BL-2"],
+                    );
+                }),
+                run: Box::new(scan_params_behind_body),
+            },
+            Row {
+                name: "scan_params_status_drift",
+                expected_check: "params_status_drift",
+                setup: Box::new(|cat, dir| {
+                    // The `BL-60` incident shape: params says `open`, the committed row says
+                    // `done-archived`.
+                    seed_status_tracker(
+                        cat,
+                        "disagree2",
+                        dir,
+                        "| ID | Task | Status |\n| BL-1 | task | **done-archived** |\n",
+                        &[("BL-1", "open")],
+                        &["open", "done-archived"],
+                    );
+                }),
+                run: Box::new(scan_params_status_drift),
+            },
+            Row {
+                name: "scan_terminal_status_with_caveat",
+                expected_check: "terminal_status_with_caveat",
+                setup: Box::new(|cat, dir| {
+                    seed_bug(cat, dir, "capname", "fixed", Some("needs re-verification"));
+                }),
+                run: Box::new(scan_terminal_status_with_caveat),
+            },
+            Row {
+                name: "scan_augmentation_declared_but_absent",
+                expected_check: "augmentation_declared_but_absent",
+                setup: Box::new(|cat, dir| {
+                    seed_declared(cat, dir, "declname", Some("true"), false);
+                }),
+                run: Box::new(scan_augmentation_declared_but_absent),
+            },
+            Row {
+                name: "scan_artifact_paths (frontmatter_id_mismatch)",
+                expected_check: "frontmatter_id_mismatch",
+                setup: Box::new(|cat, dir| {
+                    // A well-formed 16-hex id that is simply not THIS row's id — clears
+                    // `is_librarian_id` so it routes to `frontmatter_id_mismatch`, not
+                    // `frontmatter_id_is_not_a_catalog_id`.
+                    let path = dir.join("idmismatch.md");
+                    std::fs::write(&path, "---\nid: 0123456789abcdef\n---\nbody\n").unwrap();
+                    let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+                    seed_artifact(cat, "idmismatch", &abs);
+                }),
+                run: Box::new(|scope, conn| {
+                    let (v, _scoped) = scan_artifact_paths(conn, &[], &[], scope)?;
+                    Ok(v)
+                }),
+            },
+        ];
+
+        for row in rows {
+            let tmp = tempfile::tempdir().unwrap();
+            let git_root = tmp.path().join("repo");
+            // load-bearing: abs_path must be a CHILD of git_root, exactly as in
+            // `params_behind_body_scopes_by_abs_path_not_by_git_root` — Project scope
+            // (matches on abs_path) and Repo scope (matches on git_root) must actually
+            // disagree for a sibling-directory fixture to prove anything.
+            let abs_path = git_root.join("packages/mine");
+            std::fs::create_dir_all(&abs_path).unwrap();
+            let sibling_dir = git_root.join("packages/theirs");
+            std::fs::create_dir_all(&sibling_dir).unwrap();
+
+            let cat = Catalog::open_in_memory().unwrap();
+            (row.setup)(&cat, &sibling_dir);
+
+            let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+                abs_path: abs_path.clone(),
+                git_root: git_root.clone(),
+                main_root: None,
+                umbrella: None,
+            });
+            let ctx = TestToolContextBuilder::new(cat)
+                .with_current_project(cp)
+                .build();
+            let cat = ctx.catalog.lock();
+
+            let mut ds =
+                scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+            let v = (row.run)(&mut ds, &cat.conn).unwrap();
+            assert!(
+                v.is_empty(),
+                "{}: a sibling package's finding under git_root but outside abs_path must be \
+                 scoped OUT at Project scope, not reported: {v:?}",
+                row.name
+            );
+            assert_eq!(
+                ds.scoped_out()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec![row.expected_check],
+                "{}: the scoped-out drop must be ANNOUNCED under its own wire name via \
+                 DoctorScope::scoped_out() — silence here means row_checks_scoped_by_project \
+                 would undercount with nobody able to tell (2026-09-09 review, Important 4a/4b)",
+                row.name
+            );
+        }
     }
 
     /// The direction pin: on a body that LAGS params, the old check fires and the new

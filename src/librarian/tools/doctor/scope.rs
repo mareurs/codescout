@@ -314,9 +314,7 @@ mod tests {
     /// `resolve_scope` (`src/librarian/tools/scope.rs`) rewrites the `Scope::Project`/
     /// `Scope::Repo`, no-active-project case to `(Scope::All, true)` upstream of ever
     /// constructing a `DoctorScope`. Reproduced by literally applying the review's proposed
-    /// fix and observing the panic before writing this corrected version. (Kept under its
-    /// original name rather than renamed, so a citation of the review's own fix instruction
-    /// still resolves to the test that corrects it.)
+    /// fix and observing the panic before writing this corrected version.
     #[test]
     fn scope_project_without_an_active_project_is_refused() {
         let ctx = unscoped_ctx();
