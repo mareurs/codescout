@@ -657,10 +657,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut entry_validity_scoped_by_project: std::collections::BTreeMap<String, usize> =
         Default::default();
     for check in [
-        "entry_conditional_past_due",
-        "entry_dated_stale",
-        "entry_cited_from_outside_but_undeclared",
-        "validity_unparseable",
+        Check::EntryConditionalPastDue.as_str(),
+        Check::EntryDatedStale.as_str(),
+        Check::EntryCitedFromOutsideButUndeclared.as_str(),
+        Check::ValidityUnparseable.as_str(),
     ] {
         if let Some(sub) = doctor_scope.scoped_out().get(check) {
             for (group, n) in sub {
@@ -675,7 +675,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // plain `.cloned()` off `doctor_scope` stands in for the loop above.
     let cited_prefix_scoped: std::collections::BTreeMap<String, usize> = doctor_scope
         .scoped_out()
-        .get("cited_prefix_with_no_definer")
+        .get(Check::CitedPrefixWithNoDefiner.as_str())
         .cloned()
         .unwrap_or_default();
 
@@ -3316,6 +3316,35 @@ fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation
 /// Also a guess; re-tune from the first month's output.
 const EXPOSURE_THRESHOLD: usize = 5;
 
+/// A declared `conditional` whose named event may already have fired.
+///
+/// **Reports a worklist, never a verdict.** Selection is syntactic and cheap — a
+/// section's own `**Valid:**` line, above the exposure gate; whether the condition
+/// actually fired is the reader's judgement, and always will be. The `detail` carries
+/// the condition text so it can be adjudicated without reopening the file.
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, not run over every conditional entry.** A
+/// conditional nobody is citing is not worth anyone's attention. `indegree` is computed
+/// once per `doctor` run by [`entry_indegree`] and shared with the checks that follow,
+/// so the population is priced consistently rather than recomputed per check.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here.** That is
+/// [`scan_validity_unparseable`]'s business; reporting it here too would duplicate the
+/// finding, and staying silent here is what keeps the two checks from ever disagreeing
+/// about the same defect.
+///
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)** before parsing, so a
+/// parent entry with no declaration of its own never inherits a nested child's.
+///
+/// **The worklist is scoped by [`scope::DoctorScope`]; `indegree` is not, per Ruling 17.**
+/// A row `scope.admit` refuses is dropped from this function's own return, never from
+/// `indegree` — exposure stays a corpus-wide property so a conditional's priority does
+/// not change depending on which repo the reader happens to be standing in. No active
+/// project means `DoctorScope` admits everything, so this narrowing is a no-op outside a
+/// project checkout.
+///
+/// Read-only; there is no `fix=`. Discharging a conditional means judging whether the
+/// named event happened, which only a reader can do.
 fn scan_conditional_past_due(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -3416,6 +3445,51 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
     Some((d - epoch).num_days())
 }
 
+/// Declared `dated` Statements past [`VALIDITY_HORIZON_DAYS`], **ranked by exposure
+/// descending**.
+///
+/// **The ranking is load-bearing, not a nicety.** A decayed fact nothing cites costs
+/// nothing; one cited from a promoted skill costs a lot. An unranked list of every dated
+/// entry past the horizon is thousands of rows and will be ignored — the same outcome as
+/// not shipping the check, at higher cost.
+///
+/// **The sort key is TOTAL: `(Reverse(exposure), path, id)`.** No two rows can compare
+/// equal (an entry id is unique within its own path), so the output is deterministic by
+/// construction rather than by leaning on an implicit stable-sort guarantee. See the
+/// comment at the sort call for the measured reasoning: several smaller/less-adversarial
+/// tie shapes failed to expose a stable-vs-unstable difference before a 33-entry
+/// alternating-exposure fixture did.
+///
+/// **Declared `dated` only — parsed with `parse_validity`, never `resolve_validity`.**
+/// `resolve_validity`'s default-is-decay behavior treats an UNDECLARED entry as `dated
+/// <fallback>`, which is exactly the guessed age this check must not produce. An entry
+/// with no declaration is [`scan_cited_but_undeclared`]'s business — it reports the entry
+/// as undeclared rather than guessing its age. (That check shipped as the plan's Task 7;
+/// this sentence said "not-yet-shipped" until 2026-09-02, by which point it had been wired
+/// into [`call`] for weeks and a reader had proposed rebuilding it.)
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, not run over every dated entry.** Same `indegree`
+/// map computed once per `doctor` run by [`entry_indegree`] and shared with
+/// [`scan_conditional_past_due`], so the population is priced consistently.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here** — same split as
+/// [`scan_conditional_past_due`]: that is [`scan_validity_unparseable`]'s business;
+/// reporting it here too would duplicate the finding.
+///
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)** before parsing, so a parent
+/// entry with no declaration of its own never inherits a nested child's.
+///
+/// Takes `today_epoch_days` rather than computing `chrono::Utc::now()` itself, so the
+/// horizon comparison and the ranking are deterministic under test.
+///
+/// **The worklist is scoped by [`scope::DoctorScope`]; exposure is not, per Ruling 17.**
+/// Same split as [`scan_conditional_past_due`] — a row `scope.admit` refuses drops out of
+/// the returned worklist only, never out of the exposure ranking that ordered it. No
+/// active project means `DoctorScope` admits everything, so this narrowing is a no-op
+/// outside a project checkout.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict — re-running the
+/// underlying measurement and judging whether the date is still true is the reader's.
 fn scan_dated_stale(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -3501,6 +3575,40 @@ fn scan_dated_stale(
     Ok(scored.into_iter().map(|(_, v)| v).collect())
 }
 
+/// A Statement other files depend on that declares no decay class at all.
+///
+/// The inverse of the checks above: they read a declaration, this one reports its
+/// absence where absence costs something. These are the de-facto promotions — a
+/// Statement genuinely promoted and declared nowhere reads identically here to one
+/// nobody got around to declaring; this check cannot and does not distinguish them.
+///
+/// **It reports "load-bearing and undeclared", never "promoted".** Measured
+/// 2026-08-20: a promotion, an eval-fixture list, and a kin reference are
+/// syntactically identical — `grep -c '<id>'` counts any mention, and using it as a
+/// promotion predicate mislabelled three of five entries in commit `9a982ed5`. That
+/// direction stays human; the `detail` string must not contain the word "promoted".
+///
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)**, never `s.text`, before
+/// parsing — same rule as [`scan_conditional_past_due`] and [`scan_dated_stale`]: a
+/// parent with no declaration of its own must not inherit a nested child's. For this
+/// check specifically, skipping the truncation would fail in the UNSAFE direction: a
+/// parent that declares nothing would read the child's declaration as its own and
+/// silently stop being reported, even though the parent itself is still undeclared.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here.** Only `Ok(None)`
+/// (declares no class at all) is this check's business — a malformed declaration is
+/// [`scan_validity_unparseable`]'s finding, and a well-formed declaration of any class
+/// means one of the checks above already covers this entry.
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, using the same shared `indegree`** as
+/// [`scan_conditional_past_due`] and [`scan_dated_stale`] — one exposure computation,
+/// three consumers, so the population is priced consistently.
+///
+/// **The worklist is scoped by [`scope::DoctorScope`]; exposure is not, per Ruling 17**
+/// — same split as its two siblings above. No active project means `DoctorScope` admits
+/// everything, so this narrowing is a no-op outside a project checkout.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict.
 fn scan_cited_but_undeclared(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -3564,6 +3672,43 @@ fn scan_cited_but_undeclared(
     Ok(out)
 }
 
+/// A `**Valid:**` line that fails to parse — shape-invalid, calendar-invalid
+/// (`dated 2026-02-30`), or an unknown class.
+///
+/// The fourth partition of the validity-decay family, and the one that closes it.
+/// [`scan_conditional_past_due`], [`scan_dated_stale`], and [`scan_cited_but_undeclared`]
+/// each deliberately swallow `parse_validity`'s `Err` and defer to this check by name in
+/// their own doc comments. Before this check shipped, a malformed declaration was
+/// invisible to the whole family: the author tried to declare and failed, and their
+/// Statement read as healthy to every check that partitions on class. This closes
+/// `docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md`,
+/// whose filed instance (`dated 2026-02-30`) is one shape of this — the other is any
+/// value `parse_validity` refuses outright, which the filed bug did not cover.
+///
+/// **Ungated on exposure, unlike its three siblings.** The exposure gate exists to
+/// prioritise DECAY work — is a Statement's claim still true — which presupposes the
+/// declaration parsed in the first place. An unparseable declaration is a different
+/// failure, a malformed record rather than a stale one, and it costs the author
+/// something the moment it is written, regardless of who cites it yet. The population
+/// is bounded by how many sections declare `**Valid:**` at all, not by the full corpus —
+/// measured 2026-08-20, 1 of 2869 entry sections declares a `**Valid:**` line, so
+/// ungated is safe today. If that population grows large enough that this worklist
+/// starts burying others the way `entry_cited_from_outside_but_undeclared` buried
+/// everything else pre-MF-1, gate it on `EXPOSURE_THRESHOLD` like its siblings.
+///
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)**, never `s.text` — same
+/// rule as the other three: a parent with no declaration of its own must not inherit a
+/// nested child's malformed one.
+///
+/// **The worklist is scoped by [`scope::DoctorScope`], per Ruling 17** — same mechanism
+/// as its three siblings, though this check has no exposure metric of its own to keep
+/// unscoped (it is ungated, see above). No active project means `DoctorScope` admits
+/// everything, so this narrowing is a no-op outside a project checkout. The comment at
+/// [`call`]'s fold site that names this function's doc comment for the measured
+/// population size refers to the paragraph above, not to this one.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict — the fix is an
+/// author correcting the line, not this check guessing what was meant.
 fn scan_validity_unparseable(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -3980,6 +4125,14 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// not by `files[0]`. The alphabetically-first citer overall may well be the in-project one
 /// that fell below threshold, and filing the drop under the reader's own project root would
 /// read as though their own repo had been excluded from their own report.
+///
+/// **`cited_prefix_scoped_by_project`'s `n_projects` is a lower bound, not a complete tally.**
+/// A scoped-out prefix's foreign citers can span several roots, but only the first (by the same
+/// sort as above) is credited to `scoped_out` — one root per finding, not one root per foreign
+/// citer. Crediting every foreign root a single prefix touches would let that one prefix inflate
+/// `n_projects` past the actual finding count, breaking the hint text's own promise
+/// (`{total_scoped} finding(s) across {n_projects} other project root(s)`) that the two numbers
+/// describe the same population. Reviewed 2026-09-09.
 fn scan_cited_prefix_with_no_definer(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -4099,9 +4252,28 @@ fn scan_cited_prefix_with_no_definer(
                 .filter(|f| !in_project.contains(f.as_str()))
                 .collect();
             outside.sort();
+            // Tally-only call, unlike sites 1-4: this branch is entered because the
+            // in-project citers already failed the worklist thresholds above, so there is
+            // no `Violation` here for `admit` to gate with a `continue`-on-`false`. Its
+            // boolean return is dead by construction at this call site — `first` is drawn
+            // from `outside`, i.e. `!in_project.contains(first)`, and `scope.contains`
+            // (which `admit` re-tests internally) agrees with `in_project` at `Scope::Project`,
+            // so `admit` returns `false` here on every call, never `true`. A future change
+            // that lets `admit`/`scope.contains` admit a path `in_project`-excludes must
+            // re-derive this site rather than inherit today's "return is always false"
+            // (2026-09-09 review, Q1/Important 4/"also fix").
+            //
+            // **`id`/`abs_path` carry a different KIND of value here than at sites 1-4.**
+            // Sites 1-4 pass a row's own artifact id and its own path. This site passes
+            // `prefix` — a namespace prefix, not an artifact id, and not this finding's own
+            // path — plus `first`, one of the prefix's FOREIGN citers, not the finding's own
+            // location (this check's finding has no single path; `files[0]` is the in-project
+            // one, deliberately not used for the tally key either — see the doc comment
+            // above). A future consumer of `admit`'s `id` parameter must branch on `check`
+            // rather than assume every call site carries an artifact-id/own-path pair.
             if let Some(first) = outside.first() {
                 scope.admit(
-                    "cited_prefix_with_no_definer",
+                    Check::CitedPrefixWithNoDefiner.as_str(),
                     prefix.as_str(),
                     first.as_str(),
                 );
@@ -10234,6 +10406,12 @@ mod tests {
     /// (`active-project/` sorts before `sibling-project/`). Keying the drop by `files[0]`,
     /// the obvious shortcut, would file it under the reader's own project root and read as
     /// though their own repo had been excluded from their own report.
+    ///
+    /// **This fixture has exactly one foreign root by construction** (`sibling_root` alone) —
+    /// it credits `n_projects` with the coverage this test actually provides and no more.
+    /// It does NOT exercise a prefix whose foreign citers span two or more distinct roots,
+    /// which is the case the doc comment's "lower bound" paragraph describes; nothing here
+    /// asserts the multi-root count is capped at one, only that the single-root case works.
     #[test]
     fn a_mostly_foreign_prefix_is_scoped_out_and_keyed_outside_the_project() {
         let tmp = tempfile::tempdir().unwrap();
@@ -10265,7 +10443,7 @@ mod tests {
         };
         let scoped_out = ds
             .scoped_out()
-            .get("cited_prefix_with_no_definer")
+            .get(Check::CitedPrefixWithNoDefiner.as_str())
             .cloned()
             .unwrap_or_default();
 
@@ -10284,6 +10462,64 @@ mod tests {
             key.contains("sibling-project") && !key.contains("active-project"),
             "keyed by the first citer OUTSIDE the project, not by files[0] — which here is \
          the in-project file: {key}"
+        );
+    }
+
+    /// `call()`-level guard for Important 3 (2026-09-09 review): `cited_prefix_scoped_by_project`
+    /// is read via a bare string literal at its publish site and had ZERO assertions anywhere
+    /// in `src/` or `tests/` before this test — a typo or rename on either the write side
+    /// (`scan_cited_prefix_with_no_definer`'s `admit` call) or the read side (`call()`'s fold)
+    /// would silently drop the whole key, and every existing consumer gates on `is_empty()`,
+    /// so the failure mode is a missing key, not an error. `admit`'s own `debug_assert` covers
+    /// only the write side and only in debug builds, and cannot see a write/read mismatch
+    /// between two independently-typed literals. This drives the same shape as
+    /// `a_mostly_foreign_prefix_is_scoped_out_and_keyed_outside_the_project` through `call()`
+    /// end-to-end instead of calling the scan function directly, so it exercises the actual
+    /// fold-and-publish path a real MCP caller sees.
+    #[tokio::test]
+    async fn call_publishes_cited_prefix_scoped_by_project_for_a_scoped_out_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // One in-project citation: below MIN_CITATIONS and MIN_FILES on its own.
+        seed_ledger(
+            &cat,
+            "in-a",
+            &active_root.join("a.md"),
+            "A single passing mention of NN-1.\n",
+        );
+        // Three more elsewhere, which is what carries the prefix over the corpus-wide bar.
+        seed_ledger(
+            &cat,
+            "out-b",
+            &sibling_root.join("b.md"),
+            "NN-2 and NN-3 are tracked here.\n",
+        );
+        seed_ledger(&cat, "out-c", &sibling_root.join("c.md"), "As is NN-4.\n");
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert!(
+            out["summary"]["by_check"]
+                .get("cited_prefix_with_no_definer")
+                .is_none_or(|v| v == &json!(0) || v.is_null()),
+            "the in-project citation alone must not surface as a finding: {out:#?}"
+        );
+        let scoped = out["catalog_health"]["cited_prefix_scoped_by_project"]
+            .as_object()
+            .unwrap_or_else(|| {
+                panic!("the scoped-out prefix must be ANNOUNCED, not silently dropped: {out:#?}")
+            });
+        assert!(!scoped.is_empty(), "{out:#?}");
+        let key = scoped.keys().next().unwrap();
+        assert!(
+            key.contains("sibling-project") && !key.contains("active-project"),
+            "keyed by the first citer OUTSIDE the project, same as the direct-scan test: {key}"
         );
     }
 
@@ -13297,6 +13533,82 @@ root = "work/elsewhere/ghost"
         );
     }
 
+    /// Missing-deliverable fix (2026-09-09 review, brief Step 1): the MEMBER-level case
+    /// that `call_accumulates_scoped_out_counts_per_root_across_checks_and_keeps_roots_distinct`
+    /// does not reach. That test proves the AGGREGATE (`entry_validity_scoped_by_project`'s
+    /// per-root tallies) is populated; it says nothing about what happens to one entry that
+    /// IS reported. This test proves the other half: a reported, in-project entry's own
+    /// `detail` exposure figure is the GLOBAL count — including citers outside the active
+    /// project — never the in-project-only subset, even though the worklist itself narrows
+    /// to the active project (Ruling 17: the worklist scopes, the metric does not).
+    ///
+    /// Constructed so the claim is falsifiable rather than merely plausible: R-90 gets only
+    /// `EXPOSURE_THRESHOLD - 3` in-project citers, which alone would sit BELOW
+    /// `EXPOSURE_THRESHOLD` and never clear the gate at all — so if exposure were scoped to
+    /// the active project (the defect this guards against), R-90 would not be reported here,
+    /// full stop, rather than being reported with a merely-wrong number. It clears the gate,
+    /// and is reported, only because 3 more citers OUTSIDE the active project push the real
+    /// (global) `entry_indegree` count up to exactly `EXPOSURE_THRESHOLD`. Its `detail` must
+    /// then read `(exposure {EXPOSURE_THRESHOLD})`, not `(exposure {EXPOSURE_THRESHOLD - 3})`.
+    #[tokio::test]
+    async fn the_validity_family_narrows_its_worklist_but_not_its_exposure_metric() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let led = active_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "led",
+            &led,
+            "## R-90 — worklist narrows, metric does not\n\n\
+             **Valid:** conditional — until the plan edit lands\n",
+        );
+
+        // In-project citers alone: below EXPOSURE_THRESHOLD, would never clear the gate on
+        // their own.
+        const {
+            assert!(
+                EXPOSURE_THRESHOLD >= 3,
+                "fixture assumes room for an in-project-only count strictly below the threshold"
+            );
+        };
+        for i in 0..(EXPOSURE_THRESHOLD - 3) {
+            let p = active_root.join(format!("in-citer-{i}.md"));
+            seed_ledger(&cat, &format!("in-citer-{i}"), &p, "see R-90\n");
+        }
+        // Foreign citers: the remaining 3, which only the GLOBAL exposure count sees.
+        for i in 0..3 {
+            let p = sibling_root.join(format!("out-citer-{i}.md"));
+            seed_ledger(&cat, &format!("out-citer-{i}"), &p, "see R-90\n");
+        }
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["entry_conditional_past_due"],
+            json!(1),
+            "R-90 must be reported at all — it clears the gate ONLY because foreign citers \
+         count toward its exposure: {out:#?}"
+        );
+        let violations = out["violations"].as_array().unwrap();
+        let v = violations
+            .iter()
+            .find(|v| v["check"] == "entry_conditional_past_due")
+            .unwrap_or_else(|| panic!("expected one entry_conditional_past_due row: {out:#?}"));
+        let detail = v["detail"].as_str().unwrap();
+        assert!(
+            detail.contains(&format!("exposure {EXPOSURE_THRESHOLD}")),
+            "the reported exposure figure must be the GLOBAL count ({EXPOSURE_THRESHOLD}), not \
+         the in-project-only subset ({}): {detail:?}",
+            EXPOSURE_THRESHOLD - 3
+        );
+    }
+
     #[test]
     fn conditional_past_due_does_not_report_a_row_under_a_sibling_root() {
         // Fix Round 2, M1: the scoping guard survived deletion because every scoping
@@ -13343,7 +13655,7 @@ root = "work/elsewhere/ghost"
         assert_eq!(
             v.len(),
             1,
-            "only the entry under the ACTIVE project's git_root may be reported: {v:#?}"
+            "only the entry under the project root may be reported: {v:#?}"
         );
         assert_eq!(v[0].artifact_id.as_deref(), Some("in-scope-led"), "{v:#?}");
         assert_eq!(
@@ -14087,7 +14399,7 @@ root = "work/elsewhere/ghost"
         assert_eq!(
             v.len(),
             1,
-            "only the entry under the ACTIVE project's git_root may be reported: {v:#?}"
+            "only the entry under the project root may be reported: {v:#?}"
         );
         assert_eq!(v[0].artifact_id.as_deref(), Some("in-scope-led"), "{v:#?}");
         let scoped_out = ds
@@ -14429,7 +14741,7 @@ root = "work/elsewhere/ghost"
         assert_eq!(
             v.len(),
             1,
-            "a row under the active project's git_root must be reported: {v:#?}"
+            "a row under the project root must be reported: {v:#?}"
         );
         let scoped_out = ds
             .scoped_out()
@@ -14529,6 +14841,20 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-72"), EXPOSURE_THRESHOLD + 3);
 
+        // `Scope::All`, deliberately, not `Scope::Project` — this IS the real "no active
+        // project" arm in production, not a stand-in for it. `call()` never constructs a
+        // `DoctorScope` with `Scope::Project` and no active project: `resolve_scope`
+        // (`src/librarian/tools/scope.rs`) rewrites the `Scope::Project`/`Scope::Repo`,
+        // no-active-project case to `(Scope::All, true)` *before* `DoctorScope::new` runs,
+        // and `DoctorScope::new`
+        // itself refuses that combination outright — `apply_scope`'s `require()` guard
+        // errors on `Scope::Project` with no active project rather than degrading to empty
+        // roots. Verified 2026-09-09 (correcting round-3 review Important 2, whose proposed
+        // fix — routing this test through `Scope::Project` + `unscoped_ctx()` — panics on
+        // `.unwrap()`: `scope::tests::scope_project_without_an_active_project_admits_everything`
+        // reproduces the same panic and is kept, inverted, as the test of THAT fact). So
+        // `Scope::All` is not a weaker stand-in for "no active project" here; it is the only
+        // state `DoctorScope` can ever actually be in when there is no active project.
         let mut ds =
             scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();

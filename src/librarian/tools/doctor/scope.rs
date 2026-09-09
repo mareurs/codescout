@@ -69,8 +69,19 @@ pub(super) struct DoctorScope {
     // later umbrella-specific hint) is the intended production reader.
     #[allow(dead_code)] // Task 7 removes this
     pub scope: Scope,
-    /// Managed roots for the lexical half. Empty means `Scope::All` —
-    /// everything is in scope and [`Self::contains`] short-circuits to `true`.
+    /// Managed roots for the lexical half. Empty means everything is in scope and
+    /// [`Self::contains`] short-circuits to `true` — and this is `Scope::All`'s case
+    /// EXCLUSIVELY, not merely its normal one. `Scope::Project`/`Scope::Repo`/
+    /// `Scope::Umbrella` with no active project (`ctx.current_project.is_none()`) do
+    /// NOT reach the `if let Some(cp) = ...` guard in [`Self::new`] with `roots` staying
+    /// empty — [`Self::new`] calls `apply_scope(..)?` first, and `apply_scope`'s own
+    /// `require()` guard errors out on exactly that combination (`"scope=<name> requires
+    /// an active project"`) before the roots-building code below it ever runs. So an
+    /// empty `roots` here can ONLY mean `Scope::All`; there is no second route to it.
+    /// This corrects a 2026-09-09 round-3 review claim (Important 2) that assumed the
+    /// second route existed; disproven by `scope_project_without_an_active_project_admits_everything`,
+    /// which now asserts the refusal (`expect_err`) rather than the originally-proposed
+    /// `unwrap()`.
     roots: Vec<PathBuf>,
     /// Rows refused by [`Self::admit`], tallied first by CHECK NAME then by
     /// [`super::outside_roots_group`] root. Keyed by check because Ruling
@@ -144,8 +155,9 @@ impl DoctorScope {
         })
     }
 
-    /// Lexical predicate for a path already in hand. `Scope::All` (empty
-    /// `roots`) admits everything.
+    /// Lexical predicate for a path already in hand. Empty `roots` admits everything, and
+    /// (per the `roots` field doc) that state is `Scope::All` exclusively — not "any scope
+    /// with no active project," which is instead refused at [`Self::new`] construction time.
     pub(super) fn contains(&self, abs_path: &Path) -> bool {
         if self.roots.is_empty() {
             return true;
@@ -167,6 +179,17 @@ impl DoctorScope {
     /// from the start means every one of the ~13 call sites Tasks 3–5 add
     /// already carries the id `admit` will need, rather than risking a
     /// signature change later that silently misses one of them.
+    ///
+    /// **Not every call site carries the same KIND of `id`/`abs_path` pair.** Sites 1-4
+    /// (the entry-validity family) pass a row's own artifact id and its own path — the
+    /// uniform shape this paragraph originally assumed for all ~13 eventual callers.
+    /// `cited_prefix_with_no_definer` (Task 3's fifth site) does not: it is a per-PREFIX
+    /// check with no single owning row, so it passes the namespace prefix as `id` and one
+    /// of the prefix's citers OUTSIDE the active project as `abs_path` — never the
+    /// finding's own artifact or path. A future Task 7 reader of `id` must branch on
+    /// `check` rather than assume an artifact id is always available (2026-09-09 review,
+    /// Important 4 — the reviewer's own planning error, not the implementer's: Ruling C
+    /// assumed the uniform shape before this site existed).
     pub(super) fn admit(&mut self, check: &str, id: &str, abs_path: &str) -> bool {
         // 2026-09-09 review, round 2, PROMOTED: `Violation::new` (`src/librarian/tools/
         // doctor.rs`) validates its own `check` argument this same way, on the
@@ -271,6 +294,42 @@ mod tests {
             "/anywhere/at/all/docs/x.md"
         ));
         assert!(s.scoped_out().is_empty());
+    }
+
+    /// `Scope::Project` (or `Repo`/`Umbrella`) with `ctx.current_project == None` is REFUSED
+    /// at construction, not degraded to empty roots.
+    ///
+    /// This corrects a 2026-09-09 round-3 review claim (Important 2), which asserted this
+    /// combination reaches `DoctorScope::new`'s roots-building code with `roots` silently
+    /// staying empty — the same failure mode as `Scope::All` — and that a prior test claiming
+    /// to cover "no active project" via `Scope::All` therefore missed the real arm. Verified
+    /// here instead: `DoctorScope::new` calls `apply_scope(..)?` BEFORE building `roots` at
+    /// all, and `apply_scope`'s own `require()` guard errors out on `Scope::Project` with no
+    /// current project (`"scope=project requires an active project"`) — so the roots-building
+    /// `if let Some(cp) = ctx.current_project.as_deref()` branch this review's fix targeted is
+    /// unreachable for this exact combination; `?` returns `Err` first. The `Scope::All` route
+    /// in `cited_but_undeclared_reports_everything_when_there_is_no_active_project` was already
+    /// correct: it is not a weaker stand-in for "no active project", it is the ONLY scope
+    /// `DoctorScope` can hold when there is no active project, because `call()`'s own
+    /// `resolve_scope` (`src/librarian/tools/scope.rs`) rewrites the `Scope::Project`/
+    /// `Scope::Repo`, no-active-project case to `(Scope::All, true)` upstream of ever
+    /// constructing a `DoctorScope`. Reproduced by literally applying the review's proposed
+    /// fix and observing the panic before writing this corrected version. (Kept under its
+    /// original name rather than renamed, so a citation of the review's own fix instruction
+    /// still resolves to the test that corrects it.)
+    #[test]
+    fn scope_project_without_an_active_project_admits_everything() {
+        let ctx = unscoped_ctx();
+        assert!(
+            ctx.current_project.is_none(),
+            "this test's whole point is the no-active-project arm"
+        );
+        let err = DoctorScope::new(Scope::Project, &ctx)
+            .expect_err("Scope::Project with no active project must be refused, not degraded");
+        assert!(
+            err.to_string().contains("requires an active project"),
+            "{err}"
+        );
     }
 
     /// The discriminating property, at unit grain: a foreign path is refused AND
