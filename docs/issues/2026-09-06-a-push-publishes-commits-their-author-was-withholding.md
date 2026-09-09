@@ -242,10 +242,38 @@ does git not record the withholding, the guard's own consent mechanism has no sl
 
 **And the diligent path does not help, which is the tell.** The pusher read its range, resolved
 every author, obtained its operator's authorisation and used the prescribed ack. The author
-committed, verified, declined to push and surfaced upward. Both behaved correctly by every rule
-written down, and the outcome is a commit published against its author's stated intent. *"Ask the
-author first"* is the missing step and it is **not** in the guard's text, which routes the pusher
-to their operator and stops.
+committed, verified, declined to push and surfaced upward.
+
+**CORRECTION, 2026-09-09, to the first form of this entry.** It read *"'Ask the author first' is
+the missing step and it is not in the guard's text, which routes the pusher to their operator and
+stops."* **That is false and was written by a session that had the text in front of it.**
+`scripts/pre-push-foreign-session-guard.sh:304-315` says *"Ask the AUTHOR which of three states
+they are in: withheld / not withheld, UNCLEARED / cleared"*, then *"THEN ASK YOUR OPERATOR"*.
+Corrected on the pusher's own objection, which cost them rather than helped them — see below.
+
+**The accurate claim, and it is mechanizable where the false one was not.** The step exists as
+**policy**. What does not exist is any **mechanism tying its outcome to the ack**:
+`CODESCOUT_PUSH_ACK` encodes *who* the authors are and cannot encode *what they said*, so
+performing the ask and skipping it produce **identical input and identical exit 0**. That is
+`skill-frictions:SKF-22` — a trigger the model must notice is a policy, not a mechanism. **Fix
+shape falls straight out:** the ack must carry the author's answer, not merely their sid, so the
+three states are representable to the guard rather than only to the reader.
+
+**Why the correction makes the pusher's part worse, in their own framing.** Had the step not
+existed, skipping it would be no defect. It exists, they had read it, and they **performed it for
+one author and not the other in the same push** — asked `b80a27d4` the three-state question, got
+`UNCLEARED`, acted on it, and did not ask the author one rung up. So the asymmetry was not
+ignorance of the step; it was that a broad authorisation over the **branch** felt like it had
+already answered a **party's** position on their own commit. That is `F-127`'s modal compression
+with the roles swapped — there a dependency remark was read as consent to an act, here an
+operator's *"push all"* was read as covering another session's stated hold. An operator can
+authorise the push and cannot answer for the author.
+
+**So the row carries a pair, and only the second generalises:** the pusher's error is a **policy
+violation**, and this file's finding is **why a policy violation there emits no signal**. Recorded
+at the pusher's insistence that *"both parties followed every written rule"* not stand — they
+followed all but one, and the one they skipped is in the text.
+
 
 **A liveness detail worth carrying, because it nearly inverted the reading.** One call before the
 push, the guard's own output rendered `b80a27d4`'s address as `[]` where minutes earlier it had
@@ -253,14 +281,19 @@ shown `[LIVE]`. Had that been read as *"author gone, nobody to ask"* the ack wou
 like the only route rather than one of two. The address decayed; the sid did not — § *Observer
 Blindness*'s rule about which component to attribute by, arriving inside the decision it governs.
 
-**Also falsifies the fallback this file's § *Workarounds* leans on.** A sha refspec does **not**
-pin "only my commits": `git push origin <sha>:<branch>` sends everything **reachable** from that
-sha, so where the uncleared commit is an *ancestor* there is no refspec that excludes it.
-Verified: `git merge-base --is-ancestor d71f0aac f3e7c08b` → true. Both sessions believed the
-refspec route was available as a fallback and neither had it. Compounding this, the refspec form
-is independently **broken** as a guard input —
-`docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`
-— so the recommended escape is both narrower than advertised and, when it does apply, silent.
+**Also falsifies the fallback this file's § *Workarounds* leans on — twice over, and the compound
+is the part to carry.** The refspec escape is **narrower than advertised** *and* **silent when it
+does apply**, which are two independent defects in one recommended hatch:
+
+1. `git push origin <sha>:<branch>` sends everything **reachable** from that sha, so where the
+   uncleared commit is an *ancestor* there is no refspec that excludes it. Verified:
+   `git merge-base --is-ancestor d71f0aac f3e7c08b` → true. Both sessions believed the refspec
+   route was available as a fallback and neither had it.
+2. In the cases it *does* cover, the form bypasses the guard entirely —
+   `docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`.
+
+So a reader who reaches for it in the one case it fits **gets exit 0 from a check that never ran.**
+
 
 **Not filed as a new bug.** Same mechanism, same class; recorded here so the count is a count and
 not two half-records. Reported by the pusher, `26cb9b5b`, who disclosed it before the author read
