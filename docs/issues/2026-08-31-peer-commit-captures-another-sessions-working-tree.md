@@ -861,6 +861,65 @@ that changes **what is shared**, where the others rearrange who touches a shared
 **Not filed as instance 6.** The count stopped being the informative variable two instances ago;
 what this adds is a vector and a falsification, which is what the ranking consumes.
 
+## Instance 11 — 2026-09-09, a SAME-FILE capture, where the capturing side's own detector is structurally blind and the magnitude was printed and misread
+
+**Capturing commit:** `13b721f1` (session `59112612`, 10:46:35) — *"feat(pre-push): resolve
+each foreign author to a live address and compute the ladder"*.
+**Captured from:** session `ad379a7c`, who reported it. Their own commit `2caf55c5` landed at
+10:46:54 — a **nineteen-second** window.
+**Content:** the whole `fmt-mine-tests` job in `.github/workflows/ci.yml` — its comment block,
+`rustup component add rustfmt` and `bash tests/fmt-mine.sh`.
+
+Verified positively rather than from timing: `git show 13b721f1 -- .github/workflows/ci.yml`
+contains `+  fmt-mine-tests:`. Not repaired, per the standing rule — the commit also carries
+the capturer's own work, and rewriting it to extract one hunk risks that for a cosmetic gain.
+
+**Mechanism is Instance 4's, not a new one:** `git commit -- <path>` commits the WORKING TREE
+at that path, so path-scoping defends against unrelated files and gives nothing when a peer is
+editing the same file you are committing. That is already recorded. What is new is the
+**detection** half, and it narrows a claim this file makes elsewhere.
+
+### The capturing-side detector recorded here cannot fire on a same-file capture
+
+§ *Detection* and Instance 7 both describe the capturing session's `--stat` as the check that
+fires *"for free"*, because it *"reads a file list the capturer did not expect"*. **That is a
+FILE-LIST detector, and it is blind by construction to this case.** The file list was exactly
+what I expected: I had edited `.github/workflows/ci.yml`, deliberately, and it was the only
+CI file in the commit. Nothing about the list was surprising, because nothing about it was
+wrong.
+
+### The signal existed, on the capturing side, as a MAGNITUDE — and I printed it
+
+I ran `git diff --cached --numstat` before committing, in the same command, and read:
+
+```
+52	0	.github/workflows/ci.yml
+```
+
+My own job is about **26** lines. The number was double what I wrote, it was on my screen, and
+I read it as confirmation that staging had worked rather than as a quantity to check against
+what I had authored. **`--numstat` answers *did something get staged*; only the diff answers
+*what*.** I used a count as a check.
+
+**This corrects Instance 7's closing claim**, which frames *"is this the amount of change I
+wrote?"* as available **only to the captured session** — *"neither session can run the
+other's"*. On a same-file capture the capturing session can run exactly that question, and it
+is the only question that works, because the file-list detector is inert. So the two detectors
+are not cleanly complementary: which one is available depends on whether the capture is
+same-file or unrelated-file, and the *magnitude* question is the one that survives both.
+
+### Why it is worth a row when the mechanism is already Instance 4's
+
+Instance 4 established that path-scoping cannot defend a shared file. It left the reader with
+no detector for that case — and § *Detection*'s answer, read without Instance 4 in mind, looks
+like one. A reader who adopts path-scoping plus `--stat` believes they are covered in both
+directions and is covered in one.
+
+Also worth stating because the ledger otherwise reads as though care is the variable: the
+capturing session had, in the ninety minutes before this, filed two bug files about selectors
+narrower than their populations, published a wrong peer count from exactly that defect, and
+written `OB-23`. Knowing the class did not help. The tell was a number in its own output.
+
 ## Detection — the commit's own `--stat` is the only check that fired, and it fired for free
 
 2026-09-01, commit `d617051b`, capturing session `codescout-d9`. This is **layer 2** of the table
