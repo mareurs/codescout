@@ -66,6 +66,14 @@ trap 'rm -rf "$WORK"' EXIT
 # needed this machine's live profiles would run nowhere else.
 mkstub() { # mkstub <name> <verdict> [extra lines...]
     local f="$WORK/prov-$1.sh"
+    local rc=0
+    # EXIT CODE FIDELITY IS LOAD-BEARING. The real tool returns
+    # `1 if unknown == len(paths) else 0` — an all-UNKNOWN scan exits 1 while having run
+    # perfectly. A stub that exits 0 for UNKNOWN hides the branch where the caller reads
+    # that 1 as failure, which is exactly the defect this suite failed to catch the first
+    # time: the guard refused correctly and blamed the scan. Do not "simplify" this to a
+    # uniform exit 0.
+    [ "$2" = "UNKNOWN" ] && rc=1
     {
         echo '#!/usr/bin/env bash'
         # A FILE, not stderr. The first version echoed a marker to stderr, which
@@ -78,6 +86,7 @@ mkstub() { # mkstub <name> <verdict> [extra lines...]
         shift 2
         for line in "$@"; do printf '  printf "%%s\\n" %s\n' "$(printf '%q' "$line")"; done
         echo 'done'
+        echo "exit $rc"
     } > "$f"
     chmod +x "$f"
     echo "$f"
@@ -162,6 +171,11 @@ eq "UNKNOWN exits 1" "$RC" "1"
 eq "UNKNOWN left the file unwritten" "$(grep -c 'pub fn f(  )' "$P/src/lib.rs")" "1"
 has "UNKNOWN refuses" "$OUT" "REFUSED"
 has "UNKNOWN is framed as coverage" "$OUT" "COVERAGE"
+# The real tool exits 1 on an all-UNKNOWN scan. Reading that as a failed scan is a
+# DIFFERENT refusal with a different diagnosis, and it sends the reader to debug a scan
+# that worked. Both refuse and both fail closed, so only the message separates them.
+hasnt "UNKNOWN is not misreported as a broken scan" "$OUT" "could not RUN"
+eq "UNKNOWN exits 1, not 2" "$RC" "1"
 
 echo "== 6. SHARED is refused too -- a peer's bytes are still in there =="
 # Without this case a partition handling only PEER and UNKNOWN passes everything above.

@@ -117,11 +117,23 @@ if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 fi
 
 # shellcheck disable=SC2086
-PROV=$("$PROVENANCE" $WOULD_CHANGE 2>&1) || {
-    echo "fmt-mine: attribution failed; refusing to format rather than guess." >&2
+set +e
+PROV=$("$PROVENANCE" $WOULD_CHANGE 2>&1)
+PROV_RC=$?
+set -e
+# `file-provenance.py` returns `1 if unknown == len(paths) else 0` — exit 1 means the
+# scan RAN and attributed nothing, which is a verdict, not a failure. Only >1 (a usage
+# error, a missing interpreter) is the scan itself failing. Treating any non-zero as
+# failure was this script's third remedy-text defect: it refused correctly and told the
+# reader "attribution failed", sending them to debug a scan that had worked perfectly and
+# produced a careful UNKNOWN explanation the guard then threw away. Stage 1 already reads
+# `cargo fmt --check`'s 0/1/other exactly this way; the discipline was applied to cargo
+# and not to the tool right beside it.
+if [ "$PROV_RC" -gt 1 ]; then
+    echo "fmt-mine: attribution could not RUN (exit $PROV_RC); refusing rather than guess." >&2
     printf '%s\n' "$PROV" >&2
     exit 2
-}
+fi
 
 # Partitioned with awk on the verdict column, NOT with a sed `s|...|` — the first
 # draft used `s|^\(SHARED\|PEER\|UNKNOWN\)...|` where `|` was both the s/// delimiter
