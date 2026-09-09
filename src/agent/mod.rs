@@ -1,5 +1,6 @@
 //! Central orchestrator: manages projects, tool registry, and shared state.
 
+mod build_check;
 mod write_guard;
 #[allow(unused_imports)]
 pub(crate) use write_guard::{
@@ -69,6 +70,11 @@ pub struct Agent {
     /// if they do. Per researcher MCP finding: dropping a `JoinHandle` does
     /// NOT cancel a task — only `.abort()` (or a `CancellationToken`) will.
     pub active_sync_abort: Arc<std::sync::Mutex<Option<tokio::task::AbortHandle>>>,
+    /// Author-side build check: what this session has written, and the state of the
+    /// background `cargo check` over it. Same `Arc<Mutex<_>>` shape as `indexing` above,
+    /// and per-session for the same reason the server is — see
+    /// [`build_check`][crate::agent::build_check] for why it needs no session identity.
+    pub(crate) build_check: Arc<std::sync::Mutex<build_check::SessionBuildState>>,
     /// Lazily-constructed semantic memory store (Qdrant-backed).
     /// `OnceCell` so the first caller wins; later callers share the Arc.
     /// Wrapped in `Arc` so `Agent` remains `Clone`.
@@ -577,6 +583,9 @@ impl Agent {
             embedding_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             library_index_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             active_sync_abort: Arc::new(std::sync::Mutex::new(None)),
+            build_check: Arc::new(std::sync::Mutex::new(
+                build_check::SessionBuildState::default(),
+            )),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
@@ -754,7 +763,15 @@ impl Agent {
     /// default. Silently no-ops if no project resolves, matching the ambient
     /// contract — by the time a write tool calls this it has already resolved
     /// the same pin via `require_project_root_for`, so the workspace is resident.
+    ///
+    /// Also the author-side build check's trigger, and deliberately so. Every write
+    /// path in the tool layer already calls this — nine call sites across
+    /// `create_file`, `edit_file` and `edit_code` — so hanging the trigger here means a
+    /// future write path cannot acquire the check by remembering to add a line. It
+    /// either marks the file dirty, or it has a louder bug than a missing notice.
+    /// (CLAUDE.md § Testing Discipline: guard the SITE, not the feature.)
     pub async fn mark_file_dirty_for(&self, workspace_override: Option<&Path>, path: PathBuf) {
+        self.note_source_write_for(workspace_override, &path).await;
         let _ = self
             .with_project_at(workspace_override, |p| {
                 p.dirty_files
@@ -764,6 +781,28 @@ impl Agent {
                 Ok(())
             })
             .await;
+    }
+
+    /// Author-side build check: note that this session wrote `path`, and start a
+    /// background `cargo check` if this checkout is shared and the debounce has elapsed.
+    ///
+    /// Silently no-ops when no project resolves, matching `mark_file_dirty_for`'s
+    /// contract above. Every other gate — Rust-only, shared-checkout, debounce, cargo
+    /// lock — lives in [`build_check`][crate::agent::build_check] so it is testable
+    /// without a tool.
+    pub async fn note_source_write_for(&self, workspace_override: Option<&Path>, path: &Path) {
+        let root = self
+            .with_project_at(workspace_override, |p| Ok(p.root.clone()))
+            .await;
+        if let Ok(root) = root {
+            build_check::on_source_write(&self.build_check, &root, path);
+        }
+    }
+
+    /// The author-side build notice for this response, if one is pending. Consumes it,
+    /// so a break is announced once rather than on every later call.
+    pub fn take_build_notice(&self) -> Option<String> {
+        build_check::pending_notice(&self.build_check)
     }
 
     /// Pinned twin of `add_session_write_root`.

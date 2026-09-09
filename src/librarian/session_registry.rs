@@ -222,6 +222,28 @@ impl SessionRegistry {
         first_dead.expect("matches is non-empty, so at least one Dead outcome was recorded")
     }
 
+    /// The `cwd` of every row this registry can prove is LIVE.
+    ///
+    /// A purpose-built projection rather than exposing `rows`: callers outside this
+    /// module have no business seeing dead or unresolvable rows, and the one consumer
+    /// ([`crate::agent::build_check::checkout_is_shared`]) asks a counting question, not
+    /// an identifying one. Keeping the field private is what stops the next caller
+    /// re-deriving liveness with a slightly different rule — the "tested through a copy
+    /// of itself" defect, one layer up.
+    ///
+    /// `None` in a slot is a live session whose row records no `cwd`; it is retained
+    /// rather than dropped so a caller can tell "no live sessions" from "live sessions
+    /// we cannot place".
+    pub fn live_cwds(&self, probe: &dyn ProcProbe) -> Vec<Option<String>> {
+        self.rows
+            .iter()
+            .filter_map(|row| match Self::resolve_one(row, probe) {
+                ClaimLiveness::Live { cwd, .. } => Some(cwd),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The caller's own sessionId, resolved from the pid of this server's parent.
     ///
     /// The codescout MCP server is spawned by the Claude session it serves, so

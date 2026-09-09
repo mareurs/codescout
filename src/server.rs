@@ -792,7 +792,7 @@ impl CodeScoutServer {
     }
 
     /// Append the once-per-activation `[codescout] paths are relative to <root>`
-    /// banner.
+    /// banner, and the author-side build notice when one is pending.
     ///
     /// This method no longer transforms result text. Project-root stripping is
     /// field-aware and happens upstream, on the typed `Value`, inside
@@ -856,6 +856,19 @@ impl CodeScoutServer {
                     call_result.content.push(Content::text(block));
                 }
             }
+        }
+
+        // Author-side build notice. Attached here, beside the banner, for the reason the
+        // banner is here: it is cross-cutting, so it belongs at the response boundary
+        // rather than in a tool-name branch. Consumed on read, so a break is announced
+        // once and not on every later call.
+        //
+        // The author of a tree-reddening uncommitted write is otherwise the one party
+        // never told — `run_command`'s WIP attribution tells the READER whose file broke
+        // their gate, and the author, who alone can end the lock, sees nothing. See
+        // `crate::agent::build_check` for the measurements and the three silent ceilings.
+        if let Some(notice) = self.agent.take_build_notice() {
+            call_result.content.push(Content::text(notice));
         }
         call_result
     }
