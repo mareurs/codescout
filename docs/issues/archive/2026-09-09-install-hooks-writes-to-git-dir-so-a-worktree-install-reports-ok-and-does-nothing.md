@@ -140,6 +140,46 @@ The original claim was written from reading the three `rev-parse` values without
 anything, which is exactly the state § *Root cause* labels "a hypothesis wearing a
 conclusion's clothes". It is preserved here rather than deleted because the severity it
 justified is what put this bug at the front of the queue.
+
+### Confirmed from inside a real worktree, and the hook did not merely resolve — it REFUSED
+
+The correction above rests on a throwaway plus a path resolution. Stronger evidence arrived
+the same evening from sessionId `b0015a98-e290-46de-8ed1-3c94bc73a987`, working in
+`.worktrees/result-cap-marker-gate`, and it is better in the way that matters: a path that
+*resolves* to the common dir is consistent with a hook that never fires, while a hook that
+**refuses a push** cannot be.
+
+That session's `pre-push` fired three times from inside the linked worktree — once printing
+its own degrade-open warning, then **twice refusing** a push, naming `c95ba99b` on one and
+six sids on the other. Reported independently of this file, from the worktree rather than
+about it.
+
+### The window check was right by luck: `%ad` is the wrong clock
+
+§ *Fix* claims no commit landed in the ≤49s hooks-deletion window. The claim holds, but the
+method used to establish it did not: it read `git log --format=%ad`, which is the **author**
+date, to answer a question about when a commit was **made**. Those are different clocks and
+they diverge in this very history —
+
+```
+68d72d67   a=09:34:49   c=10:33:14      <- 58 minutes apart, rebased
+5e49fd13   a=10:52:24   c=10:52:24      <- the one that was read; coincided
+```
+
+Re-derived on committer date across all refs, which is the query that actually answers it:
+
+```
+$ git log --all --since='2026-09-09 11:06:00' --until='2026-09-09 11:06:49' | wc -l
+0
+```
+
+And independently by `b0015a98-e290-46de-8ed1-3c94bc73a987` over `experiments`, also empty,
+with their own two commits at `c=10:33:14` — 33 minutes before the window on committer time
+and 90 on author time, which is exactly the gap that makes the wrong clock look convincing.
+**A rebase rewrites committer date and preserves author date, so on any rebased branch
+`%ad` under-reports recent activity** — the direction that makes a "nothing happened in this
+window" claim come out false-clean. Use `--since`/`--until` (committer date) or `%cd`
+explicitly whenever the question is *when did this land*, never *who wrote it when*.
 ## Hypotheses tried
 
 1. **Hypothesis** — the installer writes an inert file into the worktree's gitdir that git
