@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: taken
+status: fixed
 title: artifact(get) reports body-relative line numbers while grep and link_scan report file-relative ones, so a heading map and a citation finding cannot be composed
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -8,11 +8,13 @@ tags:
 - line-numbers
 - coordinate-frame
 - composability
-claimed_at: 2026-09-09
-claimed_by: a403876a-59cf-46a1-8e87-6844824baf9d
+closed: 2026-09-09
 opened: 2026-08-31
 owner: marius
+related:
+- bug-fix-session-log:F-128
 severity: med
+unverified: start_line/end_line composability with grep/link_scan remains unfixed (deliberately, per F-128) — only headings/occurrences are file-relative now
 ---
 
 ## Summary
@@ -82,38 +84,51 @@ tokens exactly where `link_scan` said, and then the arithmetic: 380 − 363 = 17
 
 ## Fix
 
-Two options; the first is what a reader expects, the second is the minimum.
+Shipped a scoped version of Option 1, not the full recommendation above.
 
-1. **Report file-relative lines from `artifact(get)`** — add the frontmatter offset when
-   emitting heading-map lines, `body_meta.start_line`/`end_line`, and when interpreting
-   incoming `start_line`/`end_line`. This makes `get`, `grep`, `link_scan` and the editor
-   agree, and makes the composed call above work.
-2. **Or keep body-relative and label it**: rename `source_line_count` →
-   `body_line_count`, and add `frontmatter_lines` and `body_starts_at_file_line` to
-   `body_meta` so a reader can convert. Cheaper and non-breaking, but leaves every
-   `link_scan` → `get` hop needing manual arithmetic.
+**Fixed:** `preview.headings[*].line`, `preview.last_heading.line`, and the ambiguous-heading
+`body_meta.occurrences` array are now file-relative — offset by
+`frontmatter::body_line_offset()` (already built for the analogous chunk/embedding line-range
+bug, `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`,
+but never wired into `doc(get)` until now). This fixes exactly the composed-call failure in
+§ Evidence: a `link_scan` finding's line now lines up with `doc(get)`'s heading map.
 
-Note that the offset is constant per file and **varies between files**, so no caller-side
-constant fixes this.
+**Deliberately NOT fixed:** `start_line`/`end_line` stay body-relative, both incoming and in
+the `body_meta` echo. Reconnaissance before editing (bug-fix-session-log:F-128) found two
+existing regression tests — `line_slice_returns_requested_range` and
+`line_slice_start_line_1_returns_first_visible_content_line` — that pin the current
+body-relative contract as correct for every existing caller of `doc(get, start_line=…)`.
+Changing that interpretation is a real breaking change to a tested, documented contract, not
+just a fix to this bug's failure mode, and deciding to break it is bigger than one bug-fix
+session should do unilaterally.
 
-Prefer option 1; if the incoming-parameter change is judged breaking, ship option 2's
-fields alongside it so the space is at least nameable.
+**Shipped Option 2's fallback instead, for the part Option 1 couldn't safely reach:** a new
+top-level `frontmatter_lines` field on every `doc(get)` response (0 when there's no
+frontmatter), so a caller still using `start_line`/`end_line` can convert to file-relative
+itself. `source_line_count` was left alone — it wasn't part of the demonstrated failure and
+changing its meaning would affect the soft-cap/pagination logic that reads it.
 
+Fix SHA: `d26d3cd636b2d74fb25ff93e24e3c675d0dfdd72` (experiments)
+Patch-id: `c9c089987a516572054fb1c81292b47b3427e50b`
 ## Tests added
 
-None yet. The shape that matters, and the trap to avoid:
+Four, in `src/librarian/tools/get.rs`'s `tests` module, all following the trap-avoidance rule
+this section originally specified (expected line/offset derived independently from the raw
+fixture text via `.lines().position()`/`.enumerate()`, never by re-deriving the production
+offset):
 
-Assert that the heading map's line for a known heading equals that heading's line **in the
-file**, with the expected value obtained independently — a literal, or a separate read of
-the fixture — never by adding the same offset the code under test computes. A test that
-derives its expectation from the production offset function passes in the broken world by
-construction. This is the defect class named in
-`docs/issues/archive/2026-08-27-cross-repo-file-qualified-bucket-never-fires.md`, whose
-sibling test hand-built the state production derives and so passed over an inert feature.
+- `heading_map_lines_are_file_relative_not_body_relative`
+- `ambiguous_heading_occurrences_are_file_relative` — the literal-line sibling of
+  `duplicate_heading_reports_ambiguous_not_missing`, which had asserted document order only
+  and said explicitly why ("the frontmatter-stripping frame is exactly what this bug's
+  sibling is about").
+- `response_reports_frontmatter_line_count_for_offset_conversion`
+- `response_reports_zero_frontmatter_lines_when_there_is_no_frontmatter`
 
-The fixture must have **non-empty frontmatter**. With empty frontmatter the offset is 0 and
-every assertion holds in both worlds.
-
+All four watched RED against the pre-fix code (body-relative values / missing field) before
+the fix landed. The two pre-existing `start_line`/`end_line` regression tests
+(`line_slice_returns_requested_range`, `line_slice_start_line_1_returns_first_visible_content_line`)
+were run and left unchanged — confirming the scoped fix doesn't touch that contract.
 ## Workarounds
 
 Read line-addressed content with a bounded shell command (`awk 'NR>=A && NR<=B'`) when the

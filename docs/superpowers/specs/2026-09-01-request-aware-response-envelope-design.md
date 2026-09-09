@@ -339,7 +339,7 @@ deleted as redundant. Same rigour here.
   preview is costing them, which is the failure mode itself — a trigger the model must
   notice is a policy, not a mechanism.
 - **`artifact(get)` body-relative vs file-relative line numbers**
-  (`docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md`)
+  (`docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md`)
   is a payload *correctness* defect, not an envelope one.
 
 ## Open questions

@@ -69,7 +69,7 @@ fn find_heading_section<'q>(
 ///
 /// `line_offset` converts `occurrences` from body-relative (what `resolve_section_range`
 /// computed) to file-relative, matching `grep`/`link_scan`. See
-/// docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
+/// docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
 /// and bug-fix-session-log:F-128 for why this is offset here but `start_line`/`end_line`
 /// deliberately are not.
 fn heading_miss_meta(
@@ -125,7 +125,7 @@ fn slice_lines(body: &str, start: usize, end: usize) -> String {
 /// `headings::parse`: those stay frontmatter-agnostic and independently testable, and
 /// `get.rs` is the one call site that already has the offset (`file_content` and
 /// `parsed_body` come from a single parse here). See
-/// docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md.
+/// docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md.
 fn offset_preview_heading_lines(preview: &mut Value, line_offset: usize) {
     if line_offset == 0 {
         return;
@@ -1378,7 +1378,7 @@ mod tests {
         assert_eq!(headings.len(), 4, "# T, ## A, ## B, ## A: {headings:?}");
     }
 
-    /// Regression for docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
+    /// Regression for docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
     /// (scoped fix: heading-map lines only — see bug-fix-session-log:F-128 for why
     /// `start_line`/`end_line` semantics are deliberately untouched).
     ///
