@@ -458,6 +458,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `managed_roots` rather than widening the critical section.
     let (declared_root_violations, declared_roots_health) = scan_declared_project_roots(ctx);
 
+    // Task 7: `DoctorScope::new` locks `ctx.catalog` internally (its cross-root-cites
+    // query needs the connection). `parking_lot::Mutex` is NOT reentrant, so this must
+    // run BEFORE `cat` is taken below — constructing it after would deadlock the very
+    // first `doctor` call. Nothing between here and the lock depends on `doctor_scope`,
+    // so hoisting it costs nothing.
+    let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
+
     let cat = ctx.catalog.lock();
     let mut all_violations: Vec<Violation> = Vec::new();
 
@@ -467,7 +474,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // separate "another workspace's row" from "orphan". Needs the connection, so
     // it runs inside the lock.
     let known_elsewhere = known_workspace_roots(ctx, &cat.conn);
-    let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
     let (artifact_path_violations, mut outside_scoped_by_project) =
         scan_artifact_paths(&cat.conn, &roots, &known_elsewhere, &mut doctor_scope)?;
     all_violations.extend(artifact_path_violations);
@@ -1040,6 +1046,30 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              and scoped-out tally in its result — the two can never disagree."
         ));
     }
+    // Task 7 (relevance exemption's denominator): fires only at 0, because a nonzero
+    // count needs no explanation — the exemption is doing its job. At 0 (today's
+    // catalog), the exemption is inert, and R3 established that link_scan *can* create
+    // a cross-root edge — but only for a bare artifact id or an unqualified entry token
+    // resolving uniquely inside a declared [[umbrella]]; a repo-qualified `<repo>:TOKEN`
+    // citation is designed to never become one ("edges do not span workspaces" —
+    // src/librarian/tools/link_scan/resolve.rs). Naming a hint that cannot actually
+    // help is the defect this repo has already measured once; this hint names the form
+    // that works.
+    if doctor_scope.cross_root_cites_edges() == 0 {
+        hint_parts.push(
+            "0 cross_root_cites_edges: no cites edge (artifact_link or entry_cite) \
+             crosses this scope's root boundary, so DoctorScope::admit's relevance \
+             exemption has nothing to admit right now — inert on this catalog, not \
+             broken. To create one: doc(action=\"append_entry\", cites=[...]) or \
+             doc(action=\"link\", rel=\"cites\") from a local artifact naming a foreign \
+             one directly. librarian(action=\"link_scan\", scope=\"umbrella\", \
+             write=true) can also derive one from prose, but only for a bare artifact \
+             id or an entry token that resolves uniquely within a declared [[umbrella]] \
+             — a repo-qualified `<repo>:TOKEN` citation will not become a cross-root \
+             edge that way, by design."
+                .to_string(),
+        );
+    }
     if hidden_rows > 0 {
         hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
@@ -1119,6 +1149,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             json!(row_checks_scoped_by_project),
         );
     }
+    // Task 7: published unconditionally, including 0 — the zero-case hint above is
+    // what keeps 0 legible as "inert" rather than "broken".
+    catalog_health.insert(
+        "cross_root_cites_edges".to_string(),
+        json!(doctor_scope.cross_root_cites_edges()),
+    );
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
     // absent/unreadable/unparseable config) stays distinguishable from a pass.
     catalog_health.insert("declared_roots".to_string(), declared_roots_health);
@@ -6861,6 +6897,51 @@ mod tests {
         );
     }
 
+    /// Task 7 (relevance exemption), R4: the denominator
+    /// (`catalog_health.cross_root_cites_edges`) is published even when it is 0 — the
+    /// value measured on today's catalog, per the exemption's own field docs
+    /// (`doctor/scope.rs`) — and the zero-case hint names a remedy that R3 confirmed
+    /// actually works, not merely a metric sitting there unexplained.
+    /// `doc(action="append_entry", cites=[...])` / `doc(action="link", rel="cites")`
+    /// are citation-form-agnostic; `link_scan(scope="umbrella", ...)` alone only
+    /// derives an edge for a bare artifact id or an entry token, never a
+    /// repo-qualified `<repo>:TOKEN` one (`link_scan/resolve.rs`'s `CrossRepoToken`
+    /// arm — "edges do not span workspaces"). Asserting the hint names the
+    /// always-working `append_entry`/`cites=` form, not merely `link_scan`, is what
+    /// keeps this test from passing a hint that sends the operator somewhere useless —
+    /// the exact defect class this repo has already measured once (see CLAUDE.md §
+    /// *Testing Discipline*, "loudness is a property of a path").
+    #[tokio::test]
+    async fn cross_root_cites_edges_is_published_at_zero_with_a_working_remedy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "mine", &root.join("docs/mine.md"), "# mine\n");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["catalog_health"]["cross_root_cites_edges"],
+            json!(0),
+            "the denominator must be published even at 0: {:#?}",
+            out["catalog_health"]
+        );
+        let hint = out["catalog_health"]["hint"]
+            .as_str()
+            .expect("hint must be a string");
+        assert!(
+            hint.contains("cross_root_cites_edges"),
+            "the zero-case hint must name the metric it explains: {hint}"
+        );
+        assert!(
+            hint.contains("append_entry") && hint.contains("cites="),
+            "the hint must name a citation-form-agnostic, always-working remedy \
+             (append_entry with cites=[...]), not only link_scan (which cannot resolve \
+             a repo-qualified citation into a cross-root edge): {hint}"
+        );
+    }
+
     /// The umbrella guard `resolve_scope` applies to an explicit `all` — confirmed
     /// correct behavior, not something this task changes. Same fixture as the sibling
     /// test above: no umbrella is configured, so widening must be refused rather than
@@ -9912,10 +9993,21 @@ mod tests {
             25,
             "limit must reach every row the summary counts"
         );
-        assert_eq!(
-            full["catalog_health"]["hint"].as_str().unwrap_or_default(),
-            "",
-            "nothing elided means no elision hint"
+        // Task 7 added an unrelated hint source (`cross_root_cites_edges`'s zero-case
+        // remedy) that fires unconditionally whenever no cites edge crosses this scope's
+        // root boundary — true of this fixture, which seeds no cites edges at all. So
+        // `catalog_health.hint` is no longer empty in the nothing-elided case; asserting
+        // total emptiness would be a per-member claim (elision reachability) checked
+        // against an aggregate (every hint source combined) — exactly the anti-pattern
+        // this repo's own testing discipline warns against. What this test is actually
+        // about is that the ELISION hint specifically does not fire once `limit` reaches
+        // every row — so assert its absence by content, the same way
+        // `outside_roots_by_project_counts_elided_rows_too` asserts its PRESENCE by
+        // content below.
+        let hint = full["catalog_health"]["hint"].as_str().unwrap_or_default();
+        assert!(
+            !hint.contains("elided"),
+            "nothing elided means no elision hint: {hint}"
         );
     }
 
@@ -11154,9 +11246,16 @@ mod tests {
             .with_current_project(cp)
             .build();
 
-        let cat = ctx.catalog.lock();
+        // Task 7: `DoctorScope::new` locks `ctx.catalog` internally for non-`All` scopes
+        // (its cross-root-cites query needs the connection), and `parking_lot::Mutex` is
+        // NOT reentrant — so both scopes must be constructed BEFORE `cat` is locked below,
+        // never after, or this deadlocks. Same reordering as `doctor::call()`.
         let mut project_scope =
             scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut repo_scope =
+            scope::DoctorScope::new(super::super::scope::Scope::Repo, &ctx).unwrap();
+
+        let cat = ctx.catalog.lock();
         let project_v = scan_params_behind_body(&mut project_scope, &cat.conn).unwrap();
         assert!(
             project_v.is_empty(),
@@ -11164,8 +11263,6 @@ mod tests {
              scoped out at Project scope: {project_v:?}"
         );
 
-        let mut repo_scope =
-            scope::DoctorScope::new(super::super::scope::Scope::Repo, &ctx).unwrap();
         let repo_v = scan_params_behind_body(&mut repo_scope, &cat.conn).unwrap();
         assert_eq!(
             repo_v.len(),
@@ -11537,10 +11634,11 @@ mod tests {
             let ctx = TestToolContextBuilder::new(cat)
                 .with_current_project(cp)
                 .build();
-            let cat = ctx.catalog.lock();
-
+            // Task 7: construct BEFORE locking `ctx.catalog` — `DoctorScope::new` locks it
+            // internally for non-`All` scopes, and `parking_lot::Mutex` is not reentrant.
             let mut ds =
                 scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+            let cat = ctx.catalog.lock();
             let v = (row.run)(&mut ds, &cat.conn).unwrap();
             assert!(
                 v.is_empty(),

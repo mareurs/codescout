@@ -36,11 +36,12 @@
 //! module. Call sites here go through the `shared_scope` alias instead of
 //! spelling that out each time.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::librarian::tools::link_scan::diff::CITES_REL;
 use crate::librarian::tools::scope as shared_scope;
 use crate::librarian::tools::{containing_root, ToolContext};
 
@@ -96,6 +97,26 @@ pub(super) struct DoctorScope {
     /// that check's own destination — never into a shared map built for a
     /// different set of checks.
     scoped_out: BTreeMap<String, BTreeMap<String, usize>>,
+    /// Task 7 (relevance exemption): artifact ids living OUTSIDE `roots` that are
+    /// cited, `rel="cites"`, by an artifact INSIDE `roots` — computed once in
+    /// [`Self::new`] from BOTH cites tables (`artifact_link`, artifact grain, and
+    /// `entry_cite`, entry grain; see `cited_from_here` below for why both). `admit`
+    /// treats membership here as an admission ticket for a row-grain check whose `id`
+    /// is a real artifact id: a foreign row a local artifact actively cites is not
+    /// noise the active developer can ignore, so it should surface even though it
+    /// physically lives outside `roots`. Empty whenever `roots` is empty (`Scope::All`
+    /// already admits everything, so the exemption has nothing to add) — [`Self::new`]
+    /// skips the query entirely in that case rather than computing an exemption set
+    /// nothing will ever consult.
+    cited_from_here: BTreeSet<String>,
+    /// Count of `cites` edges (both tables, summed) whose citing side is inside
+    /// `roots` and whose cited side is outside — the denominator this exemption ships
+    /// with. Measured 2026-09-09 at 0 on today's catalog (no `entry_cite` or
+    /// `artifact_link` row crosses a scope boundary), so the exemption itself is inert
+    /// until an operator creates one; publishing this count alongside it is what keeps
+    /// that inertness visible instead of decorative. See `catalog_health.
+    /// cross_root_cites_edges` and the zero-case hint on `admit`'s doc comment.
+    cross_root_cites_edges: usize,
 }
 
 impl DoctorScope {
@@ -150,10 +171,23 @@ impl DoctorScope {
             }
         }
 
+        // Task 7: the relevance exemption's own denominator, computed once here so
+        // `admit` stays a pure lookup with no query of its own. Skipped entirely when
+        // `roots` is empty — that state is `Scope::All` exclusively (see the field
+        // doc), which already admits everything, so a cited-from-here set would be
+        // computed only to be consulted by nothing.
+        let (cited_from_here, cross_root_cites_edges) = if roots.is_empty() {
+            (BTreeSet::new(), 0)
+        } else {
+            cross_root_cites(ctx, &roots)?
+        };
+
         Ok(Self {
             scope,
             roots,
             scoped_out: BTreeMap::new(),
+            cited_from_here,
+            cross_root_cites_edges,
         })
     }
 
@@ -204,8 +238,23 @@ impl DoctorScope {
             "undeclared doctor check name {check:?} — add it to declare_checks! or \
              scoped_out() will hold a bucket no fold ever reads"
         );
-        let _ = id;
         if self.contains(Path::new(abs_path)) {
+            return true;
+        }
+        // Task 7 (relevance exemption): a row otherwise scoped OUT is admitted anyway
+        // — WITHOUT tallying into `scoped_out` — when `id` names an artifact a local
+        // (in-scope) artifact actively cites. Gated on `check`, not merely on
+        // membership, because `cited_prefix_with_no_definer` (the one call site Tasks
+        // 3-5 gave a non-uniform `id`/`abs_path` pair) passes a namespace PREFIX as
+        // `id`, never an artifact id — looking that up in `cited_from_here` would be a
+        // category error, not merely a guaranteed miss, and `cited_from_here` holding a
+        // real 16-hex id that happens to match a prefix string is not a risk worth
+        // trusting to string mismatch alone. See that call site's own doc comment
+        // (`scan_cited_prefix_with_no_definer`, `doctor.rs`) for why its `admit` return
+        // is already dead-by-construction; this branch must not resurrect it.
+        if super::Check::from_wire(check) != Some(super::Check::CitedPrefixWithNoDefiner)
+            && self.cited_from_here.contains(id)
+        {
             return true;
         }
         *self
@@ -223,6 +272,17 @@ impl DoctorScope {
     /// single shared one.
     pub(super) fn scoped_out(&self) -> &BTreeMap<String, BTreeMap<String, usize>> {
         &self.scoped_out
+    }
+
+    /// Task 7 (relevance exemption): how many `cites` edges — summed across
+    /// `artifact_link` and `entry_cite` — have a citing side inside `roots` and a
+    /// cited side outside it. This is the exemption's own denominator: `admit`
+    /// silently widening the worklist on a rule that never fires would be
+    /// indistinguishable from no rule at all, so this count ships alongside it.
+    /// `catalog_health.cross_root_cites_edges` publishes it unconditionally, at
+    /// every scope, including 0 — the value measured on today's catalog.
+    pub(super) fn cross_root_cites_edges(&self) -> usize {
+        self.cross_root_cites_edges
     }
 }
 
@@ -253,10 +313,106 @@ fn umbrella_member_roots(ctx: &ToolContext) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// Task 7's own denominator computation: for each `cites` edge (both grains) whose
+/// citing side resolves to an artifact inside `roots` and whose cited side resolves
+/// to an artifact outside `roots`, collect the cited artifact's id into the returned
+/// set and count the edge. Returns `(cited_from_here, cross_root_cites_edges)` —
+/// see [`DoctorScope`]'s field docs for what each half is for.
+///
+/// Queries BOTH cites tables, deliberately — they are different grains
+/// (`artifact_link` is artifact-to-artifact; `entry_cite` is entry-to-entry/file) and
+/// a scanner can write to either depending on what the citation text names. Querying
+/// only one would silently miss whichever grain the operator's citations happen to
+/// use.
+///
+/// `entry_cite.dst_ref` has no foreign key (see `src/librarian/catalog/gc.rs`'s
+/// rehome comment) and 13 rows on today's catalog do not resolve to any known
+/// artifact or slug. Unresolvable rows are skipped — fail CLOSED: an unresolvable
+/// `dst_ref` cannot be proven to name a real foreign artifact a local row cites, so
+/// admitting it would be an ungrounded relaxation of scope isolation rather than a
+/// grounded exemption.
+fn cross_root_cites(ctx: &ToolContext, roots: &[PathBuf]) -> Result<(BTreeSet<String>, usize)> {
+    let cat = ctx.catalog.lock();
+    let conn = &cat.conn;
+
+    // Single pass over `artifact`: id -> abs_path for both tables' direct lookups,
+    // and slug -> (id, abs_path) for `entry_cite.dst_ref`'s `<slug>:<local>` form.
+    let mut by_id: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut by_slug: BTreeMap<String, (String, PathBuf)> = BTreeMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT id, abs_path, slug FROM artifact")?;
+        let mut rows = stmt.query([])?;
+        while let Some(r) = rows.next()? {
+            let id: String = r.get(0)?;
+            let abs_path: String = r.get(1)?;
+            let slug: Option<String> = r.get(2)?;
+            let path = PathBuf::from(abs_path);
+            if let Some(s) = slug {
+                by_slug.insert(s, (id.clone(), path.clone()));
+            }
+            by_id.insert(id, path);
+        }
+    }
+
+    let mut cited_from_here: BTreeSet<String> = BTreeSet::new();
+    let mut cross_root_cites_edges = 0usize;
+
+    // Grain 1: artifact_link (artifact-to-artifact).
+    {
+        let mut stmt = conn.prepare("SELECT src_id, dst_id FROM artifact_link WHERE rel = ?1")?;
+        let mut rows = stmt.query(rusqlite::params![CITES_REL])?;
+        while let Some(r) = rows.next()? {
+            let src_id: String = r.get(0)?;
+            let dst_id: String = r.get(1)?;
+            let (Some(src_path), Some(dst_path)) = (by_id.get(&src_id), by_id.get(&dst_id)) else {
+                continue;
+            };
+            if containing_root(roots, src_path).is_some()
+                && containing_root(roots, dst_path).is_none()
+            {
+                cited_from_here.insert(dst_id);
+                cross_root_cites_edges += 1;
+            }
+        }
+    }
+
+    // Grain 2: entry_cite (entry-to-entry/file). `src_slug` has an FK and always
+    // resolves for a live row; `dst_ref` does not (see the doc comment above).
+    {
+        let mut stmt = conn.prepare("SELECT src_slug, dst_ref FROM entry_cite WHERE rel = ?1")?;
+        let mut rows = stmt.query(rusqlite::params![CITES_REL])?;
+        while let Some(r) = rows.next()? {
+            let src_slug: String = r.get(0)?;
+            let dst_ref: String = r.get(1)?;
+            let Some((_, src_path)) = by_slug.get(&src_slug) else {
+                continue;
+            };
+            let resolved: Option<(String, PathBuf)> = match dst_ref.split_once(':') {
+                Some((dst_slug, _local)) => by_slug.get(dst_slug).cloned(),
+                None => by_id.get(&dst_ref).map(|p| (dst_ref.clone(), p.clone())),
+            };
+            let Some((dst_id, dst_path)) = resolved else {
+                // Unresolvable dst_ref (no FK — see doc comment). Fail closed: skip.
+                continue;
+            };
+            if containing_root(roots, src_path).is_some()
+                && containing_root(roots, &dst_path).is_none()
+            {
+                cited_from_here.insert(dst_id);
+                cross_root_cites_edges += 1;
+            }
+        }
+    }
+
+    Ok((cited_from_here, cross_root_cites_edges))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
     use crate::librarian::catalog::Catalog;
+    use crate::librarian::catalog::{artifact, entry_cite, links};
     use crate::librarian::current_project::CurrentProject;
     use crate::librarian::tools::TestToolContextBuilder;
     use crate::librarian::workspace::Umbrella;
@@ -550,6 +706,149 @@ mod tests {
             err.to_string().contains("no umbrella declared"),
             "refusal must name the no-declared-umbrella error, not just mention the word \
              \"umbrella\" (which the sibling test's error also does): {err}"
+        );
+    }
+
+    /// Task 7 (relevance exemption), R4: fires for a foreign id cited from inside
+    /// scope via EITHER cites table — `artifact_link` (artifact grain) or `entry_cite`
+    /// (entry grain) — in one fixture, so a fix wiring only one grain cannot pass by
+    /// construction. Non-monotone per this repo's testing discipline: each exempted id
+    /// asserts BOTH that `admit()` returns true AND that `scoped_out()` stayed empty —
+    /// an implementation that widened `contains`/`roots` instead of adding a real,
+    /// targeted exemption would satisfy the first half and fail the second. A final
+    /// control row (cited from nowhere) confirms the exemption is targeted, not a
+    /// blanket admit of every foreign row.
+    #[test]
+    fn admit_exempts_a_foreign_id_cited_from_either_cites_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let foreign_root = tmp.path().join("foreign");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
+        let ctx = ctx_at(&root);
+
+        {
+            let cat = ctx.catalog.lock();
+
+            // Grain 1: artifact_link. A local citer and a foreign cited artifact, no
+            // slugs needed — this grain is artifact-id-to-artifact-id.
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("local-link")
+                    .with_abs_path(root.join("docs/local-link.md"))
+                    .build(),
+            )
+            .unwrap();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("foreign-link")
+                    .with_abs_path(foreign_root.join("docs/foreign-link.md"))
+                    .build(),
+            )
+            .unwrap();
+            links::insert(
+                &cat,
+                &links::LinkRow {
+                    src_id: "local-link".to_string(),
+                    dst_id: "foreign-link".to_string(),
+                    rel: CITES_REL.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+
+            // Grain 2: entry_cite. `src_slug` FKs `artifact(slug)`, so the citing
+            // artifact needs a minted slug; `dst_ref` here is the bare foreign id (no
+            // colon), the other of the two forms `dst_ref` can take.
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("local-entry")
+                    .with_abs_path(root.join("docs/local-entry.md"))
+                    .build(),
+            )
+            .unwrap();
+            let local_slug = artifact::ensure_slug(&cat.conn, "local-entry").unwrap();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("foreign-entry")
+                    .with_abs_path(foreign_root.join("docs/foreign-entry.md"))
+                    .build(),
+            )
+            .unwrap();
+            entry_cite::insert_with(
+                &cat.conn,
+                &entry_cite::EntryCiteRow {
+                    src_slug: local_slug,
+                    src_local: "E-1".to_string(),
+                    dst_ref: "foreign-entry".to_string(),
+                    rel: CITES_REL.to_string(),
+                    origin: entry_cite::ORIGIN_SCAN.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+
+            // Control: a third foreign artifact cited by nothing.
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("not-cited")
+                    .with_abs_path(foreign_root.join("docs/not-cited.md"))
+                    .build(),
+            )
+            .unwrap();
+        }
+
+        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        assert_eq!(
+            s.cross_root_cites_edges(),
+            2,
+            "one crossing edge per grain, both counted"
+        );
+
+        assert!(
+            s.admit(
+                "abs_path_outside_managed_roots",
+                "foreign-link",
+                &foreign_root.join("docs/foreign-link.md").to_string_lossy(),
+            ),
+            "artifact_link-cited foreign id must be admitted"
+        );
+        assert!(
+            s.scoped_out().is_empty(),
+            "an exempted row must not tally into scoped_out: {:?}",
+            s.scoped_out()
+        );
+
+        assert!(
+            s.admit(
+                "abs_path_outside_managed_roots",
+                "foreign-entry",
+                &foreign_root.join("docs/foreign-entry.md").to_string_lossy(),
+            ),
+            "entry_cite-cited foreign id must be admitted"
+        );
+        assert!(
+            s.scoped_out().is_empty(),
+            "an exempted row must not tally into scoped_out: {:?}",
+            s.scoped_out()
+        );
+
+        assert!(
+            !s.admit(
+                "abs_path_outside_managed_roots",
+                "not-cited",
+                &foreign_root.join("docs/not-cited.md").to_string_lossy(),
+            ),
+            "a foreign id cited from nowhere must still be refused — the exemption is \
+             targeted, not a blanket admit of every foreign row"
+        );
+        assert_eq!(
+            s.scoped_out()
+                .values()
+                .flat_map(|m| m.values())
+                .sum::<usize>(),
+            1,
+            "the uncited control row must be the only tally"
         );
     }
 }
