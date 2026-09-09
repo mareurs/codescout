@@ -8160,8 +8160,6 @@ mod guide_hint_tests {
             .content
     }
 
-
-
     /// Substitute every known rendering of a fixture root out of one emitted block.
     ///
     /// Extracted from `a_p50_session_stays_under_the_committed_emission_byte_ceiling`

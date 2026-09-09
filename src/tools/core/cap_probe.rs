@@ -989,4 +989,34 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
              callers exist', and no fixture currently isolates the two",
         ),
     },
+    // -- src/agent/build_check.rs --
+    ProbeRow {
+        id: "agent_build_check.rendered_diagnostics",
+        coverage: Coverage::Deferred(
+            "no marker exists to assert. `errors_naming` breaks at MAX_RENDERED and \
+             returns `hits.join(\"\\n\")`, and `render_notice` wraps that with no total, \
+             so an author with 12 compile errors is shown 3 and told nothing about the \
+             other 9. The existing `at_most_three_errors_are_rendered` asserts the CAP \
+             (`got.lines().count() == MAX_RENDERED`), which is the bound holding, not a \
+             disclosure arriving. This is therefore a new IC-13 member rather than a \
+             coverage gap: the row cannot become Probed until production emits a count, \
+             and tuning the row until it passed would hide the finding",
+        ),
+    },
+    // -- src/librarian/tools/doctor.rs --
+    ProbeRow {
+        id: "doctor.recently_touched_walk",
+        coverage: Coverage::Deferred(
+            "the ceiling IS reached on every call in this repo — 5,582 commits against \
+             a 4,000 walk, measured 2026-09-09 — and `paths_touched_since` returns a \
+             bare HashSet, breaking at the bound with nothing marking the set partial. \
+             What blocks a probe is reachability of the DEFECT, not of the cap: the walk \
+             is TIME-sorted, so the truncated tail's newest member is 2026-05-17, ~115 \
+             days behind the 7-day cutoff every caller passes, and no input available \
+             here makes the truncation change an answer. Driving it needs a fixture repo \
+             of >4,000 commits whose committer-time order is non-monotonic across the \
+             boundary — precisely the condition the ceiling exists to tolerate, per \
+             `paths_touched_since`'s own doc comment",
+        ),
+    },
 ];

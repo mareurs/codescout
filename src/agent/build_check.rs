@@ -78,6 +78,7 @@ const TIMEOUT_DEFAULT: Duration = Duration::from_secs(120);
 const DEBOUNCE_DEFAULT: Duration = Duration::from_millis(1500);
 /// How many failing diagnostics to render. A wall of errors is not more actionable than
 /// three, and this notice rides on an unrelated tool's response.
+// cap-class: RESULT_CAP agent_build_check.rendered_diagnostics — probed
 const MAX_RENDERED: usize = 3;
 
 /// Resolved configuration. One `from_env`, everything else takes values — the

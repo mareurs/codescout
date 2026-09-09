@@ -5832,6 +5832,7 @@ fn scan_open_bug_cited_from_source(
     /// Extensions treated as SOURCE — see the doc comment on why `.md` is absent.
     const SOURCE_EXTENSIONS: &[&str] = &["rs", "py", "mjs", "js", "ts", "sh"];
     /// Hard ceiling on the revwalk, independent of the time bound. See [`paths_touched_since`].
+    // cap-class: RESULT_CAP doctor.recently_touched_walk — probed
     const MAX_WALK_COMMITS: usize = 4000;
 
     let Some(cp) = ctx.current_project.as_deref() else {
