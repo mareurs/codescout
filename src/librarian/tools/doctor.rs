@@ -357,6 +357,16 @@ struct Args {
 /// catalog-wide with no root, so narrowing its report would understate what `confirm=true`
 /// is about to do). `row_checks_scoped_by_project_covers_every_admitting_check` below guards
 /// this array against falling behind a new `scope.admit(...)` call site.
+///
+/// **When adding a check here, check whether its scan function emits more than one
+/// check name (2026-09-09 review round 2, Open 1).** A single scan whose several
+/// outputs scope differently is a trap for whoever assumes gating one gates all of
+/// them — `scan_augmentation_declared_but_absent` is exactly this shape, with two
+/// separate `scope.admit(...)` call sites for `augmentation_declared_but_absent`
+/// and `augmentation_declaration_unparseable` that must each be added here (and
+/// gated) independently; see the comment at that function's second admit site for
+/// the full reasoning, kept there too because the reader gating a call site and the
+/// reader adding a row here are different audiences.
 const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::FrontmatterIdMismatch,
     Check::FrontmatterIdIsNotACatalogId,
@@ -10876,6 +10886,24 @@ mod tests {
     /// via `Check::CitedPrefixWithNoDefiner.as_str()`, never a literal, so the regex below
     /// never sees it and it needs no exemption), and asserts what remains is exactly
     /// `ROW_GRAIN_SCOPED_CHECKS`'s own check set.
+    ///
+    /// **Limitation (2026-09-09 review round 2, Also/Minor):** this test checks set
+    /// MEMBERSHIP over literal source text, not per-site correctness, and has two blind
+    /// spots as a result. First, it cannot catch a COORDINATED two-site name swap — if
+    /// two admit call sites traded their literal check-name strings with each other, the
+    /// set of distinct names extracted from the source is unchanged and this test stays
+    /// green (this sentence has to describe that shape without writing the call
+    /// literally, or the regex below would count the example itself as a real site —
+    /// the same no-escape-for-mention trap CLAUDE.md's "Parsers Over a Namespace"
+    /// section names). Second, for the one DYNAMIC site
+    /// (`scan_artifact_paths`'s `scope.admit(&v.check, ...)`) it hardcodes BOTH possible
+    /// names (`frontmatter_id_mismatch`, `frontmatter_id_is_not_a_catalog_id`)
+    /// unconditionally — it confirms the call site's shape, never which branch
+    /// `check_frontmatter_id_matches_catalog` actually took, so swapping that function's
+    /// two `Violation::new(...)` sites would leave this test green too. Neither gap is
+    /// closed here; `row_checks_scoped_by_project_table_driven`'s per-check rows are what
+    /// close them, by seeding a fixture that forces one specific branch and asserting the
+    /// scoped-out drop lands under that check's own name.
     #[test]
     fn row_checks_scoped_by_project_covers_every_admitting_check() {
         let src = std::fs::read_to_string(concat!(
@@ -10901,11 +10929,23 @@ mod tests {
         admitting.insert("frontmatter_id_mismatch".to_string());
         admitting.insert("frontmatter_id_is_not_a_catalog_id".to_string());
 
+        // Each entry names the map it actually scopes into instead — one comment per
+        // entry, so this list stays self-auditing (2026-09-09 review round 2, deferred
+        // minor) rather than requiring a reader to cross-reference the doc comment above.
         let exempt: std::collections::BTreeSet<&str> = [
+            // -> catalog_health.outside_scope_refused_by_project (dedicated map, not
+            // ROW_GRAIN_SCOPED_CHECKS's fold loop — see that map's own fold-site comment).
             "abs_path_outside_managed_roots",
+            // -> catalog_health.entry_validity_scoped_by_project (one of the four
+            // entry-validity checks folded there, not into the row-grain map).
             "entry_conditional_past_due",
+            // -> catalog_health.entry_validity_scoped_by_project.
             "entry_dated_stale",
+            // -> catalog_health.entry_validity_scoped_by_project.
             "entry_cited_from_outside_but_undeclared",
+            // -> catalog_health.entry_validity_scoped_by_project — the fourth of the
+            // four entry-validity checks (see call_wires_in_validity_unparseable_and_
+            // scopes_it_like_its_siblings for its own dedicated coverage).
             "validity_unparseable",
         ]
         .into_iter()
@@ -10939,24 +10979,31 @@ mod tests {
     /// `params_behind_body`, whose only prior scope test asserts silence but never inspects
     /// `scoped_out()`.
     ///
-    /// One row per `scan_*` function, not per check — a function that emits two checks
-    /// (`scan_undefined_entries`, `scan_augmentation_declared_but_absent`, `scan_artifact_paths`)
-    /// gets one row exercising ONE of its two, chosen for the simplest fixture. The three
-    /// checks this leaves without a row here (`entry_without_definition`,
-    /// `augmentation_declaration_unparseable`, `frontmatter_id_is_not_a_catalog_id`) still have
-    /// their `admit()` call sites named by
-    /// `row_checks_scoped_by_project_covers_every_admitting_check` above, which is what catches
-    /// either of them being dropped from the fold array — this test's job is per-site
-    /// announcement coverage, not an exhaustive re-statement of that guard.
+    /// **Twelve rows for twelve checks (2026-09-09 review round 2, Open 2)** — a function that
+    /// emits two checks (`scan_undefined_entries`, `scan_augmentation_declared_but_absent`,
+    /// `scan_artifact_paths`) now gets TWO rows, one per check, rather than one row standing in
+    /// for both. The round-1 version left three checks (`entry_without_definition`,
+    /// `augmentation_declaration_unparseable`, `frontmatter_id_is_not_a_catalog_id`) uncovered
+    /// here on the theory that `row_checks_scoped_by_project_covers_every_admitting_check`
+    /// above substituted for them — the reviewer read how that guard works and found the
+    /// substitution does not hold: it is a source-text membership scan, so a *coordinated*
+    /// two-site name swap leaves its set unchanged, and its one dynamic site
+    /// (`frontmatter_id_mismatch` / `frontmatter_id_is_not_a_catalog_id`, both from
+    /// `check_frontmatter_id_matches_catalog`) has both names hardcoded unconditionally —
+    /// the guard confirms the call site's *shape* and then asserts coverage without ever
+    /// reading which branch that function actually took. The three rows added here are the
+    /// only coverage in this file that exercises `check_frontmatter_id_matches_catalog`'s own
+    /// branch selection and each of the other two sites' real gate, rather than a regex over
+    /// the source that names them.
     #[test]
     fn row_checks_scoped_by_project_table_driven() {
         // Named aliases rather than the bare `Box<dyn Fn(...)>` spelled out on the struct
         // fields — clippy::type_complexity flags the inline form, and the alias is also just
-        // more readable at each of the nine call sites below.
+        // more readable at each of the twelve call sites below.
         type RowSetup = Box<dyn Fn(&Catalog, &std::path::Path)>;
         // Runs the owning scan_* function; wraps `scan_artifact_paths`'s extra
-        // `roots`/`known_elsewhere` params (both `&[]` in its row below — irrelevant to
-        // `frontmatter_id_mismatch`, which does not gate on them) and its `(violations,
+        // `roots`/`known_elsewhere` params (both `&[]` in its rows below — irrelevant to
+        // either frontmatter-id check, neither of which gates on them) and its `(violations,
         // scoped)` tuple return down to the shared `Vec<Violation>` shape.
         type RowRun =
             Box<dyn Fn(&mut scope::DoctorScope, &rusqlite::Connection) -> Result<Vec<Violation>>>;
@@ -11018,6 +11065,26 @@ mod tests {
                     // which is specifically what routes to `ledger_defines_nothing` rather
                     // than its sibling `entry_without_definition`.
                     seed_tracker(cat, "nodef", dir, "prose only, no headings\n", &["BL-1"]);
+                }),
+                run: Box::new(scan_undefined_entries),
+            },
+            Row {
+                name: "scan_undefined_entries (entry_without_definition)",
+                expected_check: "entry_without_definition",
+                setup: Box::new(|cat, dir| {
+                    // BL-1 has a heading (`defined` is non-empty) but params also claims
+                    // BL-2, which has none anywhere — non-empty `defined` is specifically
+                    // what routes to `entry_without_definition` rather than its sibling
+                    // `ledger_defines_nothing` above. Added 2026-09-09 review round 2
+                    // (Open 2): the round-1 table left this check's own admit() site
+                    // unexercised, relying on a source-text membership scan instead.
+                    seed_tracker(
+                        cat,
+                        "somedef",
+                        dir,
+                        "# L\n\n## BL-1 — first\n\ntext\n",
+                        &["BL-1", "BL-2"],
+                    );
                 }),
                 run: Box::new(scan_undefined_entries),
             },
@@ -11089,6 +11156,21 @@ mod tests {
                 run: Box::new(scan_augmentation_declared_but_absent),
             },
             Row {
+                name:
+                    "scan_augmentation_declared_but_absent (augmentation_declaration_unparseable)",
+                expected_check: "augmentation_declaration_unparseable",
+                setup: Box::new(|cat, dir| {
+                    // "maybe" is none of true/yes/on/1, false/no/off/0, nor a `.yaml`/`.yml`
+                    // path — `parse_declaration` returns `Unparseable`, the sibling finding
+                    // this same scan emits from its OTHER admit() site. Added 2026-09-09
+                    // review round 2 (Open 2): the round-1 table left this check's own
+                    // admit() site unexercised, relying on a source-text membership scan
+                    // instead.
+                    seed_declared(cat, dir, "unparseabledecl", Some("maybe"), false);
+                }),
+                run: Box::new(scan_augmentation_declared_but_absent),
+            },
+            Row {
                 name: "scan_artifact_paths (frontmatter_id_mismatch)",
                 expected_check: "frontmatter_id_mismatch",
                 setup: Box::new(|cat, dir| {
@@ -11099,6 +11181,28 @@ mod tests {
                     std::fs::write(&path, "---\nid: 0123456789abcdef\n---\nbody\n").unwrap();
                     let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
                     seed_artifact(cat, "idmismatch", &abs);
+                }),
+                run: Box::new(|scope, conn| {
+                    let (v, _scoped) = scan_artifact_paths(conn, &[], &[], scope)?;
+                    Ok(v)
+                }),
+            },
+            Row {
+                name: "scan_artifact_paths (frontmatter_id_is_not_a_catalog_id)",
+                expected_check: "frontmatter_id_is_not_a_catalog_id",
+                setup: Box::new(|cat, dir| {
+                    // "template-placeholder" is not 16-hex — `is_librarian_id` fails, so
+                    // `check_frontmatter_id_matches_catalog` takes its OTHER branch and
+                    // names `frontmatter_id_is_not_a_catalog_id` instead of
+                    // `frontmatter_id_mismatch`. This is the only coverage in this file of
+                    // that branch selection: `row_checks_scoped_by_project_covers_every_
+                    // admitting_check` hardcodes both names for this dynamic site
+                    // unconditionally and so cannot tell them apart (2026-09-09 review
+                    // round 2, Open 2).
+                    let path = dir.join("notcatalogid.md");
+                    std::fs::write(&path, "---\nid: template-placeholder\n---\nbody\n").unwrap();
+                    let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+                    seed_artifact(cat, "notcatalogid", &abs);
                 }),
                 run: Box::new(|scope, conn| {
                     let (v, _scoped) = scan_artifact_paths(conn, &[], &[], scope)?;
