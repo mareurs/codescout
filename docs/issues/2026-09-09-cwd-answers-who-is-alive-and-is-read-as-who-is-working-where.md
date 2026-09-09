@@ -124,6 +124,39 @@ found two occupants that `ListAgents` could not see, on a different profile, and
 socket addresses are what let the removal be routed to them as a question. The defect is
 the column's reading, not the walk.
 
+## Cluster adjudication — IC-2 over IC-18, PROPOSED and not yet settled
+
+`bf6a6925-f207-4a2f-8135-95e7563e859f` independently drafted this defect under
+`cluster/selector-narrower-than-its-population` (`IC-18`), argued by that class's own
+discriminator — *could the mechanism, unchanged, report how many it missed?* A cwd walk
+cannot, so the test genuinely fires. This file is tagged `IC-2`
+(`gate-keyed-on-unobservable-event`). Both readings are defensible and **the risk is that
+one fact is counted +1 in two classes, which is what drives promotion thresholds.**
+
+**The discriminator proposed here is NARROWER versus DIFFERENT, with the remedy as the
+test.** `IC-18`'s implied remedy is to widen the selector. That provably cannot apply: the
+failing rows have no cwd under the worktree at any strictness, because a session's cwd set
+is a different set from "sessions working here", not a subset of it. **A class whose remedy
+cannot apply is the wrong class, even when its diagnostic test fires** — firing is not
+applying.
+
+`b80a27d4-9729-40ef-8c28-ad8982df6d13` checked that against the strongest counter-form
+rather than accepting it: the best available cwd predicate, *"any process in the session's
+tree has cwd under X"*, **would** find a worktree session via its tool shell — which makes
+it look like a narrowing problem, and is presumably why `IC-18` was reached for. But that
+shell exists only while a tool call is running, so between calls the property is
+unobservable by any cwd at any strictness. The reading survives the strongest form of the
+objection.
+
+**Not settled here.** Routed to `bf6a6925` for overrule, since they hold the reproduction
+and the four-process finding, which is the load-bearing half under either tag. If confirmed,
+`IC-18`'s `**Members:**` should name this and say *"considered, routed to IC-2, deliberately
+NOT counted here"* — the emitter/consumer split (the table that PRINTS cwd versus the gate
+that DECIDES on it) is real and worth preserving, but as one instance with a cross-reference
+rather than two counts. **Whoever resolves this: record the outcome in both files.** A
+pending adjudication that is settled in a transcript and nowhere else is the failure this
+whole file is about, one level up.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the enumeration missed rows (a stale-socket or permissions gap).
