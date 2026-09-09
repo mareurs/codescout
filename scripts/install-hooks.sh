@@ -394,7 +394,16 @@ elif [ -e "$seed_log" ]; then
 else
     git diff --cached --raw 2>/dev/null |
         awk -F'\t' '{ split($1, a, " "); print "-\t" a[4] "\t" $2 }' > "$seed_log"
-    seeded="$(grep -c . "$seed_log" 2>/dev/null || echo 0)"
+    # `grep -c` reports the count on stdout and a DIFFERENT fact through its exit
+    # status: 1 means "matched nothing", not "failed". On an empty seed log it
+    # prints a correct 0 and exits 1, so the former `|| echo 0` fallback fired on a
+    # good result and appended a second zero — `$seeded` became "0\n0" and the
+    # summary broke across two lines. Read grep's stdout; never its status.
+    # Load-bearing: this script sets `-uo pipefail` and deliberately NOT `-e`. Under
+    # `set -e` an assignment from a substitution that exits 1 aborts the script, so
+    # adding `-e` here would turn an empty seed log into a failed install.
+    seeded="$(grep -c . "$seed_log" 2>/dev/null)"
+    seeded="${seeded:-0}"
     echo "ok      stage log             seeded, $seeded inherited pair(s) marked unknown"
 fi
 

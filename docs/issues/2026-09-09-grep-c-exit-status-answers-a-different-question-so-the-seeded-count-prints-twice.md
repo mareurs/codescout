@@ -117,25 +117,56 @@ single `echo`, so the line break is inside the variable rather than in the forma
 
 ## Fix
 
-Not applied. Drop the fallback and let `grep -c` speak for itself, since it already prints
-`0` in the no-match case:
+Applied 2026-09-09 at `scripts/install-hooks.sh:397` — exactly the shape this file prescribed,
+including its refusal of `|| true`:
 
 ```sh
 seeded="$(grep -c . "$seed_log" 2>/dev/null)"
 seeded="${seeded:-0}"
 ```
 
-The second line still covers the genuinely-absent-file case, where `grep` prints nothing.
-Do **not** answer this with `|| true` — that keeps the composition and only hides the
-status; the defect is reading the status at all.
+**One fact measured while applying it, load-bearing enough to sit in the code comment:** this
+form is only safe because `install-hooks.sh` sets `-uo pipefail` and deliberately **not** `-e`.
+Under `set -e` an assignment from a command substitution exiting 1 aborts the script, so an
+empty seed log would become a *failed install* rather than a wrapped line — a strictly worse
+defect than the one being fixed. Verified by control:
 
+```
+$ bash -c 'set -e; : > /tmp/e.txt; v="$(grep -c . /tmp/e.txt 2>/dev/null)"; echo survived'
+$ echo $?
+1        # "survived" never printed
+```
+
+The test file already recorded the same `-e` fact independently at
+`tests/pre-push-foreign-session-guard.sh:696`.
+
+**Not yet committed** — no `fix_sha` / `fix_patch_id` yet, so this file stays `open`. Archive
+is gated on the fix being on `experiments`.
 ## Tests added
 
-None. This should be covered by the installer section of
-`tests/pre-push-foreign-session-guard.sh`, whose fixture already reaches the seeding branch
-with an empty index: assert the install log contains no line matching `^[0-9]+ inherited`,
-which reds exactly on the wrap.
+Added to `tests/pre-push-foreign-session-guard.sh` — section *"the seeded stage-log count is one
+number, not two"*, four assertions, placed against the existing `installer_fixture` helper as this
+file prescribed.
 
+**Two-sided, plus a control**, because the prescribed assertion alone is not enough:
+
+| assertion | guards against |
+|---|---|
+| exactly one summary line | the seeding branch never running (the monotone direction) |
+| no line begins with a bare wrapped count | the wrap itself |
+| renders a single `0` | the wrap itself, positively |
+| non-empty index renders `2` (**control**) | `seeded` being hard-wired to `0` |
+
+**Observed red, by mutating the production path** — restoring `|| echo 0` in
+`install-hooks.sh` and re-running: **88 passed, 2 failed**, the two failures being *"no line
+begins with a bare wrapped count"* and *"renders a single 0"*. Fix restored: **90 passed, 0
+failed**.
+
+Recorded because it qualifies the suite honestly: *"exactly one summary line"* stayed **green**
+under the armed mutation. The wrapped output still contains exactly one line matching
+`inherited pair(s) marked unknown`, so that assertion does not discriminate this defect — it is
+the paired positive guarding the monotone direction, and nothing more. The control also stayed
+green, confirming it is not merely tracking the same signal as the two that fired.
 ## Workarounds
 
 None needed — the reported count is correct, it just wraps. A reader parsing the install

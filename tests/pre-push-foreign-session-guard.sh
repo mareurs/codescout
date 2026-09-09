@@ -827,6 +827,46 @@ fi
 chmod u+w "$FAIL_HOOKS" 2>/dev/null || true
 
 echo
+echo "== the seeded stage-log count is one number, not two =="
+# `grep -c` reports its count on STDOUT and a different fact -- "did anything match" --
+# through its EXIT STATUS. The former `seeded="$(grep -c . "$seed_log" || echo 0)"` read the
+# status as failure, so an EMPTY seed log (a correct 0, exit 1) fired the fallback and
+# appended a second zero: `$seeded` became "0\n0" and the summary wrapped across two lines.
+#
+# TWO-SIDED ON PURPOSE. The wrap assertion is monotone under the seeding branch never running
+# at all -- an installer that prints no summary line satisfies "no line begins with a bare
+# count" perfectly. The paired positive pins that the branch DID run and rendered exactly one
+# summary line. The non-empty case is the CONTROL: without it every assertion here is equally
+# satisfied by a `seeded` hard-wired to 0.
+
+# --- empty index: the case that wrapped ---
+installer_fixture
+( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/seed.log" 2>&1
+SEED_LINES="$(grep -c 'inherited pair(s) marked unknown' "$REPO/seed.log" || true)"
+SEED_WRAP="$(grep -cE '^[0-9]+ inherited pair\(s\)' "$REPO/seed.log" || true)"
+eq "empty seed log: exactly one summary line" "${SEED_LINES:-0}" 1
+eq "empty seed log: no line begins with a bare wrapped count" "${SEED_WRAP:-0}" 0
+if grep -q 'seeded, 0 inherited pair(s) marked unknown' "$REPO/seed.log"; then
+    ok "empty seed log: renders a single 0"
+else
+    no "empty seed log: renders a single 0" "see $REPO/seed.log"
+fi
+
+# --- non-empty index: THE CONTROL ---
+# Two staged paths must render as 2, on one line. This is what makes the zero above a
+# measurement rather than a constant.
+installer_fixture
+printf 'a\n' > "$REPO/one.txt"
+printf 'b\n' > "$REPO/two.txt"
+git -C "$REPO" add -- one.txt two.txt
+( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/seed2.log" 2>&1
+if grep -q 'seeded, 2 inherited pair(s) marked unknown' "$REPO/seed2.log"; then
+    ok "non-empty seed log: counts the staged pairs (control)"
+else
+    no "non-empty seed log: counts the staged pairs (control)" "see $REPO/seed2.log"
+fi
+
+echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
