@@ -193,11 +193,18 @@ enum Commands {
     #[cfg(feature = "librarian")]
     AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
 
-    /// Read-only scan of the librarian catalog for invariant violations:
-    /// non-forward-slash separators, NTFS ADS colons, `..` segments, and
-    /// missing files on disk. Output is a JSON report with per-check
-    /// violation counts. Manual cadence — run after large refactors or
-    /// when downstream LIKE queries return unexpected empty sets.
+    /// Scan the librarian catalog for invariant violations — path form, ADS
+    /// colons, `..` segments, missing files, worktree-scoped rows, entry
+    /// validity, claim liveness and more. Read-only by default; `--fix=<repair>`
+    /// runs one of six opt-in repairs, each a dry run until `--confirm`. Output
+    /// is a JSON report with per-check violation counts. Manual cadence — run
+    /// after large refactors or when downstream LIKE queries return unexpected
+    /// empty sets.
+    ///
+    /// Deliberately does NOT enumerate every check: this text named four of
+    /// them, which read as the whole set, and the drift is tracked as
+    /// `docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
+    /// Run the command for the live list rather than trusting a count here.
     #[cfg(feature = "librarian")]
     Doctor(codescout::cli::doctor::DoctorArgs),
 
