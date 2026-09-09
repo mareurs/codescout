@@ -590,6 +590,56 @@ write down**: the capturing session held the only identifier that resolves this 
 publish it, so the id reached the record three hours late and by an unrelated route. Had it arrived
 in the first message, this instance would have closed on the spot.
 
+## Instance 10 — 2026-09-09, BOTH staging guards passed, and the capture rode inside a deliberate stage
+
+`4a2ee82d` (sessionId `c9ab2c8d-dd74-43f4-9940-25756379a312`, subject *"test(attribute-red): a
+secondary span into a CLEAN file must yield no author"*) committed `F-125` and `W-117`, two
+`append_entry` writes belonging to `b80a27d4` (`codescout-87`). Verified by trailer rather than
+adjacency: `git log -S'F-125' -- docs/trackers/bug-fix-session-log.md` returns that commit and
+its `Session-Id` is `c9ab2c8d`. 58 insertions to the ledger, of which the committing session's
+own addendum was a small fraction. Reported by the captured party.
+
+**What is new is not the capture — it is that this file's hazard survived a session that
+checked for it.** I ran `git status --short` before staging, *specifically* to keep peer work
+out, and printed the unstaged list to confirm. It worked for every file I did not intend to
+commit. It could not work for the one I did: `git add docs/trackers/bug-fix-session-log.md`
+stages that path's **entire current content**, so a peer's append to a file I was legitimately
+editing arrived inside my own deliberate stage. **A check that catches a peer's separate file
+cannot see a peer's edit to your file** — and `docs/trackers/` is the directory every session
+writes to, which makes the shared-file case normal rather than marginal.
+
+**Both pre-commit guards passed, and neither is broken. The state falls between them:**
+
+| guard | why it did not fire |
+|---|---|
+| *refuse a pathspec commit carrying unstaged content* | the peer's content **was** staged — by my own `git add` of a path I meant to commit |
+| *refuse an index commit carrying another session's staged paths* | this was a **pathspec** commit, not an index one |
+
+Uncovered: *a pathspec commit whose named path carries another session's worktree edits.* Each
+predicate is right for the case it names; between them sits the commonest shape on this
+checkout. Distinct from Instance 4 (path-scoped committing failing) in that the path here was
+not over-broad — it was exactly the file I had edited, and the peer had edited it too.
+
+**Not repaired, deliberately.** Unpushed, but `9fa91a21` sits on top, so amending means
+rewriting history on a shared branch holding 8 unpushed commits across several sessions — a
+worse trade than a misfiled commit message. The entries are intact and in git; the only cost is
+that `git log` attributes two ledger entries to a test change. The captured party said they
+would rather the entries be committed than lost and explicitly did not request a rewrite.
+
+**The enumeration failure that allowed it is worth more than the capture.** `b80a27d4` is in
+`.claude-sdd` — the **same profile** as the committing session — so `ListAgents` would have
+shown them and every socket walk that evening did include them. They were invisible because
+each enumeration **filtered on sids already known**, to keep the output short. A filter written
+from memory can only return sessions you already knew about, so the instrument silently
+reported a closed world. That is § *Reaching a Peer Session*'s *"report the scope you
+searched"* failing in a new direction: the scope was right and the **projection** was not — and
+unlike the cross-profile case, no count was wrong, because the filtered rows were never counted
+at all.
+
+**Second-order, and it is this file's own subject:** the captured party first attributed the
+sweep to `5399543d` purely because that was the session they were talking to, quoted § *Observer
+Blindness* in the same message, and was corrected by the trailer. Three sessions misattributed
+by adjacency within one evening while writing about adjacency.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because

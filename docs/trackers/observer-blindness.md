@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 21
+entry_high_water_OB: 22
 entry_prefix: OB
 ---
 
@@ -2305,6 +2305,67 @@ twice tonight, where the author **held both claims and could not compare them**.
 **Status:** open — 3 instances, 1 author, 2 observers, 2026-09-06. Distinct from `OB-20`,
 which is about a fact absent from the substrate; this is about a fact absent from the
 author's *context* while present in the recipient's.
+
+## OB-22 — A self-written filter makes an enumeration a fixed point of its author's beliefs, and it returns a CONSISTENT number rather than a wrong one
+
+**Valid:** invariant
+
+**Rests on:** `bug-fix-session-log:F-124`;
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Instance 10*
+(the measured case); `CLAUDE.md` § *Reaching a Peer Session* — *report the scope you searched*
+and *check independence, not agreement*.
+
+**Class:** an enumeration whose **filter is written from the enumerator's own memory** returns a
+population that is a **fixed point of their beliefs**. It cannot surface a row they did not
+already know about, because the thing they did not know is precisely what the filter omits. The
+scope is correct — the query reaches everything — and the **projection** is what silently
+closes the world.
+
+**What makes it worse than the ordinary windowed instrument, and this is the whole entry:
+it does not return a wrong number. It returns a CONSISTENT one.** Every other instrument in
+this corpus that fails this way is caught eventually by a figure that looks off. Here the count
+of *displayed* rows is exactly right for the filter, and re-running agrees perfectly — so the
+move that normally retires doubt (*run it again, on another day, from another shell*) confirms
+it every time. **Two runs of a self-filtered instrument are one belief counted twice**, which is
+§ *check independence, not agreement* holding against an instrument and itself rather than
+against two instruments. The omitted rows are never counted, so no total is even wrong.
+
+**Blind party:** the enumerator, and not for inattention — they authored the filter, so the
+missing rows are missing by their own construction, and every re-reading of the output confirms
+a population they defined. Distinctively, the unfiltered view was **available the whole time and
+one command away**; nothing was inherited and nothing was hidden.
+
+**Who can see it:** anyone running the enumeration **unfiltered** — which is the enumerator too,
+a second later, if they think to. Also the omitted party, from the other side: they observe that
+they were never contacted while plainly present. In the measured case that is exactly how it
+surfaced.
+
+**Boundary against the two neighbours, because both are close and neither covers it:**
+
+- **`OB-3`** (*a peer listing is arbitrary with respect to the real population*) — there the
+  **instrument** is scoped narrowly and the user is not told. Here the instrument is complete
+  and the **user** narrowed it. Different blind party, and `OB-3`'s remedy (use the socket walk
+  instead of `ListAgents`) does nothing: the measured case *was* a socket walk.
+- **`OB-14`** (*the sampling frame is unauditable from inside it*) — there the analyst's entire
+  access to the population runs *through* the frame, so auditing it needs a view they
+  structurally do not have. Here the enumerator **had** that view and discarded it for brevity.
+  `OB-14`'s remedy is a party who knows the provenance of the inputs; this one needs no second
+  party at all.
+
+**Mechanism status:** designed, and cheap. **Filter the PRESENTATION, never the QUERY** — walk
+the full population, then narrow for display, and print the unfiltered total beside the shown
+rows (`showing 4 of 12`). That makes the correct path end in a state where omission is visible,
+so compliance leaves nothing armed (§ *Observer Blindness*, the third position). It is strictly
+better than *remember not to filter*, which is the policy `skill-frictions:SKF-22` says fails.
+
+**Measured instance, 2026-09-09.** Across an evening of peer coordination in one checkout, every
+socket enumeration I ran filtered on sessionIds I already knew, to keep the output short. A
+fifth session — `b80a27d4`, in **my own profile**, which `ListAgents` alone would have shown —
+was present in every walk and displayed in none. I then committed two of their ledger entries in
+a pathspec commit, and learned they existed only when they reported it. The reports I published
+during that evening named *"4 sessions"* repeatedly and consistently, and the consistency is
+what made it feel established. **Reported by the omitted party**, which is the only channel this
+class leaves open.
 
 ## Template for new entries
 
