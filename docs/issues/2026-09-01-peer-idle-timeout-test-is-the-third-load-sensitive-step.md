@@ -1,10 +1,11 @@
 ---
 id: ee9d8d80ad5ecdc8
 kind: bug
-status: investigating
+status: taken
 title: peer idle-timeout test is the third load-sensitive step in a class fixed twice per-instance
 tags:
 - cluster/repro-env-diverges-from-gate-env
+claimed_by: ad379a7c-a0cf-4c61-bcdb-f0696fea8c30
 closed: ''
 last_observed: 2026-09-08
 opened: 2026-09-01
@@ -716,6 +717,63 @@ because **nothing was ever started** — a vacuous pass wearing a green tick. Sa
 `killpg_reaps_grandchild_in_child_process_group`: real process groups, real `sleep`s. A subprocess
 does not observe virtual time. Both remain load-sensitive and unfixed, and the 100ms one is this
 population's most likely next member — it has not fired yet.
+
+**RETRACTED — the "10 sites" claim below is wrong for 8 of the 10, and the retraction is mine.**
+Corrected 2026-09-08 by `ad379a7c`, the same session that shipped it, after reading all ten
+bodies. **The original text follows the correction unaltered, because a reader who inherits only
+the fixed version cannot tell which way this class of error runs.**
+
+**What is actually true of the ten.** Two are genuine. Eight already carry an observable:
+
+| site | what it actually does | genuine? |
+|---|---|---|
+| `client_hello_then_tool_call` | bounded retry loop, breaks on success | no |
+| `end_to_end_served_read_tool_and_write_denied` | bounded retry loop, breaks on success | no |
+| `peer_tool_call_ignores_smuggled_workspace_override` | bounded retry loop, breaks on success | no |
+| `workspace_symbols_returns_project_symbols` | bounded retry loop, breaks on success | no |
+| `posix_write_lock_is_held_true_when_another_process_holds_it` | blocks on the child's stdout write | no |
+| `get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent` | blocks on the child's stdout write | no |
+| `reap_holders_of_lock_kills_an_orphan_holder` | blocks on the child's stdout write | no |
+| `claim_mux_lock_some_when_free_none_when_held` | **is the 2026-07 fix** — retries were added here then | no |
+| `drop_kills_child_process` | fixed sleep, then assert | **yes** |
+| `idle_background_task_evicts_after_ttl` | fixed sleep, then assert | **yes** |
+
+The three stdout cases are **strictly better than what this file prescribes**: a read that blocks
+until the child writes is a real happens-before edge, where a poll is only a bounded guess. Their
+`time.sleep(10)` / `time.sleep(30)` is inside the **python holder keeping the lock alive** — the
+token appearing in the role *opposite* to the one being counted.
+
+**The mechanism of the error, which is the part worth inheriting.** The selector was a grep for
+`sleep`; the claim was about a *shape* — "sleep, then assert". The token is present in all ten and
+the shape in two, so every extra member read as a confirming instance and the population looked
+**five times** its real size. Nothing in the output distinguished them, and I did not open the
+bodies before writing the classification down. This is `IC-18` run in reverse: a selector **wider**
+than the population it names, where the ordinary failure is narrower. `CLAUDE.md` § *Testing
+Discipline* already carries the rule that catches it — **count the LIST, never the corpus** — and
+the list here is ten test bodies, none of which I read.
+
+**Both genuine sites are now converted** to bounded polls with early exit (`500 × 20ms`, 10s
+ceiling), and both got *faster*: `drop_kills_child_process` 0.5s floor → **0.06s**,
+`idle_background_task_evicts_after_ttl` 1.2s floor → **0.42s**. Mutation results differ sharply
+and that difference is the finding:
+
+- `idle_background_task_evicts_after_ttl` — **observed RED.** Breaking `evict_idle`'s filter
+  (`> ttl_for_language(...)` → `* 1000`) gives `test result: FAILED ... finished in 10.58s`, which
+  also proves the poll spins its full budget before asserting rather than exiting early on a
+  passing-looking state. Hazard checked at the source first: `active_languages()` reads `clients`
+  and never touches `last_used`, so polling cannot refresh the idle timer it waits on.
+- `drop_kills_child_process` — **no mutation reds it**, and that is now its own bug file,
+  `docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
+  (`cluster/assertion-that-cannot-fail`). Three redundant mechanisms reap the child; removing any
+  one, or both deliberate ones together, leaves it green. The flake is fixed; the vacuity is not,
+  and the test now carries an inert annotation saying so.
+
+**So the honest count for whoever takes this file next is 2 handed on, not 10** — the four retry
+loops and three stdout barriers need nothing, and `claim_mux_lock_...` was already fixed.
+
+---
+
+**Original text, superseded 2026-09-08 — retained deliberately:**
 
 **Documented, not touched — 10 sites, and they fail in the OPPOSITE direction.**
 `client_hello_then_tool_call` · `end_to_end_served_read_tool_and_write_denied` ·

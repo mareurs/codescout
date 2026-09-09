@@ -2178,6 +2178,18 @@ struct Point {
             eprintln!("Skipping: rust-analyzer not installed");
             return;
         }
+        // INERT for BOTH deliberate kill paths — do not credit this test with
+        // covering either. Measured 2026-09-08 by mutation + strace
+        // (docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md):
+        // removing `terminate_process` from `Drop`, removing `.kill_on_drop(true)`,
+        // and removing BOTH TOGETHER each leave this test green in <0.1s, because a
+        // third path nobody wrote reaches the child first — dropping the client
+        // closes its stdio pipes and rust-analyzer builds with
+        // `unix_sigpipe = "sig_dfl"`, so it dies of SIGPIPE (observed:
+        // `+++ killed by SIGPIPE +++` on four threads). What this test actually
+        // asserts is that *something* reaps the child, which is true of any LSP
+        // server that dies when its client goes away. Adding an assertion here does
+        // not fix that; the child has to be one that survives SIGPIPE.
         let dir = tempdir().unwrap();
         create_test_cargo_project(dir.path());
         let config = LspServerConfig {
@@ -2204,8 +2216,21 @@ struct Point {
         // Drop the client
         drop(client);
 
-        // Give the process a moment to die
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // Drop sends SIGTERM and never reaps, so the pid stays addressable as a
+        // zombie until tokio's orphan reaper collects it and `process_alive` keeps
+        // reading true for a window after the kill. Poll that window instead of
+        // sleeping a fixed 500ms: a fixed sleep asserts "enough time has passed"
+        // and reds when the parallel suite has not scheduled the reaper yet
+        // (docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
+        // The loop exits early on death, so the 10s ceiling costs nothing when the
+        // reaper is prompt. Deleting the loop restores the load-sensitivity;
+        // deleting the assertion below makes the test vacuous.
+        for _ in 0..500 {
+            if !crate::platform::process_alive(pid) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
 
         // Verify child is dead
         assert!(

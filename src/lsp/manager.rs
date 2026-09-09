@@ -2063,8 +2063,20 @@ mod tests {
             "client should be alive"
         );
 
-        // Wait 4× the TTL so the background check interval fires at least once
-        tokio::time::sleep(ttl * 4).await;
+        // The background loop wakes every ttl/4, so eviction lands shortly after one
+        // TTL elapses. Poll for it instead of sleeping a fixed 4×TTL: a fixed sleep
+        // asserts "enough time has passed" and reds when the parallel suite has not
+        // scheduled the eviction task yet
+        // (docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md).
+        // `active_languages` reads `clients` and never touches `last_used`, so polling
+        // cannot refresh the idle timer it waits on — checked at the source, not
+        // assumed. The loop exits early, so the 10s ceiling costs nothing.
+        for _ in 0..500 {
+            if mgr.active_languages().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
 
         // Client must have been evicted
         assert!(
