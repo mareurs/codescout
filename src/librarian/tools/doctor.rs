@@ -417,28 +417,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         scan_artifact_paths(&cat.conn, &roots, &known_elsewhere, &mut doctor_scope)?;
     all_violations.extend(artifact_path_violations);
     // `doctor_scope`'s scoped-out rows are folded in LATER, after every scan_* call in
-    // this function has had the chance to call `admit()` — see the fold site right
-    // after the `SCOPED_ROW_CHECKS` retain() block below. (2026-09-09 review, round 2:
-    // an earlier revision folded here, immediately after this one call site, which was
-    // an ordering hazard for Tasks 3-5's ~13 further `admit()` call sites among the
-    // scans below — any one introduced between this line and the old fold site would
-    // have tallied into `scoped_out` but reached no published map.)
+    // this function has had the chance to call `admit()` — see the fold site below,
+    // near the end of this function, well after the row-grain checks' own `admit()`
+    // call sites. (2026-09-09 review, round 2: an earlier revision folded here,
+    // immediately after this one call site, which was an ordering hazard for Tasks
+    // 3-5's ~13 further `admit()` call sites among the scans below — any one
+    // introduced between this line and the old fold site would have tallied into
+    // `scoped_out` but reached no published map.)
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
     // The CONTENT half of the file/catalog pair, and the direction that had no instrument
     // until 2026-09-07. Its id sibling runs inside `scan_artifact_paths`' row loop above;
     // this one needs the row's `status` column as well, so it takes its own query rather
     // than widening that loop's tuple for every other check sharing it.
-    all_violations.extend(scan_frontmatter_status_mismatches(&cat.conn)?);
-    all_violations.extend(scan_snapshot_drift(&cat.conn)?);
+    all_violations.extend(scan_frontmatter_status_mismatches(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
+    all_violations.extend(scan_snapshot_drift(&mut doctor_scope, &cat.conn)?);
     // Runs beside snapshot_drift rather than inside it: the two ask different
     // questions of the same body (does it carry the row / can anything cite the
     // entry) and are allowed to disagree. See `scan_undefined_entries`.
-    all_violations.extend(scan_undefined_entries(&cat.conn)?);
+    all_violations.extend(scan_undefined_entries(&mut doctor_scope, &cat.conn)?);
     // One ledger defining a token twice — what a cross-host merge produces. Sits
     // beside scan_undefined_entries because the two ask opposite questions of the
     // same bodies (never defined / defined twice). See `scan_entry_defined_twice`.
-    all_violations.extend(scan_entry_defined_twice(&cat.conn)?);
+    all_violations.extend(scan_entry_defined_twice(&mut doctor_scope, &cat.conn)?);
     // Starts from the citation graph rather than a known ledger's claimed entries — the
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
     // `scan_cited_prefix_with_no_definer`. Scoped like the entry-validity family (Ruling
@@ -452,23 +456,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_premature_archive_citation(&cat.conn)?);
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
-    all_violations.extend(scan_params_behind_body(&cat.conn)?);
+    all_violations.extend(scan_params_behind_body(&mut doctor_scope, &cat.conn)?);
     // And the content half of that same drift: the id is on both sides, but the two
     // representations disagree about its STATUS. Its three siblings are id-set
     // comparisons and are silent by construction when every id matches — which is how
     // `BL-60` came to read `open` in `params` while the committed body said
     // `done-archived`. See `scan_params_status_drift` for the measured sensitivity and
     // the three cases it deliberately does not report.
-    all_violations.extend(scan_params_status_drift(&cat.conn)?);
+    all_violations.extend(scan_params_status_drift(&mut doctor_scope, &cat.conn)?);
     // Reads bug-file frontmatter rather than catalog columns: `unverified:` lands in
     // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
     // are ever opened.
-    all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
+    all_violations.extend(scan_terminal_status_with_caveat(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
     // The reader half of the one artifact state with no on-disk form. Reads frontmatter
     // off disk for the same reason as the check above — `expects_augmentation` lands in
     // `extra`, which is not catalog-indexed — but narrows via LEFT JOIN first, so only
     // artifacts that could violate are ever opened.
-    all_violations.extend(scan_augmentation_declared_but_absent(&cat.conn)?);
+    all_violations.extend(scan_augmentation_declared_but_absent(
+        &mut doctor_scope,
+        &cat.conn,
+    )?);
     // The inverse population of the check above: artifacts that DO have a row, whose
     // committed sidecar may nonetheless disagree with it. Reports only — drift has a
     // direction this cannot determine, and guessing it would overwrite a pulled shape.
@@ -557,14 +567,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &crate::librarian::session_registry::RealProcProbe,
     )?);
 
-    // Ruling 17 for the row-grain checks that carry no per-row state, applied as one
-    // filter over the finished list rather than five scoping blocks.
-    //
-    // The two in-scan precedents scope inside their own loop because they need
-    // something that loop already computed — `scan_artifact_paths` the known-elsewhere
-    // set, the entry-validity family an indegree key. These five need only the row's
-    // own path, so a single filter is both less code and more auditable: the scoped set
-    // is a list you can read in one place instead of five blocks you have to find.
+    // Ruling 17 for the row-grain checks that carry no per-row state beyond their own
+    // (id, abs_path): each such `scan_*` now calls `doctor_scope.admit(check, id,
+    // abs_path)` in its own row loop — the same mechanism the entry-validity family
+    // and `scan_cited_prefix_with_no_definer` already use — rather than this function
+    // post-filtering the finished `all_violations` list against a hardcoded name list.
+    // `SCOPED_ROW_CHECKS` and its `retain()` (both removed here) tested
+    // `super::containing_root(&[cp.git_root], ...)`; `DoctorScope::admit` tests
+    // `cp.abs_path` for `Scope::Project`. Retiring the retain therefore moves these
+    // eleven checks' scoping unit from `git_root` to `abs_path` — a deliberate, real
+    // narrowing (a monorepo subdirectory outside the active project's `abs_path` but
+    // still under its `git_root` is now scoped out at `Scope::Project`, same as every
+    // other row-grain check), not a bug. See
+    // `params_behind_body_scopes_by_abs_path_not_by_git_root` below for the
+    // discriminating test, and `scope_repo_admits_a_path_under_git_root_that_project_
+    // scope_refuses` in `scope.rs` for the scope-layer precedent this mirrors.
     //
     // **`worktree_scoped_row` is deliberately absent, and the omission is the
     // interesting half.** The discriminator is not "is the finding foreign" but *does
@@ -578,41 +595,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     //   its report while the repair stays machine-wide would understate what
     //   `confirm=true` is about to do — a worse defect than the two rows of noise it
     //   would remove.
-    //
-    // The remaining row-grain checks (`snapshot_drift`, `params_behind_body`,
-    // `augmentation_declared_but_absent`) report zero findings here today, so they are
-    // left out rather than swept in on an unmeasured assumption — see the bug file's
-    // Resume. `entry_without_definition` IS listed despite reporting zero foreign rows
-    // today: it shares a scan with `ledger_defines_nothing`, and one scan whose two
-    // outputs scope differently is a trap for the next reader.
-    const SCOPED_ROW_CHECKS: &[&str] = &[
-        "frontmatter_id_mismatch",
-        "frontmatter_id_is_not_a_catalog_id",
-        "frontmatter_status_mismatch",
-        "ledger_defines_nothing",
-        "entry_without_definition",
-        "entry_defined_twice",
-        "terminal_status_with_caveat",
-    ];
     let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
         Default::default();
-    // No active project means no scoping — the same degradation the scans themselves
-    // use, so a config-only caller is never handed a silently empty worklist.
-    if let Some(cp) = ctx.current_project.as_deref() {
-        let git_root = std::slice::from_ref(&cp.git_root);
-        all_violations.retain(|v| {
-            if !SCOPED_ROW_CHECKS.contains(&v.check.as_str()) {
-                return true;
-            }
-            if super::containing_root(git_root, Path::new(&v.path)).is_some() {
-                return true;
-            }
-            *row_checks_scoped_by_project
-                .entry(outside_roots_group(&v.path))
-                .or_insert(0) += 1;
-            false
-        });
-    }
     // Ruling 17, Critical 1 (2026-09-09 review, round 2 — PROMOTED this round to fix
     // an ordering hazard): fold `doctor_scope`'s scoped-out rows into their own
     // check's destination map HERE, after every scan_* call above — including this
@@ -640,10 +624,31 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     for (group, n) in &outside_scope_refused_by_project {
         *outside_scoped_by_project.entry(group.clone()).or_insert(0) += n;
     }
-    // A future `admit()` call site for one of the seven `SCOPED_ROW_CHECKS` names
-    // would fold its own check's sub-map (`doctor_scope.scoped_out().get(check)`)
-    // into `row_checks_scoped_by_project` HERE too, in this same fold site — none
-    // exists yet, so there is nothing to fold for that map today.
+    // The eleven row-grain checks converted onto `DoctorScope::admit` (Task 4) fold
+    // their own scoped-out sub-maps into `row_checks_scoped_by_project` HERE, in this
+    // same fold site — after every scan_* call above has had the chance to call
+    // `admit()`, same ordering reasoning as `outside_scope_refused_by_project` above.
+    for check in [
+        Check::FrontmatterIdMismatch.as_str(),
+        Check::FrontmatterIdIsNotACatalogId.as_str(),
+        Check::FrontmatterStatusMismatch.as_str(),
+        Check::LedgerDefinesNothing.as_str(),
+        Check::EntryWithoutDefinition.as_str(),
+        Check::EntryDefinedTwice.as_str(),
+        Check::TerminalStatusWithCaveat.as_str(),
+        Check::ParamsBehindBody.as_str(),
+        Check::ParamsStatusDrift.as_str(),
+        Check::SnapshotDrift.as_str(),
+        Check::AugmentationDeclaredButAbsent.as_str(),
+    ] {
+        if let Some(sub) = doctor_scope.scoped_out().get(check) {
+            for (group, n) in sub {
+                *row_checks_scoped_by_project
+                    .entry(group.clone())
+                    .or_insert(0) += n;
+            }
+        }
+    }
 
     // Entry-validity rows scoped OUT of the report because they belong to a project
     // root other than the active one (Fix 2 for MF-1; Task 3 moved this from an
@@ -1857,8 +1862,13 @@ fn outside_roots_group(path: &str) -> String {
 /// hint kept telling the reader every scoped-out row here "belongs to a
 /// workspace this machine knows about" — false for the `scope.admit`-refused
 /// half, which is unclaimed by construction and excluded for an unrelated
-/// reason). Never folded into `row_checks_scoped_by_project`, which belongs to
-/// a disjoint set of seven row-grain checks this function does not run.
+/// reason). The `check_frontmatter_id_matches_catalog` call below is a member of
+/// the row-grain check family that feeds `row_checks_scoped_by_project` — its
+/// `scope.admit` refusals land in `scope.scoped_out()` under that check's own
+/// wire name (`frontmatter_id_mismatch` / `frontmatter_id_is_not_a_catalog_id`)
+/// exactly like every other row-grain scan, and the caller folds them into the
+/// same map. It is the outside-managed-roots finding above, not this one, that
+/// stays out of that map.
 /// (2026-09-09 review, Critical 1: an earlier revision of this comment claimed
 /// the opposite, and the caller's code agreed with the comment, not with
 /// Ruling 17 — the scope-refused count silently vanished from every
@@ -1925,7 +1935,9 @@ fn scan_artifact_paths(
         // unreadable file yields None here — `check_missing_file` above already
         // owns that finding.
         if let Some(v) = check_frontmatter_id_matches_catalog(id, abs_path) {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         if is_absolute && !roots.is_empty() {
             if let Some(v) = check_outside_managed_roots(id, abs_path, roots) {
@@ -2652,7 +2664,10 @@ fn check_frontmatter_status_matches_catalog(
 ///
 /// Unlike [`scan_frontmatter_id_mismatches`] no `fix=` consumes this, so it carries no
 /// check-name write guard: there is no repair for the filter to keep honest.
-fn scan_frontmatter_status_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_frontmatter_status_mismatches(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String, Option<String>)> = stmt
         .query_map([], |r| {
@@ -2663,12 +2678,20 @@ fn scan_frontmatter_status_mismatches(conn: &rusqlite::Connection) -> Result<Vec
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(rows
-        .iter()
-        .filter_map(|(id, abs_path, status)| {
-            check_frontmatter_status_matches_catalog(id, abs_path, status.as_deref()?)
-        })
-        .collect())
+    let mut out = Vec::new();
+    for (id, abs_path, status) in &rows {
+        let Some(status) = status.as_deref() else {
+            continue;
+        };
+        let Some(v) = check_frontmatter_status_matches_catalog(id, abs_path, status) else {
+            continue;
+        };
+        if !scope.admit("frontmatter_status_mismatch", id, abs_path) {
+            continue;
+        }
+        out.push(v);
+    }
+    Ok(out)
 }
 
 /// One params-backed ledger, with everything the four entry-drift scans need in order
@@ -3259,7 +3282,10 @@ fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u3
 ///
 /// Read-only; there is no `fix=`. Renumbering rewrites a citable token, which
 /// silently re-points every existing citation — a separate decision.
-fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_entry_defined_twice(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.abs_path FROM artifact a \
          WHERE a.missing_since IS NULL ORDER BY a.abs_path",
@@ -3278,6 +3304,9 @@ fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation
             continue;
         }
         for (token, lines) in duplicate_definitions(&text, &prefixes) {
+            if !scope.admit("entry_defined_twice", &id, &abs_path) {
+                continue;
+            }
             let lines_str = lines
                 .iter()
                 .map(|l| l.to_string())
@@ -3789,7 +3818,10 @@ fn scan_validity_unparseable(
 /// Reports only; there is no `fix=`. Re-rendering a body is a content decision
 /// (which section, what column order, how much of the row to include) that
 /// belongs to whoever maintains the tracker.
-fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_snapshot_drift(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
     for ledger in params_backed_ledgers(conn)? {
         // ROW anchors only, in both the gate and the subtraction below. A
@@ -3817,6 +3849,9 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             .map(|n| format!("{}-{}", ledger.prefix, n))
             .collect();
         if missing.is_empty() {
+            continue;
+        }
+        if !scope.admit("snapshot_drift", &ledger.id, &ledger.abs_path) {
             continue;
         }
         // Name a bounded sample; the count carries the magnitude. An unbounded
@@ -3900,7 +3935,10 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 ///
 /// Reports only; there is no `fix=`. Writing an entry's heading means writing its
 /// title and body, which is content, not repair.
-fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_undefined_entries(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let ledgers = params_backed_ledgers(conn)?;
     // The citation sweep reads every artifact file, so it runs only when there is something
     // to classify. A catalog whose ledgers all define their entries pays nothing for this.
@@ -3930,6 +3968,9 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
         }
 
         if defined.is_empty() {
+            if !scope.admit("ledger_defines_nothing", &ledger.id, &ledger.abs_path) {
+                continue;
+            }
             out.push(Violation::new(
                 "ledger_defines_nothing",
                 Some(ledger.id),
@@ -4069,6 +4110,9 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 )
             };
 
+            if !scope.admit("entry_without_definition", &ledger.id, &ledger.abs_path) {
+                continue;
+            }
             out.push(Violation::new(
                 "entry_without_definition",
                 Some(ledger.id),
@@ -4434,56 +4478,10 @@ fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Vi
     Ok(out)
 }
 
-/// `params_behind_body`: an augmented ledger's markdown body anchors entry ids that its
-/// `params` hold no row for — the inverse of [`scan_snapshot_drift`].
-///
-/// Every drift surface codescout had asked one direction of one question: *has the
-/// **body** kept up with `params`?* `update_entry`'s `snapshot_stale`, `append_entry`'s
-/// `snapshot_missing` and `scan_snapshot_drift` all compute
-/// `claimed.difference(&in_body)`. Nothing computed the reverse, so a body that had run
-/// **ahead** — rows written into the file by hand, or written before their params row was
-/// ever appended — read as perfectly healthy on every surface.
-/// docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md
-///
-/// **The remedy is the opposite of `snapshot_drift`'s, which is why this is a separate
-/// check rather than more samples in that one.** There the body is stale and re-rendering
-/// it from `params` is repair. Here `params` is stale, and re-rendering would DELETE the
-/// newer record. The measured near-miss: generating BL-39's defining headings from the WIN
-/// ledger's `params` would have published `WIN-28`/`WIN-29` as `open` when both were
-/// `fixed`, and emitted no section at all for six further entries — in the pass whose
-/// whole purpose was making entries citable.
-///
-/// **Ids only, never statuses.** A status mismatch between a params row and a rendered
-/// table cell needs a text comparison against a column whose format is each tracker's own
-/// choice — fragile, and a separate decision. The id-set difference is exact, and it is
-/// what caught the WIN case.
-///
-/// **Not gated on `body_keeps_snapshot`**, for the reason spelled out on
-/// [`scan_undefined_entries`]: that gate answers the *row* question, where a
-/// params-canonical tracker anchoring a few ids in passing must not be nagged. Reusing it
-/// here would silence a body id the catalog has never seen, which is the entire finding.
-/// Pinned by `params_behind_body_is_not_gated_on_body_keeps_snapshot`.
-///
-/// **Neither `append_entry` nor `update_entry` can perform this repair, and the message
-/// must not name them.** It did, on first ship, and the claim was false twice over.
-/// `append_entry` ends with `obj.insert("id", new_id)` — it overwrites whatever id the
-/// caller passed — and allocates `params_next.max(body_max + 1)`, folding in the very body
-/// ids this check is reporting; on the WIN ledger it would mint `WIN-37`, not the missing
-/// `WIN-30`. `update_entry` patches a row that already exists and is pinned never to change
-/// the row count. The only surface that can create a row at a GIVEN id is the wholesale
-/// params write, which is why the message names that and warns that a partial array
-/// replaces rather than merges.
-///
-/// The same first-ship message also claimed an unallocated id "can be reissued". Also
-/// false, for the same reason: the `body_max` fold makes reissue impossible while the body
-/// still claims the id. It becomes possible only after a compaction moves those rows to an
-/// archive companion, and then only for a ledger with no committed
-/// `entry_high_water_<PREFIX>` — which is a narrower and conditional claim than the
-/// message asserted.
-///
-/// Reports only; there is no `fix=`. The missing rows carry a status and dates that no
-/// scan can infer from an id.
-fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_params_behind_body(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
     for ledger in params_backed_ledgers(conn)? {
         let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(
@@ -4495,6 +4493,9 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
             .map(|n| format!("{}-{}", ledger.prefix, n))
             .collect();
         if unrowed.is_empty() {
+            continue;
+        }
+        if !scope.admit("params_behind_body", &ledger.id, &ledger.abs_path) {
             continue;
         }
         // Bounded sample; the count carries the magnitude. Same cap and reasoning as
@@ -4693,7 +4694,10 @@ fn entry_status_region(lines: &[&str], eid: &str) -> Option<(String, &'static st
 /// Reports only; there is no `fix=`. Which side is stale is a judgement — `params` behind
 /// a corrected body and a body behind a corrected `params` produce the identical finding,
 /// and their remedies are opposites.
-fn scan_params_status_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_params_status_drift(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
     for ledger in params_backed_ledgers(conn)? {
         let Some(enum_vals) = ledger.status_enum.as_ref() else {
@@ -4725,6 +4729,9 @@ fn scan_params_status_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
             ));
         }
         if findings.is_empty() {
+            continue;
+        }
+        if !scope.admit("params_status_drift", &ledger.id, &ledger.abs_path) {
             continue;
         }
         // Bounded sample; the count carries the magnitude. Same cap and reasoning as its
@@ -4828,7 +4835,10 @@ fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Vio
 ///
 /// Reports only; there is no `fix=`. Discharging a caveat means establishing the thing it
 /// says was never established, which is work, not repair.
-fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_terminal_status_with_caveat(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     // SQL narrows to the rows worth opening; the field itself lives in `extra`, which is
     // NOT catalog-indexed, so the file has to be parsed. Ordered by abs_path for the same
     // reason as every other scan here — a report nobody can diff against a prior run is
@@ -4872,6 +4882,10 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
             other => other.to_string(),
         };
         if caveat.is_empty() {
+            continue;
+        }
+
+        if !scope.admit("terminal_status_with_caveat", id, abs_path) {
             continue;
         }
 
@@ -4986,7 +5000,10 @@ pub(crate) fn parse_declaration(v: &Value) -> Declaration {
 /// schema and a template — authored content, not repair. The check names what is missing;
 /// it cannot know what it said.
 /// docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
-fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_augmentation_declared_but_absent(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     // The LEFT JOIN is the cost control: only artifacts that could violate are opened, so
     // an already-augmented artifact is never read from disk. Ordered by abs_path like every
     // other scan here — a report nobody can diff against a prior run is half a report.
@@ -5078,6 +5095,9 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
             )
         };
 
+        if !scope.admit("augmentation_declared_but_absent", id, abs_path) {
+            continue;
+        }
         out.push(Violation::new(
             "augmentation_declared_but_absent",
             Some(id.clone()),
@@ -6587,7 +6607,8 @@ mod tests {
         );
 
         // The foreign row's only firing check is `abs_path_outside_managed_roots` (no
-        // frontmatter id declared, so none of the seven `SCOPED_ROW_CHECKS` fire), and
+        // frontmatter id declared, so none of the row-grain checks feeding
+        // `row_checks_scoped_by_project` fire), and
         // `DoctorScope::admit` refuses it (not `known_elsewhere`, not in scope) — so its
         // drop is announced in `outside_roots_by_project`, that check's own destination,
         // not `row_checks_scoped_by_project` (2026-09-09 review, Critical 1: this
@@ -7530,7 +7551,9 @@ mod tests {
         seed_declared(&cat, tmp.path(), "healthy", Some("true"), true);
         seed_declared(&cat, tmp.path(), "ordinary", None, false);
 
-        let v = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
 
         assert_eq!(
             v.len(),
@@ -7566,7 +7589,9 @@ mod tests {
         seed_declared(&cat, tmp.path(), "off", Some("false"), false);
         seed_declared(&cat, tmp.path(), "empty", Some("\"\""), false);
 
-        let all = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let all = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
         let by_check = |name: &str| -> std::collections::BTreeSet<String> {
             all.iter()
                 .filter(|v| v.check == name)
@@ -7644,7 +7669,9 @@ mod tests {
             false,
         );
 
-        let all = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let all = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
         let detail = |id: &str| -> String {
             all.iter()
                 .find(|v| v.artifact_id.as_deref() == Some(id))
@@ -7768,8 +7795,10 @@ mod tests {
         )
         .unwrap();
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_augmentation_declared_but_absent(&cat.conn)
+            scan_augmentation_declared_but_absent(&mut ds, &cat.conn)
                 .unwrap()
                 .is_empty(),
             "a doc describing [LIVE] blocks must stay silent — 23 of the 29 real-corpus \
@@ -7803,7 +7832,9 @@ mod tests {
         );
         seed_bug(&cat, tmp.path(), "clean", "fixed", None);
 
-        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
 
         assert_eq!(
             v.len(),
@@ -7834,7 +7865,9 @@ mod tests {
         seed_bug(&cat, tmp.path(), "b", "mitigated", Some("x"));
         seed_bug(&cat, tmp.path(), "c", "wontfix", Some("x"));
 
-        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 3, "all three terminal statuses count: {v:#?}");
     }
 
@@ -7848,8 +7881,10 @@ mod tests {
         seed_bug(&cat, tmp.path(), "empty", "fixed", Some(""));
         seed_bug(&cat, tmp.path(), "blank", "fixed", Some("   "));
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_terminal_status_with_caveat(&cat.conn)
+            scan_terminal_status_with_caveat(&mut ds, &cat.conn)
                 .unwrap()
                 .is_empty(),
             "an empty or whitespace-only caveat is not a caveat"
@@ -7871,7 +7906,9 @@ mod tests {
             Some("widened another open bug"),
         );
 
-        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "archiving must not silence a caveat: {v:#?}");
         assert!(v[0].path.contains("archive"));
     }
@@ -7886,7 +7923,9 @@ mod tests {
         let long: String = "—é→ ".repeat(120);
         seed_bug(&cat, tmp.path(), "verbose", "fixed", Some(&long));
 
-        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1);
         assert!(
             v[0].detail.contains('…'),
@@ -9773,7 +9812,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "one finding per LEDGER, got {v:?}");
         assert_eq!(v[0].check, "ledger_defines_nothing");
         assert!(
@@ -9800,7 +9841,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "entry_without_definition");
         assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
@@ -9853,7 +9896,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "entry_without_definition");
         assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
@@ -9909,7 +9954,9 @@ mod tests {
             "# A\n\n## BL-3 — third, archived\n",
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
         assert!(
@@ -9943,7 +9990,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
         assert!(
@@ -9973,7 +10022,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(
             v[0].detail.contains("Cited despite that: 1"),
@@ -9995,8 +10046,12 @@ mod tests {
             "# L\n\n## BL-1 — first\n\nbody\n\n## BL-2 — second\n\nbody\n",
             &["BL-1", "BL-2"],
         );
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_undefined_entries(&cat.conn).unwrap().is_empty(),
+            scan_undefined_entries(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "every entry is defined — there is nothing to report"
         );
     }
@@ -10022,11 +10077,15 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a minority anchor is a params-canonical tracker; nagging it is noise"
         );
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -10649,10 +10708,70 @@ mod tests {
             &["BL-1", "BL-2"],
         );
 
-        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "params_behind_body");
         assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
+    }
+
+    /// Task 4: retiring `SCOPED_ROW_CHECKS`' `retain()` moved every row-grain check's
+    /// scoping unit from `git_root` (the retain's own test — `super::containing_root(&
+    /// [cp.git_root], ...)`) to `abs_path` (`DoctorScope::admit`'s `Scope::Project`
+    /// arm) — a deliberate, real narrowing, not a bug. Mirrors the scope-layer
+    /// precedent `scope_repo_admits_a_path_under_git_root_that_project_scope_refuses`
+    /// in `scope.rs`: a monorepo-shaped fixture where `abs_path` is a SUBDIRECTORY of
+    /// `git_root`, so a sibling subdirectory's tracker is outside `Project` scope but
+    /// inside `Repo` scope. `params_behind_body` stands in for all eleven converted
+    /// checks — one guarded site, per this repo's mutation-per-site law.
+    #[test]
+    fn params_behind_body_scopes_by_abs_path_not_by_git_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_root = tmp.path().join("repo");
+        let abs_path = git_root.join("packages/mine");
+        std::fs::create_dir_all(&abs_path).unwrap();
+        let sibling_dir = git_root.join("packages/theirs");
+        std::fs::create_dir_all(&sibling_dir).unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "ahead",
+            &sibling_dir,
+            "| ID |\n| BL-1 |\n| BL-2 |\n| BL-3 |\n",
+            &["BL-1", "BL-2"],
+        );
+
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: abs_path.clone(),
+            git_root: git_root.clone(),
+            main_root: None,
+            umbrella: None,
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .build();
+
+        let cat = ctx.catalog.lock();
+        let mut project_scope =
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let project_v = scan_params_behind_body(&mut project_scope, &cat.conn).unwrap();
+        assert!(
+            project_v.is_empty(),
+            "a sibling package's tracker under git_root but outside abs_path must be \
+             scoped out at Project scope: {project_v:?}"
+        );
+
+        let mut repo_scope =
+            scope::DoctorScope::new(super::super::scope::Scope::Repo, &ctx).unwrap();
+        let repo_v = scan_params_behind_body(&mut repo_scope, &cat.conn).unwrap();
+        assert_eq!(
+            repo_v.len(),
+            1,
+            "the same tracker must be admitted at Repo scope — it is under git_root: {repo_v:?}"
+        );
+        assert_eq!(repo_v[0].check, "params_behind_body");
     }
 
     /// The direction pin: on a body that LAGS params, the old check fires and the new
@@ -10671,13 +10790,17 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert_eq!(
-            scan_snapshot_drift(&cat.conn).unwrap().len(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().len(),
             1,
             "BL-3 is in params and not in the body — that is the original check"
         );
         assert!(
-            scan_params_behind_body(&cat.conn).unwrap().is_empty(),
+            scan_params_behind_body(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "nothing ran ahead here; reporting it would be the same finding twice"
         );
     }
@@ -10749,12 +10872,16 @@ mod tests {
             &["open", "done-archived"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_params_behind_body(&cat.conn).unwrap().is_empty(),
+            scan_params_behind_body(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "the id is on both sides, so the id-set scans must stay silent — that \
              silence is the gap this check fills"
         );
-        let v = scan_params_status_drift(&cat.conn).unwrap();
+        let v = scan_params_status_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "params_status_drift");
         assert!(v[0].detail.contains("BL-1"), "{}", v[0].detail);
@@ -10806,7 +10933,9 @@ mod tests {
             &["open", "done", "dropped"],
         );
 
-        let v = scan_params_status_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_params_status_drift(&mut ds, &cat.conn).unwrap();
         let detail = v.first().map(|x| x.detail.clone()).unwrap_or_default();
 
         assert!(
@@ -10841,8 +10970,12 @@ mod tests {
             &["open", "done-archived"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            scan_params_status_drift(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "`done, archived` and `done-archived` are the same status rendered two ways"
         );
     }
@@ -10903,7 +11036,9 @@ mod tests {
             &["open", "done"],
         );
 
-        let v = scan_params_status_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_params_status_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(v[0].detail.contains("FT-1"), "{}", v[0].detail);
     }
@@ -10929,8 +11064,12 @@ mod tests {
             &["open", "done", "dropped"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            scan_params_status_drift(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "the Status line agrees with params; the narration below it is not a status"
         );
     }
@@ -10976,8 +11115,10 @@ mod tests {
             &["open", "done"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert_eq!(
-            scan_params_status_drift(&cat.conn).unwrap().len(),
+            scan_params_status_drift(&mut ds, &cat.conn).unwrap().len(),
             1,
             "`params` says open, the Status line says done — the prose saying `open` is \
              narration, and must not discharge the disagreement"
@@ -11003,8 +11144,12 @@ mod tests {
             &["BL-1"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            scan_params_status_drift(&mut ds, &cat.conn)
+                .unwrap()
+                .is_empty(),
             "params says `open` and the body says `done-archived`, but no enum is \
              declared — reporting it would enroll every prose tracker in a comparison \
              it never opted into"
@@ -11027,7 +11172,11 @@ mod tests {
             &["open", "done"],
         );
 
-        assert!(scan_params_status_drift(&cat.conn).unwrap().is_empty());
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        assert!(scan_params_status_drift(&mut ds, &cat.conn)
+            .unwrap()
+            .is_empty());
     }
 
     /// Fires where `snapshot_drift` is silent because nothing is missing FROM the
@@ -11045,11 +11194,13 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "every params row IS in the body, so the snapshot looks perfectly in sync"
         );
-        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "but BL-7 exists in git and in no query: {v:?}");
         assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
     }
@@ -11079,11 +11230,13 @@ mod tests {
             ),
             "fixture precondition: this body does NOT keep a snapshot"
         );
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "the gate silences the row question here, as it should"
         );
-        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "but BL-7 has no row at all: {v:?}");
         assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
     }
@@ -11117,8 +11270,10 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a body with no table cannot have a table that lags"
         );
     }
@@ -11144,7 +11299,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -11172,7 +11329,9 @@ mod tests {
             &["BL-1", "BL-2"],
         );
 
-        assert!(scan_snapshot_drift(&cat.conn).unwrap().is_empty());
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        assert!(scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty());
     }
 
     /// The named remedy must be one that can actually perform the repair, and the two
@@ -11201,7 +11360,9 @@ mod tests {
             &["BL-1"],
         );
 
-        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         let detail = &v[0].detail;
         assert!(
             detail.contains("doc(action=\"augment\""),
@@ -11225,7 +11386,9 @@ mod tests {
         let body: String = (1..=13).map(|n| format!("| BL-{n} |\n")).collect();
         seed_tracker(&cat, "capped", tmp.path(), &body, &["BL-1"]);
 
-        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
         assert!(
@@ -11260,7 +11423,9 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
-        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -11294,8 +11459,10 @@ mod tests {
             "# Notes\n\nAll prose. The rows live in params by design.\n",
             &["BL-1", "BL-2", "BL-3"],
         );
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a tracker anchoring no ids keeps no snapshot — nothing can be behind"
         );
     }
@@ -11329,8 +11496,10 @@ mod tests {
                 "BL-11", "BL-12",
             ],
         );
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a body anchoring a small scattered minority is mentioning ids, not \
              maintaining a snapshot — reporting it nags a design decision"
         );
@@ -11350,7 +11519,9 @@ mod tests {
         let refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         seed_tracker(&cat, "lagging", tmp.path(), &body, &refs);
 
-        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -11370,8 +11541,10 @@ mod tests {
             "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n",
             &["BL-1", "BL-2"],
         );
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "params and body agree — there is nothing to report"
         );
     }
@@ -11401,7 +11574,9 @@ mod tests {
                  We should also look at BL-4 sometime.\n",
             &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
-        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "BL-4 is mentioned, not rendered: {v:?}");
         assert!(v[0].detail.contains("BL-4"), "{}", v[0].detail);
     }
@@ -11433,12 +11608,16 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
 
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
         assert!(
-            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "no table exists here, so no table can be behind"
         );
 
-        let v = scan_undefined_entries(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -14851,7 +15030,7 @@ root = "work/elsewhere/ghost"
         // errors on `Scope::Project` with no active project rather than degrading to empty
         // roots. Verified 2026-09-09 (correcting round-3 review Important 2, whose proposed
         // fix — routing this test through `Scope::Project` + `unscoped_ctx()` — panics on
-        // `.unwrap()`: `scope::tests::scope_project_without_an_active_project_admits_everything`
+        // `.unwrap()`: `scope::tests::scope_project_without_an_active_project_is_refused`
         // reproduces the same panic and is kept, inverted, as the test of THAT fact). So
         // `Scope::All` is not a weaker stand-in for "no active project" here; it is the only
         // state `DoctorScope` can ever actually be in when there is no active project.

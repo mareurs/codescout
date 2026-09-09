@@ -79,7 +79,7 @@ pub(super) struct DoctorScope {
     /// an active project"`) before the roots-building code below it ever runs. So an
     /// empty `roots` here can ONLY mean `Scope::All`; there is no second route to it.
     /// This corrects a 2026-09-09 round-3 review claim (Important 2) that assumed the
-    /// second route existed; disproven by `scope_project_without_an_active_project_admits_everything`,
+    /// second route existed; disproven by `scope_project_without_an_active_project_is_refused`,
     /// which now asserts the refusal (`expect_err`) rather than the originally-proposed
     /// `unwrap()`.
     roots: Vec<PathBuf>,
@@ -318,7 +318,7 @@ mod tests {
     /// original name rather than renamed, so a citation of the review's own fix instruction
     /// still resolves to the test that corrects it.)
     #[test]
-    fn scope_project_without_an_active_project_admits_everything() {
+    fn scope_project_without_an_active_project_is_refused() {
         let ctx = unscoped_ctx();
         assert!(
             ctx.current_project.is_none(),
