@@ -240,6 +240,27 @@ has "a write AFTER it IS the dirty author"        "$out" "THIS session"
 hasnt "and the pre-commit author stays excluded"  "$out" "$PEER"
 
 echo
+echo "== a SECONDARY span into a CLEAN file is not attributed =="
+# A real rustc error carries more than one span. Observed live 2026-09-09: an E0061 in a
+# peer's dirty file pointed its second span at src/librarian/session_registry.rs, which was
+# CLEAN -- and attributing that file would have named whoever last touched it for a break
+# they had no part in, at the exact moment someone wants a party to blame. That is the same
+# hazard the author-side checker guards with an `is_primary` span filter.
+#
+# THIS TOOL AVOIDS IT INCIDENTALLY, WHICH IS WHY THIS CASE EXISTS. Stage 2 intersects the
+# named paths with `git status` BEFORE authorship resolution runs, so a span into a clean
+# file cannot reach stage 3 -- no span-role parsing involved. Nothing else in this suite
+# asserts that ordering, so moving the intersection after resolution would reintroduce the
+# defect silently and every other case would stay green. The load-bearing detail is that
+# src/clean_bystander.rs is COMMITTED AND UNMODIFIED; dirty it and this case proves nothing.
+# Raised by 5399543d after their own is_primary fix; the live observation is c9ab2c8d's.
+echo "v1" > "$T/repo/src/clean_bystander.rs"
+$G add src/clean_bystander.rs && $G commit -q -m "clean bystander"
+out="$(run "$(printf 'error[E0061]: this function takes 1 argument but 0 were supplied\n  --> src/committed.rs:12:5\n  --> src/clean_bystander.rs:34:8\n')")"
+has  "the DIRTY file in the same red is still attributed" "$out" "src/committed.rs"
+hasnt "but the clean bystander is not named at all"       "$out" "src/clean_bystander.rs"
+
+echo
 echo "== a dead session is named but not offered as an address =="
 rm -f "$SOCKDIR/live.sock"
 out="$(run "$(printf 'error: bad\n  --> src/committed.rs:1:1\n')")"

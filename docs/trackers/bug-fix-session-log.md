@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 125
-entry_high_water_W: 116
+entry_high_water_W: 117
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,7 @@ entry_high_water_W: 116
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-125 | 2026-09-09 | med | process/verification | open | **Proved `doctor` ignores `scope` using the one comparison a WORKING param also satisfies.** I reported no-scope → `total = 170` and `scope="project"` → `169` as the evidence. A peer noted those are exactly what a *working* param defaulting to `project` produces — the comparison cannot separate "ignored" from "honoured and redundant", at any sample size. The discriminator is a scope that must **widen**: `scope="all"` → `169`, `by_check` identical, response buffer byte-identical, while the same run's `catalog_health` reports **636** rows scoped out, so a working `all` owed ~805. General form: **to show a parameter is ignored you need a reading in which its value MUST change the answer, and default-vs-absent is the single comparison that cannot supply one.** The *source* read — `doctor::call` reads only `fix`/`confirm`/`root`/`old_root`/`new_root`/`limit`/`offset` — was already done and strictly stronger; a confirming number felt like better evidence than an absence in the code. Violated the recon skill's own Phase 3 law while running that skill, after `R-125` and `F-78` |
 | F-124 | 2026-09-09 | med | process/attribution | open | **Seven misattributions and instrument failures in one evening, every one by a party actively writing about the class** — including a correction of a misattribution that carried a fresh one of the same class, sent to the party being corrected, ten minutes later. Two discriminators, neither mine. **Credit a SENTENCE to the socket it arrived on** (`ad379a7c`): *"this session participated"* is not *"this session said this"*, the existing attribute-by-sessionId rule is about which **identifier** to trust rather than which **claim** it answers, and the negative needs no registry because the socket is in the envelope. **A true adjacent fact lending credibility to an unchecked claim** (`59112612`): pid decay is real and documented, so my probe's swallowed `NameError` reading as *the sessions moved* was credible; the shared-`target/` hazard is real, so their unchecked mutant-binary claim was too. Neither was a reasoning error and both were one command from resolution | The remedy is one shape in every instance: **a second field that cannot lie the same way** — `error[E####]` vs a bare `error:`, a pid that cannot silently change while its session runs, an exit code beside a summariser, a test *path* that dates the compile that emitted it. Three of my own instruments failed this way: `awk -F'[ ;]'` printing `failed=0` beside `exit=101` because a `FAILED.` line shifts the fields; the `NameError` probe; and asserting a rebuild was mine inside the paragraph warning against exactly that. A courtesy caveat — *I cannot attribute this rebuild* — is what led a peer to withdraw a **remedy** they were about to publish, which was worse than the claim it replaced because it read as closed. **4 of 7 caught by the misattributed party, 3 by a third session's log, 0 by the author**: on a shared checkout every gate result is partly a measurement of everyone else's uncommitted work, in both directions, and nobody is told |
 | F-122 | 2026-09-08 | med | self-friction | open | **Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open.** Both READ-side, which is what makes them new rather than more of `IC-10` — every prior member is write-side, and both of that class's remedies (ship a channel; stop at "not mine") are no-ops when the channel was already open. The two fall on OPPOSITE rows of `IC-10`'s instrument table (uncommitted/`claimed_by`, committed/`Session-Id` trailer), so the gap is orthogonal to the instrument axis: having an instrument and consulting it are different events. Instance 2 is the first recorded failure of that table's committed row, which had stood since 2026-09-01 as a claim about *availability* rather than consultation. Candidate mechanism survives `SKF-22` because composing the message IS the trigger. Anchor such claims to a git object, never a clock — a `11:30` wrong in BOTH parties' accounts nearly inverted the finding |
 | F-121 | 2026-09-07 | med | process/peer-verification | open | **Two sessions ran three rounds of good-faith falsification over a repair mechanism that does not exist.** R1: the discriminator is *direction* (move vs write). A bare `git mv` falsified it. R2: *trigger* — an action emitting an event a sweep hangs off. R3 refined trigger to necessary-not-sufficient and routed it to `IC-18`. **No round checked the sweep exists.** It is a documented grep in `get_guide("tracker-conventions")`; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*; `src/` contains no `sweep_citations`, only `graft.rs` re-pointing catalog ROWS. The refuting datapoint came from the theorising session — 5 archive moves left 7 stale citations, none swept, found by a deliberate grep and then cited as evidence that triggers fire. **Each round replaced a proxy with a sharper proxy, so the sequence read as convergence on the truth**; a falsification exchange is unusually good at making mutual sharpening resemble an existence check. The misleading evidence was real, not imagined: `doc(move)` reports `history_grafted{events,links,…}`, true of catalog rows, while the `cites` edges it re-points are themselves derived from the stale prose — visible automatic repair sitting upstream of what stays broken. Near-miss: a false class note into `IC-18`, a closed set other sessions read as settled; withdrawn before landing. Design item filed as `I-9` (`9c82bda4`). Kin `SKF-22`, `OB-1` |
@@ -178,6 +179,7 @@ entry_high_water_W: 116
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-117 | 2026-09-09 | med | **Scout whether the abstraction the plan NAMES is consumable at the call site, not merely present.** `apply_scope`/`resolve_scope` were already in a plan sketch; the unchecked half was that they yield a `FilterNode` while every `doctor` scan uses raw `conn.prepare(…)` rather than `cat_find::find`. Verified consumable — `filter::compile` is `pub` and returns `SqlFragment { sql, params }`, spliced by `find.rs:20-26` exactly as a raw scan would — so scoping moves to the **SQL layer** | Had it been reachable only through `cat_find::find`, the plan needed either ~30 scans rerouted or, under time pressure, a **sixth** post-hoc filter shaped like the existing `SCOPED_ROW_CHECKS` `retain` — leaving all five current mechanisms standing while the stated goal is to collapse them. It also decides the cost: `scan_terminal_status_without_fix_anchor` `read_to_string`s every terminal bug file in the catalog *before* `containing_root` drops the foreign ones, and post-hoc scoping cannot remove that read. No failure was averted; what it bought is that the plan's central step is a verified splice rather than an assumption falsified mid-implementation | validated |
 | W-116 | 2026-09-09 | high | **The push guard's own ordering manufactures the standoff it documents — ask the authors and the operator in PARALLEL.** A push was refused with 4 commits from 3 other sessions below mine; `git rev-list --count origin/experiments..<my-earliest>` = **4**, so no rung and no refspec — the ack to my operator was the only route. I sent the three-state question to all three authors *and* put the decision to my operator in the same turn. All three answered **not withheld, UNCLEARED**, and every answer arrived **after** the operator had decided | Serial routing reads as diligence and the guard's own text is ordered that way (*"ASK THE AUTHOR … THEN ASK YOUR OPERATOR"*), but the first step's output is **context** for the second, not an input to it. On this machine the first link is answered *"I hold nothing to give you"* by construction — *"push only when the user asks"* is standing, so an author mid-task is in neither branch of a withheld/cleared binary (`OB-20`). The measured serial outcome is **four sessions held eight hours**, pile 2 → 14. **What the parallel form owes:** the operator must be told the authors are uncleared, never have their silence read as assent — two authors independently warned me against exactly that compression. Two errors of mine, recorded because the pattern only works if the question is well-posed: I called the foreign commits *"complete units, not WIP"* — true of the **commits**, false of the **sessions**, and the general form is `ad379a7c`'s: **the property you can see is not the property the question asks about**, reading as diligence because a commit is complete by construction and so can never come back negative. And I told a peer they sat *above* me when they sat below — `rev-list = 4` was right and I inverted its meaning. **An ack is spent when used**: it names one set for one push, and the stack gained a fourth author while the question was in flight | validated |
 | W-115 | 2026-09-09 | high | **A skip-guard written for a real environmental gap made a test monotone under the deletion it guarded — and it was added while fixing the previous survivor.** Two `wip_authors` attachment sites survived mutation because nothing traversed `handle_successful_output`. I added end-to-end tests, watched them pass, and **the same two mutations survived again**: the new cases carried `let Some(who) = … else { eprintln!("skipping: python3 absent?"); return }`, and *field absent* is byte-identical to what the mutation produces. Fixed by taking the environment check as a **separate observation, first** — then 7/7 Rust, 10/10 Python | Not the monotone law restated: that law is about the **assertion**, and this assertion was a correct `contains()`. The blindness was installed by a **guard in front of it** — the shape you reach for whenever a test has a genuine environmental dependency — and a skipped case and a passing case are the same line of output. **The review that catches "no end-to-end test" passes the replacement.** Two further survivors, same family: the opt-out asserted `is_none()` against a red naming a **clean** path (stage 2 supplied the silence), and `materialize` passed against files a **previous run** left in a content-hashed temp dir — the worse one, since it asserts about state no run in the suite created, so the refuting outcome leaves no artifact and widening the corpus does nothing. Plus one **false KILL** caught by its count: a mutant that failed to parse reported **27** assertions including ones its blast radius cannot reach; a valid deletion killed **2** | validated |
 | W-114 | 2026-09-08 | med | **A peer's claim about MY OWN authorship is the one attribution claim no reflex fires on.** `59112612` reported two untracked files as *"your in-flight work"*; they were `c9ab2c8d`'s (`codescout-b9`, `.claude-sdd`, **busy, writing them at that moment**) — `file-provenance.py` says `PEER`, the bug's frontmatter says `claimed_by: c9ab2c8d`, and the mtime moved 20:17:03 → 20:28:03 between two of my reads while I wrote nothing | The peer-skepticism rule covers claims about **the world**; a claim naming *me* as author reads as a **status report on my own state**, so it never enters the category of things to check. The natural next action on "your uncommitted work" is to commit or clean it — capturing a live peer's file mid-write. **Caught by prior recon, not by skepticism**: `claimed_by` was already in context from orienting 8 min earlier, so the ordering was luck. **Cheap rule: a file you own does not change while you read it and write nothing** | validated |
@@ -12882,6 +12884,35 @@ measured cost is peer round-trips plus one correction that needed re-correcting.
 because the failure is silent by construction and the catch rate depended entirely on other
 parties reading their own logs, which is not a mechanism.
 
+**Corollary, and it is `5399543d`'s — who then argued it down from a sibling to a corollary
+and withdrew their own entry for it: REPETITION IS NOT CORROBORATION WHEN THE INSTRUMENT'S
+ERROR IS DETERMINISTIC.** Their `compile_errors=1` ran **six times** and agreed with itself
+every time, because a wrong grep is perfectly repeatable. Across every instance counted here,
+*"run it again"* was available and useless.
+
+Their reasoning for the demotion is why it is kept in this shape: all six reads lacked the
+second field, so re-running was **six samples of one instrument** — which the remedy above
+already covers. It is retained rather than deleted because the remedy states what to *add* and
+this states what *not to reach for*, and the two are not the same instruction at the moment of
+doubt. The independence rule from § *Reaching a Peer Session* holding over time rather than
+over scope: **an instrument agreeing with its own earlier self is one blind spot counted
+twice.**
+
+They also declined to file their four further instruments, on the grounds that they are
+**members** rather than mechanisms, and that a longer list buys no new discriminator — which is
+this repo's own rule that widening a sample fixes member-selection and nothing else. Recorded
+because a withdrawal reasoned that way is worth more than the row it replaced.
+
+**A durable guard now exists for one of the incidental ones.** `scripts/attribute-red.py`
+avoided the secondary-span misattribution only because stage 2 intersects with `git status`
+*before* authorship resolution — no span-role parsing involved, and nothing asserted the
+ordering. Observed live 2026-09-09: an `E0061` in a peer's dirty file pointed its second span
+at a **clean** `src/librarian/session_registry.rs`, and the tool correctly ignored it. That is
+the same hazard `5399543d`'s `is_primary` filter guards deliberately, avoided here by accident.
+`tests/attribute-red.sh` now carries the case, and it is not decoration: moving the
+intersection after resolution reds it, and it is the **only** case that catches the
+co-occurring shape — a red naming a dirty file *and* a clean one. The three pre-existing
+failures all cover the all-clean red, which is not what a real compile error looks like.
 ## F-125 — Proved a param was ignored with the one comparison a WORKING param also satisfies — peer caught it, source read was stronger all along
 
 **Valid:** dated 2026-09-09
@@ -12907,6 +12938,32 @@ Two things this is an instance of, both already in the corpus rather than new: t
 **Status:** open
 
 **Fix idea / Pointer:** Feeds the `doctor` ignores `scope` bug file (cluster `cluster/parsers-over-a-namespace` — the peer independently placed it at `IC-6`, a namespace with no disambiguator: one flat schema serving 11 actions makes every action's unsupported params unrepresentable as errors). Reproduction must carry the `all` reading, not just `project` vs absent.
+
+## W-117 — Scouted whether the abstraction the plan names is CONSUMABLE, not just present — the scope clause splices into doctor's raw SQL
+
+**Valid:** dated 2026-09-09
+
+**Observed:** 2026-09-09, before writing the implementation plan for per-project `doctor` isolation.
+
+**Pattern:** Scout the *reusability* of the abstraction the plan names, not just its existence. I had already written `apply_scope`/`resolve_scope` into a plan sketch, having read `src/librarian/tools/scope.rs`. The unverified half was whether `doctor` can **consume** what they return: `apply_scope` yields a `FilterNode`, and every `doctor` scan uses raw `conn.prepare("SELECT …")` rather than `cat_find::find`, so a plan citing it was one layer short of checkable.
+
+**Counterfactual:** The scout answered a binary that decides the plan's *shape*, and answering it wrong is not caught until implementation.
+
+- Had `FilterNode` been consumable only through `cat_find::find`, scoping would have had to be either a whole-scan restructure (≈30 scan functions rerouted through `find`) or — far more likely under time pressure — a **sixth** post-hoc filter over finished `Violation`s, in the shape of the existing `SCOPED_ROW_CHECKS` `retain` (`doctor.rs:551-587`).
+- `doctor` already carries **five** scoping mechanisms: an in-loop known-roots filter (`:1762`), four per-scan `ctx` filters returning their own `scoped_map` (`:3164`, `:3314`, `:3439`, `:3544`), a fifth of that shape for `cited_prefix_with_no_definer` (`:3969`), the `retain` over a 7-string list (`:551`), and six **silent** inline `containing_root` calls that report no count at all (e.g. `:5347`). A sixth added on top would have left all five standing — the plan's stated goal is to collapse them.
+- It also decides whether the cost goes away. `scan_terminal_status_without_fix_anchor` (`:5342`) issues an unscoped `SELECT … WHERE kind='bug'` and `read_to_string`s each row **before** the `containing_root` check at `:5347` drops the foreign ones. Post-hoc scoping cannot remove that read; an SQL-layer clause does.
+
+**Confirming data points:**
+1. `filter::compile` is `pub` (`src/librarian/filter.rs:92`) and returns `SqlFragment { sql, params }` — a fragment, not a finished query.
+2. `cat_find::find` (`src/librarian/catalog/find.rs:20-26`) consumes it exactly as a raw scan would have to: `sql.push_str(" AND ("); sql.push_str(&frag.sql); sql.push(')'); params.extend(frag.params)`. The splice is the *documented* usage, not an inference from the type.
+3. `containing_root` (`src/librarian/tools/mod.rs:338`) already gives the same predicate lexically for the paths already in hand, so the two layers can coexist during migration rather than requiring a big-bang cutover.
+4. Precedent that a `doctor` repair can be root-scoped at all: `fix=repair_frontmatter_id` refuses to run without a scope and filters its scan to one root inside `run_fix` — which is the model for scoping `fix=reseat_worktree`, the one exception the report currently documents.
+
+**Impact:** med — no failure was averted (nothing had been written yet); what it bought is that the plan's central step is now a verified one-line splice instead of an assumption whose falsification would have been discovered mid-implementation, with a 6th mechanism as the path of least resistance.
+
+**Promote-when:** A second instance where "the abstraction exists" and "the abstraction is consumable at the call site" came apart. On its own this is one datapoint and belongs here, not in CLAUDE.md.
+
+**Status:** validated
 
 ## Template for new entries
 
