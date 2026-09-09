@@ -114,8 +114,12 @@ that it was deliberately discarded.
 
 ## Fix
 
-Not applied. Decide the branch from **field 3** when field 1 is not a ref name, rather than
-skipping the row:
+Not applied, and **unowned on purpose** — `status: open`, no claim. `taken` means a live session
+holds it, and neither this file's author nor sessionId
+`26cb9b5b-2c9c-489e-97d9-3a907c8b2941` is working it; a claim on an untouched file is what
+`doctor`'s `claim_liveness` exists to catch.
+
+Decide the branch from **field 3** when field 1 is not a ref name, rather than skipping the row:
 
 ```sh
 case "$local_ref" in
@@ -131,7 +135,19 @@ esac
 addresses a real, separately-measured hazard (an authorisation names a set; a branch push sends a
 prefix). The defect is that the guard cannot see the form it recommends.
 
+**The remedy text is wrong in three registers, and a fix that addresses only the first leaves two
+standing:**
 
+1. **Disarming** — the recommended sha form bypasses the guard entirely (this file's finding).
+2. **Inapplicable** — a pusher with no commits of their own in the range owns no sha to name, so
+   the advice cannot be followed and pushes them toward the branch form it warns against
+   (§ *Tests added* row 5).
+3. **Correct and load-bearing** — the prefix hazard it describes is real, which is why registers 1
+   and 2 must be fixed *without* deleting the sentence.
+
+After the field-3 fix, register 1 closes and `git push origin <sha>:<branch>` refuses like any
+other push — making the rung advice usable as written for the first time. Register 2 needs a
+separate branch in the message, not a code change.
 ## Tests added
 
 None — nothing is fixed. The regression test is the A/B pair above and must be **two-sided**: a
@@ -143,13 +159,33 @@ skipped in the same block.
 `tests/pre-push-foreign-session-guard.sh` already has the fixture and helpers; this is a new
 section there, not a new file.
 
+**Five rows, not four.** The fifth was contributed by sessionId
+`26cb9b5b-2c9c-489e-97d9-3a907c8b2941` from using the guard rather than reading it, and it is the
+row no A/B over `local_ref` would have produced:
+
+| row | field 1 | expected |
+|---|---|---|
+| 1 | `refs/heads/<branch>` | refuse (the positive control) |
+| 2 | bare sha | refuse (the defect) |
+| 3 | `refs/tags/<tag>` | skip |
+| 4 | sha `= $ZERO` (deletion) | skip |
+| 5 | pusher owns **zero commits in the range** | refuse, with a remedy that does not name a refspec |
+
+Row 5 is what the remedy text has no answer for. A session whose own work was swept into a peer's
+pathspec commit on a shared ledger owns **no sha to name** — measured live 2026-09-09: that
+session's `F-129`/`W-120` writes landed *inside* another session's commit, so its range held one
+commit and none of it was theirs. *"Use a refspec at EVERY rung"* is then not merely disarming
+(row 2) but **inapplicable**, and the reader's natural next move is the branch form the same text
+warns against. Assert that the refusal shown to a zero-commit pusher routes to *ask the rung's
+author*, never to a refspec they cannot form.
+
 **This is the class's own lesson about itself:** that suite has 90 assertions and every one is
 about the guard's predicate — *who is refused*. None is about the remedy text, so no mutation
-reaches the sentence that recommends the bypass. `CLAUDE.md` § *Testing Discipline* names this
-exact gap and the cheap partial answer: assert the remedy's **shape**, e.g. that any command form
-the refusal text recommends is itself covered by a refusing test.
-
-
+reaches the sentence recommending the bypass. `CLAUDE.md` § *Testing Discipline* names this exact
+gap and the cheap partial answer: assert the remedy's **shape**, e.g. that any command form the
+refusal text recommends is itself covered by a refusing test. Row 5 extends that from *the form is
+unguarded* to *the form does not exist for this reader*, which is a second way a remedy can be
+wrong while its predicate is right.
 ## Workarounds
 
 Push by branch name (`git push origin experiments`) and satisfy the guard with
