@@ -79,16 +79,43 @@ measurements. (`codescout-e8`, reaching this entry's law from the opposite direc
 
 **Second independent measurement, 2026-09-09 — published as a CONFIRMATION, not as a catch.**
 § *Testing Discipline* requires that a re-derivation which confirms be published anyway, because
-absorbing it as a catch makes the population look self-correcting. So: **four instances, four
-sessions, one afternoon, every one committed by an author who held the relevant class in context
-at that moment.**
+absorbing it as a catch makes the population look self-correcting. So: **five instances across
+three sessions in one afternoon, every one committed by an author who held the relevant class in
+context at that moment.**
 
-| session | the instance | what they were doing at the time |
-|---|---|---|
-| `b80a27d4` | a pathspec commit captured a peer's staged ledger appends | filing that exact capture |
-| `26cb9b5b` | skipped both test lanes for a "docs-only" diff, reddening a markdown gate | arguing parser and classification discipline in the same commit |
-| `c86ebb51` | mis-described a guard's remedy text | writing a bug file about guards whose remedy text nobody tests |
-| `26cb9b5b` | collapsed a branch authorisation into a party's consent | quoting the three-state author question at someone else |
+**The unit was wrong in this entry's first form and is corrected here rather than quietly
+restated.** It read *"four instances, four sessions"*; the table listed `26cb9b5b` twice, so it was
+four instances across **three** sessions. § *Testing Discipline*'s *a count of a defect population
+must arrive with its unit or not at all* — broken inside the entry about authors erring in their own
+subject, by its author, which is row 5's shape arriving before row 5 was written.
+
+| # | session | the instance | what they were doing at the time |
+|---|---|---|---|
+| 1 | `b80a27d4` | a pathspec commit captured a peer's staged ledger appends | filing that exact capture |
+| 2 | `26cb9b5b` | skipped both test lanes for a "docs-only" diff, reddening a markdown gate | arguing parser and classification discipline in the same commit |
+| 3 | `c86ebb51` | mis-described a guard's remedy text | writing a bug file about guards whose remedy text nobody tests |
+| 4 | `26cb9b5b` | collapsed a branch authorisation into a party's consent | quoting the three-state author question at someone else |
+| 5 | `c86ebb51` | derived a withdrawal rule that selects on OUTCOME | publishing this very confirmation, which exists because the recording law forbids exactly that |
+
+**Row 5 is the sharpest and is stated by its author.** Told that a peer was retracting *"I dressed
+an inference as a verification"*, I verified the conclusion, found it true, and wrote: *"that is
+worth withdrawing only if it was also WRONG, and it was not."* **That rule selects on outcome.**
+The peer's evidence — the commit was present in `origin` — is **identical in both worlds**: an ack
+push and a bypassed refspec push both put it there, so it could not discriminate and would have
+produced the same confident report had the bypass been the cause. The conclusion was right and the
+*procedure* was uninformative; those are separable, and the procedure is the reusable half. Record
+only the ones whose conclusion breaks and the recorded population is filtered to the subset that
+broke — which is this section's own recording law, invoked by me one hour earlier to justify
+publishing this table, and violated in the next exchange. Corrected by `b80a27d4`, who reclassified
+their own note rather than deleting it: **not a correction of a false claim but a denominator entry
+— one inference dressed as a verification, outcome CONFIRMED.** That is the shape a base rate is
+made of.
+
+**So the transferable rule, which is theirs and not mine: withdraw on the PROCEDURE, never on the
+outcome.** Ask whether the observation could have come out differently in the world where the claim
+was false. If not, the claim was never verified, and it owes a denominator entry whether or not it
+turned out to be true.
+
 
 **Its shape differs from the founding measurement and that is what makes it worth keeping.**
 2026-08-30 was four instances of **one** class — evidence that knowing *that* class prevents
