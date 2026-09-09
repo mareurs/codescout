@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 123
+entry_high_water_F: 125
 entry_high_water_W: 116
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 116
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-124 | 2026-09-09 | med | process/attribution | open | **Seven misattributions and instrument failures in one evening, every one by a party actively writing about the class** — including a correction of a misattribution that carried a fresh one of the same class, sent to the party being corrected, ten minutes later. Two discriminators, neither mine. **Credit a SENTENCE to the socket it arrived on** (`ad379a7c`): *"this session participated"* is not *"this session said this"*, the existing attribute-by-sessionId rule is about which **identifier** to trust rather than which **claim** it answers, and the negative needs no registry because the socket is in the envelope. **A true adjacent fact lending credibility to an unchecked claim** (`59112612`): pid decay is real and documented, so my probe's swallowed `NameError` reading as *the sessions moved* was credible; the shared-`target/` hazard is real, so their unchecked mutant-binary claim was too. Neither was a reasoning error and both were one command from resolution | The remedy is one shape in every instance: **a second field that cannot lie the same way** — `error[E####]` vs a bare `error:`, a pid that cannot silently change while its session runs, an exit code beside a summariser, a test *path* that dates the compile that emitted it. Three of my own instruments failed this way: `awk -F'[ ;]'` printing `failed=0` beside `exit=101` because a `FAILED.` line shifts the fields; the `NameError` probe; and asserting a rebuild was mine inside the paragraph warning against exactly that. A courtesy caveat — *I cannot attribute this rebuild* — is what led a peer to withdraw a **remedy** they were about to publish, which was worse than the claim it replaced because it read as closed. **4 of 7 caught by the misattributed party, 3 by a third session's log, 0 by the author**: on a shared checkout every gate result is partly a measurement of everyone else's uncommitted work, in both directions, and nobody is told |
 | F-122 | 2026-09-08 | med | self-friction | open | **Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open.** Both READ-side, which is what makes them new rather than more of `IC-10` — every prior member is write-side, and both of that class's remedies (ship a channel; stop at "not mine") are no-ops when the channel was already open. The two fall on OPPOSITE rows of `IC-10`'s instrument table (uncommitted/`claimed_by`, committed/`Session-Id` trailer), so the gap is orthogonal to the instrument axis: having an instrument and consulting it are different events. Instance 2 is the first recorded failure of that table's committed row, which had stood since 2026-09-01 as a claim about *availability* rather than consultation. Candidate mechanism survives `SKF-22` because composing the message IS the trigger. Anchor such claims to a git object, never a clock — a `11:30` wrong in BOTH parties' accounts nearly inverted the finding |
 | F-121 | 2026-09-07 | med | process/peer-verification | open | **Two sessions ran three rounds of good-faith falsification over a repair mechanism that does not exist.** R1: the discriminator is *direction* (move vs write). A bare `git mv` falsified it. R2: *trigger* — an action emitting an event a sweep hangs off. R3 refined trigger to necessary-not-sufficient and routed it to `IC-18`. **No round checked the sweep exists.** It is a documented grep in `get_guide("tracker-conventions")`; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*; `src/` contains no `sweep_citations`, only `graft.rs` re-pointing catalog ROWS. The refuting datapoint came from the theorising session — 5 archive moves left 7 stale citations, none swept, found by a deliberate grep and then cited as evidence that triggers fire. **Each round replaced a proxy with a sharper proxy, so the sequence read as convergence on the truth**; a falsification exchange is unusually good at making mutual sharpening resemble an existence check. The misleading evidence was real, not imagined: `doc(move)` reports `history_grafted{events,links,…}`, true of catalog rows, while the `cites` edges it re-points are themselves derived from the stale prose — visible automatic repair sitting upstream of what stays broken. Near-miss: a false class note into `IC-18`, a closed set other sessions read as settled; withdrawn before landing. Design item filed as `I-9` (`9c82bda4`). Kin `SKF-22`, `OB-1` |
 | F-120 | 2026-09-07 | med | test-design/evidence | fixed-verified | **Published a zero backed by a control that the exact failure mode it was chosen to exclude also satisfies.** Shipped `frontmatter_status_mismatch` (`765a1402`), reported **0 findings over 4727 artifacts**, and cited `missing_file: 4` from the same report as proof "the scan demonstrably opens files". `missing_file` fires on an **absent** path — a `stat`, not a read — so a scan that enumerated and stat'd every row while reading **none** produces exactly that pair. The four rows were also in another repo, outside the scope the `0` described, so control and measurement were never taken over one population. The obvious second control, `frontmatter_id_mismatch`, **also read 0** — two zeroes agreeing is one blind spot counted twice. What actually carried the result was a planted-positive test asserting the check is REACHED by the default scan, which survived the correction only because it **predated the doubt** (a control written after is selected by it). Raised by a peer's independent retraction; corrected same day in `0153d04f`. **Cheap generalised check: ask what the control would read if the thing under test were wholly broken. If unchanged, it is not evidence — prefer a planted positive over a same-report figure** |
@@ -12811,6 +12812,101 @@ produces the eight-hour standoff it documents. Here the parallel form resolved i
 exchange with strictly more information reaching the operator — all three author states were
 known to *me* before the push completed, and every one of them was the state that cannot
 authorise.
+
+## F-124 — Crediting a SENTENCE needs the socket it arrived on, and every derived summary needs a field that fails differently
+
+**Observed:** Seven misattributions and instrument failures in one evening across a
+four-session thread, **every one committed by a party actively writing about the class**. The
+fifth was a *correction of a misattribution carrying a fresh misattribution of the same class*,
+sent to the party being corrected, ten minutes later.
+
+**The attribution half, and the discriminator is `ad379a7c`'s:**
+
+> Before crediting a **sentence** to a sid, confirm **the sentence appeared in a message from
+> that sid** — not that the sid was in the conversation.
+
+The corpus already said *attribute by sessionId, never by a self-reported name* — that is which
+**identifier** to trust. This is which **claim** the identifier answers. *"This session
+participated"* is not *"this session said this"*, and getting the identifier right while
+getting the sentence wrong survives every check the existing rule prescribes. The channel route
+is cheap enough to run **per sentence**, and **the negative needs no registry at all**: the
+socket is in the envelope, so *"that sentence did not arrive from 4170822"* holds even when
+`$CLAUDE_CONFIG_DIR/sessions/<pid>.json` is unreadable.
+
+**The instrument half, and the general form is `59112612`'s: A TRUE ADJACENT FACT LENDING
+CREDIBILITY TO AN UNCHECKED CLAIM.** Neither of the night's two worst was a reasoning error:
+
+| claim | the true adjacent fact that made it credible | one command away |
+|---|---|---|
+| "the sessions moved" (mine) | pid decay is real, documented, read that morning | re-run the probe without `2>/dev/null` |
+| "`target/` held the mutant" (`59112612`) | the shared-`target/` hazard is real and documented | `stat` one mtime |
+
+**And the remedy is one shape, in every instance: a second field that cannot lie the same
+way.** `error[E####]` versus a bare `error:`; a pid that does not silently change while its
+session keeps running; an exit code beside a summariser; a test *path* that dates the compile
+that emitted it.
+
+**Three of my own instruments failed this way tonight**, which is why this is `F` and not `W`:
+an `awk -F'[ ;]'` summing `$6` printed `failed=0` beside `exit=101` because a `FAILED.` line
+shifts the fields; a probe's f-string `NameError` was swallowed by `2>/dev/null` and
+`|| echo "unresolvable"` supplied a plausible answer I read as *the sessions moved*; and I
+asserted a rebuild was mine before checking, inside the paragraph describing that exact move.
+
+**A supporting attribution can be wrong while the claim it supports is right, and noticing that
+is cheaper than resolving it.** Flagging that I could not attribute one rebuild — offered as a
+courtesy, not a finding — is what led `59112612` to withdraw a *remedy* they were about to
+publish: *"scope the arming build and there is no artifact half"* is false, because cargo builds
+from the **worktree**, so scope reaches only what you write and never what a concurrent peer
+reads. Their own line is the one to keep: that version was **worse than the original claim,
+because it reads as a closed remedy.**
+
+**Closing measurement, and it is the reason none of this is solvable by care.** Of seven
+instances, **four were caught by the misattributed party noticing**, and three by a *third*
+session's log — never by the author. `ad379a7c` found an 18-error clippy red in their gate
+output that both other sessions had missed. On a shared checkout **every session's gate result
+is partly a measurement of everyone else's uncommitted work, in both directions, and nobody is
+told** (`59112612`). That is why the discriminating record is so often in an output its owner
+had no reason to read.
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Observer Blindness* (attribute by sessionId; the check that runs
+when nobody is worried) and § *Reaching a Peer Session*'s channel route. This entry adds two
+grains: run the route against the **sentence**, and pair every derived summary with a field
+that fails differently.
+
+**Status:** open
+
+**Severity:** med — `git grep` confirms no committed artifact carried any of the seven, so the
+measured cost is peer round-trips plus one correction that needed re-correcting. Not `low`
+because the failure is silent by construction and the catch rate depended entirely on other
+parties reading their own logs, which is not a mechanism.
+
+## F-125 — Proved a param was ignored with the one comparison a WORKING param also satisfies — peer caught it, source read was stronger all along
+
+**Valid:** dated 2026-09-09
+
+**Observed:** 2026-09-09, scouting `librarian(action="doctor")`'s project-scoping surface before planning per-project isolation.
+
+**When:** Establishing, for a bug file I was about to open, that `doctor` silently ignores the `scope` argument the shared librarian schema declares with `"default": "project"`.
+
+**Expected:** My own evidence to discriminate. I reported two readings — no `scope` → `summary.total = 170`, `scope="project"` → `169` — and called the param ignored.
+
+**Got:** A peer session (sessionId `5399543d-22d6-4ed9-9ebb-876be459989f`, reached by socket) pointed out that those two readings are *precisely* what a **working** param with a `project` default also produces. The comparison cannot separate "ignored" from "honoured and redundant". It never could, at any sample size.
+
+The discriminating reading is a scope that must **widen**. Taken after the correction: `scope="all"` → `total = 169`, `by_check` identical, and the response buffer byte-identical (`144549` bytes, same `output_id`) to the `umbrella` run. In the same run `catalog_health` reports **636** rows scoped out (462 outside-roots + 113 entry-validity + 21 cited-prefix + 40 row-grain), so a working `all` was obliged to return ~805. `scope="umbrella"` → `169` likewise. Four readings: `{absent: 170, project: 169, umbrella: 169, all: 169}`; the 170→169 step is corpus drift, `informational` 3→2 as a live claim expired.
+
+**Probable cause:** I led with the runtime comparison because it was the one I had run, when the *source* read — grepping `doctor::call` (`src/librarian/tools/doctor.rs:326`) for `scope` and finding it reads only `fix`/`confirm`/`old_root`/`root`/`new_root`/`limit`/`offset` — was both already done and strictly stronger. A confirming number felt like better evidence than an absence in the code, and it was worse.
+
+**Workaround:** Took the widening reading. The general form, which is the part worth carrying: **to show a parameter is ignored you need a reading in which its value MUST change the answer — and comparing the default against absent is the single comparison that cannot provide one.** Pair it with the negative source read; neither alone is sufficient, because a param can also be read and then discarded.
+
+Two things this is an instance of, both already in the corpus rather than new: the reconnaissance skill's own Phase 3 law (*"ask whether a broken world produces the same result"*) — violated while running that skill, after `codescout:R-125` and `F-78` recorded the same shape; and § *Testing Discipline*'s monotone-assertion law, since `total == 169` is monotone under "the param works and changes nothing here".
+
+**Severity:** med — the cost is bounded and was paid by a peer, not by the tree: the bug file's Reproduction section would have shipped evidence that proves nothing, and CLAUDE.md's *"run the reproduction before reading the fix plan"* rule would have been satisfied by a reproduction with no discriminating power. No wrong code, one round trip, and a peer's attention.
+
+**Status:** open
+
+**Fix idea / Pointer:** Feeds the `doctor` ignores `scope` bug file (cluster `cluster/parsers-over-a-namespace` — the peer independently placed it at `IC-6`, a namespace with no disambiguator: one flat schema serving 11 actions makes every action's unsupported params unrepresentable as errors). Reproduction must carry the `all` reading, not just `project` vs absent.
 
 ## Template for new entries
 

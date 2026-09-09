@@ -115,6 +115,45 @@ Answer it in the design rather than in a caveat: **skip when the lock is held, n
 Skipping is silence, which already matches `wip_author_diagnostic`'s contract that `None` means
 both *nothing to say* and *could not find out* — so it introduces no new ambiguity, and the
 existing refusal to render silence as an exoneration covers it unchanged.
+### Three findings from building option 1 (2026-09-09, `5399543d`)
+
+All three correct the sketch above rather than annotating it. Verified here where checkable.
+
+**1. `--all-targets` is load-bearing, and this file's option 1 was wrong about the command.**
+The sketch says *"compile-check just that file"*. **That is not available in Rust** — the unit
+of compilation is the crate. Worse, the narrower command is blind to the motivating bug: the
+incident was an `expect_err` on a `Debug`-less type **inside a `#[cfg(test)]` module**, and
+`cargo check` without `--all-targets` does not build test targets at all. Measured:
+
+```
+cargo check --workspace                 exit=0    errors=0   ~3.0s   <- BLIND
+cargo check --workspace --all-targets   exit=101  errors=2   ~6.7s
+```
+
+So the cheap form is **monotone under exactly the failure class the feature exists to catch**
+— it returns the same clean answer whether the tree is fine or holds the original defect. The
+real cost is ~7 s incremental, not the per-file check the sketch assumed. This is the same
+shape as `CLAUDE.md` § *Development Commands*' rule that the long clippy form is the gate
+rather than garnish.
+
+**2. A feature-gate constraint the design did not anticipate.** `src/agent/` is ungated
+(`src/lib.rs:24`); `src/librarian/` is `#[cfg(feature = "librarian")]` (`:39-40`) — verified.
+So the module **cannot** reach `SessionRegistry`: doing so would delete the feature from lean
+builds *and* make its tests invisible to the lean lane, which is the vacuity `CLAUDE.md`
+records as making `LEAN exit=0` worthless. Resolution: the rules (`checkout_is_shared`,
+`errors_naming`, `render_notice`) stay **pure and ungated** so both lanes run them, and only
+the registry row loader is gated. **Consequence, named at the site rather than discovered: a
+lean build emits no notice.**
+
+**3. Filter on `is_primary` spans only — a peer's compile error can carry a SECONDARY span
+pointing into your file.** Filtering on *"any span names my file"* would attribute their break
+to you, at the exact moment someone is looking for a party to blame. That is the misrouting
+this whole class is about, reproduced one layer in, inside the fix for it. Guarded by a test
+that reds if the filter is relaxed.
+
+Finding 3 is the one worth reading twice: the author-side mechanism, built to stop
+misattribution, had a misattribution available in its own parser — found by writing it rather
+than by review.
 ## Workarounds
 
 For the **reader**, which is a different problem and already solved — credited to
