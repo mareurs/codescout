@@ -1829,22 +1829,29 @@ pub(crate) async fn idle_watchdog(
 /// modes: "hang forever" (no waker registered) and "CPU spin" (`wake_by_ref()`
 /// immediately reschedules the task, causing a tight busy-loop when EAGAIN is
 /// persistent).
-struct ResilientStdin {
-    inner: tokio::io::Stdin,
+struct ResilientStdin<R = tokio::io::Stdin> {
+    /// Generic so the backoff state machine below can be tested against the
+    /// REAL type. It was concrete until 2026-09-09, and the only test for it
+    /// therefore re-implemented `poll_read` inside the test function and
+    /// asserted about the copy — coverage of this type was zero while reading
+    /// as coverage. The default type parameter keeps every production call
+    /// site (`ResilientStdin::new(tokio::io::stdin())`) unchanged.
+    /// `docs/issues/2026-09-08-resilient-stdin-is-tested-only-through-a-copy-of-itself.md`
+    inner: R,
     /// Short sleep armed on `WouldBlock` to prevent CPU spinning.
     backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
 
-impl ResilientStdin {
-    fn new(stdin: tokio::io::Stdin) -> Self {
+impl<R> ResilientStdin<R> {
+    fn new(inner: R) -> Self {
         Self {
-            inner: stdin,
+            inner,
             backoff: None,
         }
     }
 }
 
-impl tokio::io::AsyncRead for ResilientStdin {
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for ResilientStdin<R> {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -10507,90 +10514,64 @@ mod guide_hint_tests {
 
 // ── ResilientStdin ────────────────────────────────────────────────────
 
-/// A mock reader that returns WouldBlock on the first poll, then data.
-#[allow(dead_code)]
-struct WouldBlockThenData {
-    returned_eagain: bool,
-}
+/// Gated `#[cfg(test)]` — the mock below has no non-test user, and until
+/// 2026-09-09 it sat at file scope with an `#[allow(dead_code)]` silencing the
+/// warning that said so. Deliberately NOT `#[cfg(feature = "librarian")]` like
+/// `guide_hint_tests` above: `ResilientStdin` is not feature-gated, so this has
+/// to run in the lean lane too.
+#[cfg(test)]
+mod resilient_stdin_tests {
+    use super::*;
 
-impl tokio::io::AsyncRead for WouldBlockThenData {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        if !self.returned_eagain {
-            self.returned_eagain = true;
-            std::task::Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "EAGAIN",
-            )))
-        } else {
-            buf.put_slice(b"hello");
-            std::task::Poll::Ready(Ok(()))
-        }
+    /// A mock reader that returns WouldBlock on the first poll, then data.
+    struct WouldBlockThenData {
+        returned_eagain: bool,
     }
-}
 
-/// Verifies that WouldBlock from the inner reader is converted to Pending,
-/// not surfaced as an error that would kill the rmcp service loop.
-///
-/// Mirrors the production `ResilientStdin` backoff pattern (BUG-047): on
-/// EAGAIN, arm a 1ms sleep, poll it to register the waker via the timer
-/// reactor, return Pending. Production cannot be tested directly because
-/// `ResilientStdin` is hard-coded to `tokio::io::Stdin`; this generic
-/// version mirrors the state machine so regressions in the pattern are
-/// caught by test.
-#[tokio::test]
-async fn resilient_stdin_absorbs_would_block() {
-    use std::future::Future;
-    use tokio::io::AsyncReadExt;
-
-    struct ResilientReader<R> {
-        inner: R,
-        backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
-    }
-    impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for ResilientReader<R> {
+    impl tokio::io::AsyncRead for WouldBlockThenData {
         fn poll_read(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
             buf: &mut tokio::io::ReadBuf<'_>,
         ) -> std::task::Poll<std::io::Result<()>> {
-            let this = self.get_mut();
-
-            if let Some(ref mut sleep) = this.backoff {
-                if sleep.as_mut().poll(cx).is_pending() {
-                    return std::task::Poll::Pending;
-                }
-                this.backoff = None;
-            }
-
-            match std::pin::Pin::new(&mut this.inner).poll_read(cx, buf) {
-                std::task::Poll::Ready(Err(ref e))
-                    if e.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    let mut sleep =
-                        Box::pin(tokio::time::sleep(std::time::Duration::from_millis(1)));
-                    let _ = sleep.as_mut().poll(cx);
-                    this.backoff = Some(sleep);
-                    std::task::Poll::Pending
-                }
-                other => other,
+            if !self.returned_eagain {
+                self.returned_eagain = true;
+                std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "EAGAIN",
+                )))
+            } else {
+                buf.put_slice(b"hello");
+                std::task::Poll::Ready(Ok(()))
             }
         }
     }
 
-    let mock = WouldBlockThenData {
-        returned_eagain: false,
-    };
-    let mut reader = ResilientReader {
-        inner: mock,
-        backoff: None,
-    };
-    let mut buf = [0u8; 16];
-    // Would surface WouldBlock as an error without the wrapper.
-    // With the backoff pattern, the first EAGAIN arms a sleep, the timer
-    // reactor fires, the task resumes, and the second poll returns data.
-    let n = reader.read(&mut buf).await.expect("should not error");
-    assert_eq!(&buf[..n], b"hello");
+    /// Verifies that WouldBlock from the inner reader is converted to Pending,
+    /// not surfaced as an error that would kill the rmcp service loop.
+    ///
+    /// Polls the PRODUCTION `ResilientStdin` (BUG-047) — which is the whole
+    /// reason that type is generic over its reader. Until 2026-09-09 this test
+    /// declared a local `ResilientReader<R>` mirroring the same state machine
+    /// and asserted about the copy, so deleting the backoff arm from the
+    /// shipped type left it green.
+    ///
+    /// LOAD-BEARING: `ResilientStdin::new` here, not a mirror. The acceptance
+    /// criterion for this test is that removing the `WouldBlock` arm from
+    /// `ResilientStdin::poll_read` makes it FAIL — observed 2026-09-09. A
+    /// re-introduced local copy passes that mutation and tests nothing.
+    #[tokio::test]
+    async fn resilient_stdin_absorbs_would_block() {
+        use tokio::io::AsyncReadExt;
+
+        let mut reader = ResilientStdin::new(WouldBlockThenData {
+            returned_eagain: false,
+        });
+        let mut buf = [0u8; 16];
+        // Would surface WouldBlock as an error without the wrapper.
+        // With the backoff pattern, the first EAGAIN arms a sleep, the timer
+        // reactor fires, the task resumes, and the second poll returns data.
+        let n = reader.read(&mut buf).await.expect("should not error");
+        assert_eq!(&buf[..n], b"hello");
+    }
 }
