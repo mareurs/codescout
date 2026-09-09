@@ -180,6 +180,35 @@ and 90 on author time, which is exactly the gap that makes the wrong clock look 
 `%ad` under-reports recent activity** — the direction that makes a "nothing happened in this
 window" claim come out false-clean. Use `--since`/`--until` (committer date) or `%cd`
 explicitly whenever the question is *when did this land*, never *who wrote it when*.
+
+**Which clock `--since`/`--until` uses was ASSERTED above and is now MEASURED.** The
+re-derivation is only sound if the range filter is committer-based, and that premise was
+stated rather than checked. Measured by sessionId `bf6a6925-f207-4a2f-8135-95e7563e859f`
+and reproduced here, using `68d72d67` — whose clocks differ by 58 minutes — as the probe:
+
+```
+68d72d67   a=09:34:49   c=10:33:14
+window around COMMITTER date (10:33:00–10:33:30)  ->  22 commits
+window around AUTHOR    date (09:34:30–09:35:10)  ->   0 commits
+```
+
+So the range filter is committer-based and the re-derivation was sound **by construction,
+not by luck** — the luck was confined to the original `%ad` read. The precise distinction is
+**display versus filter**: `%ad` in a `--format` is author date *even when the range filter
+beside it is committer-based*, which is how one query can look wrong and be right, or the
+reverse. Naming the two halves separately is what keeps the correction from over-generalising
+into "date handling here is unreliable".
+
+**A rebase has a SECOND consequence, and it is the expensive one.** `%ad` under-reporting is
+a measurement error a re-derivation fixes. The other is that a rebase **orphans any SHA a
+peer cited before it ran** — the 22 commits above share committer date 10:33:13–14 with author
+dates spanning 2026-09-03 to 09-09, which is the rebase's signature in the log. The same
+session re-checked `dac1068a`, a SHA it had already cited in a handoff document at 09:15
++03:00, i.e. **before** that rebase. It survived only because it predates the rebase base —
+and they would not have known without looking. The patch-id recorded alongside it
+(`371bee7c5081481311866cd797d7591abb2c5bc3`) is the reason the citation was safe either way.
+That is CLAIM → EVIDENCE for CLAUDE.md's "cite a fix by SHA *and* patch-id" rule, from a live
+near-miss rather than from the 2026-08-19 census that produced the rule.
 ## Hypotheses tried
 
 1. **Hypothesis** — the installer writes an inert file into the worktree's gitdir that git
