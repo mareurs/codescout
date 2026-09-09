@@ -99,6 +99,22 @@ The first row is the useful one: reverting to v1 now reds the **corpus** test as
 because the corpus has since gained a member that can falsify it. At `f10eefe2` that
 mutation would have been survived silently.
 
+### The falsifying corpus is now tracked, which is the durable half
+
+Re-derived at tree `4a2ee82d`, after the reporting session committed the file: **21**
+`// SAFETY:` comments across **9** files under `src/`, `crates/`, `tests/` — up from the
+16 at `f10eefe2`. `src/agent/build_check.rs` contributes **6** of them, the largest single
+contributor, and it holds **both** shapes: two `// SAFETY:` over a macro-wrapped
+`unsafe { libc::flock(...) }` (which v1 fails and v2 passes) and two over a bare
+`unsafe { libc::flock(...) };` statement (which both pass). All 21 pass under v2.
+
+That matters more than the fix. A population that can only falsify in one direction is
+what produced this bug; the tree now contains members that discriminate in **both**, and
+they are committed rather than sitting in someone's untracked WIP. It is why the
+`revert-to-v1` mutation reds the corpus test today and would have been survived in silence
+at `f10eefe2` — the guard gained a regression corpus it did not have when it shipped, and
+gained it by another session's ordinary work rather than by anyone curating a fixture.
+
 ## Tests added
 
 `the_span_stops_at_the_statement_it_justifies` — five cases against the real
