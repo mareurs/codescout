@@ -63,11 +63,13 @@ use shared_scope::{apply_scope, Scope};
 /// Nothing here can stand in for a fetch that never happened.
 #[derive(Debug)]
 pub(super) struct DoctorScope {
-    // Read only from `#[cfg(test)]` code today (a plain-lib build never
-    // branches on it), so it trips `dead_code` under `-D warnings` without
-    // this annotation. Kept per the Task 2 interface spec — Task 7 (and any
-    // later umbrella-specific hint) is the intended production reader.
-    #[allow(dead_code)] // Task 7 removes this
+    // Read by `reseat_worktree` (`src/librarian/tools/doctor.rs`), which builds
+    // this fix's response `"scope"` field from `scope.scope` via
+    // `ScopeApplied::to_json()` — the same shape the report path emits. Task 6
+    // (2026-09-09) made this the field's first production reader; before that
+    // it was read only from `#[cfg(test)]` code and needed `#[allow(dead_code)]`
+    // to pass `-D warnings`. Re-verify with `cargo clippy` before re-adding that
+    // annotation if this field's only reader is ever removed again.
     pub scope: Scope,
     /// Managed roots for the lexical half. Empty means everything is in scope and
     /// [`Self::contains`] short-circuits to `true` — and this is `Scope::All`'s case

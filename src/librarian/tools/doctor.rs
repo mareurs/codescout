@@ -35,7 +35,8 @@
 //!    `registered` (an ACTIVE `worktree_registration` covers the row's
 //!    worktree root — pending `librarian(action="merge_worktree")`, not a
 //!    reseat). Unregistered rows still feed `fix=reseat_worktree`, which is
-//!    now the LEGACY fallback for catalog drift the overlay never saw.
+//!    now the LEGACY fallback for catalog drift the overlay never saw. Row-
+//!    grain scoped like every other check in this list (Task 6).
 //! 8. `abs_path_outside_managed_roots` — every `artifact.abs_path` must
 //!    resolve under some managed root, i.e. the precondition
 //!    `doc(move)` / `doc(delete)` enforce via `containing_root`.
@@ -83,7 +84,8 @@
 //! fix run returns `pruned` counts instead.
 //!
 //! A second opt-in fix, `fix=reseat_worktree`, consumes `scan_worktree_scoped`
-//! violations: `no_collision` rows are durably re-seeded at the main-repo
+//! violations — now the same scoped set the report itself shows (Task 6):
+//! `no_collision` rows are durably re-seeded at the main-repo
 //! path — a fresh row is written at `id_m = artifact_id_from_abs(main_path)`
 //! and [`crate::librarian::catalog::graft::graft_rows`] folds the worktree
 //! row's entire history (events, links, event_edges, and the git-invisible
@@ -350,12 +352,14 @@ struct Args {
 /// The row-grain checks whose `scan_*` function calls `DoctorScope::admit` in its own row
 /// loop (Task 4) and folds its scoped-out sub-map into `catalog_health.row_checks_scoped_by_project`
 /// — the single source of truth for both the fold loop and the hint legend below, so the two
-/// can never name a different set (2026-09-09 review, Important 2 / Minor 7). Two row-grain
-/// checks are deliberately absent: `abs_path_outside_managed_roots` folds into its own
+/// can never name a different set (2026-09-09 review, Important 2 / Minor 7). One row-grain
+/// check is deliberately absent: `abs_path_outside_managed_roots` folds into its own
 /// dedicated `outside_scope_refused_by_project` map instead (see the comment at the fold
-/// site), and `worktree_scoped_row` is never scoped at all (`fix=reseat_worktree` is
-/// catalog-wide with no root, so narrowing its report would understate what `confirm=true`
-/// is about to do). `row_checks_scoped_by_project_covers_every_admitting_check` below guards
+/// site). `worktree_scoped_row` (Task 6) now scopes like every other row-grain check — its
+/// admit gate lives inside `scan_worktree_scoped`, shared by both the report path and the
+/// `fix=reseat_worktree` repair, so the two cannot disagree by construction; see the
+/// `reseat_worktree` doc comment for how the repair publishes its own scoped-out tally.
+/// `row_checks_scoped_by_project_covers_every_admitting_check` below guards
 /// this array against falling behind a new `scope.admit(...)` call site.
 ///
 /// **When adding a check here, check whether its scan function emits more than one
@@ -394,6 +398,7 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::ClaimHeldByLiveSession,
     Check::ClaimHeldByDeadSession,
     Check::ClaimUnresolvableHere,
+    Check::WorktreeScopedRow,
 ];
 
 /// MCP entry point. Runs every invariant check and returns a structured
@@ -421,6 +426,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             old_root_arg,
             args.new_root.as_deref(),
             args.confirm,
+            args.scope,
         )
         .await;
     }
@@ -474,7 +480,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // introduced between this line and the old fold site would have tallied into
     // `scoped_out` but reached no published map.)
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
-    all_violations.extend(scan_worktree_scoped(&cat.conn)?);
+    all_violations.extend(scan_worktree_scoped(&mut doctor_scope, &cat.conn)?);
     // The CONTENT half of the file/catalog pair, and the direction that had no instrument
     // until 2026-09-07. Its id sibling runs inside `scan_artifact_paths`' row loop above;
     // this one needs the row's `status` column as well, so it takes its own query rather
@@ -638,18 +644,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // discriminating test, and `scope_repo_admits_a_path_under_git_root_that_project_
     // scope_refuses` in `scope.rs` for the scope-layer precedent this mirrors.
     //
-    // **`worktree_scoped_row` is deliberately absent, and the omission is the
-    // interesting half.** The discriminator is not "is the finding foreign" but *does
-    // this check's repair write files*:
-    //
-    // - `repair_frontmatter_id` writes to disk. It therefore refuses to run without a
-    //   scope and filters `scan_frontmatter_id_mismatches` to one root (`run_fix`), so
-    //   its REPORT was the outlier — it named rows its own repair declines to touch.
-    // - `fix=reseat_worktree` only re-keys catalog rows. It takes no root and filters by
-    //   none, reseating every unregistered worktree-scoped row in the catalog. Scoping
-    //   its report while the repair stays machine-wide would understate what
-    //   `confirm=true` is about to do — a worse defect than the two rows of noise it
-    //   would remove.
+    // `worktree_scoped_row` (Task 6) closes the one exception this file used to carry.
+    // Its repair, `fix=reseat_worktree`, took no root and reseated every unregistered
+    // worktree-scoped row in the catalog regardless of what the report showed, so
+    // narrowing only the report would have understated what `confirm=true` was about
+    // to do. The fix scopes the REPAIR first, not just the report: `scan_worktree_scoped`
+    // gates its own row loop with a single `admit()` call shared by both the report
+    // path and `reseat_worktree`, so the two cannot disagree by construction — see
+    // `reseat_worktree`'s doc comment for how the repair publishes its own scoped-out
+    // tally.
     let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
         Default::default();
     // Ruling 17, Critical 1 (2026-09-09 review, round 2 — PROMOTED this round to fix
@@ -1032,9 +1035,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "{total_scoped} row-grain finding(s) ({check_list}) across \
              {n_projects} other \
              project root(s) were scoped OUT of this report — see \
-             catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
-             scoped: fix=reseat_worktree takes no root and reseats every unregistered row in the \
-             catalog, so narrowing its report would understate what confirm=true is about to do."
+             catalog_health.row_checks_scoped_by_project. worktree_scoped_row's repair \
+             (fix=reseat_worktree) is scoped the same way, and reports its own scope \
+             and scoped-out tally in its result — the two can never disagree."
         ));
     }
     if hidden_rows > 0 {
@@ -1379,6 +1382,7 @@ async fn run_fix(
     root: Option<&str>,
     new_root: Option<&str>,
     confirm: bool,
+    scope: Option<super::scope::Scope>,
 ) -> Result<Value> {
     match fix {
         "prune_missing" => {
@@ -1458,7 +1462,20 @@ async fn run_fix(
                 }
             }
         }
-        "reseat_worktree" => reseat_worktree(ctx),
+        "reseat_worktree" => {
+            // Require, not Literal — same reasoning as the report path's own
+            // resolve_scope call above `call()`'s catalog lock: `reseat_worktree`
+            // is a search-shaped repair (it finds rows, then acts on the ones
+            // found), so `all` without an umbrella has nothing to widen to.
+            let (effective_scope, scope_fallback) = super::scope::resolve_scope(
+                scope,
+                ctx.current_project.as_deref(),
+                super::scope::UmbrellaPolicy::Require,
+                super::scope::Scope::Project,
+            )?;
+            let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
+            reseat_worktree(ctx, &mut doctor_scope, scope_fallback)
+        }
         // Sweep-all WITHIN ONE ROOT, dry-run by default. Reuses `mv`'s repair so the
         // invariant has exactly one implementation: a move writes the new id going
         // forward, this rewrites the ones written before that shipped. BL-23.
@@ -1687,11 +1704,25 @@ async fn run_fix(
 /// reindex now hits `ON CONFLICT(id)` (id already matches path) instead of
 /// the pre-clean `DELETE`, so nothing is lost. `collision` rows are left
 /// untouched and reported for a manual `graft`.
-fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
+///
+/// `scope` and `scope_fallback` scope the repair itself, not just the
+/// report: `scope` is a live [`scope::DoctorScope`] built from the SAME
+/// `resolve_scope` call the report path uses (`Scope::Project` default,
+/// `UmbrellaPolicy::Require`), threaded through `scan_worktree_scoped`'s
+/// one shared `admit()` gate — so this function can only reseat a row the
+/// report would also have shown. The response's `"scope"` /
+/// `"scope_fallback"` / `"scoped_out"` fields mirror the report path's own,
+/// so an operator authorising `confirm=true` can tell which root it
+/// applied to and what it excluded before it ran.
+fn reseat_worktree(
+    ctx: &ToolContext,
+    scope: &mut scope::DoctorScope,
+    scope_fallback: bool,
+) -> Result<Value> {
     let mut cat = ctx.catalog.lock();
     // Owned Vec: the immutable borrow of `cat.conn` ends here, before the
     // mutable `graft_rows` calls below.
-    let violations = scan_worktree_scoped(&cat.conn)?;
+    let violations = scan_worktree_scoped(scope, &cat.conn)?;
     let mut reseated = Vec::new();
     let mut collisions = Vec::new();
     let mut skipped = Vec::new();
@@ -1742,11 +1773,32 @@ fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
         }
     }
     drop(cat);
+    // The repair publishes its own scoped-out tally — the mirror of the report
+    // path's own `"scope"` block. Without this, a scoped run's `confirm=true`
+    // could reseat fewer rows than an earlier unscoped report promised, with
+    // nothing in the response saying why: an action whose announcement doesn't
+    // match what it did. `scoped_out` sits at top level, a sibling of
+    // `reseated` / `collisions` / `skipped` — it names a fourth disposition of
+    // a considered row, not a property of `scope` itself.
+    let scoped_out = scope
+        .scoped_out()
+        .get("worktree_scoped_row")
+        .cloned()
+        .unwrap_or_default();
     Ok(json!({
         "fix": "reseat_worktree",
         "reseated": reseated,
         "collisions": collisions,
         "skipped": skipped,
+        "scoped_out": scoped_out,
+        "scope": super::scope::ScopeApplied {
+            scope: scope.scope,
+            abs_path: ctx.current_project.as_deref().map(|c| c.abs_path.clone()),
+            git_root: ctx.current_project.as_deref().map(|c| c.git_root.clone()),
+            umbrella: ctx.current_project.as_deref().and_then(|c| c.umbrella.clone()),
+        }
+        .to_json(),
+        "scope_fallback": scope_fallback,
     }))
 }
 
@@ -2430,7 +2482,10 @@ fn shared_entry_overlap(
 /// Filesystem-only: walks each `abs_path`'s ancestor directories looking for
 /// one [`current_project::is_linked_worktree`] recognizes (a `.git` *file*
 /// containing a `gitdir: .../worktrees/<name>` pointer) — no `git` subprocess.
-fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_worktree_scoped(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     // Ordered for the same reason as `scan_artifact_paths` — a report whose row
     // order shifts after a VACUUM is one nobody can diff against a prior run.
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
@@ -2483,6 +2538,10 @@ fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 
         if registered {
             detail["hint"] = json!("pending merge — use librarian(action=\"merge_worktree\")");
+        }
+
+        if !scope.admit("worktree_scoped_row", id, abs_path) {
+            continue;
         }
 
         violations.push(Violation::new(
@@ -12997,7 +13056,9 @@ mod tests {
         // Plain rows with no linked-worktree ancestor anywhere on disk —
         // the scan must not flag anything (safe default).
         seed_artifact(&cat, "plain", "/tmp/plain/doc.md");
-        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert!(violations.is_empty());
     }
 
@@ -13040,7 +13101,9 @@ mod tests {
         // no real .git-file layout on disk this would be empty (see the
         // no-worktree-rows test above). Here it must find exactly the one
         // seeded row.
-        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(violations.len(), 1, "the worktree-scoped row is flagged");
         let v = &violations[0];
         assert_eq!(v.check, "worktree_scoped_row");
@@ -13083,7 +13146,9 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("wt-row", "items", &["a", "b"])).unwrap();
         augmentation::upsert(&cat, &aug_row(&main_id, "items", &["b", "c"])).unwrap();
 
-        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             violations.len(),
             1,
@@ -13125,7 +13190,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
             .await
             .unwrap();
         assert_eq!(out["fix"], "reseat_worktree");
@@ -13174,7 +13239,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
             .await
             .unwrap();
         assert!(out["reseated"].as_array().unwrap().is_empty());
@@ -13227,7 +13292,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
             .await
             .unwrap();
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
@@ -13295,6 +13360,84 @@ mod tests {
         }
     }
 
+    /// A project-scoped `fix=reseat_worktree` must never touch a worktree-scoped row
+    /// outside its scope -- the repair half of Task 6's guarantee (the report half is
+    /// `worktree_scoped_row_now_scopes_with_every_other_check` above). Two independent
+    /// `make_worktree_fixture()` calls stand in for two unrelated repos sharing one
+    /// catalog: one worktree row nests under the scoped-in project's own main root, the
+    /// other under a wholly foreign repo. Reached through `call()`, not `run_fix`
+    /// directly, so the test also exercises R1's JSON-`scope` -> `DoctorScope`
+    /// threading, not just `reseat_worktree`'s own logic.
+    #[tokio::test]
+    async fn reseat_worktree_never_reseats_a_row_outside_its_scope() {
+        let (_tmp_a, main_root_a, worktree_root_a) = make_worktree_fixture();
+        let (_tmp_b, _main_root_b, worktree_root_b) = make_worktree_fixture();
+
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // In scope: nested under `main_root_a`, the project this run is rooted at.
+        let in_scope_doc = worktree_root_a.join("docs/in.md");
+        let in_scope_row = TestArtifactRowBuilder::new("wt-in-scope")
+            .with_abs_path(in_scope_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &in_scope_row).unwrap();
+
+        // Foreign: a completely unrelated repo's worktree, from a second, independent
+        // fixture -- must survive the repair untouched.
+        let foreign_doc = worktree_root_b.join("docs/out.md");
+        let foreign_row = TestArtifactRowBuilder::new("wt-foreign")
+            .with_abs_path(foreign_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &foreign_row).unwrap();
+
+        let ctx = ctx_rooted_at(cat, &main_root_a);
+        let out = call(
+            &ctx,
+            json!({ "fix": "reseat_worktree", "confirm": true, "scope": "project" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out["fix"], "reseat_worktree");
+        let reseated = out["reseated"].as_array().unwrap();
+        assert_eq!(
+            reseated.len(),
+            1,
+            "only the in-scope row may be reseated: {out:#?}"
+        );
+        assert_eq!(reseated[0]["old_id"], "wt-in-scope");
+        assert!(out["collisions"].as_array().unwrap().is_empty());
+
+        // The foreign row must survive under its ORIGINAL id -- neither reseated nor
+        // grafted away -- because it never entered this run's scope.
+        {
+            let cat = ctx.catalog.lock();
+            assert!(
+                artifact::get(&cat, "wt-foreign").unwrap().is_some(),
+                "a project-scoped repair must not touch a row outside its scope"
+            );
+        }
+
+        // The repair names the scope it covered, mirroring the report path's own
+        // `"scope"` block (R3) -- so a caller can tell a narrow reseat from a wide one
+        // without re-deriving it from the request.
+        assert_eq!(
+            out["scope"]["applied"], "project",
+            "the repair must name the scope it covered: {out:#?}"
+        );
+        assert_eq!(out["scope_fallback"], false);
+        let scoped_out = out["scoped_out"].as_object().expect(
+            "the foreign row must be announced as excluded, not silently dropped: {out:#?}",
+        );
+        let scoped_out_total: u64 = scoped_out.values().map(|n| n.as_u64().unwrap()).sum();
+        assert_eq!(
+            scoped_out_total, 1,
+            "exactly the foreign row must be tallied as scoped out: {out:#?}"
+        );
+    }
+
     /// A worktree-scoped row covered by an ACTIVE `worktree_registration` is
     /// pending merge, not a legacy orphan — `scan_worktree_scoped` must flag
     /// it as `registered` (with a hint pointing at `merge_worktree`), and
@@ -13317,7 +13460,9 @@ mod tests {
         let main_root_str = crate::util::fs::RepoPath::from_path(&main_root).to_string();
         reg::upsert_active(&cat, &worktree_root_str, &main_root_str, None, 1000).unwrap();
 
-        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(violations.len(), 1);
         let detail: serde_json::Value = serde_json::from_str(&violations[0].detail).unwrap();
         assert_eq!(
@@ -13333,7 +13478,7 @@ mod tests {
         );
 
         let ctx = TestToolContextBuilder::new(cat).build();
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
             .await
             .unwrap();
         assert!(
@@ -13347,21 +13492,23 @@ mod tests {
         );
     }
 
-    /// Ruling 17 for the row-grain checks, and the deliberate exception beside it.
-    ///
-    /// Three rows, one call, because the exception is the part a future reader will try
-    /// to "finish": `worktree_scoped_row` looks exactly like the four scoped checks —
-    /// row-grain, 100% foreign in the live report — and adding it would be wrong.
-    /// `fix=reseat_worktree` takes no root and filters by none, so a narrowed report
-    /// would understate what `confirm=true` is about to reseat. Its sibling
-    /// `repair_frontmatter_id` DOES write files, refuses to run without a scope, and
-    /// already filters to one root — which is why `frontmatter_id_mismatch`'s report was
-    /// the outlier rather than its repair.
+    /// Ruling 17 for the row-grain checks — now uniform. `worktree_scoped_row` used to
+    /// be the one deliberate exception here (Task 6 closed it): it looked exactly like
+    /// the four other row-grain checks below — row-grain, foreign-rooted in this
+    /// fixture — but its repair, `fix=reseat_worktree`, took no root and reseated
+    /// every unregistered worktree-scoped row in the catalog regardless of what the
+    /// report showed, so scoping only the report would have understated what
+    /// `confirm=true` was about to do. Task 6 scopes the repair first — see
+    /// `reseat_worktree_never_reseats_a_row_outside_its_scope` for that half — through
+    /// the same `scan_worktree_scoped` `admit()` gate both the report path and
+    /// `reseat_worktree` now share, so the two cannot disagree by construction. This
+    /// test asserts the resulting SYMMETRY (`worktree_scoped_row` scopes exactly like
+    /// `frontmatter_id_mismatch`) in place of the asymmetry it used to pin.
     ///
     /// Regression for
     /// docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md.
     #[tokio::test]
-    async fn row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not() {
+    async fn worktree_scoped_row_now_scopes_with_every_other_check() {
         let (_wt_tmp, _main_root, worktree_root) = make_worktree_fixture();
         let tmp = tempfile::tempdir().unwrap();
         let active_root = tmp.path().join("active-project");
@@ -13384,7 +13531,8 @@ mod tests {
             &sibling_root.join("docs/out.md"),
             stale,
         );
-        // Outside the active project, and must survive anyway.
+        // Outside the active project, and now scoped out like every other row-grain
+        // check (Task 6) — this is the line that used to survive unscoped.
         seed_ledger(
             &cat,
             "wt-row",
@@ -13412,13 +13560,13 @@ mod tests {
             kept[0]
         );
 
-        // Only `frontmatter_id_mismatch`'s scoped-out sibling-root row lands in
-        // `row_checks_scoped_by_project` now (2026-09-09 review, Critical 1 fix).
+        // Both `frontmatter_id_mismatch`'s scoped-out sibling-root row AND
+        // `worktree_scoped_row`'s scoped-out worktree row land in
+        // `row_checks_scoped_by_project` now — the two checks are symmetric.
         // `abs_path_outside_managed_roots` is a DIFFERENT check that also fires for
         // both the sibling row and the worktree row (neither is inside `active_root`'s
         // managed roots), but `DoctorScope::admit`'s refusal for that check folds into
-        // `outside_roots_by_project` instead — asserted separately below. Before this
-        // fix both checks' drops were conflated into this one map; that was Critical 1.
+        // `outside_roots_by_project` instead — asserted separately below.
         let scoped = &out["catalog_health"]["row_checks_scoped_by_project"];
         let scoped_obj = scoped
             .as_object()
@@ -13431,25 +13579,31 @@ mod tests {
         assert_eq!(
             sibling_count, 1,
             "sibling-project contributes only frontmatter_id_mismatch here — \
-         abs_path_outside_managed_roots now lands in outside_roots_by_project: {scoped:#?}"
+     abs_path_outside_managed_roots now lands in outside_roots_by_project: {scoped:#?}"
         );
-        assert!(
-            !scoped_obj.keys().any(|k| k.contains(".worktrees")),
-            "the worktree row's only contribution was abs_path_outside_managed_roots, \
-         which no longer lands in this map: {scoped:#?}"
+        let worktree_count: u64 = scoped_obj
+            .iter()
+            .filter(|(k, _)| k.contains(".worktrees"))
+            .map(|(_, v)| v.as_u64().unwrap())
+            .sum();
+        assert_eq!(
+            worktree_count, 1,
+            "the worktree row's worktree_scoped_row finding is now scoped out too — the \
+     asymmetry this test used to pin is closed: {scoped:#?}"
         );
         let total: u64 = scoped_obj.values().map(|n| n.as_u64().unwrap()).sum();
         assert_eq!(
-            total, 1,
-            "sibling-project's frontmatter_id_mismatch is the only row-grain drop \
-         left in this map: {scoped:#?}"
+            total, 2,
+            "sibling-project's frontmatter_id_mismatch AND the worktree row's \
+     worktree_scoped_row are the only row-grain drops left in this map now: {scoped:#?}"
         );
 
         // `abs_path_outside_managed_roots`'s own scope-refused rows: both the sibling
         // row and the worktree row are outside `active_root`'s managed roots (this ctx
         // has no `main_root` linking either to it), and neither is `known_elsewhere` —
         // so both fold into `outside_roots_by_project`, one per root, per-member rather
-        // than only their sum.
+        // than only their sum. Unaffected by Task 6 — a different check, scoping
+        // independently before and after.
         let outside = out["catalog_health"]["outside_roots_by_project"]
             .as_object()
             .expect("the drop must be announced, not silent");
@@ -13461,7 +13615,7 @@ mod tests {
         assert_eq!(
             outside_sibling, 1,
             "sibling-project's row is outside managed roots too — a second, independent \
-         check dropping the same row: {outside:#?}"
+     check dropping the same row: {outside:#?}"
         );
         let outside_worktree: u64 = outside
             .iter()
@@ -13471,16 +13625,16 @@ mod tests {
         assert_eq!(
             outside_worktree, 1,
             "the worktree row is outside the active project's managed roots for \
-         abs_path_outside_managed_roots purposes even though worktree_scoped_row \
-         itself stays unscoped: {outside:#?}"
+     abs_path_outside_managed_roots purposes too — a second, independent check \
+     dropping the same row: {outside:#?}"
         );
 
         assert_eq!(
             out["summary"]["by_check"]["worktree_scoped_row"],
-            json!(1),
-            "worktree_scoped_row must NOT scope — fix=reseat_worktree reseats every \
-         unregistered row in the catalog regardless of root, so a narrowed report \
-         would understate what confirm=true is about to do: {out:#?}"
+            json!(0),
+            "worktree_scoped_row now scopes like every other row-grain check: the \
+     worktree row is outside active_root's scope, so it is scoped OUT of this \
+     report — and, symmetrically, out of what fix=reseat_worktree would reseat: {out:#?}"
         );
     }
 
