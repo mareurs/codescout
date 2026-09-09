@@ -101,6 +101,39 @@ Measured 2026-09-09 by the direct probe above, not inferred from reading the `ca
 
 ## Evidence
 
+### The refusal banner INSTRUCTS the reader to use the bypassing form
+
+This is not a guard evaded; it is a guard followed. Raised by sessionId
+`ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`, verified in the banner's own text:
+
+```
+:296   You push yours by refspec once nothing foreign sits beneath it, say "done", they push
+:298   theirs, up to the top. ... Use a refspec at EVERY rung -- pushing the branch name
+       publishes the whole stack including commits above you:
+:301       git push origin <your-sha>:$branch
+:331   `git push origin $branch` satisfies "push what I authorised" to the letter while
+:333   sending whatever arrived since. ... send the decided set by sha.
+```
+
+So the refusal message tells the reader, twice and in imperative form, to use the exact push
+form the guard cannot see — and warns them *off* the branch-name form, which is the only one
+it examines. `b0015a98-e290-46de-8ed1-3c94bc73a987` reached the bypass by doing what the
+banner said, at the moment a reader is most likely to comply.
+
+**And the header shows the exclusion was never intended.** `:50-53` reasons about
+`git push origin <sha>:experiments` explicitly, calls reading the ref pairs from stdin
+*"strictly better than assuming the branch tip"* because that form "publishes a PREFIX", and
+cites a 2026-09-06 verification of it. The design anticipated the refspec route and meant to
+handle it; `:124` excludes it. Stated intent contradicted by the implementation, in the same
+file.
+
+**Class note.** This is the corpus's compliance-relocates-exposure shape at its limit. In the
+recorded instance of that shape — `git commit -- <paths>` narrowing capture to exactly the
+case a file-list `--stat` cannot detect — compliance *moved* the residual risk into the blind
+spot. Here compliance *disables the mechanism outright*, and the instruction to do so is
+carried by the mechanism's own alarm. The banner was written by the author of this bug file
+at `13b721f1`.
+
 ### The suite cannot catch this by construction
 
 `tests/pre-push-foreign-session-guard.sh` drives the guard by piping stdin lines, and every
