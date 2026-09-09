@@ -867,6 +867,72 @@ else
 fi
 
 echo
+echo "== which FIELD names the branch depends on the push form =="
+# git's pre-push stdin is `<local-ref> <local-sha> <remote-ref> <remote-sha>`. Field 1 is
+# `refs/heads/<branch>` for `git push <remote> <branch>` and a BARE SHA for a refspec push
+# from a raw sha, because git then has no local ref to name. The guard filtered on field 1
+# alone, so the refspec form skipped the whole scan: exit 0, empty output, every foreign
+# commit published in silence.
+#
+# WHY IT WENT UNSEEN FOR SO LONG, AND WHY THIS BLOCK IS HERE RATHER THAN A WIDER SUITE:
+# this file's other ~90 assertions are all about the guard's PREDICATE -- who is refused.
+# None was about its REMEDY TEXT, and the remedy text recommends the bypassing form in so
+# many words ("use a refspec at EVERY rung"). So no mutation could reach it: following the
+# refusal correctly disarmed the guard that printed it. Measured 2026-09-09, 29 commits
+# from seven sessions published with the guard silent.
+# docs/issues/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md
+new_repo
+commit "$ALICE" "alice base"
+FIELD_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+FIELD_TIP="$(sha)"
+
+# Row 1 -- refname form. THE POSITIVE CONTROL, and load-bearing: without it every row
+# below is satisfied by a guard that refuses nothing, and row 2 passing would say nothing
+# about the fix. It also proves the fixture's foreign set is non-empty.
+run "$ALICE" - "refs/heads/main $FIELD_TIP refs/heads/main $FIELD_BASE"
+eq  "refname form: refuses a foreign commit"  "$EC" 1
+has "refname form: names the foreign sid"     "$OUT" "$BOB"
+
+# Row 2 -- sha refspec form. THE DEFECT. Identical range, identical repo; only field 1
+# differs. Before the field-3 fallback: exit 0, 0 bytes.
+run "$ALICE" - "$FIELD_TIP $FIELD_TIP refs/heads/main $FIELD_BASE"
+eq  "sha refspec form: refuses too"           "$EC" 1
+has "sha refspec form: names the foreign sid" "$OUT" "$BOB"
+
+# Row 3 -- THE OTHER DIRECTION, and not optional. Rows 1-2 are monotone under a guard that
+# refuses everything, which would also refuse the tag push this guard must ignore.
+# MEASURED, both directions, 2026-09-09: reverting to the one-field filter reds row 2 and
+# leaves row 3 green; widening the fallback to accept ANY field-3 value reds row 3 and
+# leaves row 2 green. Each direction has its own witness, which is the property a
+# single-sided pair cannot have.
+run "$ALICE" - "refs/tags/v1 $FIELD_TIP refs/tags/v1 $FIELD_BASE"
+eq  "tag push: still skipped"                 "$EC" 0
+
+# Row 4 IS INERT -- ANNOTATED AS SUCH SO NOBODY CREDITS IT WITH COVERAGE IT DOES NOT HAVE.
+# It discriminates none of the three mutations tried: the one-field revert, the widened
+# fallback, AND removal of the `$ZERO` deletion check above all leave it green (96/0 under
+# the third). The reason is worth carrying, because it is not laziness in the assertion --
+# with the deletion check gone, a deletion row falls through and the range becomes
+# `<base>..0000000`, which names no valid object, so `git log` yields nothing, commit_rows
+# stays empty and the guard exits 0 ANYWAY. The row gets the right answer by a route that
+# has nothing to do with what it appears to test. Kept as a documentation pin of the
+# intended contract, NOT as a regression guard. If you need the deletion check itself
+# guarded, the assertion has to observe something a degenerate range cannot produce.
+run "$ALICE" - "refs/heads/main $ZERO refs/heads/main $FIELD_BASE"
+eq  "branch deletion: still skipped (INERT -- see comment)" "$EC" 0
+
+# ROW 5 IS DELIBERATELY ABSENT, and named so nobody credits this block with covering it.
+# A pusher who owns ZERO commits in the range has no sha to name, so "use a refspec at
+# every rung" is not merely disarming (row 2) but INAPPLICABLE -- and the reader's next
+# move is the branch form the same text warns against. That is a defect in the MESSAGE,
+# not in this filter, and it survives the fix asserted above: register 2 of three in the
+# bug file. Contributed by sessionId 26cb9b5b-2c9c-489e-97d9-3a907c8b2941 from being in
+# that state on a live push. When the message gains that branch, assert here that the
+# refusal shown to a zero-commit pusher routes to ASK THE RUNG'S AUTHOR and names no
+# refspec they cannot form.
+
+echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

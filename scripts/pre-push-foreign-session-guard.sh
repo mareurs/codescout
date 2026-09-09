@@ -118,10 +118,24 @@ untrailered_n=0
 # and the ladder is only legible bottom-up.
 commit_rows=""
 
-while read -r local_ref local_sha _remote_ref remote_sha; do
+while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue          # branch deletion
-    case "$local_ref" in refs/heads/*) ;; *) continue ;; esac
+    # WHICH FIELD NAMES THE BRANCH DEPENDS ON THE PUSH FORM, and field 1 does not
+    # always. `git push <remote> <branch>` sends `refs/heads/<branch>` in field 1;
+    # a refspec push from a raw sha (`git push origin <sha>:experiments`) has no
+    # local ref to name, so git sends the BARE SHA there. Filtering on field 1
+    # alone therefore skipped the entire scan for the refspec form -- exit 0,
+    # nothing examined, every foreign commit published in silence -- and that form
+    # is the one this guard's OWN remedy text recommends ("use a refspec at EVERY
+    # rung"), so following the refusal disarmed the guard that emitted it.
+    # Field 3 is the ref being UPDATED and carries the branch in both forms, so it
+    # decides whenever field 1 has no name to give. Tag pushes still fall out
+    # (neither field is refs/heads/*) and deletions are already handled above.
+    case "$local_ref" in
+        refs/heads/*) ;;
+        *) case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac ;;
+    esac
 
     if [ "$remote_sha" = "$ZERO" ]; then
         # New remote branch: everything not already on some remote. Without --not this
