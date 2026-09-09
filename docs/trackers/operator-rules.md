@@ -215,4 +215,4 @@ Flip `**Status:**` to `active` and run `codescout operator-rules compile`. That 
 
 ## Template for new entries
 
-<!-- Insert new OP-N entries above this line. Use artifact(action="append_entry", id=<this artifact>, id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…) — never hand-format the heading. -->
+<!-- Insert new OP-N entries above this line. Use doc(action="append_entry", id=<this artifact>, id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…) — never hand-format the heading. -->

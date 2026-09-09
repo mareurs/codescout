@@ -29,7 +29,7 @@ entry_high_water_W: 120
 >
 > **How to use:** Copy this file to `docs/trackers/<topic>-session-log.md`
 > in the active project on first reconnaissance pass. Append F-N / W-N
-> entries via `edit_markdown(action="insert_before", heading="## Template
+> entries via `edit_file(action="insert_before", heading="## Template
 > for new entries", content=...)`. Add a row to the Index / Wins Index
 > table for each new entry — the indexes are the eval surface, the
 > sections are the evidence.
@@ -13305,7 +13305,7 @@ A subagent that restores the home project **when finished** does to its parent e
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     edit_markdown(action="insert_before",
+     edit_file(action="insert_before",
                    heading="## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->

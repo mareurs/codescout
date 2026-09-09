@@ -43,7 +43,7 @@ a reserved `cluster/<slug>` tag in each bug file's frontmatter, so a class's ins
 query rather than a list:
 
 ```
-artifact(action="find", kind="bug",
+doc(action="find", kind="bug",
          filter={"tags": {"contains": "cluster/<slug>"}})
 ```
 
@@ -168,10 +168,10 @@ failure mode this ledger exists to avoid.
 
 ```
 # every live bug in one class, archive included
-artifact(action="find", kind="bug", filter={"tags": {"contains": "cluster/<slug>"}})
+doc(action="find", kind="bug", filter={"tags": {"contains": "cluster/<slug>"}})
 
 # the same class, actionable only
-artifact(action="find", kind="bug", filter={"and": [
+doc(action="find", kind="bug", filter={"and": [
   {"tags": {"contains": "cluster/<slug>"}},
   {"status": {"in": ["open", "investigating"]}}]})
 

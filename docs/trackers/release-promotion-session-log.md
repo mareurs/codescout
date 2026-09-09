@@ -153,7 +153,7 @@ behaviour and belong in a change whose reviewers are looking at that gate; the t
 output contract.
 
 **A reindex was needed to see them.** Bug files created with `create_file` (rather than
-`artifact(action="create")`) are not catalogued, so `artifact(find, kind="bug")` reported 7
+`doc(action="create")`) are not catalogued, so `artifact(find, kind="bug")` reported 7
 open when there were 10. Run `librarian(action="reindex")` before trusting any "what's open?"
 count that follows a session which wrote bug files by hand.
 
@@ -242,7 +242,7 @@ What to hand over:
 
 ### Open bugs — 5, and none blocks the merge
 
-`artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`
+`doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`
 
 1. **AST chunker** — deferred by decision; title corrected (the "~2h" was 8.06 min)
 2. **researcher rerank** — descoped; a `researcher` defect filed here for umbrella reasons
@@ -398,7 +398,7 @@ corollary; `conventions` gained Environment-Agnostic Tuning.
 ### Open bugs — 8, unchanged in count
 
 ```
-artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
+doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
 ```
 
 One filed and closed this round (grep), so the count held. **None is blocked on investigation any
@@ -532,7 +532,7 @@ callouts **stay** (they come off at release, not at promotion), and archived bug
 ### Open bugs — 8, and use this query
 
 ```
-artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
+doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
 ```
 
 `status="open"` alone hides anything marked `investigating`. Two fixed today and archived; two
@@ -650,7 +650,7 @@ harness as originally specified measures the wrong variable.
 ### Open bugs — use the CORRECT query
 
 ```
-artifact(action="find", kind="bug",
+doc(action="find", kind="bug",
          filter={"status": {"in": ["open", "investigating"]}})
 ```
 
@@ -2987,7 +2987,7 @@ rather than read about.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     edit_markdown(action="insert_before",
+     edit_file(action="insert_before",
                    heading="## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->

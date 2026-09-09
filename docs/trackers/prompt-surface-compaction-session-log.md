@@ -44,8 +44,8 @@ entry_prefix:
 > list is the fastest way back into this work.
 >
 > **This is a guarded ledger** — `entry_prefix: [F, W]` is declared in frontmatter,
-> so `edit_markdown` is refused. Append via
-> `artifact(action="append_entry", id_prefix="F"|"W", title=…, body=…,
+> so `edit_file` is refused. Append via
+> `doc(action="append_entry", id_prefix="F"|"W", title=…, body=…,
 > anchor_heading="## Template for new entries")` and let the server write the
 > heading. Status vocabulary is the one in `docs/templates/session-log.md`.
 > **Wins Index rows are ascending** — append after the last row; prepending to a
@@ -67,7 +67,7 @@ entry_prefix:
 > re-keyed by its archive move and no longer resolves.
 >
 > Corrections stack here rather than replacing the text above because this block sits in
-> the preamble, before the first heading, and `artifact(update, body_edits)` is strictly
+> the preamble, before the first heading, and `doc(action="update", body_edits)` is strictly
 > section-scoped — there is no heading to address it by. Filed as a bug.
 ## Index
 
@@ -1998,7 +1998,7 @@ uncommitted extension to `src/prompts/mod.rs` read at 2026-09-03; `IC-14` member
 ## Template for new entries
 
 <!-- Appends land above this line. Use:
-     artifact(action="append_entry", id="<this artifact id>", id_prefix="F"|"W",
+     doc(action="append_entry", id="<this artifact id>", id_prefix="F"|"W",
               title="...", body="...", anchor_heading="## Template for new entries")
      The server writes a def_re-conformant `## <ID> — <title>` heading. Add the
      matching Index / Wins Index row in the same session. -->

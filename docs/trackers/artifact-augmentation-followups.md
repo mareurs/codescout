@@ -57,7 +57,7 @@ Skipped for now (in brainstorm but deferred):
 | AA-16 | Inline existing-trackers list (cap 30, overflow hint) | done | 1.5 | `EXISTING_TRACKERS_CAP=30`, hint references `artifact_find`. |
 | AA-17 | Tests: response structure + each archetype's example params validates against its example schema | done | 1.5 | 5 tests including self-consistency (schema↔example) and template-renders-against-example. |
 | AA-18 | Register `tracker_design` in `tools/mod.rs::all_tools` + prompt-surface mention | done | 1.5 | Tool selection table row + augmentation-and-refresh section paragraph. |
-| AA-21 | Guard merge-patch against unknown top-level params keys when no `params_schema` is set | open | 6 | `artifact_augment(merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6. |
+| AA-21 | Guard merge-patch against unknown top-level params keys when no `params_schema` is set | open | 6 | `doc(action="augment", merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6. |
 
 Status legend: `open` / `in-progress` / `done` / `blocked` / `dropped`
 

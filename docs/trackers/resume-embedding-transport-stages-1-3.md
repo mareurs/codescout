@@ -51,7 +51,7 @@ follow-through.
 **To append:** one call, from the main checkout —
 
 ```
-artifact(action="append_entry", id="<this artifact's id>", id_prefix="ET",
+doc(action="append_entry", id="<this artifact's id>", id_prefix="ET",
          anchor_heading="## Template for new entries", title=…, body=…)
 ```
 

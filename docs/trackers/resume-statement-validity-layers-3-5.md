@@ -40,7 +40,7 @@ itself the finding; correct the entry rather than working from it.
 **To append:** one call, from the main checkout —
 
 ```
-artifact(action="append_entry", id="<this artifact's id>", id_prefix="SV",
+doc(action="append_entry", id="<this artifact's id>", id_prefix="SV",
          anchor_heading="## Template for new entries", title=…, body=…)
 ```
 

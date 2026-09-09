@@ -1221,7 +1221,7 @@ User asked why champion config scored 37/75 vs historical 41/60. Investigation:
    post-refactor paths). Methodology change, not bugfix.
 2. **Extracted pre-`a55f1458` TC defs** into `scripts/tc-suites/legacy-natural.json`
    (20 TCs, natural queries). Remapped 10 expected paths (workflow.rs → run_command/mod.rs,
-   markdown.rs → markdown/edit_markdown.rs, symbol.rs → symbol/edit_code.rs, etc.) so
+   markdown.rs → markdown/edit_file.rs, symbol.rs → symbol/edit_code.rs, etc.) so
    they exist at the pinned SHA. Verified zero missing.
 3. **Ran both suites** at jina-v2 bm25=5.0 mode=code on pinned worktree:
 
@@ -1521,9 +1521,9 @@ had.
 - **TC-07** "section boundary detection in markdown editing"
   Top-3 are all `chunker.rs` (text chunker that *also* detects section
   boundaries — semantically right, not the expected
-  `src/tools/markdown/edit_markdown.rs`). The expected file's chunks just
+  `src/tools/markdown/edit_file.rs`). The expected file's chunks just
   don't surface for this phrasing. Likely fix: rephrase to
-  `"edit_markdown section heading replace insert_after action"` or accept
+  `"edit_file section heading replace insert_after action"` or accept
   `chunker.rs` as a valid match.
 
 - **TC-16** "how a semantic search query flows from input through embedding

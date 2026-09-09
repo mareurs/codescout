@@ -19,9 +19,9 @@ entry_prefix: OB
 # Observer Blindness — defect classes the right party structurally cannot see (OB-N)
 
 **Declared ledger.** `entry_prefix: OB`. Entries are `## OB-N — <title>` body sections;
-allocate with `artifact(action="append_entry", id=<this artifact>, id_prefix="OB",
+allocate with `doc(action="append_entry", id=<this artifact>, id_prefix="OB",
 anchor_heading="## Template for new entries", title=…, body=…)`. Never hand-allocate.
-`edit_markdown` is refused.
+`edit_file` is refused.
 
 ## What this ledger is for
 

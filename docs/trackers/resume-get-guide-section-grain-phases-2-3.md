@@ -42,7 +42,7 @@ a guide is edited.
 **To append:** one call, from the main checkout —
 
 ```
-artifact(action="append_entry", id="<this artifact's id>", id_prefix="GG",
+doc(action="append_entry", id="<this artifact's id>", id_prefix="GG",
          anchor_heading="## Template for new entries", title=…, body=…)
 ```
 

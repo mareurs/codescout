@@ -1087,7 +1087,7 @@ measuring.*
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     artifact(action="update", id=<this artifact>, patch={body_edits: [{
+     doc(action="update", id=<this artifact>, patch={body_edits: [{
         heading: "## Template for new entries",
         action: "insert_before",
         content: "## F-N — title\n..."}]})

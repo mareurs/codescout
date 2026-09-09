@@ -40,7 +40,7 @@ For each cherry-pick that lands on `master`:
 4. Strike the row here. When the table is empty, delete this tracker — it is a finite
    queue, not a living ledger.
 
-Edit archived files through the catalog (`artifact(action="update", id=…)`), not by
+Edit archived files through the catalog (`doc(action="update", id=…)`), not by
 path — `id = sha256(abs_path)` and these rows were just re-keyed by the move.
 
 ## Accuracy caveats — read before trusting a row

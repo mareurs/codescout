@@ -335,7 +335,7 @@ writing code that calls it."
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     artifact(action="update", id=<this artifact's id>,
+     doc(action="update", id=<this artifact's id>,
               patch={body_edits: [{heading: "## Template for new entries",
                                     action: "insert_before",
                                     content: "## F-N — title\n..."}]})

@@ -60,7 +60,7 @@ operator-rules error path.
 ## Open bugs and where each actually stands
 
 Query them with
-`artifact(action="find", kind="bug", filter={"status": {"in": ["open","investigating","zombie"]}})`.
+`doc(action="find", kind="bug", filter={"status": {"in": ["open","investigating","zombie"]}})`.
 
 - **zombie servers on deleted binaries** — 3 of 4 directions shipped (`ca2b0226`,
   `74dfbfca`, `fbd7f348`). Direction 2 **must not be built as drafted** (see Decision 1).

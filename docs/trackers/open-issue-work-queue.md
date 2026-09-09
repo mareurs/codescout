@@ -21,7 +21,7 @@ expects_augmentation: docs/augmentations/docs-trackers-open-issue-work-queue.yam
 ## What this is, and what it is not
 
 A **sequencing layer** over the open bug ledger, snapshotted 2026-08-16 from
-`artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})` — 17 rows.
+`doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})` — 17 rows.
 
 It exists because the ledger answers *what is broken* but not *what to pick up next*. A flat
 `status="open"` query cannot express readiness, blockers, or the fact that two entries need the same
@@ -38,7 +38,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 > catalog (`~/.local/share/librarian/catalog.db`), which is **not** in the repo — so without this
 > section the queue would be invisible to git and to any other checkout. Re-render it when rows
 > change. Query the live rows with
-> `artifact(get, id="9a892c2a5976e296", entry_filter={"status":{"eq":"open"}})`.
+> `doc(action="get", id="9a892c2a5976e296", entry_filter={"status":{"eq":"open"}})`.
 
 | ID | Ph | Task | Status | Bug |
 |----|---:|------|--------|-----|
@@ -89,7 +89,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `8400845b81ff0475` |
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
-| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
+| BL-48 | 1 | `edit_file`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that. Hint fix `ff90ce41`, patch-id `9da21228d4392923`; **observed live** in the running release binary on 2026-08-30 when `workspace(post_compact=true)` returned the new text after a compaction — first sighting in the wild, so this row reports it rather than inferring it from source | `d7072ed21959aca1` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | **done 2026-08-31** — item (3) discharged on the host that held the shapes; `e799f29d` + `1ad9af66` + `f565504a` + `e1b91221` + `c2039a16` (patch-id `63a943ba8e2a1a9b`), gate green 4834/0 full, 3360/0 lean. Shape travels in `docs/augmentations/<flattened-path>.yaml`; `reindex` re-attaches when the row is ABSENT and never overwrites a live one; `params` do not travel. The 9 shapes here are exported and committed, declarations upgraded to paths, verified live (0 `augmentation_declaration_unparseable`). Write-through CLOSED by `5f88be65` (patch-id `59ba22f9d7a6dfed`) — `artifact_augment` pushes a shape change to an *existing* sidecar at both write sites, mutation-verified per site; export still only CREATES. The note previously in this cell, *"not blocking — the export is idempotent"*, was wrong: idempotence was the defect's mechanism, not its mitigation (R-131), and it fired live within a day at `2a8decc5`. Not covered: drift from outside `artifact_augment` (hand-edit, graft, worktree merge) is still undetected — a `sidecar_shape_drift` check is the natural follow-on. Detection added by `03b86cd7` (`sidecar_shape_drift` + `sidecar_unparseable`), so the invariant no longer depends on call-site enumeration; it reports and has no `fix=`, and its first live run justified that better than the argument did — the queue drifted in BOTH directions at once, so direction is not even a property of an artifact. Repaired at `b05af94f`; check reports 0. **(3) UNBLOCKED 2026-08-30** — `git push origin experiments` landed 209 commits (`894a5e26..b05af94f`); all six sidecar-mechanism commits are on `origin/experiments` with 9 sidecars published. **CLOSED 2026-08-31** (`1ec456a4`, patch-id `a1967b8b671cba1c`) — "THERE" was this desktop, whose catalog held all 23. Corpus 9 → 23, 0 failures; probe reports 23/23 restored into a catalog that never held them, 23 distinct prompts, `params={}`. It was **14**, not 13: `claim-decay.md` was augmented and declared nothing | `11dec5e144ba0482` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `d91e96485308ee2f` |
@@ -117,7 +117,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
-> archived, and `artifact(action="move")` re-keys, so params carried the new ids while
+> archived, and `doc(action="move")` re-keys, so params carried the new ids while
 > this snapshot still cited `db02045fdbaaf860` / `ea21099f9d39f734` — neither of which
 > resolves any more. Three rows had drifted (BL-2, BL-26, BL-27) and BL-31 was missing
 > entirely.
@@ -131,11 +131,11 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 >
 > That is **BL-29** demonstrated, not a lapse: `update_entry` and `move` both write
 > catalog-only state, so every entry-grain write silently ages this table. The check that
-> catches it is `artifact(get, entry_filter=…)` against the live params before trusting
+> catches it is `doc(action="get", entry_filter=…)` against the live params before trusting
 > any row here — an id that returns `count: 0` is archived, not deleted.
 >
 > Earlier note, still true: BL-1, BL-20 and BL-22 were flipped with
-> `artifact(action="update_entry", …)`. The note that used to sit here said the flip was
+> `doc(action="update_entry", …)`. The note that used to sit here said the flip was
 > unsafe because there was no entry-grain update; that was BL-20, and it is now fixed.
 > Its own row was the first thing the fix was used on.
 
