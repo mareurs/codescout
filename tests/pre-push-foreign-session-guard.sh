@@ -689,6 +689,144 @@ MUT_HITS="$(scan_heredoc_bodies "$MUT" | grep -cE '(^|[^\\])`' || true)"
 rm -f "$MUT"
 
 echo
+echo "== install-hooks.sh writes into the hooks dir git READS, from a linked worktree =="
+# WHY THIS EXISTS. Until 2026-09-09 `install_shim` wrote to "$git_dir/hooks/$hook_name". In
+# a linked worktree --git-dir is .git/worktrees/<name>, which has no hooks/ directory at
+# all, while git READS hooks from the common dir. Every write failed -- and because
+# install-hooks.sh runs `set -uo pipefail` with no `-e`, the unconditional
+# `echo "ok ... shim installed"` still printed three times and the script exited 0. No hook
+# anywhere, reported as installed. `--check` from the same cwd then said MISSING and its
+# printed remedy is the run that prints ok, so the two halves formed a loop with no exit and
+# each half was locally correct.
+#
+# THE LINKED WORKTREE IS THE LOAD-BEARING DETAIL OF THIS FIXTURE. Every other installer
+# section in this file uses a plain `git init` repo, where --git-dir and --git-path hooks
+# COINCIDE -- so the divergence cannot arise there and no assertion added there can ever
+# reach this, however many are written. Delete the `git worktree add` below and this whole
+# section still passes while testing nothing.
+#
+# ITS OBSERVED RED: restore `dest="$git_dir/hooks/$hook_name"` in scripts/install-hooks.sh
+# and the three PRESENT assertions plus the record-vs-reality pairing below all fail.
+# Observed 2026-09-09 against the production script before this section shipped.
+
+# ABSOLUTE, ALWAYS. `git rev-parse --git-path hooks` returns a RELATIVE `.git/hooks` from a
+# main checkout and an ABSOLUTE path from a worktree, so the bare value means different
+# things depending on who reads it and from where. Measured 2026-09-09: a verification
+# script for this very fix took the relative form and ran `rm -f "$hooks/pre-push"` from
+# another directory, deleting three live hooks out of the real checkout. Resolve once, here.
+hooks_dir_of() {
+    local d
+    d="$(git -C "$1" rev-parse --git-path hooks)"
+    case "$d" in /*) printf '%s\n' "$d" ;; *) printf '%s\n' "$1/$d" ;; esac
+}
+
+# No fakebin/pre-commit stub here, unlike the sections above: install-hooks.sh retired the
+# framework and now names `pre-commit` only inside an error string, so that stub is inert.
+installer_fixture() {  # -> $REPO, seeded and committed, with all three targets executable
+    new_repo
+    mkdir -p "$REPO/scripts"
+    cp "$INSTALLER" "$REPO/scripts/install-hooks.sh"
+    chmod +x "$REPO/scripts/install-hooks.sh"
+    for t in pre-commit-run post-index-change-stage-log pre-push-foreign-session-guard; do
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$REPO/scripts/$t.sh"
+        chmod +x "$REPO/scripts/$t.sh"
+    done
+    git -C "$REPO" config --unset core.hooksPath 2>/dev/null || true
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -q -m "seed with scripts"
+}
+
+installer_fixture
+WT="$REPO.wt"
+git -C "$REPO" worktree add -q -b wt "$WT" 2>/dev/null
+WT_GITDIR="$(git -C "$WT" rev-parse --git-dir 2>/dev/null)"
+WT_HOOKS="$(hooks_dir_of "$WT" 2>/dev/null)"
+
+# THE FIXTURE ASSERTS ITS OWN DISCRIMINATING PROPERTY FIRST. If these two ever coincide the
+# section below is vacuous -- it would pass identically against the broken script -- and
+# nothing else here would say so. Red on a `worktree add` that silently did not happen.
+if [ -n "$WT_GITDIR" ] && [ "$WT_GITDIR/hooks" != "$WT_HOOKS" ]; then
+    ok "fixture: a linked worktree's --git-dir diverges from --git-path hooks"
+else
+    no "fixture: a linked worktree's --git-dir diverges from --git-path hooks" \
+       "git-dir=$WT_GITDIR hooks=$WT_HOOKS -- the fixture cannot express the defect"
+fi
+
+( cd "$WT" && bash scripts/install-hooks.sh ) > "$WT.log" 2>&1
+WT_EC=$?
+eq "worktree install exits 0" "$WT_EC" 0
+
+WT_PRESENT=0
+for h in pre-commit post-index-change pre-push; do
+    if [ -x "$WT_HOOKS/$h" ]; then
+        ok "worktree install: $h landed where git reads hooks"
+        WT_PRESENT=$((WT_PRESENT + 1))
+    else
+        no "worktree install: $h landed where git reads hooks" \
+           "absent from $WT_HOOKS -- see $WT.log"
+    fi
+done
+
+# PAIRED, and not load-bearing on its own: it is monotone under removal, since an installer
+# that writes nothing anywhere also leaves this directory absent. It is here to catch the
+# other repair someone reaches for -- `mkdir -p "$git_dir/hooks"` -- which makes the three
+# assertions above red and this one the only witness that a hook git never reads was written.
+if [ ! -d "$WT_GITDIR/hooks" ]; then
+    ok "worktree install: nothing written into the worktree's private gitdir"
+else
+    no "worktree install: nothing written into the worktree's private gitdir" \
+       "$WT_GITDIR/hooks exists -- git does not read hooks from there"
+fi
+
+# RECORD VS REALITY. This is the assertion the defect was actually about: the script printed
+# three `ok ... shim installed` lines with zero shims behind them. Equality alone is
+# satisfied by 0 == 0, so the count is pinned too -- one of each, in both directions.
+WT_OK="$(grep -c 'shim installed' "$WT.log" || true)"
+if [ "${WT_OK:-0}" -eq 3 ] && [ "$WT_PRESENT" -eq 3 ]; then
+    ok "every 'shim installed' line has a shim behind it ($WT_OK claimed, $WT_PRESENT present)"
+else
+    no "every 'shim installed' line has a shim behind it" \
+       "$WT_OK claimed installed, $WT_PRESENT actually present -- see $WT.log"
+fi
+
+# And the loop closes: --check from the same cwd must now agree with the install that
+# preceded it. Before the fix this printed MISSING for all three and exited 1.
+( cd "$WT" && bash scripts/install-hooks.sh --check ) > "$WT.check.log" 2>&1
+eq "worktree --check agrees with the install that just ran" "$?" 0
+
+echo
+echo "== a failed write does not print ok, and does not exit 0 =="
+# INDEPENDENT OF THE PATH. Fixing only the destination leaves the defect underneath it: the
+# success line was never conditional on the write. `set -uo pipefail` omits `-e`, so a failed
+# `cat >` neither stops install_shim nor sets `fail`. This case removes write permission
+# instead of moving the path, so it stays meaningful even if the hooks dir is resolved some
+# third way later.
+installer_fixture
+FAIL_HOOKS="$(hooks_dir_of "$REPO")"
+chmod a-w "$FAIL_HOOKS"
+if [ "$(id -u)" = "0" ] || ( : > "$FAIL_HOOKS/.probe" ) 2>/dev/null; then
+    # Root ignores the mode bits, so the fixture cannot express a failed write. Say so out
+    # loud rather than passing: a silent skip is indistinguishable from a green assertion.
+    rm -f "$FAIL_HOOKS/.probe" 2>/dev/null
+    no "unwritable hooks dir: install reports FAILED, not ok" \
+       "SKIPPED -- $FAIL_HOOKS is still writable (running as uid $(id -u)); this case needs a non-root user"
+else
+    ( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/fail.log" 2>&1
+    FAIL_EC=$?
+    FAIL_OK="$(grep -c 'shim installed' "$REPO/fail.log" || true)"
+    FAIL_LOUD="$(grep -c '^FAILED' "$REPO/fail.log" || true)"
+    [ "${FAIL_OK:-1}" -eq 0 ] \
+        && ok "unwritable hooks dir: prints no 'shim installed'" \
+        || no "unwritable hooks dir: prints no 'shim installed'" \
+              "$FAIL_OK ok-line(s) with nothing written -- see $REPO/fail.log"
+    [ "${FAIL_LOUD:-0}" -ge 1 ] \
+        && ok "unwritable hooks dir: says FAILED and names the path" \
+        || no "unwritable hooks dir: says FAILED and names the path" "see $REPO/fail.log"
+    eq "unwritable hooks dir: exits non-zero" "$FAIL_EC" 1
+fi
+chmod u+w "$FAIL_HOOKS" 2>/dev/null || true
+
+echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
