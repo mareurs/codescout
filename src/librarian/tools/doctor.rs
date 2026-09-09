@@ -321,33 +321,75 @@ impl Violation {
     }
 }
 
+/// Every argument `doctor` accepts, typed.
+///
+/// Typed rather than read through `args.get(...)`: the untyped form is what let a
+/// declared `scope` be discarded in silence (`d4b61746950b86b7`), and it is what
+/// exempted `fix`/`offset` from the `librarian.rs` param probe — an exemption whose
+/// own comment predicted this bug in writing.
+///
+/// `#[serde(default)]` on every field, and NO `deny_unknown_fields`: the librarian
+/// tool has one flat schema shared by 11 actions, so `doctor` legitimately receives
+/// sibling actions' params. Denying unknown fields here would refuse
+/// schema-conformant calls.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Args {
+    scope: Option<super::scope::Scope>,
+    fix: Option<String>,
+    confirm: bool,
+    root: Option<String>,
+    old_root: Option<String>,
+    new_root: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
 /// MCP entry point. Runs every invariant check and returns a structured
 /// report. Reads-only; safe to invoke against a live catalog.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let args: Args = serde_json::from_value(args).map_err(|e| {
+        RecoverableError::with_hint(
+            format!("doctor: bad args: {e}"),
+            "scope must be one of project|repo|umbrella|all; limit/offset are integers; \
+             see librarian(action=\"doctor\") in the input schema",
+        )
+    })?;
+
     // Opt-in mutation: prune catalog rows under a dead/renamed repo root.
     // Default (no `fix`) stays read-only.
-    if let Some(fix) = args.get("fix").and_then(Value::as_str) {
-        let confirm = args
-            .get("confirm")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+    if let Some(fix) = args.fix.as_deref() {
         // `old_root` is the self-documenting name the move-candidate hint
         // and validate_rehome_request's own error text both surface;
         // `root` is accepted as a fallback for back-compat and remains
         // the only name prune_missing/reseat_worktree callers use.
-        let old_root_arg = args
-            .get("old_root")
-            .and_then(Value::as_str)
-            .or_else(|| args.get("root").and_then(Value::as_str));
+        let old_root_arg = args.old_root.as_deref().or(args.root.as_deref());
         return run_fix(
             ctx,
             fix,
             old_root_arg,
-            args.get("new_root").and_then(Value::as_str),
-            confirm,
+            args.new_root.as_deref(),
+            args.confirm,
         )
         .await;
     }
+
+    // Require, not Literal: `doctor` is a search-shaped surface like `find`, so
+    // `all` without an umbrella is a request to widen with nothing to widen to.
+    // `context` uses Literal because reaching across every project is its point.
+    //
+    // The comment sits ABOVE the `let` rather than inside the argument list on
+    // purpose: `every_resolve_scope_call_names_project_as_its_default` looks for
+    // `Scope::Project` within 240 bytes of `resolve_scope(`, and three lines of
+    // comment between the two pushes it to 400 — reporting this correct call site
+    // as an offender. Measured 2026-09-09; see
+    // docs/issues/2026-09-09-a-fixed-byte-window-source-guard-reports-a-correct-call-site.md
+    let (effective_scope, scope_fallback) = super::scope::resolve_scope(
+        args.scope,
+        ctx.current_project.as_deref(),
+        super::scope::UmbrellaPolicy::Require,
+        super::scope::Scope::Project,
+    )?;
 
     // Managed roots are derived before taking the catalog lock — `managed_roots`
     // only reads `ctx`, and holding the lock across it would widen the critical
@@ -749,16 +791,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // in `scan_artifact_paths` for stability — without it `offset` would page
     // through a set that reshuffles between calls.
     const OUTSIDE_ROOTS_SAMPLE_DEFAULT: usize = 10;
-    let sample_limit = args
-        .get("limit")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(OUTSIDE_ROOTS_SAMPLE_DEFAULT);
-    let sample_offset = args
-        .get("offset")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(0);
+    let sample_limit = args.limit.unwrap_or(OUTSIDE_ROOTS_SAMPLE_DEFAULT);
+    let sample_offset = args.offset.unwrap_or(0);
 
     // Grouped BEFORE the truncation, so every row is accounted for even when
     // most are dropped. This is what keeps an alphabetically-ordered window
@@ -967,6 +1001,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "by_check": by_check,
         },
         "catalog_health": catalog_health,
+        "scope": super::scope::ScopeApplied {
+            scope: effective_scope,
+            abs_path: ctx.current_project.as_deref().map(|c| c.abs_path.clone()),
+            git_root: ctx.current_project.as_deref().map(|c| c.git_root.clone()),
+            umbrella: ctx.current_project.as_deref().and_then(|c| c.umbrella.clone()),
+        }
+        .to_json(),
+        "scope_fallback": scope_fallback,
     }))
 }
 
@@ -6288,6 +6330,60 @@ mod tests {
                 params![id, abs_path],
             )
             .unwrap();
+    }
+
+    /// `scope` was declared in the shared librarian schema with `"default": "project"`
+    /// and read by nothing (`d4b61746950b86b7`) — `scope="all"` returned a
+    /// byte-identical response buffer to `scope="project"` against a derived
+    /// expectation of ~805 rows against 169. These three pin the plumbing: a bad
+    /// value must be refused rather than swallowed, and the applied scope must be
+    /// readable in the response, without which a caller cannot tell a scoped result
+    /// from an unscoped one.
+    #[tokio::test]
+    async fn an_unknown_scope_value_is_refused_rather_than_ignored() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = ctx_rooted_at(cat, std::path::Path::new("/tmp/whatever"));
+        let err = call(&ctx, json!({ "scope": "galaxy" }))
+            .await
+            .expect_err("an unknown scope must be an error, not a silent default");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("scope"),
+            "the refusal must name the offending param; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_applied_scope_is_echoed_in_the_response() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = ctx_rooted_at(cat, std::path::Path::new("/tmp/whatever"));
+
+        let absent = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            absent["scope"]["applied"], "project",
+            "an omitted scope must resolve to project — the librarian's documented \
+             default on every listing surface"
+        );
+        assert_eq!(absent["scope_fallback"], json!(false));
+
+        let explicit = call(&ctx, json!({ "scope": "repo" })).await.unwrap();
+        assert_eq!(explicit["scope"]["applied"], "repo");
+    }
+
+    /// The no-active-project path. `resolve_scope` widens `project`/`repo` to `All`
+    /// and sets the fallback flag; a caller must be able to see that their narrow
+    /// request came back broad, or they will read a machine-wide report as their own
+    /// project's.
+    #[tokio::test]
+    async fn a_project_request_without_an_active_project_reports_its_fallback() {
+        let ctx = unscoped_ctx();
+        let v = call(&ctx, json!({ "scope": "project" })).await.unwrap();
+        assert_eq!(v["scope"]["applied"], "all");
+        assert_eq!(
+            v["scope_fallback"],
+            json!(true),
+            "a silently widened scope is the defect this flag exists to prevent"
+        );
     }
 
     #[tokio::test]
