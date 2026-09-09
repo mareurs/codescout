@@ -251,6 +251,15 @@ stops."* **That is false and was written by a session that had the text in front
 they are in: withheld / not withheld, UNCLEARED / cleared"*, then *"THEN ASK YOUR OPERATOR"*.
 Corrected on the pusher's own objection, which cost them rather than helped them — see below.
 
+**Provenance of the correction, recorded because the row otherwise implies the wrong thing.**
+Neither party's first position was line-sourced. The author asserted the step's absence from
+memory of a refusal it had read; the pusher objected that it exists, also from that refusal, having
+not opened the script — and said so. The `:304-315` citation is the **first line-level source
+either produced**, and the author produced it while withdrawing its own claim. So the sequence was
+**unverified assertion → unverified objection → verification by the party being corrected.** A
+reader would otherwise infer the objector checked the file and the author did not; neither is true.
+
+
 **The accurate claim, and it is mechanizable where the false one was not.** The step exists as
 **policy**. What does not exist is any **mechanism tying its outcome to the ack**:
 `CODESCOUT_PUSH_ACK` encodes *who* the authors are and cannot encode *what they said*, so

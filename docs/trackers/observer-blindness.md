@@ -77,6 +77,39 @@ correct*. Sharpening the instrument sharpens a right answer to the wrong questio
 axis* — check the referent, or re-read the premise, both of which are lookups rather than
 measurements. (`codescout-e8`, reaching this entry's law from the opposite direction.)
 
+**Second independent measurement, 2026-09-09 — published as a CONFIRMATION, not as a catch.**
+§ *Testing Discipline* requires that a re-derivation which confirms be published anyway, because
+absorbing it as a catch makes the population look self-correcting. So: **four instances, four
+sessions, one afternoon, every one committed by an author who held the relevant class in context
+at that moment.**
+
+| session | the instance | what they were doing at the time |
+|---|---|---|
+| `b80a27d4` | a pathspec commit captured a peer's staged ledger appends | filing that exact capture |
+| `26cb9b5b` | skipped both test lanes for a "docs-only" diff, reddening a markdown gate | arguing parser and classification discipline in the same commit |
+| `c86ebb51` | mis-described a guard's remedy text | writing a bug file about guards whose remedy text nobody tests |
+| `26cb9b5b` | collapsed a branch authorisation into a party's consent | quoting the three-state author question at someone else |
+
+**Its shape differs from the founding measurement and that is what makes it worth keeping.**
+2026-08-30 was four instances of **one** class — evidence that knowing *that* class prevents
+instances *of it*. This is four instances of **four different** classes, which tests the broader
+claim: the effect is not a property of one sticky defect shape but of the authoring position
+itself. Same conclusion, wider base, and neither run was designed.
+
+**The strongest single datapoint is the third row, and it is stated by its author rather than
+about them:** the false claim contradicted bytes already in that session's own context — an
+8 KB refusal it had quoted hours earlier — rather than resting on a file it had never opened. So
+the failure was not a missing lookup. It was a correct document, present and read, and a claim
+asserted past it while writing about that very failure mode.
+
+**And the corrections ran in both directions, which is the part a vigilance reading cannot
+explain.** Each of the four was caught by *the other* session, never by its author, and twice the
+catch cost the catcher: one withdrew a claim whose survival would have flattered their own
+prediction; one objected in a way that made their own error worse rather than better. That is
+§ position 2 — the reviewer who can see it is one who does **not share the author's context**,
+not a more careful one.
+
+
 The corollary tells you what to build instead: **a check that runs when nobody is
 worried.** Three shapes, in descending order of preference —
 
