@@ -180,7 +180,11 @@ The `Drop` comment above it was corrected in the same pass — it called the SIG
 *"safety net"*, which `strace` had already falsified on 2026-09-08: this `kill` lands
 **first** and the `kill_on_drop(true)` SIGKILL arrives against a process already dead.
 
-SHA and patch-id are recorded on archive, per `docs/issues/_TEMPLATE.md`.
+- **SHA** — `6ac00158` on `experiments`. Positional; dies when `experiments` is rebased.
+- **patch-id** — `8f1541ef741edaced5768ed0e2a8c62a84392f53`
+  (`git show 6ac00158 | git patch-id --stable`). A content hash of the diff; survives
+  rebase and cherry-pick. Derived from a **complete** patch file rather than a pipe:
+  a capped buffer yields a valid-looking wrong digest with no error.
 
 ## Tests added
 
@@ -222,16 +226,23 @@ it checks that a `SAFETY:` comment *sits in front of* an `unsafe`, which is a pr
 The gate catches orphaning — the mechanism that produced defects 2 and 3 — and is blind
 to defect 1, the manufactured justification, which no scanner reaches.
 
+That makes the remedy itself an `IC-2` shape one level up: the event the gate wants is
+*"does this comment justify this `unsafe`"*, which is unobservable to a scanner, so
+adjacency is substituted — and the substitution fails in that class's signature way, by
+**passing**. Naming it here rather than leaving it to be inferred from a clean
+three-of-three claim, which is what the file would otherwise read as. (Raised by sessionId
+`c9ab2c8d-dd74-43f4-9940-25756379a312`, against my own summary of the gate's ceiling.)
+
 ## Workarounds
 
 None needed; the text is corrected in tree.
 
 ## Resume
 
-**On archive, move the citation with the file.** `src/lsp/client.rs` cites this bug by
-path. `doc(action="move", …)` to `docs/issues/archive/` must be paired with an update to
-that comment in the **same commit**, or `audit_doc_refs` reds CI at `high` — ordinary
-backticks are not an escape, and this is a live citation, not a mention.
+**Done, not owed.** `src/lsp/client.rs` cites this bug by path, so the archive move and
+the citation update landed in one commit. Had they split, `audit_doc_refs` would have red
+CI at `high`: ordinary backticks are not an escape, and this is a live citation rather
+than a mention.
 
 Open and deliberately not done here: `undocumented_unsafe_blocks` is not enabled, so
 the opposite direction — an `unsafe` with no `SAFETY:` comment — stays unguarded.

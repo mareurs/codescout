@@ -1618,7 +1618,7 @@ impl Drop for LspClient {
             // so nothing here holds the pid open. Recycling it inside that window
             // would take ~4M intervening spawns, so this is sound in practice and
             // not by construction — see
-            // docs/issues/2026-09-09-a-safety-comment-outlived-both-its-unsafe-block-and-its-own-rationale.md
+            // docs/issues/archive/2026-09-09-a-safety-comment-outlived-both-its-unsafe-block-and-its-own-rationale.md
             let _ = crate::platform::terminate_process(*pid);
         }
     }
