@@ -200,10 +200,33 @@ fn verdict(content: &str, valid: &BTreeSet<String>) -> Verdict {
     }
 }
 
+/// Deduplicated path lines from `git ls-files` stdout.
+///
+/// `git ls-files` reports index ENTRIES, not files: while a merge holds an unresolved conflict the
+/// unmerged path is listed once per stage (1/2/3), so one bug file arrives three times. Both
+/// populations below document themselves as FILES, and [`actual_counts`] turns one of them into a
+/// per-class tally — so a single conflicted file under `docs/issues/` trebles a class's count and
+/// reds the counts gate with a number that is unreproducible once the merge resolves.
+///
+/// Sorted, so callers get a deterministic order rather than the index's. The sibling site in
+/// `tests/result_caps.rs` (`tracked_rs_paths`) carries this same guard for its own population —
+/// per-site coverage is required because a kill at one call site says nothing about the others.
+fn dedup_ls_files(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 /// Tracked bug files directly under `docs/issues/` — never `archive/`, never untracked.
 ///
 /// Depth is filtered here rather than in the pathspec: `git ls-files 'docs/issues/*.md'`
 /// matches across `/` and returns the whole archive (529 paths, measured 2026-08-31).
+///
+/// Paths arrive through [`dedup_ls_files`] because `git ls-files` lists an unmerged path once per
+/// index stage; that helper says what a duplicate costs each caller.
 fn tracked_open_bug_files() -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-files", "docs/issues"])
@@ -216,11 +239,13 @@ fn tracked_open_bug_files() -> Vec<String> {
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|p| p.strip_prefix("docs/issues/"))
-        .filter(|rest| !rest.contains('/') && rest.ends_with(".md") && *rest != "_TEMPLATE.md")
-        .map(|rest| format!("docs/issues/{rest}"))
+    dedup_ls_files(&String::from_utf8_lossy(&out.stdout))
+        .into_iter()
+        .filter(|p| {
+            p.strip_prefix("docs/issues/").is_some_and(|rest| {
+                !rest.contains('/') && rest.ends_with(".md") && rest != "_TEMPLATE.md"
+            })
+        })
         .collect()
 }
 
@@ -376,6 +401,9 @@ fn the_scan_actually_reads_files() {
 ///
 /// Deliberately wider than [`tracked_open_bug_files`]; see the module header for why the two
 /// populations must stay separate.
+///
+/// Paths arrive through [`dedup_ls_files`]: this is the population [`actual_counts`] counts, so a
+/// duplicated index entry here is a wrong number rather than a repeated line.
 fn tracked_all_bug_files() -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-files", "docs/issues"])
@@ -388,11 +416,45 @@ fn tracked_all_bug_files() -> Vec<String> {
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
+    dedup_ls_files(&String::from_utf8_lossy(&out.stdout))
+        .into_iter()
         .filter(|p| p.ends_with(".md") && !p.ends_with("_TEMPLATE.md"))
-        .map(str::to_owned)
         .collect()
+}
+
+/// One file at three index stages is one file.
+///
+/// The fixture is the shape `git ls-files docs/issues` returns while a merge holds one unresolved
+/// conflict — the state this repo's own 2026-09-09 merge rounds were in when the sibling defect
+/// in `tests/result_caps.rs` was found.
+#[test]
+fn ls_files_index_stages_collapse_to_one_path_per_file() {
+    // The THREE repetitions are load-bearing. With a single copy this fixture passes against a
+    // helper that deduplicates nothing, and the test stops discriminating without failing.
+    let stdout = "docs/issues/aa-open.md\n\
+                  docs/issues/conflicted.md\n\
+                  docs/issues/conflicted.md\n\
+                  docs/issues/conflicted.md\n\
+                  docs/issues/archive/old.md\n";
+
+    assert_eq!(
+        dedup_ls_files(stdout),
+        vec![
+            "docs/issues/aa-open.md".to_owned(),
+            "docs/issues/archive/old.md".to_owned(),
+            "docs/issues/conflicted.md".to_owned(),
+        ],
+        "three index stages of one path must collapse to one file, in sorted order"
+    );
+
+    // The number is the point, not the list: `actual_counts` consumes this population as a
+    // per-class tally, so five entries must answer three.
+    assert_eq!(
+        dedup_ls_files(stdout).len(),
+        3,
+        "five index entries are three files; a per-class count over the un-deduplicated form \
+         would report a class 3x its real size for as long as the conflict is unresolved"
+    );
 }
 
 /// `slug -> n`, parsed from the ledger's Index table.
