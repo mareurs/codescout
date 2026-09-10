@@ -285,15 +285,16 @@ impl DoctorScope {
         }
         // Task 7 (relevance exemption): a row otherwise scoped OUT is admitted anyway
         // — WITHOUT tallying into `scoped_out` — when `id` names an artifact a local
-        // (in-scope) artifact actively cites. Gated on `check`, not merely on
-        // membership, because `cited_prefix_with_no_definer` (the one call site Tasks
-        // 3-5 gave a non-uniform `id`/`abs_path` pair) passes a namespace PREFIX as
-        // `id`, never an artifact id — looking that up in `cited_from_here` would be a
-        // category error, not merely a guaranteed miss, and `cited_from_here` holding a
-        // real 16-hex id that happens to match a prefix string is not a risk worth
+        // (in-scope) artifact actively cites AND `abs_path` resolves under a declared
+        // umbrella member. Gated on `check`, not merely on membership, because
+        // `cited_prefix_with_no_definer` (the one call site Tasks 3-5 gave a
+        // non-uniform `id`/`abs_path` pair) passes a namespace PREFIX as `id`, never
+        // an artifact id — looking that up in `cited_from_here` would be a category
+        // error, not merely a guaranteed miss, and `cited_from_here` holding a real
+        // 16-hex id that happens to match a prefix string is not a risk worth
         // trusting to string mismatch alone. See that call site's own doc comment
-        // (`scan_cited_prefix_with_no_definer`, `doctor.rs`) for why its `admit` return
-        // is already dead-by-construction; this branch must not resurrect it.
+        // (`scan_cited_prefix_with_no_definer`, `doctor.rs`) for why its `admit`
+        // return is already dead-by-construction; this branch must not resurrect it.
         //
         // 2026-09-09 review round 1, Minor 8 (promoted): `check`'s gate is an explicit
         // ALLOW-list (`Check::admits_relevance_exemption`), not a
@@ -304,8 +305,25 @@ impl DoctorScope {
         // form means a brand-new check (Tasks 8-9 are about to add several) must be
         // deliberately added to `admits_relevance_exemption`'s `matches!` arms before
         // it can be exempted — silence now means excluded, not included.
+        //
+        // 2026-09-09 whole-branch review round 2, C2 (Critical): this arm used to read
+        // `self.cited_from_here.contains(id)` alone — "cited from here," with no
+        // umbrella bound. That let a cited row from ANY unrelated, non-umbrella repo
+        // through, breaching the user's own requirement ("at most show problems in
+        // connections to other projects in an UMBRELLA, and only if it affects the
+        // current project") in exactly the arm `known_elsewhere_row_is_relevant`
+        // exists to enforce for the *other* call path (`scan_artifact_paths`'s
+        // `known_elsewhere` branch, `doctor.rs`). Reusing that same two-part predicate
+        // here — rather than writing a second, divergent umbrella check — means both
+        // arms of `scan_artifact_paths`'s one `if`/`else if` now share one ceiling,
+        // which is the whole point of `DoctorScope` existing. Confirmed by mutation:
+        // reverting this arm to `self.cited_from_here.contains(id)` alone reds exactly
+        // one test, `admit_refuses_a_cited_foreign_id_outside_any_umbrella` — the other
+        // three `admit_exempts_*`/`admit_refuses_cited_prefix_*` tests stay green under
+        // either form, because they only prove the exemption still fires for an actual
+        // umbrella member, not that it is gated on one.
         if super::Check::from_wire(check).is_some_and(super::Check::admits_relevance_exemption)
-            && self.cited_from_here.contains(id)
+            && self.known_elsewhere_row_is_relevant(id, Path::new(abs_path))
         {
             return true;
         }
@@ -524,6 +542,41 @@ mod tests {
         });
         TestToolContextBuilder::new(cat)
             .with_current_project(cp)
+            .build()
+    }
+
+    /// A ctx whose active project is rooted at `root`, declares umbrella
+    /// `umbrella_name`, and whose umbrella's member list is `[root, member]` —
+    /// the shape `known_elsewhere_row_is_relevant`'s second half needs before it
+    /// will admit a foreign row at all.
+    ///
+    /// 2026-09-09 whole-branch review round 2, C2 (Critical): the three
+    /// `admit_exempts_*`/`admit_refuses_cited_prefix_*` tests below originally built
+    /// their ctx from `ctx_at` alone — `umbrella: None`, no `workspace.umbrellas` —
+    /// so they exercised only the "cited from here" half of `admit`'s exemption and
+    /// never the umbrella-membership half, which is exactly the half `admit` itself
+    /// was missing (`self.cited_from_here.contains(id)` with no umbrella bound). With
+    /// no umbrella configured, `umbrella_roots` is empty and
+    /// `known_elsewhere_row_is_relevant` can never return true regardless of what
+    /// `admit` checks — so those tests could not have caught the breach even in
+    /// principle; only a fixture that HAS a real umbrella member can distinguish "no
+    /// bound" from "bound satisfied." This helper is what makes that fixture
+    /// possible; `admit_refuses_a_cited_foreign_id_outside_any_umbrella` (added in the
+    /// same round) is the fixture that stays on `ctx_at` to prove the negative.
+    fn ctx_at_umbrella(root: &Path, umbrella_name: &str, member: &Path) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+        let cp = Arc::new(CurrentProject {
+            abs_path: root.to_path_buf(),
+            git_root: root.to_path_buf(),
+            main_root: None,
+            umbrella: Some(umbrella_name.to_string()),
+        });
+        TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .with_umbrellas(vec![Umbrella {
+                name: umbrella_name.to_string(),
+                members: vec![root.to_path_buf(), member.to_path_buf()],
+            }])
             .build()
     }
 
@@ -814,6 +867,16 @@ mod tests {
     /// targeted exemption would satisfy the first half and fail the second. A final
     /// control row (cited from nowhere) confirms the exemption is targeted, not a
     /// blanket admit of every foreign row.
+    ///
+    /// 2026-09-09 whole-branch review round 2, C2: `foreign_root` is now seeded as an
+    /// UMBRELLA MEMBER via `ctx_at_umbrella`, not a bare `ctx_at`. Before this round,
+    /// this fixture had no umbrella at all, so it asserted only "cited from here" and
+    /// could not have caught `admit` missing the umbrella bound — an empty
+    /// `umbrella_roots` makes `known_elsewhere_row_is_relevant` always false, which
+    /// would have reported this test as a false failure under the CORRECT
+    /// implementation just as easily as it silently passed under the broken one. This
+    /// is the case the requirement actually describes: a foreign row IS an umbrella
+    /// member AND IS cited from here.
     #[test]
     fn admit_exempts_a_foreign_id_cited_from_either_cites_table() {
         let tmp = tempfile::tempdir().unwrap();
@@ -821,7 +884,7 @@ mod tests {
         let foreign_root = tmp.path().join("foreign");
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
-        let ctx = ctx_at(&root);
+        let ctx = ctx_at_umbrella(&root, "test-umbrella", &foreign_root);
 
         {
             let cat = ctx.catalog.lock();
@@ -937,7 +1000,7 @@ mod tests {
                 &foreign_root.join("docs/not-cited.md").to_string_lossy(),
             ),
             "a foreign id cited from nowhere must still be refused — the exemption is \
-             targeted, not a blanket admit of every foreign row"
+                 targeted, not a blanket admit of every foreign row"
         );
         assert_eq!(
             s.scoped_out()
@@ -965,6 +1028,11 @@ mod tests {
     /// `Some(_) => None` left the rest of this file's suite green and turned only
     /// this test red (reported alongside this fix, not asserted here — a self-test
     /// of a mutation cannot outlive the mutation it names).
+    ///
+    /// 2026-09-09 whole-branch review round 2, C2: `foreign_root` is now seeded as
+    /// an UMBRELLA MEMBER via `ctx_at_umbrella` — see that fixture's doc comment for
+    /// why the prior `ctx_at`-only form could not have caught `admit` missing the
+    /// umbrella bound.
     #[test]
     fn admit_exempts_a_foreign_id_cited_via_the_slug_colon_local_dst_ref_form() {
         let tmp = tempfile::tempdir().unwrap();
@@ -972,7 +1040,7 @@ mod tests {
         let foreign_root = tmp.path().join("foreign");
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
-        let ctx = ctx_at(&root);
+        let ctx = ctx_at_umbrella(&root, "test-umbrella", &foreign_root);
 
         {
             let cat = ctx.catalog.lock();
@@ -1072,6 +1140,12 @@ mod tests {
     /// and once under an allow-listed check (must be admitted) — so the refusal is
     /// pinned to the check gate specifically, not to a missing `cited_from_here`
     /// membership the first assertion alone could not rule out.
+    ///
+    /// 2026-09-09 whole-branch review round 2, C2: `foreign_root` is now seeded as an
+    /// UMBRELLA MEMBER via `ctx_at_umbrella` — see that fixture's doc comment for why
+    /// the prior `ctx_at`-only form could not have caught `admit` missing the umbrella
+    /// bound. The second `admit()` call below (under an allow-listed check) now
+    /// exercises exactly the fixed path: cited from here AND an umbrella member.
     #[test]
     fn admit_refuses_cited_prefix_with_no_definer_even_when_its_id_is_cited_from_here() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1079,7 +1153,7 @@ mod tests {
         let foreign_root = tmp.path().join("foreign");
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
-        let ctx = ctx_at(&root);
+        let ctx = ctx_at_umbrella(&root, "test-umbrella", &foreign_root);
 
         {
             let cat = ctx.catalog.lock();
@@ -1128,7 +1202,7 @@ mod tests {
                 &foreign_root.join("docs/foreign-cited.md").to_string_lossy(),
             ),
             "cited_prefix_with_no_definer must never receive the relevance exemption, \
-             even when its `id` string happens to match a real cited_from_here id"
+                 even when its `id` string happens to match a real cited_from_here id"
         );
         assert_eq!(
             s.scoped_out()
@@ -1149,6 +1223,88 @@ mod tests {
                 &foreign_root.join("docs/foreign-cited.md").to_string_lossy(),
             ),
             "the same cited-from-here id must be admitted under an allow-listed check"
+        );
+    }
+    /// 2026-09-09 whole-branch review round 2, C2 (Critical): the negative case the
+    /// three tests above never covered. `admit`'s relevance exemption used to read
+    /// `self.cited_from_here.contains(id)` alone — "cited from here," with no umbrella
+    /// bound — so a foreign row cited from a local artifact was exempted regardless of
+    /// which repo it lived in, breaching the user's own requirement ("at most show
+    /// problems in connections to other projects in an umbrella, and only if it
+    /// affects the current project"). This test is the one that would have caught
+    /// that breach directly: `foreign_root` is cited from here (same fixture shape as
+    /// the tests above) but is deliberately built with plain `ctx_at` — no umbrella,
+    /// no `workspace.umbrellas` entry — so `known_elsewhere_row_is_relevant`'s second
+    /// half can never be satisfied. `admit` must still refuse and tally the row.
+    #[test]
+    fn admit_refuses_a_cited_foreign_id_outside_any_umbrella() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        let foreign_root = tmp.path().join("foreign");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(foreign_root.join("docs")).unwrap();
+        let ctx = ctx_at(&root);
+
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("local-citer")
+                    .with_abs_path(root.join("docs/local-citer.md"))
+                    .build(),
+            )
+            .unwrap();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("foreign-cited")
+                    .with_abs_path(foreign_root.join("docs/foreign-cited.md"))
+                    .build(),
+            )
+            .unwrap();
+            links::insert(
+                &cat,
+                &links::LinkRow {
+                    src_id: "local-citer".to_string(),
+                    dst_id: "foreign-cited".to_string(),
+                    rel: CITES_REL.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+        }
+
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
+        assert_eq!(
+            s.cross_root_cites_edges(),
+            Some(1),
+            "sanity check on the fixture: exactly one crossing edge, same as the \
+                 umbrella-seeded tests above — only the umbrella membership differs"
+        );
+        assert!(
+            s.umbrella_roots.is_empty(),
+            "sanity check: this ctx declares no umbrella at all"
+        );
+
+        // Cited from here, but NOT an umbrella member: must be refused, even under an
+        // allow-listed check, even though `cited_from_here.contains(id)` alone is true.
+        assert!(
+            !s.admit(
+                "abs_path_outside_managed_roots",
+                "foreign-cited",
+                &foreign_root.join("docs/foreign-cited.md").to_string_lossy(),
+            ),
+            "a cited-from-here id outside any umbrella must not receive the relevance \
+                 exemption — cited_from_here alone is not sufficient, admit() must also \
+                 require umbrella membership"
+        );
+        assert_eq!(
+            s.scoped_out()
+                .values()
+                .flat_map(|m| m.values())
+                .sum::<usize>(),
+            1,
+            "the refused row must tally into scoped_out like any other out-of-scope row"
         );
     }
 }

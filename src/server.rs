@@ -3609,7 +3609,17 @@ mod tests {
     /// and cost nothing here — they are runtime messages, not schema, and they reach the
     /// caller who is already failing at exactly this.
     /// docs/issues/archive/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_296;
+    ///
+    /// **57_296 → 57_303 (2026-09-10, +7): `doctor` named on the shared `scope` clause.**
+    /// `doctor`'s `scope` argument was accepted and consumed by the tool, but the shared
+    /// `scope` clause on `librarian`'s schema never named `doctor` among the actions it
+    /// covers — so a caller reading the schema alone had no signal that the argument does
+    /// anything for this action (2026-09-09 whole-branch review round 2, I4). Gross
+    /// addition was 7 (`/doctor` appended to the action list); nothing was paid on the
+    /// spot — the clause was already at its operative-facts minimum, and trimming a
+    /// neighbouring action's coverage to fund this one is the thing this log exists to
+    /// forbid. docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_303;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

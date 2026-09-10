@@ -246,11 +246,30 @@ impl Check {
     /// polarity is the one where a NEW check must opt in here deliberately, not the
     /// one where it opts in by omission.
     ///
-    /// `CitedPrefixWithNoDefiner` is the one exclusion, and it stays excluded for the
+    /// `CitedPrefixWithNoDefiner` is one exclusion, and it stays excluded for the
     /// reason `admit`'s own doc comment gives: it is a per-PREFIX check with no
     /// owning row, so its `id` is a namespace prefix, never an artifact id —
     /// looking that up in `cited_from_here` (which holds artifact ids) would be a
     /// category error, not merely a guaranteed miss.
+    ///
+    /// **`WorktreeScopedRow` is the second exclusion, added 2026-09-09 whole-branch
+    /// review round 2, C1 (Critical) — read-membership and mutation-authority are
+    /// different questions, and this list only answers the first one.**
+    /// `Check::WorktreeScopedRow` shares its `admit` gate with `fix=reseat_worktree`
+    /// (Task 6): the SAME exemption that lets a cited, umbrella-member foreign row
+    /// surface in the read-only report also let `reseat_worktree` perform a
+    /// `graft::graft_rows` delete+reseed on that row in a repo the caller never
+    /// named — reproduced with default scope, no `umbrella` configured, and no
+    /// `confirm` passed at all, because `run_fix` does not currently gate on
+    /// `confirm` (a separate, pre-existing bug, tracked independently — not fixed
+    /// here). **The ruling this list must honor going forward: relevance SURFACES a
+    /// finding; it must never AUTHORIZE a mutation.** A future `Check` variant whose
+    /// `fix=` mode writes — not merely reports — must be excluded here even if its
+    /// `id`/`abs_path` pair is a perfectly genuine artifact reference, because
+    /// genuineness was never the risk; the write was. See
+    /// `reseat_worktree_does_not_reseat_a_cited_foreign_worktree_row` for the
+    /// regression test — confirmed by mutation: re-adding `WorktreeScopedRow` here
+    /// reds it (the cited foreign row gets reseated).
     ///
     /// Every other declared check is assumed to pass its own finding's artifact id
     /// as `id` — that claim is now known to be **unverified** for 10 of the 37
@@ -303,7 +322,6 @@ impl Check {
                 | Check::TerminalStatusWithoutFixAnchor
                 | Check::UnterminatedFence
                 | Check::ValidityUnparseable
-                | Check::WorktreeScopedRow
         )
     }
 }
@@ -472,6 +490,27 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::ClaimHeldByDeadSession,
     Check::ClaimUnresolvableHere,
     Check::WorktreeScopedRow,
+    // 2026-09-09 whole-branch review round 2, C3 (Critical): these eight were the
+    // unconditionally-pushed checks the review named — five from `scan_artifact_paths`
+    // (dynamic `scope.admit(&v.check, ...)` call site, so `row_checks_scoped_by_project_
+    // covers_every_admitting_check`'s literal-string regex cannot see them; they are
+    // added here by hand, same as the two pre-existing `frontmatter_id_*` names that
+    // share that same dynamic site) plus `backslash_in_git_root`, `premature_archive_
+    // citation` and `sidecar_shape_drift` (each its own literal call site, so that test
+    // does catch a future regression on those three specifically). Omitting any of the
+    // eight from this array would not fail to compile or fail any prior test — the row
+    // would scope out silently and vanish from both the fold loop and the hint legend,
+    // exactly the false negative this array exists to prevent. See
+    // `every_declared_check_is_scope_gated_or_a_named_exemption` for the broader,
+    // `Check::ALL`-keyed guard that covers these five dynamic-site names too.
+    Check::AbsPathMustBeAbsolute,
+    Check::BackslashInAbsPath,
+    Check::AdsColonInAbsPath,
+    Check::DotdotSegmentInAbsPath,
+    Check::MissingFile,
+    Check::BackslashInGitRoot,
+    Check::PrematureArchiveCitation,
+    Check::SidecarShapeDrift,
 ];
 
 /// MCP entry point. Runs every invariant check and returns a structured
@@ -560,7 +599,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // 3-5's ~13 further `admit()` call sites among the scans below — any one
     // introduced between this line and the old fold site would have tallied into
     // `scoped_out` but reached no published map.)
-    all_violations.extend(scan_commits_git_root(&cat.conn)?);
+    all_violations.extend(scan_commits_git_root(&cat.conn, &mut doctor_scope)?);
     all_violations.extend(scan_worktree_scoped(&mut doctor_scope, &cat.conn)?);
     // The CONTENT half of the file/catalog pair, and the direction that had no instrument
     // until 2026-09-07. Its id sibling runs inside `scan_artifact_paths`' row loop above;
@@ -589,7 +628,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // The one check here that needs no threshold: a citation naming an archive path that
     // holds nothing, for a bug still sitting un-archived, is wrong in every world. See
     // `scan_premature_archive_citation`.
-    all_violations.extend(scan_premature_archive_citation(&cat.conn)?);
+    all_violations.extend(scan_premature_archive_citation(
+        &cat.conn,
+        &mut doctor_scope,
+    )?);
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&mut doctor_scope, &cat.conn)?);
@@ -618,7 +660,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // The inverse population of the check above: artifacts that DO have a row, whose
     // committed sidecar may nonetheless disagree with it. Reports only — drift has a
     // direction this cannot determine, and guessing it would overwrite a pulled shape.
-    all_violations.extend(scan_sidecar_shape_drift(&cat.conn)?);
+    all_violations.extend(scan_sidecar_shape_drift(&cat.conn, &mut doctor_scope)?);
     // Per-entry cross-file citation exposure, computed once and shared by every check
     // in the validity-decay family (Tasks 5-7) so each prices its worklist against the
     // same population rather than recomputing it. Stays GLOBAL/unscoped — Ruling 17 —
@@ -1909,8 +1951,19 @@ async fn run_fix(
 /// one shared `admit()` gate — so this function can only reseat a row the
 /// report would also have shown. The response's `"scope"` /
 /// `"scope_fallback"` / `"scoped_out"` fields mirror the report path's own,
-/// so an operator authorising `confirm=true` can tell which root it
-/// applied to and what it excluded before it ran.
+/// so an operator can tell which root it applied to and what it excluded
+/// after the fact.
+///
+/// **`confirm` is NOT read here — this fix is NOT dry-run gated, unlike
+/// `prune_missing` and `repair_frontmatter_id`.** `run_fix`'s `"reseat_worktree"`
+/// match arm calls straight into this function without inspecting `confirm` at
+/// all; every no-collision row this scope admits is reseated on the SAME call
+/// that reported it. This is a separate, pre-existing bug (2026-09-09
+/// whole-branch review round 2, Critical 1) — tracked independently, not fixed
+/// by this comment. This comment previously claimed the opposite ("an operator
+/// authorising `confirm=true`"), which was false: there was never a call to
+/// authorise. Read `docs/issues/` for the open bug file before assuming a
+/// `confirm=false` (or omitted) call here is safe to run.
 fn reseat_worktree(
     ctx: &ToolContext,
     scope: &mut scope::DoctorScope,
@@ -2225,20 +2278,38 @@ fn scan_artifact_paths(
     for (id, abs_path) in &rows {
         let not_absolute = check_abs_path_must_be_absolute(id, abs_path);
         let is_absolute = not_absolute.is_none();
+        // 2026-09-09 whole-branch review round 2, C3 (Critical): the five checks
+        // below used to push unconditionally, with no `scope.admit` call at all —
+        // so every one of them reported rows from EVERY repo the catalog has ever
+        // indexed regardless of `scope`, contradicting `abs_path_outside_managed_
+        // roots`'s own correct refusal of the very same rows a few lines down.
+        // Confirmed at `scope="project"`: four of five reported findings named a
+        // path belonging to another repo. Each is now routed through the same
+        // `scope.admit` gate every other row-grain check in this file uses.
         if let Some(v) = not_absolute {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         if let Some(v) = check_backslash(id, abs_path, "backslash_in_abs_path") {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         if let Some(v) = check_ads_colon(id, abs_path) {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         if let Some(v) = check_dotdot_segment(id, abs_path) {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         if let Some(v) = check_missing_file(id, abs_path) {
-            violations.push(v);
+            if scope.admit(&v.check, id, abs_path) {
+                violations.push(v);
+            }
         }
         // Reads the file, so it runs after the cheap string checks. A missing or
         // unreadable file yields None here — `check_missing_file` above already
@@ -2563,7 +2634,21 @@ fn scan_declared_project_roots(ctx: &ToolContext) -> (Vec<Violation>, Value) {
     (out, health)
 }
 
-fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+/// 2026-09-09 whole-branch review round 2, C3 (Critical): this scan used to take
+/// no `DoctorScope` parameter at all and pushed every firing row
+/// unconditionally — so a project-scoped report named `commits.git_root`
+/// drift from ANY repo the catalog has ever indexed, not just the active
+/// project's. Now routed through the same `scope.admit` gate every other
+/// row-grain check in this file uses. `id` is passed as `""`: a
+/// `commits.git_root` row has no owning artifact, so there is nothing to look
+/// up in `cited_from_here` even if this check were ever added to
+/// `admits_relevance_exemption`'s allow-list (it is not, for the same reason
+/// `cited_prefix_with_no_definer` is not: a bare root string is not an
+/// artifact id).
+fn scan_commits_git_root(
+    conn: &rusqlite::Connection,
+    scope: &mut scope::DoctorScope,
+) -> Result<Vec<Violation>> {
     // `commits.git_root` carries normalized paths (since #66). A backslash
     // here is pre-migration drift, same shape as the artifact-side check
     // but without an artifact_id anchor.
@@ -2575,6 +2660,9 @@ fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> 
     let mut violations = Vec::new();
     for root in &roots {
         if let Some(pos) = root.find('\\') {
+            if !scope.admit("backslash_in_git_root", "", root) {
+                continue;
+            }
             violations.push(Violation::new(
                 "backslash_in_git_root",
                 None,
@@ -4747,7 +4835,10 @@ fn cited_archive_basenames(text: &str) -> std::collections::BTreeSet<String> {
 /// A citer under any `archive/` directory is exempt, matching `apply_drops`' `archive_drop`:
 /// a retired document citing a path that was correct when written is a record, not drift,
 /// and rewriting it would falsify the record to satisfy a linter.
-fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_premature_archive_citation(
+    conn: &rusqlite::Connection,
+    scope: &mut scope::DoctorScope,
+) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
     let paths: Vec<String> = stmt
         .query_map([], |r| r.get(0))?
@@ -4787,18 +4878,35 @@ fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Vi
             if !live.contains(name.as_str()) {
                 continue;
             }
+            // 2026-09-09 whole-branch review round 2, C3 (Critical): this whole-function scan
+            // used to gate at the top of the OUTER loop, before reading the file or checking
+            // whether it cited anything premature — so every catalogued row called `admit()`,
+            // and a foreign row that never cites an archive path still tallied into
+            // `scoped_out` as though it were a real, suppressed finding. Gated here instead,
+            // immediately before the push, so `admit()` fires only for a path that has already
+            // been confirmed to carry an actual premature citation. (Round-2 fix: the earlier
+            // up-front gate inflated `row_checks_scoped_by_project` for rows with no citation
+            // at all — see `worktree_scoped_row_now_scopes_with_every_other_check`, which
+            // caught it firing for a plain `# plain\n` worktree row with no archive citation.)
+            // `id` is passed as `""` — the query above never selects an artifact id, and this
+            // check is deliberately NOT on `admits_relevance_exemption`'s allow-list (same
+            // reasoning as `backslash_in_git_root`), so the relevance-exemption branch never
+            // fires and the id is inert; only `scope.contains(abs_path)` gates this check.
+            if !scope.admit("premature_archive_citation", "", path) {
+                continue;
+            }
             out.push(Violation::new(
                 "premature_archive_citation",
                 None,
                 path.clone(),
                 format!(
                     "cites `docs/issues/archive/{name}`, which holds no artifact, while \
-                     `docs/issues/{name}` does — the bug is still open and the citation names \
-                     the path the archive flow *would* create. The archive sweep is triggered \
-                     BY an archive move, so a citation written before one schedules no repair: \
-                     no event fires and no procedure owns the fix. Either repoint the citation \
-                     to `docs/issues/{name}`, or complete the archive via \
-                     `doc(action=\"move\")` and re-point every citation in the same commit."
+                         `docs/issues/{name}` does — the bug is still open and the citation names \
+                         the path the archive flow *would* create. The archive sweep is triggered \
+                         BY an archive move, so a citation written before one schedules no repair: \
+                         no event fires and no procedure owns the fix. Either repoint the citation \
+                         to `docs/issues/{name}`, or complete the archive via \
+                         `doc(action=\"move\")` and re-point every citation in the same commit."
                 ),
             ));
         }
@@ -5537,16 +5645,19 @@ fn scan_augmentation_declared_but_absent(
 /// because **nothing else can see it**: `reindex` skips the artifact entirely once a row is
 /// present, so a corrupt committed shape would otherwise sit unread until the machine that
 /// holds the row loses it — which is the one moment it is needed and the one moment it fails.
-fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_sidecar_shape_drift(
+    conn: &rusqlite::Connection,
+    scope: &mut scope::DoctorScope,
+) -> Result<Vec<Violation>> {
     use crate::librarian::augmentation_sidecar as sidecar;
 
     // The inverse JOIN of the sibling check: only AUGMENTED artifacts can drift, so an
     // unaugmented one is never opened. Ordered by abs_path so two runs can be diffed.
     let mut stmt = conn.prepare(
         "SELECT a.id, a.abs_path FROM artifact a \
-         JOIN artifact_augmentation g ON g.artifact_id = a.id \
-         WHERE a.missing_since IS NULL \
-         ORDER BY a.abs_path",
+             JOIN artifact_augmentation g ON g.artifact_id = a.id \
+             WHERE a.missing_since IS NULL \
+             ORDER BY a.abs_path",
     )?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -5554,6 +5665,20 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
 
     let mut out = Vec::new();
     for (id, abs_path) in &rows {
+        // 2026-09-09 whole-branch review round 2, C3 (Critical): this whole-function scan
+        // took no `DoctorScope` and pushed both findings below unconditionally, so a foreign
+        // repo's own sidecar drift — visible only because it shares this catalog — surfaced
+        // in every scope. `admit()` is called at EACH of the two push sites below, on the
+        // row's real id, rather than once at the top of the loop — a row that turns out to
+        // have no declared sidecar, an absent one, or no drift never calls `admit()` at all,
+        // so it never inflates `scoped_out` with a tally for a violation that was never going
+        // to fire. (Round-2 fix: the up-front gate this comment used to describe called
+        // `admit()` for every augmented row regardless of outcome, so a foreign row with no
+        // drift still tallied into `row_checks_scoped_by_project` under
+        // `sidecar_shape_drift` — see `worktree_scoped_row_now_scopes_with_every_other_check`,
+        // which caught it.) Both findings still share one check name in the `admit()` call —
+        // `sidecar_shape_drift` — because both are about the same (id, abs_path) pair and
+        // neither is on `admits_relevance_exemption`'s allow-list.
         let Ok(content) = std::fs::read_to_string(abs_path) else {
             continue;
         };
@@ -5582,17 +5707,20 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
         let committed = match sidecar::read(&path) {
             Ok(s) => s,
             Err(e) => {
+                if !scope.admit("sidecar_shape_drift", id, abs_path) {
+                    continue;
+                }
                 out.push(Violation::new(
                     "sidecar_unparseable",
                     Some(id.clone()),
                     abs_path.clone(),
                     format!(
                         "`{rel}` is declared and present but does not parse: {e:#}. Nothing else \
-                         reports this — `reindex` skips an artifact that already has a row, so a \
-                         corrupt committed shape stays unread until the machine holding the row \
-                         loses it, which is the one moment it is needed. Repair the YAML by hand, \
-                         or delete it and re-run librarian(action=\"doctor\", \
-                         fix=\"export_augmentations\") on a machine whose row is correct."
+                             reports this — `reindex` skips an artifact that already has a row, so a \
+                             corrupt committed shape stays unread until the machine holding the row \
+                             loses it, which is the one moment it is needed. Repair the YAML by hand, \
+                             or delete it and re-run librarian(action=\"doctor\", \
+                             fix=\"export_augmentations\") on a machine whose row is correct."
                     ),
                 ));
                 continue;
@@ -5606,6 +5734,9 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
         if fields.is_empty() {
             continue;
         }
+        if !scope.admit("sidecar_shape_drift", id, abs_path) {
+            continue;
+        }
 
         out.push(Violation::new(
             "sidecar_shape_drift",
@@ -5613,20 +5744,20 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
             abs_path.clone(),
             format!(
                 "the committed sidecar `{rel}` and this catalog's augmentation disagree on: {}. \
-                 One of them is stale and THIS CHECK CANNOT TELL WHICH — mtime does not \
-                 discriminate, because a git checkout stamps the file with checkout time \
-                 whatever its shape's age. Read the difference before acting. If your catalog is \
-                 right (you changed the shape here and it has not been published), DELETE the \
-                 sidecar and then re-run librarian(action=\"doctor\", \
-                 fix=\"export_augmentations\") — that fix CREATES sidecars and never refreshes \
-                 them, so it skips any artifact whose sidecar already exists, which is every \
-                 finding this check can emit. Without the delete it reports exported: 0, exits \
-                 successfully, and repairs nothing. If the SIDECAR is \
-                 right (you pulled someone else's shape change), do NOT export — that would \
-                 overwrite their shape with your stale row; apply the committed values with \
-                 doc(action=\"augment\") instead, which also rewrites the file and so leaves \
-                 the two agreeing. Until this is resolved, a fresh clone restores whatever the \
-                 sidecar says and reports success.",
+                     One of them is stale and THIS CHECK CANNOT TELL WHICH — mtime does not \
+                     discriminate, because a git checkout stamps the file with checkout time \
+                     whatever its shape's age. Read the difference before acting. If your catalog is \
+                     right (you changed the shape here and it has not been published), DELETE the \
+                     sidecar and then re-run librarian(action=\"doctor\", \
+                     fix=\"export_augmentations\") — that fix CREATES sidecars and never refreshes \
+                     them, so it skips any artifact whose sidecar already exists, which is every \
+                     finding this check can emit. Without the delete it reports exported: 0, exits \
+                     successfully, and repairs nothing. If the SIDECAR is \
+                     right (you pulled someone else's shape change), do NOT export — that would \
+                     overwrite their shape with your stale row; apply the committed values with \
+                     doc(action=\"augment\") instead, which also rewrites the file and so leaves \
+                     the two agreeing. Until this is resolved, a fresh clone restores whatever the \
+                     sidecar says and reports success.",
                 fields.join(", ")
             ),
         ));
@@ -8240,7 +8371,13 @@ mod tests {
         )
         .unwrap();
 
-        let found = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let found = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
         let v = found
             .iter()
             .find(|v| v.artifact_id.as_deref() == Some("drifted"))
@@ -10560,9 +10697,21 @@ mod tests {
     /// that keeps the lexically-first ten instead of the highest-count ten.
     /// Every root here has a distinct count, so a mis-ordered collapse is
     /// visible: it would either include `/elsewhere/root00` (count 1, the
-    /// lowest) or omit one of the genuinely-highest roots. The arithmetic
-    /// assertion at the end is the one that catches a collapse that loses rows
-    /// rather than merely reordering them.
+    /// lowest) or omit one of the genuinely-highest roots. **The per-root loop
+    /// below is what catches a collapse that loses rows rather than merely
+    /// reordering them** — it asserts each of the ten expected keys is present
+    /// with its exact expected value, which alone fully pins `by_project` (its
+    /// length is separately asserted to be exactly 10, so ten verified
+    /// key/value pairs leave no room for a substituted or dropped row). A
+    /// trailing `shown_rows + elided_rows == outside_roots_total` arithmetic
+    /// check used to close this test (2026-09-09 whole-branch review round 2,
+    /// Minor 2) but was deleted as tautological: with every summand already
+    /// pinned to a literal by the assertions above it (`outside_roots_total`
+    /// to 105, `outside_rows_elided` to 10, and each of the ten displayed
+    /// roots' value individually), the sum identity holds as pure arithmetic
+    /// and cannot fail as a consequence of anything this test does not already
+    /// check — it read as a production-behavior guard while actually
+    /// re-deriving a fact already proven above it.
     #[tokio::test]
     async fn outside_roots_by_project_collapses_to_the_top_ten_by_count() {
         let ctx = ctx_with_many_outside_roots();
@@ -10610,15 +10759,6 @@ mod tests {
         assert!(
             !by_project.contains_key("/elsewhere/root00"),
             "the lowest-count root (count 1) must be elided, not displayed: {by_project:#?}"
-        );
-
-        let shown_rows: u64 = by_project.values().map(|v| v.as_u64().unwrap()).sum();
-        let total = health["outside_roots_total"].as_u64().unwrap();
-        let elided_rows = health["outside_rows_elided"].as_u64().unwrap();
-        assert_eq!(
-            shown_rows + elided_rows,
-            total,
-            "arithmetic must close: sum(displayed) + outside_rows_elided == outside_roots_total"
         );
     }
 
@@ -11711,7 +11851,13 @@ mod tests {
             "Root cause in `docs/issues/archive/2026-08-26-still-open.md`.\n",
         );
 
-        let v = scan_premature_archive_citation(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_premature_archive_citation(&cat.conn, &mut ds).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "premature_archive_citation");
         assert!(
@@ -11736,8 +11882,14 @@ mod tests {
             "Fixed — see `docs/issues/archive/2026-08-26-done.md`.\n",
         );
 
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
-            scan_premature_archive_citation(&cat.conn)
+            scan_premature_archive_citation(&cat.conn, &mut ds)
                 .unwrap()
                 .is_empty(),
             "a citation to a path that exists is not this check's business"
@@ -11758,8 +11910,14 @@ mod tests {
             "See `docs/issues/archive/2026-01-01-never-existed.md`.\n",
         );
 
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
-            scan_premature_archive_citation(&cat.conn)
+            scan_premature_archive_citation(&cat.conn, &mut ds)
                 .unwrap()
                 .is_empty(),
             "a dead link with no live twin is audit_doc_refs' finding, not a premature citation"
@@ -11781,8 +11939,14 @@ mod tests {
             "Back then: `docs/issues/archive/2026-08-26-still-open.md`.\n",
         );
 
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
-            scan_premature_archive_citation(&cat.conn)
+            scan_premature_archive_citation(&cat.conn, &mut ds)
                 .unwrap()
                 .is_empty(),
             "an archived citer is a historical snapshot and is exempt"
@@ -11909,15 +12073,15 @@ mod tests {
     /// hint legend (2026-09-09 review, Important 2 / Minor 7) — this test guards against it
     /// silently falling behind a new `scope.admit("<check>", ...)` call site. It scans this
     /// file's own source for every LITERAL check-name argument to `scope.admit(`, adds by
-    /// hand the one call site that admits dynamically (`scan_artifact_paths`'s
-    /// `scope.admit(&v.check, ...)`, whose two possible names are asserted separately below
-    /// so a rename there cannot go unnoticed either), excludes the checks that fold into a
-    /// DIFFERENT destination map on purpose (`abs_path_outside_managed_roots` →
-    /// `outside_scope_refused_by_project`; the four entry-validity checks →
-    /// `entry_validity_scoped_by_project`; `cited_prefix_with_no_definer` is admitted only
-    /// via `Check::CitedPrefixWithNoDefiner.as_str()`, never a literal, so the regex below
-    /// never sees it and it needs no exemption), and asserts what remains is exactly
-    /// `ROW_GRAIN_SCOPED_CHECKS`'s own check set.
+    /// hand the six call sites that admit dynamically — all six live in
+    /// `scan_artifact_paths` and share the identical `scope.admit(&v.check, id, abs_path)`
+    /// shape, so a single `contains` check below guards the shape for all of them at once —
+    /// excludes the checks that fold into a DIFFERENT destination map on purpose
+    /// (`abs_path_outside_managed_roots` → `outside_scope_refused_by_project`; the four
+    /// entry-validity checks → `entry_validity_scoped_by_project`; `cited_prefix_with_
+    /// no_definer` is admitted only via `Check::CitedPrefixWithNoDefiner.as_str()`, never a
+    /// literal, so the regex below never sees it and it needs no exemption), and asserts
+    /// what remains is exactly `ROW_GRAIN_SCOPED_CHECKS`'s own check set.
     ///
     /// **Limitation (2026-09-09 review round 2, Also/Minor):** this test checks set
     /// MEMBERSHIP over literal source text, not per-site correctness, and has two blind
@@ -11927,15 +12091,24 @@ mod tests {
     /// green (this sentence has to describe that shape without writing the call
     /// literally, or the regex below would count the example itself as a real site —
     /// the same no-escape-for-mention trap CLAUDE.md's "Parsers Over a Namespace"
-    /// section names). Second, for the one DYNAMIC site
-    /// (`scan_artifact_paths`'s `scope.admit(&v.check, ...)`) it hardcodes BOTH possible
-    /// names (`frontmatter_id_mismatch`, `frontmatter_id_is_not_a_catalog_id`)
-    /// unconditionally — it confirms the call site's shape, never which branch
-    /// `check_frontmatter_id_matches_catalog` actually took, so swapping that function's
-    /// two `Violation::new(...)` sites would leave this test green too. Neither gap is
-    /// closed here; `row_checks_scoped_by_project_table_driven`'s per-check rows are what
-    /// close them, by seeding a fixture that forces one specific branch and asserting the
-    /// scoped-out drop lands under that check's own name.
+    /// section names). Second, for the six DYNAMIC sites
+    /// (`scan_artifact_paths`'s `scope.admit(&v.check, ...)`) it hardcodes every name each
+    /// site can possibly produce unconditionally — it confirms the call sites' shape, never
+    /// which branch the underlying `check_*` function actually took, so swapping two
+    /// `Violation::new(...)` sites within one `check_*` function (there is only one such
+    /// function today, `check_frontmatter_id_matches_catalog`, with its two possible
+    /// outcomes) would leave this test green too. Neither gap is closed here;
+    /// `row_checks_scoped_by_project_table_driven`'s per-check rows are what close them, by
+    /// seeding a fixture that forces one specific branch and asserting the scoped-out drop
+    /// lands under that check's own name. `every_declared_check_is_scope_gated_or_a_named_
+    /// exemption` below is a THIRD, complementary guard — it does not scan call sites at
+    /// all, so it cannot tell whether a literal matches an admit() site; what it catches
+    /// instead is a brand-new `Check` variant landing in `declare_checks!` with no admit()
+    /// call site anywhere and no named exemption, which this source-scanning test cannot
+    /// see (it only ever asks "does the scraped set equal `ROW_GRAIN_SCOPED_CHECKS`", so a
+    /// check absent from BOTH is invisible to it by construction). Keep both: this one
+    /// still catches a literal call-site name drifting out of step with the array (a
+    /// failure mode `Check::ALL` set membership cannot see either).
     #[test]
     fn row_checks_scoped_by_project_covers_every_admitting_check() {
         let src = std::fs::read_to_string(concat!(
@@ -11944,22 +12117,47 @@ mod tests {
         ))
         .expect("src/librarian/tools/doctor.rs must be readable");
 
+        // Scan only the production half of the file. Scanning the whole file (including
+        // this test module) is self-defeating for a `.matches().count()` search: this very
+        // test's own source line embeds the literal being searched for (to name it in the
+        // assertion message below), so counting against `src` in full over-counts by
+        // exactly one self-match — measured 2026-09-10, left=7 right=6 the first time this
+        // was written as a whole-file count.
+        let test_mod_start = src
+            .find("#[cfg(test)]")
+            .expect("doctor.rs must have a #[cfg(test)] test module");
+        let production_src = &src[..test_mod_start];
+
         let literal_re = regex::Regex::new(r#"scope\.admit\(\s*"([a-z_]+)""#).unwrap();
         let mut admitting: std::collections::BTreeSet<String> = literal_re
-            .captures_iter(&src)
+            .captures_iter(production_src)
             .map(|c| c[1].to_string())
             .collect();
 
-        // The dynamic frontmatter-id admit site — asserted present so a rewording of it
-        // cannot silently drop these two names out of this test's coverage.
-        assert!(
-            src.contains("if scope.admit(&v.check, id, abs_path) {"),
-            "the dynamic frontmatter-id admit site in scan_artifact_paths moved or was \
-             reworded — update this test's hand-added names below to match, or this guard \
-             stops covering them"
+        // The six dynamic call sites in `scan_artifact_paths` — each `check_*` function
+        // wraps its `Option<Violation>` in this identical shape, so counting occurrences
+        // (rather than a bare `contains`) catches a site being added or removed without a
+        // matching update to the hand-inserted names below.
+        let dynamic_site_count = production_src
+            .matches("if scope.admit(&v.check, id, abs_path) {")
+            .count();
+        assert_eq!(
+            dynamic_site_count, 6,
+            "scan_artifact_paths is expected to have exactly six `scope.admit(&v.check, ...)` \
+             call sites (abs_path_must_be_absolute, backslash_in_abs_path, ads_colon_in_abs_path, \
+             dotdot_segment_in_abs_path, missing_file, and check_frontmatter_id_matches_catalog's \
+             shared site) — a site was added or removed without updating this test's hand-added \
+             names below, or this guard stops covering them"
         );
+        // check_frontmatter_id_matches_catalog is the one dynamic site with TWO possible
+        // outcomes; the other five each produce exactly one fixed check name.
         admitting.insert("frontmatter_id_mismatch".to_string());
         admitting.insert("frontmatter_id_is_not_a_catalog_id".to_string());
+        admitting.insert("abs_path_must_be_absolute".to_string());
+        admitting.insert("backslash_in_abs_path".to_string());
+        admitting.insert("ads_colon_in_abs_path".to_string());
+        admitting.insert("dotdot_segment_in_abs_path".to_string());
+        admitting.insert("missing_file".to_string());
 
         // Each entry names the map it actually scopes into instead — one comment per
         // entry, so this list stays self-auditing (2026-09-09 review round 2, deferred
@@ -11997,23 +12195,137 @@ mod tests {
              shows"
         );
     }
+    /// The `Check::ALL`-keyed exhaustiveness guard C3 (2026-09-09 whole-branch review round
+    /// 2) asked for, complementary to `row_checks_scoped_by_project_covers_every_admitting_
+    /// check` above rather than a replacement for it — that test scans call-site TEXT and
+    /// can tell a literal name has drifted out of step with `ROW_GRAIN_SCOPED_CHECKS`; this
+    /// one scans `Check::ALL` itself and can tell a brand-new variant was added to
+    /// `declare_checks!` with no scoping story at all — no admit() call site, no dedicated
+    /// fold, no named exemption. Neither can see what the other sees: the source-scanning
+    /// test has no notion of "every declared variant", and this one has no notion of
+    /// "a literal string argument". A variant landing in neither guard's picture is exactly
+    /// the shape C3 found: five checks pushed unconditionally, invisible to the old test
+    /// because they used the dynamic `&v.check` call form, and invisible to a
+    /// `Check::ALL`-shaped guard until one existed to ask the question.
+    ///
+    /// Every one of `Check::ALL`'s variants must fall into EXACTLY one of five buckets:
+    /// `ROW_GRAIN_SCOPED_CHECKS` (the general row-grain fold); `AbsPathOutsideManagedRoots`
+    /// (its own dedicated `outside_scope_refused_by_project` fold); the four entry-validity
+    /// checks (`entry_validity_scoped_by_project`); `CitedPrefixWithNoDefiner` (its own
+    /// dedicated `cited_prefix_scoped` fold, admitted only via `.as_str()`, never a
+    /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly two variants
+    /// today, each with a structural reason it needs no per-row scope gate of its own:
+    /// - `SidecarUnparseable` shares its sibling `SidecarShapeDrift`'s single `admit()` call
+    ///   site (`scan_sidecar_shape_drift` gates once, on the same `(id, abs_path)`, before
+    ///   emitting either finding) — a separate fold would double-count the same gate.
+    /// - `DeclaredRootMissing` — `scan_declared_project_roots` only ever reads
+    ///   `ctx.current_project`'s own `.codescout/workspace.toml`, and every `Violation::new`
+    ///   call there passes `id: None`, `abs_path` set to the *declared* root path (which
+    ///   need not exist on disk, that being the finding) rather than a catalogued artifact's
+    ///   `abs_path` — so this check can structurally never surface a foreign-repo row: there
+    ///   is no other repo's `workspace.toml` for it to have read in the first place.
+    ///
+    /// Both no-overlap (via the plain `+` length sum below, checked before the sets are
+    /// unioned) and no-leftover (`accounted == all`) are asserted, so a variant double-
+    /// counted across two buckets is caught exactly like one counted in zero.
+    #[test]
+    fn every_declared_check_is_scope_gated_or_a_named_exemption() {
+        let row_grain: std::collections::BTreeSet<&str> =
+            ROW_GRAIN_SCOPED_CHECKS.iter().map(|c| c.as_str()).collect();
+        assert_eq!(
+            row_grain.len(),
+            ROW_GRAIN_SCOPED_CHECKS.len(),
+            "ROW_GRAIN_SCOPED_CHECKS contains a duplicate entry — the array is supposed to be \
+             a set, and a duplicate would silently double the fold loop's tally for whichever \
+             check repeats"
+        );
+
+        let outside_managed_roots: std::collections::BTreeSet<&str> =
+            [Check::AbsPathOutsideManagedRoots.as_str()]
+                .into_iter()
+                .collect();
+
+        let entry_validity: std::collections::BTreeSet<&str> = [
+            Check::EntryConditionalPastDue.as_str(),
+            Check::EntryDatedStale.as_str(),
+            Check::EntryCitedFromOutsideButUndeclared.as_str(),
+            Check::ValidityUnparseable.as_str(),
+        ]
+        .into_iter()
+        .collect();
+
+        let cited_prefix: std::collections::BTreeSet<&str> =
+            [Check::CitedPrefixWithNoDefiner.as_str()]
+                .into_iter()
+                .collect();
+
+        // EXEMPT — see the doc comment above for why each of these two needs no per-row
+        // scope gate of its own. Adding a third exemption here without a matching comment
+        // explaining the structural reason defeats the whole point of this test: it exists
+        // to force that explanation, not to make the assertion pass.
+        let exempt: std::collections::BTreeSet<&str> = [
+            // Shares scan_sidecar_shape_drift's single admit() call site with SidecarShapeDrift.
+            Check::SidecarUnparseable.as_str(),
+            // scan_declared_project_roots reads only ctx.current_project's own
+            // workspace.toml and emits id: None — structurally never a foreign-repo row.
+            Check::DeclaredRootMissing.as_str(),
+        ]
+        .into_iter()
+        .collect();
+
+        let bucket_lens = row_grain.len()
+            + outside_managed_roots.len()
+            + entry_validity.len()
+            + cited_prefix.len()
+            + exempt.len();
+
+        let mut accounted: std::collections::BTreeSet<&str> = row_grain;
+        accounted.extend(&outside_managed_roots);
+        accounted.extend(&entry_validity);
+        accounted.extend(&cited_prefix);
+        accounted.extend(&exempt);
+
+        assert_eq!(
+            accounted.len(),
+            bucket_lens,
+            "two of the five buckets above name the same check — that check is being \
+             classified twice, which hides a check that names NEITHER bucket just as \
+             effectively as a leftover would"
+        );
+
+        let all: std::collections::BTreeSet<&str> = Check::ALL.iter().map(|c| c.as_str()).collect();
+
+        assert_eq!(
+            accounted, all,
+            "a Check::ALL variant is not accounted for by any of: ROW_GRAIN_SCOPED_CHECKS, \
+             AbsPathOutsideManagedRoots's dedicated fold, the four entry-validity checks, \
+             CitedPrefixWithNoDefiner's dedicated fold, or a named EXEMPT entry above — a \
+             newly declared check with no scoping story at all is invisible to every other \
+             guard in this file until this one names it"
+        );
+    }
 
     /// Guards `Check::admits_relevance_exemption`'s allow-list against silent drift
     /// when a new `Check` variant is declared (2026-09-09 review round 1, Minor 8).
     /// The predicate is deliberately an explicit, enumerated `matches!` rather than
-    /// `Check::ALL` minus one exclusion — the whole point is that a brand-new
+    /// `Check::ALL` minus some exclusions — the whole point is that a brand-new
     /// variant does NOT opt in by omission. But that means nothing forces a
     /// developer to make the deliberate choice either, unless something reds when
     /// they skip it. This test is that something: `Check::ALL.len()` (via
     /// `declare_checks!`, which the enum, `as_str` and `from_wire` all derive from
-    /// the same macro arms) minus the allow-list's own count must equal exactly 1 —
-    /// today's sole exclusion, `CitedPrefixWithNoDefiner`, named explicitly so the
-    /// failure message points at the right variant rather than an arithmetic
-    /// mismatch. Adding `Check::Foo` without touching `admits_relevance_exemption`
-    /// changes `Check::ALL.len()` and not the allow-list's count, so the two sides
-    /// of the equality below stop agreeing — the developer must then look at
-    /// `Foo` and decide, on purpose, whether it belongs in the `matches!` arms or
-    /// joins `CitedPrefixWithNoDefiner` as a second named exclusion.
+    /// the same macro arms) minus the allow-list's own count must equal exactly 2 —
+    /// today's two exclusions, named explicitly so the failure message points at
+    /// the right variant rather than an arithmetic mismatch. Adding `Check::Foo`
+    /// without touching `admits_relevance_exemption` changes `Check::ALL.len()` and
+    /// not the allow-list's count, so the two sides of the equality below stop
+    /// agreeing — the developer must then look at `Foo` and decide, on purpose,
+    /// whether it belongs in the `matches!` arms or joins the named exclusions.
+    ///
+    /// 2026-09-09 whole-branch review round 2, C1: the exclusion count moved from 1
+    /// to 2 when `Check::WorktreeScopedRow` was removed — see
+    /// `admits_relevance_exemption`'s own doc comment for why (relevance surfacing
+    /// and mutation authority are different questions, and `WorktreeScopedRow`
+    /// shares its `admit` gate with a WRITE, `fix=reseat_worktree`).
     #[test]
     fn admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all() {
         let allow_listed = Check::ALL
@@ -12025,9 +12337,14 @@ mod tests {
             "CitedPrefixWithNoDefiner must stay excluded — its id is a namespace \
              prefix, not an artifact id"
         );
+        assert!(
+            !Check::WorktreeScopedRow.admits_relevance_exemption(),
+            "WorktreeScopedRow must stay excluded — it shares its admit() gate with \
+             fix=reseat_worktree, a WRITE, and relevance must never authorize a mutation"
+        );
         assert_eq!(
             Check::ALL.len() - allow_listed,
-            1,
+            2,
             "Check::ALL grew or shrank without a matching, deliberate update to \
              admits_relevance_exemption's matches! arms — a new check defaults to \
              EXCLUDED (the safe polarity), but that exclusion must be a choice this \
@@ -13332,7 +13649,7 @@ mod tests {
         // it does not fire.
         assert_eq!(by_check.get("missing_file").copied(), Some(5));
 
-        let r = scan_commits_git_root(&cat.conn).unwrap();
+        let r = scan_commits_git_root(&cat.conn, &mut ds).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].check, "backslash_in_git_root");
     }
@@ -14316,6 +14633,109 @@ mod tests {
         assert_eq!(
             scoped_out_total, 1,
             "exactly the foreign row must be tallied as scoped out: {out:#?}"
+        );
+    }
+    /// 2026-09-09 whole-branch review round 2, C1 (Critical): `Check::WorktreeScopedRow`
+    /// used to sit on `admits_relevance_exemption`'s allow-list, and `admit` is the
+    /// SAME gate `scan_worktree_scoped` uses for both the read-only report and
+    /// `fix=reseat_worktree` (Task 6) — so a foreign worktree row that a local
+    /// artifact cites, sitting under a declared umbrella member, was exempted from
+    /// scope and therefore REACHABLE by `reseat_worktree`'s `confirm=true` path: a
+    /// `graft::graft_rows` delete+reseed MUTATION in a repo this call never named.
+    /// Reproduced pre-fix with default scope and no `confirm` gate on `run_fix` at
+    /// all (a separate, pre-existing bug tracked independently — not this test's
+    /// concern). The ruling this test pins: relevance may SURFACE a finding in the
+    /// read-only report; it must never AUTHORIZE a write. Unlike the sibling test
+    /// above (an uncited, non-umbrella foreign row, refused for the ordinary
+    /// out-of-scope reason), this fixture deliberately satisfies BOTH halves of the
+    /// relevance exemption's predicate — cited from here, AND an umbrella member —
+    /// so the only thing keeping the row out is `WorktreeScopedRow`'s removal from
+    /// the allow-list specifically. Confirmed by mutation: re-adding
+    /// `Check::WorktreeScopedRow` to `admits_relevance_exemption`'s `matches!` arms
+    /// reds this test (the row gets reseated); reverting `admit`'s `known_elsewhere_
+    /// row_is_relevant` call back to the pre-C2 bare `cited_from_here.contains(id)`
+    /// does NOT red it, because C1 is a distinct hole from C2 — closing C2 alone
+    /// does not stop a check that should never receive the exemption at all.
+    #[tokio::test]
+    async fn reseat_worktree_does_not_reseat_a_cited_foreign_worktree_row() {
+        let active = std::env::temp_dir().join("cs-c1-active");
+        let (_tmp_b, main_root_b, worktree_root_b) = make_worktree_fixture();
+
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // A local (in-scope) artifact that actively cites the foreign worktree row
+        // below -- the "cited from here" half of the relevance exemption.
+        let citer_row = TestArtifactRowBuilder::new("citer")
+            .with_abs_path(active.join("docs/citer.md"))
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &citer_row).unwrap();
+
+        // Foreign worktree-scoped row, nested under `main_root_b` -- which is
+        // declared an umbrella member below, satisfying the "umbrella member" half.
+        let foreign_doc = worktree_root_b.join("docs/out.md");
+        let foreign_row = TestArtifactRowBuilder::new("wt-foreign-cited")
+            .with_abs_path(foreign_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &foreign_row).unwrap();
+
+        crate::librarian::catalog::links::insert(
+            &cat,
+            &crate::librarian::catalog::links::LinkRow {
+                src_id: "citer".to_string(),
+                dst_id: "wt-foreign-cited".to_string(),
+                rel: crate::librarian::tools::link_scan::diff::CITES_REL.to_string(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: active.clone(),
+            git_root: active.clone(),
+            main_root: None,
+            umbrella: Some("test-umbrella".to_string()),
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "test-umbrella".to_string(),
+                members: vec![main_root_b.clone()],
+            }])
+            .build();
+
+        let out = call(
+            &ctx,
+            json!({ "fix": "reseat_worktree", "confirm": true, "scope": "project" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out["fix"], "reseat_worktree");
+        assert!(
+            out["reseated"].as_array().unwrap().is_empty(),
+            "a cited, umbrella-member foreign worktree row must NOT be reseated — \
+                 relevance surfaces a finding, it does not authorize a mutation: {out:#?}"
+        );
+        assert!(out["collisions"].as_array().unwrap().is_empty());
+
+        {
+            let cat = ctx.catalog.lock();
+            assert!(
+                artifact::get(&cat, "wt-foreign-cited").unwrap().is_some(),
+                "the foreign row must survive under its original id, untouched"
+            );
+        }
+
+        let scoped_out = out["scoped_out"].as_object().expect(
+            "the cited foreign row must still be announced as excluded, not silently \
+                 dropped, now that it no longer receives the relevance exemption: {out:#?}",
+        );
+        let scoped_out_total: u64 = scoped_out.values().map(|n| n.as_u64().unwrap()).sum();
+        assert_eq!(
+            scoped_out_total, 1,
+            "exactly the cited foreign row must be tallied as scoped out: {out:#?}"
         );
     }
 
@@ -17232,7 +17652,13 @@ root = "work/elsewhere/ghost"
         let cat = Catalog::open_in_memory().unwrap();
         seed_with_sidecar(&cat, tmp.path(), "t", "the superseded prompt");
 
-        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
 
         assert_eq!(v.len(), 1, "exactly the drifted artifact must fire: {v:#?}");
         assert_eq!(v[0].check, "sidecar_shape_drift");
@@ -17257,7 +17683,13 @@ root = "work/elsewhere/ghost"
         // "p" is exactly what `seed_declared` puts in the catalog row.
         seed_with_sidecar(&cat, tmp.path(), "t", "p");
 
-        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
 
         assert!(v.is_empty(), "an in-sync pair must not fire: {v:#?}");
     }
@@ -17276,7 +17708,13 @@ root = "work/elsewhere/ghost"
         let hand = std::fs::read_to_string(&path).unwrap() + "# hand-edited, and still correct\n";
         std::fs::write(&path, &hand).unwrap();
 
-        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
 
         assert!(
             v.is_empty(),
@@ -17299,7 +17737,13 @@ root = "work/elsewhere/ghost"
         let path = seed_with_sidecar(&cat, tmp.path(), "t", "p");
         std::fs::write(&path, "prompt: [unterminated\n\t\tnonsense: {{{\n").unwrap();
 
-        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
 
         assert_eq!(v.len(), 1, "the corrupt sidecar must fire: {v:#?}");
         assert_eq!(
