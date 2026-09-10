@@ -585,20 +585,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     //   would remove.
     //
     // The remaining row-grain checks (`snapshot_drift`, `params_behind_body`,
-    // `augmentation_declared_but_absent`) report zero findings here today, so they are
-    // left out rather than swept in on an unmeasured assumption — see the bug file's
-    // Resume. `entry_without_definition` IS listed despite reporting zero foreign rows
+    // `params_status_drift`, `augmentation_declared_but_absent`) were left out while
+    // they reported zero, on the 2026-08-27 bug's instruction to add them if they ever
+    // fired across repos and to read each repair path first. Both reads are done and
+    // all four are now in the list — see `SCOPED_ROW_CHECKS` for which two were
+    // measured firing and which two were swept in on structure.
+    // `entry_without_definition` IS listed despite reporting zero foreign rows
     // today: it shares a scan with `ledger_defines_nothing`, and one scan whose two
     // outputs scope differently is a trap for the next reader.
-    const SCOPED_ROW_CHECKS: &[&str] = &[
-        "frontmatter_id_mismatch",
-        "frontmatter_id_is_not_a_catalog_id",
-        "frontmatter_status_mismatch",
-        "ledger_defines_nothing",
-        "entry_without_definition",
-        "entry_defined_twice",
-        "terminal_status_with_caveat",
-    ];
     let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
         Default::default();
     // No active project means no scoping — the same degradation the scans themselves
@@ -606,7 +600,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(cp) = ctx.current_project.as_deref() {
         let git_root = std::slice::from_ref(&cp.git_root);
         all_violations.retain(|v| {
-            if !SCOPED_ROW_CHECKS.contains(&v.check.as_str()) {
+            if !SCOPED_ROW_CHECKS.iter().any(|c| c.as_str() == v.check) {
                 return true;
             }
             if super::containing_root(git_root, Path::new(&v.path)).is_some() {
@@ -890,10 +884,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if !row_checks_scoped_by_project.is_empty() {
         let total_scoped: usize = row_checks_scoped_by_project.values().sum();
         let n_projects = row_checks_scoped_by_project.len();
+        let names = scoped_row_check_names();
         hint_parts.push(format!(
-            "{total_scoped} row-grain finding(s) (frontmatter_id_mismatch / \
-             frontmatter_id_is_not_a_catalog_id / ledger_defines_nothing / \
-             entry_without_definition / entry_defined_twice / terminal_status_with_caveat) across \
+            "{total_scoped} row-grain finding(s) ({names}) across \
              {n_projects} other \
              project root(s) were scoped OUT of this report — see \
              catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
@@ -1694,6 +1687,58 @@ fn count_dead_root(
         |r| r.get(0),
     )?;
     Ok((arts.max(0) as usize, commits.max(0) as usize))
+}
+
+/// The row-grain checks whose REPORT narrows to the active project (Ruling 17).
+///
+/// Membership is by CHECK NAME rather than by scan, and that is load-bearing rather
+/// than incidental: `frontmatter_id_mismatch` and `frontmatter_id_is_not_a_catalog_id`
+/// are emitted from inside [`scan_artifact_paths`]' row loop, a scan that must NOT be
+/// scoped wholesale — it owns `outside_roots_by_project` and reports rows that
+/// `fix=reseat_worktree` will touch machine-wide. A per-scan gate cannot express
+/// "these two names from that scan, and nothing else it emits".
+///
+/// Typed as [`Check`] rather than `&[&str]` so a renamed variant is a compile error
+/// here instead of a string that silently stops matching and un-scopes its check.
+const SCOPED_ROW_CHECKS: &[Check] = &[
+    Check::FrontmatterIdMismatch,
+    Check::FrontmatterIdIsNotACatalogId,
+    Check::FrontmatterStatusMismatch,
+    Check::LedgerDefinesNothing,
+    Check::EntryWithoutDefinition,
+    Check::EntryDefinedTwice,
+    Check::TerminalStatusWithCaveat,
+    // Added 2026-09-10 on the instruction the 2026-08-27 bug left behind: *"If one of
+    // them starts firing across repos, add it to `SCOPED_ROW_CHECKS` — and read its
+    // repair path first."* Measured that day, `params_behind_body` fires 3 times with 2
+    // foreign (`work/mirela/backend-kotlin`, `work/stefanini/southpole`) and
+    // `params_status_drift` 3 with 1 (`work/mirela/eduplanner-ui`).
+    Check::ParamsBehindBody,
+    Check::ParamsStatusDrift,
+    // These two still report ZERO here and are swept in on structure rather than on a
+    // measurement — say so rather than implying they were seen firing. `snapshot_drift`
+    // is `params_behind_body`'s inverse over the same two id sets, so any corpus that
+    // leaks one leaks the other; `augmentation_declared_but_absent`'s repair
+    // (`fix=export_augmentations`) already refuses to cross a root, so its report was
+    // the wider of the pair.
+    Check::SnapshotDrift,
+    Check::AugmentationDeclaredButAbsent,
+];
+
+/// The scoped check names, as the health hint lists them.
+///
+/// Generated from [`SCOPED_ROW_CHECKS`] rather than written out, because the
+/// hand-written copy had already drifted: it named six of the seven, omitting
+/// `frontmatter_status_mismatch`, so that check's findings were scoped out of every
+/// report while the sentence explaining the drop never named it. Same defect
+/// [`Violation::check`]'s own doc comment records going stale by three names — the fix
+/// is one list and one generator, not a second edit anybody has to remember.
+fn scoped_row_check_names() -> String {
+    SCOPED_ROW_CHECKS
+        .iter()
+        .map(|c| c.as_str())
+        .collect::<Vec<_>>()
+        .join(" / ")
 }
 
 /// Group key for the `outside_roots_by_project` aggregate: the project root a
@@ -12149,6 +12194,145 @@ mod tests {
             "worktree_scoped_row must NOT scope — fix=reseat_worktree reseats every \
              unregistered row in the catalog regardless of root, so a narrowed report \
              would understate what confirm=true is about to do: {out:#?}"
+        );
+    }
+
+    /// The emitted hint must name every check it scoped out.
+    ///
+    /// Reds on drift that was already live: the hand-written prose at the hint site
+    /// listed six of the seven scoped checks, so `frontmatter_status_mismatch` findings
+    /// were dropped from every report while the sentence explaining the drop never
+    /// named them — a reader who saw the count and went looking had six names to search
+    /// for and no way to learn a seventh existed.
+    ///
+    /// **Asserts on `catalog_health.hint` from a real report, never on
+    /// `scoped_row_check_names()`.** Written the second way first, it passed instantly
+    /// against the live drift: a generator compared to itself is a tautology, and the
+    /// only thing that makes this test evidence is that the string under assertion is
+    /// the one a caller actually reads.
+    #[tokio::test]
+    async fn the_scoped_row_check_hint_names_every_check_it_scoped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+        // Any one foreign row of any scoped check arms the hint; the assertion below is
+        // about the SENTENCE, not about which check happened to fire.
+        let stale = "---\nid: aaaaaaaaaaaaaaaa\nkind: bug\n---\n\n# x\n";
+        seed_ledger(
+            &cat,
+            "cccccccccccccccc",
+            &sibling_root.join("docs/out.md"),
+            stale,
+        );
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+        let hint = out["catalog_health"]["hint"].as_str().unwrap_or_default();
+        assert!(
+            hint.contains("were scoped OUT of this report"),
+            "fixture must arm the row-check hint or the loop below asserts over nothing: {hint}"
+        );
+
+        for check in SCOPED_ROW_CHECKS {
+            assert!(
+                hint.contains(check.as_str()),
+                "{} is scoped OUT of the report but is not named in the sentence that \
+                 explains the drop — the reader is handed a count and cannot learn which \
+                 checks it covers: {hint}",
+                check.as_str()
+            );
+        }
+    }
+
+    /// The measured foreign leak this closes.
+    ///
+    /// `params_behind_body` was left out of the scoped set by
+    /// `docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`
+    /// § *Known gap, deliberately not swept*, which reported it firing zero times and
+    /// wrote: *"If one of them starts firing across repos, add it to
+    /// `SCOPED_ROW_CHECKS` — and read its repair path first."* Measured 2026-09-10 on
+    /// this machine it fires 3 times, **2 of them foreign**
+    /// (`work/mirela/backend-kotlin`, `work/stefanini/southpole`). The repair-path read
+    /// that instruction demands: no `fix=` mode consumes this scan, so narrowing its
+    /// report narrows nothing else — unlike `worktree_scoped_row`, whose
+    /// `fix=reseat_worktree` takes no root.
+    #[tokio::test]
+    async fn params_behind_body_is_scoped_like_every_other_row_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // Body carries BL-3, params holds only BL-1/BL-2 — the measured shape, seeded
+        // identically on both sides so the ONLY difference between them is the root.
+        // Weakening either body to a matching id set would make the test pass with the
+        // scoping deleted.
+        let ahead = "| ID |\n| BL-1 |\n| BL-2 |\n| BL-3 |\n";
+        seed_tracker(&cat, "mine", &active_root, ahead, &["BL-1", "BL-2"]);
+        seed_tracker(&cat, "theirs", &sibling_root, ahead, &["BL-1", "BL-2"]);
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["params_behind_body"],
+            json!(1),
+            "another repo's params drift is not this developer's worklist: {out:#?}"
+        );
+        let kept: Vec<&serde_json::Value> = out["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == "params_behind_body")
+            .collect();
+        assert!(
+            kept[0]["path"].as_str().unwrap().contains("active-project"),
+            "the survivor is the ACTIVE project's row, not whichever sorted first: {:#?}",
+            kept[0]
+        );
+
+        let scoped = &out["catalog_health"]["row_checks_scoped_by_project"];
+        let total: u64 = scoped
+            .as_object()
+            .expect("the drop must be announced, not silent")
+            .values()
+            .map(|n| n.as_u64().unwrap())
+            .sum();
+        // The two fixtures are byte-identical apart from their root, so every scoped
+        // finding KEPT for the active project must have exactly one dropped twin. That
+        // is an exact count without hard-coding one: the sibling ledger happens to fire
+        // two scoped checks here, and pinning the literal would red the day a third
+        // check joins SCOPED_ROW_CHECKS for reasons unrelated to this test.
+        let kept_scoped = out["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| {
+                SCOPED_ROW_CHECKS
+                    .iter()
+                    .any(|c| c.as_str() == v["check"].as_str().unwrap_or_default())
+            })
+            .count() as u64;
+        assert!(
+            kept_scoped >= 1,
+            "floor against the vacuous pass: with nothing kept, total==kept_scoped \
+             holds at 0==0 whatever the scoping does: {out:#?}"
+        );
+        assert_eq!(
+            total, kept_scoped,
+            "every scoped finding kept for the active root must have a counted twin \
+             dropped from the identical sibling: {scoped:#?}"
+        );
+        assert!(
+            scoped
+                .as_object()
+                .unwrap()
+                .keys()
+                .any(|k| k.contains("sibling-project")),
+            "attributed to the project that owns it: {scoped:#?}"
         );
     }
 
