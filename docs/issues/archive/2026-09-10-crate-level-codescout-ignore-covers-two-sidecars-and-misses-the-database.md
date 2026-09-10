@@ -1,12 +1,13 @@
 ---
-id: '6e1f4ae6d5262ba8'
+id: 4a5dcdc1802be5ea
 kind: bug
-status: open
+status: fixed
 title: 'BUG: crate-level .codescout ignore rules cover two sidecars and miss the 250 MB database'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-10
 ---
 
 # BUG: the crate-level .codescout ignore rules cover two sidecars and miss the 250 MB database
@@ -111,30 +112,62 @@ Lines 14-24 and 77-90 enumerate roughly fifteen runtime paths (`project.toml`,
    wrong one about the rule — reproduced here rather than relayed.
 
 ## Fix
-*Not fixed by this bug file.* Complete the enumeration at `.gitignore:25-27`: add
-`crates/*/.codescout/usage.db`, `write.lock`, `write.lock.holder`, `librarian.db{,-wal,-shm}`,
-`embeddings.db{,-wal,-shm}`. Do **not** add a blanket `crates/*/.codescout/` rule — line 11's
-note explains why the root block is an enumeration and not a directory rule, and the same
-reasoning applies per crate.
 
-Separately and optionally: `git rm --cached` the stub's two tracked runtime files, or prune
-`crates/librarian-mcp/` entirely since it holds no code. That is the tidy-up half and is
-genuinely optional; the rule completion is not.
+**Fixed** in `0fc39268` (patch-id `306ceba1fdfa3ae0bf01ec59a6ba859b77e223bb`) on `experiments`.
 
-**The durable half is a guard, not a longer list.** A rule set maintained by transcription
-will drift again the next time the root block grows. The shape that would hold: a test
-asserting that for every path the root block ignores, the `crates/*/` equivalent is also
-ignored — derived from the root block rather than restated, so adding a root rule without its
-per-crate twin reds. That is a real test this repo can express (`git check-ignore` is
-scriptable and already used in `tests/`), and it is the difference between fixing this
-instance and closing the class.
+The enumeration is complete: **30** `crates/*/.codescout/…` rules, one per root-block rule,
+replacing the two-line block. It is **derived, not transcribed** — the 28 missing twins came out
+of the failing test rather than out of reading the file, and the block itself was generated from
+the root rules.
 
+That mattered, and is the correction this section owes its own earlier draft: the list above
+named roughly ten files and the § Evidence estimate said *"roughly fifteen"*. The derived count
+is **30**. A hand count of the root block taken while writing the fix said 29. Every one of those
+under-counts has the same cause as the original defect — a pattern with an internal `/` is
+anchored either way, so `.codescout/write.lock` reads as "at any depth" and gets skipped when
+enumerating "the root block". Three readings of this file by the same author, three different
+numbers, all low.
+
+No blanket `crates/*/.codescout/` rule, for the reason this file already gave. And **no blanket
+rule plus a negation either**, which the earlier draft did not rule out and should have: git will
+not descend into an excluded directory to reconsider a negation. That is not a preference — it
+does not work, and it is already measured in this repo for `**/.claude/`
+(`docs/issues/archive/2026-09-07-gitignore-claude-rule-is-root-anchored-so-nested-dirs-escape.md`).
+
+The stub's two tracked runtime files are **deliberately still tracked**. `.gitignore` never
+untracks, so that is a separable `git rm --cached` decision about a directory holding no code,
+and it is not part of completing the rule set.
 ## Tests added
-None yet. See the Fix's last paragraph for the guard worth having — asserting parity by
-DERIVING the crate-level expectation from the root block, so the assertion cannot go stale by
-someone extending one list and not the other. A test that restates both lists is the same
-transcription defect one level up.
 
+`every_root_codescout_ignore_rule_has_its_crates_twin` (`tests/hook_config.rs`) — parity by
+**derivation**: it parses every root-anchored `.codescout/…` rule out of `.gitignore` and
+requires a `crates/*/` twin for each. Adding a root rule without its twin reds. Verdicts are
+taken against a probe crate that does not exist, so the answer is about rules, not disk.
+
+**Mutations, on the production path** (`.gitignore` itself, never the test's inputs):
+
+| mutation | result |
+|---|---|
+| drop `crates/*/.codescout/usage.db` | RED, naming that exact rule |
+| append a root rule with no twin | RED, naming the twin to add |
+
+The second is the direction that matters — it is the drift the guard exists for, and no assertion
+covered it before. The first alone would have been monotone under "the twin block never grows".
+
+Non-vacuity, three ways, because a derived assertion can pass by deriving nothing:
+
+- A **per-pattern control** asserts the root rule matches the path built from it. Without it, a
+  bad probe construction reports *every* twin as missing and the failure reads as a `.gitignore`
+  gap rather than as the test's own construction being wrong.
+- A floor of `>= 20` rules catches a parser that silently matches nothing. Deliberately well under
+  the derived 30 — it is there to catch an empty population, not to pin a number every added rule
+  falsifies.
+- `the_root_codescout_rule_parser_discriminates` pins that the parser rejects comments,
+  negations, and all three scoped siblings. A parser that accepted `crates/*/.codescout/…` would
+  compare the twin block against itself and pass while every root rule went unchecked.
+
+The refusal message names the exact lines to add **and** rules out both wrong repairs, since a
+guard's remedy text is untested by construction.
 ## Workarounds
 Never `git add -A` or `git add crates/` in this repo — already the standing rule for a
 different reason (`get_guide("tracker-conventions")`: a directory is `-A` scoped to a
@@ -142,12 +175,23 @@ subtree). Stage explicit paths. Before committing anything under a crate, check
 `git status --short --untracked-files=all crates/`.
 
 ## Resume
-Complete `.gitignore:25-27` per Fix, then decide on the stub. Then consider the parity guard,
-which is the part that closes the class rather than the instance.
 
+Nothing owed on the rules — the enumeration is complete and guarded.
+
+One separable decision is left open on purpose: whether to `git rm --cached` the stub's two
+tracked runtime files, or prune `crates/librarian-mcp/` entirely. It holds no `Cargo.toml`, no
+`.rs` files, and `Cargo.toml`'s `members` does not list it. That is a tidy-up, not this defect.
 ## References
-- `.gitignore:11-12` (why `.codescout/` is not blanket-ignored — the committed audit shards)
-- `.gitignore:14-24`, `:77-90` (the root runtime enumeration this claims parity with)
-- `.gitignore:25-27` (the two-line crate block)
+
+Cited by content rather than by line, because this fix moved every line number the earlier
+draft of this section named.
+
+- `.gitignore`, the `NOT ignored, deliberately` note — why `.codescout/` is not blanket-ignored
+  (the committed audit shards)
+- `.gitignore`, the `/.codescout/…` root block — the enumeration the crate block mirrors
+- `.gitignore`, the `crates/*/.codescout/…` block — 30 rules, derived from the above
+- `tests/hook_config.rs`, `every_root_codescout_ignore_rule_has_its_crates_twin` — the guard
+- `docs/issues/archive/2026-09-07-gitignore-claude-rule-is-root-anchored-so-nested-dirs-escape.md`
+  — why a blanket rule plus a negation is not an available repair
 - `crates/librarian-mcp/` (the non-crate stub; the gap's only landed instance)
 - `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md` (cluster membership)

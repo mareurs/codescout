@@ -548,7 +548,7 @@ fn the_ignore_verdict_helper_discriminates() {
 // reader would go looking for, so re-reading the block returns "handled". It had already fired:
 // `crates/librarian-mcp/.codescout/usage.db` and `write.lock` are tracked. Measured 2026-09-10
 // against paths that do not exist, so the verdicts are about rules rather than about disk
-// (`docs/issues/2026-09-10-crate-level-codescout-ignore-covers-two-sidecars-and-misses-the-database.md`).
+// (`docs/issues/archive/2026-09-10-crate-level-codescout-ignore-covers-two-sidecars-and-misses-the-database.md`).
 //
 // The mechanism is that a pattern containing an internal `/` is anchored to its own directory
 // with or without a leading slash — so `.codescout/write.lock` READS as "at any depth" and
