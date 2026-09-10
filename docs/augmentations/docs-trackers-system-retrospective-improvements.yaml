@@ -1,0 +1,39 @@
+schema_version: 1
+prompt: 'Maintain the task table. Mark tasks done as commits land; add new tasks as scope expands; never delete completed tasks — they are part of the record. Task one-liners live in params; every task also keeps its own `## T-N — <title>` body section (that heading is what makes T-N citable). Append dated entries under ## History for status changes.'
+entry_collection: tasks
+params_schema:
+  type: object
+  required:
+  - tasks
+  properties:
+    tasks:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - task
+        - status
+        properties:
+          id:
+            type: string
+            pattern: ^T-\d+$
+          task:
+            type: string
+          status:
+            type: string
+            enum:
+            - open
+            - in-progress
+            - done
+            - blocked
+            - dropped
+          notes:
+            type: string
+render_template: |-
+  ## Tasks
+
+  | ID | Task | Status | Notes |
+  |---:|------|--------|-------|
+  {% for t in tasks %}| {{ t.id }} | {{ t.task }} | {{ t.status }} | {{ t.notes if t.notes is defined else "" }} |
+  {% endfor %}
