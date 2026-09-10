@@ -393,12 +393,6 @@ impl Tool for EditFile {
             // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["edit_file"] == 3) parses it.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
                 "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert or edits is set." },
                 "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
@@ -456,6 +450,10 @@ impl Tool for EditFile {
 
             }
         })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {

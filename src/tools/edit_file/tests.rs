@@ -1161,6 +1161,52 @@ async fn create_file_accepts_file_path_alias() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "via alias");
 }
 
+/// Task 3's `normalization_precedes_the_write_path_capture` proves the ORDERING
+/// (normalize-then-capture) with a fixture tool that hand-declares an alias. It
+/// cannot prove `create_file` itself benefits, because `CreateFile::param_aliases`
+/// still returned `&[]` at that point in the plan (Task 4/5's job). Drive the real
+/// `CreateFile` through `call_content` — never `call()` directly, since normalization
+/// lives at the `call_content` boundary and a direct `call()` test would pass or fail
+/// for reasons unrelated to alias wiring; `call()` has its own redundant fallback that
+/// would resolve `file_path` on its own regardless of `param_aliases()` wiring.
+///
+/// Regression this guards: before `CreateFile::param_aliases()` returned
+/// `crate::fs::PATH_PARAM_ALIAS_MAP`, `call_content`'s `write_path` capture read the
+/// literal key `"path"` before normalization ever ran, so a `file_path`-only call lost
+/// its `rel_path` write-path annotation silently (the write itself still succeeded).
+/// A relative path is used deliberately, so `annotate_write_path` files it under
+/// `rel_path` rather than `abs_path`.
+#[tokio::test]
+async fn create_file_via_alias_still_carries_the_write_path_annotation() {
+    let (dir, ctx) = project_ctx().await;
+    let rel = "aliased-annotated.txt";
+
+    let out = CreateFile
+        .call_content(
+            json!({
+                "file_path": rel,
+                "content": "via alias, annotated"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = out[0].as_text().map(|t| t.text.clone()).unwrap_or_default();
+    let val: serde_json::Value =
+        serde_json::from_str(&text).expect("a write result must round-trip as JSON");
+
+    assert_eq!(
+        val.get("rel_path").and_then(|v| v.as_str()),
+        Some(rel),
+        "a create_file(file_path=…) call must still carry the write-path annotation \
+             once normalization runs ahead of the capture; got {val}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(rel)).unwrap(),
+        "via alias, annotated"
+    );
+}
+
 #[tokio::test]
 async fn edit_file_accepts_file_path_alias() {
     // Same `file_path` alias support on the sibling write tool.

@@ -41,16 +41,6 @@ impl Tool for ReadFile {
             // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
-                // FIXTURE NOTE: the literal "Alias for " prefix on these four
-                // descriptions is load-bearing — src/server.rs's
-                // required_names_no_key_that_has_a_declared_alias (and its
-                // EXPECTED_ALIAS_COUNTS_BY_TOOL entry for "read_file", currently 4)
-                // parse it to derive this schema's alias relation. Reword any of
-                // them (e.g. to "Same as path") and that count silently drops.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
-                "output_id": { "type": "string", "description": "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back." },
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
                 "offset": { "type": "integer", "description": "Native-Read-style alias: 1-indexed start line (= start_line). Ignored when start_line/end_line are set." },
@@ -64,6 +54,19 @@ impl Tool for ReadFile {
         })
     }
 
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        // `output_id`/`file_id` join the path family: `path` already accepts
+        // `@tool_*`/`@cmd_*`/`@file_*` handles via `strip_buffer_ref_quotes`, so these
+        // were renames of `path`, never a separate capability.
+        &[
+            ("file_path", "path"),
+            ("relative_path", "path"),
+            ("file", "path"),
+            ("output_id", "path"),
+            ("file_id", "path"),
+        ]
+    }
+
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         // Native-`Read` compatibility: callers habitually pass offset/limit (a 1-indexed
         // start line + a line count, the built-in Read signature). Normalize to
@@ -73,6 +76,10 @@ impl Tool for ReadFile {
         let mut input = input;
         normalize_line_nav_aliases(&mut input);
 
+        // Redundant second layer: `Tool::call_content` already normalizes every alias in
+        // `param_aliases()` (see `param_alias.rs`) onto `path` before `call()` ever runs,
+        // so a caller reaching this fallback arrived via a direct `call()` in a test that
+        // bypasses that boundary. Kept rather than deleted because those tests exist.
         let raw_path = input["path"]
             .as_str()
             .or_else(|| {

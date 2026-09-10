@@ -36,13 +36,6 @@ impl Tool for Grep {
             "properties": {
                 "pattern": { "type": "string", "description": "Regex pattern" },
                 "path": { "type": "string", "description": "File or directory (default: project root)" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["grep"] == 1) parses it. `grep`'s
-                // `path` is optional (required=["pattern"] alone), so this alias is
-                // correctly NOT flagged as an offender — see the companion gate's
-                // scope note for why it's excluded there too.
-                "file_path": { "type": "string", "description": "Alias for path" },
                 "limit": { "type": "integer", "default": 50, "description": "Max matching lines" },
                 "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." },
                 "ignore_case": { "type": "boolean", "default": false, "description": "Case-insensitive match" },
@@ -52,6 +45,10 @@ impl Tool for Grep {
                 "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" }
             }
         })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {

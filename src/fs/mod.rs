@@ -229,29 +229,10 @@ pub(crate) async fn resolve_glob_for(
 /// signature) is by far the most common miss; `relative_path`/`file` predate it.
 pub(crate) const PATH_PARAM_ALIASES: &[&str] = &["file_path", "relative_path", "file"];
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Tasks 4-5, where the \
-        path-taking tools return it from Tool::param_aliases; Task 3 only wires the trait \
-        method, whose default is empty. The cfg_attr is load-bearing: a bare #[expect] reds \
-        `unfulfilled_lint_expectations` in the lib-TEST compilation, where the agreement test \
-        below genuinely uses the const."
-    )
-)]
 /// The same accept-set as [`PATH_PARAM_ALIASES`], as `(received, canonical)`
 /// pairs for `Tool::param_aliases`. Derived from one list by hand rather than
 /// generated, because `param_aliases` must be `&'static` and a const fn cannot
 /// build it; `path_aliases_and_alias_map_agree` (below) pins the two together.
-///
-/// `expect`, not `allow`, and only under `cfg(not(test))`: in test builds the
-/// agreement test below is the (genuine) consumer, so no suppression is
-/// needed there at all; outside test, nothing reads this yet (Task 4/5
-/// wires the first real tool's `param_aliases()` to return it) — and
-/// `expect` reds `unfulfilled_lint_expectations` the moment that changes,
-/// so the suppression cannot silently outlive its own justification the
-/// way a plain `allow` would. Delete this attribute in that task.
 pub(crate) const PATH_PARAM_ALIAS_MAP: crate::tools::param_alias::AliasMap = &[
     ("file_path", "path"),
     ("relative_path", "path"),
