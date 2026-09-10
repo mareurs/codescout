@@ -600,11 +600,36 @@ Expected: FAIL — `call_sees_the_canonical_key_never_the_alias` shows `seen=fil
 In `src/tools/core/types.rs`, make `input` mutable and normalize as the **first**
 statement of `call_content`, above the `selector` capture. Note the type path is
 `crate::tools::param_alias::…` — `mod core` is private, reachable only via `pub use core::*`
-(established in Task 1; the plan's original `crate::tools::param_alias::…` does not
-compile). **Also delete the `#[allow(dead_code)]` on `PATH_PARAM_ALIAS_MAP`
-(`src/fs/mod.rs:240`) in this task** — Task 1 added it because nothing consumed the constant,
-and wiring it here makes the allow a lie. `#[expect]` was verified unavailable: the agreement
-test reads the constant from `#[cfg(test)]`, which reds `unfulfilled_lint_expectations`.
+(established in Task 1; the form this plan originally used, with a `core::` segment between
+`tools::` and `param_alias::`, does not compile).
+
+**Do NOT delete the `#[allow(dead_code)]` on `PATH_PARAM_ALIAS_MAP` (`src/fs/mod.rs:236`) —
+REPLACE it** with the attribute below. An earlier draft of this step said *delete*, on the false
+premise that Task 3 wires the constant. It does not: Task 3 wires `self.param_aliases()`, whose
+default is `&[]`, and the first non-test consumer of `PATH_PARAM_ALIAS_MAP` arrives in **Task 4**.
+Deleting here leaves the const dead and uncovered, which reds
+`cargo clippy … -D warnings` with `constant PATH_PARAM_ALIAS_MAP is never used` for every session
+on the shared checkout until Task 4 lands — observed 2026-09-10 by a peer running the gate
+against this task's working tree.
+
+```rust
+#[cfg_attr(not(test), expect(dead_code, reason = "consumed by Tasks 4-5, where the \
+    path-taking tools return it from Tool::param_aliases; Task 3 only wires the trait \
+    method, whose default is empty. The cfg_attr is load-bearing: a bare #[expect] reds \
+    `unfulfilled_lint_expectations` in the lib-TEST compilation, where the agreement test \
+    genuinely uses the const."))]
+```
+
+**Why this form rather than `allow`.** In `cfg(test)` the attribute is absent, the agreement test
+uses the const, nothing fires. In `cfg(not(test))` it is `expect`, so it stays silent while the
+item is dead **and reds the moment Task 4 adds a consumer** — `unfulfilled_lint_expectations`,
+fatal under `-D warnings`. The suppression cannot become a stale lie quietly, which is what
+Task 1's review meant by *"removing the allow is a policy, not a mechanism"*. A **bare**
+`#[expect]` is genuinely unavailable — it reds the lib-test compilation, which Task 1's review
+verified by probe — but the `cfg_attr`-gated form is not, and it ships in-tree:
+`src/librarian/catalog/audit/host.rs:14-20` documents the pattern, why per-item rather than a
+file-scoped `#![allow]`, and that those attributes were *deleted, not widened, once
+`unfulfilled_lint_expectations` confirmed each item had become live*.
 
 ```rust
     async fn call_content(&self, mut input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
@@ -718,6 +743,14 @@ Message must list which test each of the four mutations reddened.
 - Produces: nothing new.
 
 - [ ] **Step 1: For each of the four tools, delete the alias properties and add the declaration**
+
+**First, delete the suppression on `PATH_PARAM_ALIAS_MAP` (`src/fs/mod.rs:236`).** This task adds
+its first non-test consumers, so the `#[cfg_attr(not(test), expect(dead_code, …))]` Task 3 left
+there becomes unfulfilled — and because it is `expect` rather than `allow`, clippy reds with
+`this lint expectation is unfulfilled` until you remove it. **You do not have to remember this
+step: the build fails if you skip it.** That is the entire reason Task 3 uses `expect` rather
+than `allow`, and it is the property CLAUDE.md § *Observer Blindness* asks for — a check that
+runs when nobody is worried.
 
 `read_file` — delete the `file_path`, `relative_path`, `file`, `output_id` properties **and
 the FIXTURE NOTE comment above them** (it documents a gate that no longer exists after Task
