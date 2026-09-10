@@ -198,15 +198,31 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
     # shellcheck disable=SC2086
     set -- $(printf '%s' "$ack" | tr -d '[:space:]')
     IFS="$_ifs2"
-    for _tok in "$@"; do
-        [ -n "$_tok" ] || continue
-        case ",$ack_matched," in
-            *",$_tok,"*) ;;
-            *) printf '\n  note: CODESCOUT_PUSH_ACK named %s, which authored no commit in\n' "$_tok" >&2
-               printf '  this push, so the ack had no effect on it. Check you named the sid\n' >&2
-               printf '  you meant -- an ack matching nothing is silent otherwise.\n' >&2 ;;
-        esac
-    done
+    # TWO STATES WORE ONE SENTENCE, AND THE NOTE MADE ONE OF THEM FALSE. Per-token, "X
+    # authored no commit in this push" is a claim about X and reads as "you named the wrong
+    # sid" -- correct when a foreign population exists and X is absent from it. When the
+    # population is EMPTY the same sentence is true of every sid alive and informative about
+    # none: nobody authored a foreign commit, so there was nothing for any ack to apply to.
+    # A pusher told to "check you named the sid you meant" goes looking for a typo that is
+    # not there. Split on $foreign_report, which is already built above, and say it once for
+    # the push rather than once per token -- the fact is about the range, not about a sid.
+    if [ -z "$foreign_report" ]; then
+        printf '\n  note: CODESCOUT_PUSH_ACK was set, but this push carries\n' >&2
+        printf '  no commits by another session -- there was no foreign population for it to\n' >&2
+        printf '  apply to, and the push was allowed on that basis, not on the ack. Nothing\n' >&2
+        printf '  was authorised because nothing needed authorising. Harmless; a stale ack in\n' >&2
+        printf '  a shell history is a habit, not an error.\n' >&2
+    else
+        for _tok in "$@"; do
+            [ -n "$_tok" ] || continue
+            case ",$ack_matched," in
+                *",$_tok,"*) ;;
+                *) printf '\n  note: CODESCOUT_PUSH_ACK named %s, which authored no commit in\n' "$_tok" >&2
+                   printf '  this push, so the ack had no effect on it. Check you named the sid\n' >&2
+                   printf '  you meant -- an ack matching nothing is silent otherwise.\n' >&2 ;;
+            esac
+        done
+    fi
 fi
 
 [ -n "$foreign_report" ] || exit 0
@@ -379,6 +395,11 @@ $remedy
   Routing the ask sideways is what makes a standoff -- four sessions held for eight hours
   that way, each correctly refusing to decide what none of them had authority over.
 
+  AND THE MIRROR, WHICH IS THE HALF THIS BANNER USED TO STATE IN ONE DIRECTION ONLY: your
+  ack records YOUR operator's decision and does not speak for the operators of the sessions
+  it names. "A peer cannot grant" and "your grant does not cover a peer" are the same rule
+  read from the two ends, and only the first was written down.
+
   A RUNG ASSIGNMENT EXPIRES. "I am last, blocking nobody" is true when formed and decays
   with no signal, and a session that believes it is last stops using refspecs -- which is
   exactly when a branch push publishes everyone beneath it. Carry the instant: "I am last as
@@ -388,6 +409,20 @@ $remedy
   the only route, and it goes to your operator, never to a peer:
 
       CODESCOUT_PUSH_ACK="$foreign_sids" git push <args>
+
+  THAT LIST IS THE GUARD'S ARITHMETIC, NOT A WITNESSED BINDING. It computed those sids from
+  the range; it did not witness your operator's decision about them, and it cannot -- the
+  decision is formed in prose and the ack carries sids, with no surface joining the two.
+  Handing you a ready-made list reads like a check that happened. Nothing here verifies that
+  what you described to your operator is what you are about to send.
+
+  AND TAKING THIS ROUTE OVERTAKES THE THREE-STATE QUESTION RATHER THAN ANSWERING IT. An ack
+  is not a fourth author state and it does not move anyone into "cleared": every author below
+  you stays exactly as UNCLEARED as they were, and the push proceeds on a different authority
+  instead. So the table above does not describe the outcome -- do not record the result as
+  consent by the named authors, and do not read your own ack back later as evidence that any
+  of them agreed. Raised independently by 3 of 5 authors polled after a real ack push on
+  2026-09-10; the sharpest form was "never resolved, only overtaken".
 
   AN AUTHORISATION NAMES A SET; A BRANCH PUSH SENDS A PREFIX. They coincide only when nothing
   lands between the decision and the push, which on a shared tree is the unusual case.

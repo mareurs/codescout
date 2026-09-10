@@ -971,6 +971,76 @@ has   "owns nothing: routes to the rung's author" "$OUT" "ASK THAT AUTHOR TO PUS
 # no assertion in this block would otherwise see.
 has   "owns nothing: and the three states reach it" "$OUT" "not withheld, UNCLEARED"
 
+# ---------------------------------------------------------------------------- Row 6
+# The three CODESCOUT_PUSH_ACK residuals of
+# docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md,
+# plus a fourth raised by five authors independently on 2026-09-10 after a real ack push.
+#
+# 6a/6b are BEHAVIOURAL and carry each other's control. 6c-6e are SHAPE assertions on the
+# banner's prose and cannot tell you the remedy is correct -- only that the step still
+# exists. That is the documented ceiling for remedy text (CLAUDE.md § Testing Discipline:
+# arrival, never answerability), and it is worth the three lines because deletion is the
+# regression that actually happens.
+
+# Row 6a -- an ack that matched nothing BECAUSE THERE WAS NO FOREIGN POPULATION. Alice
+# authors both commits, so foreign_report is empty and the guard allows; the ack names Bob.
+# "Bob authored no commit in this push" is true and useless -- nobody did, and the pusher
+# needs to hear that the ack applied to an empty set rather than to a wrong sid.
+new_repo
+commit "$ALICE" "alice base"
+R6_BASE="$(sha)"
+commit "$ALICE" "alice again"
+R6_TIP="$(sha)"
+run "$ALICE" "$BOB" "refs/heads/main $R6_TIP refs/heads/main $R6_BASE"
+eq    "empty population: allowed"                 "$EC" 0
+has   "empty population: says the set was empty"  "$OUT" "no commits by another session"
+
+# Row 6b -- THE POSITIVE CONTROL, and 6a is vacuous without it. Same ack, but a foreign
+# population EXISTS and Bob is simply not in it. Here the old wording is the correct one, so
+# a fix that merely deleted it would pass 6a and red here. Carol's commit is the load-bearing
+# detail: remove it and this row collapses into 6a.
+new_repo
+commit "$ALICE" "alice base"
+R6B_BASE="$(sha)"
+commit "$CAROL" "carol foreign"
+R6B_TIP="$(sha)"
+run "$ALICE" "$BOB" "refs/heads/main $R6B_TIP refs/heads/main $R6B_BASE"
+has   "wrong sid named: still says authored no commit" "$OUT" "authored no commit in"
+hasnt "wrong sid named: does not claim an empty set"   "$OUT" "no commits by another session"
+
+# Rows 6c-6e -- the banner. Needs a refusal, so: a foreign commit and no ack.
+new_repo
+commit "$ALICE" "alice base"
+R6C_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+R6C_TIP="$(sha)"
+run "$ALICE" - "refs/heads/main $R6C_TIP refs/heads/main $R6C_BASE"
+eq    "ack semantics: refused"                    "$EC" 1
+
+# 6c -- the MIRROR of "a peer CANNOT grant", which the banner has stated in one direction
+# only. An ack is one operator's decision; it does not make the named authors' operators
+# parties to it.
+has   "ack semantics: ack does not speak for the named authors" "$OUT" "does not speak for"
+
+# 6d -- residual 3. The banner hands over a ready-made sid list, which reads as though the
+# guard had checked those sids against what the operator was told. It cannot: the decision is
+# formed in prose and the ack carries sids. Do not read this as closing that gap -- it
+# removes a false assurance and the bug file records why no binding is reachable.
+has   "ack semantics: the sid list is not a witnessed binding" "$OUT" "did not witness"
+
+# 6e -- the fourth state. Raised independently by 3 of 5 authors polled after the 2026-09-10
+# ack push (sids 26cb9b5b, 343d53e1, 59112612), the sharpest being "never resolved, only
+# overtaken". The three-state table enumerates what an AUTHOR can hold; an operator ack is
+# not an author state, so a push taken that way leaves every author UNCLEARED and the table
+# unable to describe the outcome. A reader who follows the guard correctly ends somewhere its
+# own vocabulary has no word for.
+#
+# Asserts the full emphasis phrase rather than the bare word "overtakes": the word alone also
+# matches the closing attribution sentence, so this row would stay green if the load-bearing
+# claim were deleted and only the provenance note left behind.
+has   "ack semantics: says the ack overtakes rather than resolves" \
+      "$OUT" "OVERTAKES THE THREE-STATE QUESTION RATHER THAN ANSWERING IT"
+
 echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
