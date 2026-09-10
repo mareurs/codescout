@@ -145,7 +145,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // it converts is an invisible divergence into a pushed one, which is why
         // the hint names pushing rather than the refusal.
         //
-        // `ledger_has_unpushed_commits` allows (returns `false`) when `row.abs_path`
+        // `ledger_unpushed_commits` allows (returns an empty list) when `row.abs_path`
         // does not exist on disk — `git2::Repository::discover()` errs for a
         // nonexistent path even inside a valid repo, and every failure path in the
         // helper allows by design (Task 3). A catalog row surviving its file's
@@ -163,27 +163,42 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // remedy that does not unblock the call: push, retry, and
         // `allocate_entry_id` refuses again with "does not declare an
         // entry_prefix". Reading `row.abs_path` here (rather than adding a third
-        // `artifact::get`) is the same file access `ledger_has_unpushed_commits`
+        // `artifact::get`) is the same file access `ledger_unpushed_commits`
         // already needs the path for.
         if let Some(row) = artifact::get(&cat, &a.id)? {
             let text = std::fs::read_to_string(&row.abs_path).unwrap_or_default();
             let is_ledger =
                 !crate::util::librarian_guard::declared_entry_prefixes(&text).is_empty();
-            if is_ledger && ledger_has_unpushed_commits(std::path::Path::new(&row.abs_path)) {
+            let blocking = if is_ledger {
+                ledger_unpushed_commits(std::path::Path::new(&row.abs_path))
+            } else {
+                Vec::new()
+            };
+            if !blocking.is_empty() {
+                let listed = blocking
+                    .iter()
+                    .map(|c| format!("\n  {c}"))
+                    .collect::<String>();
                 return Err(RecoverableError::with_hint(
-                    "append_entry: this ledger has commits that are not on its upstream \
-                     branch, so its `entry_high_water_` mark is ahead of what any other \
-                     host can see"
-                        .to_string(),
+                    format!(
+                        "append_entry: this ledger has commits that are not on its upstream \
+                         branch, so its `entry_high_water_` mark is ahead of what any other \
+                         host can see. Blocking commits, newest first:{listed}"
+                    ),
                     "Push this ledger's commits, then allocate. Another clone reads its \
                      own committed high-water mark, so until yours is pushed both hosts \
                      resolve the same next id and the collision is only visible after \
-                     the branches merge — as one token with two definitions. If you \
-                     cannot push right now (no network, no push access), do not write \
-                     the entry by hand instead — a declared `entry_prefix` puts this \
-                     file off-limits to direct `edit_file`. Note the entry \
-                     somewhere worktree-local instead, and fold it into the ledger once \
-                     these commits are pushed."
+                     the branches merge — as one token with two definitions. The shas \
+                     above are named because `git log '@{upstream}'..HEAD -- <ledger>` \
+                     will NOT agree with them: it applies history simplification and \
+                     omits a merge that touched the file, so it can report zero while \
+                     this refusal stands. Use `--full-history`, or just `git show` the \
+                     shas. A commit tagged [merge] is one you may not be able to push \
+                     yourself — it is likely a peer's, and the pre-push guard will \
+                     refuse it. If you cannot push right now, do not write the entry by \
+                     hand instead — a declared `entry_prefix` puts this file off-limits \
+                     to direct `edit_file`. Note the entry somewhere worktree-local \
+                     instead, and fold it into the ledger once these commits are pushed."
                         .to_string(),
                 ));
             }
@@ -405,7 +420,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     Ok(out)
 }
 
-/// Does this ledger's own file carry commits in `@{upstream}..HEAD`?
+/// Which of this ledger's own commits sit in `@{upstream}..HEAD`?
+///
+/// Returns a bounded, human-readable sample — empty means "allocation may proceed",
+/// so `!is_empty()` is the guard. **It names them because the refusal has to.** The
+/// obvious way to predict this guard, `git log '@{upstream}'..HEAD -- <ledger>`,
+/// applies history simplification and omits a MERGE that touched the path, while the
+/// revwalk below diffs against `parent(0)` and sees it. Measured 2026-09-10: the
+/// diagnostic returned 0 and this guard refused, so the reader had a refusal they
+/// could not check and no way to discover the answer was a merge. The shas close that.
 ///
 /// PER-FILE, not per-branch, and that is the whole design. Measured on codescout
 /// 2026-09-02: HEAD was 34 commits ahead of `origin/experiments` — the normal state
@@ -416,33 +439,39 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// EVERY FAILURE PATH ALLOWS. No repository, no configured upstream, an unreadable
 /// ref, and — notably — a `abs_path` that does not exist on disk: `git2::Repository::
 /// discover()` errs for a nonexistent path even inside a valid repo, so a ledger
-/// absent at call time silently allows. Each of these returns `false`. A repo with
-/// no remote has no second host, so refusing there is a false positive with no
+/// absent at call time silently allows. Each of these returns an EMPTY list. A repo
+/// with no remote has no second host, so refusing there is a false positive with no
 /// recoverable reading, and this guard is partial by construction — degrading it to
 /// a hard failure trades a real capability for no safety.
-fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
+fn ledger_unpushed_commits(abs_path: &std::path::Path) -> Vec<String> {
+    // How many to NAME. The walk still counts every one, so the reader gets the total
+    // and a bounded sample: a refusal that pastes 44 commits is one nobody reads, and
+    // one that names none is the defect this function exists to close.
+    const NAME_AT_MOST: usize = 5;
+
+    let none: Vec<String> = Vec::new();
     let Ok(repo) = git2::Repository::discover(abs_path) else {
-        return false;
+        return none;
     };
-    let Ok(head) = repo.head() else { return false };
+    let Ok(head) = repo.head() else { return none };
     let Some(shorthand) = head.shorthand() else {
-        return false;
+        return none;
     };
     let Ok(branch) = repo.find_branch(shorthand, git2::BranchType::Local) else {
-        return false;
+        return none;
     };
     let Ok(upstream) = branch.upstream() else {
-        return false;
+        return none;
     };
     let (Some(head_oid), Some(up_oid)) = (head.target(), upstream.get().target()) else {
-        return false;
+        return none;
     };
     if head_oid == up_oid {
-        return false;
+        return none;
     }
 
     let Ok(workdir) = repo.workdir().ok_or(()) else {
-        return false;
+        return none;
     };
     // Canonicalize BOTH sides before comparing. `repo.workdir()` is already resolved
     // by libgit2; `abs_path` is whatever the caller held. On macOS every
@@ -467,22 +496,27 @@ fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
         .canonicalize()
         .unwrap_or_else(|_| workdir.to_path_buf());
     let Ok(rel) = abs_c.strip_prefix(&work_c) else {
-        return false;
+        return none;
     };
     let rel = rel.to_string_lossy().replace('\\', "/");
 
     let mut walk = match repo.revwalk() {
         Ok(w) => w,
-        Err(_) => return false,
+        Err(_) => return none,
     };
     if walk.push(head_oid).is_err() || walk.hide(up_oid).is_err() {
-        return false;
+        return none;
     }
+    let mut named: Vec<String> = Vec::new();
+    let mut total = 0usize;
     for oid in walk.flatten() {
         let Ok(commit) = repo.find_commit(oid) else {
             continue;
         };
         let Ok(tree) = commit.tree() else { continue };
+        // FIRST PARENT ONLY, and that is why a merge lands here at all. It is also why
+        // `git log -- <path>` disagrees: simplification hides such a merge, this does
+        // not. The `[merge]` tag below exists so the reader sees which kind they have.
         let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
         let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
             continue;
@@ -498,10 +532,23 @@ fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool {
                     .unwrap_or(false)
         });
         if touched {
-            return true;
+            total += 1;
+            if named.len() < NAME_AT_MOST {
+                let subject = commit.summary().unwrap_or("(no subject)");
+                let tag = if commit.parent_count() > 1 {
+                    " [merge]"
+                } else {
+                    ""
+                };
+                let short: String = oid.to_string().chars().take(8).collect();
+                named.push(format!("{short}{tag} {subject}"));
+            }
         }
     }
-    false
+    if total > named.len() {
+        named.push(format!("... and {} more", total - named.len()));
+    }
+    named
 }
 
 #[cfg(test)]
@@ -1529,7 +1576,7 @@ mod tests {
         let led = tmp.path().join("ledger.md");
         std::fs::write(&led, "x").unwrap();
         commit_all(&repo, "first");
-        assert!(!ledger_has_unpushed_commits(&led));
+        assert!(ledger_unpushed_commits(&led).is_empty());
     }
 
     /// A path outside any git repository must ALLOW, not panic.
@@ -1538,7 +1585,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let led = tmp.path().join("ledger.md");
         std::fs::write(&led, "x").unwrap();
-        assert!(!ledger_has_unpushed_commits(&led));
+        assert!(ledger_unpushed_commits(&led).is_empty());
     }
 
     /// THE DISCRIMINATION THAT MATTERS. A branch-wide check passes a refusal-only
@@ -1563,22 +1610,22 @@ mod tests {
         commit_path(&origin_clone, "other.md", "touch other");
 
         assert!(
-            !ledger_has_unpushed_commits(&ledger),
+            ledger_unpushed_commits(&ledger).is_empty(),
             "an unpushed commit on ANOTHER file must not block this ledger"
         );
         assert!(
-            !ledger_has_unpushed_commits(&nested),
+            ledger_unpushed_commits(&nested).is_empty(),
             "an unpushed commit on an unrelated file must not block the nested ledger either"
         );
 
         std::fs::write(&ledger, "changed").unwrap();
         commit_path(&origin_clone, "ledger.md", "touch ledger");
         assert!(
-            ledger_has_unpushed_commits(&ledger),
+            !ledger_unpushed_commits(&ledger).is_empty(),
             "an unpushed commit on THIS ledger must be reported"
         );
         assert!(
-                !ledger_has_unpushed_commits(&nested),
+                ledger_unpushed_commits(&nested).is_empty(),
                 "a commit on the top-level ledger.md must not falsely mark the same-named nested ledger unpushed"
             );
 
@@ -1589,7 +1636,7 @@ mod tests {
             "touch nested ledger",
         );
         assert!(
-            ledger_has_unpushed_commits(&nested),
+            !ledger_unpushed_commits(&nested).is_empty(),
             "an unpushed commit on THIS nested ledger must be reported"
         );
         let _ = tmp;
@@ -1625,7 +1672,7 @@ mod tests {
         commit_path(&work, "ledger.md", "touch ledger");
 
         assert!(
-            ledger_has_unpushed_commits(&direct),
+            !ledger_unpushed_commits(&direct).is_empty(),
             "control: the direct path must report. If THIS row fails, the fixture is \
              wrong and the symlink assertion below proves nothing"
         );
@@ -1635,7 +1682,7 @@ mod tests {
         let link = tmp.path().join("link");
         std::os::unix::fs::symlink(&work, &link).unwrap();
         assert!(
-            ledger_has_unpushed_commits(&link.join("ledger.md")),
+            !ledger_unpushed_commits(&link.join("ledger.md")).is_empty(),
             "a path reaching the ledger through a symlink must report the same unpushed \
              commit — `strip_prefix` against a canonicalized workdir fails here, and \
              every failure path in this helper allows, so the guard reports the SAFE \
@@ -1671,6 +1718,63 @@ mod tests {
             msg.contains("Push this ledger's commits, then allocate."),
             "hint must name the actual remedy sentence, not just any occurrence of \
              the word \"push\" (the explanatory second sentence also contains it): {msg}"
+        );
+        let _ = tmp;
+    }
+
+    /// The refusal must NAME the blocking commits, because the reader cannot otherwise
+    /// check it — and the obvious check disagrees with the guard.
+    ///
+    /// Measured 2026-09-10 on this checkout: a session predicting this refusal ran
+    /// `git rev-list '@{upstream}'..HEAD -- <ledger>`, got **0**, and was refused anyway.
+    /// `--full-history` returns 1 — a MERGE commit, which git's default history
+    /// simplification omits and this guard's revwalk (which diffs against `parent(0)`)
+    /// sees. Both are right about their own question, and the diagnostic errs in the
+    /// ALLOWING direction, so the reader concludes the ledger is clear and is left with
+    /// nothing to reconcile. The guard has already walked those commits; not naming them
+    /// is what makes the refusal uncheckable.
+    ///
+    /// Asserts the sha appears, never a count and never the phrasing: a count reds on
+    /// every fixture change, and pinned prose reds on every rewording. The sha is the
+    /// thing a reader carries to `git show`.
+    /// `docs/issues/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`
+    #[tokio::test]
+    async fn the_unpushed_refusal_names_the_commits_that_block_it() {
+        let (tmp, work) = repo_with_upstream();
+        let ledger = work.join("ledger.md");
+        std::fs::write(&ledger, "---\nentry_prefix: R\n---\n\n# L\n\n## R-1 — a\n").unwrap();
+        commit_path(&work, "ledger.md", "add ledger");
+        // Captured from the fixture rather than hardcoded, so the assertion cannot pass
+        // against some other commit that happens to be named in the message.
+        let out = std::process::Command::new("git")
+            .args(["-C", work.to_str().unwrap(), "rev-parse", "HEAD"])
+            .output()
+            .expect("fixture repo answers rev-parse");
+        let blocking = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(
+            blocking.len() >= 8,
+            "fixture must produce a commit to name, got {blocking:?}"
+        );
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "led", &ledger);
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": "led", "id_prefix": "R",
+                "anchor_heading": "## L", "title": "t", "body": "b"
+            }),
+        )
+        .await
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains(&blocking[..8]),
+            "the refusal must name the blocking commit so the reader can `git show` it \
+             instead of re-deriving a range whose obvious form disagrees with this guard: \
+             expected {} in {msg}",
+            &blocking[..8]
         );
         let _ = tmp;
     }
