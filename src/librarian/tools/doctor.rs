@@ -521,14 +521,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `managed_roots` rather than widening the critical section.
     let (declared_root_violations, declared_roots_health) = scan_declared_project_roots(ctx);
 
-    // Task 7: `DoctorScope::new` locks `ctx.catalog` internally (its cross-root-cites
-    // query needs the connection). `parking_lot::Mutex` is NOT reentrant, so this must
-    // run BEFORE `cat` is taken below — constructing it after would deadlock the very
-    // first `doctor` call. Nothing between here and the lock depends on `doctor_scope`,
-    // so hoisting it costs nothing.
-    let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
-
+    // Task 7 (review round 1, Commit B): `DoctorScope::new` no longer locks
+    // `ctx.catalog` internally — its cross-root-cites query takes a `&Connection`
+    // directly instead, so the catalog is locked exactly once, here, and the
+    // connection is threaded into `DoctorScope::new`. The earlier form locked
+    // twice (once inside `DoctorScope::new`, once here) relying on hoisting the
+    // first lock above the second to dodge `parking_lot::Mutex`'s non-reentrancy;
+    // this form has only one lock, so there is nothing to dodge.
     let cat = ctx.catalog.lock();
+    let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx, &cat.conn)?;
+
     let mut all_violations: Vec<Violation> = Vec::new();
 
     all_violations.extend(declared_root_violations);
@@ -1597,7 +1599,9 @@ async fn run_fix(
                 super::scope::UmbrellaPolicy::Require,
                 super::scope::Scope::Project,
             )?;
-            let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx)?;
+            let cat = ctx.catalog.lock();
+            let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx, &cat.conn)?;
+            drop(cat);
             reseat_worktree(ctx, &mut doctor_scope, scope_fallback)
         }
         // Sweep-all WITHIN ONE ROOT, dry-run by default. Reuses `mv`'s repair so the
@@ -7953,8 +7957,12 @@ mod tests {
         seed_declared(&cat, tmp.path(), "healthy", Some("true"), true);
         seed_declared(&cat, tmp.path(), "ordinary", None, false);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
 
         assert_eq!(
@@ -7991,8 +7999,12 @@ mod tests {
         seed_declared(&cat, tmp.path(), "off", Some("false"), false);
         seed_declared(&cat, tmp.path(), "empty", Some("\"\""), false);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let all = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
         let by_check = |name: &str| -> std::collections::BTreeSet<String> {
             all.iter()
@@ -8071,8 +8083,12 @@ mod tests {
             false,
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let all = scan_augmentation_declared_but_absent(&mut ds, &cat.conn).unwrap();
         let detail = |id: &str| -> String {
             all.iter()
@@ -8197,8 +8213,12 @@ mod tests {
         )
         .unwrap();
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_augmentation_declared_but_absent(&mut ds, &cat.conn)
                 .unwrap()
@@ -8234,8 +8254,12 @@ mod tests {
         );
         seed_bug(&cat, tmp.path(), "clean", "fixed", None);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
 
         assert_eq!(
@@ -8267,8 +8291,12 @@ mod tests {
         seed_bug(&cat, tmp.path(), "b", "mitigated", Some("x"));
         seed_bug(&cat, tmp.path(), "c", "wontfix", Some("x"));
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 3, "all three terminal statuses count: {v:#?}");
     }
@@ -8283,8 +8311,12 @@ mod tests {
         seed_bug(&cat, tmp.path(), "empty", "fixed", Some(""));
         seed_bug(&cat, tmp.path(), "blank", "fixed", Some("   "));
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_terminal_status_with_caveat(&mut ds, &cat.conn)
                 .unwrap()
@@ -8308,8 +8340,12 @@ mod tests {
             Some("widened another open bug"),
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "archiving must not silence a caveat: {v:#?}");
         assert!(v[0].path.contains("archive"));
@@ -8325,8 +8361,12 @@ mod tests {
         let long: String = "—é→ ".repeat(120);
         seed_bug(&cat, tmp.path(), "verbose", "fixed", Some(&long));
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1);
         assert!(
@@ -8415,7 +8455,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
@@ -8448,7 +8489,8 @@ mod tests {
 
         let (v, _) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1);
@@ -8480,7 +8522,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
@@ -8514,7 +8557,10 @@ mod tests {
         // Scope::All would admit the other repo's row too, defeating the very
         // exclusion this test exists to check — this needs a REAL project scope
         // tied to ctx's own root so the other repo's bug is refused, not admitted.
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let (v, health) = {
             let cat = ctx.catalog.lock();
             scan_archived_fix_sha_unresolvable(&ctx, &mut ds, &cat.conn).unwrap()
@@ -8572,7 +8618,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
 
@@ -8644,7 +8691,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the unanchored record fires: {v:#?}");
@@ -8673,7 +8721,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 2);
@@ -8704,7 +8753,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
@@ -8737,7 +8787,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
@@ -8756,7 +8807,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "wontfix owes no anchor: {v:#?}");
@@ -8783,7 +8835,10 @@ mod tests {
         );
         let ctx = ctx_rooted_at(cat, &active_root);
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_terminal_status_without_fix_anchor(&mut ds, &cat.conn).unwrap()
@@ -8839,7 +8894,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the anchored open record fires: {v:#?}");
@@ -8867,7 +8923,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -8918,7 +8975,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "none of these declares an anchor: {v:#?}");
@@ -8955,7 +9013,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 2, "both shapes are declarations: {v:#?}");
@@ -8976,7 +9035,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
@@ -9007,7 +9067,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
@@ -9040,7 +9101,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
@@ -9077,7 +9139,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
@@ -9132,7 +9195,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the Fix-section anchor counts: {v:#?}");
@@ -9156,7 +9220,10 @@ mod tests {
         );
         let ctx = ctx_rooted_at(cat, &active_root);
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_non_terminal_status_with_fix_anchor(&mut ds, &cat.conn).unwrap()
@@ -9251,7 +9318,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the cited bug fires: {v:#?}");
@@ -9269,7 +9337,8 @@ mod tests {
         // The whole justification for this check existing.
         let sibling = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -9295,7 +9364,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "a day-old citation has not settled: {v:#?}");
@@ -9328,7 +9398,8 @@ mod tests {
 
         let (v, _health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -9361,7 +9432,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(v.is_empty(), "markdown is not source: {v:#?}");
@@ -9395,7 +9467,8 @@ mod tests {
 
         let (v, _health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -9428,7 +9501,10 @@ mod tests {
         );
         let ctx = ctx_rooted_at(cat, &root);
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let (v, health) = {
             let cat = ctx.catalog.lock();
             scan_open_bug_cited_from_source(&ctx, &mut ds, &cat.conn).unwrap()
@@ -9492,7 +9568,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_open_bug_cited_from_source(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -9678,7 +9755,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "only the unterminated file fires: {v:#?}");
@@ -9705,7 +9783,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert!(
@@ -9729,7 +9808,8 @@ mod tests {
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_unterminated_fence(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -9757,7 +9837,10 @@ mod tests {
         );
         let ctx = ctx_rooted_at(cat, &active_root);
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_unterminated_fence(&mut ds, &cat.conn).unwrap()
@@ -9802,7 +9885,8 @@ mod tests {
 
         let (v, health) = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_archived_fix_sha_unresolvable(&ctx, &mut scope, &cat.conn).unwrap()
         };
         assert_eq!(
@@ -9908,8 +9992,12 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "anywhere", "/somewhere/entirely/else/a.md");
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let (v, _) = scan_artifact_paths(&cat.conn, &[], &[], &mut ds).unwrap();
         assert!(
             !v.iter()
@@ -9931,8 +10019,12 @@ mod tests {
         #[cfg(not(windows))]
         let roots = vec![PathBuf::from("/home/dev/work/codescout")];
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let (v, _) = scan_artifact_paths(&cat.conn, &roots, &[], &mut ds).unwrap();
         assert!(
             v.iter().any(|x| x.check == "abs_path_must_be_absolute"),
@@ -9974,8 +10066,12 @@ mod tests {
 
         let roots = vec![active.clone()];
         let known = vec![sibling.clone()];
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known, &mut ds).unwrap();
 
         let outside: Vec<&str> = violations
@@ -10085,7 +10181,10 @@ mod tests {
 
         let roots = vec![active.clone()];
         let known = vec![umbrella_member.clone(), other_known_root.clone()];
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let cat = ctx.catalog.lock();
         let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known, &mut ds).unwrap();
 
@@ -10127,8 +10226,12 @@ mod tests {
             &sibling.join("docs").join("b.md").to_string_lossy(),
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let (violations, scoped) = scan_artifact_paths(&cat.conn, &[active], &[], &mut ds).unwrap();
         assert_eq!(
             violations
@@ -10541,8 +10644,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "one finding per LEDGER, got {v:?}");
         assert_eq!(v[0].check, "ledger_defines_nothing");
@@ -10570,8 +10677,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "entry_without_definition");
@@ -10625,8 +10736,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "entry_without_definition");
@@ -10683,8 +10798,12 @@ mod tests {
             "# A\n\n## BL-3 — third, archived\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
@@ -10719,8 +10838,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
@@ -10751,8 +10874,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(
@@ -10775,8 +10902,12 @@ mod tests {
             "# L\n\n## BL-1 — first\n\nbody\n\n## BL-2 — second\n\nbody\n",
             &["BL-1", "BL-2"],
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_undefined_entries(&mut ds, &cat.conn)
                 .unwrap()
@@ -10806,14 +10937,22 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a minority anchor is a params-canonical tracker; nagging it is noise"
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -10847,8 +10986,12 @@ mod tests {
             "T-1 is still open; so is T-3.\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "cited_prefix_with_no_definer");
@@ -10878,8 +11021,12 @@ mod tests {
             "One passing mention of T-1.\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn)
                 .unwrap()
@@ -10917,8 +11064,12 @@ mod tests {
             seed_ledger(&cat, name, &tmp.path().join(format!("{name}.md")), &body);
         }
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
         let prefixes: Vec<&str> = v
             .iter()
@@ -10978,8 +11129,12 @@ mod tests {
             seed_ledger(&cat, name, &tmp.path().join(format!("{name}.md")), body);
         }
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap();
         let reported = |p: &str| v.iter().any(|x| x.detail.contains(&format!("`{p}-N`")));
 
@@ -11015,8 +11170,12 @@ mod tests {
             "T-1 and T-99 both come up here, alongside T-100.\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn)
                 .unwrap()
@@ -11046,8 +11205,12 @@ mod tests {
             "T-1, T-2, and T-3 are all still pending.\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn)
                 .unwrap()
@@ -11089,7 +11252,10 @@ mod tests {
         seed_ledger(&cat, "out-d", &sibling_root.join("d.md"), "QQ-3 too.\n");
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap()
@@ -11164,7 +11330,10 @@ mod tests {
         seed_ledger(&cat, "in-b", &active_root.join("b.md"), "So is HY-3.\n");
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap()
@@ -11224,7 +11393,10 @@ mod tests {
         seed_ledger(&cat, "out-c", &sibling_root.join("c.md"), "As is MM-4.\n");
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_prefix_with_no_definer(&mut ds, &cat.conn).unwrap()
@@ -11437,8 +11609,12 @@ mod tests {
             &["BL-1", "BL-2"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "params_behind_body");
@@ -11494,16 +11670,15 @@ mod tests {
             .with_current_project(cp)
             .build();
 
-        // Task 7: `DoctorScope::new` locks `ctx.catalog` internally for non-`All` scopes
-        // (its cross-root-cites query needs the connection), and `parking_lot::Mutex` is
-        // NOT reentrant — so both scopes must be constructed BEFORE `cat` is locked below,
-        // never after, or this deadlocks. Same reordering as `doctor::call()`.
-        let mut project_scope =
-            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
-        let mut repo_scope =
-            scope::DoctorScope::new(super::super::scope::Scope::Repo, &ctx).unwrap();
-
+        // Task 7 (review round 1, Commit B): `DoctorScope::new` takes the connection
+        // directly now, so the catalog is locked once, here, before both scopes are
+        // built from the same held connection.
         let cat = ctx.catalog.lock();
+        let mut project_scope =
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap();
+        let mut repo_scope =
+            scope::DoctorScope::new(super::super::scope::Scope::Repo, &ctx, &cat.conn).unwrap();
+
         let project_v = scan_params_behind_body(&mut project_scope, &cat.conn).unwrap();
         assert!(
             project_v.is_empty(),
@@ -11919,11 +12094,12 @@ mod tests {
             let ctx = TestToolContextBuilder::new(cat)
                 .with_current_project(cp)
                 .build();
-            // Task 7: construct BEFORE locking `ctx.catalog` — `DoctorScope::new` locks it
-            // internally for non-`All` scopes, and `parking_lot::Mutex` is not reentrant.
-            let mut ds =
-                scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+            // Task 7 (review round 1, Commit B): the catalog is locked once, here,
+            // before `ds` is built, and the connection is passed straight in.
             let cat = ctx.catalog.lock();
+            let mut ds =
+                scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn)
+                    .unwrap();
             let v = (row.run)(&mut ds, &cat.conn).unwrap();
             assert!(
                 v.is_empty(),
@@ -11961,8 +12137,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().len(),
             1,
@@ -12043,8 +12223,12 @@ mod tests {
             &["open", "done-archived"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_params_behind_body(&mut ds, &cat.conn)
                 .unwrap()
@@ -12104,8 +12288,12 @@ mod tests {
             &["open", "done", "dropped"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_params_status_drift(&mut ds, &cat.conn).unwrap();
         let detail = v.first().map(|x| x.detail.clone()).unwrap_or_default();
 
@@ -12141,8 +12329,12 @@ mod tests {
             &["open", "done-archived"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_params_status_drift(&mut ds, &cat.conn)
                 .unwrap()
@@ -12207,8 +12399,12 @@ mod tests {
             &["open", "done"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_params_status_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(v[0].detail.contains("FT-1"), "{}", v[0].detail);
@@ -12235,8 +12431,12 @@ mod tests {
             &["open", "done", "dropped"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_params_status_drift(&mut ds, &cat.conn)
                 .unwrap()
@@ -12286,8 +12486,12 @@ mod tests {
             &["open", "done"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_params_status_drift(&mut ds, &cat.conn).unwrap().len(),
             1,
@@ -12315,8 +12519,12 @@ mod tests {
             &["BL-1"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_params_status_drift(&mut ds, &cat.conn)
                 .unwrap()
@@ -12343,8 +12551,12 @@ mod tests {
             &["open", "done"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(scan_params_status_drift(&mut ds, &cat.conn)
             .unwrap()
             .is_empty());
@@ -12365,8 +12577,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "every params row IS in the body, so the snapshot looks perfectly in sync"
@@ -12401,8 +12617,12 @@ mod tests {
             ),
             "fixture precondition: this body does NOT keep a snapshot"
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "the gate silences the row question here, as it should"
@@ -12441,8 +12661,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a body with no table cannot have a table that lags"
@@ -12470,8 +12694,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -12500,8 +12728,12 @@ mod tests {
             &["BL-1", "BL-2"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty());
     }
 
@@ -12531,8 +12763,12 @@ mod tests {
             &["BL-1"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         let detail = &v[0].detail;
         assert!(
@@ -12557,8 +12793,12 @@ mod tests {
         let body: String = (1..=13).map(|n| format!("| BL-{n} |\n")).collect();
         seed_tracker(&cat, "capped", tmp.path(), &body, &["BL-1"]);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_params_behind_body(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         let detail = &v[0].detail;
@@ -12594,8 +12834,12 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -12630,8 +12874,12 @@ mod tests {
             "# Notes\n\nAll prose. The rows live in params by design.\n",
             &["BL-1", "BL-2", "BL-3"],
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a tracker anchoring no ids keeps no snapshot — nothing can be behind"
@@ -12667,8 +12915,12 @@ mod tests {
                 "BL-11", "BL-12",
             ],
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "a body anchoring a small scattered minority is mentioning ids, not \
@@ -12690,8 +12942,12 @@ mod tests {
         let refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         seed_tracker(&cat, "lagging", tmp.path(), &body, &refs);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -12712,8 +12968,12 @@ mod tests {
             "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n",
             &["BL-1", "BL-2"],
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "params and body agree — there is nothing to report"
@@ -12745,8 +13005,12 @@ mod tests {
                  We should also look at BL-4 sometime.\n",
             &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_snapshot_drift(&mut ds, &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "BL-4 is mentioned, not rendered: {v:?}");
         assert!(v[0].detail.contains("BL-4"), "{}", v[0].detail);
@@ -12779,15 +13043,23 @@ mod tests {
             &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_snapshot_drift(&mut ds, &cat.conn).unwrap().is_empty(),
             "no table exists here, so no table can be behind"
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -12829,8 +13101,12 @@ mod tests {
 
         // No managed roots: the outside-roots check is skipped entirely, so
         // this existing assertion set is unchanged by its addition.
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let (v, _) = scan_artifact_paths(&cat.conn, &[], &[], &mut ds).unwrap();
         let mut by_check: std::collections::BTreeMap<&str, usize> = Default::default();
         for x in &v {
@@ -13439,8 +13715,12 @@ mod tests {
         // Plain rows with no linked-worktree ancestor anywhere on disk —
         // the scan must not flag anything (safe default).
         seed_artifact(&cat, "plain", "/tmp/plain/doc.md");
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert!(violations.is_empty());
     }
@@ -13484,8 +13764,12 @@ mod tests {
         // no real .git-file layout on disk this would be empty (see the
         // no-worktree-rows test above). Here it must find exactly the one
         // seeded row.
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(violations.len(), 1, "the worktree-scoped row is flagged");
         let v = &violations[0];
@@ -13529,8 +13813,12 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("wt-row", "items", &["a", "b"])).unwrap();
         augmentation::upsert(&cat, &aug_row(&main_id, "items", &["b", "c"])).unwrap();
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             violations.len(),
@@ -13843,8 +14131,12 @@ mod tests {
         let main_root_str = crate::util::fs::RepoPath::from_path(&main_root).to_string();
         reg::upsert_active(&cat, &worktree_root_str, &main_root_str, None, 1000).unwrap();
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_worktree_scoped(&mut ds, &cat.conn).unwrap();
         assert_eq!(violations.len(), 1);
         let detail: serde_json::Value = serde_json::from_str(&violations[0].detail).unwrap();
@@ -14343,6 +14635,15 @@ root = "work/elsewhere/ghost"
     fn unscoped_ctx() -> ToolContext {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
+    /// A throwaway connection for `DoctorScope::new`'s `conn` parameter, paired
+    /// with `unscoped_ctx()` (review round 1, Commit B): every call site that
+    /// uses this helper constructs `Scope::All`, whose `roots.is_empty()` branch
+    /// makes `DoctorScope::new` skip `cross_root_cites` entirely — `conn` is
+    /// never queried on that path, so it need not be a connection to the same
+    /// catalog `unscoped_ctx()` wraps, or carry any schema at all.
+    fn unscoped_conn() -> rusqlite::Connection {
+        rusqlite::Connection::open_in_memory().unwrap()
+    }
 
     /// The exposure-map key: `entry_indegree` counts against the file that DEFINES the
     /// entry, so a test faking exposure must name the same definer or the scan looks up a
@@ -14426,8 +14727,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-1"), 9usize);
         deg.insert(deg_key(&p, "R-2"), 1usize);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_conditional_past_due(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -14456,8 +14761,12 @@ root = "work/elsewhere/ghost"
 
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-3"), EXPOSURE_THRESHOLD);
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_conditional_past_due(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -14498,8 +14807,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "PV-2"), EXPOSURE_THRESHOLD);
         deg.insert(deg_key(&p, "PV-8"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_conditional_past_due(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -14524,8 +14837,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_conditional_past_due(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -14555,8 +14872,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-98"), EXPOSURE_THRESHOLD + 50);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_conditional_past_due(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -14582,8 +14903,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-60"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_conditional_past_due(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -14620,8 +14945,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&active, "R-61"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_conditional_past_due(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -15087,7 +15416,10 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&out_of_scope, "R-81"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_conditional_past_due(&mut ds, &cat.conn, &deg).unwrap()
@@ -15133,8 +15465,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-3"), 99usize);
 
         // 2026-08-20 as days since epoch.
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685).unwrap();
         let ids: Vec<String> = v
             .iter()
@@ -15203,8 +15539,12 @@ root = "work/elsewhere/ghost"
         }
         seed_ledger(&cat, "led", &p, &text);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(v.len(), 33);
         let got: Vec<String> = v
@@ -15237,8 +15577,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-9"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15269,8 +15613,12 @@ root = "work/elsewhere/ghost"
 
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD);
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15312,8 +15660,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-99"), EXPOSURE_THRESHOLD + 50);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15344,8 +15696,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "PV-3"), EXPOSURE_THRESHOLD);
         deg.insert(deg_key(&p, "PV-9"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
             v.len(),
@@ -15372,8 +15728,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-5"), EXPOSURE_THRESHOLD);
         deg.insert(deg_key(&p, "R-6"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15398,8 +15758,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15445,8 +15809,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-8"), EXPOSURE_THRESHOLD);
         deg.insert(deg_key(&p, "R-9"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15477,8 +15845,12 @@ root = "work/elsewhere/ghost"
                  ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_validity_unparseable(&mut ds, &cat.conn).unwrap();
         let ids: Vec<&str> = violations.iter().map(|v| v.path.as_str()).collect();
         assert_eq!(
@@ -15536,8 +15908,12 @@ root = "work/elsewhere/ghost"
          ## R-3 — unknown class\n\n**Valid:** conditionally speaking\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let violations = scan_validity_unparseable(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             violations.len(),
@@ -15603,8 +15979,12 @@ root = "work/elsewhere/ghost"
             "## R-61 — archived by path\n\n**Valid:** dated 2026-02-30\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_validity_unparseable(&mut ds, &cat.conn)
                 .unwrap()
@@ -15638,8 +16018,12 @@ root = "work/elsewhere/ghost"
          **Valid:** dated 2026-02-30\n",
         );
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_validity_unparseable(&mut ds, &cat.conn).unwrap();
         assert_eq!(
             v.len(),
@@ -15724,8 +16108,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-62"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -15761,8 +16149,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&active, "R-63"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_dated_stale(&mut ds, &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
             v.len(),
@@ -15834,7 +16226,10 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&out_of_scope, "R-83"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             // 2026-08-20 as days since epoch — matches the other `scan_dated_stale`
@@ -15881,8 +16276,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-2"), 20usize);
         deg.insert(deg_key(&p, "R-3"), 1usize);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -15926,8 +16325,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-2"), 20usize);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(v.len(), 1, "R-2 is load-bearing and undeclared: {v:#?}");
         for form in ["invariant", "dated YYYY-MM-DD", "conditional"] {
@@ -15960,8 +16363,12 @@ root = "work/elsewhere/ghost"
 
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD);
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert_eq!(
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -16005,8 +16412,12 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "PV-2"), EXPOSURE_THRESHOLD);
         deg.insert(deg_key(&p, "PV-8"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -16032,8 +16443,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -16062,8 +16477,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-98"), EXPOSURE_THRESHOLD + 50);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -16092,8 +16511,12 @@ root = "work/elsewhere/ghost"
             deg.insert(deg_key(&p, id.to_string()), EXPOSURE_THRESHOLD + 10);
         }
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -16119,8 +16542,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&p, "R-64"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         assert!(
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                 .unwrap()
@@ -16152,8 +16579,12 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert(deg_key(&active, "R-65"), EXPOSURE_THRESHOLD + 3);
 
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -16178,7 +16609,10 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-70"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap()
@@ -16214,7 +16648,10 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-71"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap()
@@ -16258,7 +16695,10 @@ root = "work/elsewhere/ghost"
         deg.insert(deg_key(&p, "R-74"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap()
@@ -16300,8 +16740,12 @@ root = "work/elsewhere/ghost"
         // reproduces the same panic and is kept, inverted, as the test of THAT fact). So
         // `Scope::All` is not a weaker stand-in for "no active project" here; it is the only
         // state `DoctorScope` can ever actually be in when there is no active project.
-        let mut ds =
-            scope::DoctorScope::new(super::super::scope::Scope::All, &unscoped_ctx()).unwrap();
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
         let v = scan_cited_but_undeclared(&mut ds, &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
@@ -17111,7 +17555,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17149,7 +17594,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17186,7 +17632,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17232,7 +17679,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(
                 &mut scope,
                 &cat.conn,
@@ -17272,7 +17720,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17335,7 +17784,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(
@@ -17383,7 +17833,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &SocketButNoProcess).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17440,7 +17891,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[dir], &probe).unwrap()
         };
         assert_eq!(v.len(), 1, "{v:#?}");
@@ -17482,7 +17934,8 @@ body
 
         let v = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[], &probe).unwrap()
         };
         assert_eq!(
@@ -17534,7 +17987,8 @@ body
 
         let live_only = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(
                 &mut scope,
                 &cat.conn,
@@ -17571,7 +18025,8 @@ body
         seed_session(&root, "sid-dead", 9999, "111");
         let both = {
             let cat = ctx.catalog.lock();
-            let mut scope = scope::DoctorScope::new(super::super::scope::Scope::All, &ctx).unwrap();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
             scan_claim_liveness(&mut scope, &cat.conn, &[sessions], &probe).unwrap()
         };
         assert_eq!(both.len(), 2, "{both:#?}");
@@ -17611,7 +18066,10 @@ body
             starttime: "1".into(),
         };
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
@@ -17648,7 +18106,10 @@ body
             starttime: "555".into(),
         };
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
@@ -17685,7 +18146,10 @@ body
             starttime: "555".into(),
         };
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&mut ds, &cat.conn, &[sessions], &probe).unwrap()
@@ -17722,7 +18186,10 @@ body
             starttime: "1".into(),
         };
 
-        let mut ds = scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx).unwrap();
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
         let v = {
             let cat = ctx.catalog.lock();
             scan_claim_liveness(&mut ds, &cat.conn, std::slice::from_ref(&sessions), &probe)

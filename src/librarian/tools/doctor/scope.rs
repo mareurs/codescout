@@ -147,7 +147,11 @@ pub(super) struct DoctorScope {
 }
 
 impl DoctorScope {
-    pub(super) fn new(scope: Scope, ctx: &ToolContext) -> Result<Self> {
+    pub(super) fn new(
+        scope: Scope,
+        ctx: &ToolContext,
+        conn: &rusqlite::Connection,
+    ) -> Result<Self> {
         // `apply_scope` owns the umbrella lookup and the worktree-overlay OR
         // clause; re-deriving either here is how the two definitions of
         // "project" diverged in the first place. Its `FilterNode` output is
@@ -215,7 +219,7 @@ impl DoctorScope {
         let (cited_from_here, cross_root_cites_edges) = if roots.is_empty() {
             (BTreeSet::new(), None)
         } else {
-            let (cited_from_here, edges) = cross_root_cites(ctx, &roots)?;
+            let (cited_from_here, edges) = cross_root_cites(conn, &roots)?;
             (cited_from_here, Some(edges))
         };
 
@@ -414,10 +418,10 @@ fn umbrella_member_roots(ctx: &ToolContext) -> Vec<PathBuf> {
 /// `dst_ref` cannot be proven to name a real foreign artifact a local row cites, so
 /// admitting it would be an ungrounded relaxation of scope isolation rather than a
 /// grounded exemption.
-fn cross_root_cites(ctx: &ToolContext, roots: &[PathBuf]) -> Result<(BTreeSet<String>, usize)> {
-    let cat = ctx.catalog.lock();
-    let conn = &cat.conn;
-
+fn cross_root_cites(
+    conn: &rusqlite::Connection,
+    roots: &[PathBuf],
+) -> Result<(BTreeSet<String>, usize)> {
     // Single pass over `artifact`: id -> abs_path for both tables' direct lookups,
     // and slug -> (id, abs_path) for `entry_cite.dst_ref`'s `<slug>:<local>` form.
     let mut by_id: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -528,7 +532,8 @@ mod tests {
     #[test]
     fn scope_all_admits_every_path_and_tallies_nothing() {
         let ctx = unscoped_ctx();
-        let mut s = DoctorScope::new(Scope::All, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::All, &ctx, &cat.conn).unwrap();
         assert!(s.admit(
             "abs_path_outside_managed_roots",
             "a1",
@@ -563,7 +568,8 @@ mod tests {
             ctx.current_project.is_none(),
             "this test's whole point is the no-active-project arm"
         );
-        let err = DoctorScope::new(Scope::Project, &ctx)
+        let cat = ctx.catalog.lock();
+        let err = DoctorScope::new(Scope::Project, &ctx, &cat.conn)
             .expect_err("Scope::Project with no active project must be refused, not degraded");
         assert!(
             err.to_string().contains("requires an active project"),
@@ -581,7 +587,8 @@ mod tests {
         std::fs::create_dir_all(root.join("docs")).unwrap();
         let ctx = ctx_at(&root);
 
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert_eq!(s.scope, Scope::Project, "the requested scope is retained, for callers that need to branch on it (e.g. an Umbrella-specific hint)");
         assert!(s.admit(
             "abs_path_outside_managed_roots",
@@ -615,7 +622,8 @@ mod tests {
         let root = tmp.path().join("proj");
         std::fs::create_dir_all(&root).unwrap();
         let ctx = ctx_at(&root);
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         let sibling = format!("{}terfuge/docs/x.md", root.to_string_lossy());
         assert!(!s.admit("abs_path_outside_managed_roots", "sib", &sibling));
     }
@@ -644,13 +652,14 @@ mod tests {
             .with_current_project(cp)
             .build();
 
-        let mut project_scope = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut project_scope = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert!(
             !project_scope.admit("abs_path_outside_managed_roots", "sib", &sibling_pkg_file.to_string_lossy()),
             "a sibling package under git_root but outside abs_path must be refused at Project scope"
         );
 
-        let mut repo_scope = DoctorScope::new(Scope::Repo, &ctx).unwrap();
+        let mut repo_scope = DoctorScope::new(Scope::Repo, &ctx, &cat.conn).unwrap();
         assert!(
             repo_scope.admit(
                 "abs_path_outside_managed_roots",
@@ -683,7 +692,8 @@ mod tests {
             .with_current_project(cp)
             .build();
 
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert!(
             s.admit(
                 "abs_path_outside_managed_roots",
@@ -725,7 +735,8 @@ mod tests {
             }])
             .build();
 
-        let mut s = DoctorScope::new(Scope::Umbrella, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Umbrella, &ctx, &cat.conn).unwrap();
         assert!(
             s.admit(
                 "abs_path_outside_managed_roots",
@@ -762,7 +773,8 @@ mod tests {
     #[test]
     fn umbrella_scope_without_an_active_project_is_refused() {
         let ctx = unscoped_ctx();
-        let err = DoctorScope::new(Scope::Umbrella, &ctx).unwrap_err();
+        let cat = ctx.catalog.lock();
+        let err = DoctorScope::new(Scope::Umbrella, &ctx, &cat.conn).unwrap_err();
         assert!(
             err.to_string().contains("active project"),
             "refusal must name the missing project: {err}"
@@ -777,7 +789,8 @@ mod tests {
         let root = tmp.path().join("mine");
         std::fs::create_dir_all(&root).unwrap();
         let ctx = ctx_at(&root); // umbrella: None
-        let err = DoctorScope::new(Scope::Umbrella, &ctx).unwrap_err();
+        let cat = ctx.catalog.lock();
+        let err = DoctorScope::new(Scope::Umbrella, &ctx, &cat.conn).unwrap_err();
         // 2026-09-09 review, round 2, TAKE 1: `.contains("umbrella")` alone cannot
         // discriminate this error from the SIBLING test's ("scope=umbrella requires an
         // active project", which also contains the literal substring "umbrella" via
@@ -881,7 +894,8 @@ mod tests {
             .unwrap();
         }
 
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert_eq!(
             s.cross_root_cites_edges(),
             Some(2),
@@ -1009,7 +1023,8 @@ mod tests {
             .unwrap();
         }
 
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert_eq!(
             s.cross_root_cites_edges(),
             Some(1),
@@ -1094,7 +1109,8 @@ mod tests {
             .unwrap();
         }
 
-        let mut s = DoctorScope::new(Scope::Project, &ctx).unwrap();
+        let cat = ctx.catalog.lock();
+        let mut s = DoctorScope::new(Scope::Project, &ctx, &cat.conn).unwrap();
         assert_eq!(
             s.cross_root_cites_edges(),
             Some(1),
