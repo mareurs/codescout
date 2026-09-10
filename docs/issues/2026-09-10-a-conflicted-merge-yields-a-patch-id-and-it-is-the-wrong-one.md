@@ -1,12 +1,13 @@
 ---
 id: f361f362d77940bb
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a conflicted merge commit does yield a patch-id, and it is the wrong one'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-09-10
 opened: 2026-09-10
 severity: med
 ---
@@ -14,13 +15,18 @@ severity: med
 # BUG: a CONFLICTED merge commit does yield a patch-id, and it is the wrong one
 
 ## Summary
-Two surfaces state, without qualification, that a merge commit has no patch-id and that the
+Three surfaces state, without qualification, that a merge commit has no patch-id and that the
 prescribed pipeline therefore returns empty:
 
 - `CLAUDE.md` § *Bug Tracking*: *"A merge commit has no patch-id — `git show <merge>` emits
   no diff, so the pipeline returns empty and exits `0`, giving you no error and no value."*
-- `get_guide("tracker-conventions")` § *Bug files*: *"`git show <merge>` emits the message
+- `get_guide("tracker-conventions")` § *Bug files* (source: `src/prompts/guides/tracker-conventions.md`): *"`git show <merge>` emits the message
   with no diff … `git patch-id` given no patch prints **nothing and exits 0**."*
+- `docs/RELEASE.md` § *Citing a fix*: same claim again. **This third surface was missed when
+  the bug was filed** — the file said "two surfaces" on the strength of a grep that did not
+  reach it. Corrected at fix time, and worth noting as the counting law biting inside a bug
+  file about a wrong claim: the count was asserted from a partial search rather than derived
+  from a complete one.
 
 That is true of a **clean** merge and false of a **conflicted** one. `git show` on a merge
 whose resolution differs from both parents emits a *combined* diff, so the pipeline returns
@@ -85,37 +91,57 @@ output; the empty result is `git patch-id --stable` printing nothing and exiting
    in exactly one property: whether the resolution was mechanical.
 
 ## Fix
-*Not fixed by this bug file.* The remedy is a wording change on two surfaces, and the
-useful form is narrower than "add the caveat":
 
-- The **operative instruction is unchanged and still right** — never record a merge's
-  patch-id; cite the constituent commits. Do not weaken that.
-- What needs correcting is the stated **reason**, because the reason is what a reader uses
-  to decide whether the rule applies to the commit in front of them. "It returns empty" is
-  a falsifiable premise, and a reader who observes a value concludes the rule does not
-  apply to their case.
+**FIXED 2026-09-10.** The operative instruction is unchanged on all three surfaces — never
+record a merge's patch-id, cite the constituent commits — and what changed is the stated
+REASON, because the reason is what a reader uses to decide whether the rule covers the
+commit in front of them.
 
-So: state that a clean merge returns empty and a conflicted merge returns a value over the
-combined diff, and that **both** mean "cite the constituents". That makes the rule
-independent of what the reader observes.
+Each surface now says: a **clean** merge emits no diff and the pipeline returns empty and
+exits 0; a merge that **resolved a conflict** emits a *combined* diff and returns a
+well-formed value hashing only the resolution hunks, which matches no constituent commit
+and does not survive a different-but-valid resolution of the same conflict. Both outcomes
+carry the same instruction, so the rule no longer depends on what the reader observes —
+which was the defect: *"it returns empty"* is falsifiable, and a reader who saw a value
+concluded the rule did not apply to their case.
 
+Each carries the measurement rather than the assertion: `4485eeb0` clean → 457 bytes, empty;
+`8cf67de0` conflicted → 32,634 bytes, `9817e7c6…`. And each keeps the pre-existing warning
+against manufacturing one with `git diff <first-parent>..<merge>`, now sitting beside the
+case where `git show` manufactures it for you unasked.
+
+**Surfaces changed:** `CLAUDE.md` § *Bug Tracking*; `docs/RELEASE.md` § *Citing a fix*;
+`src/prompts/guides/tracker-conventions.md` § *Bug files*.
+
+**Deliberately NOT changed:**
+`docs/issues/archive/2026-08-30-patch-id-citation-is-unavailable-for-a-merge-commit.md`,
+which is where the claim originated. It is an archived historical snapshot, and
+`get_guide("tracker-conventions")`'s own rule is to leave `docs/issues/archive/**` alone —
+rewriting it would falsify the record of what was believed then to satisfy a linter that is
+already ignoring it.
 ## Tests added
-None, and this is a wording defect in prose that no test in this repo is positioned to
-gate — `audit_doc_refs` checks citations against the filesystem, not claims against tool
-behaviour. Noted rather than excused: the honest gate would be a fixture repo with one
-clean and one conflicted merge asserting the two outcomes, which is more machinery than
-the claim is worth. The reproduction above is the durable artifact.
 
+None, and the reason is structural rather than an omission. All three surfaces are prose,
+and no test in this repo is positioned to gate a claim about tool behaviour —
+`audit_doc_refs` checks citations against the filesystem, not assertions against `git`. The
+honest gate would be a fixture repo carrying one clean and one conflicted merge, asserting
+the two outcomes; that is more machinery than the claim is worth, and saying so is better
+than implying coverage exists.
+
+What the change IS gated by, incidentally: `CLAUDE.md` and the guide are both pinned
+surfaces — `claude_md_contains_no_deprecated_tool_names` and the prompt-surface tests run
+over them — so a malformed edit reds, even though a *false* one would not. The
+reproduction table in this file is the durable artifact; it is re-runnable in two commands
+against two commits that are both on `experiments`.
 ## Workarounds
 Never record a merge commit's patch-id, whatever the pipeline prints. If you need a
 durable pointer to work delivered by a merge, cite the merged branch's constituent commits
 by SHA + patch-id — which is what the rule already says.
 
 ## Resume
-Correct the reason clause on both surfaces (`CLAUDE.md` § *Bug Tracking* and § *Git
-Workflow*; `get_guide("tracker-conventions")` § *Bug files*, whose text is
-`src/prompts/guides/` or the guide source). Keep the instruction, replace the premise.
 
+Nothing owed. All three surfaces corrected 2026-09-10; the archived origin file left as the
+historical record it is.
 ## Cluster — deliberately `unclassified`, with the reasoning
 The two nearest classes were read in full and neither fits; forcing one would be the
 mistake `docs/trackers/issue-clusters.md` warns about in its own Index preamble.

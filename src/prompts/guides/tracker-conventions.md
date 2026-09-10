@@ -123,13 +123,23 @@ git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
 grep <first-12-of-patch-id> /tmp/patch-ids.txt
 ```
 
-**A merge commit has no patch-id, and the tool reports that by staying silent.**
-`git show <merge>` emits the message with no diff — a merge has more than one parent, so
-"the diff" is ambiguous — and `git patch-id` given no patch prints **nothing and exits
-0**. The prescribed pipeline therefore returns empty, with no error, exactly where the
-rule matters most. Cite the merged branch's **constituent commits** by SHA + patch-id
-instead; each has an ordinary patch-id that survives rebase normally. Never record an
-empty patch-id field, and never substitute the SHA for it.
+**A merge commit's patch-id is never citable — but it is not always EMPTY, and the
+difference decides whether you notice.** For a **clean** merge `git show <merge>` emits
+the message with no diff (the tree is derivable from the parents, so there is nothing to
+print), and `git patch-id` given no patch prints **nothing and exits 0** — the pipeline
+returns empty, with no error. For a merge that **resolved a conflict**, the tree is *not*
+derivable from the parents, so `git show` emits a **combined diff** and the pipeline
+returns a well-formed 40-hex value that hashes only the resolution hunks — not the change
+the merge delivers, matching no constituent commit, and not stable across a different but
+equally valid resolution of the same conflict. Measured 2026-09-10: `4485eeb0` (clean) 457
+bytes and empty; `8cf67de0` (conflicted) 32,634 bytes and `9817e7c6…`.
+
+**Both outcomes mean the same thing: cite the merged branch's constituent commits** by
+SHA + patch-id; each has an ordinary patch-id that survives rebase normally. Never record
+an empty patch-id field, never substitute the SHA for it, and never record the value a
+conflicted merge hands you — the empty case you would have noticed, and that one you
+would not. Nor manufacture one from `git diff <first-parent>..<merge>`: same shape, same
+objection. docs/issues/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md
 
 Do not reach for `git diff <first-parent>..<merge>` to manufacture one: it hashes, but
 not to the object a cherry-pick would reproduce, so it is a plausible value in a field

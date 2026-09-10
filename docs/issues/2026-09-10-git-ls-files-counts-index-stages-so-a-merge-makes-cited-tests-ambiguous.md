@@ -1,12 +1,13 @@
 ---
 id: '987b146635cae607'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: git ls-files counts index stages, so a merge conflict makes every cited test look declared-three-times'
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-10
 opened: 2026-09-10
 severity: med
 ---
@@ -146,38 +147,80 @@ audits — upward — and the census pages that consume it say only that they ar
    annotation↔row correspondence.
 
 ## Fix
-*Not fixed by this bug file.* Two independent halves, and the second is the one this corpus
-usually skips:
 
-**(a) The selector.** Dedup `tracked_src_files()` — `--deduplicate` on the `git ls-files`
-invocation, or `.collect::<std::collections::BTreeSet<_>>()` then into a `Vec`. Keep the
-`git ls-files`-over-walk property; only the stage multiplicity goes.
+**FIXED 2026-09-10.** Both halves, because fixing only the selector leaves the message
+ready to misdirect the next reader who reaches `Ambiguous` by some other route.
 
-**(b) The remedy text.** `resolve_cited_test`'s `Ambiguous` message should distinguish *"N
-distinct files"* from *"N entries in one file"*, and in the latter case name the actual cause
-(*"unmerged index — `git add` the conflicted path"*) instead of prescribing a rename. Fixing (a)
-alone leaves the message ready to misdirect the next reader who reaches `Ambiguous` by some other
-route, and a rename is not reversible by the thing that caused it.
+**(a) The selector.** `tracked_src_files()` now delegates to a new
+`tracked_rs_paths(stdout: &str)` that filters `.rs` and collects through a `BTreeSet`, so
+a path present at three index stages yields one entry. The split exists so the
+de-duplication is reachable by a test without a git checkout in a crafted state — see
+Tests added for why that matters. The `git ls-files`-over-a-walk property is untouched;
+only the stage multiplicity goes.
 
+**(b) The remedy text.** Extracted into `ambiguity_message(id, cited_test, declarers)`,
+which **branches on distinctness** — and the discriminator turned out to be already in the
+data and unused. A genuine collision names DIFFERENT files, and a single file declaring
+one name twice is already reported as `file (x2)` by `resolve_cited_test`. So the only way
+to get the SAME path listed twice is a duplicated population. When that happens the
+message now names the cause (*"the POPULATION is duplicated, not the declaration"*), gives
+`git ls-files --unmerged src` to confirm and `git add` to fix, and says **do not rename
+anything**. The genuine-collision branch keeps the original wording, which was correct for
+its own cause all along.
+
+The extraction is what makes the remedy assertable at all — `CLAUDE.md` § *Testing
+Discipline* records that a suite tests a guard's predicate and never its remedy text, and
+this gate had 54-plus assertions about the predicate and none about the sentence.
 ## Tests added
-None yet. A regression test for (a) is awkward but not impossible: the honest shape is a fixture
-that seeds a three-stage index entry via `git update-index --index-info` in a temp repo and
-asserts the population length, rather than asserting over this repo's live index — which is
-clean whenever the gate is normally run, i.e. monotone under exactly the bug. For (b), assert the
-message names the unmerged-index cause when the colliding paths are equal, which reds on the
-current text and is cheap.
 
+Two, one per half, and each **driven red on the production path before being accepted**:
+
+| test | mutation | observed |
+|---|---|---|
+| `tracked_rs_paths_collapses_a_path_present_at_several_index_stages` | `BTreeSet` → `Vec` in `tracked_rs_paths` | **red, and only this test** (68 pass, 1 fail) |
+| `ambiguity_message_distinguishes_a_real_collision_from_a_duplicated_population` | distinctness branch disabled (`if false &&`) | **red, and only this test** — the failure output printed the original misleading message verbatim |
+
+**The dedup test asserts over a fixture string, not the live index, and that is the
+design.** A test asserting `tracked_src_files()` returns no duplicates is MONOTONE under
+the defect: the live index is clean whenever this gate is normally run, so it passes just
+as well with the dedup deleted. Handed real mid-merge `git ls-files` output directly, the
+assertion can fail — which the mutation confirms. Its bound is stated on the function: it
+proves the dedup works on duplicated input, NOT that `git ls-files` produces duplicates,
+which is a claim about git evidenced by the Reproduction table instead.
+
+**The remedy test asserts SHAPE, not prose** — which sentences are present per branch, and
+critically the one instruction that must be ABSENT (`!dup.contains("distinguishing
+name")`). A heavy rewording that keeps the two branches distinct stays green; collapsing
+them reds. That is the regression that actually happened.
+
+The `.md` line in the dedup fixture is load-bearing and annotated as such: it pins that
+de-duplicating did not replace the extension filter.
+
+`cargo test --workspace --test result_caps`: **69 passed, 0 failed** (was 67).
 ## Workarounds
 `git add` every resolved conflicted path before running the gate — which the merge flow should do
 anyway. If `probed_rows_cite_a_real_test` names a row whose cited test you did not touch, check
 `git ls-files --unmerged` before reading the message's advice.
 
 ## Resume
-Implement Fix (a) at `tests/result_caps.rs:567-584` and (b) at `resolve_cited_test`'s
-`Ambiguous` arm (message text quoted in Symptom above, emitted from
-`probed_rows_cite_a_real_test` at `tests/result_caps.rs:2974`). Then decide, per site and not as
-a sweep, which of the Evidence section's unverified counting sites share the defect.
 
+**The `result_caps.rs` site is closed. One further site is now VERIFIED to share the
+defect — promoted from the unverified floor by reading it, not by assuming:**
+
+`tests/issue_clusters.rs:207` — `tracked_open_bug_files()` runs `git ls-files docs/issues`,
+filters, and `collect()`s into a `Vec` with no dedup. Its own doc comment says *"Tracked
+bug FILES"*, so a path appearing three times violates the function's own contract, and
+dedup is unambiguously correct there rather than a judgement call. Remedy is the same one
+line (`BTreeSet` in the collect). Left unfixed deliberately: this bug file scoped itself to
+`result_caps.rs`, and the Evidence section's instruction was to decide **per site**, which
+is now done for this one — the decision is "yes, fix it", the act is not taken here.
+
+**Still unverified, and not to be swept:** `scripts/pre-commit-ledger-counts.py:91`/`:205`,
+`scripts/probe-cluster-census.py`, `scripts/probe-caveat-density.py`,
+`scripts/probe-double-frontmatter.py:66`, `tests/e2e/eval_common/proc.rs:22`. What separates
+a hazard from a harmless site is whether the caller COUNTS or uniqueness-checks the
+population, or merely iterates it — an iterating reader processes a conflicted file three
+times and, being idempotent, does not care.
 ## References
 - `tests/result_caps.rs:567-584` (`tracked_src_files`, the selector)
 - `tests/result_caps.rs:2688-2700` (`resolve_cited_test` and its first-match doc comment)

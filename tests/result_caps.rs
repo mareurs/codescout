@@ -558,12 +558,47 @@ fn tracked_src_files_returns_rust_files_under_src_and_excludes_tests() {
     );
 }
 
-/// Tracked `.rs` files under `src/`.
+/// The `.rs` paths in `git ls-files` output, each exactly once, sorted.
+///
+/// Split out of [`tracked_src_files`] so the de-duplication is reachable by a test
+/// without a git checkout in a crafted state. That split is the whole reason this
+/// function exists: a test asserting `tracked_src_files()` returns no duplicates is
+/// MONOTONE under the bug it guards — the live index is clean whenever the gate is
+/// normally run, so it passes just as well with the dedup deleted. Handed the
+/// three-stage output directly, the assertion can fail.
+///
+/// **Bound, and it is the honest half.** This proves the dedup works on duplicated
+/// input; it does NOT prove `git ls-files` produces duplicates, which is a claim about
+/// git and is evidenced by the measurement in [`tracked_src_files`]' doc comment
+/// instead. Two different claims, one testable here and one not.
+fn tracked_rs_paths(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter(|p| p.ends_with(".rs"))
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Tracked `.rs` files under `src/`, each exactly once.
 ///
 /// `git ls-files`, not a walk: an untracked file is a peer's in-flight work
 /// and gating on it lets one session red another's build. Same reasoning and
 /// the same measured incident as `tracked_all_bug_files` in
 /// `tests/issue_clusters.rs`.
+///
+/// **De-duplicated, and that is a fix rather than tidiness.** `git ls-files`
+/// reports index ENTRIES, not files, and an unmerged path has three of them
+/// (stage 1 base, 2 ours, 3 theirs). So while a merge conflict sits unresolved
+/// in the index, every conflicted `.rs` file appeared three times here — and
+/// [`resolve_cited_test`], whose whole job is to refuse a name declared in more
+/// than one file, then visited the same file three times and reported every
+/// test declared in it as declared three times. Measured 2026-09-10:
+/// `git ls-files src | grep -c doctor` returned 4 for two files mid-merge, and
+/// `git add` of the conflicted paths — changing no byte of any `.rs` file —
+/// took the lane from red to green.
+/// docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
 fn tracked_src_files() -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-files", "src"])
@@ -576,11 +611,7 @@ fn tracked_src_files() -> Vec<String> {
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|p| p.ends_with(".rs"))
-        .map(str::to_owned)
-        .collect()
+    tracked_rs_paths(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// True when a constant's name is cap-shaped.
@@ -2690,6 +2721,55 @@ enum CitedTestResolution {
     Ambiguous(Vec<String>),
 }
 
+/// The failure line for an [`CitedTestResolution::Ambiguous`] verdict.
+///
+/// Extracted from [`probed_rows_cite_a_real_test`] for one reason: it makes the
+/// REMEDY assertable. `CLAUDE.md` § *Testing Discipline* — *"a suite tests a guard's
+/// PREDICATE and never its REMEDY TEXT ... every assertion is about who is refused;
+/// nobody writes one about where the refusal sends you"*. This gate had 54-plus
+/// assertions about the predicate and none about the sentence, and the sentence was
+/// wrong in one reachable state.
+///
+/// **It branches on distinctness, and the discriminator was already in the data.** A
+/// genuine collision names DIFFERENT files (`heading_truncation_is_signaled` lives in
+/// `default.rs`, `plan.rs` and `spec.rs`), and a file declaring one name twice is
+/// already reported as `file (x2)` by [`resolve_cited_test`]. So the only way to get
+/// the SAME path listed twice is a duplicated population — which is what an unmerged
+/// index produces, `git ls-files` emitting one line per stage. Before this branch the
+/// message said "declared more than once in tracked src/" and closed with *"Give one
+/// declaration a distinguishing name and cite that"*, so a reader in that state was
+/// told to rename a uniquely-named test to satisfy a collision that `git add` — no
+/// content change at all — makes evaporate. It fired on two rows on 2026-09-10, one of
+/// them `Probed`/`Killed` since 2026-09-03, which is why it read as "the merge broke an
+/// unrelated cap citation".
+/// docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
+fn ambiguity_message(id: &str, cited_test: &str, declarers: &[String]) -> String {
+    let distinct: std::collections::BTreeSet<&String> = declarers.iter().collect();
+    if distinct.len() < declarers.len() {
+        return format!(
+            "{id}: cited_test \"{cited_test}\" resolved to {} declarations but only {} \
+             distinct path(s) ({}) — the POPULATION is duplicated, not the declaration. \
+             `git ls-files` reports index ENTRIES, and an unmerged path has three (stage \
+             1/2/3), so a merge conflict sitting unresolved in the index makes every test \
+             in a conflicted file look declared three times. Run `git ls-files --unmerged \
+             src`; `git add` the conflicted paths and re-run. Do NOT rename anything — \
+             this test is declared exactly once and the collision disappears on `git \
+             add`, changing no byte of any source file.",
+            declarers.len(),
+            distinct.len(),
+            declarers.join(", ")
+        );
+    }
+    format!(
+        "{id}: cited_test \"{cited_test}\" is declared more than once in tracked src/ \
+         ({}) — an unqualified name cannot say which one this row means, and the \
+         resolver would otherwise take the first in `git ls-files src` order, certifying \
+         this cap with another cap's test. Give one declaration a distinguishing name \
+         and cite that.",
+        declarers.join(", ")
+    )
+}
+
 /// Resolve a `cited_test` name to ONE body, or refuse.
 ///
 /// The refusal is the point, and it is not hypothetical. Before it, the resolver
@@ -2968,16 +3048,7 @@ fn probed_rows_cite_a_real_test() {
                 continue;
             }
             CitedTestResolution::Ambiguous(files) => {
-                failures.push(format!(
-                    "{}: cited_test \"{}\" is declared more than once in tracked src/ ({}) \
-                     — an unqualified name cannot say which one this row means, and the \
-                     resolver would otherwise take the first in `git ls-files src` order, \
-                     certifying this cap with another cap's test. Give one declaration a \
-                     distinguishing name and cite that.",
-                    c.id,
-                    c.cited_test,
-                    files.join(", ")
-                ));
+                failures.push(ambiguity_message(&c.id, &c.cited_test, &files));
                 continue;
             }
         };
@@ -2997,5 +3068,105 @@ fn probed_rows_cite_a_real_test() {
         failures.is_empty(),
         "Probed rows whose citation does not hold up:\n{}",
         failures.join("\n")
+    );
+}
+/// `git ls-files` output with a path at three index stages yields that path ONCE.
+///
+/// The regression guard for
+/// `docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md`.
+/// The fixture is real `git ls-files src` output captured mid-merge on 2026-09-10, with
+/// `doctor.rs` at stages 1/2/3 — the shape that made [`resolve_cited_test`] report every
+/// test in that file as declared three times.
+///
+/// **Driven red before being written green:** with the `BTreeSet` removed from
+/// [`tracked_rs_paths`], this returns 5 paths with `doctor.rs` three times and the first
+/// assertion fails. That mutation is the whole point — asserting over the LIVE index
+/// instead would pass either way, the index being clean whenever this gate is normally
+/// run, which is monotone under exactly the defect.
+#[test]
+fn tracked_rs_paths_collapses_a_path_present_at_several_index_stages() {
+    let mid_merge = "src/librarian/tools/doctor.rs\n\
+                     src/librarian/tools/doctor.rs\n\
+                     src/librarian/tools/doctor.rs\n\
+                     src/librarian/tools/doctor/scope.rs\n\
+                     src/server.rs\n\
+                     src/server.rs\n\
+                     src/librarian/tools/librarian.md\n";
+    let got = tracked_rs_paths(mid_merge);
+
+    assert_eq!(
+        got,
+        vec![
+            "src/librarian/tools/doctor.rs".to_string(),
+            "src/librarian/tools/doctor/scope.rs".to_string(),
+            "src/server.rs".to_string(),
+        ],
+        "three stage entries for one path are ONE file; two for another are ONE file; \
+         and the non-.rs line is still excluded: {got:#?}"
+    );
+    // The `.md` line is load-bearing: it pins that de-duplicating did not replace the
+    // extension filter. Deleting the `.ends_with(".rs")` guard would add a fourth entry
+    // here, which the assertion above catches.
+    assert!(
+        !got.iter().any(|p| p.ends_with(".md")),
+        "the extension filter survives the dedup: {got:#?}"
+    );
+}
+
+/// The `Ambiguous` remedy names the CAUSE, and the two causes get different remedies.
+///
+/// `CLAUDE.md` § *Testing Discipline* — a suite tests a guard's predicate and never its
+/// remedy text, so that half is untested by construction and no mutation reaches it.
+/// This is the assertion that half was missing: it pins that the duplicated-population
+/// message does NOT tell the reader to rename anything, because doing so would damage a
+/// correctly-named test to satisfy a collision `git add` dissolves.
+///
+/// Asserts on SHAPE, not on prose — which sentences are present, and the one instruction
+/// that must be absent. A heavy rewording that keeps both branches distinct stays green;
+/// collapsing them into one message reds.
+#[test]
+fn ambiguity_message_distinguishes_a_real_collision_from_a_duplicated_population() {
+    // Two DISTINCT files: the genuine IC-6 collision this resolver exists to refuse.
+    let real = ambiguity_message(
+        "preview.plan_headings",
+        "heading_truncation_is_signaled",
+        &[
+            "src/librarian/preview/default.rs".to_string(),
+            "src/librarian/preview/plan.rs".to_string(),
+        ],
+    );
+    assert!(
+        real.contains("declared more than once in tracked src/"),
+        "a real collision keeps the original diagnosis: {real}"
+    );
+    assert!(
+        real.contains("distinguishing name"),
+        "and its remedy, which is correct for THIS cause: {real}"
+    );
+
+    // The SAME path twice: a duplicated population, i.e. an unmerged index.
+    let dup = ambiguity_message(
+        "doctor.caveat_chars",
+        "a_long_caveat_is_truncated_without_splitting_a_character",
+        &[
+            "src/librarian/tools/doctor.rs".to_string(),
+            "src/librarian/tools/doctor.rs".to_string(),
+            "src/librarian/tools/doctor.rs".to_string(),
+        ],
+    );
+    assert!(
+        dup.contains("POPULATION is duplicated"),
+        "names the actual cause rather than the declaration: {dup}"
+    );
+    assert!(
+        dup.contains("git ls-files --unmerged"),
+        "and the command that confirms it: {dup}"
+    );
+    assert!(dup.contains("git add"), "and the one that fixes it: {dup}");
+    assert!(
+        !dup.contains("distinguishing name"),
+        "MUST NOT prescribe a rename here — the test is declared exactly once and the \
+         collision disappears on `git add`. This is the assertion the original message \
+         would have failed, and the reason this test exists: {dup}"
     );
 }
