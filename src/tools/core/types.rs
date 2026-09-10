@@ -1234,7 +1234,36 @@ pub trait Tool: Send + Sync {
             }
             if let Some(c) = &param_corrections {
                 if let Some(obj) = val.as_object_mut() {
-                    obj.insert("corrections".to_string(), c.clone());
+                    // Merge into an existing `corrections` key rather than
+                    // overwriting it wholesale: `find.rs`/`update.rs` already
+                    // populate `corrections` via this same default
+                    // `call_content` path (`{filter, hint}` / a bare array),
+                    // and a future tool combining `param_aliases()` with one
+                    // of those shapes must not have this framework write
+                    // silently clobber the tool's own. Not reachable today —
+                    // no in-tree tool both declares `param_aliases()` and
+                    // writes `corrections` itself — so this branch has no
+                    // live caller yet; it is cheap to get right now rather
+                    // than left as a footgun for whichever tool does.
+                    match obj.get_mut("corrections") {
+                        Some(existing) if existing.is_object() => {
+                            if let (Some(existing_obj), Some(c_obj)) =
+                                (existing.as_object_mut(), c.as_object())
+                            {
+                                for (k, v) in c_obj {
+                                    existing_obj.insert(k.clone(), v.clone());
+                                }
+                            }
+                        }
+                        Some(_) => {
+                            // Already holds a non-object shape (e.g.
+                            // update.rs's bare array) — leave it alone rather
+                            // than clobber it with ours.
+                        }
+                        None => {
+                            obj.insert("corrections".to_string(), c.clone());
+                        }
+                    }
                 }
             }
             if form == OutputForm::Text {
@@ -1295,8 +1324,11 @@ pub trait Tool: Send + Sync {
     /// Advertise ONLY the canonical name in `input_schema`. `call_content` rewrites
     /// these before anything reads the input and announces the correction on the
     /// response — so a tool declaring an alias here must NOT also declare it as a
-    /// property, and `every_declared_alias_is_absent_from_the_schema` (`src/server.rs`)
-    /// enforces that.
+    /// property. Task 7 of the parameter-alias-collapse plan owes an
+    /// `every_declared_alias_is_absent_from_the_schema` guard in `src/server.rs`
+    /// to enforce that; as of this task (Task 3) it does not exist yet — see
+    /// `docs/issues/2026-09-02-a-doc-comment-announcing-unbuilt-work-outlives-the-work.md`
+    /// for why this note names the gap in the future tense rather than the present.
     ///
     /// Defaults to empty: a tool opts in.
     fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {

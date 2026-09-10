@@ -2445,9 +2445,23 @@ async fn correction_reaches_the_caller_on_the_json_path() {
         .await
         .unwrap();
     let t = text_of(&out);
+    // Exact shape, not substrings: `t.contains("file_path")` is satisfied by a
+    // bare `"warning": "file_path..."` string or by `received`/`superseded_by`
+    // swapped, so it survives a rename-the-key or flatten-to-string mutation.
+    // Parse and assert the Ruling-9 shape by field.
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("json path must be valid JSON: {e}: {t}"));
+    assert_eq!(
+        v["corrections"]["params"][0]["received"], "file_path",
+        "corrections.params[0].received must name the alias actually sent: {t}"
+    );
+    assert_eq!(
+        v["corrections"]["params"][0]["canonical"], "path",
+        "corrections.params[0].canonical must name the canonical key it was rewritten to: {t}"
+    );
     assert!(
-        t.contains("file_path") && t.contains("alias_echo"),
-        "json path must carry the correction: {t}"
+        v["corrections"]["hint"].is_string(),
+        "corrections.hint must be a string (Ruling 9: object, never a bare string or a `warning` key): {t}"
     );
 }
 
@@ -2490,9 +2504,18 @@ async fn correction_reaches_the_caller_on_the_buffered_path() {
         .unwrap();
     let t = text_of(&out);
     assert!(t.contains("output_id"), "payload should have buffered: {t}");
+    // Same exact-shape assertion as the json path (Important 1): a substring
+    // check here is satisfied by a `warning` key or a flattened bare-string
+    // notice, neither of which is the Ruling-9 `{params, hint}` object.
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("buffered envelope must be valid JSON: {e}: {t}"));
+    assert_eq!(
+        v["corrections"]["params"][0]["received"], "file_path",
+        "buffered envelope must carry the correction, not just the buffer: {t}"
+    );
     assert!(
-        t.contains("file_path"),
-        "the returned envelope must carry the correction, not just the buffer: {t}"
+        v["corrections"]["hint"].is_string(),
+        "corrections.hint must be a string: {t}"
     );
 }
 
@@ -2554,6 +2577,13 @@ impl Tool for AliasWriteEcho {
         _input: serde_json::Value,
         _ctx: &ToolContext,
     ) -> anyhow::Result<serde_json::Value> {
+        // LOAD-BEARING: must return a bare JSON string, not an object. This is
+        // the no-echo write-result shape (`json!("ok")`, per the `conventions`
+        // memory), and it exercises `annotate_write_path`'s string→object
+        // promotion path specifically — a tidy-up that "simplifies" this to
+        // `json!({"status": "ok"})` would still pass every assertion in
+        // `normalization_precedes_the_write_path_capture` above while silently
+        // dropping that promotion's only coverage in this file.
         Ok(serde_json::json!("ok"))
     }
 }
@@ -2606,6 +2636,15 @@ impl Tool for AmbiguousAlias {
     }
 }
 
+/// The write side of Ruling 6's escalation, AND (not by name until now) the
+/// only guard against Ruling 6 being escalated too FAR: `AmbiguousAlias` here
+/// has no third alias and no explicit-canonical input, so this is the sole
+/// test that would catch `:1019`'s `.find(|c| c.superseded_by.is_some())`
+/// being broadened (e.g. to also match plain `conflicted` corrections) — a
+/// broadened condition would try to hard-error the read-tool sibling below
+/// too, and this test's own `.expect_err(...)` masks that failure mode unless
+/// the write side is the one under test. See
+/// `a_read_tool_repairs_and_notes_the_same_ambiguous_input` for the read side.
 #[tokio::test]
 async fn a_write_tool_hard_errors_on_two_racing_aliases_with_no_canonical() {
     let ctx = bare_ctx().await;
@@ -2617,14 +2656,31 @@ async fn a_write_tool_hard_errors_on_two_racing_aliases_with_no_canonical() {
         )
         .await
         .expect_err("an ambiguous write target must hard-error, not silently pick a winner");
-    let msg = err.to_string();
+    // Must be a RecoverableError specifically, not just an anyhow error with
+    // matching text: `route_tool_error` (src/server.rs:1655) downcasts by
+    // EXACT TYPE, so `anyhow::bail!(...)` with identical wording would pass
+    // every assertion below and still fall to the fatal branch in production,
+    // aborting sibling parallel tool calls instead of returning isError:false.
     assert!(
-        msg.contains("file_path") && msg.contains("a.rs"),
-        "must name the winning key and its value: {msg}"
+        err.downcast_ref::<RecoverableError>().is_some(),
+        "must be a RecoverableError so route_tool_error's exact-type match handles it \
+         as a soft failure, not a fatal bail: {err}"
+    );
+    let msg = err.to_string();
+    // Paired substring, not two separate `contains()` checks: the production
+    // code assigns `winner_val`/`loser_val` at two adjacent lookups
+    // (types.rs ~:1021-1028), and a swap between them would still leave
+    // "file_path" and "a.rs" each present *somewhere* in the message —
+    // `contains("file_path") && contains("a.rs")` cannot see them landing on
+    // the wrong key. Asserting the exact `'key' = "value"` pairing can.
+    assert!(
+        msg.contains("'file_path' = \"a.rs\""),
+        "must name the winning key paired with ITS OWN value, not merely mention both \
+         substrings separately: {msg}"
     );
     assert!(
-        msg.contains("relative_path") && msg.contains("b.rs"),
-        "must name the losing key and its value too: {msg}"
+        msg.contains("'relative_path' = \"b.rs\""),
+        "must name the losing key paired with ITS OWN value too: {msg}"
     );
 }
 
