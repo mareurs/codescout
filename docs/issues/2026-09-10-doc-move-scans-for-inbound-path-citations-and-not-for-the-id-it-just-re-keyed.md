@@ -44,7 +44,7 @@ to look:**
 | what goes stale | caught by | fires when |
 |---|---|---|
 | the old **path**, cited anywhere | `audit_doc_refs` — `policy_default` is `high` | CI, unprompted |
-| the file's own **frontmatter id** | `doc(move)` rewrites it in the same call (`mv.rs`, test `move_rewrites_the_frontmatter_id_it_just_invalidated`); `doctor`'s `frontmatter_id_mismatch` catches the ones a bare `git mv` left | never needed after a `doc(move)`; a manual scan otherwise |
+| the file's own **frontmatter id** | `doc(move)` rewrites it in the same call (`mv.rs:160`, test `move_rewrites_the_frontmatter_id_it_just_invalidated`); `doctor`'s `frontmatter_id_mismatch` catches rows the tool did not write | never needed after a `doc(move)`; a manual scan otherwise |
 | the old **id**, cited in prose | nothing | at some later reader's call site, as `unknown id` |
 
 That last one is a *correct* error about a *stale premise* — indistinguishable from a typo, and it
@@ -133,7 +133,14 @@ from — **and that premise is false for `doc(move)`, verified 2026-09-10 two wa
 the frontmatter id in the same call as the graft (test
 `move_rewrites_the_frontmatter_id_it_just_invalidated`, shipped `858f22ec` 2026-08-16), and this
 file's own sibling move that day landed `id: 84589e9e5a644ec7` in the archived file. Stale
-frontmatter ids come from a bare `git mv` or from a move predating that fix, not from this tool.
+frontmatter ids therefore do not come from this tool. **What they DO come from is measured, and it
+is not what an earlier draft of this paragraph guessed** — it said *"a bare `git mv`, or a move
+predating that fix"*, which named a cause nobody had counted. The measured population is
+**worktree-minted ids**: `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+(`e82deca98330f72c`) records 8 of 8 live instances minted in a worktree since removed, now 9 of 9
+with the row this file's review turned up — closed positively, by hashing the worktree path, rather
+than by elimination. Correcting my own sentence here because it was the identical shape I had just
+flagged in `doctor`'s message: a plausible cause stated where a measured one was available.
 
 So the suggestion does not follow from its premise. **A weaker independent case survives and is
 left open rather than adopted:** a moved file's *body* may cite its own former id in a superseded
