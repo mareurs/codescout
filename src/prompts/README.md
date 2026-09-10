@@ -33,9 +33,13 @@ Read this when touching `source.md` (the single source for the `server_instructi
 5. **Don't document every param.** Pagination (`offset`, `limit`, `detail_level`) is
    discoverable from the tool schema. Aliases are NOT in the schema at all — there is
    exactly one advertised name per concept, and a caller who sends another is repaired
-   at runtime with a `corrections` note naming the right one
-   (`src/tools/core/param_alias.rs`, per ADR 2026-07-10). Only document params that
-   change behavior in non-obvious ways.
+   at runtime (`src/tools/core/param_alias.rs`, per ADR 2026-07-10) and told about it
+   on success: a `corrections` key for JSON-output tools, a bare `⚠`-prefixed hint
+   string for the two `OutputForm::Text` tools (`read_file`, `grep`), which have no
+   `corrections` key to nest it in. **Not yet on the error path** — the advisory is
+   currently dropped when the call itself fails
+   (`docs/issues/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`).
+   Only document params that change behavior in non-obvious ways.
 6. **Prompt caching matters.** Keep section order stable between releases so the static prefix benefits from automatic caching. Don't reorganize for cosmetic reasons.
 7. **You are the consumer.** When writing or reviewing prompt changes, think as the agent who will read this mid-task. Ask: "Would this have helped me find the right tool chain naturally?" Test by simulating a realistic task and checking whether the prompt guided you to the right flow. Usage data (`usage.db`) is the ground truth — if a tool has near-zero calls despite being useful, the prompt isn't surfacing it.
 8. **1900-CHARACTER hard cap on the static slice.** The `server_instructions` slice is delivered as the MCP `initialize.instructions` field, which Claude Code silently truncates at **2048 characters** — measured 2026-08-16 by locating a live session's own cut point inside the rendered slice (byte 2092 / char 2048, mid-token). The cap is enforced by `prompts::redesign_invariants::source_md_under_cap` with `STATIC_SLICE_CHAR_BUDGET = 1900`; the remainder funds the dynamic `## Project Status` block, and `build_server_instructions` now *guarantees* the total fits by trimming that block at a line boundary with an explicit note rather than letting the client cut the Iron Laws.
