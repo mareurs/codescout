@@ -142,24 +142,40 @@ Four constraints this ordering satisfies, each discovered in the existing code:
 - **`grep`'s `path` is optional.** Normalization is independent of requiredness — it renames
   a key if present and does nothing otherwise.
 
-### 3. The correction must survive compaction
+### 3. The correction must survive all THREE render paths
 
-This is the design's sharpest edge. When a response exceeds the inline limit, the caller does
-**not** receive the JSON — it receives `format_compact(&val)` plus a buffer handle. A
-`warning` key added to `val` is then present only in the buffered payload the caller has not
-read.
+This is the design's sharpest edge, and the first draft of this spec got it wrong by naming
+two paths. There are three, and `Tool::call_content` already threads an existing notice
+through every one of them.
 
-The codebase already hit this and solved it once by hand: `src/tools/symbol/edit_code.rs:184`
-appends `result["warning"]` onto its compact base, with the comment *"a warning only present
-in the raw JSON is a silent fix."*
+| path | condition | what the caller receives | does a `val["warning"]` survive? |
+|---|---|---|---|
+| buffered | `exceeds_inline_limit` | a fresh `{output_id, summary, hint, buffered_bytes}` envelope; `val` goes into the buffer | **no** — the caller never reads `val` |
+| compact text | small + `OutputForm::Text` | `format_compact(&val)` rendered as text | **no** — `format_compact` selects the fields the tool knows about, and a framework-added key is not one of them |
+| pretty JSON | small + `OutputForm::Json` | `serde_json::to_string_pretty(&val)` | yes |
 
-So `announce_corrections` has **two** insertion points at the one boundary:
+The middle row is the dangerous one and is **not** an edge case: `OutputForm::Text` covers
+roughly 18 tools including `read_file`, `symbols`, `grep` and `references` — the bulk of the
+population this change touches.
 
-1. `val["warning"]` — the JSON field, for inline responses and for the buffered payload.
-2. the compact summary string, appended after `format_compact`, for overflowing responses.
+**All three are already solved once, for `workspace_notice`**, and the second row was a
+shipped bug:
+`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`
+— the notice was injected into the `Value` and then dropped by every compact renderer, on
+"precisely the read surface it exists to caveat". `src/tools/symbol/edit_code.rs:184` is the
+same lesson at tool scope: *"a warning only present in the raw JSON is a silent fix."*
 
-This mirrors the existing `inject_notice`/`_workspace_notice` pattern, which for the same
-reason also prepends into `run_command`'s `stdout` — the channel that is actually read.
+So `announce_corrections` threads exactly like `workspace_notice` does:
+
+1. buffered envelope — inject alongside `output_id`/`summary`, via the `inject_notice` shape.
+2. compact-text branch — prefix the rendered text, matching the existing
+   `format!("⚠ {notice}\n\n{text}")` treatment, because a correction changes how the content
+   should be read and must arrive before it.
+3. pretty-JSON branch — set `val["warning"]`.
+
+**Do not implement this by setting `val["warning"]` early and hoping.** That is the exact
+shape of the bug cited above: it looks correct, passes a JSON-shaped test, and is silent on
+the two paths most callers actually get.
 
 Message shape, one line, naming the tool so it is actionable out of context:
 
@@ -259,15 +275,19 @@ headroom is removed rather than banked.
 - Per-alias round trip through `call_content` for all ~26 aliases (gate 3 above).
 - Conflict case: both canonical and alias supplied, different values — canonical wins, warning
   names the ignored key.
-- Overflow case: a response large enough to buffer, asserting the correction appears in the
-  **compact summary**, not only in the buffered JSON. This is the one that would otherwise
-  regress silently.
+- **One test per render path**, because they are three independent mechanisms and a JSON-shaped
+  test says nothing about the other two: a small `OutputForm::Json` response (field present),
+  a small `OutputForm::Text` response whose tool has a `format_compact` (prefix present in the
+  rendered text), and a response large enough to buffer (correction present in the returned
+  envelope, not only in the buffered payload). The middle one is the regression that already
+  happened once to `workspace_notice`.
 - `write_path` annotation present for `create_file(file_path=…)` — the incidental fix.
 - **Mutation, on the production path, with an observed red for each** — an assertion's
   existence is not evidence. At minimum: delete one alias from `PATH_PARAM_ALIAS_MAP`; make
-  `announce_corrections` a no-op; move normalization to after `write_path` capture; drop the
-  compact-summary insertion point while keeping the JSON one. Each must red a *different*
-  named test, and the last is the one the existing suite would most plausibly miss.
+  `announce_corrections` a no-op; move normalization to after `write_path` capture; and
+  **remove each of the three render-path insertions separately**, which must red three
+  different named tests. If removing the compact-text insertion reds nothing, the suite has
+  reproduced the 2026-09-02 bug.
 
 ## Rejected alternatives
 
