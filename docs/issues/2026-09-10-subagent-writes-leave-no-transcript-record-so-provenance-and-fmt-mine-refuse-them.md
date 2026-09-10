@@ -24,7 +24,9 @@ that wrote it. Subagent tool calls do not appear in those transcripts at all —
 `isSidechain: true` records — so every file written by a subagent attributes to nobody.
 `scripts/fmt-mine.sh` consumes that verdict and formats only what it can attribute, so the
 **mandatory first command of this project's gate cannot format the normal output of this
-project's own `subagent-driven-development` skill.** The script's own comment claims to handle
+project's own `subagent-driven-development` skill — and, measured 2026-09-10, cannot be run at
+all by any OTHER session on the checkout while such work is dirty** (see *The refusal blocks
+every other session* below). The script's own comment claims to handle
 sidechain records, which is a documented behaviour the substrate cannot support.
 
 **Scoped 2026-09-10, correcting this file's own first draft.** The blindness is total — provenance
@@ -127,7 +129,30 @@ and invokes it at `:124`. So the mandatory first gate command inherits this blin
 attributes to you and **refuses** the rest"* — which, for subagent output, is everything it is
 asked to format, on the rounds where anything needs formatting at all.
 
-### There is no `--force`, by design
+### The refusal blocks EVERY OTHER SESSION, not only the writer
+
+Reported by peer sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941` (`codescout-29`, profile
+`.claude-kat`) at 2026-09-10, and this file's first draft did not have it. `fmt-mine.sh` refuses on any dirty file it cannot attribute, and there is
+deliberately no `--force`. So while one session's subagent holds uncommitted work, the gate's
+**mandatory first command is unusable for every other session on the checkout** — the peer's run
+named `src/fs/mod.rs` and `src/tools/core/tests.rs` as "needing formatting and not mine to
+write", with provenance `UNKNOWN` for both.
+
+That is a blast-radius escalation rather than a restatement of the section above. The writer at
+least has the documented `cargo fmt` fallback available after checking
+`git status --porcelain`; a peer has neither, because the files genuinely are not theirs and
+formatting them would be the cross-session write the guard exists to prevent. **Only the writing
+session can clear it, and the writing session is the one the instrument cannot see.**
+
+Corollary the peer named and this file should carry: `run_command` attaches its `wip_authors`
+block only for callers that route through it, so **a peer running the gate through native `Bash`
+gets silence** — a red naming `src/fs/mod.rs` with no author, which reads as "whatever I just
+committed". The peer resolved the real author positively instead, from
+`CLAUDE_CONFIG_DIR` in `/proc/<pid>/environ` → the profile's `sessions/<pid>.json`, which is the
+channel route `CLAUDE.md` § *Reaching a Peer Session* prescribes and which needs no cooperation
+from the session being identified.
+
+
 
 `CLAUDE.md`: *"When it refuses, it is not being unhelpful and there is no `--force`: ask the named
 owner, or if you have decided it is safe, run `cargo fmt` yourself."* For an `UNKNOWN` verdict
