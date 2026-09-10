@@ -99,7 +99,13 @@ inventing a denominator — the same refusal this corpus made for the parent bug
 
 ## Fix
 
-Applied. The guard counts the pusher's own commits in the range (`mine_n`, incremented in the
+Applied on `experiments` as **`0a6a2c9d`**, patch-id
+**`7cfa052e5c0a49091c20d93060914b7a1a07f7c2`**. The change lives in
+`scripts/pre-push-foreign-session-guard.sh` (the `mine_n` counter in the scan loop, and the
+`$remedy` branch built immediately before the banner heredoc) and in `docs/RELEASE.md`
+§ *Publishing a stack several sessions wrote — the ladder*.
+
+The guard counts the pusher's own commits in the range (`mine_n`, incremented in the
 same scan that builds `commit_rows`) and branches the remedy paragraph on it, into `$remedy`,
 before the banner heredoc:
 
