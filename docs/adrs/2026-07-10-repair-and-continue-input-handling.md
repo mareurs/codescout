@@ -184,8 +184,9 @@ object-shaped `corrections` gets a `param_aliases` key added; a non-object
 `corrections` (e.g. a bare array) is promoted to `{"tool": <original>,
 "param_aliases": <advisory>}` so both reach the caller. This still does not
 extend to the buffered-envelope render path merging with a tool's own
-`corrections` there — that gap is tracked separately, per the *Consequences*
-paragraph above.
+`corrections` there — a tool's own advisory does not reach that envelope at
+all, which is a separate open defect tracked in
+`docs/issues/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
 
 **Unchanged by this amendment.** `json!("ok")` write tools still repair
 **silently** — the round-trip saving is in the repair, not the note, and

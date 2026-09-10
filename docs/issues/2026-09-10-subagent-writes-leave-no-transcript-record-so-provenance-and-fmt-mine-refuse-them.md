@@ -13,6 +13,7 @@ related:
 - docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md
 - docs/issues/archive/2026-09-08-the-provenance-selector-kept-the-pre-rename-tool-name.md
 severity: high
+unverified: the transcript-boundary cause is inferred from the refusal text plus the direct-write/subagent-write discriminator; the parser in scripts/file-provenance.py has not been read against the subagent transcript path to confirm which files it globs
 ---
 
 # BUG: subagent writes produce no transcript record, so `file-provenance.py` returns UNKNOWN for every file an SDD task writes — and `fmt-mine.sh`, the gate's first command, cannot format any of them
@@ -119,6 +120,47 @@ the *subagent* is not. Both stories predict the same observed `UNKNOWN`, and onl
 
 Measured 2026-09-10 by the counts above; predicate read at `285064ad`.
 
+## Second instance, with the refusal text and a clean discriminator (2026-09-10)
+
+An SDD fix round wrote `src/tools/core/types.rs` and `src/tools/core/tests.rs`, then ran the gate:
+
+```
+./scripts/fmt-mine.sh   -> exit 1, REFUSED
+  src/tools/core/tests.rs  classified UNKNOWN
+  "no record of any session writing this path in the window... 28 write(s) exist
+   but predate the window; re-run with --all to see them"
+```
+
+Two things this adds to the first instance.
+
+**The classification is `UNKNOWN`, not "owned by a peer", and the message names a WINDOW.** So the
+mechanism is not "provenance cannot see MCP writes" — it explicitly can, and reports 28 historical
+writes to that path. It is that the writes attributable to the session *now asking* fall outside the
+window, because a subagent's writes are recorded in the subagent's own transcript file rather than
+in the parent session's. The parent asks about a path it did in fact cause to be written and is
+told nobody wrote it.
+
+**Discriminator, measured in the same hour on the same checkout.** The controller session edited
+`src/tools/read_file.rs` and `src/server.rs` directly through MCP `edit_file`, then ran the same
+script: **exit 0**. Same tree, same window, same tool — direct writes attribute, subagent writes do
+not. That isolates the cause to the transcript boundary and rules out the script, the window length
+and the write tool, none of which differ between the two cases.
+
+### The blast radius is narrower than this file first claimed — a later mechanism catches it
+
+The refusal does NOT leave formatting unchecked, and that matters for severity. The pre-commit
+sequence runs `rustfmt --check` **on the committed bytes**, and in this instance it did its job:
+it refused the round's first commit attempt over a real defect (a multi-line `.expect(...)` needing
+collapsing), which was fixed and the commit succeeded on retry — all without working around
+`fmt-mine`'s refusal or reaching for `cargo fmt`.
+
+So the correct path still ends in a formatted tree. What the refusal costs is not correctness but
+**the error's quality and its timing**: the author learns at commit time, from a check on bytes,
+rather than at gate time from a check on their own files. That is `CLAUDE.md` § *Observer
+Blindness*'s third position already partly satisfied by accident — compliance leaves nothing armed
+— and it is the reason this bug is an ergonomics defect with a loud fallback rather than a
+correctness hole. Do not read the first instance's framing as saying formatting goes unverified;
+it does not.
 ## Evidence
 
 ### The gate's first command is the consumer
