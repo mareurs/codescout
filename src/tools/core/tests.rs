@@ -2452,16 +2452,16 @@ async fn correction_reaches_the_caller_on_the_json_path() {
     let v: serde_json::Value = serde_json::from_str(&t)
         .unwrap_or_else(|e| panic!("json path must be valid JSON: {e}: {t}"));
     assert_eq!(
-        v["corrections"]["params"][0]["received"], "file_path",
-        "corrections.params[0].received must name the alias actually sent: {t}"
+        v["corrections"]["param_aliases"]["params"][0]["received"], "file_path",
+        "corrections.param_aliases.params[0].received must name the alias actually sent: {t}"
     );
     assert_eq!(
-        v["corrections"]["params"][0]["canonical"], "path",
-        "corrections.params[0].canonical must name the canonical key it was rewritten to: {t}"
+        v["corrections"]["param_aliases"]["params"][0]["canonical"], "path",
+        "corrections.param_aliases.params[0].canonical must name the canonical key it was rewritten to: {t}"
     );
     assert!(
-        v["corrections"]["hint"].is_string(),
-        "corrections.hint must be a string (Ruling 9: object, never a bare string or a `warning` key): {t}"
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "corrections.param_aliases.hint must be a string (Ruling 9: object, never a bare string or a `warning` key): {t}"
     );
 }
 
@@ -2489,15 +2489,43 @@ async fn correction_reaches_the_caller_on_the_compact_text_path() {
         t.contains("file_path"),
         "compact-text path dropped the correction — this is the 2026-09-02 bug: {t}"
     );
-    // Item 4: `t.contains("file_path")` above is presence-only and is equally
-    // satisfied by dumping the serialized `{params, hint}` OBJECT into the text
-    // renderer instead of the HINT STRING (`param_notice`) that
-    // `types.rs:1297` actually prefixes — a text renderer cannot carry a JSON
+    // Item 3 (round 3): `t.contains("file_path")` above is presence-only and is
+    // equally satisfied by dumping the serialized `{params, hint}` OBJECT into
+    // the text renderer instead of the HINT STRING (`param_notice`) that
+    // `types.rs` actually prefixes — a text renderer cannot carry a JSON
     // object (that's why `param_notice` and `param_corrections` are built as
     // two separate values at all), so a regression that substitutes one for
     // the other would still contain the substring "file_path" (it's nested
     // inside the serialized `params[0].received` field) and pass the
-    // assertion above unnoticed. A `{` before the compact render is the tell.
+    // assertion above unnoticed.
+    //
+    // Rather than lean on a proxy (`!contains('{')`) alone, assert on the
+    // NAME the system already gives this text: `correction_notice()`
+    // (`src/tools/core/param_alias.rs`) is the pure function `types.rs` calls
+    // to build `param_notice`, so recomputing its exact output here and
+    // requiring it verbatim in `t` is strictly stronger than any substring
+    // check — it pins the real text, not a stand-in for it.
+    let expected_notice = crate::tools::param_alias::correction_notice(
+        "alias_echo",
+        &[crate::tools::param_alias::Correction {
+            received: "file_path".to_string(),
+            canonical: "path",
+            conflicted: false,
+            superseded_by: None,
+        }],
+    )
+    .expect("a correction must yield a notice");
+    assert!(
+        t.contains(&expected_notice),
+        "Site B must carry exactly the text `correction_notice()` produces for \
+         this call, not a proxy for it: expected {expected_notice:?} in {t}"
+    );
+    // Kept alongside the exact-text check above, not dropped: `expected_notice`
+    // contains no `{`, but a regression that dumps the whole serialized
+    // `corrections` object into the text renderer would still contain
+    // `expected_notice` as a substring (JSON string-encodes it verbatim inside
+    // quotes), so the exact-match assertion alone does NOT catch that
+    // regression. This one does.
     assert!(
         !t.contains('{'),
         "Site B must carry the correction HINT STRING, not a serialized \
@@ -2525,12 +2553,12 @@ async fn correction_reaches_the_caller_on_the_buffered_path() {
     let v: serde_json::Value = serde_json::from_str(&t)
         .unwrap_or_else(|e| panic!("buffered envelope must be valid JSON: {e}: {t}"));
     assert_eq!(
-        v["corrections"]["params"][0]["received"], "file_path",
+        v["corrections"]["param_aliases"]["params"][0]["received"], "file_path",
         "buffered envelope must carry the correction, not just the buffer: {t}"
     );
     assert!(
-        v["corrections"]["hint"].is_string(),
-        "corrections.hint must be a string: {t}"
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "corrections.param_aliases.hint must be a string: {t}"
     );
 }
 

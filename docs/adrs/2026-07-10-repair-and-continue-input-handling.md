@@ -172,6 +172,21 @@ framework-added key is dropped unless re-attached at the render site. A
 `corrections` key set on the value and nowhere else is silent on the two paths
 most callers actually receive.
 
+**Round 3 note (2026-09-10) — where the advisory lands, as implemented.** The
+alias-correction advisory lands at `corrections.param_aliases`, **unconditionally**
+— including when the tool wrote no `corrections` of its own. An earlier
+implementation kept that no-op case flat (`corrections` = the advisory directly)
+to avoid touching existing pinned assertions; that gave the advisory two
+addresses depending on a fact the caller cannot see, so it was changed to nest
+in every case. When a tool's own `call()` already returned a `corrections`
+value, the framework nests its advisory into it rather than overwriting: an
+object-shaped `corrections` gets a `param_aliases` key added; a non-object
+`corrections` (e.g. a bare array) is promoted to `{"tool": <original>,
+"param_aliases": <advisory>}` so both reach the caller. This still does not
+extend to the buffered-envelope render path merging with a tool's own
+`corrections` there — that gap is tracked separately, per the *Consequences*
+paragraph above.
+
 **Unchanged by this amendment.** `json!("ok")` write tools still repair
 **silently** — the round-trip saving is in the repair, not the note, and
 reshaping ~40 responses is still not worth it.

@@ -1217,7 +1217,15 @@ pub trait Tool: Send + Sync {
                 inject_notice(&mut buffered, notice);
             }
             if let Some(c) = &param_corrections {
-                buffered["corrections"] = c.clone();
+                // Same unconditional nesting as the small-output path below
+                // (see the comment there): the advisory lives at
+                // `corrections.param_aliases` in every case, never bare at
+                // `corrections`. This assignment is still a wholesale
+                // overwrite rather than a merge with any `corrections` the
+                // tool itself wrote into the buffered envelope — that gap is
+                // the pre-existing, separately-filed buffered-envelope
+                // finding, out of scope for this change.
+                buffered["corrections"] = serde_json::json!({ "param_aliases": c });
             }
             Content::text(
                 serde_json::to_string_pretty(&buffered)
@@ -1240,31 +1248,64 @@ pub trait Tool: Send + Sync {
                     // `call_content` path (`{filter, hint}` / a bare array),
                     // and a future tool combining `param_aliases()` with one
                     // of those shapes must not have this framework write
-                    // silently clobber the tool's own. Not reachable today —
-                    // no in-tree tool both declares `param_aliases()` and
-                    // writes `corrections` itself — so neither arm below has
-                    // a live caller yet; it is cheap to get both right now
-                    // rather than leave either as a footgun for whichever
-                    // tool does.
+                    // silently clobber the tool's own. The two merge arms
+                    // below (`Some(object)` / `Some(non-object)`) have no
+                    // live production caller today — no in-tree tool both
+                    // declares `param_aliases()` and writes its own
+                    // `corrections` — but the `None` arm below is live on
+                    // every ordinary alias-repair call, e.g.
+                    // `read_file(file_path=…)`.
                     //
-                    // Item 1 (2026-09 re-review): `c` is shaped `{params,
-                    // hint}` (Ruling 9), DELIBERATELY mirroring `find.rs`'s
-                    // `{filter, hint}` — one field name, one concept, per the
-                    // ADR. That shared shape is exactly why a flat per-key
-                    // `insert` is wrong: `hint` collides with every in-tree
-                    // writer of `corrections` (find.rs, and any future one
-                    // following the same convention), so the merge below used
-                    // to silently overwrite the tool's own teaching text with
-                    // ours. Nesting our own advisory under the dedicated key
-                    // `param_aliases` — rather than merging key-by-key — makes
-                    // a collision impossible by construction: that key names
-                    // THIS mechanism specifically, so no tool's own
-                    // `corrections` object can already be using it. The cost
-                    // (see the design note in the commit message) is a shape
-                    // that depends on whether `corrections` was already
-                    // present; the `None` arm below is untouched so every
-                    // existing pinned assertion (a tool with no `corrections`
-                    // of its own) keeps the flat `{params, hint}` shape.
+                    // Item 1 (2026-09 re-review, round 3): `c` is shaped
+                    // `{params, hint}` (Ruling 9), DELIBERATELY mirroring
+                    // `find.rs`'s `{filter, hint}` — one field name, one
+                    // concept, per the ADR. That shared shape is exactly why a
+                    // flat per-key `insert` is wrong: `hint` collides with
+                    // every in-tree writer of `corrections` (find.rs, and any
+                    // future one following the same convention), so a flat
+                    // merge would silently overwrite the tool's own teaching
+                    // text with ours. Nesting our own advisory under the
+                    // dedicated key `param_aliases` — rather than merging
+                    // key-by-key — avoids that specific collision.
+                    //
+                    // The advisory now lives at `corrections.param_aliases`
+                    // UNCONDITIONALLY — including the `None` arm just below
+                    // and Site A's buffered-envelope insert — never bare at
+                    // `corrections`. Round 2 kept the `None` arm flat
+                    // specifically to protect existing pinned assertions;
+                    // that gave the advisory two addresses depending on
+                    // whether the tool itself wrote to `corrections`, which
+                    // contradicts this file's own model for `Guidance`
+                    // (~:376-378): "the field name itself carries the
+                    // register — agents scan JSON responses and react to the
+                    // key, not the prose." An agent that learned
+                    // `corrections.params` would get a false negative reading
+                    // a flat `corrections` produced by a tool with nothing of
+                    // its own to say — silent, plausible, and it keeps
+                    // sending the alias forever.
+                    //
+                    // `param_aliases` is NOT collision-proof by construction
+                    // — a key naming a mechanism is exactly the key another
+                    // reporter of that same mechanism reaches for, the
+                    // stronger (not weaker) version of the `hint` collision
+                    // this nesting fixes. The collider is one layer down in
+                    // this same subsystem: the ADR deliberately keeps each
+                    // tool's own alias fallback as "a redundant second layer"
+                    // (`src/fs/mod.rs`'s `get_path_param`/`require_path_param`,
+                    // `src/tools/core/params.rs`'s `require_str_param_or_hint`),
+                    // reached via the SAME `Tool::param_aliases()` name, so a
+                    // tool that ever surfaces its own fallback repair under
+                    // that key would have it silently destroyed by the
+                    // unconditional insert below. Verified zero today, not
+                    // assumed zero: `param_aliases()` is implemented only by
+                    // `CreateFile`, `EditFile`, `Grep`, `ReadFile` (none of
+                    // which write their own `corrections`), and `corrections`
+                    // is written only by `find.rs:1290` and `update.rs:763`,
+                    // both under `doc`, which declares no aliases. Re-verify
+                    // this pairing before trusting it stays empty — a false
+                    // "impossible" claim here is worse than none, per
+                    // CLAUDE.md's Testing Discipline: it is what stops the
+                    // next reader from checking.
                     match obj.get_mut("corrections") {
                         Some(existing) if existing.is_object() => {
                             if let Some(existing_obj) = existing.as_object_mut() {
@@ -1290,7 +1331,15 @@ pub trait Tool: Send + Sync {
                             });
                         }
                         None => {
-                            obj.insert("corrections".to_string(), c.clone());
+                            // Unconditional nesting (item 1): the advisory
+                            // lives at `corrections.param_aliases` even when
+                            // the tool wrote nothing of its own, so the
+                            // address never depends on a fact the caller
+                            // cannot see.
+                            obj.insert(
+                                "corrections".to_string(),
+                                serde_json::json!({ "param_aliases": c }),
+                            );
                         }
                     }
                 }
