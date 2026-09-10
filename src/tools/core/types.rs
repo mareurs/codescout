@@ -1188,6 +1188,19 @@ pub trait Tool: Send + Sync {
         Ok(blocks)
     }
 
+    /// Non-canonical parameter names this tool accepts, as `(received, canonical)`.
+    ///
+    /// Advertise ONLY the canonical name in `input_schema`. `call_content` rewrites
+    /// these before anything reads the input and announces the correction on the
+    /// response — so a tool declaring an alias here must NOT also declare it as a
+    /// property, and `every_declared_alias_is_absent_from_the_schema` (`src/server.rs`)
+    /// enforces that.
+    ///
+    /// Defaults to empty: a tool opts in.
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[]
+    }
+
     /// A cheap projection of this call's shape, taken BEFORE `call()` consumes
     /// `input`. **Every tool opts in by default**: the default computes
     /// `action_selector_key(self.name(), input)`, so a tool is reachable by

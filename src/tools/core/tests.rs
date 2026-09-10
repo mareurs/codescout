@@ -2327,3 +2327,31 @@ async fn call_content_buffered_summary_is_built_from_the_stripped_value() {
         "the stored @tool_* payload must itself be stripped, not just the envelope: {buffered_payload}"
     );
 }
+
+#[test]
+fn param_aliases_defaults_to_empty_so_a_tool_opts_in() {
+    // A tool that says nothing declares no aliases: the normalizer is a no-op
+    // for it, which is what makes this safe to add to the trait rather than to
+    // each implementor.
+    struct Bare;
+    #[async_trait::async_trait]
+    impl crate::tools::Tool for Bare {
+        fn name(&self) -> &str {
+            "bare"
+        }
+        fn description(&self) -> &str {
+            "d"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type":"object"})
+        }
+        async fn call(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &crate::tools::ToolContext,
+        ) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::json!({"status":"ok"}))
+        }
+    }
+    assert!(Bare.param_aliases().is_empty());
+}
