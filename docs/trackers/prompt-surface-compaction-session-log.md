@@ -2134,9 +2134,23 @@ it. My first theory for (1) was that the pathspec `src/**/*.rs` had been too nar
 **falsified** — it matches `2735df73`'s files.
 
 **So the rule this entry now carries:** on a shared checkout, a measurement taken from a BUILD and
-an attribution taken from `git log` are readings of two different trees, and nothing in either
-output says so. Attribute from the diff, or ask the author — or, at minimum, re-derive the
-attribution at write time rather than at measure time.
+an attribution taken from `git log` are readings of two different trees, and **neither output
+carries the tree it read** (that sharper form is `b0b9bc40`'s; mine said only that nothing in
+either output says so, which names the absence without naming what is absent).
+
+**This is an instance of an existing law, not a new one — and it is the case where that law's
+remedy fails.** `CLAUDE.md` § *Testing Discipline* already requires a count to arrive with its
+**instant** and its **tree**, names the mechanism as *"a sweep in flight makes the worktree and
+HEAD disagree"*, and prescribes `git grep <pattern> HEAD` because naming the tree is cheaper than
+stamping the moment. Here the two disagreeing readers are not two sessions but one session's two
+instruments — the build read the worktree, `git log` read HEAD — and **the prescribed remedy is
+unavailable**: pinning to `HEAD` cannot name the tree that was measured, because the bytes
+measured were uncommitted and in `HEAD` nowhere. The tree half is the one a stamp cannot buy, and
+a build of a dirty tree is where it cannot be bought at all.
+
+Attribute from the diff, or ask the author — or, at minimum, re-derive the attribution at write
+time rather than at measure time, which is the only one of the three that was available to me
+here and the one I skipped.
 
 **The correction to `F-11`, which is the part worth keeping.** `F-11` reported *"budget 57296,
 headroom 0"* and glossed it as a design choice: *"the ceiling was set to the post-collapse total,
