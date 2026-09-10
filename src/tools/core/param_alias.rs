@@ -112,6 +112,18 @@ pub fn correction_notice(tool: &str, corrections: &[Correction]) -> Option<Strin
     let parts: Vec<String> = corrections
         .iter()
         .map(|c| {
+            // LOAD-BEARING: the SINGLE quotes around every key and value below.
+            // A test in `src/tools/core/tests.rs` asserts that Site B (the
+            // compact-text render) carries this text verbatim, AND separately
+            // that it carries no `{`. Those two assertions only cover opposite
+            // directions because single quotes survive `serde_json`
+            // string-encoding byte-identically: a regression that dumps the
+            // serialized `corrections` object into the text renderer still
+            // contains this notice verbatim, so the exact-match assertion stays
+            // green and only the `{` check reds. Switch these to double quotes
+            // and serde escapes them, the dump no longer contains the notice,
+            // both assertions red together, and the comment explaining why both
+            // exist becomes false while the suite stays green.
             if c.conflicted {
                 format!(
                     "'{}' is not a parameter of {tool} — '{}' was also supplied and won; \

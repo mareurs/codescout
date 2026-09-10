@@ -1293,10 +1293,17 @@ pub trait Tool: Send + Sync {
                     // tool's own alias fallback as "a redundant second layer"
                     // (`src/fs/mod.rs`'s `get_path_param`/`require_path_param`,
                     // `src/tools/core/params.rs`'s `require_str_param_or_hint`),
-                    // reached via the SAME `Tool::param_aliases()` name, so a
-                    // tool that ever surfaces its own fallback repair under
-                    // that key would have it silently destroyed by the
-                    // unconditional insert below. Verified zero today, not
+                    // which share the alias SET rather than this trait method:
+                    // they read `PATH_PARAM_ALIASES` (`src/fs/mod.rs`) directly,
+                    // and `Tool::param_aliases()`'s only caller is
+                    // `call_content` — so do NOT re-verify by grepping that
+                    // method's callers, which would find only this file and
+                    // wrongly suggest the second layer is unreachable. What
+                    // makes it a collider is the shared WORD: a tool surfacing
+                    // its own fallback repair would name it `param_aliases`
+                    // because that is what the concept is called here, and the
+                    // unconditional insert below would silently destroy it.
+                    // Verified zero today, not
                     // assumed zero: `param_aliases()` is implemented only by
                     // `CreateFile`, `EditFile`, `Grep`, `ReadFile` (none of
                     // which write their own `corrections`), and `corrections`

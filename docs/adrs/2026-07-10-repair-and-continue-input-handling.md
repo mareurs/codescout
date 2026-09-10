@@ -172,25 +172,44 @@ framework-added key is dropped unless re-attached at the render site. A
 `corrections` key set on the value and nowhere else is silent on the two paths
 most callers actually receive.
 
-**Round 3 note (2026-09-10) — where the advisory lands, as implemented.** The
-alias-correction advisory lands at `corrections.param_aliases`, **unconditionally**
-— including when the tool wrote no `corrections` of its own. An earlier
-implementation kept that no-op case flat (`corrections` = the advisory directly)
-to avoid touching existing pinned assertions; that gave the advisory two
+**Round 3 note (2026-09-10) — where the advisory lands, as implemented.** On the
+**object-shaped** render paths — the pretty-JSON value and the buffered envelope
+— the alias-correction advisory lands at `corrections.param_aliases`,
+**unconditionally**, including when the tool wrote no `corrections` of its own.
+An earlier implementation kept that no-op case flat (`corrections` = the advisory
+directly) to avoid touching existing pinned assertions; that gave the advisory two
 addresses depending on a fact the caller cannot see, so it was changed to nest
 in every case. When a tool's own `call()` already returned a `corrections`
 value, the framework nests its advisory into it rather than overwriting: an
 object-shaped `corrections` gets a `param_aliases` key added; a non-object
 `corrections` (e.g. a bare array) is promoted to `{"tool": <original>,
-"param_aliases": <advisory>}` so both reach the caller. This still does not
-extend to the buffered-envelope render path merging with a tool's own
-`corrections` there — a tool's own advisory does not reach that envelope at
-all, which is a separate open defect tracked in
+"param_aliases": <advisory>}` so both reach the caller.
+
+**Two paths this does NOT cover, and both matter more than the sentence above.**
+The `OutputForm::Text` compact render carries the advisory as a `⚠`-prefixed
+hint STRING with **no `corrections` key at all** — a text renderer cannot carry an
+object, so that asymmetry is by design, but it means two of the four
+alias-declaring tools (`read_file` and `grep`) deliver no key on the path they
+mostly take. And the buffered envelope, while it does carry the framework's
+advisory, drops a tool's OWN `corrections` entirely — a separate open defect
+tracked in
 `docs/issues/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
 
-**Unchanged by this amendment.** `json!("ok")` write tools still repair
-**silently** — the round-trip saving is in the repair, not the note, and
-reshaping ~40 responses is still not worth it.
+**Unchanged by this amendment — the DECISION, whose factual claim has since gone
+stale.** The decision stands: **no response is reshaped in order to carry the
+note**, because the round-trip saving is in the repair rather than the note and
+reshaping ~40 responses is not worth it.
+
+What is no longer true is the sentence that used to state it — *"`json!("ok")`
+write tools still repair silently."* Corrected 2026-09-10, found independently
+twice: `annotate_write_path` (`src/tools/core/types.rs`) promotes a bare
+`json!("ok")` to an object for its own unrelated purpose, the write-path
+annotation, and it runs BEFORE the corrections insert. So the two `json!("ok")`
+write tools that declare aliases — `create_file` and `edit_file` — do carry
+`corrections.param_aliases`. The exception above was purchased with a cost that
+is not being paid for them: the shape change was already paid for by something
+else. `json!("ok")` write tools that are NOT promoted still repair silently, and
+that is the clause's live scope.
 
 **Revisit-when (added):** a repaired alias call is observed where the
 `corrections` note did **not** reach the caller — that is a render-path hole, not

@@ -2503,8 +2503,17 @@ async fn correction_reaches_the_caller_on_the_compact_text_path() {
     // NAME the system already gives this text: `correction_notice()`
     // (`src/tools/core/param_alias.rs`) is the pure function `types.rs` calls
     // to build `param_notice`, so recomputing its exact output here and
-    // requiring it verbatim in `t` is strictly stronger than any substring
-    // check — it pins the real text, not a stand-in for it.
+    // requiring it verbatim in `t` pins the WIRING — that Site B prefixes
+    // that function's output and not something else.
+    //
+    // It is NOT strictly stronger than the proxy below, and saying so would be
+    // the false-coverage direction: both sides of this assertion derive from
+    // the same production function, so a reword of `correction_notice` moves
+    // them in lockstep and this stays green. The two assertions are monotone in
+    // OPPOSITE directions — this one is blind to a superset (the notice plus
+    // surrounding JSON satisfies it), the proxy is blind to a reword — so
+    // neither subsumes the other and both are required. See the block below,
+    // which documents the concrete regression this one does not catch.
     let expected_notice = crate::tools::param_alias::correction_notice(
         "alias_echo",
         &[crate::tools::param_alias::Correction {
