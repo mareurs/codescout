@@ -223,6 +223,12 @@ mod tests {
             !n.contains("also supplied"),
             "the caller never supplied 'path'; the notice must not claim they did: {n}"
         );
+        assert!(
+            n.contains("already set"),
+            "must positively name which alias won, not merely avoid the false \
+             claim above — an absence check alone can't see the winner's name \
+             going missing too: {n}"
+        );
     }
 
     /// The companion state to the test above: here the caller DID supply the
