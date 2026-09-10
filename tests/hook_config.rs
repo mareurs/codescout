@@ -538,3 +538,170 @@ fn the_ignore_verdict_helper_discriminates() {
          `the_claude_skills_negation_survives_the_nested_log_rule` vacuous"
     );
 }
+// ---------------------------------------------------------------------------------------
+// `.gitignore`: every root `.codescout/` rule owes its `crates/*/` twin.
+//
+// WHAT WENT WRONG, AND WHY RE-READING COULD NOT CATCH IT.
+// `.gitignore` says "Same runtime files, but for crates with their own .codescout/" and then
+// enumerates TWO of thirty — `usage.db-wal` and `usage.db-shm`, the small SQLite sidecars, while
+// `usage.db` itself is 250 MB and was offered for commit. The comment asserts the exact parity a
+// reader would go looking for, so re-reading the block returns "handled". It had already fired:
+// `crates/librarian-mcp/.codescout/usage.db` and `write.lock` are tracked. Measured 2026-09-10
+// against paths that do not exist, so the verdicts are about rules rather than about disk
+// (`docs/issues/2026-09-10-crate-level-codescout-ignore-covers-two-sidecars-and-misses-the-database.md`).
+//
+// The mechanism is that a pattern containing an internal `/` is anchored to its own directory
+// with or without a leading slash — so `.codescout/write.lock` READS as "at any depth" and
+// behaves exactly like the explicitly-anchored `/.codescout/usage.db`. That is why this guard
+// DERIVES the expected set from the root block rather than listing it: a restated list is the
+// same transcription defect one level up, and transcription is precisely what failed.
+//
+// WHY THE PER-CRATE RULES ARE AN ENUMERATION AND NOT A DIRECTORY RULE.
+// The root block is deliberately file-by-file because `/.codescout/audit/*.jsonl` are COMMITTED
+// audit shards; a blanket `.codescout/` rule would silently stop sharing them. The same holds
+// per crate — a crate activated as its own project generates the same runtime files and would
+// generate the same shareable ones — so the repair for a missing twin is another enumerated
+// line, never `crates/*/.codescout/`.
+//
+// AND A BLANKET RULE PLUS A NEGATION IS NOT AVAILABLE EITHER: git will not descend into an
+// excluded directory to reconsider a negation. That is the same mechanism measured for
+// `**/.claude/` in the test above, not a style preference — it does not work.
+
+/// A crate directory that does not exist, so every verdict below is about RULES, not about disk.
+const PROBE_CRATE: &str = "a-crate-nobody-has-added-yet";
+
+/// The tails of every root-anchored `.codescout/…` ignore pattern — the part after `.codescout/`.
+///
+/// A line qualifies when it addresses the repo-root `.codescout/`, with or without a leading `/`,
+/// because an internal slash anchors it either way. Comments and negations are dropped, and so
+/// are the scoped siblings (`crates/*/…`, `tests/fixtures/*/…`, `docs/**/…`), which do not begin
+/// at `.codescout/` once the optional leading slash is gone.
+fn root_codescout_patterns(gitignore: &str) -> Vec<String> {
+    gitignore
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('!'))
+        .map(|l| l.strip_prefix('/').unwrap_or(l))
+        .filter_map(|l| l.strip_prefix(".codescout/"))
+        .filter(|tail| !tail.is_empty())
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// A pattern tail turned into one concrete path that pattern must match.
+///
+/// `*` becomes a literal segment character and a trailing `/` gains a child, so the result is a
+/// path `git check-ignore` can answer about rather than a pattern. Both substitutions have to
+/// keep the path matching its source rule; the per-pattern control assertion below is what proves
+/// they do, rather than leaving it to this sentence.
+fn concrete_probe(tail: &str) -> String {
+    let mut p = tail.replace('*', "x");
+    if p.ends_with('/') {
+        p.push_str("a-file");
+    }
+    p
+}
+
+/// Every root `.codescout/` ignore rule has a `crates/*/` twin.
+#[test]
+fn every_root_codescout_ignore_rule_has_its_crates_twin() {
+    let gitignore = std::fs::read_to_string(repo_root().join(".gitignore"))
+        .expect(".gitignore must be readable");
+    let tails = root_codescout_patterns(&gitignore);
+
+    // Non-vacuity: a parser that silently matched nothing satisfies every assertion below. The
+    // floor sits well under the derived count (30 on 2026-09-10) on purpose — it is here to catch
+    // a parser returning an empty population, not to pin a number each added rule falsifies.
+    assert!(
+        tails.len() >= 20,
+        "root_codescout_patterns found only {} rules in .gitignore — the parser has stopped \
+         matching the root block, and every verdict below is then about an empty population",
+        tails.len()
+    );
+
+    let mut missing = Vec::new();
+    for tail in &tails {
+        let probe = concrete_probe(tail);
+
+        // CONTROL, per pattern: the root rule must itself match the path built from it. Without
+        // this, a probe no rule can match reports EVERY twin as missing, and that failure reads
+        // as a .gitignore gap rather than as this test's own construction being wrong.
+        assert_eq!(
+            ignore_verdict(&format!(".codescout/{probe}")),
+            IgnoreVerdict::Ignored,
+            "the probe path built from `.codescout/{tail}` is not matched by its own root rule — \
+             `concrete_probe` is wrong for this pattern shape, so no verdict below is safe"
+        );
+
+        if ignore_verdict(&format!("crates/{PROBE_CRATE}/.codescout/{probe}"))
+            != IgnoreVerdict::Ignored
+        {
+            missing.push(tail.clone());
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "{} root `.codescout/` rule(s) have no `crates/*/` twin, so a crate with its own \
+         .codescout/ offers these for commit:\n{}\n\nAdd one enumerated line per entry beside \
+         .gitignore's existing `crates/*/.codescout/…` rules. NOT a blanket \
+         `crates/*/.codescout/` directory rule, and NOT a blanket rule with a negation — the \
+         comment above this test measures why neither works.",
+        missing.len(),
+        missing
+            .iter()
+            .map(|t| format!("  crates/*/.codescout/{t}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// The rule parser discriminates: both anchored forms in, comments and scoped siblings out.
+#[test]
+fn the_root_codescout_rule_parser_discriminates() {
+    // Each rejected line is a real shape from `.gitignore`, not an invented one: the negations
+    // exist (`!/.claude/skills/`), and all three scoped siblings are live rules. A parser that
+    // accepted `crates/*/.codescout/usage.db-wal` would compare the twin block against itself
+    // and pass while every root rule went unchecked.
+    let fixture = "\
+# a comment mentioning .codescout/decoy.db
+/.codescout/usage.db
+.codescout/write.lock
+.codescout/tmp/
+crates/*/.codescout/usage.db-wal
+tests/fixtures/*/.codescout/
+docs/**/.codescout/
+!/.codescout/keep-me.json
+/target
+";
+
+    assert_eq!(
+        root_codescout_patterns(fixture),
+        vec![
+            "tmp/".to_owned(),
+            "usage.db".to_owned(),
+            "write.lock".to_owned()
+        ],
+        "the parser must take both anchored forms and reject comments, negations, and the \
+         crates/tests/docs-scoped siblings"
+    );
+
+    // The probe builder, on the three pattern shapes `.gitignore` actually uses.
+    assert_eq!(
+        concrete_probe("usage.db"),
+        "usage.db",
+        "a literal name is unchanged"
+    );
+    assert_eq!(
+        concrete_probe("debug.log*"),
+        "debug.logx",
+        "a glob gains a literal segment"
+    );
+    assert_eq!(
+        concrete_probe("tmp/"),
+        "tmp/a-file",
+        "a directory rule gains a child"
+    );
+}

@@ -22,9 +22,42 @@
 /.codescout/librarian.db
 /.codescout/librarian.db-wal
 /.codescout/librarian.db-shm
-# Same runtime files, but for crates with their own .codescout/ (e.g. librarian-mcp)
-crates/*/.codescout/usage.db-wal
+# The same files again, for any crate with its own .codescout/ (one activated as its own project).
+# Enumerated for the reason the "NOT ignored, deliberately" note above gives, and NOT a blanket
+# rule plus a negation either: git will not descend into an excluded directory to reconsider one.
+# This block is DERIVED from the root block above, never maintained by eye -- adding a root rule
+# without its twin here reds `every_root_codescout_ignore_rule_has_its_crates_twin`
+# (tests/hook_config.rs).
+crates/*/.codescout/call_edges.db
+crates/*/.codescout/cc_session_id
+crates/*/.codescout/code-index.db
+crates/*/.codescout/constitution-seen/
+crates/*/.codescout/crash.log
+crates/*/.codescout/debug.log*
+crates/*/.codescout/diagnostic-*.log
+crates/*/.codescout/embeddings.db
+crates/*/.codescout/embeddings.db-shm
+crates/*/.codescout/embeddings.db-wal
+crates/*/.codescout/embeddings/
+crates/*/.codescout/guide_hints/
+crates/*/.codescout/index-state.json
+crates/*/.codescout/librarian.db
+crates/*/.codescout/librarian.db-shm
+crates/*/.codescout/librarian.db-wal
+crates/*/.codescout/libraries.json
+crates/*/.codescout/peer-audit.jsonl
+crates/*/.codescout/peers.toml
+crates/*/.codescout/private-memories/
+crates/*/.codescout/project.toml
+crates/*/.codescout/tantivy/
+crates/*/.codescout/tmp/
+crates/*/.codescout/usage.db
 crates/*/.codescout/usage.db-shm
+crates/*/.codescout/usage.db-wal
+crates/*/.codescout/usage.db.bak-*
+crates/*/.codescout/workspace.toml
+crates/*/.codescout/write.lock
+crates/*/.codescout/write.lock.holder
 /.codescout/debug.log*
 /.codescout/diagnostic-*.log
 /.codescout/libraries.json
