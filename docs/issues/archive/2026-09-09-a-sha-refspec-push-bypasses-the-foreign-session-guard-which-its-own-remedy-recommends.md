@@ -31,7 +31,7 @@ fixed: 2026-09-09
 > not move a promotion threshold. Note recorded on `IC-14`'s `**Members:**` line.
 >
 > **How it happened, recorded because the mechanism is reusable and the lapse was this author's.**
-> The earlier filing was `750c60a5135d52f9` before archiving re-keyed it, and that row **was in
+> The earlier filing is `7e0968e2ddfcbc07`, and that row **was in
 > the 96-artifact open-bug list this file's author read at 14:1x the same day** — title truncated
 > mid-word at *"so git push ori…"*. It was not missed for want of a query. A duplicate check was
 > run before filing a different bug two hours earlier and **skipped here**, because this defect
