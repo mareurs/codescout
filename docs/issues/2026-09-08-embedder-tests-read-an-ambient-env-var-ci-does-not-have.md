@@ -189,3 +189,16 @@ None needed locally; the tree is green here by construction, which is precisely 
 - `docs/plans/2026-09-06-stale-ledger-and-shared-state-fix-queue.md` § *Not in this queue* — the
   ownerless-CI item this explains
 - `docs/conventions/test-env-isolation.md`
+
+## Fix provenance
+
+- **SHA:** `03f174c2` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4dde4a69650e0b21a6aef23fe5e2e25c2b4fbffd` — content hash of the diff; survives rebase and cherry-pick.
+
+**The SHA this file used to cite, `ab33f4ff`, is ORPHANED — no branch contains it.** It is
+reachable today only because the object has not been garbage-collected, and it will stop
+resolving. This is the decay the patch-id exists for, met in the wild rather than argued:
+recovered 2026-09-10 by building the index the guide prescribes
+(`git log --all -p > /tmp/all.patch; git patch-id --stable < /tmp/all.patch`) and matching
+`4dde4a69…`, which returned **exactly one** commit across **5912** — `03f174c2`, same subject,
+same four files, three minutes later, on `origin/experiments`. Do not restore `ab33f4ff`.

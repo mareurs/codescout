@@ -137,3 +137,8 @@ N/A.
 - `docs/issues/archive/2026-09-09-a-safety-comment-outlived-both-its-unsafe-block-and-its-own-rationale.md`
   — the bug this gate was built for; its "zero false positives" line is retracted there
 - Reported by sessionId `5399543d-22d6-4ed9-9ebb-876be459989f`, whose file it accused
+
+## Fix provenance
+
+- **SHA:** `901bbd4b` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `093a3709d5c150ec3bb63f355605c6382d2f73de` — content hash of the diff; survives rebase and cherry-pick.

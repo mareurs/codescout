@@ -114,3 +114,13 @@ declared at the point of copying, since it cannot be gated.
 - `docs/issues/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md` — the
   backtick escape; adjacent, different mechanism
 - `4647762b`, `707bff08` — the fourth and fifth surfaces of the same policy change
+
+## Fix provenance
+
+- **SHA:** `2a2825b4` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `aa20d85e168985854ed9e68210807c7a377fac21` — content hash of the diff; survives rebase and cherry-pick.
+
+§ *Fix* said only *"recorded in the commit that carries this file"* — true, and unresolvable by a
+reader, because a filing commit is not distinguishable from a fix commit without opening it. It is
+resolved here: `2a2825b4` files this bug **and** carries the fix, editing
+`docs/trackers/issue-clusters.md` in the same commit.

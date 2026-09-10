@@ -303,3 +303,12 @@ hazard — which is the same reason these are filed and not applied.
   — the parent, whose titular defect is fixed at `d6847322`.
 - `scripts/pre-push-foreign-session-guard.sh:194-196` (the note), `:283-340` (the banner).
 - `docs/trackers/observer-blindness.md` OB-20 — why the guard exists.
+
+## Fix provenance
+
+- **SHA:** `ca977f51` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `9b7bc9fd70a5d44a0e2696b76d661619221b63cb` — content hash of the diff; survives rebase and cherry-pick.
+
+Status is `mitigated`, not `fixed`, and this pointer does not change that — residuals 1 and 2 are
+fixed with regression tests, residual 3 is mitigated only, and `unverified:` carries the difference
+so a query can read it.

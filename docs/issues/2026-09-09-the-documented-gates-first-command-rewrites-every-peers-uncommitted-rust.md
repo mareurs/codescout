@@ -230,3 +230,13 @@ rather than deleting it, as § *Development Commands* instructs.
 - `CLAUDE.md` § *Development Commands*, `docs/conventions/gate-ordering.md`
 - `docs/conventions/shared-checkout-commit-sequence.md` — the same shared-tree discipline
   for the index, which has guards where this has none
+
+## Fix provenance
+
+- **SHA:** `2caf55c5` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `35f0ccc37590baafad49fcc4c8f5519877b23853` — content hash of the diff; survives rebase and cherry-pick.
+
+`feat(scripts): fmt-mine.sh formats only this session's Rust and refuses the rest` — adds
+`scripts/fmt-mine.sh` and `tests/fmt-mine.sh`. Status is `mitigated`, not `fixed`, and this
+pointer does not change that: `unverified:` names the reason, and CLAUDE.md's gate has since
+been changed to call the script, which is a separate commit and a separate decision.

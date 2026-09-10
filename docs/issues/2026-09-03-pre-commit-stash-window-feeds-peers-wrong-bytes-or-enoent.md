@@ -370,3 +370,11 @@ not a fix for the tree.
 - Contributions: `2cb44cd3` (two-window decode, behavioural probe), `66523284` (the `E0583`
   observation and the tracked-file-reports-absent widening), `ffb95976` (the unstaged-only
   exposure bound), `9f839a8e` (third symptom).
+
+## Fix provenance
+
+- **SHA:** `074b749e` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4c3958557408b19cdf60354a5f8288167e4342e4` — content hash of the diff; survives rebase and cherry-pick.
+
+The same commit closes `2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — one
+mechanism, two observers, deliberately not folded and not superseded (§ *References*).

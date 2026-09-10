@@ -219,3 +219,8 @@ interval was about ninety seconds on a checkout with five live sessions.
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Instance 7* — the capture this was observed in
 - `docs/trackers/bug-fix-session-log.md` `W-99` — the entry that was captured
 - `get_guide("tracker-conventions")` § *Entry ids*, § *One entry format, never two*
+
+## Fix provenance
+
+- **SHA:** `8857b0b2` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `dec1af44d91b701b1ff7863e9f44b7946df470ce` — content hash of the diff; survives rebase and cherry-pick.

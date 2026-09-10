@@ -11,6 +11,7 @@ opened: 2026-09-09
 owner: marius
 related: []
 severity: medium
+unverified: 'Legitimately open, and the patch-id in the body is NOT this record''s fix anchor. `26b60af8` / `39641840397a72f257450e7d36b72e197a1c67bf` is cited in § Root cause as a WORKAROUND at one call site — doctor.rs keeps its UmbrellaPolicy rationale above the `let` rather than inside the argument list — and the body says so in the same sentence: "that is a workaround at one call site, not a fix to the guard." The guard itself still checks a fixed byte window and still reports a correct call site, so status stays `open` and `closed:` stays null. Recorded here because `non_terminal_status_with_fix_anchor` cannot distinguish a citation of a sibling''s fix from this record''s own, and its own detail names `unverified:` as the discharge for exactly this case.'
 ---
 
 # BUG: a fixed-byte-window source guard both refuses a correct call site and admits a wrong one

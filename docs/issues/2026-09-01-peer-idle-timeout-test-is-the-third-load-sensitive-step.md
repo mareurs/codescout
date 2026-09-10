@@ -911,3 +911,8 @@ members are addressed; see § Fix.
 - `src/peer/server.rs` `connect_with_retry`; `src/lsp/manager.rs`
   `claim_mux_lock_some_when_free_none_when_held`
 - `docs/trackers/catalog-audit-trail-session-log.md` — observed during the T-7 SDD run
+
+## Fix provenance
+
+- **SHA:** `f10eefe2` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `d1331208d10a9477fdc31f3969ea526375913078` — content hash of the diff; survives rebase and cherry-pick.

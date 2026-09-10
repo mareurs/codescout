@@ -344,3 +344,14 @@ so — see `IC-12`'s `Mechanism status`.
 - `OB-10` in `docs/trackers/observer-blindness.md` — the class covering resources whose
   holder gets no signal.
 - `9e493b20` — shortened this window from ~2000 ms to ~40 ms for an unrelated reason.
+
+## Fix provenance
+
+- **SHA:** `074b749e` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4c3958557408b19cdf60354a5f8288167e4342e4` — content hash of the diff; survives rebase and cherry-pick.
+
+One commit closes this file and `2026-09-03-pre-commit-stash-window-feeds-peers-wrong-bytes-or-enoent.md`
+— one mechanism, two observers, deliberately not folded (§ *References*). **The outcome banner sits in
+§ *Resume*, not § *Fix*:** § *Fix* holds the pre-fix analysis and opens *"Not fixed, and probably not
+fixable in `pre-commit`"*, which was true when written and is not the state of this record. A reader
+scanning § *Fix* alone concludes the opposite of the truth, which is why the pointer lives here.

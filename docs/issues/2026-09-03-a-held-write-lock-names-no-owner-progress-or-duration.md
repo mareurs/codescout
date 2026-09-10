@@ -232,3 +232,10 @@ name into the refusal, which `acquire` could record in the lock file itself befo
   resource*, which is `shared-resource-carries-no-owner`; reasoning from the symptom
   (invisible to the holder, visible only to the refused) is the same move that makes
   topic-shaped cluster slugs bad.
+
+## Fix provenance
+
+- **SHA:** `d1b6146d` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `8288a3733cba958ed0a603240c9860fafaae460a` — content hash of the diff; survives rebase and cherry-pick.
+
+Closes two of this file's three remedies; `unverified:` names the third, which did not ship.

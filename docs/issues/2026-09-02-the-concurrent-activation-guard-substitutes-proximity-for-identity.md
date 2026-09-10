@@ -171,3 +171,14 @@ which today encodes the proxy rather than the intent.
 - `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
   — same missing field, Fix 2
 - Cluster: `IC-17` — a shared resource carries no owner
+
+## Fix provenance
+
+- **SHA:** `fd985218` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `99cb861fc8346a5306e5da945e5aa1022aae9c6a` — content hash of the diff; survives rebase and cherry-pick.
+
+`feat(activate): the concurrent-activation guard compares identity, not wall-clock proximity`. The
+SHA was named in `unverified:` and nowhere else; the patch-id is derived here for the first time.
+**§ *Fix* holds the pre-fix analysis** and opens *"Not independently fixable by tuning the
+predicate"* — true when written, not the outcome. This commit closes the **false-positive half
+only**, and `unverified:` states the half that remains open.

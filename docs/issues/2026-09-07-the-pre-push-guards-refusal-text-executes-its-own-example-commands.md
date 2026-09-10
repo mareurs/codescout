@@ -196,3 +196,8 @@ apply the one-line fix first.
 - CLAUDE.md § *Parsers Over a Namespace* — the heredoc tell
 - CLAUDE.md § *Testing Discipline* — monotone assertions; the guard's own predicate-vs-remedy ceiling
 - `docs/trackers/observer-blindness.md` `OB-20` — why the guard exists
+
+## Fix provenance
+
+- **SHA:** `9dd4792f` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `29dfd7ca487e46c7780df8de465652e11fa2a359` — content hash of the diff; survives rebase and cherry-pick.

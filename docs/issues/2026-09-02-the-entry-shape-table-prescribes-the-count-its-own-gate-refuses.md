@@ -91,3 +91,11 @@ divergence discoverable from either side.
 
 Fixed as to the contradiction; unverified as to recurrence, per `unverified:`.
 
+
+## Fix provenance
+
+- **SHA:** `4647762b` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `7a7b4a6329f49ba857600c61cd2cc7d091d09d24` — content hash of the diff; survives rebase and cherry-pick.
+
+§ *Fix* said only *"Corrected in the same commit that filed this"*. Resolved here: `4647762b` files
+this bug and carries the 35-line correction to `docs/trackers/issue-clusters.md` in one commit.
