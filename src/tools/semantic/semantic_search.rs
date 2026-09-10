@@ -577,7 +577,15 @@ impl Tool for SemanticSearch {
                 "limit": { "type": "integer", "default": 10, "description": "Max results to return (default 10)." },
                 "detail_level": { "type": "string", "description": "'full' for complete chunks (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
-                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'" },
+                "scope": {
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    // Nested combinator, not root-level — see the identical comment in
+                    // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
+                    "oneOf": [
+                        { "type": "string", "enum": ["project", "libraries", "all"] },
+                        { "type": "string", "pattern": "^lib:.+$" }
+                    ]
+                },
                 "include_memories": { "type": "boolean", "default": false, "description": "Also search semantic memories." },
                 "project_id": { "type": "string", "description": "Filter to a workspace project ID." },
                 "mode": { "type": "string", "enum": ["code", "full"], "default": "code", "description": "'code' (default) excludes markdown chunks — best for finding implementations. 'full' includes all indexed content (code + docs)." }

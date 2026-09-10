@@ -156,7 +156,20 @@ impl Tool for Symbols {
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
-                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
+                "scope": {
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "default": "project",
+                    // Nested combinator, not root-level (no_tool_schema_declares_a_top_level_combinator,
+                    // src/server.rs, forbids the latter but confirms the former is "fine and
+                    // deliberately unchecked"). Scope::parse silently falls back to Project for any
+                    // unrecognized string, which a bare enum here would mask; this expresses the real
+                    // accepted set honestly — the closed vocabulary, OR the open-ended `lib:<name>`
+                    // prefix — without falsely rejecting a valid `lib:<name>` value.
+                    "oneOf": [
+                        { "type": "string", "enum": ["project", "libraries", "all"] },
+                        { "type": "string", "pattern": "^lib:.+$" }
+                    ]
+                }
             }
         })
     }

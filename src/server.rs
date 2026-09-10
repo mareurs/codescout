@@ -2998,19 +2998,42 @@ mod tests {
     /// 3-pair `PATH_PARAM_ALIAS_MAP` "for consistency") reds nothing under it — a
     /// POPULATION assertion cannot verify a per-MEMBER claim. Counts derived directly
     /// from each tool's `param_aliases()` body this session, not transcribed from any
-    /// plan or prior report: `edit_file`/`call_graph`/`references`/`symbol_at`/`grep`/
-    /// `create_file` each return the shared 3-pair `PATH_PARAM_ALIAS_MAP`; `edit_code`
-    /// and `read_file` each carry an independent 5-pair array. 6*3 + 2*5 = 28.
+    /// plan or prior report: `edit_file`/`call_graph`/`references`/`create_file` each
+    /// return the shared 3-pair `PATH_PARAM_ALIAS_MAP`; `edit_code` and `read_file`
+    /// each carry an independent 5-pair array. `grep` and `symbol_at` were widened on
+    /// 2026-09-10 (measured tool-surface fix batch): `grep` now carries its own
+    /// 5-pair array (the shared 3-pair path family plus `("query","pattern")` and
+    /// `("regex","pattern")`, previously a SILENT `require_str_param_or` repair inside
+    /// `call()`); `symbol_at` now carries its own 4-pair array (the shared 3-pair path
+    /// family plus `("column","col")`, a pure addition — `column` was never read
+    /// anywhere in that file before). `doc` gained its FIRST `param_aliases()`
+    /// override, a 2-pair array `("query","semantic")`/`("q","semantic")` — `find`'s
+    /// search parameter is `semantic`, not `query`, and the mismatch previously
+    /// no-op'd silently rather than erroring (verified live: `query="zzz-nonexistent"`
+    /// returned unfiltered results with no warning). 4*3 + 2*5 + 1*5 + 1*4 + 1*2 = 35.
     const EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL: &[(&str, usize)] = &[
         ("edit_file", 3),
         ("call_graph", 3),
         ("references", 3),
-        ("symbol_at", 3),
+        ("symbol_at", 4),
         ("edit_code", 5),
-        ("grep", 3),
+        ("grep", 5),
         ("create_file", 3),
         ("read_file", 5),
+        ("doc", 2),
     ];
+
+    /// `doc` is the one entry in the two tables above (and below, in
+    /// `EXPECTED_ALIAS_PAIRS`) that is not unconditionally registered: it is added to
+    /// `server.tools` only `#[cfg(feature = "librarian")]` (this file, ~L89), so the
+    /// lean gate lane (`cargo test --workspace --no-default-features`) never sees it
+    /// at all — `server.tools` simply has no tool named `"doc"`. Both consuming tests
+    /// below filter the expected tables through this before comparing against the
+    /// live registry, so the lean lane skips exactly the rows it could never satisfy
+    /// rather than failing on a tool the feature flags never intended it to have.
+    fn alias_table_row_is_registered_here(tool: &str) -> bool {
+        cfg!(feature = "librarian") || tool != "doc"
+    }
 
     /// The honesty gate, inverted. A name in `param_aliases()` must NOT also be a
     /// property: advertising it re-creates the ambiguity the collapse removed, and
@@ -3046,13 +3069,18 @@ mod tests {
                 }
             }
         }
+        let expected_counts: Vec<(&str, usize)> = EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL
+            .iter()
+            .copied()
+            .filter(|(tool, _)| alias_table_row_is_registered_here(tool))
+            .collect();
         assert_eq!(
             counted.len(),
-            EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL.len(),
+            expected_counts.len(),
             "an alias-declaring tool is not named in EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL \
              (or a named one declared zero pairs): {counted:?}"
         );
-        for (tool, expected) in EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL {
+        for (tool, expected) in &expected_counts {
             let actual = counted.get(tool).copied().unwrap_or(0);
             assert_eq!(
                 actual, *expected,
@@ -3089,7 +3117,7 @@ mod tests {
     /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
     /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
     /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
-    /// counts (28 pairs, 8 tools) — so a live-array mutation and this table now
+    /// counts (35 pairs, 9 tools) — so a live-array mutation and this table now
     /// disagree, which is what makes the check non-vacuous.
     ///
     /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic
@@ -3132,9 +3160,12 @@ mod tests {
         ("symbol_at", "file_path", "path"),
         ("symbol_at", "relative_path", "path"),
         ("symbol_at", "file", "path"),
+        ("symbol_at", "column", "col"),
         ("grep", "file_path", "path"),
         ("grep", "relative_path", "path"),
         ("grep", "file", "path"),
+        ("grep", "query", "pattern"),
+        ("grep", "regex", "pattern"),
         ("create_file", "file_path", "path"),
         ("create_file", "relative_path", "path"),
         ("create_file", "file", "path"),
@@ -3148,6 +3179,8 @@ mod tests {
         ("read_file", "file", "path"),
         ("read_file", "output_id", "path"),
         ("read_file", "file_id", "path"),
+        ("doc", "query", "semantic"),
+        ("doc", "q", "semantic"),
     ];
 
     #[tokio::test]
@@ -3164,6 +3197,13 @@ mod tests {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
         for (tool_name, received, canonical) in EXPECTED_ALIAS_PAIRS {
+            if !alias_table_row_is_registered_here(tool_name) {
+                // See `alias_table_row_is_registered_here`'s doc comment: `doc` does
+                // not exist in `server.tools` under `--no-default-features`, by
+                // design (feature-gated registration), not by a regression this
+                // gate should catch.
+                continue;
+            }
             let Some(t) = server.tools.iter().find(|t| t.name() == *tool_name) else {
                 offenders.push(format!("{tool_name}: not found in the registry"));
                 continue;
@@ -3420,7 +3460,7 @@ mod tests {
     /// copies against each other and cannot see this one. A narrowing of the COUNT (e.g.
     /// collapsing this 5-pair array down to the shared 3-pair `PATH_PARAM_ALIAS_MAP`) is
     /// now caught above, by `every_declared_alias_is_absent_from_the_schema`'s per-tool
-    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 28 — derived from each
+    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 35 — derived from each
     /// tool's `param_aliases()` body, not transcribed): `read_file` is asserted to declare
     /// exactly 5 pairs, so dropping either extra pair reds it directly. What a COUNT
     /// cannot catch is a same-count KEY-IDENTITY substitution — e.g. `("output_id",
@@ -3919,8 +3959,27 @@ mod tests {
     /// couldn't already get from the alias resolving silently at call time. Per the rule
     /// above, the headroom this freed is removed, not banked. Report run 2026-09-10:
     /// TOTAL (21 tools) = 54_873, headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-10, 54_873 → 55_056 (+183), for `scope`'s `Scope::parse`
+    /// silent-fallback mismatch.** `symbols`, `references`, `semantic_search` and `index`
+    /// each declared `"scope"` as a bare `"type": "string"` — no `enum` — while their
+    /// shared runtime (`crate::library::scope::Scope::parse`) silently coerces ANY
+    /// unrecognized string to `Project`, so a caller who mistyped `scope="libary"` got a
+    /// project-scoped result with no error and no advisory. A flat `enum` cannot express
+    /// the real accepted set honestly: `lib:<name>` is an open-ended prefix, not a fixed
+    /// member, and a bare enum would falsely reject every valid library name. Each
+    /// property now carries a NESTED `oneOf` (`{"enum":[...]} | {"pattern":"^lib:.+$"}`)
+    /// — nested, not root-level, so `no_tool_schema_declares_a_top_level_combinator`
+    /// (which exists because the Anthropic Messages API rejects only ROOT `oneOf`) stays
+    /// satisfied. `index`'s accepted set is narrower than the other three (`"project"` or
+    /// `lib:<name>` only — never `"libraries"`/`"all"`), so its `oneOf` uses `{"const":
+    /// "project"}` rather than the 3-member enum the other three share, which is most of
+    /// the per-tool byte variance. This is a genuinely owed cost, not reclaimable
+    /// elsewhere: the alternative (leaving the mismatch undocumented in the schema) is
+    /// the exact defect this batch exists to fix. Report run 2026-09-10: TOTAL
+    /// (21 tools) = 55_056, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 54_873;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_056;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

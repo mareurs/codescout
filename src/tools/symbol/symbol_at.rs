@@ -376,7 +376,20 @@ impl Tool for SymbolAt {
     }
 
     fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
-        crate::fs::PATH_PARAM_ALIAS_MAP
+        // `column` joins the path family: usage.db shows it at a 38% wrong-spelling
+        // rate against `col` (8 calls to `col` vs. 5 to `column`). Nothing in this
+        // tool ever read `column` before — `read_position_inputs` only consults
+        // `input["col"]` — so this is a pure addition, not a second resolver to
+        // keep in sync.
+        //
+        // NOT `crate::fs::PATH_PARAM_ALIAS_MAP`: the last pair is the one that
+        // constant does not carry.
+        &[
+            ("file_path", "path"),
+            ("relative_path", "path"),
+            ("file", "path"),
+            ("column", "col"),
+        ]
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {

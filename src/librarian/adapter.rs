@@ -233,6 +233,28 @@ impl crate::tools::Tool for LibrarianAdapter {
         self.inner.input_schema()
     }
 
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        // `crate::librarian::tools::Tool` (the inner trait) has no `param_aliases`
+        // method of its own — normalization is a `crate::tools::Tool` (the outer,
+        // dispatch-facing trait) concern, and `LibrarianAdapter` is the one impl of
+        // that trait every librarian tool shares. So per-tool aliases are declared
+        // HERE, keyed on `self.inner.name()`, rather than on the inner tool structs.
+        //
+        // `doc`'s `find` action's natural-language search parameter is `semantic`,
+        // not `query` — agents habitually reach for `query`/`q` anyway (verified
+        // live: `doc(find, kind="tracker", query="zzz-nonexistent")` returned
+        // unfiltered results with no warning, because `query` is not a schema
+        // property and silently no-ops rather than erroring). No OTHER `doc` action
+        // reads `args["query"]` for a different concept — `topic` (create/update's
+        // stored frontmatter field) and `filter`/`kind`/`status`
+        // (structured/exact-match) are distinct properties this alias does not
+        // touch — so it is safe to declare tool-wide rather than scoped to `find`.
+        match self.inner.name() {
+            "doc" => &[("query", "semantic"), ("q", "semantic")],
+            _ => &[],
+        }
+    }
+
     async fn call(&self, input: Value, ctx: &crate::tools::ToolContext) -> Result<Value> {
         // `doc()` bundles read and write actions under one tool name. Only the
         // mutating ones need the same worktree-activation choice edit_file /

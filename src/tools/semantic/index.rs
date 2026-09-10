@@ -862,9 +862,16 @@ impl Tool for Index {
                     "description": "For action='build': force full reindex, ignoring cached file hashes."
                 },
                 "scope": {
-                    "type": "string",
                     "default": "project",
-                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
+                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library.",
+                    // Nested combinator, not root-level — see the identical comment in
+                    // src/tools/symbol/symbols.rs's "scope" property. Narrower than the
+                    // symbol-family form: `index` only ever accepts "project" or "lib:<name>",
+                    // never "libraries"/"all".
+                    "oneOf": [
+                        { "const": "project" },
+                        { "type": "string", "pattern": "^lib:.+$" }
+                    ]
                 }
             },
             "required": ["action"]

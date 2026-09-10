@@ -101,7 +101,6 @@ impl Tool for Librarian {
                 "tracker_id": { "type": "string", "description": "audit_doc_refs: existing tracker id to update (creates new if omitted)" },
                 "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" },
                 "write": { "type": "boolean", "description": "legibility_scan (default true): reconcile the backlog tracker (false = dry-run JSON only). link_scan (default false): materialize/prune cites edges (false = report only)." },
-                "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
                 "offset": { "type": "integer", "description": "doctor: skip this many abs_path_outside_managed_roots rows before the window (default 0); ordered by abs_path, so pages are stable and disjoint." },
                 "findings_offset": { "type": "integer", "description": "link_scan: skip N findings per array (default 0); page with findings_limit until counts.truncated is false." },
                 "findings_limit": { "type": "integer", "description": "link_scan: findings per array (default 50)." },

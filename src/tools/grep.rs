@@ -48,10 +48,31 @@ impl Tool for Grep {
     }
 
     fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
-        crate::fs::PATH_PARAM_ALIAS_MAP
+        // `query`/`regex` join the path family: agents reach for either name when
+        // they mean `pattern` (grep/ripgrep muscle memory). This was previously a
+        // SILENT repair inside `call()` via `require_str_param_or` — no
+        // `corrections` note, so a caller who typed `regex=` never learned the
+        // canonical name. Declaring it here runs it through the same dispatch-level
+        // `normalize_params` as the path aliases, which DOES announce it.
+        //
+        // LOAD-BEARING, and NOT `crate::fs::PATH_PARAM_ALIAS_MAP`: the last two
+        // pairs are exactly the two that constant does not carry. The
+        // `require_str_param_or` fallback in `call()` below stays — direct-`call()`
+        // tests bypass `call_content`'s normalization boundary entirely, so it is
+        // their only resolver for `query`/`regex`.
+        &[
+            ("file_path", "path"),
+            ("relative_path", "path"),
+            ("file", "path"),
+            ("query", "pattern"),
+            ("regex", "pattern"),
+        ]
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        // Second layer: redundant for direct MCP calls now that `param_aliases()`
+        // above normalizes `query`/`regex` before this runs, but direct-`call()`
+        // tests bypass that boundary — see the comment on `param_aliases()`.
         let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
         let raw_path = strip_buffer_ref_quotes(
             input["path"]

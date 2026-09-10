@@ -16,9 +16,6 @@ fn default_true() -> bool {
 
 #[derive(Debug, Deserialize)]
 pub struct LegibilityScanArgs {
-    /// Absolute path; defaults to the active project. Scopes the recorder lane.
-    #[serde(default)]
-    pub project: Option<String>,
     /// true (default) = reconcile the backlog tracker; false = dry-run JSON only.
     #[serde(default = "default_true")]
     pub write: bool,
@@ -42,14 +39,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })?
         .abs_path
         .clone();
-    // `project` re-scopes the RECORDER lane's `project_root` filter only. The index
-    // lane, git head, and the backlog tracker stay tied to the active project
-    // (`repo_root`); cross-project redirection is not wired in v1. Defaults to the
-    // active project's path so the recorder scope matches what the index lane walked.
-    let project_root = args
-        .project
-        .clone()
-        .unwrap_or_else(|| repo_root.to_string_lossy().into_owned());
+    // Formerly a separate `project` param that re-scoped ONLY the recorder lane's
+    // `project_root` filter, leaving the index lane / git head / backlog tracker tied
+    // to the active project (`repo_root`) regardless — a split that was never fully
+    // wired (dzo-legibility-session-log F-10: `project=` alone silently returned
+    // empty candidates because the symbol-index lane ignored it) and had zero real
+    // calls across 181,765 recorded uses. The framework's own `workspace=` pin
+    // already redirects `repo_root` correctly for EVERY lane (see
+    // `LibrarianAdapter::call`'s `active_root` resolution), so `project_root` just
+    // follows `repo_root` now — no separate knob, no lane split.
+    let project_root = repo_root.to_string_lossy().into_owned();
 
     // Index lane — parse ONCE, keep `files` for auto-close re-measurement.
     let files = crate::legibility::parse_project(&repo_root);

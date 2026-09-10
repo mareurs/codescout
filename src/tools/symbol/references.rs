@@ -240,7 +240,16 @@ impl Tool for References {
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
-                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
+                "scope": {
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "default": "project",
+                    // Nested combinator, not root-level — see the identical comment in
+                    // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
+                    "oneOf": [
+                        { "type": "string", "enum": ["project", "libraries", "all"] },
+                        { "type": "string", "pattern": "^lib:.+$" }
+                    ]
+                }
             }
         })
     }
