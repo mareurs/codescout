@@ -70,6 +70,54 @@ There is a wired signal for the worktree case that this check does not reach for
 worktree's `.git` pointer, so removal makes the row unrecognisable, exactly as memory
 `worktree-merge-catalog-reconciliation` warns).
 
+### A ninth instance, identified POSITIVELY — and the refinement this file defers is cheaper than it looks
+
+**The instance.** `docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`
+declares `id: 637ad14bbbc663da`; the catalog row is `7dc6b51ed6036f02`, which is
+`sha256(<repo>/<that rel_path>)` — so the catalog is right, the file is stale, and the message sends
+its reader to look for a move. There was none: `git log --follow` returns **one** commit
+(`68d72d67`, 2026-09-09) and no rename.
+
+**The declared id was RESOLVED, not inferred.**
+`sha256("<repo>/.worktrees/result-cap-marker-gate/docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md")`
+`= 637ad14bbbc663da`, exact. Row 2 of the table above, in a worktree since removed — so 8 of 8
+becomes **9 of 9**, and this one is closed by construction rather than by elimination, which the
+corpus asks for on authorship questions and which applies here for the same reason.
+
+**Row 1 is narrower than the table says, and that sharpens the message's error rather than
+softening it.** `mv.rs:160` has called `repair_frontmatter_id` in the same call as the graft since
+`ec9e63d0` (2026-08-16), pinned by `move_rewrites_the_frontmatter_id_it_just_invalidated`. So for
+any artifact created after that date, row 1 is unreachable *via `doc(move)`* and needs a bare
+`git mv` or another out-of-band write. The message names as its sole cause the one route the tool
+has been unable to take for the entire lifetime of the file it fired on.
+
+**The trial-hash resolved on its FIRST candidate set, and the roots are derivable — but not from
+where you would look first.** § *Root cause* names it as evidence "the check does not consult";
+§ *Resume* defers it. Feasibility, measured 2026-09-10:
+
+| candidate source | holds `result-cap-marker-gate`? |
+|---|---|
+| `git worktree list` / `.git/worktrees/` | **no** — a removed worktree is pruned from both |
+| catalog `abs_path` prefixes | **no** — 0 rows under that root at `scope="all"` |
+| `git branch -a` | **yes** — `remotes/origin/result-cap-marker-gate` survives |
+| `git reflog` | **yes** — `68d72d67 HEAD@{83}: merge result-cap-marker-gate` |
+
+The two obvious sources both fail and the two non-obvious ones both work, which is the part worth
+knowing before anyone implements it — and the reflog entry naming the branch is the *same commit*
+that created the file. `sha256("<root>/.worktrees/<branch>/<rel_path>")` over `git branch -a` is a
+bounded trial with a live hit here. **It does not change § *Resume*'s ordering:** widening the
+message is one string, true of every row, and a trial-hash that misses still has to say something.
+
+**A measured cost, and it lands on the MESSAGE rather than on the check.** On 2026-09-10 this
+row's `detail` was quoted between two sessions as evidence for the proposition *"a move does not
+rewrite the frontmatter `id:`"* — the exact inverse of what `mv.rs:160` does. One session asserted
+it to a peer, who refuted it two ways: the pinning test, and direct observation that their own
+`doc(action="move")` minutes earlier had written `id: 84589e9e5a644ec7` into the moved file. The
+check was right and the reader was wrong, and the message is what made the wrong reading the
+natural one — it does not merely omit the other causes, it supplies a **confident history** that a
+reader reasons backwards from. That is § *Testing Discipline*'s remedy-text law (a guard whose
+predicate is correct can still send its reader somewhere useless) reached through a `detail` string
+instead of a refusal banner, which is a surface nobody writes assertions about.
 ## Hypotheses tried
 
 1. **Hypothesis:** a rediscovery of the archived 2026-08-18 bug.
@@ -122,4 +170,3 @@ refinement can follow.
   `worktree_scoped_row` cannot see them once the worktree is removed.
 - `CLAUDE.md` § *Observer Blindness* — "Never close an authorship question by elimination — identify
   positively." The cause here was settled by reproducing the id, not by ruling a move out.
-
