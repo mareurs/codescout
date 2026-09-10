@@ -83,6 +83,38 @@ phrasing of the incident blurred the same distinction and who flagged it themsel
 
 ## Evidence
 
+### Second instance, 2026-09-10, disclosed by the pusher
+
+`origin/experiments` moved `7e60f305..1691ca0f` — **8 commits spanning 3 distinct sessionIds**,
+one of them this file's author's (`1691ca0f`), verified independently after the fact. The
+pushing session, `343d53e1-2c36-4063-9517-7459472e9b31` (sid re-derived from the socket its
+message arrived on, not from its signature), reported it unprompted and described its own
+reasoning in the words this bug is about:
+
+> *"I simply took my operator's decision as covering the set […] the honest description is
+> that your commit was published without your session being consulted."*
+
+That is defect (2) stated by the party it runs through, which is the strongest form this file
+can carry. Their conduct was otherwise the one the banner prescribes and worked: the guard
+refused the branch push and printed the stack with authors resolved live; they had described
+it to their operator as *"5 commits from the live peer"* and, reading the refusal, **corrected
+their own attribution before acting** — four were one peer's, one was this author's; their
+operator then authorised the full set knowing it spanned two other sessions; and they pushed
+**by sha after re-deriving the range**, so the decided eight went and nothing that landed in
+between.
+
+**Nothing here was withheld and nothing is owed back.** What the instance shows is narrower
+and exactly this file's subject: every mechanism fired correctly, an informed operator
+decided, and there is still **no surface on which the named authors' operators are asked** —
+so the resulting `origin` state is indistinguishable from one where they had been.
+
+**The counterfactual they drew is now false, and that is the fix's value.** They wrote that
+had they reached for the refspec route first, the commit *"would have gone out with nobody
+asked and no record that anyone should have been."* True of the world before `d6847322` —
+and no longer, since the refspec form is scanned too (re-verified 2026-09-10 by the parent
+file's reproduction). The route the banner recommends is now the safe one, which is why this
+instance produced a disclosure instead of a silent publish.
+
 The banner already reasons in three states — *withheld*, *not withheld/uncleared*, *cleared*
 — and an external decision to publish is a **fourth** that collapses into none of them. That
 structure is what makes (2) a gap rather than a nuance: the text is careful about exactly this
