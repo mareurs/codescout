@@ -680,6 +680,50 @@ as load-unmeasured; neither is estimated.
 session about the range before its failure; the red was read as load on sight, no time spent
 in `src/peer/`, and the investigation went to the *instrument* instead. Cost: one message.
 
+
+### Fourteenth observation, 2026-09-10 — a FOURTH test, and a SIBLING mechanism that presents identically
+
+**The member.** `tools::run_command::tests::a_red_attaches_wip_authors_on_the_main_arm` failed
+inside a `cargo test --workspace` run on a checkout with five other sessions active and a peer
+building concurrently. **3/3 green in isolation, zero skips**, immediately after. Subsystem is
+`src/tools/run_command/` — not `src/peer/`, not the guide-index tests, so this is a fourth distinct
+test in a fourth area.
+
+The test is unusually good evidence for load-sensitivity rather than breakage, because it
+**contains its own control and the control passed**. It calls `wip_author_diagnostic` once as a
+pre-check and skips if the engine returns `None`; it did **not** skip, so the engine answered.
+Then the main arm, calling the same machinery through `handle_successful_output`, got no field. Two
+calls to the same engine, seconds apart, different answers — which is a timing difference and
+cannot be a missing `python3`. That pre-check exists because the two cases were once folded
+together; the split is what makes this reading available.
+
+**AND A SIBLING THAT IS NOT THIS MECHANISM, recorded here because merging them is the trap.**
+On the same day sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941` observed
+`prompts::guide_index::tests::declared_sections_are_within_the_size_cap` reporting a section at
+**2727 B against 2457 B on disk** — a concurrent-**READ** transient: the file changed between the
+read the test measured and the read they did. Mine is a **subprocess answering slower under load**.
+Both present as *"fails in the full run, passes in isolation"*, and that shared symptom is exactly
+why the third person to meet either will file them as one. They are not one:
+
+| | this observation | the sibling |
+|---|---|---|
+| mechanism | subprocess latency under CPU load | file mutated between two reads |
+| would a quiet machine fix it? | yes | no — needs a quiet **tree** |
+| what a retry proves | that load fell | that the writer finished |
+
+A remedy aimed at one does nothing for the other, which is the operational reason to keep the rows
+apart rather than a taxonomic one.
+
+**Attribution, split because the halves were earned separately.** This observation is sessionId
+`c86ebb51-7ae3-477d-b755-f25db6180782`'s; the sibling is `26cb9b5b-…`'s, who declined to route it
+through themselves — *"a second author re-deriving your measurement is how the count gets worse"* —
+and that is the better rule, so both are written once, here, by whoever measured them.
+
+**One caveat on this row's own evidence, stated rather than left implicit:** the failing run was
+also the run in which three byte-budget tests reddened for an unrelated reason (my own prose
+edits), so the machine was carrying a heavier-than-usual load *and* the run was not clean. That
+makes it a weaker datapoint than the tenth or eleventh observations, which pin no-byte-difference
+and within-run pairs respectively. Recorded at that strength, not above it.
 ### Option 2 — the enumeration, done 2026-09-08 by `ad379a7c`
 
 **The count this file asked for is 14**, not three — the *"different conversation"* branch the

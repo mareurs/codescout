@@ -142,7 +142,14 @@ prose citing the old one"*; it now names both fields and their `null` convention
 `src/prompts/guides/tracker-conventions.md` both said `id_changed: true` **is the signal** — true
 before, and now the weaker of two available statements. Both name the list instead.
 
-Fix SHA: *(recorded below at archive time)*
+Fix SHA: `38f7490e` (experiments)
+Patch-id: `6f187107b6d04b736366539ed340fca1cf15ccf4`
+
+**Dogfooded at archive time, and the result is worth keeping:** this file's own archive move
+reported `inbound_path_citations: ["src/librarian/tools/mv.rs"]` and **no id field at all** — the
+live MCP server is the pre-fix binary (`cargo rb` + `/mcp` not yet run), so the id sweep for this
+very move was done by hand, which is the manual step the fix removes. One citation, found by
+`grep`, re-pointed in the same commit.
 ## Tests added
 
 Three, in `src/librarian/tools/mv.rs`, each with an observed RED against the **production** path.
