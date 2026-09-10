@@ -1,14 +1,14 @@
 ---
-id: '4bfec00edf979204'
+id: 190955a99d482631
 kind: bug
-status: open
+status: fixed
 title: 'BUG: param_probe checks one action per shared schema key, so 5 of 7 declared pairs on librarian are unchecked and unadmitted'
 tags:
 - param-probe
 - schema-drift
 - guards
 - cluster/selector-narrower-than-its-population
-closed: null
+closed: 2026-09-09
 opened: 2026-09-09
 owner: marius
 related:
@@ -205,20 +205,42 @@ Two follow-ups deliberately **not** bundled:
 - The `.`-separated multi-action form needs a decision about whether it is a supported label
   shape at all. Today it silently means "the first action only".
 
-**SHA:** N/A — not yet fixed.
-**patch-id:** N/A — not yet fixed.
+Fixed as prescribed — the slash loop, with `checked` counting action/key pairs.
+
+**Measured after the widening** (2026-09-09, read from `sweep`'s own `checked`): `doc`
+**80** pairs (was a 58-KEY reading), `librarian` **28**, `library` **1** unchanged — its
+one key is labelled for a single action, so it had no pairs to gain. Floors raised to
+those readings at all three sites, not to a fraction of them: the margin between floor
+and count is exactly how many labels can lose their prefix in silence.
+
+**The predicted reds did not arrive.** 22 newly-swept pairs on `doc` alone and zero new
+`unhonored` on any of the three. Recorded as a result rather than a silence, because the
+instrument was watched failing first on the synthetic fixture below. What it establishes
+is narrow: no shared-key action on these three tools drops a key it advertises. It says
+nothing about IC-15 elsewhere.
+
+Both follow-ups above remain unfixed and out of scope — the multi-clause `:` form and the
+`.`-separated form. The slash loop reaches neither.
+
+**SHA:** `80c4fd1e3a7a6507bc2c75cbfcd78b3f9f678e37` (**experiments**)
+**patch-id:** `3f662b6154f5c76751495977cbab12b650518e8f`
 
 ## Tests added
 
-None yet. Planned, in `src/tools/param_probe.rs`'s own tests:
+Both in `src/tools/param_probe.rs`'s own `tests` module — which did not exist before this
+fix. That is the finding underneath the bug: `param_probe` is the shared IC-15 detector
+for four tools and nothing tested the detector, which is how a one-token selector bug
+survived in it.
 
-- `a_key_labelled_for_several_actions_is_probed_for_every_one` — construct a two-action
-  schema key where the **second** action drops it, and assert `unhonored` names that second
-  action. **This is the discriminating test**: a fixture whose *first* action drops the key
-  passes against the bug.
-- `checked_counts_action_key_pairs_not_keys` — a single key labelled for three actions must
-  contribute 3, so the floor can see a lost label.
+- `a_key_labelled_for_several_actions_is_probed_for_every_one` — watched red at
+  `unhonored: []` where `["beta:id (declared string)"]` was owed. The fixture's dropped
+  key belongs to the **second** slash token, and that placement is the whole
+  discrimination; a fixture whose *first* action drops the key passes against the bug.
+- `checked_counts_action_key_pairs_not_keys` — watched red at `1` where `3` was owed, so
+  a floor can see a lost label.
 
+Both run in **both** lanes; `param_probe` is deliberately feature-independent. Verified by
+reading the two test names out of the lean lane's output, not from its total.
 ## Workarounds
 
 None at the probe. To check one action-key pair by hand, temporarily reorder the label so

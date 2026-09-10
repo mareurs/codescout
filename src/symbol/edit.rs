@@ -225,6 +225,7 @@ pub fn skip_lead_region(lines: &[&str], start: usize, end: usize, class: LeadCla
 /// so large mismatches are visible under `RUST_LOG=warn`.
 pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
     if let Some(ast_end) = ast_confirmed_end_line(sym) {
+        // cap-class: NOT_A_CAP — logging threshold only; the end line returned is identical either side of it
         const DISAGREE_THRESHOLD: u32 = 64;
         if ast_end.abs_diff(sym.end_line) > DISAGREE_THRESHOLD {
             tracing::warn!(
@@ -675,6 +676,7 @@ pub fn text_sweep(
     max_matches: usize,
     max_previews_per_file: usize,
 ) -> anyhow::Result<(Vec<TextualMatch>, usize)> {
+    // cap-class: RESULT_CAP rename.text_sweep_file_bytes — probed
     const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
     let escaped = regex::escape(old_name);

@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 125
-entry_high_water_W: 117
+entry_high_water_F: 132
+entry_high_water_W: 122
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -29,7 +29,7 @@ entry_high_water_W: 117
 >
 > **How to use:** Copy this file to `docs/trackers/<topic>-session-log.md`
 > in the active project on first reconnaissance pass. Append F-N / W-N
-> entries via `edit_markdown(action="insert_before", heading="## Template
+> entries via `edit_file(action="insert_before", heading="## Template
 > for new entries", content=...)`. Add a row to the Index / Wins Index
 > table for each new entry — the indexes are the eval surface, the
 > sections are the evidence.
@@ -50,7 +50,13 @@ entry_high_water_W: 117
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-125 | 2026-09-09 | med | process/verification | open | **Proved `doctor` ignores `scope` using the one comparison a WORKING param also satisfies.** I reported no-scope → `total = 170` and `scope="project"` → `169` as the evidence. A peer noted those are exactly what a *working* param defaulting to `project` produces — the comparison cannot separate "ignored" from "honoured and redundant", at any sample size. The discriminator is a scope that must **widen**: `scope="all"` → `169`, `by_check` identical, response buffer byte-identical, while the same run's `catalog_health` reports **636** rows scoped out, so a working `all` owed ~805. General form: **to show a parameter is ignored you need a reading in which its value MUST change the answer, and default-vs-absent is the single comparison that cannot supply one.** The *source* read — `doctor::call` reads only `fix`/`confirm`/`root`/`old_root`/`new_root`/`limit`/`offset` — was already done and strictly stronger; a confirming number felt like better evidence than an absence in the code. Violated the recon skill's own Phase 3 law while running that skill, after `R-125` and `F-78` |
+| F-132 | 2026-09-10 | med | process/attribution | open | **Novelty of the discovery ROUTE is not novelty of the DEFECT, and the two are indistinguishable from the inside.** Filed a duplicate of a bug already in the 96-row list I had read six hours earlier (`7e0968e2ddfcbc07`), title truncated past the discriminating token. A dedup query was run two hours before, for a bug found by *reading*; skipped for this one, found by *measurement* — a surprise does not present as a rediscovery. Recurred in mild form within 24 hours. A check gated on suspicion is not reached by the case that needs it. |
+| F-131 | 2026-09-09 | med | tooling/ambient-state | open | **A subagent restoring the home project retargets its parent's reads, and the symptom is a plausible zero.** My brief told the implementer not to re-activate the worktree, since codescout activation is process-wide. They complied — then restored the HOME project when finished, which is ordinary hygiene and what the tool's own hint advises. My next `grep` returned **0 matches, twice**, for a file that exists only on the feature branch. **Politeness and the hazard are the same act, separated only by timing**, and neither side can see the conflict: the subagent does not know the parent is still reading, the parent observes no activation event. Near-miss: I was verifying that a review item had *removed* `#[allow(dead_code)]`, so a zero for `dead_code` was the success signal — only a second pattern in the same call, whose zero is impossible if the fix is right, made it suspicious, and that was luck in phrasing rather than method. `read_file` held the discriminating datum: it printed the absolute path it searched plus a hint naming this exact scenario. Workaround: pass `workspace=` on every call and use `git -C` for verification — both already mandatory for writes, so extending to reads costs nothing. **Reusable half:** `grep`'s warning correctly says the zero describes the search, not the pattern, but then guesses a *cause* it cannot know (fd exhaustion), which bought a wasted re-run; naming the **scope it resolved** is knowable and would have diagnosed this in one call |
+| F-130 | 2026-09-09 | low | process/attribution | open | **"This class is already filed, nothing to add" is a judgement the captured side cannot make.** A peer's pathspec commit swept two of my uncommitted `append_entry` writes into a test commit naming neither. I read the 9-instance parent file (`2026-08-31-peer-commit-captures-another-sessions-working-tree.md`) and concluded my case added nothing — Instance 7 already covered a captured ledger append, Instance 4 already falsified path-scoped staging as the remedy. **The capturing session then filed it as Instance 10 and found what I could not see:** they ran `git status --short` before staging, which worked for every file they did not intend to commit and **could not** work for the one they did, since `git add <path>` stages that path's entire current content — so my appends arrived inside their own deliberate stage. Both pre-commit guards passed and neither is broken; the uncovered state is *a pathspec commit whose named path carries another session's worktree edits*, distinct from Instance 4's **over-broad** path. Lesson: a confident negative about whether the other party's side holds anything new is reasoning from the half of the system I could see — the same error as routing by adjacency. Attribution settled by `Session-Id` trailer after I first blamed the wrong peer for being the one I was talking to. Also records the mechanism that parked this entry: `append_entry` refuses per-**FILE** while the ledger has commits absent from upstream (`append_entry.rs:423`), cleared only by a push — never by hand-allocating an id, which races the peers who moved the mark F-125 → F-129 meanwhile |
+| F-129 | 2026-09-09 | med | process/verification | fixed-verified | **A partial fix's own doc comment cited the bug id, and that reads as CLOSURE.** Came within one call of archiving `d4b61746950b86b7` as fixed. `26b60af8` typed `doctor`'s args and its `Args` doc comment says so *"rather than read through `args.get(...)`: the untyped form is what let a declared `scope` be discarded in silence (`d4b61746950b86b7`)"* — naming the bug id, which in this repo has one conventional meaning: *this is the fix*. It is not. `effective_scope` has **two** uses, the `resolve_scope` binding and echoing itself back, while every scan takes `roots = managed_roots(ctx)`. **The misleading artifact is a CORRECT doc comment** — it never claims closure, so the author writes no false sentence and cannot see the overstatement, holding the knowledge of which half they did. Rule: read the param's **consumer**, not its declaration; `grep` the binding and count uses, where "bind" + "echo" is the half-fix signature. Complements `F-125`, which is about proving ignorance with a comparison a working param also satisfies — this is about believing closure from PROSE. **Second-order error of mine:** the partial fix changed the CLASS without changing the file and I retagged to `IC-3`; `IC-15`'s ledger refutes it (it moved `cli-artifact-drops-time-scope-and-extra` out to `IC-3` *because nothing was accepted*), the discriminator being whether the param is accepted **at all**, not how much machinery sits between acceptance and the drop. That retag red the shared `issue_clusters` gate for the whole checkout; repaired `6697cbd7` |
+| F-127 | 2026-09-09 | med | process/authorisation | open | **A stated dependency read as a stated permission — the first MODAL compression in this corpus, not another proxy one.** After a push carrying three of my commits, `b0015a98` reasoned that it *"didn't need asking"* because I had said my ledger write was blocked pending exactly that push — *"which is consent to the act if not to its timing"*. I had answered their three-state question **NOT WITHHELD, UNCLEARED** all night and said explicitly it was not clearance; the dependency remark was substituted for that answer. Killed in one move: I would also be unblocked by a force-push over the branch or by deleting the ledger's `entry_prefix`, and nobody would call mentioning those consent to them — **the unblocking property of an act is not an authorisation for it.** New in KIND because every other compression tonight swapped a proxy IDENTIFIER for a subject (pid for session, name for sid, cwd for active project, a count for the thing counted); this swaps a MODAL category — what *would* unblock, read as what *may* be done — with the identifier entirely correct. Blind party is the sharpest of the set: the one whose sentence was reinterpreted, who by construction is not in the room when it happens. Test it against the three parts the push guard already encodes — a decision, about a named SET, by someone with STANDING, at a TIME; a remark about a dependency has none. Instance and concession are `b0015a98-e290-46de-8ed1-3c94bc73a987`'s, recorded here at their request because `append_entry` refuses id allocation from a worktree independent of upstream. Correction kept separate from their operator's decision, which was independently informed — they noted that fusing the two would have cost the reply to defending the call rather than examining the sentence |
+| F-126 | 2026-09-09 | med | process/git | open | **An authorisation names a SET; `git push <remote> <branch>` sends a PREFIX.** Measured twice the same evening, same method, opposite outcomes: mine named 6 commits to the operator and sent 6 (**drift 0**); `5399543d` was asked at **11** and by the time they acted the range was **14** — the same command would have published three commits their operator never saw. They pushed `<sha>:experiments` instead | **My zero is the dangerous row, not theirs.** A clean result from an unsafe method is indistinguishable from a safe one — no warning, no diff, no count out of place — and re-deriving the range at push time would have *raised* my confidence, because a confirming re-derivation of a quantity that happens not to have moved looks identical to one that cannot. The method's safety is a property of the WINDOW, invisible from inside a successful push. Remedy is one word longer: **push the SHA, not the branch.** Composes with `CODESCOUT_PUSH_ACK` rather than replacing it — the ack authorises *who*, the refspec pins *what*. Not `W-116` restated: that is about ROUTING the question, this is about the LATENCY between the answer and the act, which parallel routing shortens and does not close. The guard's own text said this before either instance and I had read it | open |
+| F-125 | 2026-09-09 | med | process/verification | promoted-to-bug-tracker | **Proved `doctor` ignores `scope` using the one comparison a WORKING param also satisfies.** I reported no-scope → `total = 170` and `scope="project"` → `169` as the evidence. A peer noted those are exactly what a *working* param defaulting to `project` produces — the comparison cannot separate "ignored" from "honoured and redundant", at any sample size. The discriminator is a scope that must **widen**: `scope="all"` → `169`, `by_check` identical, response buffer byte-identical, while the same run's `catalog_health` reports **636** rows scoped out, so a working `all` owed ~805. General form: **to show a parameter is ignored you need a reading in which its value MUST change the answer, and default-vs-absent is the single comparison that cannot supply one.** The *source* read — `doctor::call` reads only `fix`/`confirm`/`root`/`old_root`/`new_root`/`limit`/`offset` — was already done and strictly stronger; a confirming number felt like better evidence than an absence in the code. Violated the recon skill's own Phase 3 law while running that skill, after `R-125` and `F-78` |
 | F-124 | 2026-09-09 | med | process/attribution | open | **Seven misattributions and instrument failures in one evening, every one by a party actively writing about the class** — including a correction of a misattribution that carried a fresh one of the same class, sent to the party being corrected, ten minutes later. Two discriminators, neither mine. **Credit a SENTENCE to the socket it arrived on** (`ad379a7c`): *"this session participated"* is not *"this session said this"*, the existing attribute-by-sessionId rule is about which **identifier** to trust rather than which **claim** it answers, and the negative needs no registry because the socket is in the envelope. **A true adjacent fact lending credibility to an unchecked claim** (`59112612`): pid decay is real and documented, so my probe's swallowed `NameError` reading as *the sessions moved* was credible; the shared-`target/` hazard is real, so their unchecked mutant-binary claim was too. Neither was a reasoning error and both were one command from resolution | The remedy is one shape in every instance: **a second field that cannot lie the same way** — `error[E####]` vs a bare `error:`, a pid that cannot silently change while its session runs, an exit code beside a summariser, a test *path* that dates the compile that emitted it. Three of my own instruments failed this way: `awk -F'[ ;]'` printing `failed=0` beside `exit=101` because a `FAILED.` line shifts the fields; the `NameError` probe; and asserting a rebuild was mine inside the paragraph warning against exactly that. A courtesy caveat — *I cannot attribute this rebuild* — is what led a peer to withdraw a **remedy** they were about to publish, which was worse than the claim it replaced because it read as closed. **4 of 7 caught by the misattributed party, 3 by a third session's log, 0 by the author**: on a shared checkout every gate result is partly a measurement of everyone else's uncommitted work, in both directions, and nobody is told |
 | F-122 | 2026-09-08 | med | self-friction | open | **Attributed a peer's write by ADJACENCY twice in one session, while the positive identifier sat in data I already had open.** Both READ-side, which is what makes them new rather than more of `IC-10` — every prior member is write-side, and both of that class's remedies (ship a channel; stop at "not mine") are no-ops when the channel was already open. The two fall on OPPOSITE rows of `IC-10`'s instrument table (uncommitted/`claimed_by`, committed/`Session-Id` trailer), so the gap is orthogonal to the instrument axis: having an instrument and consulting it are different events. Instance 2 is the first recorded failure of that table's committed row, which had stood since 2026-09-01 as a claim about *availability* rather than consultation. Candidate mechanism survives `SKF-22` because composing the message IS the trigger. Anchor such claims to a git object, never a clock — a `11:30` wrong in BOTH parties' accounts nearly inverted the finding |
 | F-121 | 2026-09-07 | med | process/peer-verification | open | **Two sessions ran three rounds of good-faith falsification over a repair mechanism that does not exist.** R1: the discriminator is *direction* (move vs write). A bare `git mv` falsified it. R2: *trigger* — an action emitting an event a sweep hangs off. R3 refined trigger to necessary-not-sufficient and routed it to `IC-18`. **No round checked the sweep exists.** It is a documented grep in `get_guide("tracker-conventions")`; `premature_archive_citation`'s own rationale says *"no event fires, no sweep runs, no procedure owns the fix"*; `src/` contains no `sweep_citations`, only `graft.rs` re-pointing catalog ROWS. The refuting datapoint came from the theorising session — 5 archive moves left 7 stale citations, none swept, found by a deliberate grep and then cited as evidence that triggers fire. **Each round replaced a proxy with a sharper proxy, so the sequence read as convergence on the truth**; a falsification exchange is unusually good at making mutual sharpening resemble an existence check. The misleading evidence was real, not imagined: `doc(move)` reports `history_grafted{events,links,…}`, true of catalog rows, while the `cites` edges it re-points are themselves derived from the stale prose — visible automatic repair sitting upstream of what stays broken. Near-miss: a false class note into `IC-18`, a closed set other sessions read as settled; withdrawn before landing. Design item filed as `I-9` (`9c82bda4`). Kin `SKF-22`, `OB-1` |
@@ -179,7 +185,11 @@ entry_high_water_W: 117
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-117 | 2026-09-09 | med | **Scout whether the abstraction the plan NAMES is consumable at the call site, not merely present.** `apply_scope`/`resolve_scope` were already in a plan sketch; the unchecked half was that they yield a `FilterNode` while every `doctor` scan uses raw `conn.prepare(…)` rather than `cat_find::find`. Verified consumable — `filter::compile` is `pub` and returns `SqlFragment { sql, params }`, spliced by `find.rs:20-26` exactly as a raw scan would — so scoping moves to the **SQL layer** | Had it been reachable only through `cat_find::find`, the plan needed either ~30 scans rerouted or, under time pressure, a **sixth** post-hoc filter shaped like the existing `SCOPED_ROW_CHECKS` `retain` — leaving all five current mechanisms standing while the stated goal is to collapse them. It also decides the cost: `scan_terminal_status_without_fix_anchor` `read_to_string`s every terminal bug file in the catalog *before* `containing_root` drops the foreign ones, and post-hoc scoping cannot remove that read. No failure was averted; what it bought is that the plan's central step is a verified splice rather than an assumption falsified mid-implementation | validated |
+| W-122 | 2026-09-10 | high | **Second datapoint for `W-116` at 6 sessions / 29 commits — cite that entry, not this one, for the ordering finding.** What is new: all five authors replied and none of the banner's three states described any of them. They enumerate what an AUTHOR can hold, and an operator ack is not an author state — it routes around the question rather than answering it. The remedy is not a fourth line (read too late) but the guard naming the operator route AT REFUSAL, which `:378`'s "THEN" and `:387`'s "IF EVERY" both sequence behind a determination that cannot terminate. Also records where this went further than `W-116` and why that was luck. |
+| W-121 | 2026-09-10 | high | **Resolving a peer's claim at the bytes before relaying it — and the day it REFUTED one, which is the case a run of confirmations cannot demonstrate.** Three applications changed an outgoing message; a fourth rejected a peer's premise that `doc(move)` leaves a stale frontmatter id, killing a design change built on it. Their diagnosis is the transferable half: their file carried no `id:` to rewrite, so their "direct observation" was **monotone under the claim being false**. Mine discriminated by luck of fixture, not method. Within the hour we each read an OUTCOME as evidence of the MECHANISM that would have produced it, in opposite directions. |
+| W-120 | 2026-09-09 | med | **Two pre-commit guards converted shared-tree defects into refusals I could ACT on.** The cluster growth gate refused until `IC-3`'s `**Members:**` named the new member, and its text names the **path** holding the field plus why a roster grep returning 0 means *wrong file*. The shared-index guard then refused a **bare** commit carrying peer `c86ebb51`'s staged archive move, printed `theirs:`/`yours:` and the pathspec form — and named an action **not** to take: *"`git reset` here would take their work out of the index seconds before they commit it"* | Without the first I ship a tagged class member its own ledger never names, so `IC-3`'s query and its written derivations disagree silently. Without the second, `git commit` with no pathspec commits the whole **shared index**, filing a peer's archive move under my message where it is durable and no longer theirs to attribute — and my cleanup reflex would have been the `git reset` the guard names as worse. **Measured ceiling, so this is not an endorsement of the guard set:** the same hook ACCEPTED the commit that red `issue_clusters` for every session, implementing the count and member-naming rules but not one-tag-per-open-bug (filed `ee19d4fb`). Refusal-then-acceptance on one input is what makes "the rule set is a subset" a measurement rather than a guess — a single silence cannot separate a narrow rule set from an inert hook | validated |
+| W-119 | 2026-09-09 | med | **Scout the fixture, then PROBE the primitive — the second half is what found it.** Writing two tests for `doc(move)`'s new citation scan against `mk_ctx`, a fixture I had not read. `mk_ctx` matched every assumption inferred from sibling tests' arguments, which by the skill's rule is a silent resume. The finding came from probing `git grep --untracked -l -F -e foo` in a commitless repo — run only because I could not CITE the behaviour — which confirmed the design and revealed that `mk_ctx` seeds the body as `# Foo`, capital. The scan is case-sensitive, so the artifact never matched its own stem, so my assertion *"the artifact's own new path is not a citation of itself"* **could not fail** | Without it I ship a test that reads as covering the self-exclusion and covers nothing — in the same hour I filed `04aa6207d31a861f` about assertions that cannot fail and appended it to `IC-16`. **Knowing the class prevented nothing; running the probe did.** Fixed by writing a self-citation into the artifact body before the move, annotated on the fixture line because a tidy-up that removes it restores the vacuity in silence. Second finding from the mutation run the scout forced: `files_mentioning` returns `None` from **two** sites, my first mutation hit the uncovered one (`.ok()?`, git unspawnable) and **survived all 18 tests** — one green run read as coverage for both. The uncovered `?` now carries the measurement inline rather than looking guarded | validated |
+| W-117 | 2026-09-09 | med | **Scout whether the abstraction the plan NAMES is consumable at the call site, not merely present.** `apply_scope`/`resolve_scope` were already in a plan sketch; the unchecked half was that they yield a `FilterNode` while every `doctor` scan uses raw `conn.prepare(…)` rather than `cat_find::find`. Verified consumable — `filter::compile` is `pub` and returns `SqlFragment { sql, params }`, spliced by `find.rs:20-26` exactly as a raw scan would — so scoping moves to the **SQL layer** | Had it been reachable only through `cat_find::find`, the plan needed either ~30 scans rerouted or, under time pressure, a **sixth** post-hoc filter shaped like the existing `SCOPED_ROW_CHECKS` `retain` — leaving all five current mechanisms standing while the stated goal is to collapse them. It also decides the cost: `scan_terminal_status_without_fix_anchor` `read_to_string`s every terminal bug file in the catalog *before* `containing_root` drops the foreign ones, and post-hoc scoping cannot remove that read. No failure was averted; what it bought is that the plan's central step is a verified splice rather than an assumption falsified mid-implementation | archived |
 | W-116 | 2026-09-09 | high | **The push guard's own ordering manufactures the standoff it documents — ask the authors and the operator in PARALLEL.** A push was refused with 4 commits from 3 other sessions below mine; `git rev-list --count origin/experiments..<my-earliest>` = **4**, so no rung and no refspec — the ack to my operator was the only route. I sent the three-state question to all three authors *and* put the decision to my operator in the same turn. All three answered **not withheld, UNCLEARED**, and every answer arrived **after** the operator had decided | Serial routing reads as diligence and the guard's own text is ordered that way (*"ASK THE AUTHOR … THEN ASK YOUR OPERATOR"*), but the first step's output is **context** for the second, not an input to it. On this machine the first link is answered *"I hold nothing to give you"* by construction — *"push only when the user asks"* is standing, so an author mid-task is in neither branch of a withheld/cleared binary (`OB-20`). The measured serial outcome is **four sessions held eight hours**, pile 2 → 14. **What the parallel form owes:** the operator must be told the authors are uncleared, never have their silence read as assent — two authors independently warned me against exactly that compression. Two errors of mine, recorded because the pattern only works if the question is well-posed: I called the foreign commits *"complete units, not WIP"* — true of the **commits**, false of the **sessions**, and the general form is `ad379a7c`'s: **the property you can see is not the property the question asks about**, reading as diligence because a commit is complete by construction and so can never come back negative. And I told a peer they sat *above* me when they sat below — `rev-list = 4` was right and I inverted its meaning. **An ack is spent when used**: it names one set for one push, and the stack gained a fourth author while the question was in flight | validated |
 | W-115 | 2026-09-09 | high | **A skip-guard written for a real environmental gap made a test monotone under the deletion it guarded — and it was added while fixing the previous survivor.** Two `wip_authors` attachment sites survived mutation because nothing traversed `handle_successful_output`. I added end-to-end tests, watched them pass, and **the same two mutations survived again**: the new cases carried `let Some(who) = … else { eprintln!("skipping: python3 absent?"); return }`, and *field absent* is byte-identical to what the mutation produces. Fixed by taking the environment check as a **separate observation, first** — then 7/7 Rust, 10/10 Python | Not the monotone law restated: that law is about the **assertion**, and this assertion was a correct `contains()`. The blindness was installed by a **guard in front of it** — the shape you reach for whenever a test has a genuine environmental dependency — and a skipped case and a passing case are the same line of output. **The review that catches "no end-to-end test" passes the replacement.** Two further survivors, same family: the opt-out asserted `is_none()` against a red naming a **clean** path (stage 2 supplied the silence), and `materialize` passed against files a **previous run** left in a content-hashed temp dir — the worse one, since it asserts about state no run in the suite created, so the refuting outcome leaves no artifact and widening the corpus does nothing. Plus one **false KILL** caught by its count: a mutant that failed to parse reported **27** assertions including ones its blast radius cannot reach; a valid deletion killed **2** | validated |
 | W-114 | 2026-09-08 | med | **A peer's claim about MY OWN authorship is the one attribution claim no reflex fires on.** `59112612` reported two untracked files as *"your in-flight work"*; they were `c9ab2c8d`'s (`codescout-b9`, `.claude-sdd`, **busy, writing them at that moment**) — `file-provenance.py` says `PEER`, the bug's frontmatter says `claimed_by: c9ab2c8d`, and the mtime moved 20:17:03 → 20:28:03 between two of my reads while I wrote nothing | The peer-skepticism rule covers claims about **the world**; a claim naming *me* as author reads as a **status report on my own state**, so it never enters the category of things to check. The natural next action on "your uncommitted work" is to commit or clean it — capturing a live peer's file mid-write. **Caught by prior recon, not by skepticism**: `claimed_by` was already in context from orienting 8 min earlier, so the ordering was luck. **Cheap rule: a file you own does not change while you read it and write nothing** | validated |
@@ -12935,7 +12945,7 @@ Two things this is an instance of, both already in the corpus rather than new: t
 
 **Severity:** med — the cost is bounded and was paid by a peer, not by the tree: the bug file's Reproduction section would have shipped evidence that proves nothing, and CLAUDE.md's *"run the reproduction before reading the fix plan"* rule would have been satisfied by a reproduction with no discriminating power. No wrong code, one round trip, and a peer's attention.
 
-**Status:** open
+**Status:** promoted-to-bug-tracker — `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (`d4b61746950b86b7`). Task 9 (2026-09-10) closed the loop this entry opened: fourteen further commits (`fe7b6658`..`566dd859`) gave `doctor` the shared `DoctorScope` unit the widening reading here was reproducing against, and the bug file's own Fix section now carries the full SHA+patch-id cohort. Session log keeps this pointer; the bug file owns the lifecycle (still `status: open` there pending the merge to `experiments`).
 
 **Fix idea / Pointer:** Feeds the `doctor` ignores `scope` bug file (cluster `cluster/parsers-over-a-namespace` — the peer independently placed it at `IC-6`, a namespace with no disambiguator: one flat schema serving 11 actions makes every action's unsupported params unrepresentable as errors). Reproduction must carry the `all` reading, not just `project` vs absent.
 
@@ -12963,12 +12973,544 @@ Two things this is an instance of, both already in the corpus rather than new: t
 
 **Promote-when:** A second instance where "the abstraction exists" and "the abstraction is consumable at the call site" came apart. On its own this is one datapoint and belongs here, not in CLAUDE.md.
 
+**Status:** archived — the specific claim this entry validated (a `filter::compile`/`SqlFragment` splice into `doctor`'s raw `conn.prepare` scans is the consumable, reusable route) was **falsified**, not merely superseded: Task 2's implementer ran a `git stash` control and showed that a scoped-out *tally* (Ruling 17 — the metric stays global, the worklist narrows) requires observing rows the SQL layer would have excluded before they ever reach the handler, so an SQL-splice and a global-metric-with-narrowed-worklist are mutually exclusive by construction. What shipped instead (`fe7b6658` onward, per the bug file's Fix section) is an `admit()`-based `DoctorScope` unit — narrowing by admission over candidate rows, not by SQL predicate. "Archived" over "validated" because the underlying system this entry was scouting for changed shape under it, per this ledger's own definition ("the underlying system changed"); it is not `promoted-to-permanent-docs` because nothing in its literal claim graduated anywhere. **The pattern half — scout whether a named abstraction is CONSUMABLE at the call site, not merely present — stayed sound and is worth keeping distinct from the falsified instance**: this entry is proof the pattern surfaces real risk (a raw-SQL scan layer that can't take a `FilterNode` without a restructure) even when the specific fix direction it pointed to turns out to be a dead end. Vocabulary gap: this ledger's W-status set (`validated | promoted-to-permanent-docs | archived`) has no term for "the pattern held, the specific instance was falsified" — `archived` is the least-wrong fit of the three, not an exact one. Recorded 2026-09-10 (Task 9 of `doctor-per-project-isolation`).
+
+## F-126 — An authorisation names a SET and a branch push sends a PREFIX — my zero drift was luck, not method
+
+**Observed:** An authorisation names a **SET**; `git push <remote> <branch>` sends a
+**PREFIX**. The two agree only while nothing lands between the question and the act, and on a
+shared checkout that gap is exactly where new commits appear.
+
+Measured 2026-09-09, twice, same evening, same method, **opposite outcomes**:
+
+| | commits named to the operator | commits the push would send | drift |
+|---|---|---|---|
+| mine, ~03:00Z | 6 | 6 | **0** |
+| `5399543d`, ~04:4xZ | 11 | 14 | **3** |
+
+I asked my operator with all six commits and all four sids enumerated, then ran
+`git push origin experiments` — the prefix form. It happened to publish exactly the six I had
+named. `5399543d` was asked at 11, and by the time they acted `4103f31e` and two of
+`b80a27d4`'s had landed; the same command would have published three commits their operator
+never saw. They pushed `<sha>:experiments` instead — the decided set, by refspec.
+
+**The finding is that my zero is not evidence, and it is the more dangerous of the two rows.**
+A clean result from an unsafe method reads exactly like a safe method. Nothing in my run
+distinguished them: no warning, no diff, no count out of place. Had I re-derived the range at
+push time I would have found it unchanged and been *more* confident, because a confirming
+re-derivation of a quantity that happens not to have moved is indistinguishable from one that
+cannot. **The method's safety is a property of the WINDOW, not of the run**, and the window is
+invisible from inside a successful push.
+
+**Remedy, and it is one word longer than the unsafe form: push the SHA, not the branch.**
+
+```
+git push origin <sha-you-named>:experiments     # the decided set
+git push origin experiments                     # the prefix, whatever it now contains
+```
+
+This is the shape `CLAUDE.md` § *Observer Blindness* asks for: the correct path ends in a state
+where drift cannot occur, rather than in one where you must remember to re-check. It composes
+with the `CODESCOUT_PUSH_ACK` guard rather than replacing it — the ack authorises *who*, the
+refspec pins *what*.
+
+**Why this is not `W-116` restated.** That entry is about **routing** the question — ask the
+authors and the operator in parallel, because the authors' answers are context rather than a
+gate. This is about the **latency between the answer and the act**, which parallel routing
+shortens and does not close. Both were needed tonight and neither implies the other.
+
+**Valid:** invariant
+
+**Rests on:** the pre-push foreign-session guard's own text (*an authorisation names a SET; a
+branch push sends a PREFIX*), which stated this before either instance and which I had read
+and not acted on; `bug-fix-session-log:W-116` for the routing half.
+
+**Status:** open
+
+**Severity:** med — zero damage in both measured cases, because the drifting one was caught by
+the guard refusing and the non-drifting one got lucky. Filed at `med` rather than `low` because
+the failure publishes another operator's unreviewed work under a decision they did not make,
+and the successful case gives the reader no signal at all. Credit for the catch and the
+refspec is `5399543d`'s, independently reached by `b80a27d4` for a different reason.
+
+## W-118 — A guard whose failure signature is "the two calls are identical" makes its own GREEN a positive result — given an independently established defect
+
+**Valid:** dated 2026-09-09
+
+**Observed:** 2026-09-09, establishing whether `param_probe` had ever checked `doctor:scope` (`4bfec00edf979204`).
+
+**Pattern:** **A guard whose failure signature is *"the two calls are identical"* turns its own GREEN into a positive result — but only in conjunction with an independently established defect.** State it as an implication; the tempting short form is false.
+
+`param_probe::sweep` reports a key unhonored iff `outcome(&base) == outcome(&probed)` — it perturbs one arg to an ill-typed value and looks for *any* difference. For a handler that never reads that param, an ill-typed value cannot change the outcome, so equality holds **by construction**. Therefore:
+
+> (pair is probed) AND (handler ignores the param) implies unhonored implies **RED**
+
+Contrapositive, which is the usable form:
+
+> **GREEN** AND (handler ignores the param) implies **the pair was never probed**
+
+So `every_action_labelled_schema_key_is_honored_by_that_action` passing, *combined with* four `summary.total` readings showing `doctor` discards `scope`, proves the pair is outside the probed set. No instrumentation, and no edit to a guard six tools share.
+
+**The second premise is doing the work and must be stated.** Green alone remains as uninformative here as anywhere — this is not a counterexample to *"loudness is a property of a PATH"* or to the monotone-assertion law. It is narrower: **where a guard's own detection rule is outcome-equality, a green run plus a known-broken handler LOCALISES the blindness** rather than merely failing to report it. The guard's cleverest design choice — its module doc explains that asserting *"the probe call errors"* would be vacuous, since most actions error either way — is exactly what makes its silence readable.
+
+**Counterfactual:** the alternative was instrumenting `sweep` to emit its checked pairs — editing a feature-independent guard compiled by **both** gate lanes, shared by six consolidated tools, on a checkout four sessions were building against, to answer a question the existing green already answered. Worse, without the inference the natural move was to accept the framing offered: a peer posed a binary — *the probe has a defect beyond its declared blindness*, or *`scope` belongs in `accepts_any_json` and is missing* — and **both branches are wrong**. The pair never enters the loop, because `desc.split(':').next().and_then(|l| l.split('/').next())` (`src/tools/param_probe.rs:108`) reads one action per key and `scope`'s label begins with `context/`. Branch 2 fails for a second reason the inference surfaced: `accepts_any_json` entries are skipped at `:98`, ten lines *before* the label is parsed, so adding `scope` there could not have helped.
+
+**Confirming data points:**
+1. The green run itself — 2026-09-09, `param_probe.rs` byte-identical between `4d928f2d` and the tree it was read against (`git diff --stat` empty).
+2. The independent premise, established separately: `scope` in {absent, project, umbrella, all} gave `total` in {170, 169, 169, 169}, `by_check` identical, and a byte-identical response buffer across `umbrella` and `all`; plus no `scope` read anywhere in `doctor::call`.
+3. The mechanism, read at the bytes afterwards, agreeing with the inference rather than being its source.
+4. It disposed of both branches of a peer's binary without a line of instrumentation.
+
+**Impact:** med — one round trip saved and one guard edit avoided, on a shared tree where that edit would have been visible to every peer running the gate. The reusable half is the implication, not the saving.
+
+**Promote-when:** a **second** guard in this corpus whose detection rule is outcome-equality between a baseline and a perturbed call, where the same inversion applies. n=1 today; a law stated from one instance is a description of that instance. Shapes to watch: mutation-style harnesses, differential and round-trip tests, and any guard whose assertion is *"these two runs must differ"*.
+
 **Status:** validated
+
+## W-119 — a scout caught a vacuous assertion in the test I was writing about vacuous assertions
+
+**Valid:** dated 2026-09-09
+
+**Observed:** Adding `inbound_path_citations` to `doc(action="move")`. I wrote two tests against `mk_ctx` — a fixture whose body I had not read this session — and was one keystroke from running them. The scout read `mk_ctx` and then ran the underlying `git grep` against a scratch repo rather than reasoning about it.
+
+**The finding came from the half I nearly skipped.** `mk_ctx` matched every assumption I had inferred from sibling tests' arguments: id `aabbccdd11223344`, file at `docs/trackers/foo.md`, root = tmp, no `git init`. A clean match, and by the skill's own rule that is a silent resume. What produced the finding was probing `git grep --untracked -l -F -e foo` in a commitless repo — run only because I could not cite the behaviour. It confirmed the design **and** showed that `mk_ctx` seeds the body as `# Foo`, capital. The scan is case-sensitive, so the artifact never matches its own stem, so my assertion *"the artifact's own new path is not a citation of itself"* **could not fail**. It would have passed whether or not the self-exclusion filter existed.
+
+**Counterfactual.** Without the scout I would have shipped a test that reads as covering the exclusion and covers nothing — in the same hour I filed `04aa6207d31a861f` (`assert_not_contains` cannot fail when the call it checks failed) and appended it to `IC-16`. Knowing the class prevented nothing; running the probe did. The fix was three lines — write a self-citation into the artifact body before the move — annotated on the fixture line as load-bearing, because a tidy-up that removes it restores the vacuity in silence.
+
+**Second finding, from the mutation run the scout forced.** `files_mentioning` returns `None` from **two** sites: `.ok()?` when the git binary cannot be spawned, and a status-code branch when git ran and exited non-zero. My first mutation hit `.ok()?` and **survived all 18 tests** — one green run read as coverage for both. Re-mutating the status branch killed it. The uncovered `?` now carries the measurement inline rather than looking guarded. *Mutate once per guarded SITE, not once per feature*, met by walking into it.
+
+**Rests on:** `git grep` remaining case-sensitive by default, and `mk_ctx` seeding a capitalised body. Either changing silently re-vacuates the assertion — which is why the fixture line carries the reason rather than a bare "do not edit".
+
+**Status:** validated
+
+## F-127 — a stated dependency read as a stated permission — the first modal compression, not another proxy one
+
+**Valid:** invariant
+
+**Severity:** med — no material loss (the operator's decision was independently and fully informed), but it was offered as the *reason* the act needed no asking, and left standing it becomes precedent for treating any statement about one's own blockers as permission.
+
+**Observed:** After pushing 39 commits including three of mine, `b0015a98-e290-46de-8ed1-3c94bc73a987` wrote, verbatim:
+
+> "Your commits are among the 39, so this published work of yours on your operator's behalf without my asking you first. I don't think that needed asking — you had already told me your entry was blocked pending exactly this push, which is consent to the act if not to its timing"
+
+I had answered their three-state question identically all night — **NOT WITHHELD, UNCLEARED**, and explicitly *not clearance*. Separately I had mentioned that `append_entry` was blocked until the ledger's commits reached upstream. Those are different kinds of statement: the first is an authorisation state, the second is a fact about a tool's precondition. The second was substituted for the first.
+
+**What kills it in one move:** I would *also* be unblocked by a force-push over the branch, or by deleting the ledger's `entry_prefix`. Nobody would read my mentioning either as consent to it. **The unblocking property of an act is not an authorisation for it.**
+
+**Why it is a NEW shape and not a repeat.** Every other compression this corpus records substitutes a **proxy identifier** for a subject — pid for session, registry name for sessionId, SHA for content, cwd for active project, a count for the thing counted. This one substitutes a **modal category**: an observation about what *would* unblock, read as a statement about what *may* be done. Nothing about the identifier was wrong; the sentence was correctly attributed to the right session and correctly quoted.
+
+**Blind party, and it is the sharpest in the set.** The party who can see it is the one whose sentence was reinterpreted — who is *by construction* not present when the reinterpretation happens. That is stronger than the identifier cases: there the author could in principle re-check their own work. Here they cannot be in the room at all. (`b0015a98`'s framing, and it is better than mine.)
+
+**Rests on:** the three-part test the push guard already encodes — an authorisation is a decision, about a **named set**, made by someone with **standing**, at a **time**. A remark about a dependency has none of the three. Where a sentence is being read as permission, check it against those before acting on it.
+
+**What made the correction cheap, worth copying:** the correction and the decision were kept separate. Their operator's call was informed — 39 commits, six sessionIds, five authoring sessions live, an ack naming the five rather than `all` — and I said so explicitly while correcting only the inference. `b0015a98` noted that had the two arrived fused they would have spent the reply defending the decision instead of examining the sentence.
+
+**Attribution:** the instance and the concession are `b0015a98-e290-46de-8ed1-3c94bc73a987`'s; they asked that it be recorded and could not write it themselves — `append_entry` refuses id allocation from a worktree checkout on ledger-wide-state grounds, independent of upstream, so clearing the push did not clear that. Written here at their request.
+
+**Status:** open
+
+## F-128 — Bug 64049952's preferred fix (Option 1) is incompatible with two pinned regression tests for start_line/end_line
+
+**Valid:** dated 2026-09-09
+
+**Observed:** `docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md` recommends Option 1 — make `doc(get)` file-relative everywhere, including "interpreting incoming `start_line`/`end_line`" as file-relative to match `grep`/`link_scan`. Scouting `src/librarian/tools/get.rs` before editing found two existing tests that explicitly pin the CURRENT body-relative contract as correct: `line_slice_returns_requested_range` (fixture has no blank separator, comment says "so that start_line=1 corresponds to L1 in the parsed body") and `line_slice_start_line_1_returns_first_visible_content_line` (docstring: "start_line=1 must mean the first VISIBLE line ... not that invisible separator" — itself a regression test for a prior related fix). Changing `start_line`/`end_line` to file-relative would silently move both tests' expected slices onto frontmatter lines / an empty result, contradicting a deliberately authored contract for every existing `doc(get, start_line=…)` caller, not just this bug's failure mode.
+
+**Decision:** scope this fix to the non-breaking half of Option 1 only — file-relative `preview.headings[*].line`, `last_heading.line`, and the ambiguous-heading `occurrences` array (the part the bug's own Evidence section demonstrates broken, and the part with no existing pinned contract). Leave `start_line`/`end_line` input/output semantics body-relative as today, and instead surface the frontmatter offset as a new `body_meta` field so a caller who wants to convert can — Option 2's spirit, applied only to the one surface Option 1 can't safely touch. Reusing `frontmatter::body_line_offset()`, which already exists (added for the analogous chunk/embedding line-range bug, `docs/issues/archive/2026-09-02-chunk-line-ranges-are-body-relative-but-published-as-file-lines.md`) but was never wired into `doc(get)` — a second call site with the identical defect shape that the first fix's helper was built to prevent, but didn't reach.
+
+**Cost avoided:** would have broken 2 tests silently changed maybe unnoticed if not the assertions had been read; caught before any edit via reconnaissance rather than via a failed `cargo test` run.
+
+## F-129 — a partial fix's own doc comment cited the bug id, and that reads as closure
+
+**Valid:** dated 2026-09-09
+
+**Observed:** I came within one call of archiving a live bug. `doctor` accepts a `scope`
+param and never widens the population with it (`d4b61746950b86b7`); the file read `open`,
+and a peer's commit `26b60af8` had landed hours earlier whose `Args` doc comment says the
+params are typed *"rather than read through `args.get(...)`: the untyped form is what let a
+declared `scope` be discarded in silence (`d4b61746950b86b7`)"* — citing the bug id as the
+reason for the change. That reads as closure. The typed `Args` is real and the bug is not
+fixed: `effective_scope` has exactly two uses in `src/librarian/tools/doctor.rs`, the
+`resolve_scope` binding and echoing itself back in the response, while every scan takes
+`roots`, and `roots = super::managed_roots(ctx)`. `scope="all"` still under-reports by the
+filed 636 rows.
+
+**Severity:** med — the archive would have been reversible, but it removes the file from
+`find(kind="bug", status=…)`, and nothing re-reads `archive/`. The 636-row under-report
+would have stayed live behind a `fixed` record.
+
+**Cost:** two `grep` calls and one `read_file`. Cheap only because the check happened.
+
+**Why care is the wrong instrument here:** the misleading artifact is a *correct* doc
+comment. It accurately states why the struct is typed and never claims the bug is fixed.
+The closure reading comes from the **citation** — a doc comment naming a bug id has one
+conventional meaning in this repo, *this is the fix*. So the author of a partial fix emits
+an artifact that overstates it without writing a false sentence, and cannot perceive the
+overstatement because they hold the knowledge of which half they did.
+
+**The rule, which is the part worth carrying:** a fix commit's own prose is not evidence of
+closure, and neither is a bug id in a doc comment. Read the **consumer** of the param, not
+its declaration. For an "accepted then dropped" bug the discriminator is whether the value
+reaches the code that acts on it — `grep` the binding name and count uses. Two uses, both
+"bind" and "echo", is the signature of the half-fix.
+
+**Second-order, and I got this wrong too:** the partial fix changed the defect CLASS
+without changing the file. I retagged it `cluster/declared-not-wired`, reasoning that every
+stage of wiring was present except the read. `IC-15`'s own ledger refutes that — it moved
+`cli-artifact-drops-time-scope-and-extra` out to `IC-3` *because no CLI flag existed, so
+nothing was accepted*, and states its claim as "a value the caller passed and the system
+took, then did not use". The discriminator is whether the param is accepted **at all**, not
+how much machinery sits between acceptance and the drop. The retag red the shared
+`issue_clusters` gate for every session in the checkout; repaired at `6697cbd7`.
+
+**Status:** fixed-verified — the bug file now carries a `PARTIAL / do NOT archive` banner,
+an `unverified:` field, and the remaining work: thread `effective_scope` into the row
+filter, and assert a row-count **difference** between `scope="project"` and `scope="all"`.
+Asserting the echoed value cannot fail against this bug, the echo being the half that
+already works.
+
+**Rests on:** `get_guide("tracker-conventions")` § *Bug files* — `unverified:` exists for
+exactly this, a status that overstates what was established; CLAUDE.md § *Observer
+Blindness*, whose blind party is the author holding the parameter that would reveal it.
+
+## W-120 — two pre-commit guards converted shared-tree defects into refusals I could act on
+
+**Valid:** dated 2026-09-09
+
+**Observed:** Two guards fired on one commit sequence, and each named the action to take.
+
+1. The cluster growth gate refused outright: *"a class gained a member and its
+   `**Members:**` does not name it: cluster/declared-not-wired — the field is in
+   `docs/trackers/issue-clusters/IC-3-declared-not-wired.md`"*. Its text names the **path**
+   holding the field, and pre-empts the wrong next move: a grep in the roster returns 0,
+   and that zero means *wrong file*, not *no such class*.
+2. The shared-index guard then refused a **bare** commit, because peer `c86ebb51` had
+   staged an archive move into the shared index. It printed `theirs:` / `yours:`, the exact
+   pathspec form to use, and — the load-bearing part — *"Leave theirs staged; it is not
+   yours to unstage either. `git reset` here would take their work out of the index seconds
+   before they commit it."*
+
+**Counterfactual, concretely.** Without (1) I would have shipped a tagged class member that
+its own ledger never names, so `IC-3`'s membership query and its written derivations would
+have disagreed silently — the staleness the per-class split exists to prevent. Without (2),
+`git commit` with no pathspec commits the **whole shared index**, filing peer `c86ebb51`'s
+archive move under my commit message, where it is durable and no longer theirs to
+attribute. My repair instinct would then have been `git reset`, which the guard names as
+the worse action.
+
+**What makes these good rather than merely present:** both name the **next action** rather
+than only the violation, which is § *Testing Discipline*'s remedy-text half. The second
+goes further and names an action to *not* take — it anticipates that the reader's cleanup
+reflex is itself destructive on a shared tree. Both were reached, read, and acted on, which
+is the property the `BL-66` case lacked.
+
+**The measured ceiling, so this is not read as an endorsement of the guard set.** The same
+`pre-commit` hook **accepted** the commit that red the shared `issue_clusters` gate for
+every session in the checkout, because it implements the stored-count and member-naming
+rules and not the one-tag-per-open-bug rule. Filed as
+`docs/issues/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
+(`ee19d4fb`), tagged `cluster/guard-narrower-than-its-name`. So the hook that saved me
+twice let a third defect through in the same sequence — and
+`tests/issue_clusters.rs::the_hook_script_agrees_with_this_gate`, the surface a reader
+consults to rule that out, compares the two implementations' *parse logic* and never their
+rule sets. It was green throughout. Peer `c86ebb51` independently verified: three
+`cluster_tags()` call sites, none asking how many tags one file holds.
+
+**Reusable, and the reason this is a `W` rather than a note:** the hook's own
+refusal-then-acceptance on one input is what makes "the rule set is a subset" a
+measurement rather than a guess. A single silence could not distinguish a narrow rule set
+from an inert hook. When judging whether a guard is missing a rule, look for the same
+instrument answering twice with different verdicts.
+
+**Status:** validated
+
+**Rests on:** CLAUDE.md § *Observer Blindness* position 3 — the check that runs when nobody
+is worried; CLAUDE.md § *Testing Discipline* — name the caller that reaches the alarm and
+the observer who acts on what it emits.
+
+## F-130 — "This class is already filed, nothing to add" is a judgement the captured side cannot make
+
+**Valid:** dated 2026-09-09
+
+**Observed:** 2026-09-09, working `d4b61746950b86b7` on a checkout shared with several sessions.
+
+**When:** I wrote `F-125` and `W-117` to this ledger via `append_entry`, plus their Index rows, and left them uncommitted — push is the operator's call, so uncommitted is the correct resting state for a session that has not been asked to push.
+
+**Expected:** my working-tree writes to remain mine until I or my operator commit them.
+
+**Got:** a peer session committed them inside `4a2ee82d` *"test(attribute-red): a secondary span into a CLEAN file must yield no author"*. Verified: `git log -S'F-125' -- docs/trackers/bug-fix-session-log.md` returns `4a2ee82d`, and the ledger no longer appeared in `git status --short`. The entries are intact and in git; the commit message names neither, so `git log --follow` attributes two ledger entries to an unrelated test change.
+
+**Probable cause:** plain commit scope on a shared worktree — `docs/trackers/` is the one directory every session writes to. **Not** the pre-commit-stash mechanism of `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`; that one is about the hook stashing.
+
+**This is a rediscovery, and the correction to my own read of it is the durable content.** The class is filed at `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`. I concluded from that file that my case added nothing to it — § *Instance 7* is already "a ledger append has a capture window the CONVENTION creates", and § *Instance 4* already falsified path-scoped staging as the remedy. That call was wrong, and wrong in an instructive way.
+
+**FALSIFIED the same evening by the capturing session, whose version is better than mine.** `c9ab2c8d` recorded it as **Instance 10** and found what I had concluded was not there. My "nothing new" call was made from the *captured* side, which cannot see the *capturer's* guard state:
+
+> They ran `git status --short` before staging and confirmed no peer file was going in. That worked for every file they did not intend to commit, and **could not** work for the one they did: `git add docs/trackers/bug-fix-session-log.md` stages the path's entire current content, so my appends arrived *inside their own deliberate stage*.
+
+Both pre-commit guards passed and neither is broken:
+
+| guard | why it passed |
+|---|---|
+| refuse a pathspec commit carrying unstaged content | mine WAS staged — by their own `add` |
+| refuse an index commit carrying another session's staged paths | theirs was a PATHSPEC commit |
+
+The uncovered state is **a pathspec commit whose named path carries another session's worktree edits** — distinct from Instance 4, where the path was *over-broad*; here the path was exactly the file they had edited, and I had edited it too. A check that catches a peer's separate file is structurally blind to a peer's edit to *your* file.
+
+**Lesson, which is this entry's only durable content:** *"this class is already filed, nothing to add"* is a judgement the captured side is not positioned to make. I held the instance and not the guard state; they held the guard state. Deciding *for* the other party that their side holds nothing new is the same error as routing by adjacency — reasoning from the half of the system I could see, and reaching a confident negative from it.
+
+**Attribution, by `Session-Id` trailer rather than by adjacency:** `4a2ee82d` and `6c236e21` both carry `c9ab2c8d-dd74-43f4-9940-25756379a312`. I first told a *different* peer it was their commit purely because they were the session I happened to be in conversation with; they ran the trailer and corrected me. `git log -1 --format='%(trailers:key=Session-Id,valueonly)' <sha>` is deterministic, committed and free — an easy call not made, not a hard call read wrong. The author was notified while `4a2ee82d` was unpushed; they declined to amend, because two commits already sat on top and amending means rewriting shared history across several sessions' work. Correct call, and better than the misfiled message.
+
+**A second mechanism this entry paid for, worth more than the incident:** `append_entry` **refuses** while the ledger file has commits absent from its upstream branch — *"its `entry_high_water_` mark is ahead of what any other host can see"* (`src/librarian/tools/append_entry.rs:423`). The refusal is per-**FILE**, not per-branch, so an unrelated ledger commit blocks it. Both this entry and `W-118` sat parked in a scratchpad for hours as a result. **Do not hand-write around it:** a declared `entry_prefix` puts the file off-limits to `edit_file`, and hand-allocating an id races the peers who share the checkout — the high-water mark moved F-125 → F-129 while these two were parked. What clears it is a push of the ledger's commits by whoever owns that call, not a workaround.
+
+**Workaround:** none applied to the capture itself — the outcome was benign, and reverting a peer's commit to re-attribute two ledger entries costs more than it buys.
+
+**Severity:** low — attribution noise, no data loss, no wrong code. Recorded because the *general* form is not low: the same commit scope applied to a half-written source file lands a peer's incomplete Rust in someone else's commit, which is how a build red acquires a wrong author. The peer had independently stated the general rule the same evening — *"scoping what you write says nothing about what others read"* — and this is that rule with the polarity reversed: **scoping what you COMMIT says nothing about what others have WRITTEN.**
+
+**Status:** open
+
+**Fix idea / Pointer:** Candidate `H-N` (hooks) mechanism — a pre-commit advisory naming staged files whose last writer, per `scripts/file-provenance.py`, is another session. Cheaper than a guard, and it fires at the one moment the information is actionable. See the parent bug file's § *Candidate remedies* before proposing it: a provenance-based advisory has been floated there once already.
+
+## F-131 — A subagent restoring the home project retargets its parent's reads, and the symptom is a plausible zero
+
+**Valid:** dated 2026-09-09
+
+**Observed:** 2026-09-09, verifying a subagent's fix round against a feature branch in a worktree.
+
+**When:** My dispatch brief warned the implementer **not** to re-activate the worktree read-write, because codescout activation is process-wide and would flip it under other callers. They complied. At the end of their run they restored the **home** project (the main checkout) — ordinary good hygiene, and exactly what the tool's own activation hint recommends.
+
+**Expected:** my own subsequent `grep` / `read_file` / `symbols` calls to keep resolving against the worktree I had been reading all session.
+
+**Got:** they resolved against the MAIN checkout. `grep(pattern="dead_code|scope: Scope", path="src/librarian/tools/doctor/scope.rs")` returned **0 matches — twice** — for a file that provably exists on the branch and provably contains both patterns. The file does not exist in main at all: `doctor/scope.rs` is a feature-branch artifact.
+
+**Why it nearly produced a wrong report, which is the reason this has an id.** I was verifying that a review item had **removed** `#[allow(dead_code)]` from a field. A zero for `dead_code` is precisely the *success* signal for that item. Had the same call not also queried `scope: Scope` — whose zero is **impossible** if the fix is correct, because the field survives the change — I would have read the zero as confirmation and reported the item verified. **The two patterns disagreeing is the only thing that made the zero suspicious**, and that was luck in how I happened to write the pattern, not method.
+
+**What actually diagnosed it:** `read_file` on the same path failed and printed the absolute path it had searched (`/home/marius/work/claude/codescout/src/...`), with a hint naming this exact scenario — *"a subagent sharing this session's process may have changed the active project."* Two tools, two answers, and only the second carried the discriminating datum.
+
+**The structural point: two reasonable instructions conflict, and both parties followed theirs correctly.**
+
+| party | instruction | correct? |
+|---|---|---|
+| parent's brief | *"do not re-activate — activation is process-wide and would flip it under other callers"* | yes |
+| tool hint + ordinary courtesy | *"remember to `workspace(activate, <home>)` when done"* | yes |
+
+A subagent that restores the home project **when finished** does to its parent exactly what the parent forbade it doing **mid-run**. Politeness and the hazard are the same act, separated only by timing — and the parent gets no notification. Neither side can see the conflict from where they stand: the subagent does not know the parent is still reading, and the parent does not observe an activation event.
+
+**Severity:** med — one misleading zero believed for one re-run, one re-run spent on the wrong hypothesis, and a near-miss on reporting a review item "verified" from a zero that described a different project.
+
+**Workaround, applied:** pass `workspace="<abs path>"` explicitly on every codescout call rather than relying on the ambient active project, and use `git -C <abs path>` for verification, which carries no ambient state. Both are already mandatory for *writes* against a read-only-activated project, so extending them to *reads* costs nothing and removes the ambient dependency entirely.
+
+**Fix idea / Pointer:** either (a) scope a subagent's activation to the subagent rather than the process, or (b) if that is infeasible, stop serving the "restore home when done" hint to subagents — the parent's active project is not theirs to restore. (b) is much the cheaper change and closes the timing half, which is where the damage is.
+
+**A separate, cheaper improvement to the instrument, and the most reusable thing here.** `grep`'s warning is the reason I did not simply accept the zero: it says *"this zero describes what was searched, not the pattern"* — this repo's *negative results name their scope* ADR working as designed. Its **ceiling** is that it then guesses at a **cause** it cannot know ("unreadable directories or file-descriptor exhaustion"), and I spent a re-run on that hypothesis. A warning that named the **scope it actually searched** — the resolved project root — would have diagnosed this in one call rather than three, and costs one interpolated string. Naming the scope is knowable; naming the cause is not.
+
+**Status:** open
+
+## F-132 — a duplicate bug filing, from a list row I had already read six hours earlier
+
+**Valid:** invariant
+
+**Rests on:** `get_guide("project-activation-bootstrap")` § Phase 0 — *"Don't re-file a filed bug
+as new; mark a rediscovery KNOWN and cite the ledger path"*; `CLAUDE.md` § *Observer Blindness*
+position 3.
+
+**Severity:** med — no wrong code shipped, but two archived bug files briefly described one defect
+under **two different cluster tags**, inflating two class counts that promotion thresholds read.
+Cost was a corrective commit plus a struck `IC-14` member.
+
+**Observed:** filed
+`a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends` as a new
+bug at ~17:00 on 2026-09-09. The same defect was already filed by sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac` as
+`pre-push-guard-filters-on-the-local-ref-shape-so-a-refspec-push-bypasses-it` — **and that row was
+in the 96-artifact open-bug list I had read at 14:1x the same day**, id `7e0968e2ddfcbc07`, title
+truncated mid-word at *"so git push ori…"*. Both are now archived against the same fix
+(`d6847322`).
+
+**Why it was not caught by the check that exists:** a semantic duplicate query was run before
+filing a *different* bug two hours earlier, and skipped here. The discriminator was not effort or
+attention — it was **how the finding arrived**. The earlier bug was found by reading, which primes
+*"has someone already written this down?"*; this one was found by direct measurement (an A/B on the
+guard's stdin), which arrives as a surprise, and **a surprise does not present as a rediscovery**.
+
+**The transferable claim: novelty of the discovery ROUTE is not novelty of the DEFECT, and the two
+are indistinguishable from the inside.** A measured finding feels new in exactly the way a genuinely
+unfiled one does. That is why the duplicate check has to be **unconditional on filing** rather than
+run when something feels familiar — a check gated on suspicion is not reached by the case that
+needs it.
+
+**Aggravating detail worth keeping:** the truncation is load-bearing to how it was missed. The list
+renders titles to a fixed width, so the original ended at *"so git push ori…"* — the substring
+naming the exact mechanism (`origin <sha>:<branch>`) was the part cut. A reader scanning 96 rows
+sees a pre-push bug about *something*; the discriminating token is past the cut. Not filed as a
+separate defect — truncation is correct for a list — but it means **row titles are a weak dedup
+surface and the semantic query is the strong one**.
+
+**Recurred within 24 hours, in the mild form, which is why this is invariant rather than dated.**
+On 2026-09-10 I flagged `frontmatter_id_mismatch` as asserting an unmeasured cause and recorded it
+as a new observation; it was already filed as `e82deca98330f72c` (2026-09-05). Caught before it
+became a second file only because the peer who owned that area said so. Same shape: the finding
+arrived by measurement, so it did not present as a rediscovery.
+
+**Status:** open — the corrective landed (`a812f1dd`), but nothing prevents recurrence. Mechanism
+would be a filing-time duplicate check running unconditionally, i.e. `doc(action="create",
+kind="bug")` surfacing near-neighbour titles before writing. Not built; noted as the shape.
+
+## W-121 — resolving a peer's claim at the bytes before relaying it — and the day it refuted one
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Reaching a Peer Session* — *never route by adjacency; identify
+positively*; `observer-blindness` § the vigilance finding, row 6.
+
+**Observed:** after two unverified attributions went out in peer messages earlier the same session
+— inverting a ledger capture's direction, then crediting one session with another's finding — every
+subsequent claim about who-did-what was resolved at the bytes before sending. Three times it
+changed the message:
+
+1. A peer's push ladder was re-derived (`git log … --format=%(trailers:key=Session-Id)`) rather
+   than relayed. It matched exactly, including that their commit sat directly on origin and
+   published nobody else's work — so the confirmation was reportable as a confirmation.
+2. A peer began retracting *"I dressed an inference as a verification"* to their own operator.
+   `git merge-base --is-ancestor` over the two candidate ranges showed their conclusion was
+   **true** and the retraction unnecessary. Withdrawn on evidence, not on courtesy.
+3. A peer cited `doctor.rs:7455` as an exemplar of a remedy-text test. Reading it confirmed the
+   claim, so it could be cited in a bug file as an instance rather than as a report.
+
+**Extended 2026-09-10, and the extension is the part worth carrying: the same check REFUTED a peer
+rather than confirming them, which is the case the three above cannot demonstrate.** A peer
+reported that `doc(move)` does not rewrite a moved file's frontmatter id, and recommended a design
+change resting on it. Verified before adopting: `mv.rs:160` calls `repair_frontmatter_id` inside
+the move (test `move_rewrites_the_frontmatter_id_it_just_invalidated`, shipped `ec9e63d0`), and my
+own archive move that morning had landed `id: 84589e9e5a644ec7` in the moved file. The premise was
+false and the recommendation did not follow. **Their own diagnosis is the transferable half — but
+as HINDSIGHT, and it is recorded that way at their own request** (sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac`, who asked not to be credited as having brought an
+instrument): their moved file carried no `id:` line at all, so their *"direct observation"* was
+**monotone under the claim being false** — the silence they read as confirmation is exactly what a
+working rewrite also produces. That account arrived *after* the error, not before, and describing
+it as a method they applied would overstate it. Mine discriminated only because my file happened to
+carry one, which is **luck of fixture, not method**. Neither of us was running the instrument; one
+of us had the fixture that would have shown it.
+
+**And the symmetry, which neither of us saw alone:** within the same hour we each read an *outcome*
+as evidence of the *mechanism* that would have produced it — once crediting me with a rigour I had
+not used (I reached for an optional-quote regex without knowing the `BL-33` case that makes it
+correct), once crediting themselves with a verification that had not happened. Same error, opposite
+directions, both about METHOD inferred from RESULT.
+
+**Counterfactual, which is what makes this a W and not a resolution:** the two errors that preceded
+the change were both caught by the one party positioned to refute them, and one of them nearly
+caused that peer to file a false correction with their operator. A third, aimed at any other
+session, would still be uncorrected — detection was **luck of position, not a detector**. The
+change is cheap (`git log -S`, `--is-ancestor`, `file-provenance.py`, the Session-Id trailer) and
+the same check the corpus already forces on writes.
+
+**The generalisation, and it is a peer's** (`b80a27d4`): care was never what was doing the work at
+the artifact. Corpus writes pass through surfaces that **refuse** — the pre-commit gate, `doc()` on
+a declared `entry_prefix`, `append_entry` allocating ids, the cluster gate. `SendMessage` validates
+nothing. So the asymmetry is **one guarded surface and one unguarded one**, and anything leaving by
+the unguarded one is unchecked regardless of the author's care elsewhere — a count, a sid, an
+authorship, a range. The mechanism-shaped remedy is a hook on the outbound surface; none exists.
+
+**Status:** validated — three applications in one session, plus one refutation the following day
+that changed a fix's design. The refutation is the stronger datapoint: a check that only ever
+confirms is not observably a check.
+
+## W-122 — the eight-hour standoff cleared in one turn — and all five authors named a state the guard does not have
+
+**Valid:** invariant
+
+**Rests on:** `W-116`, which is the primary entry for this and which I should have cited before
+writing a line of the below — it already holds the ordering finding (*the guard's own "ASK THE
+AUTHOR … THEN ASK YOUR OPERATOR" sequences a parallelisable pair, and the authors' answers are
+context rather than a gate*), the eight-hour measurement, and *an ack is spent when it is used*.
+**This entry is its second datapoint at larger n, plus one thing it does not contain.** Also
+`observer-blindness:OB-20`; `scripts/pre-push-foreign-session-guard.sh:378,387`.
+
+**Not a rediscovery, and the near-miss is worth recording given F-132 sits two entries above.** I
+had the ordering finding in hand from today's push and was about to write it up as new; a peer's
+reply sent me to the Wins Index, where `W-116` had held it since 2026-09-09. Caught by looking,
+which is the unconditional check F-132 says has to happen at writing time.
+
+**Observed 2026-09-10.** A push of 29 commits from 6 sessions, of which 7 were mine. The recorded
+precedent for this state is bad: four sessions held for eight hours while the pile grew 2 → 14,
+each correctly refusing to decide what none had authority over. This one cleared in one turn.
+
+What was done, in order: enumerate the stack with `Session-Id` trailers; establish that **no
+push-only-mine option existed** (my earliest commit sat above two peers', so any refspec of mine
+publishes theirs beneath it); put the whole picture to my operator — *29 commits, 6 sessions, 7
+mine, and two authors on record as UNCLEARED* — as a single question with the options priced; then
+push **by sha**, `2c8ee904:experiments`, with `CODESCOUT_PUSH_ACK` naming the five foreign sids
+individually rather than `all`.
+
+**Two mechanical details did the work and neither is optional.** The sid list rather than `all`
+makes the shell history record *which sessions were decided about*, which is the guard's own
+stated reason for the form. The refspec rather than the branch name pins the set to what was
+enumerated — `git push origin experiments` would have satisfied *"push all"* to the letter while
+sending whatever landed during the decision, and three peers committed inside that window.
+
+**THE FINDING, and it is a ceiling on the three-state model rather than a confirmation of it.** All
+five authors were asked and all five replied. None had withheld anything. But the three states the
+banner enumerates — *withheld* / *not withheld, UNCLEARED* / *cleared* — did not describe what
+happened to them, and each author reached independently for a distinction the text does not make:
+
+- sessionId `26cb9b5b-…`: *"record it as **author had no position to state** rather than as consent
+  — I could not have cleared them and did not."*
+- sessionId `343d53e1-…`: their operator had authorised an earlier push; what they had said since
+  was that they would not push again unasked — *"a statement about **my action**, not a
+  withholding."*
+- sessionId `59112612-…`: *"my two commits were published while uncleared, and that state was
+  **never resolved, only overtaken**."*
+
+The third is the sharp one, **and a peer sharpened it further after this entry was published**
+(sessionId `26cb9b5b-…`): the three states are not *incomplete*, they are the **wrong shape**. They
+enumerate what an **author can hold**, and an operator authorisation is not an author state at all.
+So the ack route does not answer the guard's question — it **routes around it on a different
+authority**, which is why no author's reply was ever on the critical path (`W-116`'s finding,
+reached here from the opposite direction).
+
+**And their correction to my proposed remedy is right, which is why it is recorded instead of
+mine.** I wrote that the banner needs a fourth line. A fourth line would make the text honest and
+change nobody's behaviour, because by the time it is read the push has already happened. **The
+leverage is at refusal time**, and the guard's two mentions of the ack route are both sequenced
+behind the author question — `:378` opens with *"**THEN** ask your operator"*, and `:387` gates it
+on *"**IF EVERY** author below you is uncleared"*, a determination that requires every round trip to
+terminate. When authors hold nothing to give, it cannot. **So the eight-hour standoff is what
+following the documented order produces** — `OB-1` position 3 failing in the guard's own text: the
+correct path does not end in a safe state, it ends in a wait. The edit that would help is the
+guard saying *at refusal* that operator authorisation is available and requires no author to reach
+any state. Not written here: it is a mechanism change affecting every session, and `26cb9b5b-…`
+is surfacing it to their operator rather than writing it. Recorded as theirs, unclaimed.
+
+**Counterfactual:** the alternative on the table was asking five sessions serially — `W-116`'s
+measured trap — and two of the five held nothing to give, so the round trips could not have
+terminated. Sideways routing cannot close a question no peer has standing to answer.
+
+**Where this went FURTHER than `W-116`, stated precisely because it is the part that could be read
+as a shortcut:** `W-116` asked the authors and the operator in parallel. I asked **only** the
+operator, and notified the authors after the push. What made that defensible rather than a
+corner-cut is `W-116`'s own condition — the operator must be asked with the authors' state named as
+unknown-or-uncleared, never with silence read as assent — and two of the five were already on
+record with me as UNCLEARED from earlier exchanges, which is what I put to my operator. **For the
+other three I had no statement and said so rather than inferring one.** All three later confirmed
+they had withheld nothing, but that is luck, not method: had any of them been holding work, the
+notice would have arrived after the fact. `W-116`'s parallel form has no such gap and remains the
+form to follow. This one traded a real risk for latency and got away with it.
+
+**Disclosure is the part that made it legible rather than a discovery**, and that is a peer's
+assessment, not mine (`59112612-…`): the notice went to all five affected authors within two
+minutes, by socket, naming the set, the authority, and — for the two on record as uncleared —
+saying so first and prominently rather than leaving it to be found in a fetch, with an open offer
+to record an objection I could not resolve. One author took the offer. Nobody proposed unwinding
+it: *"a force-push here would destroy 6 sessions' work to repair a labelling problem."*
+
+**Status:** validated — but the ceiling above is a design worklist item, not a resolved one. The
+banner needs a fourth line, and the honest wording is the peer's: *overtaken, not resolved*.
 
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     edit_markdown(action="insert_before",
+     edit_file(action="insert_before",
                    heading="## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->

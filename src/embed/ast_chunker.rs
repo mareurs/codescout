@@ -411,6 +411,7 @@ fn extract_container_header(
 /// `=>` (arrow function), or 100 chars. Designed for header metadata;
 /// signature fidelity is not critical — only keyword matchability.
 fn extract_signature(first_line: &str) -> String {
+    // cap-class: NOT_A_CAP — trims a signature used only as the embedding-input header; the chunk content indexed and returned is untouched
     const MAX_LEN: usize = 100;
     let trimmed = first_line.trim_end();
 

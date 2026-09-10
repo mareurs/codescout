@@ -164,6 +164,7 @@ mod tests {
         }
     }
 
+    // cap-class: NOT_A_CAP — test-only fixture ceiling handed to CeilingEmbedder::new and EmbeddingService::with_budget; it parameterises the test's own embedder and bounds no runtime path
     const BUDGET: usize = 500;
 
     #[tokio::test]

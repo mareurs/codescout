@@ -125,7 +125,7 @@ Every field exists to serve one of these. If a proposed field serves none, leave
 Query them:
 
 ```
-artifact(action="get", id="<this id>",
+doc(action="get", id="<this id>",
          entry_filter={"and": [{"automatable": {"eq": "yes"}},
                                {"status": {"eq": "open"}}]})
 ```
@@ -139,23 +139,23 @@ without it the entry can never be cited.
 
 ```
 # 1. Row — the server assigns the id atomically
-artifact(action="append_entry", id="<this id>",
+doc(action="append_entry", id="<this id>",
          entry_collection="claims", id_prefix="DC", entry={...})
 
 # 2. Section — using the id step 1 returned
-artifact(action="update", id="<this id>", patch={body_edits: [{
+doc(action="update", id="<this id>", patch={body_edits: [{
     heading: "## Template for new entries", action: "insert_before",
     content: "## DC-N — <title>\n\n**Site:** ...\n"}]})
 ```
 
-> ⚠️ Never `artifact_augment(merge=true, params={claims: [...]})` — RFC 7396 replaces the
+> ⚠️ Never `doc(action="augment", merge=true, augment={params:{claims: [...]}})` — RFC 7396 replaces the
 > array wholesale rather than merging. That call took `tool-usage-patterns` from 19 entries
 > to 1 on 2026-08-16, and the catalog is not in git.
 
 To flip a row's status as a check ships, use `update_entry`, never a params patch:
 
 ```
-artifact(action="update_entry", id="<this id>", entry_collection="claims",
+doc(action="update_entry", id="<this id>", entry_collection="claims",
          entry_id="DC-1", fields={"status": "check-shipped"})
 ```
 

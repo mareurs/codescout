@@ -8,8 +8,8 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 10
-entry_high_water_W: 17
+entry_high_water_F: 13
+entry_high_water_W: 18
 entry_prefix:
 - F
 - W
@@ -44,8 +44,8 @@ entry_prefix:
 > list is the fastest way back into this work.
 >
 > **This is a guarded ledger** — `entry_prefix: [F, W]` is declared in frontmatter,
-> so `edit_markdown` is refused. Append via
-> `artifact(action="append_entry", id_prefix="F"|"W", title=…, body=…,
+> so `edit_file` is refused. Append via
+> `doc(action="append_entry", id_prefix="F"|"W", title=…, body=…,
 > anchor_heading="## Template for new entries")` and let the server write the
 > heading. Status vocabulary is the one in `docs/templates/session-log.md`.
 > **Wins Index rows are ascending** — append after the last row; prepending to a
@@ -67,7 +67,7 @@ entry_prefix:
 > re-keyed by its archive move and no longer resolves.
 >
 > Corrections stack here rather than replacing the text above because this block sits in
-> the preamble, before the first heading, and `artifact(update, body_edits)` is strictly
+> the preamble, before the first heading, and `doc(action="update", body_edits)` is strictly
 > section-scoped — there is no heading to address it by. Filed as a bug.
 ## Index
 
@@ -83,6 +83,9 @@ entry_prefix:
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 | F-10 | 2026-09-03 | med | self-friction | mitigated | I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed in 10 hours, found by a peer, on the gate carrying my own prediction that it would |
+| F-11 | 2026-09-09 | med | prompt-surface | open | The collapse's byte win is 2.7% — a merge moves parameters into the survivors rather than deleting them, so a tool COUNT is a bad proxy for surface cost; and `budget 57296, headroom 0` leaves no slack |
+| F-12 | 2026-09-10 | med | prompt-surface | open | `F-11`'s 57296 decayed to 56485 in under two hours with no alarm — two agreeing instruments protect a number synchronically and not against decay; and the budget is a RATCHET re-set to each new total, not the post-collapse ceiling `F-11` called it |
+| F-13 | 2026-09-10 | high | self-friction | open | I designed a cross-cutting input-repair mechanism an accepted ADR already specified, and picked a field name contradicting it — searched for the mechanism, never for the policy |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -104,6 +107,7 @@ entry_prefix:
 | W-15 | 2026-09-02 | med | A substring join on `input_json` reads a value as a key — join on the key (`json_extract`) and read the rows before publishing a count | A bug file would have opened with "8 field instances in 30 days" for a defect with 0 real ones; a second join the same hour read 48 for a real count of 1 | open |
 | W-16 | 2026-09-03 | med | Price a schema restructuring against its own scaffolding before proposing it — compare the bytes the new shape *requires* against the bytes the old shape spends on the same fact | Would have shipped `oneOf` narrowing on `doc` as a size reduction: +2,022 chars at the optimal encoding, ~2× the whole five-tool collapse's saving and in the opposite direction — and provably unwinnable, since 17 minimal branches (794) already exceed every action-qualifier prefix in the tool (616) | validated |
 | W-17 | 2026-09-03 | high | Ask of a candidate cut "does this DESCRIBE the parameter, or DISPLACE something the model would otherwise reach for?" — redundancy analysis is structurally blind to the second, and routes you straight at it | Would have proposed cutting the `workspace` routing clause — the surface's largest duplicate at 2,244 redundant chars across 18 tools — which `prompt-hamsa-audit-log:A-28` had already measured at 8/10 against base 10/10 and marked KEEP; every failure was the model reaching for global `activate`, which clobbers a concurrent parent on a machine running 16 sessions. The proposal would have carried a correctly-derived number and read as the session's strongest finding | validated |
+| W-18 | 2026-09-10 | med | Probe the binary that is actually SERVED, not the one the script defaults to — then control for the instrument having ignored your choice | `F-11`'s figure was measured on `target/debug` under default features while the live binary is `cargo rb` (`server-stack,local-embed`), so it would have been a default-lane number quoted about a server-stack binary — which CLAUDE.md warns against by name. Identical results would ALSO be produced by `--binary` being ignored, so the finding rests on the bogus-path control rather than on the agreement | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -1995,10 +1999,267 @@ inclusion list got hand-typed in the first place.
 uncommitted extension to `src/prompts/mod.rs` read at 2026-09-03; `IC-14` member 7 in
 `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md`.
 
+## F-11 — the collapse's byte win is 2.7%, because a merge moves parameters rather than deleting them
+
+**Observed:** This log's headline `tools/list` figure was **27 tools / 58,882 chars**, measured
+before the 2026-09-02 collapse and annotated in-place as over-counted. Its replacement — a
+~28.7k-token re-measurement — went into `resume-tool-surface-structural-mechanisms` at `284c82bd`,
+which is now `status: archived`. So the live tracker carried a number known to be wrong, and the
+correction sat in a closed record: two documents, neither of which a reader gets right alone.
+
+**Re-derived 2026-09-09, not cited.** Both instruments, run in the same session, agree exactly:
+
+| | desc | schema | annot | TOTAL | tools |
+|---|---|---|---|---|---|
+| `scripts/probe_tool_surface.py` | 7060 | 49479 | 757 | **57296** | 21 |
+| `cargo test --lib tool_surface_report_lengths` | 7060 | 49479 | 757 | **57296** | 21 |
+
+The agreement is the point, not a formality: the probe's own trap 1/2 says a mismatch between it
+and `list_tools` makes any delta meaningless. Two independent readers of the same surface, so this
+is corroboration rather than one instrument quoted twice.
+
+**The finding, and it inverts the expectation the collapse was argued on.** Six tools removed
+bought **1,586 chars — 2.7%**. A collapse is a **merge, not a deletion**: the folded tools'
+parameters moved into the survivors rather than leaving. The same run shows where they went —
+`doc` alone is **18,556 chars over 62 params**, and `librarian` **10,276 over 41**, together 50% of
+the whole surface across two tools. **So a tool COUNT is a bad proxy for surface cost**, and this
+log had been reasoning in tool counts. The probe already reports the cut that does track cost —
+`prose 37,625 (65.7%) / machine 19,671 (34.3%)` — and its trap 4 warns that prose cuts must not aim
+at `desc`, which is tool descriptions only; parameter descriptions live inside `schema`.
+
+**And the budget now has zero slack:** the same test prints `budget 57296, headroom 0`. The ceiling
+was set to the post-collapse total, so the next parameter added to any tool reds the gate. That is
+a design choice worth knowing before someone reads the red as a regression rather than as the
+budget doing its job.
+
+**Build provenance, added 2026-09-10.** These four numbers were taken with
+`scripts/probe_tool_surface.py`, whose `--binary` defaults to `target/debug/codescout`, and with
+`cargo test --lib`, which runs default features. The live binary is neither: `cargo rb` is
+`--release --features server-stack,local-embed`. Re-probed against BOTH at the same instant, the
+advertised surface is identical on all six dimensions, so `57296` describes the served binary too.
+See the paired `W` entry for the controls. Without it this figure would be a default-lane number
+quoted about a server-stack binary, which `CLAUDE.md` § *Development Commands* warns against by name.
+
+**What this does not establish.** Nothing here says the collapse was not worth doing — the argument
+for it was Iron Law legibility and one call shape per concern, not bytes, and 2.7% is only a
+refutation of the *byte* case if someone made one. It also says nothing about resident prompt cost:
+`A-38` records that Claude Code injects tool **names** and defers ~85% of schema to `ToolSearch`,
+so wire chars and per-turn chars are different quantities and this is the wire one.
+
+**Valid:** dated 2026-09-09
+
+**Rests on:** `scripts/probe_tool_surface.py` and `src/server.rs`'s `tool_surface_report_lengths`,
+both run 2026-09-09; `docs/trackers/prompt-hamsa-audit-log.md:A-38` for the deferral calibration;
+`docs/plans/2026-09-09-tool-collapse-post-merge-queue.md` § *OWED* item 6, which owed this entry.
+
+## W-18 — the tool surface is build-invariant across server-stack, so F-11's debug-binary figure is citable for the live one
+
+**Observed:** `scripts/probe_tool_surface.py`'s `--binary` defaults to `target/debug/codescout`
+(`:165`), and `cargo test --lib` runs default features. The live MCP binary is neither: `cargo rb`
+is `build --release --features server-stack,local-embed` (`.cargo/config.toml`), and
+`~/.cargo/bin/codescout` symlinks to `target/release/codescout`. So `F-11`'s measurement was taken
+against a build no session runs, on a feature set `CLAUDE.md` warns about by name — *"the default
+lane is VACUOUS for `server-stack`… green here is silence about code the running binary uses."*
+
+**Scouted after a `cargo rb` + `/mcp` reconnect, both binaries probed at the same instant:**
+
+| build | tools | desc | schema | annot | TOTAL | prose | machine |
+|---|---|---|---|---|---|---|---|
+| `target/release` (`server-stack,local-embed`, live) | 21 | 7060 | 49479 | 757 | 57296 | 37625 | 19671 |
+| `target/debug` (default features) | 21 | 7060 | 49479 | 757 | 57296 | 37625 | 19671 |
+
+**Identical on every dimension — the advertised surface is BUILD-INVARIANT across that feature
+set.** The two flags add a vector backend and an embedder; neither registers a tool nor widens a
+schema.
+
+**Three controls, because a confirming result is what a broken instrument also returns.** Identical
+numbers are exactly what *"`--binary` is ignored and both runs probed one binary"* would produce,
+and that alternative is a priori likelier than the finding. (1) `--binary` is honoured: a bogus path
+exits 1 with `FileNotFoundError` rather than silently falling back. (2) The two files are genuinely
+different — distinct `sha256sum`, 332 MB vs 64 MB. (3) Tool count read independently of the byte
+totals: 21 both sides. Without control 1 in particular this entry would be an artifact wearing the
+shape of a finding.
+
+**Counterfactual — narrow, and no defect is claimed.** What changes is the *citability* of `57296`.
+Before the scout it was a number from a build nobody runs, and a reader applying this repo's own
+server-stack warning would have been right to distrust it; `F-11` quotes it as the post-collapse
+surface, which is a claim about the served binary. Cost: two probe runs and three controls. The
+scout also caught an omission `F-11` could not have disclosed on its own — it stated no build
+provenance at all, and a reader had no way to supply it.
+
+**What this does NOT establish.** Only the **advertised** surface — `tools/list` over stdio. Nothing
+about runtime behaviour under `server-stack`, where `VectorBackend::resolve()` defaults to Qdrant
+and the hybrid sparse+reranker path is live; that lane is CI's `test-server-stack` and this probe
+cannot see it. Build-invariance of a wire payload is not feature-parity. It is also one observation
+at one commit, not a standing guarantee — a tool registered behind `#[cfg(feature = "server-stack")]`
+would break it silently and nothing here would notice.
+
+**Valid:** dated 2026-09-10
+
+**Rests on:** `.cargo/config.toml`'s `rb` alias; `scripts/probe_tool_surface.py`:165 for the default
+binary; `CLAUDE.md` § *Development Commands* for the server-stack vacuity warning;
+`prompt-surface-compaction-session-log:F-11`, whose figure this qualifies.
+
+## F-12 — F-11's figure decayed in under two hours, and the budget is a ratchet rather than the post-collapse ceiling I called it
+
+**Observed:** `F-11` was written 2026-09-09 with `TOTAL 57296` and the line *"budget 57296,
+headroom 0"*. Re-measured after a rebuild the following morning — **under two hours of working
+time later** — the surface is **56485**. Nothing went red. Both instruments simply returned the
+new value and agreed with each other, exactly as they had agreed on the old one.
+
+**Cause — `2735df73`, corrected 2026-09-10 after this entry was written.** The −811 chars are
+**entirely in `schema`** (49479 → 48668); `desc` (7060) and `annot` (757) are unchanged to the byte.
+That localisation was right and the SHA was wrong: the cause is `2735df73`, *"fix(schemas): drop
+the API-illegal top-level `anyOf` from seven tools"*, which also performed the ratchet
+(`TOOL_SURFACE_CHAR_BUDGET` 57296 → 56485) this entry is named for — so the commit that moved the
+number is itself an instance of the finding. Reported by `b0b9bc40`, its author, and verified here.
+
+**The 811 bytes were never padding.** A top-level `oneOf`/`allOf`/`anyOf` is rejected by the
+Anthropic Messages API, so Claude Code drops the whole tool client-side rather than 400 the
+request: seven path-taking tools were **unreachable for eight days behind four green schema
+gates**. The write-up is
+`docs/issues/archive/2026-09-10-seven-tools-carried-an-api-illegal-top-level-anyof-and-were-dropped-client-side.md`
+(patch-id `f306405970ed6ad23a5b494e6e560acef34f8cd8`). Read alongside `F-11`: a surface *shrinking*
+is not evidence of trimming, and this shrink bought seven tools back.
+
+**How the mis-attribution happened, which is worth more than the correction.** Two mechanisms, and
+only the first was outside my reach. **(1)** On a shared checkout the author's edits were sitting
+**uncommitted in the working tree** when the binaries were built (09:56/09:58); `cargo test`
+compiled them while `git log` showed only committed history, and `2735df73` was not committed until
+**10:07:38**. Field-localisation plus the newest plausible commit subject is a sound-looking
+inference that **cannot see another session's dirty tree**. **(2)** The half that was mine: a later
+command in the same session listed the unpushed set and `2735df73` appeared in my own output, with
+a subject naming schemas explicitly. I had formed the attribution before that evidence existed and
+**did not revisit it when it arrived** — the reading was correct when made and I never re-derived
+it. My first theory for (1) was that the pathspec `src/**/*.rs` had been too narrow; that is
+**falsified** — it matches `2735df73`'s files.
+
+**So the rule this entry now carries:** on a shared checkout, a measurement taken from a BUILD and
+an attribution taken from `git log` are readings of two different trees, and **neither output
+carries the tree it read** (that sharper form is `b0b9bc40`'s; mine said only that nothing in
+either output says so, which names the absence without naming what is absent).
+
+**This is an instance of an existing law, not a new one — and it is the case where that law's
+remedy fails.** `CLAUDE.md` § *Testing Discipline* already requires a count to arrive with its
+**instant** and its **tree**, names the mechanism as *"a sweep in flight makes the worktree and
+HEAD disagree"*, and prescribes `git grep <pattern> HEAD` because naming the tree is cheaper than
+stamping the moment. Here the two disagreeing readers are not two sessions but one session's two
+instruments — the build read the worktree, `git log` read HEAD — and **the prescribed remedy is
+unavailable**: pinning to `HEAD` cannot name the tree that was measured, because the bytes
+measured were uncommitted and in `HEAD` nowhere. The tree half is the one a stamp cannot buy, and
+a build of a dirty tree is where it cannot be bought at all.
+
+Attribute from the diff, or ask the author — or, at minimum, re-derive the attribution at write
+time rather than at measure time, which is the only one of the three that was available to me
+here and the one I skipped.
+
+**The correction to `F-11`, which is the part worth keeping.** `F-11` reported *"budget 57296,
+headroom 0"* and glossed it as a design choice: *"the ceiling was set to the post-collapse total,
+so the next parameter added to any tool reds the gate."* The gate now reads **`budget 56485,
+headroom 0`**. The ceiling was not set once at the collapse — it is a **RATCHET**, re-set to the
+new total whenever the surface shrinks, so `headroom 0` is the standing invariant rather than a
+transient state anyone should read as news. The *form* of `F-11`'s claim survives (the next
+addition still reds the gate); the reasoning under it was wrong, and a reader who took the
+"post-collapse ceiling" framing would expect the number to hold and be surprised twice — once by
+the decay, once by the budget having followed it down.
+
+**`W-18` re-verified and HELD, including its premise.** Release and debug are identical again —
+21 tools, 56485, matching on all six dimensions — so build-invariance survived a rebuild that
+moved the surface. Its premise was re-checked rather than assumed: the live `target/release`
+binary still carries `server-stack` and `local-embed` (72 and 7 matching strings), despite
+shrinking **64.6 MB → 4.6 MB**. **The cause of that size change was NOT determined and is not
+claimed here** — only that it is not a loss of the two features `W-18` depends on.
+
+**What this establishes about the class, and it is the reason for the entry.** `F-11` carried two
+independently-derived instruments agreeing to the byte, and that agreement bought **nothing**
+against decay. Agreement is *synchronic* — it says two readers of the same surface concur at one
+instant. Decay is *diachronic*. When the surface moved, both instruments moved with it and agreed
+just as strongly on the new number, so the very property that made the figure trustworthy is the
+property that guarantees its staleness is silent. **A corroborated number is not a durable one**,
+and this ledger now holds a measured interval for how fast: under two hours, one commit, no alarm.
+
+**What this does not establish.** Not that `F-11` should be edited — it is a dated observation and
+its `**Valid:**` field is doing its job. Not that the ratchet is wrong; re-setting a ceiling to a
+new floor is a defensible design and this entry takes no position on it. **The original
+attribution of the 811 chars to `b057cc6d` was WRONG and is corrected above** — the hedge this
+paragraph carried (*"strong, but not the same as having diffed the schema before and after"*) was
+load-bearing and is the only reason the claim was not stated flatly.
+
+**Valid:** dated 2026-09-10
+
+**Rests on:** `scripts/probe_tool_surface.py` and `src/server.rs`'s `tool_surface_report_lengths`,
+both re-run 2026-09-10 against both binaries; `2735df73` for the cause and for the ratchet, with
+its bug file and patch-id above (`b057cc6d` appears here only as the SHA this entry originally and
+wrongly named);
+`prompt-surface-compaction-session-log:F-11` for the superseded figure and the corrected gloss;
+`prompt-surface-compaction-session-log:W-18` for the build-invariance claim this re-confirms.
+
+## F-13 — I designed a cross-cutting input-repair mechanism an accepted ADR already specified, and picked a field name contradicting it — searched for the mechanism, never for the policy
+
+**Valid:** dated 2026-09-10
+
+**Severity:** high · **Category:** self-friction · **Status:** open
+
+**Observed:** 2026-09-10, after the top-level-`anyOf` fix (`2735df73`). The operator asked for
+a better shape than "the schema states nothing": advertise one param name, accept the others in
+code, and return a note that a wrong param was corrected. I ran the full brainstorming → spec →
+plan pipeline on it, wrote `docs/superpowers/specs/2026-09-10-parameter-alias-collapse-design.md`
+and `docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md` (nine tasks, 1137 lines,
+committed `782446d7` + `cb5afa36`), and chose `warning` as the advisory field — deriving it from
+`Guidance`'s doc comment in `src/tools/core/types.rs`.
+
+All of it was already decided. `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` is
+**accepted**, deciders "Marius (with the Architecture Snow Lion)", and its Decision is the
+operator's request verbatim: *repair the input, execute, return the result, attach an advisory
+correction note — never `RecoverableError`*. Its Context cites a 72-DB / ~152k-call `usage.db`
+sweep. Its named examples are `file_path` for `path` and buffer handles under `output_id` — my
+exact scope. The field is **`corrections`**, shaped `{keyed, hint}`
+(`src/librarian/tools/find.rs:1290`).
+
+**Why `warning` was wrong at the root, not merely different:** `Guidance` attaches to a
+`RecoverableError`. This is definitionally the path where no error is returned, so the enum I
+reasoned from does not govern it. Shipping it would have put a **third** vocabulary on one
+concept — `filter_warnings`, `corrections`, `warning` — across ~26 sites and nine tasks.
+
+**What the search missed, which is the reusable part.** I searched for the *mechanism* and never
+for the *policy*: `grep "warning"`, `grep "Alias for "`, `symbols(Guidance)`, `read_file` on
+`call_content`. Every one of those asks how the code behaves. None of them can surface a
+decision, because an ADR records a decision and names no implementation. `docs/adrs/` was never
+opened. **Before designing anything cross-cutting, list `docs/adrs/` — it is one `ls`.** A spec
+that contradicts an accepted ADR is not a design disagreement; it is a missed read.
+
+**The leak this exposed, which is real and separate.** The ADR's law is half-implemented, and
+nobody had recorded that. Cited on types and call sites, not on a grep's absence:
+`get_path_param` (`src/fs/mod.rs:233`), `require_path_param` (`:251`) and
+`require_str_param_or_hint` (`src/tools/core/params.rs:139`) all repair the alias and return
+`Option<&str>` / `Result<&str>` — **a function returning `&str` structurally cannot report a
+correction to its caller**, so the note was unreachable from the helper rather than merely
+absent. Two librarian handlers (`find.rs`, `update.rs`) do the whole law; the path family has
+repaired silently since `e92529e8`. The ADR's own Sites list calls those tools *"path aliases +
+teaching hints"* — and the hint rides the **error** path, which a successful repair means you
+never reach. Amendment landed `6b7427da`.
+
+**A confirming probe that does NOT discriminate, recorded because it reads as evidence.** I
+called `grep(pattern="^name =", file_path="Cargo.toml")` and got results with no advisory field.
+`grep` is `OutputForm::Text`, so its response is `format_compact` output — that result is equally
+consistent with "no note exists" and "a note exists and the compact renderer drops it", which is
+the exact bug class this same design pass was built around
+(`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`).
+The claim rests on the return types above, not on this call.
+
+**Filed late, and the delay is its own datapoint.** This entry was written in full at ~10:50 and
+could not be allocated: `append_entry` refuses while the ledger has unpushed commits, and the
+only remedy it names is a push, which no session may perform unasked. It sat parked in a
+gitignored file until a *different* session's operator authorised a 29-commit push at 08:11Z,
+which cleared the condition as a side effect. **Nothing about that resolution path was available
+to the party the guard refused.** Filed as
+`docs/issues/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`
+(high).
+
 ## Template for new entries
 
 <!-- Appends land above this line. Use:
-     artifact(action="append_entry", id="<this artifact id>", id_prefix="F"|"W",
+     doc(action="append_entry", id="<this artifact id>", id_prefix="F"|"W",
               title="...", body="...", anchor_heading="## Template for new entries")
      The server writes a def_re-conformant `## <ID> — <title>` heading. Add the
      matching Index / Wins Index row in the same session. -->

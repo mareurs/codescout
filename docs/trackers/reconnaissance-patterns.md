@@ -8675,7 +8675,7 @@ volunteers back is a second observer on it, not a self-assessment.
   1. WRITE THE ENTRY — ONE CALL. The server allocates the id AND writes the
      section:
 
-       artifact(action="append_entry", id="5696563f06b2c222", id_prefix="R",
+       doc(action="append_entry", id="5696563f06b2c222", id_prefix="R",
                 anchor_heading="## Template for new entries",
                 title="<title>",
                 body="**Verdict:** hit | miss [×N] → rule · "
@@ -8705,8 +8705,8 @@ volunteers back is a second observer on it, not a self-assessment.
      a word boundary.
 
      SUPERSEDED 2026-08-20 — this used to be TWO steps: reserve the id, then write
-     the section via `artifact(update, patch={body_edits:[…]})`, because
-     `append_entry` wrote nothing without `entry_collection` and `edit_markdown` is
+     the section via `doc(action="update", patch={body_edits:[…]})`, because
+     `append_entry` wrote nothing without `entry_collection` and `edit_file` is
      refused on a guarded ledger. That two-step was an instance-level workaround,
      and it carried its own failure mode — a reserved id whose section never
      landed. An augmentation being present does not push this ledger off the

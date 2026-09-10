@@ -6,7 +6,7 @@ prompt: |-
 
   Readers: the maintenance rules below are not yours.
 
-  Maintenance: this is a SNAPSHOT, not live state — do not rewrite body sections and do not re-run the numbers into it; a later audit gets its own dated document. Update a GF-N row's `status` only when its fix lands or its filed bug changes state, via `artifact(action="update_entry", entry_collection="findings", entry_id="GF-N", fields={...})` — never a whole-params patch, which replaces the collection. Keep `findings` under 20 rows; new evidence opens a new audit rather than extending this one.
+  Maintenance: this is a SNAPSHOT, not live state — do not rewrite body sections and do not re-run the numbers into it; a later audit gets its own dated document. Update a GF-N row's `status` only when its fix lands or its filed bug changes state, via `doc(action="update_entry", entry_collection="findings", entry_id="GF-N", fields={...})` — never a whole-params patch, which replaces the collection. Keep `findings` under 20 rows; new evidence opens a new audit rather than extending this one.
 entry_collection: findings
 render_template: |-
   **Audited:** {{ investigated_on }} · **Corpus:** {{ corpus }}, {{ window }} · {{ total_calls }} calls / {{ errors }} errors ({{ iron_law_errors }} Iron-Law, {{ unclassified }} unclassified) · **Findings:** {{ findings|length }} ({{ findings|selectattr("status","equalto","open")|list|length }} open)

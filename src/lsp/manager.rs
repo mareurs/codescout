@@ -522,6 +522,7 @@ fn mux_socket_unreachable_error(
 
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
+    // cap-class: NOT_A_CAP — consecutive-startup-failure ceiling; tripping returns an error naming the breaker rather than a shorter answer
     const CIRCUIT_BREAKER_MAX_FAILURES: usize = 5;
 
     /// Time window for the circuit-breaker. Failures older than this are forgotten.

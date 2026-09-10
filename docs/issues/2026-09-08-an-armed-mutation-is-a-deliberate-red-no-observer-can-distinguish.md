@@ -1,13 +1,11 @@
 ---
 id: df0c18734b20fddd
 kind: bug
-status: taken
+status: investigating
 title: An armed mutation is a deliberate red, and no observer can distinguish it from a broken test
 tags:
 - cluster/transient-shared-state-lies-to-readers
 topic: shared-checkout mutation testing
-claimed_at: 2026-09-08
-claimed_by: 5399543d-22d6-4ed9-9ebb-876be459989f
 ---
 
 # BUG: an armed mutation is a deliberate red, and no observer can tell it from a broken test
@@ -65,19 +63,79 @@ discipline requires.
 
 ## Fix
 
-**None, and the mechanism field is genuinely open rather than merely unbuilt.** Two directions,
-neither built, stated so the next reader does not mistake absence for oversight:
+**Still unbuilt — but the two directions below are no longer symmetric, and the first one is now
+known to BACKFIRE.** Measured 2026-09-09 across two announced mutation windows (03:22Z, nine
+mutations in an untracked file; 04:16Z, three in tracked files), four peers announced to each time.
 
-- **Announcement** — the arming session tells the tree before it mutates. Cheap, and a *policy the
-  arming session must remember*, which `skill-frictions:SKF-22` records as the failure mode of
-  every trigger a model must notice.
-- **A marker other sessions can read** — e.g. a file the arming session touches for the duration,
-  which a gate run could surface as *"a peer is mid-mutation; this red may be theirs and
-  deliberate."* This is the shape `OB-1`'s third position prefers, since it runs when nobody is
-  worried. Unbuilt.
+### Announcement was tried. It labels, and it SUBTRACTS WITNESSES.
 
-The second is the only one that survives the arming session forgetting.
+The entry above called announcement *"cheap, and a policy the arming session must remember"* — a
+`SKF-22` weakness. That understated it. Announcement is an **intervention on the population it
+needs as instruments**:
 
+> The prescribed response to an announcement is *do not investigate, stand down*. Complying is
+> what removes the observer whose build log would have resolved the arming session's own anomaly.
+> **The better the announcement works, the less it can observe.**
+
+Observed directly. My 04:16Z window produced a reading I could not explain — one mutation reported
+a real E-coded compile error batched and none in isolation, same one-character patch. A concurrent
+build log would have settled it. `c9ab2c8d` **held off building because I announced**, and their
+held-back build was that log. The anomaly is still unexplained; both offered causes were falsified.
+
+And the 03:22Z window looked well covered only **by luck** — two peers happened to be mid-gate. I
+cited that coverage as though the announcement had produced it. It had not.
+
+Promoted to `observer-blindness:OB-23` (*a notification that changes the recipient's behaviour
+cannot also measure it*), three-way attribution: `c9ab2c8d` supplied the framing and complied with
+it, `59112612` retired it, this file's windows made the cost concrete.
+
+**The split that survives:** *"is anyone building?"* is a **query** — it leaves the population
+intact and returns a count. *"Here is what you will see"* is an **intervention**. They are
+sequential rather than alternative (`ad379a7c`): query first for the witness count, then announce
+for the labelling, which is real — without the 03:22Z announcement one peer's next move was to
+bisect their own commits.
+
+### An announcement also under-describes its own blast radius, in two ways
+
+**Radius is what others READ, not what you WRITE.** I announced 03:22Z as *"only
+`agent::build_check::tests::*` can move — no tracked file is edited"*. Both halves were wrong:
+`src/agent/mod.rs` was tracked and modified (the `mod` declaration), and a concurrent
+`cargo test --workspace` reads the **whole worktree** regardless of which files I consider mine.
+Scoping your writes bounds nothing about a concurrent build.
+
+**One window carried THREE failure kinds under one exit code**, and I predicted one:
+
+| kind | in that window | announced? |
+|---|---|---|
+| test failures | the mutations themselves | yes |
+| **clippy `-D warnings` errors** | 18 `never used` from a then-unwired module | no |
+| a peer's gate red | reached a third session's run | no |
+
+The clippy red was found in **another session's gate log**, not by me. An arming session cannot
+enumerate its own blast radius, which is the same structural claim this file already makes about
+the `broken` / `deliberately red` bit.
+
+### So the marker is the direction — with one property this file did not know to require
+
+A marker other sessions can read remains the shape `OB-1`'s third position prefers, and it is the
+only one that survives the arming session forgetting. Tonight adds a constraint:
+
+**The marker must be PASSIVE — it must label without prescribing.** A marker that reads as *"a peer
+is mid-mutation, stand down"* reproduces `OB-23` exactly: it changes the reader's behaviour and
+destroys the evidence. The correct shape labels a red the reader **was going to see anyway** and
+asks for nothing, so the build still happens and its log still exists.
+
+That is the same *informational, never a request* constraint the author-side build check
+(`7168c1f0`) was built under, arriving from the opposite direction — there it protects the peer's
+autonomy, here it protects the arming session's own evidence.
+
+**Second property, from `59112612`:** prefer a record the acting party writes **unconditionally, at
+the moment it acts**. Their pre-push log has that shape and cannot be dismissed by compliance,
+because it depends on nobody else doing or not doing anything. A marker written by the arming
+session at arm time qualifies; one that depends on peers reading it does not.
+
+**Not built, and deliberately not built tonight.** Announcement is available and imperfect;
+building the marker is a design change to a shared gate surface, which is an operator's call.
 ## Tests added
 
 None, and none is possible from inside the arming session: the state under test is *another

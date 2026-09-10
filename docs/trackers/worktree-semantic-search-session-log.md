@@ -259,7 +259,7 @@ tags: [worktree, retrieval, semantic-search, sdd, session-log]
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
-     edit_markdown(action="insert_before",
+     edit_file(action="insert_before",
                    heading="## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->

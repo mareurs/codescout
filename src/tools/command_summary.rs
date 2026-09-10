@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 /// Inline line cap for buffer-only queries (e.g. `grep/sed @cmd_xxx`).
 /// Kept separate from the summarization threshold so "when to buffer" and "how much
 /// to return from a buffer query" can be tuned independently.
+// cap-class: RESULT_CAP command_summary.buffer_query_lines — probed
 pub(crate) const BUFFER_QUERY_INLINE_CAP: usize = 100;
 
 /// Number of lines to keep from the top in generic summaries.

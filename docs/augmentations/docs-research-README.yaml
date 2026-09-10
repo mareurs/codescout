@@ -16,9 +16,9 @@ prompt: |-
   Do this with it, in order:
 
   1. Filter, do not skim:
-     `artifact(action="get", id="5086e3c7c0b9d83c", entry_filter={"topic": {"eq": "retrieval-quality"}})`.
+     `doc(action="get", id="5086e3c7c0b9d83c", entry_filter={"topic": {"eq": "retrieval-quality"}})`.
      `topic` is freeform with no enum, so a miss means "no such tag", not "no such
-     research" — fall back to `artifact(action="find", semantic="…")` before concluding
+     research" — fall back to `doc(action="find", semantic="…")` before concluding
      nothing exists.
   2. Open the file at `path` before citing anything. `summary` is a ≤200-character
      pointer written to help you choose a file; it is never a citable finding, and § C-3
@@ -39,7 +39,7 @@ prompt: |-
   3. Sort by `date` descending; `date: unknown` entries come last, ordered by title. The
      render template places `superseded` entries after everything else regardless of date.
   4. Write with
-     `artifact_augment(id="5086e3c7c0b9d83c", merge=true, params_path="<abs path to the rebuilt JSON>")`.
+     `doc(action="augment", id="5086e3c7c0b9d83c", merge=true, augment={params_path: "<abs path to the rebuilt JSON>"})`.
 
   **Send every entry, every time.** A params write REPLACES `entries` rather than merging
   into it, so a patch carrying only the new row deletes the other fourteen — and the

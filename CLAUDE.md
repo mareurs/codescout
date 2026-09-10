@@ -6,7 +6,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Development Commands
 
-**Run `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.**
+**Run `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.**
 
 Why each part, one line each. Every measurement, date and superseded form →
 [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md).
@@ -28,6 +28,25 @@ Why each part, one line each. Every measurement, date and superseded form →
   clears it** — a terminal state reached by following the documented order. `&&` means "stop if a
   step fails", which is right for a gate; but the default lane does two jobs, reporting *and*
   rebuilding, and only the first should ever be short-circuited. Read the exit codes instead.
+- **Step 1 is `./scripts/fmt-mine.sh`, not `cargo fmt`, and the substitution is the point.**
+  `cargo fmt` takes no pathspec and no `--staged`: its blast radius is every `.rs` in the
+  workspace, which on this checkout is wider than the set of files your session wrote. So the
+  gate as previously documented **rewrote other sessions' uncommitted Rust every time anyone ran
+  it**, with nothing in the documented form to defeat — measured 2026-09-09, 7 hunks in a peer's
+  untracked file that `git checkout` could not have restored
+  (`docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
+  The script formats what `scripts/file-provenance.py` attributes to you and **refuses** the
+  rest, naming the owner's sessionId and the socket to ask them on. On a tree needing no
+  reformatting it exits in ~2s having run only the `--check` the gate pays anyway.
+  **Why a script rather than "remember to run `--check` first":** the incident above happened
+  to a session that had read the warning, run `--check`, and then chained the gate with `;` so
+  the check gated nothing. § *Observer Blindness* position 3 asks for the correct path to end in
+  a safe state; typed as one line, this one has no wrong way to type it.
+  **When it refuses, it is not being unhelpful and there is no `--force`:** ask the named owner,
+  or if you have decided it is safe, run `cargo fmt` yourself — the same act, minus the false
+  assurance that a guard sanctioned it. **Outside a Claude session** (`CLAUDE_CODE_SESSION_ID`
+  unset) it exits 2 and tells you to use `cargo fmt`, which is correct for a solo checkout;
+  `CONTRIBUTING.md` deliberately still says `cargo fmt` for that audience.
 - **The long clippy form is the gate, not garnish:** bare `cargo clippy -- -D warnings` lints only
   the root package's **non-test** targets with default features, so it passes trees CI fails.
 - **It is `test`, not `check`:** a `check` compiles the lean test targets and never runs them, so a

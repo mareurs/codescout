@@ -247,6 +247,7 @@ pub(crate) async fn handle_successful_output(
     let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
         if buffer_only {
             // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
+            // cap-class: RESULT_CAP run_command.stderr_lines — probed
             const STDERR_BUDGET: usize = 20;
             let buffer_stderr: String = if raw_stderr.is_empty() {
                 original_command

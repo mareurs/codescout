@@ -35,13 +35,10 @@ impl Tool for ReadFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] },
-                { "required": ["output_id"] }
-            ],
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
                 // FIXTURE NOTE: the literal "Alias for " prefix on these four
@@ -679,6 +676,7 @@ fn read_with_line_range(
     // (archived 2026-08-18. That bug closed on THIS exemption and the extent-ordered hint —
     // its third step, stating the overlap condition in the always-loaded IL1 text, was
     // measured as prompt-hamsa A-25 and refuted. Do not "finish" the bug by re-adding it.)
+    // cap-class: NOT_A_CAP — routing predicate deciding whether a read counts as a head read; it selects a code path and removes no content
     const HEAD_END_MAX: u64 = 60;
     let is_head_read = start == 1 && end <= HEAD_END_MAX;
 

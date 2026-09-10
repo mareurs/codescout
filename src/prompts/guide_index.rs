@@ -269,6 +269,7 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
 /// arrows, so `chars().count()` would silently under-report. 2,500 B sits just
 /// above `librarian`'s natural p90 section, so most of the corpus already
 /// complies: only 6 of 67 sections corpus-wide exceed it.
+// cap-class: NOT_A_CAP — authoring ceiling asserted by a test; no runtime path truncates a section that exceeds it
 pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 
 /// A guide section with its declarations resolved.

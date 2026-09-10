@@ -70,6 +70,20 @@ FROM tool_calls;
 > If `total_calls` is 0, skip this project entirely — do not include it in the report.
 
 **B. Tool popularity**
+
+> **A window spanning 2026-09-02 must UNION the old and new tool names, or it splits one
+> tool's history into two rows and under-reports both.** The tool-surface collapse renamed
+> `artifact` to `doc` and folded `read_markdown`/`edit_markdown` into `read_file`/`edit_file`,
+> `find_symbol`/`list_symbols` into `symbols`, and `replace_symbol`/`insert_code`/`rename_symbol`
+> into `edit_code`. `GROUP BY tool_name` is faithful to what was recorded and wrong about what
+> was *used*: `doc` looks new and small, `artifact` looks abandoned, and neither row is a tool.
+> Fold them first — `GROUP BY CASE WHEN tool_name='artifact' THEN 'doc' ... END` — and say in
+> the report which names were merged, because a reader who does not know cannot tell a fold
+> from a miscount. The retention sweep hides this on its own schedule: at 30 days the old names
+> age out and the tables silently become correct again, so the defect has a **window**, not a
+> fix. `scripts/probe_tool_surface.py` needs no such handling — it reads the live registry, not
+> the recorded history.
+
 ```sql
 SELECT tool_name, COUNT(*) as calls,
        ROUND(AVG(latency_ms)) as avg_ms,

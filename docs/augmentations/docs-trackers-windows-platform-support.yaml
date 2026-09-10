@@ -2,9 +2,9 @@ schema_version: 1
 prompt: |-
   Windows-platform issue index (WIN-N). `params.issues` is the structured mirror of the "## Issue index" table: one object per issue, shape {id, area, status, summary, ref, since}. `status` uses the "## Status legend" vocabulary (fixed | mitigated | open | deferred | wontfix); `area` uses the "## Areas" list plus the later-added `retrieval-stack`, `ci`, `tooling`.
 
-  Canonical query: artifact(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}}).
+  Canonical query: doc(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}}).
 
-  To add an issue: artifact(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since}) — the server assigns the next WIN-N atomically. To flip a status: artifact(action="update_entry", id="52451519052d207c", entry_collection="issues", entry_id="WIN-N", fields={status:"..."}). **Never** artifact_augment(merge=true, params={issues:[...]}) — RFC 7396 replaces the array wholesale; that call took the sibling T-N queue from 19 entries to 1 on 2026-08-16. Never reuse or delete a WIN-N id. WIN-31 was never allocated and must stay unused.
+  To add an issue: doc(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since}) — the server assigns the next WIN-N atomically. To flip a status: doc(action="update_entry", id="52451519052d207c", entry_collection="issues", entry_id="WIN-N", fields={status:"..."}). **Never** doc(action="augment", merge=true, augment={params:{issues:[...]}}) — RFC 7396 replaces the array wholesale; that call took the sibling T-N queue from 19 entries to 1 on 2026-08-16. Never reuse or delete a WIN-N id. WIN-31 was never allocated and must stay unused.
 
   After any params change, re-sync the "## Issue index" table AND add/update the `### WIN-N — <title>` section under "## Per-issue detail": `link_scan` derives a citable definition from that heading and from nothing else, so a WIN-N living only as a params row and a table row cannot be cited by anything.
 
@@ -65,4 +65,4 @@ render_template: |
   |----|------|--------|-------|-----|
   {% for i in issues %}{% if i.status == "open" or i.status == "deferred" %}| {{ i.id }} | {{ i.area }} | {{ i.status }} | {{ i.since }} | {{ i.ref }} |
   {% endif %}{% endfor %}
-  Query all rows: `artifact(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}})`.
+  Query all rows: `doc(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}})`.

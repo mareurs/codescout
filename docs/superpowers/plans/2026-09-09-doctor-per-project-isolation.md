@@ -22,7 +22,7 @@ topic: doctor per-project isolation
 
 **Tech Stack:** Rust · `rusqlite` · `serde` · `tokio` (tests) · the librarian catalog at `~/.local/share/librarian/catalog.db`
 
-**Spec:** `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `d4b61746950b86b7`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` (`a06de4dfc30c2e8d`) — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target.
+**Spec:** `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `d4b61746950b86b7`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/archive/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target. **FIXED and archived 2026-09-09** at `953c98f3` (patch-id `8de7522768dd6dacacd293eae5d881442470422a`), in the prescribed order: the typed `Args` landed first (`26b60af8`), the wrapper second. Note its id changed on archiving — the old `a06de4dfc30c2e8d` no longer resolves.
 
 ## Global Constraints
 
@@ -246,7 +246,8 @@ So this step is two edits, in this order:
         // so `scope`, labelled for four actions, was probed for `context` alone. An
         // unchecked pair that is not in `accepts_any_json` is worse than an admitted one:
         // the admission list is where blindness is declared, and this blindness was
-        // undeclared. See docs/issues/2026-09-09-param-probe-checks-one-action-per-shared-key.md
+        // undeclared. See
+        // docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md
         let Some(label) = desc.split(':').next() else { continue };
         for action in label.split('/') {
             if !spec.actions.contains(&action) {
@@ -322,6 +323,71 @@ EOF
 ---
 
 ### Task 2: `DoctorScope` — one scoping unit, applied at the SQL layer
+
+> **⚠ ALREADY IMPLEMENTED on branch `doctor-per-project-isolation` (`fe7b6658`) — and the
+> sequencing correction below is WITHDRAWN.** That branch landed Tasks 2 → 3 → 4 in plan
+> order. The swap this banner prescribed was an artifact of **Step 4's SQL splice**, which
+> the implementer declined: `fe7b6658`'s subject reads *"admit-based narrowing, not
+> SQL-splice"*. With `admit` there is no `WHERE` clause to remove rows before they can be
+> counted, so finding 1 below never arises, and finding 2 dissolves with it. Read the
+> branch before writing code here; it is 99 commits behind `experiments` and the rebase is
+> all that is left.
+>
+> **The three findings were correctly measured and are kept — the prescription drawn from
+> them was wrong.** They are what the splice costs, which is worth knowing if anyone
+> reaches for it again. Finding 1 in particular was met independently on that branch and
+> fixed rather than sequenced around: `67e9804e fix(doctor): restore Ruling 17 for
+> scope-refused outside-roots rows`.
+>
+> 1. **Steps 4 and 5 contradict each other.** Step 4 splices `scope.sql_and()` into
+>    `scan_artifact_paths`'s query. That scan produces `outside_roots_by_project`, whose
+>    contract — Ruling 17, restated in the function's own doc comment at
+>    `src/librarian/tools/doctor.rs` — is that the METRIC stays global while the WORKLIST
+>    narrows. A `WHERE` clause removes the foreign rows before they can be counted, so
+>    the metric empties at `scope=project`, and **Step 5's own assertion
+>    (`the cross-repo metric must stay global at scope=project`) fails against Step 4.**
+>
+> 2. **Narrowing per-row instead breaks a different announcement.** Gating the row checks
+>    on `scope.admit(...)` preserved the metric but redded
+>    `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not` with *"the
+>    drop must be announced, not silent"* — pre-filtering removed violations before the
+>    `SCOPED_ROW_CHECKS` `retain` could count and announce them. **Resolved on the branch
+>    by having `DoctorScope` own the tally itself**, so the announcement travels with the
+>    narrowing instead of trailing it. That is the fix this banner should have prescribed;
+>    "do Task 4 first" only sequenced around it.
+>
+>    The general property is still the useful part: `doctor` has five scoping mechanisms
+>    and **each owns its own announcement**, so any sixth narrowing added without also
+>    carrying an announcement takes one with it. Not three bugs — one property, met three
+>    times.
+>
+> 3. **Task 2 is NOT "shippable alone", and the toolchain says so — stands.** `cargo clippy
+>    --workspace --all-targets -- -D warnings` refuses to compile a `DoctorScope` no
+>    caller uses: *"associated function `new` is never used"*, `-D dead-code`. So Steps
+>    1–3 cannot be committed as a unit; the struct and its first consumer must land
+>    together. Do not answer this with `#[allow(dead_code)]` — that suppresses the guard
+>    that is correctly reporting the coupling.
+>
+> **Fixture corrections for whoever rebases** (Step 1 as written does not compile):
+> `insert_artifact_row` and `ctx_at` do not exist. The real helpers are `seed_artifact`
+> and `ctx_rooted_at`, and both are private to `doctor.rs`'s own `#[cfg(test)] mod tests`,
+> so a sibling `doctor/scope.rs` cannot reach them — write local twins. Also, `doctor`
+> resolves scope with `UmbrellaPolicy::Require`, so Step 5's `scope="all"` call is
+> **refused outright** without a configured umbrella (*"scope=\"all\" requires a
+> configured umbrella"*); the fixture needs `cp.umbrella = Some(..)` plus
+> `.with_umbrellas(vec![Umbrella { name, members }])`.
+>
+> No rename is needed: edition 2021 lets `doctor.rs` and `doctor/scope.rs` coexist, so
+> `mod scope;` in `doctor.rs` is the whole wiring — the 15,620-line file stays put. The
+> branch does exactly this.
+>
+> **Why this banner was wrong, recorded because the mistake is repeatable:** all three
+> findings came from executing the plan in the worktree, which is the right instinct and
+> an incomplete scope. `git branch -a` and `git log --all --grep=DoctorScope` would have
+> shown a 15-commit implementation before a line of prescription was written. On a shared
+> checkout, *"the plan is wrong"* needs the branch list checked first — the worktree and
+> HEAD are two of the trees, not all of them.
+> — sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`
 
 **Files:**
 - Create: `src/librarian/tools/doctor/scope.rs`
@@ -768,6 +834,98 @@ EOF
 ---
 
 ### Task 4: Retire `SCOPED_ROW_CHECKS` and admit the two checks that started firing
+
+> **⚠ WITHDRAWN 2026-09-10 — the ordering problem was an artifact of the SQL-splice
+> approach, which the implementer did not take.** `doctor-per-project-isolation` landed
+> Tasks 2 → 3 → 4 in plan order (`fe7b6658` → `c1d8cd51` → `55c77f25`), and `fe7b6658`'s
+> own subject says why: *"admit-based narrowing, not SQL-splice"*. Choosing `admit` over
+> the splice means no announcement is ever subtracted, so Task 2 never had to follow Task
+> 4. **Kept because the measurement was right even though the prescription was not** — the
+> two failures below were both real, and both are consequences of the splice:
+>
+> > *(superseded prescription)* `doctor` has five scoping mechanisms and each owns its own
+> > announcement, so a sixth narrowing added before they are unified silently takes an
+> > announcement with it. Measured twice — an SQL splice empties
+> > `outside_roots_by_project`, a per-row gate reds
+> > `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not` with *"the
+> > drop must be announced, not silent"*. Both are Ruling 17 failures introduced by the fix
+> > for Ruling 17.
+>
+> The branch confirms the first independently: `67e9804e fix(doctor): restore Ruling 17 for
+> scope-refused outside-roots rows` is that same defect, met from the other direction and
+> fixed rather than sequenced around.
+>
+> Still true, and the reason a `DoctorScope` commit cannot be split: clippy's `-D
+> dead-code` refuses a struct with no consumer, so the unit and its first caller are one
+> commit whether or not the plan separates them.
+
+> **⚠ ALREADY IMPLEMENTED on branch `doctor-per-project-isolation` — do not execute this
+> task on `experiments`.** That branch (15 commits, `+4610/−566`, adding
+> `src/librarian/tools/doctor/scope.rs`) retires `SCOPED_ROW_CHECKS` at `55c77f25` and
+> scopes all nine checks through `DoctorScope`. It is **99 commits behind `experiments`**
+> as of 2026-09-10; the rebase is the only thing left, and it is what bug
+> `d4b61746950b86b7` is waiting on. Read that branch before writing any code here.
+>
+> **RETRACTION 2026-09-10.** This banner previously read *"SUPERSEDED — Steps 1–5 below
+> are wrong"* and argued the mechanism change was structurally impossible. **That
+> conclusion was wrong**, and the argument is kept below only because the way it failed is
+> reusable. The implementation on that branch is:
+>
+> ```rust
+> if let Some(v) = check_frontmatter_id_matches_catalog(id, abs_path) {
+>     if scope.admit(&v.check, id, abs_path) { violations.push(v); }
+> }
+> ```
+>
+> `admit` takes the **check name** as its first argument and is called inside
+> `scan_artifact_paths`' row loop for exactly that one result. So membership stays
+> check-keyed, which is what I claimed the design could not express.
+>
+> **How the argument failed, since it is a repeatable mistake.** Step 3's prose *is* wrong
+> — see point 2 below, which stands. From a wrong sentence I inferred a wrong
+> architecture, and never looked for the falsifying instance: `git log --all --grep` and
+> `git branch -a` would have shown a 15-commit branch implementing it. The reconnaissance
+> covered the worktree and HEAD and stopped there. **A plan's wrong sentence is not
+> evidence about its architecture** — the implementer read past the prose to the intent,
+> which is what should have been checked before the plan was called falsified.
+>
+> **What survives, and is still worth having:**
+>
+> 1. ~~Membership cannot be per-scan~~ — **retracted**; `admit(check, id, path)` is
+>    check-keyed. The underlying observation is still true and still the crux:
+>    `frontmatter_id_mismatch` *and* `frontmatter_id_is_not_a_catalog_id` are emitted from
+>    inside `scan_artifact_paths`' row loop, a scan that must **not** be scoped wholesale
+>    because it owns `outside_roots_by_project`. Any implementation has to gate that one
+>    call by check name. That branch does; a naive per-scan gate would not.
+> 2. **Step 3 names the wrong function — stands.** `scan_frontmatter_id_mismatches` has
+>    exactly one non-test caller, `run_fix`, so it is never reached in the report path.
+>    Gating it narrows a repair that is already root-scoped and changes the report by
+>    nothing. The branch correctly puts `admit` in `scan_artifact_paths` instead. Note the
+>    existing guard `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not`
+>    seeds `frontmatter_id_mismatch` only, so `frontmatter_id_is_not_a_catalog_id` has no
+>    scoping test — a regression there would ship silently.
+> 3. **Blast radius — stands, and was paid.** ~65 call sites, ~50 of them direct unit tests
+>    on `(&cat.conn)`. That is most of why the branch is 4016 changed lines in one file.
+>
+> Fixture and number corrections, measured 2026-09-10 at HEAD `903e2332` — independent of
+> the above and still useful to whoever rebases: `params_behind_body` is **3** findings,
+> not 4, still 2 foreign (the foreign counts in the prose below are right; the total
+> moved). `seed_params_behind_body` and `ctx_at` do not exist — use
+> `seed_tracker(&cat, id, dir, body, ids)` and `ctx_rooted_at(cat, &root)`. Two
+> byte-identical trackers under different roots fire **two** scoped checks per ledger, so
+> Step 1's `assert_eq!(…, 1)` on the tally is wrong: assert kept and dropped counts are
+> equal, with a `>= 1` floor against a vacuous `0 == 0`.
+>
+> **`b057cc6d` on `experiments` is superseded by that branch and left in place
+> deliberately.** It is the only copy of the measured fix currently on `experiments`, and
+> the rebase has no date. It scopes `params_behind_body` / `params_status_drift` /
+> `snapshot_drift` / `augmentation_declared_but_absent` via a typed `SCOPED_ROW_CHECKS:
+> &[Check]` and generates the hint's check list from it — which the branch also does, as
+> `ROW_GRAIN_SCOPED_CHECKS` with the same `.map(as_str).join(" / ")`, arrived at
+> independently. **On rebase, resolve every conflict in that region by taking the
+> branch's side**; it is strictly more complete (it also threads `effective_scope`, which
+> `experiments` still never reads). Nothing in the conflict markers will say so, which is
+> why it is said here.
 
 **Files:**
 - Modify: `src/librarian/tools/doctor.rs:551-587` (delete the const and the `retain`), `:4308` (`scan_params_behind_body`), `:4518` (`scan_params_status_drift`), and the seven scans the const named

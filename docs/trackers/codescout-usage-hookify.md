@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 9
+entry_high_water_H: 11
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -510,3 +510,100 @@ number is wrong; they answer questions about different trees, and a hook quoting
 
 **Status:** proposed. Warn-first; the trigger is rare enough that a deny stage is unwarranted until
 a false-positive class is observed.
+
+### H-10 — Warn at EDIT time when the target file is already dirty
+
+**Valid:** dated 2026-09-09
+
+Shipped rather than proposed: `codescout-companion/hooks/pre-edit-dirty-check.mjs`,
+registered on `Edit|Write|mcp__codescout__(edit_code|edit_file|create_file)`
+(`claude-plugins:813a28d`).
+
+**The gap it fills is a phase, not a check.** `scripts/pre-commit-unreviewed-content.sh`
+already refuses a pathspec commit carrying unstaged content — at COMMIT time, by which point
+your edit and a peer's have merged in the working tree and the only move left is to
+disentangle them. That file's own remedy table records that explicit pathspecs do **not**
+defeat the co-edited-file layer (instance 5, `e0525462`), and the bug file says so directly:
+*"It narrows the window, it does not close it."* This hook fires before entry into the window.
+
+**Silent unless the path is dirty AND carries no marker from this session**, so ordinary work
+sees nothing; one warning per path per session bounds the noise. The session marker is what
+separates dirt you inherited from dirt you made — written on every edit, clean or dirty.
+
+**It claims only what `git status --porcelain` proves, and deliberately does not name a peer.**
+An earlier session of your own leaves an identical trace, and naming an unchecked cause ends
+the search for the real one. It *names* `scripts/file-provenance.py` as the next step rather
+than calling it: that scan costs ~7s, grows with the corpus, and on a solo checkout would fire
+on the user's own stale edit.
+
+**Ceiling, carried in the hook's header rather than only here.** Matchers see TOOL CALLS, so
+`sed -i`, `tee` and heredoc writes through native `Bash` are invisible to it — a path agents
+actually use, and the one the session that wrote this hook was using at the time. Linked
+worktrees share no working tree, so a peer in one is neither visible nor a hazard. Already
+committed peer work is not uncommitted state.
+
+**Three guarded sites, each mutated on the production path, each killing a distinct test** —
+drop the clean-status guard and *"clean file: silent"* reds; never write the marker and *"same
+path twice"* plus *"dirt this session made"* red; treat git's `null` as dirty and *"non-git
+dir: silent"* reds. Recorded because the four silence assertions passed **vacuously** before
+the hook existed: no hook, no output, nothing for an absence assertion to catch. They
+discriminate only because a fifth test proves the hook can speak.
+
+**Status:** shipped, warn stage. Promotion to deny is unwarranted until a false-positive class
+is observed — the bar this ledger already uses is zero warn-stage false positives across one
+month. Registration resolves at process launch, so it is committed, not live, until a restart.
+
+### H-11 — Name a zero whose selector could not have matched
+
+**Valid:** dated 2026-09-09
+
+Shipped: `codescout-companion/hooks/suspicious-zero-hint.mjs`, PostToolUse on `Bash`.
+`claude-plugins:07bceca`, patch-id `df3244db91fd154b9e45c6836129e87fa9a7622b`.
+`H-10`'s hook is `claude-plugins:813a28d`, patch-id `a7ae9efb9735afcc1c927acb496396d4892646c9`.
+Both are on `origin/main`. The patch-ids are recorded beside them because a SHA is positional
+and does not survive a rebase; re-derive with `git show <sha> | git patch-id --stable` if
+either moves.
+
+**The class.** `grep`, `awk` and `sed` match LINE BY LINE. A phrase that wraps across a newline
+cannot match however present the text is; a range expression fails the same way when an
+endpoint is not a line of its own. The zero is well-formed and reads as *not present* when it
+means *could not be expressed* — `IC-18`, whose author-facing half is recorded as unmechanised
+because an ad-hoc grep typed into a shell has no output surface on which to annotate its own
+scope. **A PostToolUse hook is that surface**, which is the contribution here; the class was
+already named.
+
+**Why it does not fire on every zero.** `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
+clause 2 — *"a warning on every zero is equivalent to no warning"* — and its Alternative 3
+pre-rejects a blanket every-zero rule because no mechanical check can decide which negatives are
+trustworthy. So this does not try. It fires only where the **selector itself** carries a
+line-structure assumption: a multi-word phrase, or a range. A single-token miss is silent, and
+that is an assertion, not an intention.
+
+**Why not `run_command`, and why the ADR is untouched.** The first design annotated zeros in
+codescout's `run_command`, citing the ADR's own *Revisit-when* trigger. Two things killed it.
+The trigger governs the ADR's population — codescout's `grep` and `symbols` — and both measured
+cases came from native `Bash`, so citing them would have forced evidence into the
+nearest-sounding class. And a `run_command` mechanism **would not have caught either case**, for
+the same reason. A shell result is not a codescout tool result, so the ADR's population is
+untouched and needs no amendment.
+
+**Measured, 2026-09-09, twice in one evening in two sessions** — a `grep` for a phrase that
+wrapped in the file, diagnosed *"wrong tree"* when the tree was right; and an `awk` range over an
+**index** file whose entries live in 22 per-class files, diagnosed *"IC-18 is a table row"* when
+that file has no entry sections at all. Neither was resolved by a better selector; both by
+opening the artifact, after a second party intervened. Both wrong diagnoses were plausible enough
+to **stop the search**, which is what makes this worth a mechanism rather than a resolution to
+read more carefully.
+
+**A test that was green and measuring nothing.** The third mutation — deleting the search-tool
+gate — initially killed no test. The gate's test used `ls -la /some/empty/dir`, which has no
+quoted argument, so the hook exited at the *pattern* gate and the tool gate was never reached.
+Rewritten to `echo 'a long phrase here'`, where every other predicate is satisfied and only
+*"echo is not a searcher"* can produce the silence; it then killed the mutation. Recorded because
+the suite was green throughout, and because it is the same shape as the defect the hook exists
+to catch.
+
+**Status:** shipped, warn stage. Registration resolves at process launch, so it is committed, not
+live, until a Claude Code restart — verified by disagreement rather than assumed: a live `Bash`
+call satisfying every predicate was silent, while the identical input piped straight to the hook
+emitted correctly. Sound code, absent registration.

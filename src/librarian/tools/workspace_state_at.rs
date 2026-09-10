@@ -10,6 +10,7 @@ use crate::librarian::filter::FilterNode;
 use crate::librarian::freshness::Freshness;
 
 /// Maximum artifacts returned per call (exploring-mode cap, matches codescout convention).
+// cap-class: RESULT_CAP workspace_state_at.rows — probed
 const MAX_ROWS: usize = 200;
 const FRESHNESS_HORIZON: i64 = crate::librarian::freshness::FRESHNESS_HORIZON_DEFAULT;
 

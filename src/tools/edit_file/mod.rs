@@ -387,12 +387,10 @@ impl Tool for EditFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] }
-            ],
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path" },
                 // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —

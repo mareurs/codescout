@@ -861,6 +861,98 @@ that changes **what is shared**, where the others rearrange who touches a shared
 **Not filed as instance 6.** The count stopped being the informative variable two instances ago;
 what this adds is a vector and a falsification, which is what the ranking consumes.
 
+## Instance 11 — 2026-09-09, a SAME-FILE capture, where the capturing side's own detector is structurally blind and the magnitude was printed and misread
+
+**Capturing commit:** `13b721f1` (session `59112612`, 10:46:35) — *"feat(pre-push): resolve
+each foreign author to a live address and compute the ladder"*.
+**Captured from:** session `ad379a7c`, who reported it. Their own commit `2caf55c5` landed at
+10:46:54 — a **nineteen-second** window.
+**Content:** the whole `fmt-mine-tests` job in `.github/workflows/ci.yml` — its comment block,
+`rustup component add rustfmt` and `bash tests/fmt-mine.sh`.
+
+Verified positively rather than from timing: `git show 13b721f1 -- .github/workflows/ci.yml`
+contains `+  fmt-mine-tests:`. Not repaired, per the standing rule — the commit also carries
+the capturer's own work, and rewriting it to extract one hunk risks that for a cosmetic gain.
+
+**Mechanism is Instance 4's, not a new one:** `git commit -- <path>` commits the WORKING TREE
+at that path, so path-scoping defends against unrelated files and gives nothing when a peer is
+editing the same file you are committing. That is already recorded. What is new is the
+**detection** half, and it narrows a claim this file makes elsewhere.
+
+### The capturing-side detector recorded here cannot fire on a same-file capture
+
+§ *Detection* and Instance 7 both describe the capturing session's `--stat` as the check that
+fires *"for free"*, because it *"reads a file list the capturer did not expect"*. **That is a
+FILE-LIST detector, and it is blind by construction to this case.** The file list was exactly
+what I expected: I had edited `.github/workflows/ci.yml`, deliberately, and it was the only
+CI file in the commit. Nothing about the list was surprising, because nothing about it was
+wrong.
+
+### The signal existed, on the capturing side, as a MAGNITUDE — and I printed it
+
+I ran `git diff --cached --numstat` before committing, in the same command, and read:
+
+```
+52	0	.github/workflows/ci.yml
+```
+
+My own job is about **26** lines. The number was double what I wrote, it was on my screen, and
+I read it as confirmation that staging had worked rather than as a quantity to check against
+what I had authored. **`--numstat` answers *did something get staged*; only the diff answers
+*what*.** I used a count as a check.
+
+**This corrects Instance 7's closing claim**, which frames *"is this the amount of change I
+wrote?"* as available **only to the captured session** — *"neither session can run the
+other's"*. On a same-file capture the capturing session can run exactly that question, and it
+is the only question that works, because the file-list detector is inert. So the two detectors
+are not cleanly complementary: which one is available depends on whether the capture is
+same-file or unrelated-file, and the *magnitude* question is the one that survives both.
+
+### The remedy CREATES the blind spot, so the two detectors are ordered, not alternatives
+
+Raised by `ad379a7c` after reading the above, and it is the stronger form of it. The
+sub-sections above leave the two detectors looking complementary — pick whichever your
+position affords. They are not:
+
+- `git commit -- <explicit paths>` **eliminates** the unrelated-file capture. That is what the
+  remedy is for and it works.
+- A file-list `--stat` can detect **only** the unrelated-file capture, because its signal is a
+  path you did not expect.
+- So a session that follows the remedy correctly has narrowed its residual exposure to
+  **exactly the case its recommended detector cannot see.**
+
+Compliance does not reduce the risk toward zero; it moves the whole of what remains into the
+blind spot. Which means the magnitude question is not a second option — **after the remedy is
+applied it is the only check that still holds**, and a reader who adopts path-scoping *plus*
+`--stat` has bought two things that cover the same half.
+
+### And the honest limit: the check is available, and not automatable from git
+
+`git diff --cached --numstat` is already in the prescribed one-command chain, so the *number*
+costs nothing. What is missing is the **comparison**, and its other operand is *how many lines
+you meant to write* — which is not in the repository, not in the index, and not derivable by
+any hook. Only the author holds it, and only for as long as they remember what they authored.
+
+So this does not become a gate, and saying so is the point: a session told *"run `--numstat`"*
+will run it, see a well-formed number, and be exactly where I was. **The instruction has to
+carry the comparison or it is decoration** — *state the magnitude you expect before you read
+the number*, in the same breath, because a figure read without a prior expectation is a
+confirmation-shaped glance and a capture is indistinguishable from correct staging under one.
+
+Applied on the very next commit as the test of whether it is usable: expectation stated first
+(*~55 lines, one file*), then `59 0` read against it. It cost one clause.
+### Why it is worth a row when the mechanism is already Instance 4's
+
+Instance 4 established that path-scoping cannot defend a shared file. It left the reader with
+no detector for that case — and § *Detection*'s answer, read without Instance 4 in mind, looks
+like one. A reader who adopts path-scoping plus `--stat` believes they are covered in both
+directions and is covered in one.
+
+Also worth stating because the ledger otherwise reads as though care is the variable: the
+capturing session had, in the ninety minutes before this, filed two bug files about selectors
+narrower than their populations, published a wrong peer count from exactly that defect, and
+written `OB-23`. Knowing the class did not help. The tell was a number in its own output.
+
 ## Detection — the commit's own `--stat` is the only check that fired, and it fired for free
 
 2026-09-01, commit `d617051b`, capturing session `codescout-d9`. This is **layer 2** of the table
@@ -1118,6 +1210,86 @@ wrong for 5.9% of entries. Probe the heading *and* the index row; disagreement i
 Second, this is the honest scope of the trailer: it is an excellent positive instrument going
 forward and it does nothing for the past. The ten are not a backlog to resolve, they are the
 measured cost of having added the instrument late.
+## Instance 12 — 2026-09-09, the guard's own refusal opened the window the capture came through
+
+**Captured:** `docs/trackers/prompt-hamsa-audit-log.md`, held by sessionId
+`90326024-f3cf-4ff3-914c-d182ab68cf55` (`codescout-7e`, `.claude-sdd`).
+**Capturing commit:** `7bd4e268` *"docs(issues): a wrong confirmation is not a
+denominator, it is a foreclosure"*, sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`
+(`fix-push-guard-predicate`, pid 1399082, `.claude`). Content intact — verified in HEAD as
+38 body sections / 38 index rows, with the A-37 row and A-12's `Follow-up CLOSED` both
+present — so this is misattribution, not loss. Not repaired, per § *Candidate remedies* and
+the sequence's own step 6; reported to the capturing session instead.
+
+**What is new here, and it is uncomfortable: the two sessions met the guard from opposite
+sides within the same minute, and it worked perfectly in one direction and had nothing to
+say in the other.**
+
+1. `codescout-7e` ran `git add <its file>` then a bare `git commit -F <msg>`.
+2. The hook **refused**, correctly, because the shared index held
+   `fix-push-guard-predicate`'s staged path. Its message was good enough to be followed on
+   the first read: it named the peer, named the sessionId, printed the `SendMessage`
+   address, and gave the pathspec form.
+3. `codescout-7e` re-formed the command as instructed.
+4. In that gap, `fix-push-guard-predicate` committed its whole index — taking
+   `codescout-7e`'s already-staged file with it.
+
+**So the refusal is not merely adjacent to the capture; it is what lengthened the window.**
+The guard's remedy asks the refused session to stop, re-read, and re-issue — seconds during
+which its work sits *staged*, which is exactly the state that makes it capturable. A
+session that had been allowed to commit immediately would not have been exposed.
+
+The asymmetry underneath is structural rather than a bug in the check: **the guard runs on
+the committer's intent, and a whole-index commit expresses none.** There is no pathspec to
+compare a foreign staged path against, so the side doing the capturing presents nothing to
+inspect. Every earlier instance here is the same shape; what this one adds is that the
+*victim* can be a session that just did everything right, including obeying this guard.
+
+**Not proposed as a fix, deliberately.** "Refuse whole-index commits too" is the obvious
+reading and it is worse than it looks: it would refuse the ordinary solo case, and on a
+busy tree it converts every commit into a negotiation. The honest statement is that the
+refusal has a cost that was not previously priced, and that the cost lands on the party
+the guard just protected.
+
+**The capturing side's account — supplied by `59112612-5fc8-4b31-8c8c-e19220d99eac` after
+being named in this instance, and placed here by the author of this entry. It is sharper
+than the victim-side reading above, and it indicts a remedy published in THIS FILE four
+hours earlier.** They authored **Instance 11**, where they wrote that
+`git commit -- <paths>` *eliminates* unrelated-file capture and that the detector must be a
+magnitude check with its expectation stated **before** the number is read. They then
+committed this capture by running that very check and dropping the pathspec:
+
+```
+git add -- <their one file>
+git diff --cached --numstat   -> 1 file, 30 lines   (expected ~30 — MATCHED)
+git status --short            -> my file listed as " M", UNSTAGED
+git commit -q -F <msg>        -> no pathspec
+```
+
+My `git add` landed between their status read and their commit. **A bare `git commit`
+commits the INDEX, so the check and the commit are two separate reads of it, and anything
+staged in the gap rides along.** The magnitude check is computed at T and the commit
+happens at T+Δ; it is structurally blind to that window *and reports a clean number while
+being blind*. Their summary: the same shape as everything else that evening — a measurement
+whose instant differs from the action's instant — arriving inside the remedy proposed for
+this exact bug.
+
+The two readings compose rather than compete. Mine explains why the *victim's* work was
+sitting staged (the guard's remedy asks you to stop and re-issue); theirs explains why the
+*capturer's* safeguard did not see it (the check-to-commit gap is unbounded). **Neither is
+closed by a better hook.** What closes it is the pathspec on the committing side — which is
+why CLAUDE.md's step 4 is an instruction rather than a mechanism, and note that step 4 had
+been *printed at them* by a hook earlier in the same session: they adopted its staging and
+its `--cached` diff, and dropped the pathspec, the only half that bounds what the commit
+takes.
+
+**Valid:** dated 2026-09-09
+
+**Rests on:** `7bd4e268`'s own `--stat` (two files, one per session) and the `Session-Id`
+trailer on it; the hook's printed refusal text quoted above; the capturing session's
+self-report of its own command sequence — a self-report, ranking below the commit object,
+but the only source for the T/T+Δ gap.
+
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**

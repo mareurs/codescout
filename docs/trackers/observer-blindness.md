@@ -12,16 +12,16 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 22
+entry_high_water_OB: 25
 entry_prefix: OB
 ---
 
 # Observer Blindness — defect classes the right party structurally cannot see (OB-N)
 
 **Declared ledger.** `entry_prefix: OB`. Entries are `## OB-N — <title>` body sections;
-allocate with `artifact(action="append_entry", id=<this artifact>, id_prefix="OB",
+allocate with `doc(action="append_entry", id=<this artifact>, id_prefix="OB",
 anchor_heading="## Template for new entries", title=…, body=…)`. Never hand-allocate.
-`edit_markdown` is refused.
+`edit_file` is refused.
 
 ## What this ledger is for
 
@@ -76,6 +76,115 @@ correct*. Sharpening the instrument sharpens a right answer to the wrong questio
 `OB-N` prompts "what should I have used instead?", the honest answer is often *nothing on that
 axis* — check the referent, or re-read the premise, both of which are lookups rather than
 measurements. (`codescout-e8`, reaching this entry's law from the opposite direction.)
+
+**Second independent measurement, 2026-09-09 — published as a CONFIRMATION, not as a catch.**
+§ *Testing Discipline* requires that a re-derivation which confirms be published anyway, because
+absorbing it as a catch makes the population look self-correcting. So: **six instances across
+three sessions in one afternoon, every one committed by an author who held the relevant class in
+context at that moment.**
+
+**The unit was wrong in this entry's first form and is corrected here rather than quietly
+restated.** It read *"four instances, four sessions"*; the table listed `26cb9b5b` twice, so it was
+four instances across **three** sessions. § *Testing Discipline*'s *a count of a defect population
+must arrive with its unit or not at all* — broken inside the entry about authors erring in their own
+subject, by its author. **It is one recursion deeper than row 5 and the distinction is worth
+keeping** (`b80a27d4`'s reading, correcting mine, which had flattened the two): row 5 is *"I invoked
+the law an hour ago and violated it in the next exchange"*; this is *"the violation was already
+sitting in the artifact I was editing while writing the row about the violation."*
+
+| # | session | the instance | what they were doing at the time |
+|---|---|---|---|
+| 1 | `b80a27d4` | a pathspec commit captured a peer's staged ledger appends | filing that exact capture |
+| 2 | `26cb9b5b` | skipped both test lanes for a "docs-only" diff, reddening a markdown gate | arguing parser and classification discipline in the same commit |
+| 3 | `c86ebb51` | mis-described a guard's remedy text | writing a bug file about guards whose remedy text nobody tests |
+| 4 | `26cb9b5b` | collapsed a branch authorisation into a party's consent | quoting the three-state author question at someone else |
+| 5 | `c86ebb51` | derived a withdrawal rule that selects on OUTCOME | publishing this very confirmation, which exists because the recording law forbids exactly that |
+| 6 | `c86ebb51` | two unverified attributions, both in PEER MESSAGES, both about who did what | a session whose whole subject was attribution |
+
+**Row 6 is the one with a remedy, so it earns its place over the others.** Both misattributions
+were caught by the peer and **neither reached the corpus** — verified by grep, not asserted — and
+that asymmetry *is* the finding: **the verification discipline was attached to the ARTIFACT, not to
+the CLAIM.** Every corpus write that afternoon was checked at the bytes; the two claims that went
+out unchecked both went out as messages. The blind spot is not carelessness about attribution — the
+author was demonstrably careful about it in every file — it is a surface that never occurred to him
+as needing the same check.
+
+**And the cost was not politeness.** One unverified message told `b80a27d4` they were the *captured*
+party in a ledger capture when they were the *capturer*; the other credited them with
+`343d53e1`'s `usage.db` finding. The first nearly caused them to retract a **true** report to their
+own operator. A message shapes a peer's beliefs and their upward reports, so treating it as
+lower-stakes than a file is exactly inverted when the content is attribution. **A misattributed
+finding is a misattributed commit minus the diff, and harder to catch:** the party who would notice
+has no reason to look, and the party being credited has no reason to object — `b80a27d4`'s
+formulation, made while declining credit that cost them nothing to accept.
+
+**Mechanism status: NONE YET — and the first form of this row got that wrong, which is the row
+happening again one level up.** It read *"Mechanism, since a resolution to be careful is what this
+ledger refuses"* and then prescribed *"if it names who did what, resolve it before sending"* —
+which is a **policy tied to noticing**, the exact thing this section exists to refuse, labelled as
+its opposite.
+
+**The structural cause, which is `b80a27d4`'s and is worth more than the attribution case because
+it names a population rather than an instance: care was never what was doing the work at the
+artifact.** A corpus write passes through surfaces that **refuse** — the pre-commit gate rejects a
+pathspec commit carrying a peer's staged paths; `doc()` refuses a direct edit to a ledger with a
+declared `entry_prefix`; `append_entry` allocates the id rather than trusting the caller's; the
+cluster gate blocks a bug file whose `**Members:**` append is missing. **`SendMessage` validates
+nothing and refuses nothing.** So the asymmetry is not two attitudes, it is **one guarded surface
+and one unguarded one**, and the general form is: *a claim leaving by an unguarded surface is
+unchecked regardless of how careful its author is everywhere else.* Everything that exits that way
+inherits it — a count, a peer's sid, a file's authorship, a range — not just attribution. The
+mechanism-shaped answer is a hook on the outbound surface; nothing of the kind exists, so this row
+is a **design worklist item** in the sense `H-N` and `I-N` consume, not a solved problem.
+
+**And the detection was luck of position, not a detector — which the first form of this row
+implied away by noting both errors were caught.** `b80a27d4` was, in both cases, the **one party
+able to refute the claim**: the first was about their own commit, the second about their own sends.
+Neither was found by a check, a reader, or the author. **A third message-only attribution error
+tonight, aimed at anyone else, would still be sitting there uncorrected** — their own point, and
+the reason "both were caught" is a fact about who happened to be addressed rather than evidence of
+a working correction path.
+
+
+**Row 5 is the sharpest and is stated by its author.** Told that a peer was retracting *"I dressed
+an inference as a verification"*, I verified the conclusion, found it true, and wrote: *"that is
+worth withdrawing only if it was also WRONG, and it was not."* **That rule selects on outcome.**
+The peer's evidence — the commit was present in `origin` — is **identical in both worlds**: an ack
+push and a bypassed refspec push both put it there, so it could not discriminate and would have
+produced the same confident report had the bypass been the cause. The conclusion was right and the
+*procedure* was uninformative; those are separable, and the procedure is the reusable half. Record
+only the ones whose conclusion breaks and the recorded population is filtered to the subset that
+broke — which is this section's own recording law, invoked by me one hour earlier to justify
+publishing this table, and violated in the next exchange. Corrected by `b80a27d4`, who reclassified
+their own note rather than deleting it: **not a correction of a false claim but a denominator entry
+— one inference dressed as a verification, outcome CONFIRMED.** That is the shape a base rate is
+made of.
+
+**So the transferable rule, which is theirs and not mine: withdraw on the PROCEDURE, never on the
+outcome.** Ask whether the observation could have come out differently in the world where the claim
+was false. If not, the claim was never verified, and it owes a denominator entry whether or not it
+turned out to be true.
+
+
+**Its shape differs from the founding measurement and that is what makes it worth keeping.**
+2026-08-30 was four instances of **one** class — evidence that knowing *that* class prevents
+instances *of it*. This is four instances of **four different** classes, which tests the broader
+claim: the effect is not a property of one sticky defect shape but of the authoring position
+itself. Same conclusion, wider base, and neither run was designed.
+
+**The strongest single datapoint is the third row, and it is stated by its author rather than
+about them:** the false claim contradicted bytes already in that session's own context — an
+8 KB refusal it had quoted hours earlier — rather than resting on a file it had never opened. So
+the failure was not a missing lookup. It was a correct document, present and read, and a claim
+asserted past it while writing about that very failure mode.
+
+**And the corrections ran in both directions, which is the part a vigilance reading cannot
+explain.** Each of the four was caught by *the other* session, never by its author, and twice the
+catch cost the catcher: one withdrew a claim whose survival would have flattered their own
+prediction; one objected in a way that made their own error worse rather than better. That is
+§ position 2 — the reviewer who can see it is one who does **not share the author's context**,
+not a more careful one.
+
 
 The corollary tells you what to build instead: **a check that runs when nobody is
 worried.** Three shapes, in descending order of preference —
@@ -138,6 +247,9 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-25 | 2026-09-09 | **"docs-only" is a category imported from other repos, and a diff cannot carry the fact that refutes it** — where prose is under test, the evidence for skipping the lanes is complete, correct, and wrong | the author deciding whether to run the gate: their whole basis is the diff, and the refuting fact is not in it | wrong instrument — the author re-reads a diff that cannot contain the answer | partial — `scripts/pre-commit-ledger-counts.py` runs unprompted but enforces a subset of the gate it mirrors (`ee19d4fb`) |
+| OB-24 | 2026-09-09 | **a coverage metric whose denominator is drawn from the covered set cannot report its own shortfall** — a kill rate, a `checked >= N` floor, a pass count, where the denominator is generated by the same mechanism as the numerator. The uncovered case does not appear as a zero; it produces **no row at all**, so it is absent from both halves of the ratio. Distinct from `OB-22`, where a filter written from the enumerator's memory omits what they did not know: no belief is involved here, and no widening reaches it, because the omission is structural to how the measurement is GENERATED rather than how it is filtered | the party running the metric — reading the report harder cannot surface a line that was never generated. `59112612`'s mechanism states it best: **a surviving mutant reports itself; a function with zero test references produces no row to survive** — the difference between a weak signal and no signal | wrong instrument — measured twice in one evening by parties actively writing about adjacent classes. *"6 mutations, 6 killed, 0 survivors"* was arithmetically exact and silent about the shipped path, published while its author held the population-versus-member rule in context and quoted it at a peer within the hour | none yet — **a second enumeration that does not share the metric's generator**: list the module's functions and diff against the set the harness produced rows for; count declared action-key *pairs* from the schema rather than incrementing per key. A raised threshold is the tempting non-fix — it changes the value the blind metric reports, not what it can represent |
+| OB-23 | 2026-09-09 | **a notification that changes the recipient's behaviour cannot also measure it** — the remedy for a blindness is an intervention on the very population that would have observed it. Announcing does not CREATE observers; it informs whoever happens to be looking, and the response it prescribes (do not investigate; stand down) is what removes them. So the better it works, the less it can observe. Not a signal routed to the wrong party (`OB-19`) and not an armer who gets no signal (`OB-2`): the routing is perfect, the recipient is exactly right, they act correctly, and the acting is the damage | the **announcing session**, structurally — what comes back is compliance and silence, the two outcomes it wanted, indistinguishable from coverage; the cost is an absence produced by its own success. **And the complying peer, symmetrically**, who cannot see that standing down destroyed evidence while holding the belief that standing down is correct — the belief the announcement supplied | wrong instrument, unusually cleanly: the announcement was correct, the stand-down was correct, the all-clear was correct. The missing evidence was produced by three parties each doing the right thing, so no additional care by any of them reaches it | none yet — two cheap candidates. **Ask, do not broadcast:** *"is anyone building?"* is a query that leaves the population intact and returns a count; *"here is what you will see"* is an intervention. Only the query can report *"this window had no witness"*. And **prefer a record the acting party writes itself, unconditionally, at the moment of the act** — it depends on no peer doing anything, so compliance cannot dismiss it |
 | OB-20 | 2026-09-06 | **Authorship is recoverable by asking; AUTHORISATION is not recoverable at all** — it lives in a conversation between a session and its operator that no peer can see, query or infer, and a commit deliberately withheld pending an operator's say-so is BYTE-IDENTICAL to one merely not-yet-pushed. On a shared branch any peer's push publishes it. **The state that does not exist:** "commit but hold the push" reads like a withholding mechanism and is not one — the unit of publication is the BRANCH, the unit of decision is the SESSION, so there are only two real states (uncommitted, which risks peer sweep and the stash window; or committed, i.e. published on anyone's next push) | the **pusher**, structurally — `git log --stat` answers *what am I sending* and *who wrote it*, and there is no field anywhere in git that answers *may this be published*. The fact is not in the substrate, so no amount of reading it produces the answer | wrong instrument, demonstrably: `codescout-7f` read `git log origin/experiments..HEAD --stat` BEFORE pushing rather than after — more than any stated rule asks — and it could not have caught this. Correct attribution would also have changed nothing, since the authorisation is not in the repository | one candidate, `codescout-7f`'s, and it holds WITHOUT coordination: **a session that cannot publish must not COMMIT to a shared branch.** Note the reflex alternative is unavailable — "use a scratch branch" is wrong on a shared CHECKOUT, where `git checkout -b` moves the working tree for every session. Do not repair a published withheld commit either: report it, never revert |
 | OB-19 | 2026-09-06 | **a mechanism emits a clear, timestamped, real-time signal and routes it to the one party for whom it is uninteresting, while the party it damages receives nothing** — not "nobody can see it" (`OB-6`, `OB-15`) and not "the author cannot see it" (`OB-1`, `OB-12`): the observation is perfect, immediate, correctly formatted, and in the wrong terminal. `pre-commit` prints `Stashing unstaged files` / `Restored changes` in the COMMITTER's terminal while reverting a PEER's in-flight work to HEAD for the hook's duration | the session whose work is stashed — it happens in another process, leaves the file byte-identical afterwards, and by the time that session could look, the state is back | wrong instrument on both sides: the affected party cannot check for a state that no longer exists, and the committer would have to already know it matters to someone, which is knowledge about another session's activity rather than their own | none — today's mitigation is a committer who understands the lines choosing to say so, i.e. politeness. Two uncosted directions: stop stashing (several hooks already read the index via `git show :<path>`), or make the stash line NAME the files it took, which is cheap because the signal already exists |
 | OB-18 | 2026-08-31 | a comment in repo A asserting a fact about repo B goes stale silently — and manufactures a plausible design (inverse of OB-4: a **liveness** marker read as **event history**) | anyone designing from the comment's own repo | wrong instrument | **none yet** — worklist |
@@ -2366,6 +2478,189 @@ a pathspec commit, and learned they existed only when they reported it. The repo
 during that evening named *"4 sessions"* repeatedly and consistently, and the consistency is
 what made it feel established. **Reported by the omitted party**, which is the only channel this
 class leaves open.
+
+## OB-23 — a notification that changes the recipient's behaviour cannot also measure it
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Observer Blindness*, position 3 — *the check that runs when nobody is worried*. This class is that position's limit case: the check here is a **message**, and a message that reaches a person changes what that person does.
+
+**Class:** the remedy for a blindness is an **intervention on the very population that would have observed it**. Announcing does not *create* observers — it informs whoever happens to be looking — and the prescribed response to the announcement (do not investigate; stand down) is what removes them. So the better the announcement works, the less it can observe. Not a message routed to the wrong party (`OB-19`) and not an armer who gets no signal (`OB-2`): the routing is perfect, the recipient is exactly right, they act correctly, and the acting is the damage.
+
+**Blind party:** the **announcing session**, structurally. What it receives back is compliance and silence, which are the two outcomes it wanted and which are indistinguishable from coverage. It cannot see the cost because the cost is an absence produced by its own success. **And the complying peer, symmetrically** — they cannot see that standing down destroyed evidence *while holding the belief that standing down is the correct response*, which is the belief the announcement supplied.
+
+**Who can see it:** a third party holding neither the authorship nor the compliance. Here it was resolvable only after the framing *"the announcement's value is that it creates observers whose logs survive when the artifact does not"* had been retired by someone who held neither role — and the complying session could then see its own compliance, which it could not do while the framing stood.
+
+**Plausible-answer property:** **silence.** *"No peer reported a red"* has two causes — nobody hit one, or nobody looked — and they produce identical observations. Compliance makes the second strictly more likely exactly when the announcement was most effective, so the failure mode strengthens with the remedy.
+
+**Vigilance:** wrong instrument, and unusually cleanly so. Every party was careful and every act was correct: the announcement was correct, the stand-down was correct, the all-clear was correct. The missing evidence was produced by all three doing the right thing, so no amount of additional care by any of them reaches it.
+
+**Mechanism status:** none yet. Two candidates, both cheap:
+
+- **Ask, do not broadcast.** *"Is anyone building right now?"* is a **query** — it leaves the population intact and returns a count. *"Here is what you will see"* is an **intervention** that reads as a request to stand down. Only the first can report *"this window had no witness"*, which is the fact an unwitnessed all-clear currently hides.
+- **Prefer a record the acting party writes itself, unconditionally, at the moment of the act.** Such a record depends on no peer doing or not doing anything, so compliance cannot dismiss it. This is the shape adopted for the pre-push guard's `push-published.log` — written by the guard at push time, for the push it is guarding anyway.
+
+**Instances:**
+
+- The 2026-09-09 04:16Z mutation window (`5399543d`). Announced to three peers; `c9ab2c8d` held off building **because** of the announcement; `59112612` was in plan mode; the window may have had **zero** witnesses. Its one anomaly — a real E-coded compile error present in a batched run and absent in isolation from the same one-character patch — is precisely what a concurrent build log would have resolved, and it remains unexplained. The all-clear was published with that stated rather than left to imply coverage.
+- The 2026-09-09 03:22Z window, same session, which **was** well covered — by luck, two peers happening to be mid-run — and was being cited as evidence that the announcement produced the coverage. It produced the *labelling* of a red someone was going to see anyway.
+
+**Status:** open — 2 instances, 3 sessions, 2026-09-09.
+
+**Attribution, split because the halves were earned separately and flattening it would lose the only thing the class teaches.** The framing *"announcements create observers"* was `c9ab2c8d`'s, and they acted on it. `59112612` retired it (*announcing does not create observers, and "no peer reported a red" has two indistinguishable causes*) and later supplied the general form above. `5399543d`'s window made the cost concrete; they did not find it. `c9ab2c8d` then saw that **their own compliance** had removed the witness — which they could not see while holding the framing that produced it — and asked that it not be filed as any one party's. That request is the mechanism demonstrating itself: **the observer who can see it is never the one holding it.**
+
+## OB-24 — A coverage metric whose denominator is drawn from the covered set cannot report its own shortfall
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* — *an assertion computed over a POPULATION cannot
+verify a claim about a MEMBER*, of which this is the measurement-side twin;
+`docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` and its probe-floor
+sibling; the mutation runs behind `7168c1f0` / `6e178e5c`.
+
+**Class:** a coverage metric — a kill rate, a `checked >= N` floor, a pass count — whose
+**denominator is generated by the same mechanism as its numerator**. The uncovered case does not
+appear in the report as a zero; it produces **no row at all**, so it is absent from both halves of
+the ratio. The metric is arithmetically correct and structurally incapable of representing its own
+shortfall.
+
+**Blind party:** the party running the metric, and the reason is not inattention. Reading the
+report harder cannot surface a line that was never generated. `59112612` states the mechanism
+better than a definition does: **a surviving mutant reports itself; a function with zero test
+references produces no row to survive.** That is the difference between a weak signal and no
+signal, and only the second is this class.
+
+**Who can see it:** anyone who enumerates the population **independently of the metric** and
+compares the two counts. Not a more careful reader — a *different* instrument. In both measured
+instances the discriminator was a question about the metric's unit rather than its value:
+*which functions did those kills land on?* and *is this floor counted per key or per action-key
+pair?*
+
+**Plausible-answer property:** a true, high, reassuring number. *"6 mutations, 6 killed, 0
+survivors"* was arithmetically exact and silent about the shipped path. A floor reading
+`checked >= N` is satisfied at 25% coverage when a four-action key counts as 1. Nothing errors,
+nothing is wrong, and the number is the one you hoped for.
+
+**Vigilance:** wrong instrument — measured twice, in the same evening, by parties actively writing
+about adjacent classes. I published *six for six* while holding the CLAUDE.md rule about
+population-versus-member in context and quoting it at a peer within the hour; `b80a27d4` shipped a
+floor whose whole job is noticing the sweep stopped checking, and it counts in the unit that cannot
+notice. Care is not the failing faculty.
+
+**Mechanism status:** none yet. The shape that would work is a **second enumeration that does not
+share the metric's generator** — for mutation coverage, list the module's public functions and diff
+against the set the harness produced rows for; for a probe floor, count declared action-key *pairs*
+from the schema rather than incrementing per key. Both are cheap and neither exists. A raised
+threshold is the tempting non-fix: it changes the value the blind metric reports and not what it
+can represent.
+
+**Instances:**
+
+- **Mutation kill rate over a population excluding the shipped path** (`5399543d`). `7168c1f0`
+  shipped 26 tests and 6 killed mutations, all on **pure functions**; the four wiring functions —
+  `on_source_write`, `pending_notice`, `note_source_write_for`, `take_build_notice` — had **zero**
+  test references, so the notice could never have reached a response and no mutation row would have
+  said so. Closed by `6e178e5c`, whose two wiring mutations each kill exactly one test.
+- **A probe floor counted per key rather than per action-key pair** (`b80a27d4`,
+  `4bfec00edf979204`). `librarian`'s `scope` declares four actions in one label and is probed for
+  one; `checked` increments per key, so a four-action key counts as 1 and the floor stays satisfied
+  at any coverage. 7 declared pairs, 2 probed.
+
+**Status:** open — 2 instances, 2 subsystems (`src/agent/` mutation testing, `src/tools/param_probe`),
+3 sessions contributing. Below the ≥3 promotion threshold and recorded now because both instances
+were found within one evening by different parties who could not see their own.
+
+**Attribution:** the class was named jointly. `b80a27d4` supplied the framing — *a coverage metric
+whose denominator is drawn from the covered set* — and the probe instance; `59112612` supplied the
+mechanism that separates it from a weak signal — *a survivor reports itself, a zero-reference
+function produces no row to survive*; `5399543d` supplied the mutation instance and filed this.
+`b80a27d4` deferred filing to whoever reached it first while mid-plan, and asked that it be one
+entry with three parties rather than three claims.
+
+## OB-25 — "docs-only" is a category imported from other repos, and the diff cannot carry the fact that refutes it
+
+**Valid:** invariant
+
+**Rests on:** `CLAUDE.md` § *Testing Discipline* — *a test cannot detect what its RECORDING
+filters out*, of which this is the author-side twin; `CLAUDE.md` § *Observer Blindness* position 3;
+`docs/issues/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
+(`ee19d4fb`), the mechanism row for the gap this class leaves open.
+
+**Class:** an author skips a verification step on the strength of a **category judgement about the
+diff** — "docs-only", "comments only", "no behaviour change" — in a repo where that category does
+not exist, because the repo has tests **over** the artifact kind the diff touches. Here: prose and
+Rust comments are under test (`tests/issue_clusters.rs`, `tests/audit_doc_refs.rs`,
+`tests/manual_toc.rs`, `tests/doc_tool_refs.rs`, `src/prompts/mod.rs`), so "markdown only" implies
+nothing about which lanes can be skipped. The category is sound in most repos and is imported
+whole; nothing local marks it invalid.
+
+**Blind party:** the author deciding whether to run the gate. **The reason is not inattention: the
+decision surface is the diff, and no diff can carry the fact that refutes it.** The author's
+evidence — every changed line is prose — is complete, correctly read, and true. The proposition
+that would overturn it ("this repo tests prose") lives in a test target, and the target is not
+being run *precisely because* the author has concluded the diff is prose. The belief and the blind
+spot are the same belief. Re-reading the diff more carefully returns the same correct answer to a
+question that was never the deciding one.
+
+**Who can see it:** anyone who runs the lanes, and **nobody who reasons about the diff** — however
+carefully. That is what makes this a wrong-instrument case rather than a vigilance case: the two
+instruments do not differ in rigour, they differ in *what they are pointed at*. A reviewer reading
+the same diff shares the blindness exactly, so peer review is not the redundancy here; execution
+is. **The tell that this is the recording-filter law and not member-selection:** the standard
+remedy is a no-op against it. Widening the sample does nothing, because the population is one diff
+and the missing thing is an *observation*, not a member.
+
+**Plausible-answer property:** a clean, defensible commit message stating a true fact —
+*"Rust COMMENTS and markdown only, so the two test lanes were not re-run"* (`bd7d7eb1`). No error,
+no warning, no red. The next observer sees a gate failure with no obvious author, and the reasoning
+that produced it reads as diligence, because it is.
+
+**Vigilance:** wrong instrument. Measured 2026-09-09: the author of `bd7d7eb1` was writing about
+parser and classification discipline in the same commit, argued the skip explicitly in the commit
+message rather than skipping silently, and still reddened both lanes for every session in the
+checkout. **The skip was reasoned, written down, and wrong.** The author learned of it only when a
+peer running the gate for unrelated reasons reported the red.
+
+**Mechanism status:** partial. `scripts/pre-commit-ledger-counts.py` is the right shape — it runs
+unprompted on every commit, so an author who has concluded they are safe is not consulted — and it
+is demonstrably **not inert**: it *refused* an earlier draft of `bd7d7eb1` on the member-naming
+rule, then accepted the two-tag version. **That refusal/acceptance pair is what earns "partial"
+rather than "none yet": it is the same instrument answering twice with different verdicts on one
+input, which is the only shape that separates *the rule set is a subset* from *the hook is inert*.
+A single silence could not.** The gap is that it mirrors a subset of the gate, and the surface a
+reader consults to rule that out — `tests/issue_clusters.rs::the_hook_script_agrees_with_this_gate`
+— compares the two implementations' **parse logic** (`parse_index_counts`, `cluster_tags`), never
+their **rule sets**. Its doc comment says so accurately; the *name* is what gets read. Verified
+independently 2026-09-09: `cluster_tags()` is called from three sites in the hook and no caller
+asks how many tags one file holds. So the class nests — a guard narrower than its name, whose
+narrowing is guarded by a second guard narrower than its name. **Do not close this by renaming that
+test:** the rename removes the surface a reader currently trusts while leaving the divergence
+unguarded. The fix the class asks for is a declared *hook-owed* subset making the two rule sets
+comparable, since most of the 21 tests in that target are parser-discrimination tests a commit hook
+has no business running.
+
+**Deliberately no coverage ratio.** "2 of 21" would be the wrong denominator for the reason
+`OB-24` states, and quoting it would invent the hook-owed subset that does not yet exist. The
+shortfall is real and currently uncountable; that is the finding, not a gap in it.
+
+**Instances:** `bd7d7eb1` (the reddening commit and its reasoning), `6697cbd7` (the fix, whose
+message records the root cause rather than only the repair), `ee19d4fb` (the mechanism bug file).
+Filed by sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`, who found the hook gap after the
+incident and split it from this class deliberately: the IC half is a verified defect, this half is
+the structural claim. Class written by sessionId `c86ebb51-7ae3-477d-b755-f25db6180782`; the hook
+and agreement-test findings are the former's and were re-verified independently here before this
+row was written.
+
+**Status:** open — 1 instance, 2 sessions. Single-instance rows are admitted here when the
+mechanism is identified; the promotion question is whether the *category-imported-from-other-repos*
+shape recurs with a different category ("test-only", "config-only", "generated files"), which would
+make the class about **imported categories** rather than about docs. **A candidate was tested and
+deliberately NOT counted:** `.codescout/system-prompt.md` is generated, committed, injected into
+every session and gated by nothing
+(`docs/issues/2026-09-09-the-fourth-prompt-surface-is-injected-into-every-session-and-gated-by-nothing.md`),
+which is the *generated files* category exactly — but the file is clean, so no author has skipped
+verification behind it. Confirming a place to watch and logging an instance are different claims,
+and only the second promotes.
 
 ## Template for new entries
 

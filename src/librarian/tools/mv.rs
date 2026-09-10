@@ -12,6 +12,55 @@ struct Args {
     new_rel_path: String,
 }
 
+/// Repo-relative paths of files whose text mentions `stem`, or `None` if the scan could
+/// not run at all.
+///
+/// Keyed on the file STEM rather than the full relative path, because both forms occur in
+/// prose and `audit_doc_refs` resolves a bare basename via fallback — so a path-only scan
+/// would miss the citations that lint scores lowest and a reader still has to fix. Stems in
+/// this corpus are dated slugs and effectively unique; a short or generic stem would
+/// over-report, which is the safe direction for a field whose job is "how much work is this
+/// move".
+///
+/// `--untracked` is deliberate: a citation in a file another session has not committed
+/// breaks exactly as hard as a committed one, and on a shared checkout that is the common
+/// case rather than the exotic one.
+fn files_mentioning(root: &std::path::Path, stem: &str, exclude: &str) -> Option<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["grep", "--untracked", "-l", "-F", "-e", stem])
+        .output()
+        // UNCOVERED, and deliberately labelled rather than left to look guarded: this `?`
+        // fires only when the git BINARY cannot be spawned, and no test reaches it —
+        // measured 2026-09-09 by mutating it to `Some(Vec::new())`, which left all 18 tests
+        // green. `a_citation_scan_that_cannot_run_reports_null_not_an_empty_list` exercises
+        // the OTHER `None` site below, where git ran and exited non-zero. Two sites, one
+        // covered; the same feature, so a single mutation read as coverage for both until
+        // it was run per SITE. Simulating an absent git needs PATH manipulation in-process
+        // and is not worth it — but the next person should know this line is unguarded
+        // rather than infer protection from the test name.
+        .ok()?;
+    // `git grep` exits 1 with empty output when there are no matches. That is a real zero
+    // and must be reported as one. Any OTHER non-zero is a failed scan, and returning an
+    // empty list for it would assert "nothing cites this" on no evidence — the failure this
+    // whole field exists to prevent, reproduced one layer down.
+    if !out.status.success() && out.status.code() != Some(1) {
+        return None;
+    }
+    let mut files: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty() && l != exclude)
+        .collect();
+    files.sort();
+    files.dedup();
+    Some(files)
+}
+
+/// How many citing files to name before switching to a count alone.
+const CITATION_SAMPLE: usize = 20;
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         super::RecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
@@ -43,7 +92,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `SqliteVecArtifactStore::refile` re-acquires THIS mutex, and parking_lot's is
     // not reentrant -- so a version that merely silenced the compiler would hang
     // that backend on every move.
-    let (old_full, new_full, new_id) = {
+    let (old_full, new_full, new_id, root_path) = {
         let cat = ctx.catalog.lock();
         let row = artifact::get(&cat, &a.id)?
             .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
@@ -135,7 +184,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         };
         artifact::upsert(&cat, &updated_row)?;
 
-        (old_full, new_full, new_id)
+        // Owned rather than borrowed: `containing_root` returns a reference into `roots`,
+        // which dies with this block, and the citation scan below needs the root.
+        (old_full, new_full, new_id, root_path.to_path_buf())
     };
 
     // Re-file the artifact's chunk vectors onto the new id, BETWEEN the upsert
@@ -205,6 +256,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         None
     };
 
+    // Scanned AFTER the move, so it reads the tree the caller is about to commit rather
+    // than the one they started from, and excludes the artifact's own new path — a file
+    // carrying its former slug in a superseded note cites itself, which is not work.
+    let citing_files = old_full
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|stem| files_mentioning(&root_path, stem, &a.new_rel_path));
+
     Ok(json!({
         "id": new_id,
         // The id is derived from the path, so a move mints a new one. Reported
@@ -244,6 +303,31 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // layer this move IS atomic — the split only becomes visible one tool call
         // later, at the git layer, to a different observer.
         // docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
+        // The number that decides whether this archive is a ONE-file commit or a
+        // thirteen-file one, and the only field here computed from the repo rather than
+        // from the catalog. Every path in it cites the location this move just
+        // invalidated, and each must be re-pointed in the SAME commit: `audit_doc_refs`
+        // scores a live path-shaped citation that no longer resolves at `high`, and
+        // ordinary backticks are not an escape from it.
+        //
+        // Deliberately NOT derived from `cites` edges, and that is the whole point of the
+        // field. The catalog indexes markdown artifacts only, so a citation inside a `.rs`
+        // comment can never become an edge. Measured 2026-09-09 against
+        // `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`:
+        // the link graph held THREE incoming `cites` and a repo scan found THIRTEEN citing
+        // files, three of them source. Reporting the edge count would have been a plausible
+        // number wrong by 4x, and a caller acting on it archives the file and reds CI on ten
+        // live citations — which is the bug this field exists for, met by hand first.
+        //
+        // `null` means the scan could not run, NOT that nothing cites the old path — the
+        // same distinction `vectors_refiled` draws above, for the same reason.
+        "inbound_path_citations": citing_files
+            .as_ref()
+            .map(|f| f.iter().take(CITATION_SAMPLE).cloned().collect::<Vec<_>>()),
+        // Carried BESIDE the list because the list is capped, and a sample presented as a
+        // complete population is its own defect class. The count is what a caller sizes the
+        // commit from; the sample is only what they start with.
+        "inbound_path_citation_count": citing_files.as_ref().map(|f| f.len()),
         "stage_together": [to_forward_slash(&old_full), to_forward_slash(&new_full)],
         // Deliberately path-free. `stage_together` is relativized by
         // `path_strip::PATH_KEYS` and a prose string is not, so a path embedded here
@@ -512,6 +596,122 @@ mod tests {
         // This assertion read `hint.contains('R')` until 2026-09-08 and was doubly wrong:
         // it pinned the letter this bug removed, and a bare `contains('R')` matches any
         // capital R in any word, so it never discriminated the rename line at all.
+    }
+    /// A scan that cannot run reports `null`, never an empty list.
+    ///
+    /// The tmp fixture is not a git repo, so `git grep` fails outright. An empty list here
+    /// would assert "nothing cites the old path" on no evidence — which is the exact defect
+    /// this field was added to prevent, reproduced one layer down inside the prevention.
+    /// Same discipline as `vectors_refiled`, and the same reason: a caller cannot tell a
+    /// measured zero from an unasked question unless the two are spelled differently.
+    ///
+    /// Mutation this kills: `.unwrap_or_default()` on the scan result, or returning
+    /// `Some(vec![])` instead of `None` when git is unavailable.
+    #[tokio::test]
+    async fn a_citation_scan_that_cannot_run_reports_null_not_an_empty_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result["inbound_path_citations"].is_null(),
+            "no git repo means the scan never ran; an empty array would claim it found nothing: {}",
+            result["inbound_path_citations"]
+        );
+        assert!(
+            result["inbound_path_citation_count"].is_null(),
+            "the count must be null for the same reason the list is: {}",
+            result["inbound_path_citation_count"]
+        );
+    }
+
+    /// The scan must see a citing file that is UNTRACKED.
+    ///
+    /// **Untracked is the case that matters, not an edge case.** On this shared checkout the
+    /// citing file is routinely another session's work in progress, and a citation in an
+    /// uncommitted file breaks exactly as hard as a committed one. Dropping `--untracked`
+    /// from the `git grep` leaves this test's citer invisible and the count at 0 — a green
+    /// tree and a confident wrong number.
+    ///
+    /// The fixture's citer is deliberately never `git add`ed. **Do not "tidy" this by staging
+    /// it**: staged or committed, the assertion passes with or without `--untracked` and stops
+    /// discriminating, which no assertion in this file could then catch.
+    ///
+    /// Mutations this kills: removing `--untracked`; returning the catalog's `cites` edges
+    /// instead of a repo scan (there are none here, so the count would be 0).
+    #[tokio::test]
+    async fn the_citation_scan_sees_an_untracked_citing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for the scan to run at all"
+        );
+
+        // The artifact's OWN body must cite its own old path — a superseded note, which is the
+        // ordinary real case. This line is load-bearing and was added after a scout found the
+        // self-exclusion assertion below could not fail without it: `mk_ctx` seeds the body as
+        // `# Foo`, capital, and the scan is case-sensitive, so the artifact never matched its
+        // own stem and the exclusion was never exercised. Delete this write and that assertion
+        // goes green whether or not the filter exists.
+        let src = tmp.path().join("docs/trackers/foo.md");
+        let seeded = std::fs::read_to_string(&src).unwrap();
+        std::fs::write(&src, format!("{seeded}\nformerly `docs/trackers/foo.md`\n")).unwrap();
+
+        // Never staged. See the doc comment — the untracked-ness is the load-bearing detail.
+        let citer = tmp.path().join("docs/notes-citing-foo.md");
+        std::fs::create_dir_all(citer.parent().unwrap()).unwrap();
+        std::fs::write(&citer, "see `docs/trackers/foo.md` for the rationale\n").unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed: Vec<String> = result["inbound_path_citations"]
+            .as_array()
+            .expect("the scan ran, so the list must be present rather than null")
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+            .collect();
+
+        assert!(
+            listed.iter().any(|p| p.ends_with("notes-citing-foo.md")),
+            "the untracked citer must be named so the caller can re-point it: {listed:?}"
+        );
+        assert!(
+            !listed.iter().any(|p| p.ends_with("docs/archive/foo.md")),
+            "the artifact's own new path is not a citation of itself: {listed:?}"
+        );
+        assert_eq!(
+            result["inbound_path_citation_count"].as_u64(),
+            Some(listed.len() as u64),
+            "with a list this short the count and the sample must agree; they diverge only \
+         above the cap, and a count that disagrees below it means one of them is derived \
+         from the wrong set"
+        );
     }
 
     /// The archive confirmation must name two PROPERTIES — staged-ness and content — on

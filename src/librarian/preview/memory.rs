@@ -7,6 +7,7 @@ use crate::librarian::tools::ToolContext;
 use serde_json::{json, Value};
 
 const LATEST_OBSERVATIONS: usize = 3;
+// cap-class: RESULT_CAP preview.observation_text — probed
 const OBSERVATION_TEXT_MAX: usize = 200;
 
 pub fn extract(row: &ArtifactRow, body: &str, ctx: &ToolContext) -> Value {

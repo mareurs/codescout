@@ -4,6 +4,7 @@ use crate::librarian::catalog::artifact::ArtifactRow;
 use crate::librarian::preview::{headings, summary};
 use serde_json::{json, Value};
 
+// cap-class: RESULT_CAP preview.spec_headings — probed
 const MAX_HEADINGS: usize = 20;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {

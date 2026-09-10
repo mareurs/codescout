@@ -106,6 +106,29 @@ The 31 sites, in 14 files, reconcile as:
 The discriminator that sorts them is whether the fallback yields a **reported value**
 where the swallowed error could be a *code defect* rather than an expected absence.
 
+> ### RETRACTED 2026-09-09 — the clearing below is WRONG, and a wrong clearing is worse than none
+>
+> `grep -c .` prints `0` on an empty file **and** exits 1. `||` does not *replace* stdout,
+> it *appends* — so `seeded="$(grep -c . "$seed_log" 2>/dev/null || echo 0)"` yields
+> `$'0\n0'`, and the line renders as `0` / `0 inherited pair(s) marked unknown` across two
+> lines. Measured directly: `seeded=$'0\n0'`.
+>
+> I had the mechanism right and drew the opposite conclusion from it. The paragraph below
+> correctly states that grep prints 0 and exits 1, then concludes the fallback "normalizes
+> an exit status into the number it already means" — which would be true of a fallback that
+> substituted, and this one adds.
+>
+> **Filed independently as `d81efeef5252bfcc` by another session**, who found it after I had
+> published it as clear. That is the cost of the error and the reason it is retracted in
+> place rather than edited away: § *Testing Discipline* asks that a re-derivation which
+> confirms be published, because a confirmation is a **denominator**. A confirmation that is
+> *wrong* is not a denominator, it is a **foreclosure** — a finding invites the next reader
+> to check, a clearing tells them not to. Under-counting the 27 would have cost nothing;
+> mis-clearing one site cost someone else the rediscovery.
+>
+> The site count in the table above is therefore **26 correct, not 27**, and this is the
+> third shape in that table rather than a member of the first.
+
 **One candidate was checked and cleared, and that is recorded rather than dropped.**
 `scripts/install-hooks.sh:327` reads `seeded="$(grep -c . "$seed_log" 2>/dev/null || echo
 0)"`, which looks like a failure becoming the number `0`. It is not: `grep -c` exits **1**

@@ -627,23 +627,419 @@ has "and the banner actually printed"            "$OUT" "REFUSING THE PUSH"
 has "inline example survived as literal text"    "$OUT" '`git push origin main`'
 
 echo
-echo "== no unescaped backtick survives in the unquoted heredoc body =="
+echo "== no unescaped backtick survives in any unquoted heredoc body =="
 # The site-specific assertion above cannot see the NEXT inline example someone adds. This is
-# the class-level guard: scan the heredoc body for a backtick that is not backslash-escaped.
-HEREDOC_BODY="$(awk '/^cat >&2 <<EOF$/{inbody=1; next} inbody && /^EOF$/{inbody=0} inbody' "$GUARD")"
+# the class-level guard: scan every unquoted heredoc body for a backtick that is not
+# backslash-escaped.
+#
+# THE SCANNER IS DELIMITER-AGNOSTIC, and that is a fix rather than a flourish. It used to pin
+# the literal `<<EOF`, so a second banner opened as `<<WARN` was silently never scanned while
+# the old non-vacuity control still passed on the strength of the first body. Subtraction was
+# caught, addition was not. See docs/issues/2026-09-09-the-heredoc-scanner-sees-one-delimiter
+# -and-its-control-is-blind-to-an-added-opener.md.
+#
+# Defined as a function so the POSITIVE CONTROL below exercises this exact code rather than a
+# re-implementation of it — a second copy asserting about itself is indistinguishable from
+# coverage until you break the one that ships.
+scan_heredoc_bodies() {   # $1 = file
+    awk '
+        !inb && /<<[A-Za-z_][A-Za-z_0-9]*$/ { d = $0; sub(/^.*<</, "", d); inb = 1; next }
+        inb && $0 == d                     { inb = 0; next }
+        inb                                { print }
+    ' "$1"
+}
+HEREDOC_BODY="$(scan_heredoc_bodies "$GUARD")"
 LIVE_TICKS="$(printf '%s\n' "$HEREDOC_BODY" | grep -nE '(^|[^\\])`' || true)"
-is_empty() { [ -z "$2" ] && ok "$1" || no "$1" "unescaped backtick(s) in the heredoc body:
+is_empty() { [ -z "$2" ] && ok "$1" || no "$1" "unescaped backtick(s) in a heredoc body:
 $2"; }
-is_empty "heredoc body has no live backtick"     "$LIVE_TICKS"
-# NON-VACUITY CONTROL, and it is the reason the check above is worth anything. An emptiness
-# assertion is monotone under removal: rename the opener, or reflow it onto two lines, and
-# the awk matches nothing, LIVE_TICKS is empty, and this passes while scanning air. So pin
-# that the scanner found a real body -- the banner is ~145 lines, so 100 is a floor no
-# healthy edit crosses and no broken selector reaches.
-BODY_LINES="$(printf '%s\n' "$HEREDOC_BODY" | grep -c . || true)"
-[ "${BODY_LINES:-0}" -ge 100 ] \
-    && ok "and the scanner reached a real body ($BODY_LINES lines)" \
-    || no "and the scanner reached a real body" "found $BODY_LINES lines; the opener selector is stale, so the check above scanned nothing"
+is_empty "no heredoc body has a live backtick"   "$LIVE_TICKS"
+
+# CONTROL 1 — COVERAGE, not size. The floor this replaces was `BODY_LINES >= 100` against a
+# 114-line banner, which encodes "the banner is long" and not "the scanner is live"; the two
+# coincided by 14 lines. It reddened on an ordinary prose trim and stayed green on an added
+# opener, and its failure text named a cause ("the selector is stale") it had not measured.
+#
+# Counted with a DELIBERATELY DIFFERENT expression from the scanner's own regex, so this is
+# not the scanner agreeing with itself. The broad form admits the `<<-` indented variant and
+# a trailing space; the scanner's does not. Quoted openers (`<<'EOF'`) are excluded from both
+# on purpose — they do not interpolate, so they cannot substitute, and counting them would
+# red on a construct that is safe by definition.
+UNQUOTED_OPENERS="$(grep -cE '<<-?[A-Za-z_][A-Za-z_0-9]*[[:space:]]*$' "$GUARD" || true)"
+SCANNED_OPENERS="$(awk '!inb && /<<[A-Za-z_][A-Za-z_0-9]*$/{n++; inb=1; d=$0; sub(/^.*<</,"",d); next} inb && $0==d{inb=0} END{print n+0}' "$GUARD")"
+[ "${SCANNED_OPENERS:-0}" -eq "${UNQUOTED_OPENERS:-0}" ] \
+    && ok "the scanner reaches every unquoted heredoc ($SCANNED_OPENERS of $UNQUOTED_OPENERS)" \
+    || no "the scanner reaches every unquoted heredoc" "scanned $SCANNED_OPENERS of $UNQUOTED_OPENERS unquoted heredoc opener(s) — one is outside the selector, so its body was never checked above"
+
+# CONTROL 2 — POSITIVE, by mutating the production scanner's INPUT. "Never selects the wrong
+# one" and "never selects one at all" are the same assertion until something pins the
+# accepting case (.codescout/memories/test-design-discipline.md). So inject one live backtick
+# into every body of a COPY and require the scanner to find one hit per body. Invariant to
+# banner length and to rewording; red exactly when the selector goes stale or an opener form
+# appears that it cannot see.
+MUT="$(mktemp)"
+awk '
+    !inb && /<<[A-Za-z_][A-Za-z_0-9]*$/ { d = $0; sub(/^.*<</, "", d); print; print "  injected `probe` line"; inb = 1; next }
+    inb && $0 == d                     { inb = 0 }
+    { print }
+' "$GUARD" > "$MUT"
+MUT_HITS="$(scan_heredoc_bodies "$MUT" | grep -cE '(^|[^\\])`' || true)"
+[ "${MUT_HITS:-0}" -eq "${UNQUOTED_OPENERS:-0}" ] \
+    && ok "and it detects an injected backtick in every body ($MUT_HITS of $UNQUOTED_OPENERS)" \
+    || no "and it detects an injected backtick in every body" "found $MUT_HITS of $UNQUOTED_OPENERS injected ticks — the scanner is not reading the bodies it appears to"
+rm -f "$MUT"
+
+echo
+echo "== install-hooks.sh writes into the hooks dir git READS, from a linked worktree =="
+# WHY THIS EXISTS. Until 2026-09-09 `install_shim` wrote to "$git_dir/hooks/$hook_name". In
+# a linked worktree --git-dir is .git/worktrees/<name>, which has no hooks/ directory at
+# all, while git READS hooks from the common dir. Every write failed -- and because
+# install-hooks.sh runs `set -uo pipefail` with no `-e`, the unconditional
+# `echo "ok ... shim installed"` still printed three times and the script exited 0. No hook
+# anywhere, reported as installed. `--check` from the same cwd then said MISSING and its
+# printed remedy is the run that prints ok, so the two halves formed a loop with no exit and
+# each half was locally correct.
+#
+# THE LINKED WORKTREE IS THE LOAD-BEARING DETAIL OF THIS FIXTURE. Every other installer
+# section in this file uses a plain `git init` repo, where --git-dir and --git-path hooks
+# COINCIDE -- so the divergence cannot arise there and no assertion added there can ever
+# reach this, however many are written. Delete the `git worktree add` below and this whole
+# section still passes while testing nothing.
+#
+# ITS OBSERVED RED: restore `dest="$git_dir/hooks/$hook_name"` in scripts/install-hooks.sh
+# and the three PRESENT assertions plus the record-vs-reality pairing below all fail.
+# Observed 2026-09-09 against the production script before this section shipped.
+
+# ABSOLUTE, ALWAYS. `git rev-parse --git-path hooks` returns a RELATIVE `.git/hooks` from a
+# main checkout and an ABSOLUTE path from a worktree, so the bare value means different
+# things depending on who reads it and from where. Measured 2026-09-09: a verification
+# script for this very fix took the relative form and ran `rm -f "$hooks/pre-push"` from
+# another directory, deleting three live hooks out of the real checkout. Resolve once, here.
+hooks_dir_of() {
+    local d
+    d="$(git -C "$1" rev-parse --git-path hooks)"
+    case "$d" in /*) printf '%s\n' "$d" ;; *) printf '%s\n' "$1/$d" ;; esac
+}
+
+# No fakebin/pre-commit stub here, unlike the sections above: install-hooks.sh retired the
+# framework and now names `pre-commit` only inside an error string, so that stub is inert.
+installer_fixture() {  # -> $REPO, seeded and committed, with all three targets executable
+    new_repo
+    mkdir -p "$REPO/scripts"
+    cp "$INSTALLER" "$REPO/scripts/install-hooks.sh"
+    chmod +x "$REPO/scripts/install-hooks.sh"
+    for t in pre-commit-run post-index-change-stage-log pre-push-foreign-session-guard; do
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$REPO/scripts/$t.sh"
+        chmod +x "$REPO/scripts/$t.sh"
+    done
+    git -C "$REPO" config --unset core.hooksPath 2>/dev/null || true
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -q -m "seed with scripts"
+}
+
+installer_fixture
+WT="$REPO.wt"
+git -C "$REPO" worktree add -q -b wt "$WT" 2>/dev/null
+WT_GITDIR="$(git -C "$WT" rev-parse --git-dir 2>/dev/null)"
+WT_HOOKS="$(hooks_dir_of "$WT" 2>/dev/null)"
+
+# THE FIXTURE ASSERTS ITS OWN DISCRIMINATING PROPERTY FIRST. If these two ever coincide the
+# section below is vacuous -- it would pass identically against the broken script -- and
+# nothing else here would say so. Red on a `worktree add` that silently did not happen.
+if [ -n "$WT_GITDIR" ] && [ "$WT_GITDIR/hooks" != "$WT_HOOKS" ]; then
+    ok "fixture: a linked worktree's --git-dir diverges from --git-path hooks"
+else
+    no "fixture: a linked worktree's --git-dir diverges from --git-path hooks" \
+       "git-dir=$WT_GITDIR hooks=$WT_HOOKS -- the fixture cannot express the defect"
+fi
+
+( cd "$WT" && bash scripts/install-hooks.sh ) > "$WT.log" 2>&1
+WT_EC=$?
+eq "worktree install exits 0" "$WT_EC" 0
+
+WT_PRESENT=0
+for h in pre-commit post-index-change pre-push; do
+    if [ -x "$WT_HOOKS/$h" ]; then
+        ok "worktree install: $h landed where git reads hooks"
+        WT_PRESENT=$((WT_PRESENT + 1))
+    else
+        no "worktree install: $h landed where git reads hooks" \
+           "absent from $WT_HOOKS -- see $WT.log"
+    fi
+done
+
+# PAIRED, and not load-bearing on its own: it is monotone under removal, since an installer
+# that writes nothing anywhere also leaves this directory absent. It is here to catch the
+# other repair someone reaches for -- `mkdir -p "$git_dir/hooks"` -- which makes the three
+# assertions above red and this one the only witness that a hook git never reads was written.
+if [ ! -d "$WT_GITDIR/hooks" ]; then
+    ok "worktree install: nothing written into the worktree's private gitdir"
+else
+    no "worktree install: nothing written into the worktree's private gitdir" \
+       "$WT_GITDIR/hooks exists -- git does not read hooks from there"
+fi
+
+# RECORD VS REALITY. This is the assertion the defect was actually about: the script printed
+# three `ok ... shim installed` lines with zero shims behind them. Equality alone is
+# satisfied by 0 == 0, so the count is pinned too -- one of each, in both directions.
+WT_OK="$(grep -c 'shim installed' "$WT.log" || true)"
+if [ "${WT_OK:-0}" -eq 3 ] && [ "$WT_PRESENT" -eq 3 ]; then
+    ok "every 'shim installed' line has a shim behind it ($WT_OK claimed, $WT_PRESENT present)"
+else
+    no "every 'shim installed' line has a shim behind it" \
+       "$WT_OK claimed installed, $WT_PRESENT actually present -- see $WT.log"
+fi
+
+# And the loop closes: --check from the same cwd must now agree with the install that
+# preceded it. Before the fix this printed MISSING for all three and exited 1.
+( cd "$WT" && bash scripts/install-hooks.sh --check ) > "$WT.check.log" 2>&1
+eq "worktree --check agrees with the install that just ran" "$?" 0
+
+echo
+echo "== a failed write does not print ok, and does not exit 0 =="
+# INDEPENDENT OF THE PATH. Fixing only the destination leaves the defect underneath it: the
+# success line was never conditional on the write. `set -uo pipefail` omits `-e`, so a failed
+# `cat >` neither stops install_shim nor sets `fail`. This case removes write permission
+# instead of moving the path, so it stays meaningful even if the hooks dir is resolved some
+# third way later.
+installer_fixture
+FAIL_HOOKS="$(hooks_dir_of "$REPO")"
+chmod a-w "$FAIL_HOOKS"
+if [ "$(id -u)" = "0" ] || ( : > "$FAIL_HOOKS/.probe" ) 2>/dev/null; then
+    # Root ignores the mode bits, so the fixture cannot express a failed write. Say so out
+    # loud rather than passing: a silent skip is indistinguishable from a green assertion.
+    rm -f "$FAIL_HOOKS/.probe" 2>/dev/null
+    no "unwritable hooks dir: install reports FAILED, not ok" \
+       "SKIPPED -- $FAIL_HOOKS is still writable (running as uid $(id -u)); this case needs a non-root user"
+else
+    ( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/fail.log" 2>&1
+    FAIL_EC=$?
+    FAIL_OK="$(grep -c 'shim installed' "$REPO/fail.log" || true)"
+    FAIL_LOUD="$(grep -c '^FAILED' "$REPO/fail.log" || true)"
+    [ "${FAIL_OK:-1}" -eq 0 ] \
+        && ok "unwritable hooks dir: prints no 'shim installed'" \
+        || no "unwritable hooks dir: prints no 'shim installed'" \
+              "$FAIL_OK ok-line(s) with nothing written -- see $REPO/fail.log"
+    [ "${FAIL_LOUD:-0}" -ge 1 ] \
+        && ok "unwritable hooks dir: says FAILED and names the path" \
+        || no "unwritable hooks dir: says FAILED and names the path" "see $REPO/fail.log"
+    eq "unwritable hooks dir: exits non-zero" "$FAIL_EC" 1
+fi
+chmod u+w "$FAIL_HOOKS" 2>/dev/null || true
+
+echo
+echo "== the seeded stage-log count is one number, not two =="
+# `grep -c` reports its count on STDOUT and a different fact -- "did anything match" --
+# through its EXIT STATUS. The former `seeded="$(grep -c . "$seed_log" || echo 0)"` read the
+# status as failure, so an EMPTY seed log (a correct 0, exit 1) fired the fallback and
+# appended a second zero: `$seeded` became "0\n0" and the summary wrapped across two lines.
+#
+# TWO-SIDED ON PURPOSE. The wrap assertion is monotone under the seeding branch never running
+# at all -- an installer that prints no summary line satisfies "no line begins with a bare
+# count" perfectly. The paired positive pins that the branch DID run and rendered exactly one
+# summary line. The non-empty case is the CONTROL: without it every assertion here is equally
+# satisfied by a `seeded` hard-wired to 0.
+
+# --- empty index: the case that wrapped ---
+installer_fixture
+( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/seed.log" 2>&1
+SEED_LINES="$(grep -c 'inherited pair(s) marked unknown' "$REPO/seed.log" || true)"
+SEED_WRAP="$(grep -cE '^[0-9]+ inherited pair\(s\)' "$REPO/seed.log" || true)"
+eq "empty seed log: exactly one summary line" "${SEED_LINES:-0}" 1
+eq "empty seed log: no line begins with a bare wrapped count" "${SEED_WRAP:-0}" 0
+if grep -q 'seeded, 0 inherited pair(s) marked unknown' "$REPO/seed.log"; then
+    ok "empty seed log: renders a single 0"
+else
+    no "empty seed log: renders a single 0" "see $REPO/seed.log"
+fi
+
+# --- non-empty index: THE CONTROL ---
+# Two staged paths must render as 2, on one line. This is what makes the zero above a
+# measurement rather than a constant.
+installer_fixture
+printf 'a\n' > "$REPO/one.txt"
+printf 'b\n' > "$REPO/two.txt"
+git -C "$REPO" add -- one.txt two.txt
+( cd "$REPO" && bash scripts/install-hooks.sh ) > "$REPO/seed2.log" 2>&1
+if grep -q 'seeded, 2 inherited pair(s) marked unknown' "$REPO/seed2.log"; then
+    ok "non-empty seed log: counts the staged pairs (control)"
+else
+    no "non-empty seed log: counts the staged pairs (control)" "see $REPO/seed2.log"
+fi
+
+echo
+echo "== which FIELD names the branch depends on the push form =="
+# git's pre-push stdin is `<local-ref> <local-sha> <remote-ref> <remote-sha>`. Field 1 is
+# `refs/heads/<branch>` for `git push <remote> <branch>` and a BARE SHA for a refspec push
+# from a raw sha, because git then has no local ref to name. The guard filtered on field 1
+# alone, so the refspec form skipped the whole scan: exit 0, empty output, every foreign
+# commit published in silence.
+#
+# WHY IT WENT UNSEEN FOR SO LONG, AND WHY THIS BLOCK IS HERE RATHER THAN A WIDER SUITE:
+# this file's other ~90 assertions are all about the guard's PREDICATE -- who is refused.
+# None was about its REMEDY TEXT, and the remedy text recommends the bypassing form in so
+# many words ("use a refspec at EVERY rung"). So no mutation could reach it: following the
+# refusal correctly disarmed the guard that printed it. Measured 2026-09-09, 29 commits
+# from seven sessions published with the guard silent.
+# docs/issues/archive/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md
+new_repo
+commit "$ALICE" "alice base"
+FIELD_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+FIELD_TIP="$(sha)"
+
+# Row 1 -- refname form. THE POSITIVE CONTROL, and load-bearing: without it every row
+# below is satisfied by a guard that refuses nothing, and row 2 passing would say nothing
+# about the fix. It also proves the fixture's foreign set is non-empty.
+run "$ALICE" - "refs/heads/main $FIELD_TIP refs/heads/main $FIELD_BASE"
+eq  "refname form: refuses a foreign commit"  "$EC" 1
+has "refname form: names the foreign sid"     "$OUT" "$BOB"
+
+# Row 2 -- sha refspec form. THE DEFECT. Identical range, identical repo; only field 1
+# differs. Before the field-3 fallback: exit 0, 0 bytes.
+run "$ALICE" - "$FIELD_TIP $FIELD_TIP refs/heads/main $FIELD_BASE"
+eq  "sha refspec form: refuses too"           "$EC" 1
+has "sha refspec form: names the foreign sid" "$OUT" "$BOB"
+
+# Row 3 -- THE OTHER DIRECTION, and not optional. Rows 1-2 are monotone under a guard that
+# refuses everything, which would also refuse the tag push this guard must ignore.
+# MEASURED, both directions, 2026-09-09: reverting to the one-field filter reds row 2 and
+# leaves row 3 green; widening the fallback to accept ANY field-3 value reds row 3 and
+# leaves row 2 green. Each direction has its own witness, which is the property a
+# single-sided pair cannot have.
+run "$ALICE" - "refs/tags/v1 $FIELD_TIP refs/tags/v1 $FIELD_BASE"
+eq  "tag push: still skipped"                 "$EC" 0
+
+# Row 4 IS INERT -- ANNOTATED AS SUCH SO NOBODY CREDITS IT WITH COVERAGE IT DOES NOT HAVE.
+# It discriminates none of the three mutations tried: the one-field revert, the widened
+# fallback, AND removal of the `$ZERO` deletion check above all leave it green (96/0 under
+# the third). The reason is worth carrying, because it is not laziness in the assertion --
+# with the deletion check gone, a deletion row falls through and the range becomes
+# `<base>..0000000`, which names no valid object, so `git log` yields nothing, commit_rows
+# stays empty and the guard exits 0 ANYWAY. The row gets the right answer by a route that
+# has nothing to do with what it appears to test. Kept as a documentation pin of the
+# intended contract, NOT as a regression guard. If you need the deletion check itself
+# guarded, the assertion has to observe something a degenerate range cannot produce.
+run "$ALICE" - "refs/heads/main $ZERO refs/heads/main $FIELD_BASE"
+eq  "branch deletion: still skipped (INERT -- see comment)" "$EC" 0
+
+# ROW 5 -- THE REMEDY BRANCHES ON THE READER, not only on the range. A pusher who owns ZERO
+# commits in the range has no sha to name, so "use a refspec at every rung" is not merely
+# disarming (row 2) but INAPPLICABLE -- and the reader's next move is the branch form the same
+# text warns against. Register 2 of three in the parent bug; contributed by sessionId
+# 26cb9b5b-2c9c-489e-97d9-3a907c8b2941 from being in that state on a live push.
+#
+# ONE FIXTURE, ONE VARIABLE: rows 5a and 5b push the IDENTICAL range and differ only in who is
+# pushing. That is what makes the pair discriminating rather than two separate observations --
+# nothing about the commits, the ladder or the rung moves between them, so any difference in
+# the banner is attributable to $me alone.
+#
+# 5a IS THE PAIRED CONTROL AND IS NOT OPTIONAL. `hasnt <your-sha>:` on its own is monotone
+# under deleting the refspec advice for EVERYBODY, which is the fix the bug file explicitly
+# rejects (at mine_n >= 1 the advice prevents a real hazard). Only the pair reds in both
+# directions.
+#
+# MEASURED, both directions, 2026-09-10, on a COPY of the guard so the live one was never
+# briefly wrong on a tree four sessions share: forcing the branch always-true (the pre-fix
+# behaviour) reds 5b's three assertions and leaves 5a green; forcing it always-false reds 5a's
+# two and leaves 5b green. Each direction has its own witness.
+new_repo
+commit "$ALICE" "alice base"
+R5_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+commit "$ALICE" "alice on top"
+R5_TIP="$(sha)"
+
+# Row 5a -- pusher owns 1 of the 2. The refspec sentence must survive.
+run "$ALICE" - "refs/heads/main $R5_TIP refs/heads/main $R5_BASE"
+eq    "owns a rung: refused"                      "$EC" 1
+has   "owns a rung: refspec advice kept"          "$OUT" "git push origin <your-sha>:main"
+hasnt "owns a rung: not told they own nothing"    "$OUT" "YOU AUTHOR 0 OF"
+
+# Row 5b -- same range, a pusher who authored none of it.
+run "$CAROL" - "refs/heads/main $R5_TIP refs/heads/main $R5_BASE"
+eq    "owns nothing: refused"                     "$EC" 1
+hasnt "owns nothing: names no refspec to form"    "$OUT" "<your-sha>:"
+has   "owns nothing: says so, with the unit"      "$OUT" "0 OF THE 2 COMMIT(S)"
+has   "owns nothing: routes to the rung's author" "$OUT" "ASK THAT AUTHOR TO PUSH IT THEMSELVES"
+# ANSWERABILITY, not merely arrival (OB-20's measured ceiling): the party named must be asked
+# a question whose answers their state can actually occupy, so the three-state enumeration has
+# to reach this branch too. "Ask them" without it reproduces the unanswerable binary exactly.
+# THIS ONE IS INERT UNDER BOTH BRANCH MUTATIONS ABOVE -- ANNOTATED SO NOBODY CREDITS IT WITH
+# COVERING THE BRANCH. The three-state block is emitted unconditionally, outside $remedy, so it
+# survives either polarity. What it does guard is a future edit that moves the enumeration
+# INTO the mine_n >= 1 branch, or drops it -- the regression the ceiling predicts, and the one
+# no assertion in this block would otherwise see.
+has   "owns nothing: and the three states reach it" "$OUT" "not withheld, UNCLEARED"
+
+# ---------------------------------------------------------------------------- Row 6
+# The three CODESCOUT_PUSH_ACK residuals of
+# docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md,
+# plus a fourth raised by five authors independently on 2026-09-10 after a real ack push.
+#
+# 6a/6b are BEHAVIOURAL and carry each other's control. 6c-6e are SHAPE assertions on the
+# banner's prose and cannot tell you the remedy is correct -- only that the step still
+# exists. That is the documented ceiling for remedy text (CLAUDE.md § Testing Discipline:
+# arrival, never answerability), and it is worth the three lines because deletion is the
+# regression that actually happens.
+
+# Row 6a -- an ack that matched nothing BECAUSE THERE WAS NO FOREIGN POPULATION. Alice
+# authors both commits, so foreign_report is empty and the guard allows; the ack names Bob.
+# "Bob authored no commit in this push" is true and useless -- nobody did, and the pusher
+# needs to hear that the ack applied to an empty set rather than to a wrong sid.
+new_repo
+commit "$ALICE" "alice base"
+R6_BASE="$(sha)"
+commit "$ALICE" "alice again"
+R6_TIP="$(sha)"
+run "$ALICE" "$BOB" "refs/heads/main $R6_TIP refs/heads/main $R6_BASE"
+eq    "empty population: allowed"                 "$EC" 0
+has   "empty population: says the set was empty"  "$OUT" "no commits by another session"
+
+# Row 6b -- THE POSITIVE CONTROL, and 6a is vacuous without it. Same ack, but a foreign
+# population EXISTS and Bob is simply not in it. Here the old wording is the correct one, so
+# a fix that merely deleted it would pass 6a and red here. Carol's commit is the load-bearing
+# detail: remove it and this row collapses into 6a.
+new_repo
+commit "$ALICE" "alice base"
+R6B_BASE="$(sha)"
+commit "$CAROL" "carol foreign"
+R6B_TIP="$(sha)"
+run "$ALICE" "$BOB" "refs/heads/main $R6B_TIP refs/heads/main $R6B_BASE"
+has   "wrong sid named: still says authored no commit" "$OUT" "authored no commit in"
+hasnt "wrong sid named: does not claim an empty set"   "$OUT" "no commits by another session"
+
+# Rows 6c-6e -- the banner. Needs a refusal, so: a foreign commit and no ack.
+new_repo
+commit "$ALICE" "alice base"
+R6C_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+R6C_TIP="$(sha)"
+run "$ALICE" - "refs/heads/main $R6C_TIP refs/heads/main $R6C_BASE"
+eq    "ack semantics: refused"                    "$EC" 1
+
+# 6c -- the MIRROR of "a peer CANNOT grant", which the banner has stated in one direction
+# only. An ack is one operator's decision; it does not make the named authors' operators
+# parties to it.
+has   "ack semantics: ack does not speak for the named authors" "$OUT" "does not speak for"
+
+# 6d -- residual 3. The banner hands over a ready-made sid list, which reads as though the
+# guard had checked those sids against what the operator was told. It cannot: the decision is
+# formed in prose and the ack carries sids. Do not read this as closing that gap -- it
+# removes a false assurance and the bug file records why no binding is reachable.
+has   "ack semantics: the sid list is not a witnessed binding" "$OUT" "did not witness"
+
+# 6e -- the fourth state. Raised independently by 3 of 5 authors polled after the 2026-09-10
+# ack push (sids 26cb9b5b, 343d53e1, 59112612), the sharpest being "never resolved, only
+# overtaken". The three-state table enumerates what an AUTHOR can hold; an operator ack is
+# not an author state, so a push taken that way leaves every author UNCLEARED and the table
+# unable to describe the outcome. A reader who follows the guard correctly ends somewhere its
+# own vocabulary has no word for.
+#
+# Asserts the full emphasis phrase rather than the bare word "overtakes": the word alone also
+# matches the closing attribution sentence, so this row would stay green if the load-bearing
+# claim were deleted and only the provenance note left behind.
+has   "ack semantics: says the ack overtakes rather than resolves" \
+      "$OUT" "OVERTAKES THE THREE-STATE QUESTION RATHER THAN ANSWERING IT"
 
 echo
 echo "-------------------------------------------"

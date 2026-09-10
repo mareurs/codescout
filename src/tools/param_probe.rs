@@ -101,30 +101,42 @@ where
         let Some(desc) = spec_v["description"].as_str() else {
             continue;
         };
-        // Label convention: `<action>: …`, or `<a>/<b>/<c>: …` for a shared key. The
-        // slash split is load-bearing — without it a shared key matches no action and is
-        // skipped SILENTLY, which is how `librarian`'s `scope` sat unprobed while an
-        // archived IC-15 member was that exact key on that exact tool.
-        let Some(action) = desc.split(':').next().and_then(|l| l.split('/').next()) else {
-            continue;
-        };
-        if !spec.actions.contains(&action) {
-            continue;
-        }
+        // Label convention: `<action>: …`, or `<a>/<b>/<c>: …` for a key shared by several
+        // actions. The slash split is load-bearing — without it a shared key matches no
+        // action and is skipped SILENTLY, which is how `librarian`'s `scope` sat unprobed
+        // while an archived IC-15 member was that exact key on that exact tool.
+        //
+        // **Every token, and `checked` counts action/key PAIRS.** Taking only the first
+        // token left every later action unswept while `checked` still rose once per key, so
+        // the coverage loss read as coverage: deleting `doc`'s whole `"gather" =>` dispatch
+        // arm left the lib suite at 5007 passed, 0 failed
+        // (docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md
+        // and docs/issues/archive/
+        // 2026-09-02-param-probe-reads-only-the-first-slash-token-so-later-actions-are-unswept.md,
+        // the same defect filed twice a week apart). A floor compared against a per-key
+        // count cannot see a lost label, which is the one thing the floor exists for.
+        let label = desc.split(':').next().unwrap_or_default();
 
         let declared = spec_v["type"].as_str().unwrap_or("string");
-        let mut base_args = (spec.required)(action);
-        base_args.insert("action".into(), json!(action));
 
-        let base = call(Value::Object(base_args.clone())).await;
-        let mut probe_args = base_args;
-        probe_args.insert(name.clone(), ill_typed(declared));
-        let probed = call(Value::Object(probe_args)).await;
+        for action in label.split('/') {
+            if !spec.actions.contains(&action) {
+                continue;
+            }
 
-        if outcome(&base) == outcome(&probed) {
-            unhonored.push(format!("{action}:{name} (declared {declared})"));
+            let mut base_args = (spec.required)(action);
+            base_args.insert("action".into(), json!(action));
+
+            let base = call(Value::Object(base_args.clone())).await;
+            let mut probe_args = base_args;
+            probe_args.insert(name.clone(), ill_typed(declared));
+            let probed = call(Value::Object(probe_args)).await;
+
+            if outcome(&base) == outcome(&probed) {
+                unhonored.push(format!("{action}:{name} (declared {declared})"));
+            }
+            checked += 1;
         }
-        checked += 1;
     }
 
     (checked, unhonored)
@@ -136,6 +148,16 @@ where
 /// under the label convention breaking**: if `<action>:` prefixes were renamed away, every
 /// key would be skipped, `unhonored` would be empty, and the test would pass while
 /// checking nothing — the exact failure mode it is here to prevent.
+///
+/// **`floor` counts action/key PAIRS, not keys**, and a call site's value is measured
+/// rather than chosen — see each site's comment for the reading and its date. A floor
+/// carrying a per-key figure is satisfied by a sweep that lost every shared key's later
+/// actions, which is the defect
+/// `docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md`
+/// records: the
+/// margin between floor and count is exactly the number of labels that can go missing in
+/// silence, so these are set at the measurement and a schema shrink must move them
+/// deliberately.
 pub(crate) async fn assert_all_honored<F, Fut>(
     tool: &str,
     schema: &Value,
@@ -215,4 +237,79 @@ pub(crate) fn assert_required_are_advertised(tool: &str, schema: &Value, spec: &
         "{tool}: the required-param table supplied no keys for any action, so this \
          assertion checked nothing — `Spec::required` or `Spec::actions` has drifted"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stand-in tool: every action fails *after* deserialisation (so a base call is a
+    /// valid baseline, per `Spec::required`'s contract), and every action type-checks
+    /// `id` **except `beta`**, which discards it the way serde discards a field its
+    /// `Args` does not carry.
+    async fn honours_id_except_beta(args: Value) -> anyhow::Result<Value> {
+        let action = args["action"].as_str().unwrap_or_default().to_string();
+        if action != "beta" {
+            if let Some(v) = args.get("id") {
+                if !v.is_string() {
+                    anyhow::bail!("{action}: id must be a string");
+                }
+            }
+        }
+        anyhow::bail!("{action}: resolution failed")
+    }
+
+    fn spec(actions: &'static [&'static str]) -> Spec<'static> {
+        Spec {
+            actions,
+            accepts_any_json: &[],
+            required: |_| Map::new(),
+        }
+    }
+
+    /// `beta` is the SECOND slash token, and that placement is the whole test: a fixture
+    /// whose *first* action drops the key passes against the bug this guards. Reorder the
+    /// label to `beta/alpha` and this test still passes while discriminating nothing.
+    #[tokio::test]
+    async fn a_key_labelled_for_several_actions_is_probed_for_every_one() {
+        let schema = json!({
+            "properties": {
+                "id": {"type": "string", "description": "alpha/beta: the id"}
+            }
+        });
+
+        let (_checked, unhonored) =
+            sweep(&schema, &spec(&["alpha", "beta"]), honours_id_except_beta).await;
+
+        assert_eq!(
+            unhonored,
+            vec!["beta:id (declared string)".to_string()],
+            "a key labelled for two actions must be probed for both; only the action \
+             named first in the label was swept"
+        );
+    }
+
+    /// `checked` is what every call site's `floor` is compared against, so a count of
+    /// keys rather than action/key pairs leaves the floor unable to see a lost label.
+    #[tokio::test]
+    async fn checked_counts_action_key_pairs_not_keys() {
+        let schema = json!({
+            "properties": {
+                "id": {"type": "string", "description": "alpha/gamma/delta: the id"}
+            }
+        });
+
+        let (checked, unhonored) = sweep(
+            &schema,
+            &spec(&["alpha", "gamma", "delta"]),
+            honours_id_except_beta,
+        )
+        .await;
+
+        assert!(unhonored.is_empty(), "all three honour `id`: {unhonored:?}");
+        assert_eq!(
+            checked, 3,
+            "one key labelled for three actions is three action/key pairs, not one"
+        );
+    }
 }

@@ -26,6 +26,7 @@ pub const SERVER_INSTRUCTIONS: &str =
 /// (2200) sat above the real cliff, so the gate was wrong twice over while staying green.
 ///
 /// See `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.
+// cap-class: RESULT_CAP prompts.client_instructions_chars — probed
 pub(crate) const CLIENT_INSTRUCTIONS_CHAR_LIMIT: usize = 2048;
 
 /// Characters held back from the measured cliff. The limit was observed on one client
@@ -234,6 +235,14 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
     // `get_guide` — pull channels, read when the topic is live — not pushed at every
     // session that happens to contain one file of that language.
 
+    // TRIGGER for `prompts.trim_note_names` (`src/tools/core/cap_probe.rs`): this is the
+    // ONLY droppable persistent segment — every other one is `Anchor` or `Substitutable`,
+    // and `fit_dynamic_block` draws `trim_note`'s labels from neither. So `labels.len()`
+    // is at most 1 today, `MAX_NAMED_DROPS` (3) can never bind, and the `+2 more` branch
+    // is unreachable from `build_server_instructions`. ADDING A SECOND DROPPABLE
+    // PERSISTENT SEGMENT HERE MAKES THAT CAP LIVE, and makes the probe row citable via
+    // `the_trim_note_caps_the_names_it_lists`. That row is Deferred on reachability, not
+    // on missing evidence — the test already exists.
     if let Some(prompt) = &status.system_prompt {
         segs.push(StatusSegment {
             text: format!("\n\n## Custom Instructions\n\n{prompt}\n"),
@@ -400,6 +409,7 @@ fn fit_dynamic_block(static_part: &str, segments: &[StatusSegment]) -> String {
 /// trimmed" only tells it to distrust the whole block. Capped, because a note that grows
 /// with the losses it reports can consume the budget it is reporting on.
 fn trim_note(dropped: &[&'static str]) -> String {
+    // cap-class: RESULT_CAP prompts.trim_note_names — probed
     const MAX_NAMED_DROPS: usize = 3;
     if dropped.is_empty() {
         return String::new();
@@ -2325,6 +2335,14 @@ mod tests {
     /// CLAUDE.md § Development Commands and
     /// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
     ///
+    /// **Step 1 changed on 2026-09-09** from `cargo fmt` to `./scripts/fmt-mine.sh`, and
+    /// this test moved with the sentence rather than being deleted, per that section's own
+    /// instruction. The reason for the substitution is in the section; the reason it is
+    /// pinned here is unchanged — the gate is the contract every session pays on every
+    /// task. If the first command reverts to bare `cargo fmt`, this test must red, because
+    /// that reversion silently restores a step that rewrites other sessions' uncommitted
+    /// Rust (`docs/issues/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`).
+    ///
     /// Two traps this test is shaped around, both measured against CLAUDE.md on
     /// 2026-08-31 rather than reasoned about:
     ///
@@ -2341,10 +2359,11 @@ mod tests {
     ///    arbitrary. So this scopes to the directive sentence FIRST, then asserts
     ///    order within that slice.
     ///
-    /// Mutations it must die on, both demonstrated rather than assumed:
-    /// swapping the last two commands (ordering assertion), and deleting the
-    /// directive line outright (the `expect` on START) — two distinct failures,
-    /// because "the gate line is missing" must never read as "the order is fine".
+    /// Mutations it must die on, all demonstrated rather than assumed:
+    /// swapping the last two commands (ordering assertion), deleting the
+    /// directive line outright (the `expect` on START), and reverting step 1 to
+    /// `cargo fmt` (the GATE[0] needle) — three distinct failures, because "the gate
+    /// line is missing" must never read as "the order is fine".
     #[test]
     fn claude_md_gate_lists_its_four_commands_in_the_load_bearing_order() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
@@ -2352,14 +2371,16 @@ mod tests {
             std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
 
         // Scope first — see trap 2 above.
-        const START: &str = "**Run `cargo fmt`";
+        const START: &str = "**Run `./scripts/fmt-mine.sh`";
         const END: &str = "before completing any task.**";
 
         let start = claude_md.find(START).unwrap_or_else(|| {
             panic!(
                 "CLAUDE.md has no gate directive: expected a run beginning {START:?}. \
                  The gate is the contract every session pays on every task, so if it \
-                 moved, move this test with it — do not delete it."
+                 moved, move this test with it — do not delete it. If step 1 was reverted \
+                 to bare `cargo fmt`, that is the regression this needle exists to catch: \
+                 it rewrites every peer's uncommitted Rust."
             )
         });
         let rest = &claude_md[start..];
@@ -2373,7 +2394,7 @@ mod tests {
         // a presence one. A presence check would survive the exact swap this exists
         // to catch.
         const GATE: [&str; 4] = [
-            "`cargo fmt`",
+            "`./scripts/fmt-mine.sh`",
             "`cargo clippy --workspace --all-targets --features local-embed -- -D warnings`",
             "`cargo test --workspace --no-default-features`",
             "`cargo test --workspace`",
@@ -2429,7 +2450,10 @@ mod tests {
             .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
 
         // Same scoping discipline as the sibling test: find the gate section first.
-        const START: &str = "**Run `cargo fmt`";
+        // Anchor updated 2026-09-09 with the directive's step 1 (`cargo fmt` ->
+        // `./scripts/fmt-mine.sh`); this is the "move this test with it" its own panic
+        // message asks for, and there are TWO tests anchored on that sentence, not one.
+        const START: &str = "**Run `./scripts/fmt-mine.sh`";
         const END: &str = "The gate sentence above is pinned byte-for-byte by";
 
         let start = claude_md.find(START).unwrap_or_else(|| {
@@ -2588,6 +2612,7 @@ mod redesign_invariants {
     ///
     /// If you need to add content, author a `get_guide(topic)` entry and reference it
     /// from the slice — do not raise this number.
+    // cap-class: NOT_A_CAP — test-only ratchet asserting the static slice size; it bounds no runtime path
     const STATIC_SLICE_CHAR_BUDGET: usize = 1900;
 
     #[test]

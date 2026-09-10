@@ -127,10 +127,10 @@ result of having made it. The discriminator that follows from it:
 `python3 scripts/probe_tool_surface.py` § *TOP 20 SINGLE PARAMETERS*, not remembered.
 
 > **Corrected 2026-09-03, on both halves.** This paragraph read *"~2,155 B … `doc.patch`
-> 1,068, `edit_markdown.action` 578, `doc.new_rel_path` 509"* and ended **"SM-2 is the
+> 1,068, `edit_file.action` 578, `doc.new_rel_path` 509"* and ended **"SM-2 is the
 > mechanism that unpins it."**
 >
-> **(a) The figures and one of the names were wrong.** `edit_markdown` has not been a tool
+> **(a) The figures and one of the names were wrong.** `edit_file` has not been a tool
 > since the surface collapse; the parameter is `edit_file.action`. Writing a retired tool
 > name into a tracker trips nothing — `prompt_surfaces_reference_only_real_tools` covers
 > the three prompt surfaces and `claude_md_contains_no_deprecated_tool_names` covers

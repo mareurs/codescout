@@ -104,6 +104,7 @@ pub struct ServerEnv {
 /// at the parse site (rather than in `expire_idle`, which this task does not
 /// own) means a malicious or fat-fingered env var degrades to "TTL effectively
 /// never fires" instead of unwinding every guide-eligible call.
+// cap-class: NOT_A_CAP — clamp on a parsed env-var duration guarding a chrono overflow panic; it bounds a TTL, not any returned content
 const MAX_GUIDE_TTL_SECS: u64 = 60 * 60 * 24 * 365 * 100;
 
 /// Parse `CODESCOUT_GUIDE_TTL_SECS`, clamped to [`MAX_GUIDE_TTL_SECS`]. `None`
@@ -2188,19 +2189,12 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{
+        make_server, make_server_no_project, make_server_with_project_toml, test_env,
+    };
     use super::*;
     use crate::agent::Agent;
     use tempfile::tempdir;
-
-    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
-    /// ever reads, writes, or garbage-collects the real per-user state directory.
-    fn test_env(dir: &std::path::Path) -> ServerEnv {
-        ServerEnv {
-            guide_hints_dir: Some(dir.join("guide_hints")),
-            servers_dir: Some(dir.join("servers")),
-            ..Default::default()
-        }
-    }
 
     /// `100_000_000_000_000` secs is inside the measured live panic band:
     /// `Duration::from_std`'s own guard only rejects values adjacent to
@@ -2228,58 +2222,6 @@ mod tests {
             0,
             "a fresh stamp must not expire under a 100-year TTL"
         );
-    }
-
-    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
-        make_server_with_project_toml(None).await
-    }
-
-    /// `make_server`, plus an optional `.codescout/project.toml`.
-    ///
-    /// The file must be written BEFORE `Agent::new`, which is the only window in
-    /// which it is read: `ProjectConfig::load_or_default` runs during agent
-    /// construction, so a config written afterwards is invisible to the session.
-    /// That ordering is the whole reason this helper exists rather than callers
-    /// writing the file themselves after `make_server()`.
-    async fn make_server_with_project_toml(
-        project_toml: Option<&str>,
-    ) -> (tempfile::TempDir, CodeScoutServer) {
-        let dir = tempdir().unwrap();
-        let codescout_dir = dir.path().join(".codescout");
-        std::fs::create_dir_all(&codescout_dir).unwrap();
-        let ws_path = codescout_dir.join("librarian-workspace.toml");
-        std::fs::write(&ws_path, "").unwrap();
-        if let Some(project_toml) = project_toml {
-            std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
-        }
-
-        // `ServerEnv::librarian` only exists with the `librarian` feature on;
-        // without the gate this helper fails to compile under
-        // `--no-default-features` / `--features local-embed`.
-        #[cfg(feature = "librarian")]
-        let env = ServerEnv {
-            librarian: crate::librarian::LibrarianEnv {
-                workspace: Some(ws_path),
-                db: Some(codescout_dir.join("librarian.db")),
-                ..Default::default()
-            },
-            ..test_env(dir.path())
-        };
-        #[cfg(not(feature = "librarian"))]
-        let env = test_env(dir.path());
-
-        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-        let lsp = LspManager::new_arc();
-        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
-        (dir, server)
-    }
-
-    async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
-        let dir = tempfile::tempdir().unwrap();
-        let agent = Agent::new(None).await.unwrap();
-        let env = test_env(dir.path());
-        let server = CodeScoutServer::new_with_env(agent, env).await;
-        (dir, server)
     }
 
     #[tokio::test]
@@ -2861,7 +2803,12 @@ mod tests {
     /// property lets a caller satisfy the underlying need without ever naming the
     /// required key — so naming that key alone in `required` is false the moment an
     /// alias exists; the true requirement is an alternation, which a flat `required`
-    /// array cannot express and `anyOf` can.
+    /// array cannot express. Nor can anything else in the schema: the one construct
+    /// that states an alternation — a top-level `anyOf` — is rejected by the Anthropic
+    /// Messages API, which drops the whole tool client-side (see
+    /// `no_tool_schema_declares_a_top_level_combinator`). So the remedy is to say
+    /// NOTHING about which name is needed and enforce presence in `call()`. This gate
+    /// checks only that the schema does not state something FALSE.
     ///
     /// The alias relation is derived from the schema's own prose, not a hand-list: a
     /// property whose description opens `Alias for <name>` declares itself an alias of
@@ -2919,8 +2866,8 @@ mod tests {
             // reworded, instead of a global sum no single tool's reword can move.
             //
             // Alias counting must NOT be gated on a top-level `required` array
-            // existing — three tools (read_file, create_file, edit_file) express
-            // their path requirement entirely via `anyOf` and carry no top-level
+            // existing — three tools (read_file, create_file, edit_file) leave their
+            // path requirement to `call()` entirely and carry no top-level
             // `required` at all, so gating the count on `required` being present
             // (as the offender scan below correctly does, since an offender needs
             // a `required` to name the key) would silently record 0 aliases for
@@ -2954,8 +2901,10 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "these schemas name a required key that another property declares itself an \
-         alias of — the true requirement is an alternation; express it with `anyOf` \
-         (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
+         alias of — the true requirement is an alternation, which no schema construct \
+         the API accepts can state. Drop the key from `required` and enforce presence \
+         in `call()`; do NOT add a top-level `anyOf`, which is API-illegal and gets the \
+         tool dropped client-side:\n  {}",
             offenders.join("\n  ")
         );
     }
@@ -2981,7 +2930,7 @@ mod tests {
     /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
     /// `alias_offender_detection_catches_a_synthetic_offender`: derive a schema's top-level
     /// `required` array as `Vec<&str>`, or an empty vec when the schema has no `required` key
-    /// at all (the tools whose alternation is expressed purely via `anyOf`). Round 4 fix:
+    /// at all (the tools that leave their path alternation to `call()`). Round 4 fix:
     /// before this extraction, `find_alias_offenders` was shared and well-tested but its
     /// INPUT derivation was still two lines re-typed at both call sites — the reviewer set
     /// the production-only `required.iter().filter_map(...).collect()` line to `Vec::new()`
@@ -3130,81 +3079,156 @@ mod tests {
         );
     }
 
-    /// Companion to the prose-driven gate above — that gate is blind to an alias that
-    /// exists in code but is never advertised via matching schema prose (a property
-    /// whose description does not start "Alias for <name>", or that has no property at
-    /// all). `PATH_PARAM_ALIASES` (`src/fs/mod.rs`) is exactly that: a runtime accept-set
-    /// consumed directly by six tools and via `require_path_param`/`get_path_param` by
-    /// others, independent of whatever prose a schema does or does not carry. This test
-    /// is derived from that constant, not from prose, so rewording a description cannot
-    /// blind it.
-    ///
     /// Scope: tools verified by reading `call()` to reach `require_path_param` with
     /// `path` (or an alias) genuinely required — i.e. excluding tools where `path` is
     /// optional (`grep`, whose `required` is `["pattern"]` alone; `symbols`,
     /// `list_overview`, which use `get_path_param` with `path` optional).
+    ///
+    /// SUPERSEDED FORM, and the supersession is the point. Until 2026-09-10 this test
+    /// asserted the opposite of what it asserts now: that each of these schemas carries
+    /// an `anyOf` branch per accepted alias, so the schema *states* the alternation
+    /// `require_path_param` accepts. That is correct JSON Schema and unshippable — the
+    /// Anthropic Messages API rejects an `input_schema` carrying `oneOf`/`allOf`/`anyOf`
+    /// at the top level outright, so a client must drop such a tool before sending or
+    /// the whole request 400s. Seven tools were therefore unreachable from any session
+    /// whose client did not rewrite the construct, and the server never learned: it is
+    /// never consulted, so every server-side probe came back clean.
+    ///
+    /// So the alternation is now stated NOWHERE in the schema and enforced ONLY by
+    /// `require_path_param` (`src/fs/mod.rs`), which accepts `path` plus every
+    /// `PATH_PARAM_ALIASES` entry and fails with a hint naming them. What this test
+    /// still buys is the honesty half — the half a schema *can* express without a
+    /// combinator: a flat `required` must not name `path` OR any alias, because either
+    /// is a false claim the moment a sibling name discharges the same need. Widened
+    /// from the old form, which checked `path` alone: `required: ["file_path"]` is the
+    /// same lie and the old shape let it through.
     #[tokio::test]
-    async fn required_path_branch_covers_all_path_param_aliases() {
-        const TOOLS_REQUIRING_PATH_VIA_ALIASES: &[&str] = &[
-            "read_file",
-            "create_file",
-            "edit_file",
-            "edit_code",
-            "call_graph",
-            "references",
-            "symbol_at",
-        ];
+    async fn path_requiring_tools_never_name_path_or_an_alias_in_required() {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
+        let mut seen = 0usize;
         for t in &server.tools {
             if !TOOLS_REQUIRING_PATH_VIA_ALIASES.contains(&t.name()) {
                 continue;
             }
+            seen += 1;
             let schema = t.input_schema();
-            // A flat top-level `required: [..., "path", ...]` makes `path` mandatory
-            // even when an alias is supplied instead — the true requirement is an
-            // alternation, which only `anyOf` can express.
-            if let Some(req) = schema.get("required").and_then(|r| r.as_array()) {
-                if req.iter().any(|v| v.as_str() == Some("path")) {
+            let Some(req) = schema.get("required").and_then(|r| r.as_array()) else {
+                continue;
+            };
+            for name in std::iter::once("path").chain(crate::fs::PATH_PARAM_ALIASES.iter().copied())
+            {
+                if req.iter().any(|v| v.as_str() == Some(name)) {
                     offenders.push(format!(
-                        "{}: flat required=[...] names \"path\" directly, which cannot \
-                         be satisfied by {:?} even though require_path_param accepts \
-                         them at runtime",
+                        "{}: flat required=[...] names {name:?}, which a sibling in {:?} \
+                         can discharge instead — require_path_param accepts any of them \
+                         at runtime, so naming one alone is false. Drop it from \
+                         `required` and let call() enforce presence; do NOT reach for a \
+                         top-level `anyOf`, which is API-illegal (see \
+                         no_tool_schema_declares_a_top_level_combinator).",
                         t.name(),
-                        crate::fs::PATH_PARAM_ALIASES
+                        crate::fs::PATH_PARAM_ALIASES,
                     ));
-                    continue;
                 }
             }
-            // Every one of PATH_PARAM_ALIASES (plus "path" itself) needs its own
-            // anyOf branch requiring exactly that key, so the schema states the same
-            // alternation `require_path_param` accepts at runtime.
-            let branch_names: std::collections::HashSet<&str> = schema
-                .get("anyOf")
-                .and_then(|a| a.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|b| b.get("required").and_then(|r| r.as_array()))
-                        .flat_map(|r| r.iter().filter_map(|v| v.as_str()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let mut needed: Vec<&str> = vec!["path"];
-            needed.extend(crate::fs::PATH_PARAM_ALIASES.iter().copied());
-            for name in needed {
-                if !branch_names.contains(name) {
+        }
+        // Non-vacuity: this population is a hand-list intersected with the live
+        // registry, so a renamed or unregistered tool would silently drop out and leave
+        // the sweep green over nothing. Assert the intersection is complete.
+        assert_eq!(
+            seen,
+            TOOLS_REQUIRING_PATH_VIA_ALIASES.len(),
+            "expected to inspect all {} path-requiring tools, inspected {seen} — a name \
+             in TOOLS_REQUIRING_PATH_VIA_ALIASES no longer matches a registered tool, \
+             which would make this sweep vacuous for it",
+            TOOLS_REQUIRING_PATH_VIA_ALIASES.len(),
+        );
+        assert!(
+            offenders.is_empty(),
+            "these schemas name a path key in a flat `required` that an alias can \
+             discharge:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// The tools whose `call()` reaches `require_path_param` with `path` (or an alias)
+    /// genuinely required. Declared once and shared by the two tests around it.
+    const TOOLS_REQUIRING_PATH_VIA_ALIASES: &[&str] = &[
+        "read_file",
+        "create_file",
+        "edit_file",
+        "edit_code",
+        "call_graph",
+        "references",
+        "symbol_at",
+    ];
+
+    /// **Schema ACCEPTABILITY — the question the four schema-honesty gates could not ask.**
+    ///
+    /// The Anthropic Messages API rejects a tool whose `input_schema` carries `oneOf`,
+    /// `allOf` or `anyOf` at the top level:
+    ///
+    /// ```text
+    /// tools.N.custom.input_schema: input_schema does not support oneOf, allOf, or
+    /// anyOf at the top level
+    /// ```
+    ///
+    /// A client cannot forward one — the entire request 400s and the session dies — so
+    /// Claude Code drops the offending tool instead. **That is why no server-side check
+    /// could have caught this: the drop happens in the client, and the server is never
+    /// consulted.** Seven tools shipped unreachable for eight days (2026-09-02 →
+    /// 2026-09-10) behind four green schema gates, because every one of them asked
+    /// whether a schema was *honest* and none asked whether it was *sendable*.
+    ///
+    /// The defect had no observer by construction, in both directions: on a sanitizing
+    /// client (the one this was found on rewrites the construct into a synthesized
+    /// `Input constraint:` description line) all seven tools are present and the bug
+    /// cannot be reproduced, while on a forwarding client they are simply absent — with
+    /// no error naming a cause, since a tool that was never advertised is
+    /// indistinguishable from one that does not exist.
+    ///
+    /// Nested combinators are fine and deliberately unchecked — only the root object is
+    /// restricted. Scoped to the whole registry rather than a hand-list, because the
+    /// constraint belongs to the transport, not to any tool's semantics.
+    #[tokio::test]
+    async fn no_tool_schema_declares_a_top_level_combinator() {
+        const FORBIDDEN: &[&str] = &["oneOf", "allOf", "anyOf"];
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        for t in &server.tools {
+            let schema = t.input_schema();
+            for key in FORBIDDEN {
+                if schema.get(*key).is_some() {
                     offenders.push(format!(
-                        "{}: no anyOf branch requires {name:?}, but require_path_param \
-                         accepts it at runtime",
+                        "{}: input_schema has top-level {key:?} — the Anthropic Messages \
+                         API rejects it and the client drops the tool, so it goes \
+                         unreachable with no server-side symptom. State the constraint at \
+                         runtime instead (see require_path_param, src/fs/mod.rs); a \
+                         combinator nested inside a property is fine.",
                         t.name()
                     ));
                 }
             }
         }
+        // Non-vacuity: an empty or truncated registry would satisfy the assertion below
+        // by finding nothing. Pin that the sweep saw the tools this defect actually hit.
+        assert!(
+            server.tools.len() >= 15,
+            "expected the full tool registry, saw {} — this sweep passes trivially over \
+             an empty or truncated registry",
+            server.tools.len()
+        );
+        for name in TOOLS_REQUIRING_PATH_VIA_ALIASES {
+            assert!(
+                server.tools.iter().any(|t| t.name() == *name),
+                "{name} is absent from the registry this sweep walks, so the sweep says \
+                 nothing about the tool class the defect hit"
+            );
+        }
         assert!(
             offenders.is_empty(),
-            "these schemas' required/anyOf structure does not state the full path-param \
-             alternation PATH_PARAM_ALIASES accepts at runtime:\n  {}",
+            "these tools carry an API-illegal top-level schema combinator and will be \
+             dropped client-side:\n  {}",
             offenders.join("\n  ")
         );
     }
@@ -3610,7 +3634,20 @@ mod tests {
     /// caller who is already failing at exactly this.
     /// docs/issues/archive/2026-09-08-the-preamble-sentinel-is-absent-from-every-surface-a-caller-reads.md
     ///
-    /// **57_296 → 57_303 (2026-09-10, +7): `doctor` named on the shared `scope` clause.**
+    /// **Ratcheted DOWN 2026-09-03… → 2026-09-10, 57_296 → 56_485 (−811), by removing the
+    /// top-level `anyOf` path-alias block from all seven path-requiring tools.** These
+    /// bytes are not a saving that was earned by trimming prose — they were *unshippable*.
+    /// The Anthropic Messages API rejects `input_schema` carrying `oneOf`/`allOf`/`anyOf`
+    /// at the top level, so a client must drop the whole tool rather than forward it; the
+    /// 811 chars bought seven tools being invisible to any session on a non-sanitizing
+    /// client. The path alternation they stated is now enforced only by
+    /// `require_path_param` (`src/fs/mod.rs`) and gated by
+    /// `no_tool_schema_declares_a_top_level_combinator`.
+    ///
+    /// The headroom is removed rather than banked, per the rule above. Report run
+    /// 2026-09-10: TOTAL (21 tools) = 56_485.
+    ///
+    /// **56_485 → 56_492 (2026-09-10, +7): `doctor` named on the shared `scope` clause.**
     /// `doctor`'s `scope` argument was accepted and consumed by the tool, but the shared
     /// `scope` clause on `librarian`'s schema never named `doctor` among the actions it
     /// covers — so a caller reading the schema alone had no signal that the argument does
@@ -3620,7 +3657,7 @@ mod tests {
     /// neighbouring action's coverage to fund this one is the thing this log exists to
     /// forbid. docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
     ///
-    /// **57_303 → 57_359 (2026-09-10, +56): `reseat_worktree` named as the `fix` clause's
+    /// **56_492 → 56_548 (2026-09-10, +56): `reseat_worktree` named as the `fix` clause's
     /// one exception to "DRY RUN until confirm=true".** The `fix` param's schema description
     /// said every fix "is a DRY RUN until confirm=true" without qualification, but
     /// `reseat_worktree` never reads `confirm` and applies immediately — so a caller reading
@@ -3630,7 +3667,18 @@ mod tests {
     /// the surrounding clause was already at its operative-facts minimum, and trimming a
     /// neighbouring fix's coverage to fund this one is the thing this log exists to forbid.
     /// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_359;
+    ///
+    /// **The two entries above were authored against the 57_296 baseline** on
+    /// `doctor-per-project-isolation` and re-based onto the −811 ratchet when that branch
+    /// merged on 2026-09-10. Their GROSS costs (+7, +56) are what the additions actually
+    /// bought and are unchanged by the rebasing; only the endpoints moved, and they are
+    /// restated from the ratcheted base so the log reads as one sequence rather than two
+    /// that disagree about where they start. Both figures were re-measured after the merge
+    /// rather than carried across it — the two changes touch disjoint clauses of
+    /// `librarian`'s schema, so their costs compose, but that is a claim the report run
+    /// settles and not one arithmetic may assume.
+    // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_548;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -7865,9 +7913,178 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Test-only helpers shared by more than one test module.
+    //!
+    //! `call_tool_checked` lives here rather than in each consumer because
+    //! codescout routes `RecoverableError` to a SUCCESS result carrying
+    //! `{"ok": false}` — so `is_error` alone silently passes a failed call
+    //! (pinned by `recoverable_error_routes_to_success_not_is_error`). A
+    //! second copy is a second place to get that wrong, and a probe that
+    //! scored a rejected call as "capped, no marker" would report a
+    //! plausible finding instead of an error.
+    use super::*;
+    use crate::agent::Agent;
+    use serde_json::Value;
+    use tempfile::tempdir;
+
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    pub(crate) fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            servers_dir: Some(dir.join("servers")),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+        make_server_with_project_toml(None).await
+    }
+
+    /// `make_server`, plus an optional `.codescout/project.toml`.
+    ///
+    /// The file must be written BEFORE `Agent::new`, which is the only window in
+    /// which it is read: `ProjectConfig::load_or_default` runs during agent
+    /// construction, so a config written afterwards is invisible to the session.
+    /// That ordering is the whole reason this helper exists rather than callers
+    /// writing the file themselves after `make_server()`.
+    pub(crate) async fn make_server_with_project_toml(
+        project_toml: Option<&str>,
+    ) -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        let ws_path = codescout_dir.join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+        if let Some(project_toml) = project_toml {
+            std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
+        }
+
+        // `ServerEnv::librarian` only exists with the `librarian` feature on;
+        // without the gate this helper fails to compile under
+        // `--no-default-features` / `--features local-embed`.
+        #[cfg(feature = "librarian")]
+        let env = ServerEnv {
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(codescout_dir.join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        #[cfg(not(feature = "librarian"))]
+        let env = test_env(dir.path());
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        (dir, server)
+    }
+
+    pub(crate) async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        let env = test_env(dir.path());
+        let server = CodeScoutServer::new_with_env(agent, env).await;
+        (dir, server)
+    }
+
+    pub(crate) fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: server.agent.clone(),
+            lsp: server.lsp.clone(),
+            output_buffer: server.output_buffer.clone(),
+            progress: None,
+            peer: None,
+            section_coverage: server.section_coverage.clone(),
+            guide_hints_emitted: server.guide_hints_emitted.clone(),
+            workspace_override: None,
+        }
+    }
+
+    /// Consume the session-opening guide slot.
+    ///
+    /// The opener fires on the first guide-eligible call of ANY session
+    /// (`prompts::SESSION_OPENING_GUIDE`, dispatched from `Tool::call_content`).
+    /// Tests that measure a *domain* guide's own trigger must warm the ledger
+    /// first, or they measure the opener instead — which is exactly what made
+    /// seven of these tests fail when the opener was widened on 2026-08-16.
+    pub(crate) fn warm_ledger(ctx: &crate::tools::ToolContext) {
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+    }
+
+    /// Same dispatch as `call_tool`, but asserts the call actually succeeded
+    /// before returning its content. Guide injection only fires on
+    /// `call_content`'s success path, so a silently-failed call produces 0 B
+    /// of guide — indistinguishable from legitimate cross-call dedup unless
+    /// the call is checked for BOTH failure shapes: `is_error: true` (fatal
+    /// `anyhow` errors, e.g. `update`'s unknown-id path at
+    /// `librarian/tools/update.rs:369`) AND a `RecoverableError`, which
+    /// `route_tool_error` (this file) deliberately routes to `is_error: false`
+    /// with an `{"ok": false, "error": ...}` body (e.g. `get`'s unknown-id
+    /// path at `librarian/tools/get.rs:125-134`) — pinned by
+    /// `recoverable_error_routes_to_success_not_is_error`. Checking `is_error`
+    /// alone would silently pass a `RecoverableError`, undercounting the
+    /// session's real guide draw with no test failure to show for it.
+    /// `label` identifies the failing shape in the panic message.
+    pub(crate) async fn call_tool_checked(
+        server: &CodeScoutServer,
+        name: &str,
+        input: Value,
+        label: &str,
+    ) -> Vec<rmcp::model::Content> {
+        let ctx = shared_ctx(server);
+        warm_ledger(&ctx);
+        let result = server
+            .call_tool_by_name(name, input)
+            .await
+            .expect("dispatch ok");
+        assert!(
+            result.is_error.is_none_or(|e| !e),
+            "{label} call must succeed for its guide bytes to count — got: {:?}",
+            result.content
+        );
+        if let Some(primary) = result.content.first().and_then(|c| c.as_text()) {
+            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
+                assert_ne!(
+                    body.get("ok"),
+                    Some(&Value::Bool(false)),
+                    "{label} call returned a RecoverableError (isError:false, but \
+                     ok:false) — its guide bytes cannot count: {body}"
+                );
+            }
+        }
+        result.content
+    }
+
+    /// Every content block after the primary (index 0) — the auto-injected
+    /// guide blocks `call_content` appends, whether that is the single
+    /// whole-topic block (non-declaring topic) or N section-slice blocks
+    /// (declaring topic).
+    ///
+    /// `#[cfg(feature = "librarian")]`-gated: `guide_hint_tests`, its only
+    /// consumer, is itself librarian-gated. Ungated, this compiled under
+    /// `--no-default-features` with no caller, producing a permanent
+    /// dead-code warning on the lean lane that this attribute exists to
+    /// prevent (`bug-fix-session-log`-adjacent finding, fix round 1).
+    #[cfg(feature = "librarian")]
+    pub(crate) fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
+        content
+            .iter()
+            .skip(1)
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect()
+    }
+}
+
 #[cfg(feature = "librarian")]
 #[cfg(test)]
 mod guide_hint_tests {
+    use super::test_support::{call_tool_checked, guide_blocks, shared_ctx, warm_ledger};
     use super::*;
     use serde_json::{json, Value};
 
@@ -7989,19 +8206,6 @@ mod guide_hint_tests {
             .clone()
     }
 
-    fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
-        crate::tools::ToolContext {
-            agent: server.agent.clone(),
-            lsp: server.lsp.clone(),
-            output_buffer: server.output_buffer.clone(),
-            progress: None,
-            peer: None,
-            section_coverage: server.section_coverage.clone(),
-            guide_hints_emitted: server.guide_hints_emitted.clone(),
-            workspace_override: None,
-        }
-    }
-
     fn extract_hint(content: &[rmcp::model::Content]) -> Option<String> {
         let text = content.first()?.as_text()?.text.clone();
         let v: Value = serde_json::from_str(&text).ok()?;
@@ -8025,19 +8229,6 @@ mod guide_hint_tests {
             Some(t) => t.text.chars().take(600).collect(),
             None => format!("<{} content item(s), none textual>", content.len()),
         }
-    }
-
-    /// Consume the session-opening guide slot.
-    ///
-    /// The opener fires on the first guide-eligible call of ANY session
-    /// (`prompts::SESSION_OPENING_GUIDE`, dispatched from `Tool::call_content`).
-    /// Tests that measure a *domain* guide's own trigger must warm the ledger
-    /// first, or they measure the opener instead — which is exactly what made
-    /// seven of these tests fail when the opener was widened on 2026-08-16.
-    fn warm_ledger(ctx: &crate::tools::ToolContext) {
-        ctx.guide_hints_emitted
-            .lock()
-            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
     }
 
     /// Concatenate every content block of a result, for asserting on the
@@ -8093,62 +8284,6 @@ mod guide_hint_tests {
             .await
             .expect("dispatch ok")
             .content
-    }
-
-    /// Same dispatch as `call_tool`, but asserts the call actually succeeded
-    /// before returning its content. Guide injection only fires on
-    /// `call_content`'s success path, so a silently-failed call produces 0 B
-    /// of guide — indistinguishable from legitimate cross-call dedup unless
-    /// the call is checked for BOTH failure shapes: `is_error: true` (fatal
-    /// `anyhow` errors, e.g. `update`'s unknown-id path at
-    /// `librarian/tools/update.rs:369`) AND a `RecoverableError`, which
-    /// `route_tool_error` (this file) deliberately routes to `is_error: false`
-    /// with an `{"ok": false, "error": ...}` body (e.g. `get`'s unknown-id
-    /// path at `librarian/tools/get.rs:125-134`) — pinned by
-    /// `recoverable_error_routes_to_success_not_is_error`. Checking `is_error`
-    /// alone would silently pass a `RecoverableError`, undercounting the
-    /// session's real guide draw with no test failure to show for it.
-    /// `label` identifies the failing shape in the panic message.
-    async fn call_tool_checked(
-        server: &CodeScoutServer,
-        name: &str,
-        input: Value,
-        label: &str,
-    ) -> Vec<rmcp::model::Content> {
-        let ctx = shared_ctx(server);
-        warm_ledger(&ctx);
-        let result = server
-            .call_tool_by_name(name, input)
-            .await
-            .expect("dispatch ok");
-        assert!(
-            result.is_error.is_none_or(|e| !e),
-            "{label} call must succeed for its guide bytes to count — got: {:?}",
-            result.content
-        );
-        if let Some(primary) = result.content.first().and_then(|c| c.as_text()) {
-            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
-                assert_ne!(
-                    body.get("ok"),
-                    Some(&Value::Bool(false)),
-                    "{label} call returned a RecoverableError (isError:false, but \
-                     ok:false) — its guide bytes cannot count: {body}"
-                );
-            }
-        }
-        result.content
-    }
-
-    /// Every content block after the primary (index 0) — the auto-injected
-    /// guide blocks `call_content` appends, whether that is the single
-    /// whole-topic block (non-declaring topic) or N section-slice blocks
-    /// (declaring topic).
-    fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
-        content
-            .iter()
-            .skip(1)
-            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-            .collect()
     }
 
     /// Substitute every known rendering of a fixture root out of one emitted block.

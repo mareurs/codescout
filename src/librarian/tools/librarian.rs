@@ -244,7 +244,12 @@ mod tests {
             "librarian",
             &Librarian.input_schema(),
             &spec,
-            15,
+            // Floor is **action/key pairs**, not keys, and measured not chosen: 28 pairs,
+            // read 2026-09-09 from `sweep`'s own `checked`. Was 15, a figure derived when
+            // `sweep` probed only a shared key's first action — see
+            // `crate::tools::param_probe::assert_all_honored` for why the margin between
+            // floor and count is the number of labels that can go missing in silence.
+            28,
             |args| async move { Librarian.call(&mk_ctx(), args).await },
         )
         .await;

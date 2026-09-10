@@ -1517,7 +1517,7 @@ SELECT COALESCE(json_extract(input_json,'$.path'),
        COUNT(DISTINCT cc_session_id) AS sessions, COUNT(*) AS writes
 FROM tool_calls
 WHERE called_at >= date('now') AND input_json IS NOT NULL
-  AND tool_name IN ('edit_file','edit_code','edit_markdown','create_file','artifact')
+  AND tool_name IN ('edit_file','edit_code','edit_file','create_file','artifact')
 GROUP BY target HAVING COUNT(DISTINCT cc_session_id) > 1;
 ```
 

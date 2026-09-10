@@ -2599,6 +2599,7 @@ fn symbols_overview_single_file_cap_unit() {
         .map(|i| json!({ "name": format!("sym{i}"), "start_line": i + 1 }))
         .collect();
 
+    // cap-class: NOT_A_CAP — a unit test's own OutputGuard input; it bounds no shipped path
     const SINGLE_FILE_CAP: usize = 100;
     let total = symbols.len();
     let hint = format!(

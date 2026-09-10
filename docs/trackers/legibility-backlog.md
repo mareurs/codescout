@@ -131,10 +131,10 @@ _Per-key triage goes here — classify code-class vs tool-class, name the move, 
 **Confidence:** high.
 
 
-### src/tools/markdown/read_markdown.rs — ReadMarkdown/call ✅ CLOSED 2026-06-15
+### src/tools/markdown/read_file.rs — ReadMarkdown/call ✅ CLOSED 2026-06-15
 **Was:** Tier 2 (latent — `cost: {truncations:0, edit_fails:0, sessions:0}`) — over_budget_body, 446 ln / ~4798 tok. The primary markdown-reading tool; every `symbols(include_body)` on it buffered (~20 KB).
 **Scout (W-10):** the **third distinct seam shape** of the campaign. Unlike ArtifactAugment (lock-held `!Send` → sync helpers) and Symbols (lock-free but genuinely *async* → async helpers), here only the path-resolution prelude awaits (`project_root_for`/`security_config_for`); the four read branches (multi-heading, single-heading, line-range, default-tiers) hold no lock and contain **zero `.await`** — the `section_coverage.lock()` blocks never cross an await. So 4 of 5 helpers are plain **sync `fn`**; only `resolve_markdown_source` is async. No Send-future concern.
-**Move (`4d601b5d`, behavior-preserving; `cargo test` 2864 passed / 0 failed = baseline; clippy `--all-targets -D warnings` + fmt clean):** extracted `resolve_markdown_source` (async), `read_markdown_multi_heading`, `read_markdown_single_heading`, `read_markdown_line_range`, `read_markdown_default_tiers` (sync). `call` collapses to resolve → guard → params → validate → dispatch.
+**Move (`4d601b5d`, behavior-preserving; `cargo test` 2864 passed / 0 failed = baseline; clippy `--all-targets -D warnings` + fmt clean):** extracted `resolve_markdown_source` (async), `read_file_multi_heading`, `read_file_single_heading`, `read_file_line_range`, `read_file_default_tiers` (sync). `call` collapses to resolve → guard → params → validate → dispatch.
 **Instrument delta:** `symbols(include_body)` **buffered (~20 KB) → returns WHOLE** (446→55 ln); re-scan auto-closed the row (open 18→17).
 **Recon sub-miss (low):** first typed the threaded `resolved` param as `&Path`; the collaborators (`section_coverage::mark_seen`/`status`, `markdown_coverage`) take `&PathBuf`, so the first `cargo check` failed 5× E0308. Fixed in one cycle by threading `&PathBuf` (forwarded straight to those consumers, so `clippy::ptr_arg` stays quiet). Lesson: scout the *consumer* param types before choosing an extracted helper's signature.
 **Human-cost:** positive — `call` reads as a clean orchestrator; the four read strategies are separable and individually testable. Comments preserved verbatim.

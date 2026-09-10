@@ -28,7 +28,7 @@ entry_high_water_W: 3
 > records the high-water mark, and stamps `**Valid:**`:
 >
 > ```
-> artifact(action="append_entry", id="<this artifact id>", id_prefix="F",
+> doc(action="append_entry", id="<this artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
 >          title="<one-line title>", body="**Observed:** ...")
 > ```
@@ -763,7 +763,7 @@ this is a wording fix or a member.
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
 
-     artifact(action="append_entry", id="<this artifact id>", id_prefix="F",
+     doc(action="append_entry", id="<this artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
               title="<one-line title>", body="**Observed:** ...")
 

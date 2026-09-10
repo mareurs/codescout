@@ -1,0 +1,255 @@
+---
+kind: bug
+status: fixed
+tags:
+- cluster/guard-narrower-than-its-name
+closed: 2026-09-10
+opened: 2026-09-09
+owner: marius
+related: []
+severity: high
+---
+
+# BUG: the pre-push guard filters on the LOCAL ref shape, so `git push origin <sha>:<branch>` bypasses it entirely and publishes foreign commits with exit 0
+
+## Summary
+
+`scripts/pre-push-foreign-session-guard.sh` skips any stdin line whose **local** ref does not
+match `refs/heads/*`. A refspec push (`git push origin <sha>:refs/heads/<branch>`) reports the
+local side as a raw SHA, so the guard `continue`s past it, examines nothing, and exits 0 —
+publishing every foreign commit in the range silently.
+
+Both push forms send **the same commits**. Only the shape of the string on the left of the
+colon differs, and that string is the one thing the guard keys its decision on.
+
+## Symptom (Effect)
+
+Observed live 2026-09-09 by sessionId `b0015a98-e290-46de-8ed1-3c94bc73a987`, one command
+apart on this checkout:
+
+```
+git push origin experiments           -> REFUSED, naming 914c50aa / ad379a7c as foreign
+git push origin 0b07f9c8:experiments  -> SUCCEEDED, and published 914c50aa anyway
+```
+
+`914c50aa` carries `Session-Id: ad379a7c-a0cf-4c61-bcdb-f0696fea8c30` and that author had
+explicitly confirmed the **uncleared** state. It is now an ancestor of `origin/experiments`.
+
+The note the guard printed on the successful push is worse than silence:
+
+```
+CODESCOUT_PUSH_ACK named ad379a7c-a0cf-4c61-bcdb-f0696fea8c30, which authored no
+commit in this push, so the ack had no effect on it.
+```
+
+`authored no commit in this push` is **true of the population the guard built** (empty) and
+false of the push. The reassuring reading — *you named the wrong sid* — is the wrong one; the
+correct reading is *the guard is not looking there*.
+
+## Reproduction
+
+Throwaway with a local remote; nothing leaves the machine. Verified 2026-09-09 at
+`5f0e1fc3`:
+
+```
+$ # base commit (mine) pushed to establish refs/heads/experiments, then:
+$ #   FOREIGN commit  (sid bbbbbbbb-…)
+$ #   mine, on top of the foreign one
+$ git push origin experiments                          # A
+EXIT=1   REFUSING lines: 1
+$ git push origin "$TIP:refs/heads/experiments"        # B, same commits
+EXIT=0   REFUSING lines: 0
+$ git merge-base --is-ancestor "$FOREIGN_SHA" origin/experiments
+PUBLISHED                                              # guard bypassed
+```
+
+**The mechanism, isolated** — the guard invoked by hand with the *same range* and the *same
+commits*, varying only `local_ref`:
+
+```
+local_ref=refs/heads/experiments        exit=1  REFUSING=1
+local_ref=1d3367371ee77367d7d2606c22b9  exit=0  REFUSING=0
+```
+
+## Environment
+
+Linux, `experiments`, shared checkout, 13 live sessions. Platform-independent.
+
+## Root cause
+
+**The decision is keyed on the SOURCE of the refspec; the thing being protected is its
+DESTINATION.**
+
+- `scripts/pre-push-foreign-session-guard.sh:124` —
+  `case "$local_ref" in refs/heads/*) ;; *) continue ;; esac`
+
+git's pre-push hook receives `<local ref> <local sha> <remote ref> <remote sha>` per ref. For
+`git push origin <sha>:refs/heads/<branch>` the local side is a **commit object**, not a ref,
+so git reports the SHA there. The `case` fails, `continue` fires, and the loop body — which
+contains the entire foreign-commit analysis — never runs for that line.
+
+**The range computation is CORRECT and is not the defect.** `:131` is
+`range=("$remote_sha..$local_sha")`, which is exactly what git will send, ancestors included.
+The guard never reaches it. This distinction decides the fix: a repair aimed at the range
+would change a line that is already right and leave the bypass intact.
+
+`_remote_ref` is bound with a leading underscore at `:121` — deliberately unused. It holds
+`refs/heads/experiments` under **both** push forms, and it is the field that actually answers
+*"am I publishing to a branch?"*.
+
+Measured 2026-09-09 by the direct probe above, not inferred from reading the `case`.
+
+## Evidence
+
+### The refusal banner INSTRUCTS the reader to use the bypassing form
+
+This is not a guard evaded; it is a guard followed. Raised by sessionId
+`ad379a7c-a0cf-4c61-bcdb-f0696fea8c30`, verified in the banner's own text:
+
+```
+:296   You push yours by refspec once nothing foreign sits beneath it, say "done", they push
+:298   theirs, up to the top. ... Use a refspec at EVERY rung -- pushing the branch name
+       publishes the whole stack including commits above you:
+:301       git push origin <your-sha>:$branch
+:331   `git push origin $branch` satisfies "push what I authorised" to the letter while
+:333   sending whatever arrived since. ... send the decided set by sha.
+```
+
+So the refusal message tells the reader, twice and in imperative form, to use the exact push
+form the guard cannot see — and warns them *off* the branch-name form, which is the only one
+it examines. `b0015a98-e290-46de-8ed1-3c94bc73a987` reached the bypass by doing what the
+banner said, at the moment a reader is most likely to comply.
+
+**And the header shows the exclusion was never intended.** `:50-53` reasons about
+`git push origin <sha>:experiments` explicitly, calls reading the ref pairs from stdin
+*"strictly better than assuming the branch tip"* because that form "publishes a PREFIX", and
+cites a 2026-09-06 verification of it. The design anticipated the refspec route and meant to
+handle it; `:124` excludes it. Stated intent contradicted by the implementation, in the same
+file.
+
+**Class note.** This is the corpus's compliance-relocates-exposure shape at its limit. In the
+recorded instance of that shape — `git commit -- <paths>` narrowing capture to exactly the
+case a file-list `--stat` cannot detect — compliance *moved* the residual risk into the blind
+spot. Here compliance *disables the mechanism outright*, and the instruction to do so is
+carried by the mechanism's own alarm. The banner was written by the author of this bug file
+at `13b721f1`.
+
+### The suite cannot catch this by construction
+
+`tests/pre-push-foreign-session-guard.sh` drives the guard by piping stdin lines, and every
+one of them is written `refs/heads/main`. No fixture ever supplies a SHA-shaped local ref, so
+the excluded branch is unreachable from the suite however many assertions are added — the
+same shape as the linked-worktree gap fixed at `3f0d13b7`, in the same file.
+
+### It is the reachable half of a pair, and the other half over-refuses
+
+Reported by `b0015a98-e290-46de-8ed1-3c94bc73a987`, **not reproduced here**: force-pushing a
+*branch* ref computed its population against `origin/result-cap-marker-gate` (`2a32c043`),
+orphaned by a rebase, and demanded acks for **26 sessionIds** to publish **1** new commit —
+508 of the 509 in that range were already on `origin/experiments`. Same guard: refusal
+inflated by a stale positional ref, refusal evaded by a narrow selector, both silent. Filed
+here as context; it wants its own reproduction and may want its own file.
+
+## Hypotheses tried
+
+1. **Hypothesis** — the population is the tip commit only, so ancestors are never counted
+   (the shape first reported to me).
+   **Test** — read `:126-132`; then invoke the guard by hand with one range and two
+   `local_ref` shapes.
+   **Verdict** — **rejected.** The range is `"$remote_sha..$local_sha"`, which includes every
+   ancestor the remote lacks; with `local_ref=refs/heads/…` the same range refuses correctly.
+   The defect is upstream of the range, in the ref-shape filter. The correction matters: the
+   proposed fix (derive the population from `git rev-list <remote-ref>..<local-sha>`) would
+   rewrite a correct line and leave the bypass in place.
+
+## Fix
+
+**FIXED on `experiments` at `d6847322`**, patch-id
+**`03c1fcd5aee6ca1fb98399a0386437e33c586b06`**, published. Not by this file's author.
+
+The repair is the one prescribed below: decide the branch from **field 3** (the ref being
+UPDATED, which carries the branch under both push forms) when field 1 is a bare sha. The
+fix's own comment at `scripts/pre-push-foreign-session-guard.sh:126-132` records the sharp
+half of § *Evidence* in the code — *"that form is the one this guard's OWN remedy text
+recommends ("use a refspec at EVERY rung"), so following the refusal disarmed the guard that
+emitted it."*
+
+**Verified 2026-09-10 by re-running this file's own reproduction, and the result is exactly
+inverted:**
+
+| | at filing | after `d6847322` |
+|---|---|---|
+| `git push origin <branch>` | `EXIT=1` REFUSING | `EXIT=1` REFUSING |
+| `git push origin <sha>:refs/heads/<branch>` | `EXIT=0`, foreign **published** | `EXIT=1` REFUSING, **not published** |
+| direct probe, SHA-shaped `local_ref` | `exit=0` | `exit=1` |
+
+**The banner needed no rewording, which is the better outcome.** § *Evidence* argued the
+refusal text instructs the reader into the bypassing form. That is now *correct advice* — the
+recommended route is guarded — so the fix repaired the instruction by making the world match
+it rather than by editing the words. Nothing is owed on that finding.
+
+**TWO RESIDUALS ARE NOT FIXED AND HAVE MOVED**, so that archiving this file does not bury
+them: the inert-ack note's ambiguity (`:194-196`, unchanged) and the missing mirror on what
+an ack can grant. Both now live in
+`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
+The first is materially de-fanged by this fix — with the scan no longer skippable, an empty
+population is much harder to reach — but the sentence still cannot distinguish the two cases.
+
+Second, independent of the filter: **the inert-ack note must distinguish *no such author in
+the range examined* from *nothing was examined*.** As written it reports the same sentence for
+both, and for the second case that sentence is a false reassurance. An ack that matched
+nothing because the population was empty should say the population was empty.
+
+Third, a semantic gap in `CODESCOUT_PUSH_ACK` itself, raised by sessionId
+`b0015a98-e290-46de-8ed1-3c94bc73a987` and not addressed by either change above. The guard's
+banner already carries one half of this: *a peer can report what they were told; a peer
+cannot grant.* **The mirror is missing — a pusher's ack cannot grant on the AUTHOR's behalf
+either.** An ack records exactly one fact: that the pusher's operator decided to publish a
+named set. It is silent on whether each named author's operator would have, and it is not a
+consent aggregator. Nothing in the guard's text says so, and an ack naming six sessionIds
+reads as six authorisations while being one decision.
+
+Measured 2026-09-09 on this checkout: 39 commits published under an ack naming six sids,
+including 11 commits whose author had not been asked and whose operator had not requested a
+push. No harm — nothing was withheld — but the *record* of that push is indistinguishable
+from one where every author had consented, which is the property that makes it worth a line
+in the banner. It is the same three-state structure the guard already reasons about
+(*not withheld*, *uncleared*), with an external decision to publish as a fourth state that
+collapses into neither.
+
+## Tests added
+
+`d6847322` added 66 lines to `tests/pre-push-foreign-session-guard.sh`, a section named
+**`== which FIELD names the branch depends on the push form ==`**, carrying the SHA-shaped
+`local_ref` fixture this section asked for — the one input the previous 86-assertion suite
+could not express, because every fixture in it wrote `refs/heads/main`.
+
+Independently re-verified 2026-09-10 by the reproduction in § *Reproduction*, run against the
+fixed guard in a throwaway with a local remote. Both push forms now refuse and the foreign
+commit is not published; the by-hand probe over one fixed range returns `exit=1` for **both**
+`local_ref` shapes, where it returned `exit=1` / `exit=0` at filing.
+
+## Workarounds
+
+**Push by branch name.** `git push origin <branch>` is examined; `git push origin
+<sha>:<branch>` is not. The guard's own ladder advice — *"you push yours by refspec once
+nothing foreign sits beneath it"* — is safe only under a precondition it does not check, so
+until this is fixed that advice must not be followed while anything foreign is beneath you.
+
+## Resume
+
+N/A — fixed at `d6847322` (patch-id `03c1fcd5aee6ca1fb98399a0386437e33c586b06`), published on
+`experiments`, regression test present, reproduction independently re-run against the fix.
+
+The two unfixed residuals moved to
+`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
+
+## References
+
+- `scripts/pre-push-foreign-session-guard.sh:121-132` — the stdin loop, the ref-shape filter,
+  and the (correct) range computation.
+- `docs/trackers/observer-blindness.md` OB-20 — why the guard exists.
+- `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md` — the
+  hazard this bypass re-opens.
+- Reported by sessionId `b0015a98-e290-46de-8ed1-3c94bc73a987`, who measured the live pair;
+  the mechanism correction and the isolating probe are this file's.

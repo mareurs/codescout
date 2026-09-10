@@ -159,6 +159,7 @@ impl CachedResolver {
         /// Hard cap on files walked before giving up. Set so a typical
         /// project (1k–10k files) completes well under the MCP 60 s ceiling
         /// while a monorepo stops short instead of stalling the call.
+        // cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
         const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
 
         let walker = ignore::WalkBuilder::new(&self.root)
@@ -383,13 +384,11 @@ impl Tool for CallGraph {
                 "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },
                 "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "exploring: counts, auto-promotes full at <=30 edges. full: every edge; cap 200->500." }
             },
-            "required": ["symbol"],
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] }
-            ]
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
+            "required": ["symbol"]
         })
     }
 

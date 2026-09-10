@@ -273,7 +273,12 @@ fn the_script_edition_parser_discriminates() {
 /// What a `core.hooksPath` setting resolves to.
 #[derive(Debug, PartialEq, Eq)]
 enum HooksPath {
-    /// Not set. git uses `.git/hooks`, which is what `scripts/install-hooks.sh` writes.
+    /// Not set. git uses the common dir's `hooks/` — `.git/hooks` in a main checkout, and
+    /// the SAME directory from a linked worktree, whose own `.git/worktrees/<name>` holds no
+    /// hooks at all. That is what `scripts/install-hooks.sh` writes, via
+    /// `git rev-parse --git-path hooks` rather than `--git-dir`; naming only `.git/hooks`
+    /// here read as a claim that the worktree case was covered, which until 2026-09-09 it
+    /// was not.
     Unset,
     /// Set and the directory exists. A deliberate override; not this gate's business.
     PointsAtExisting(String),

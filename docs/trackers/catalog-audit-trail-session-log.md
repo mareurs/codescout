@@ -25,7 +25,7 @@ entry_high_water_W: 3
 > entries with:
 >
 > ```
-> artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+> doc(action="append_entry", id="<artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
 >          title="<one-line title>", body="**Observed:** ...")
 > ```
@@ -45,12 +45,12 @@ entry_high_water_W: 3
 > codescout's `statement-validity-session-log` starts at `statement-validity-session-log:F-2`/`statement-validity-session-log:W-3`
 > rather than `statement-validity-session-log:F-1`/`statement-validity-session-log:W-1` (see `statement-validity-session-log:F-3` there).
 >
-> **`edit_markdown` is not the append path**, though it works at first.
+> **`edit_file` is not the append path**, though it works at first.
 > This template ships without frontmatter, so a fresh copy is directly
 > editable — but once you declare `entry_prefix` to make the ledger
 > guarded (which `get_guide("tracker-conventions")` tells you to do), the
 > librarian guard refuses direct edits and only `append_entry` writes.
-> Reach for `edit_markdown` for the prose sections and the index tables,
+> Reach for `edit_file` for the prose sections and the index tables,
 > never for allocating an entry.
 >
 > **Lifecycle:**
@@ -700,7 +700,7 @@ F-4's counterfactual and is not independent evidence of it.
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:
 
-     artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+     doc(action="append_entry", id="<artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
               title="<one-line title>", body="**Observed:** ...")
 

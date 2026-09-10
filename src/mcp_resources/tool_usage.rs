@@ -17,6 +17,7 @@ pub const URI: &str = "doctor://tool-usage";
 
 /// Tools called < this many times in the window are flagged as prune
 /// candidates for the next prompt-surface review.
+// cap-class: NOT_A_CAP — inclusion predicate for the prune-candidate label; every tool still appears in tools[] and the threshold is published in the report
 const LOW_CALL_THRESHOLD: i64 = 5;
 
 /// Default analysis window when the resource is read.

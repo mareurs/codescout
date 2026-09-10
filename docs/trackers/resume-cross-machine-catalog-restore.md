@@ -35,7 +35,7 @@ of them describes any other host**.
 **To append:** one call, from the main checkout —
 
 ```
-artifact(action="append_entry", id="<this artifact's id>", id_prefix="CM",
+doc(action="append_entry", id="<this artifact's id>", id_prefix="CM",
          anchor_heading="## Template for new entries", title=…, body=…)
 ```
 

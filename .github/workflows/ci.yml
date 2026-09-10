@@ -83,6 +83,58 @@ jobs:
       - run: bash tests/file-provenance.sh
       - run: bash tests/peer-sessions.sh
 
+  # DELIBERATELY ITS OWN JOB rather than a fourth line in `shell-tests` above.
+  # `shell-tests` is a known-flaky lane -- ~25% on `hooks-discrimination.sh`, cause
+  # unknown, tracked in docs/issues/2026-09-08-the-shell-suites-lane-is-flaky-and-ci-
+  # endpoint-sampling-misattributes-it.md. Adding a suite to a lane that is already
+  # lying means every new red there gets attributed to whoever pushed last, and this
+  # suite's whole value is that its assertions are readable as verdicts.
+  #
+  # Why it is wired at all: it guards `.git/hooks/pre-push`, the mechanism OB-20 exists
+  # for, and until now it ran in NO job and NO gate command -- observer-blindness.md:2197
+  # says so outright: "it runs when someone runs it, so the assertion documents the shape
+  # and does not enforce it." An assertion nothing runs is decoration however carefully
+  # written.
+  push-guard-tests:
+    name: Pre-push foreign-session guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway git repos)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/pre-push-foreign-session-guard.sh
+
+  # ITS OWN JOB, for the reason spelled out above `push-guard-tests`: `shell-tests`
+  # is a known-flaky lane, and a suite whose assertions are meant to be read as
+  # verdicts loses that the moment its reds are attributable to lane noise.
+  #
+  # Needs a Rust toolchain, which the other shell suites do not — `fmt-mine.sh`
+  # shells out to `cargo fmt -- --check` and `rustfmt`, and its fixtures are real
+  # cargo projects under `mktemp -d`. That dependency is the second reason not to
+  # fold it into `shell-tests`.
+  #
+  # Why it is wired at all: `scripts/fmt-mine.sh` exists so that following the gate
+  # cannot rewrite another session's uncommitted Rust. A guard that ships unrun is
+  # exactly the shape CLAUDE.md § Testing Discipline calls decoration, and this one
+  # already shipped one defect that only a message assertion caught — its first
+  # partition matched the literal string "SHARED|PEER|UNKNOWN" and refused with the
+  # wrong reason, green on every exit-code and byte assertion.
+  fmt-mine-tests:
+    name: fmt-mine guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds throwaway cargo projects)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: rustup component add rustfmt
+      - run: bash tests/fmt-mine.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

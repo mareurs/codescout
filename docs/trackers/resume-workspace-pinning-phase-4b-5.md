@@ -35,7 +35,7 @@ Verified at the bytes 2026-08-28:
   read-tool migration.
 - **Phase 4a** (writes) — `workspace_override` reaches every write tool:
   `src/tools/symbol/edit_code.rs`, `src/tools/edit_file/mod.rs`,
-  `src/tools/create_file.rs`, `src/tools/markdown/edit_markdown.rs`,
+  `src/tools/create_file.rs`, `src/tools/markdown/edit_file.rs`,
   `src/tools/memory/mod.rs`. Regime-3 correctness is closed and was live-verified.
 - **The lock-ordering proof** — committed `69c91896`, and it is the mandatory gate
   for WP-1. Read it before touching the field type.
@@ -51,7 +51,7 @@ independent of them.
 **To append:** one call, from the main checkout —
 
 ```
-artifact(action="append_entry", id="<this artifact's id>", id_prefix="WP",
+doc(action="append_entry", id="<this artifact's id>", id_prefix="WP",
          anchor_heading="## Template for new entries", title=…, body=…)
 ```
 

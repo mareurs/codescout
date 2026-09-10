@@ -40,6 +40,7 @@ const DESIGN_VERSION: &str = "1";
 /// was never the right collision check anyway, since a title scan cannot catch a
 /// duplicate worded differently. Step 7 now sends the caller to a semantic
 /// `doc(find)` for that.
+// cap-class: RESULT_CAP tracker_design.existing_trackers — probed
 const EXISTING_TRACKERS_CAP: usize = 5;
 
 /// The archetype menu: `name` + `when_to_use` only.

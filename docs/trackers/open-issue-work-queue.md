@@ -21,7 +21,7 @@ expects_augmentation: docs/augmentations/docs-trackers-open-issue-work-queue.yam
 ## What this is, and what it is not
 
 A **sequencing layer** over the open bug ledger, snapshotted 2026-08-16 from
-`artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})` — 17 rows.
+`doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})` — 17 rows.
 
 It exists because the ledger answers *what is broken* but not *what to pick up next*. A flat
 `status="open"` query cannot express readiness, blockers, or the fact that two entries need the same
@@ -38,7 +38,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 > catalog (`~/.local/share/librarian/catalog.db`), which is **not** in the repo — so without this
 > section the queue would be invisible to git and to any other checkout. Re-render it when rows
 > change. Query the live rows with
-> `artifact(get, id="9a892c2a5976e296", entry_filter={"status":{"eq":"open"}})`.
+> `doc(action="get", id="9a892c2a5976e296", entry_filter={"status":{"eq":"open"}})`.
 
 | ID | Ph | Task | Status | Bug |
 |----|---:|------|--------|-----|
@@ -89,7 +89,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `8400845b81ff0475` |
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
-| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
+| BL-48 | 1 | `edit_file`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that. Hint fix `ff90ce41`, patch-id `9da21228d4392923`; **observed live** in the running release binary on 2026-08-30 when `workspace(post_compact=true)` returned the new text after a compaction — first sighting in the wild, so this row reports it rather than inferring it from source | `d7072ed21959aca1` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | **done 2026-08-31** — item (3) discharged on the host that held the shapes; `e799f29d` + `1ad9af66` + `f565504a` + `e1b91221` + `c2039a16` (patch-id `63a943ba8e2a1a9b`), gate green 4834/0 full, 3360/0 lean. Shape travels in `docs/augmentations/<flattened-path>.yaml`; `reindex` re-attaches when the row is ABSENT and never overwrites a live one; `params` do not travel. The 9 shapes here are exported and committed, declarations upgraded to paths, verified live (0 `augmentation_declaration_unparseable`). Write-through CLOSED by `5f88be65` (patch-id `59ba22f9d7a6dfed`) — `artifact_augment` pushes a shape change to an *existing* sidecar at both write sites, mutation-verified per site; export still only CREATES. The note previously in this cell, *"not blocking — the export is idempotent"*, was wrong: idempotence was the defect's mechanism, not its mitigation (R-131), and it fired live within a day at `2a8decc5`. Not covered: drift from outside `artifact_augment` (hand-edit, graft, worktree merge) is still undetected — a `sidecar_shape_drift` check is the natural follow-on. Detection added by `03b86cd7` (`sidecar_shape_drift` + `sidecar_unparseable`), so the invariant no longer depends on call-site enumeration; it reports and has no `fix=`, and its first live run justified that better than the argument did — the queue drifted in BOTH directions at once, so direction is not even a property of an artifact. Repaired at `b05af94f`; check reports 0. **(3) UNBLOCKED 2026-08-30** — `git push origin experiments` landed 209 commits (`894a5e26..b05af94f`); all six sidecar-mechanism commits are on `origin/experiments` with 9 sidecars published. **CLOSED 2026-08-31** (`1ec456a4`, patch-id `a1967b8b671cba1c`) — "THERE" was this desktop, whose catalog held all 23. Corpus 9 → 23, 0 failures; probe reports 23/23 restored into a catalog that never held them, 23 distinct prompts, `params={}`. It was **14**, not 13: `claim-decay.md` was augmented and declared nothing | `11dec5e144ba0482` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `d91e96485308ee2f` |
@@ -98,7 +98,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | mitigated + archived 2026-09-02 (`3ccfefb2`) — per-call pinning is a probe-verified escape; the structural half was **declined**, not deferred | `6a3bb4d968d1d514` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
-| BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
+| BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **done** `953c98f3`, patch-id `8de7522768dd6dac…` — fixed by the key-set coverage test this row asked for, not a fourth round of flags: the guard reads the scanner's `struct Args` field names out of source and refuses any param that is neither emitted nor declared-omitted-with-a-reason, so it reds on ADDITION to the tool, the direction all four instances failed in. Root cause is no longer inferred from `--help` — it was `Map::new()` in the wrapper, read at the bytes. `--scope` is the one declared omission, pending `d4b61746950b86b7` | `4692a5219854dcce` |
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
 | BL-66 | 3 | `probe_ollama` is the one TLS construction site in either tree that installs no crypto provider, and its failure is reported as "Ollama is not reachable" | **done, archived** — `1909e5f0`, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`. Fourth instance of the root/crate asymmetry, found by enumerating call sites of `install_default_crypto_provider` rather than by pairwise diff — `probe_ollama` has no root twin. **The reproduction falsified three premises of this row.** It **panics** inside `ClientBuilder::build()` rather than returning `Err`, so the "Ollama is not reachable" misreport described here is unreachable code and never prints; the URL scheme is irrelevant, so plain `http://localhost:11434` panics identically; and severity was `low` on an operator-with-TLS theory when in fact **every external consumer aborts at zero configuration**. (a) shipped; (b) dropped, its premise being the false one | `a7af9964a16e8056` |
 | BL-67 | 2 | `export_augmentations` will not rewrite a sidecar whose shape changed, so a `params_schema` edit silently does not travel | **done, archived** — `5f88be65`, patch-id `59ba22f9d7a6dfed66fcd8e551e09455b5c58f32`. A peer commit that does not name this entry, closed by a **verify-open pass** rather than a gate. **The title now describes intended behaviour:** `export_augmentations` still reports `exported: 0` for a stale-but-existing sidecar, correctly — export CREATES, never refreshes. The fix is one layer up: `artifact_augment` writes a shape change through to an existing sidecar at both shape-writing sites, byte-guarded so a params-only merge leaves the file untouched by construction, and sidecar-ahead (BL-50's restore path) stays untouched. Re-reproduced end-to-end on a throwaway artifact: prompt and enum both travelled with no export step, after which export reported `0` — the original symptom's number, now meaning the opposite, which is why the naive check reads as *not fixed* | `689fb62e40557480` |
@@ -117,7 +117,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
-> archived, and `artifact(action="move")` re-keys, so params carried the new ids while
+> archived, and `doc(action="move")` re-keys, so params carried the new ids while
 > this snapshot still cited `db02045fdbaaf860` / `ea21099f9d39f734` — neither of which
 > resolves any more. Three rows had drifted (BL-2, BL-26, BL-27) and BL-31 was missing
 > entirely.
@@ -131,11 +131,11 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 >
 > That is **BL-29** demonstrated, not a lapse: `update_entry` and `move` both write
 > catalog-only state, so every entry-grain write silently ages this table. The check that
-> catches it is `artifact(get, entry_filter=…)` against the live params before trusting
+> catches it is `doc(action="get", entry_filter=…)` against the live params before trusting
 > any row here — an id that returns `count: 0` is archived, not deleted.
 >
 > Earlier note, still true: BL-1, BL-20 and BL-22 were flipped with
-> `artifact(action="update_entry", …)`. The note that used to sit here said the flip was
+> `doc(action="update_entry", …)`. The note that used to sit here said the flip was
 > unsafe because there was no entry-grain update; that was BL-20, and it is now fixed.
 > Its own row was the first thing the fix was used on.
 
@@ -756,14 +756,27 @@ what a false negative looks like from the caller's side, which is this project's
 most-repeated law (`reconnaissance-patterns` law C, a zero that lies).
 ### BL-65 — the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only
 
-**Status:** open — unowned, self-contained, phase 1.
+**Status:** **done** 2026-09-09 — `953c98f3`, patch-id
+`8de7522768dd6dacacd293eae5d881442470422a` (**experiments**). Fixed by the key-set test
+this entry and `BL-60`'s Resume both argued for, not by a fourth round of flags.
 
 **Valid:** dated 2026-08-30
 
-`docs/issues/2026-08-30-cli-doctor-exposes-no-fix-flag.md`. `librarian(action="doctor",
+`docs/issues/archive/2026-08-30-cli-doctor-exposes-no-fix-flag.md`. `librarian(action="doctor",
 fix=…)` offers six repairs; `codescout doctor` offers none — its args are `--project`,
 `--json`, `--no-color`, `--fail-on-violations`. The subcommand's own help calls it a
 "Read-only scan", which is accurate about the CLI and describes half of what `doctor` is.
+
+**Both halves are closed.** Seven of the scanner's eight params are now flags, and the
+`about` text no longer says "Read-only scan" — it also stopped enumerating four checks,
+which was feeding
+`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
+The eighth param, `scope`, is deliberately not exposed and the omission is **declared** in
+`SCANNER_PARAMS_THE_CLI_OMITS`: the scanner accepts and validates it and never widens the
+scanned population with it, so a `--scope` flag's only observable effect would be making
+the report assert a scope it did not apply. That stays open as
+`docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`, and the
+flag lands in the same commit as the selector.
 
 **Third instance of one mechanism in one day.** The CLI keeps its own clap structs and
 hand-marshals into the tool's JSON; `Args` carries no `deny_unknown_fields` and every

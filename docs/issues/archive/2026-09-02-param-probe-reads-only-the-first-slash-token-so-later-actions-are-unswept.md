@@ -1,10 +1,12 @@
 ---
-id: ef3e685d69e34321
+id: efd7c410df7bdcfb
 kind: bug
-status: open
+status: fixed
 title: 'BUG: param_probe reads only the first slash token of a shared label, so every later action is unswept'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-09-09
+unverified: 'The prescribed second half (emit `checked N of M labelled pairs`) was judged obviated by the parser fix rather than implemented — reasoning in the Fix section. Residue: keys skipped for `accepts_any_json` or for carrying no `<action>:` label remain uncounted anywhere.'
 ---
 
 ## Summary
@@ -105,15 +107,56 @@ key/action pairs the probe *decided to look at*, and nothing reports the pairs i
 point of use. That half matters more than the parser fix — the parser bug is one line, the
 missing denominator is why nobody noticed for the life of the probe.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+Fix SHA: `80c4fd1e3a7a6507bc2c75cbfcd78b3f9f678e37` (**experiments**)
+Patch-id: `3f662b6154f5c76751495977cbab12b650518e8f`
+
+**Duplicate filing.** The same defect was filed again a week later as
+`docs/issues/archive/2026-09-09-param-probe-checks-one-action-per-shared-key.md`, tagged
+`cluster/selector-narrower-than-its-population` where this one is tagged
+`cluster/guard-narrower-than-its-name`. One commit closes both. Two authors independently
+read one narrow selector as two different architectural problems, which is a datapoint
+about the two classes rather than a filing error — neither tag is wrong.
+
+**The parser half is fixed as prescribed.** Measured after the widening (2026-09-09, from
+`sweep`'s own `checked`): `doc` **80** pairs against the 58 quoted above, `librarian`
+**28**, `library` **1**. The ~12-pair estimate for `doc` was low; the real figure is 22.
+
+**The denominator half was judged OBVIATED, not skipped — dispute this if you disagree.**
+The argument for `checked N of M labelled pairs` was that `checked` counted pairs the
+probe decided to look at while nothing reported the pairs it declined. With the loop
+fixed, every labelled pair whose token names a real action *is* probed, so `M == N` by
+construction — a denominator that cannot differ from its numerator is an assertion that
+cannot fail (`IC-16`), and adding one here would ship that class into the guard that
+exists to catch a neighbouring one. What the raised floors do instead is make a future
+narrowing visible: they are set **at** the measured pair counts, so any selector change
+that drops pairs reds rather than passing quietly.
+
+What that argument does **not** cover, and is the residue worth naming: keys skipped for
+`accepts_any_json` or for carrying no `<action>:` label at all are still uncounted, and a
+denominator would have surfaced those too. `accepts_any_json` is at least declared
+per-site as an admission; the unlabelled population is not counted anywhere.
 
 ## Tests added
 
-None yet. Acceptance is the § Reproduction step 2 mutation going **RED** — deleting a dispatch arm
-for an action named after a slash must fail the probe. Keep step 3 as the control; a fix that makes
-step 2 red while breaking step 3 has moved the blind spot rather than closed it.
+Two, in `src/tools/param_probe.rs`'s own `tests` module — which did not exist before this
+fix, and that absence is why a one-token selector bug survived in the shared IC-15
+detector for four tools.
 
+**Acceptance was NOT taken via this file's § Reproduction step 2.** That step prescribes
+deleting `doc`'s `"gather" =>` dispatch arm and observing a red — an armed mutation in a
+shared checkout, which is itself an open defect here
+(`docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`):
+a peer running the gate cannot tell a deliberate red from a real one. The same
+discrimination is available without arming anything, from a synthetic two-action schema:
+
+- `a_key_labelled_for_several_actions_is_probed_for_every_one` — the fixture's dropped key
+  belongs to the **second** slash token, which preserves this file's step-3 control: a
+  fixture whose *first* action drops the key passes against the bug. Watched red at
+  `unhonored: []` where `["beta:id (declared string)"]` was owed.
+- `checked_counts_action_key_pairs_not_keys` — watched red at `1` where `3` was owed.
+
+Both run in **both** lanes; `param_probe` is deliberately feature-independent. Verified by
+reading the two test names out of the lean lane's output, not from its total.
 ## Workarounds
 
 When adding an action to a tool with shared parameter labels, do not rely on the probe. Add an
@@ -136,4 +179,3 @@ across all four probe sites and add the `N of M` denominator; the delta between 
   (`571720406a0b7f4a`).
 - `CLAUDE.md` § *Testing Discipline* — "A count of a defect population must arrive with its unit or
   not at all", and "Loudness is a property of a PATH, not of a failure".
-

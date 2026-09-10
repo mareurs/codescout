@@ -1,14 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/doc-contradicted-by-code
+closed: null
+fix_patch_id: 371bee7c5081481311866cd797d7591abb2c5bc3
+fix_sha: dac1068a5e9f9f3265da091dcda1fa20f9da8592
+fixed: 2026-09-09
 opened: 2026-09-02
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/archive/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
-tags:
-  - cluster/doc-contradicted-by-code
-kind: bug
+- docs/issues/archive/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
+severity: low
 ---
 
 # BUG: `artifact.patch`'s schema text describes a failure that `60df0d76` removed, on every request
@@ -104,17 +107,19 @@ defect, published on a surface no date-bounding reaches.
 
 ## Fix
 
-Plan, not implemented. Replace the opening of the `patch` description with the current
-contract, roughly:
+Fixed in `dac1068a` (patch-id `371bee7c5081481311866cd797d7591abb2c5bc3`) — Task 3 of the
+tool-surface collapse, whose subject names this directly: *"retire the stale patch text"*.
 
-> update: the fields to change. Accepted keys: … . Top-level `status`/`title`/`owners`/
-> `tags`/`topic`/`time_scope`/`extra` are lifted into `patch` and reported under
-> `corrections`; an update that changes nothing is refused.
+The sentence describing the `missing field 'patch'` serde failure is gone. `patch`'s description
+now opens *"update: the fields to change. Accepted keys: …"* and states the real contract — that
+top-level params are lifted and reported under `corrections`, and that an update changing nothing
+is refused.
 
-Net ~−100 chars against a budget with 1 char of headroom. The remainder of the description
-(three body-editing modes, `params` RFC 7396 warning) stays — the `params` warning is Rule B
-of hamsa A-27, the one that caused data loss.
-
+**Verified 2026-09-09 with a control, so the zero is a measurement rather than a broken grep:**
+over `src/librarian/tools/artifact.rs`, `"REQUIRED for action='update'"` → **0**,
+`"missing field 'patch'"` → **0**, and the control `"Accepted keys"` → **1**. The commit that
+removed the sentence is `dac1068a`, confirmed by `git log -S"missing field 'patch'"` rather than
+read off the subject line.
 ## Tests added
 
 None yet. Owed: a pin that `artifact`'s schema text contains neither `missing field` nor

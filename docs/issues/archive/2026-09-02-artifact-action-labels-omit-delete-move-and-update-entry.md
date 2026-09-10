@@ -1,14 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/doc-contradicted-by-code
+closed: null
+fix_patch_id: 371bee7c5081481311866cd797d7591abb2c5bc3
+fix_sha: dac1068a5e9f9f3265da091dcda1fa20f9da8592
+fixed: 2026-09-09
 opened: 2026-09-02
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/archive/2026-09-01-graft-requires-two-params-the-schema-never-advertises.md
-tags:
-  - cluster/doc-contradicted-by-code
-kind: bug
+- docs/issues/archive/2026-09-01-graft-requires-two-params-the-schema-never-advertises.md
+severity: low
 ---
 
 # BUG: `artifact`'s action labels omit `delete`, `move` and `update_entry` for `id`, so `delete` has no labelled param at all
@@ -106,24 +109,21 @@ required and absent; fixed `6894b67d`. That was **required-but-unadvertised**; t
 
 ## Fix
 
-Plan, not implemented.
+Fixed in `dac1068a` (patch-id `371bee7c5081481311866cd797d7591abb2c5bc3`) — Task 3 of the
+tool-surface collapse, whose subject names this directly: *"complete the action labels"*.
 
-1. `id`: label `get/update/move/delete/graph/append_entry/update_entry` — or, since ten of
-   twelve actions take it, invert the grammar: `artifact id (all actions except find/create;
-   state_at accepts it as an alias of artifact_id)`.
-2. Add `#[serde(alias = "id")]` on `state_at::Args::artifact_id`, label `artifact_id` as the
-   legacy spelling, and consider dropping it from the schema after a usage window.
-3. Describe and label `include_observations` (`get:`), `include_archived`/`limit`/`offset`
-   (`find:`).
-4. Gates, beside the existing two: (a) every property on every registered tool has a
-   non-empty `description` — 12 fail today across 7 tools, listed in the 2026-09-02 review;
-   (b) for `artifact` and `librarian`, every property's description starts with an action
-   label (or an explicit `all:`), and the union of labels covers every action in the enum
-   (`delete` fails today).
+**Verified 2026-09-09 at `src/librarian/tools/artifact.rs:150`.** The `id` property's description
+now reads:
 
-Net bytes: +~150 on a surface with 1 char of headroom; fund from the `patch` trim filed as a
-sibling. The point is not bytes — it is that a reader of `delete`'s row currently learns nothing.
+```
+get/update/move/delete/graph/state_at/append_entry/update_entry/event_create/event_list/gather/augment:
+document id (16-hex). find and create take none.
+```
 
+`delete`, `move` and `update_entry` are all present, so `delete` — which this file recorded as
+having no labelled param at all — now has one. The commit was confirmed by
+`git log -S'get/update/move/delete/graph/state_at'` against that file rather than read off the
+subject line.
 ## Tests added
 
 None yet. Owed: gates 4(a) and 4(b) above.

@@ -50,6 +50,7 @@ pub fn prewarm_lsp_background(
 /// Callers fall back to tree-sitter output (marked `"lsp": "warming"`) when
 /// the budget elapses; the start continues in a DETACHED task so the next
 /// call hits the warm fast path.
+// cap-class: RESULT_CAP lsp.first_call_budget — probed
 pub const LSP_FIRST_CALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Bounded LSP acquisition: immediate when a live client exists; otherwise

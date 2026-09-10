@@ -95,7 +95,7 @@ No new status enum values. `fixed-shipped` is retained as the closure label; pre
 - The active tracker stays at `status: active` and retains the entries that weren't yet eligible.
 
 **4. Recovery — chosen: rely on the librarian's archived-but-indexed model.**
-- `artifact(action="find", kind="tracker", include_archived=true)` returns archived trackers alongside active ones.
+- `doc(action="find", kind="tracker", include_archived=true)` returns archived trackers alongside active ones.
 - Cross-references in active entries cite the archive artifact id, not the file path. The librarian's `id` field is durable across renames.
 - No new infra.
 
@@ -175,7 +175,7 @@ how hard they are to work around:
    and **37 carry none**. Surface 3(a) as ratified does not pick between those three shapes
    because it never contemplated them.
 3. **Without a timestamp, the second archival of a name is impossible.**
-   `artifact(action="move")` *fails if the destination already exists*. A work stream that
+   `doc(action="move")` *fails if the destination already exists*. A work stream that
    wraps, gets archived as `archive/foo-session-log.md`, and is later restarted at the live
    path `foo-session-log.md` cannot be archived again — the move errors, and the operator's
    only outs are a hand-invented name or a bare `git mv`, which orphans the catalog row. A
@@ -209,9 +209,9 @@ whole-file archival gets the timestamped rule above. Operative form:
 And the move is not the whole operation. Whole-file archival changes the path, which changes
 `id = sha256(abs_path)`, so citations of both break. The procedure is three steps, not two:
 
-1. `artifact(action="update", patch={status: "archived"})` — or a `supersedes` edge instead,
+1. `doc(action="update", patch={status: "archived"})` — or a `supersedes` edge instead,
    when a successor replaced it;
-2. `artifact(action="move", new_rel_path="docs/trackers/archive/<name>-<YYYY-MM-DD>.md")`,
+2. `doc(action="move", new_rel_path="docs/trackers/archive/<name>-<YYYY-MM-DD>.md")`,
    reading the new id out of the response (`id_changed: true`);
 3. **repoint citations of the old path AND the old 16-hex id, in the same commit**, verified by
    a scoped `audit_doc_refs`. Leave `docs/trackers/archive/**` and superseded session-log
@@ -223,7 +223,7 @@ across 7 live surfaces, none caught by `link_scan`, one of them failing CI on a 
 The hygiene skill's D10 step 5 has been updated to carry all three.
 ### 4. Recovery — how do archived entries get found?
 
-The librarian indexes archived trackers but hides them by default (`status: archived`). `artifact(action="find", kind="tracker", include_archived=true)` should surface them. Cross-references in active entries that point at archived ones need to keep working — either via the artifact graph or by leaving forwarding stubs.
+The librarian indexes archived trackers but hides them by default (`status: archived`). `doc(action="find", kind="tracker", include_archived=true)` should surface them. Cross-references in active entries that point at archived ones need to keep working — either via the artifact graph or by leaving forwarding stubs.
 
 - **Lean: rely on the librarian's existing archived-but-indexed model.** No new infra. Active entries that reference archived ones use the librarian's link/find APIs, not file-relative paths.
 

@@ -911,7 +911,7 @@ The `render_template` projects them into a table when the librarian packs this
 artifact into context; to read them directly use:
 
 ```
-artifact(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq": "decision"}})
+doc(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq": "decision"}})
 ```
 
 Note `entry_total` reports rows **considered** (the whole collection), not rows

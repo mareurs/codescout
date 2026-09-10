@@ -1,13 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/doc-contradicted-by-code
+closed: null
+fix_patch_id: 371bee7c5081481311866cd797d7591abb2c5bc3
+fix_sha: dac1068a5e9f9f3265da091dcda1fa20f9da8592
+fixed: 2026-09-09
 opened: 2026-09-02
-closed:
-severity: low
 owner: marius
 related: []
-tags:
-  - cluster/doc-contradicted-by-code
-kind: bug
+severity: low
 ---
 
 # BUG: `workspace`'s schema requires `action`, and its own `post_compact` contract, the code, and the companion hook all omit it
@@ -106,21 +109,29 @@ asserts the banner contains exactly `workspace(post_compact=true)`.
 
 ## Fix
 
-Plan, not implemented. Two options; recommend the first because the code and the hook are
-the contract and the schema is the stale copy:
+Fixed in `dac1068a` (patch-id `371bee7c5081481311866cd797d7591abb2c5bc3`) — Task 3 of the
+tool-surface collapse. `"required": ["action"]` was removed from the `workspace` schema and the
+`action` property's description now states the real contract: *"Operation to perform. Required
+unless post_compact=true, which implies status."*
 
-1. Remove `action` from `required` at `src/tools/config/mod.rs:46`, and say in `action`'s description
-   that it is required unless `post_compact=true`.
-2. Or keep `required` and change the hook to `workspace(action="status", post_compact=true)`
-   — but this leaves `None if post_compact => "status"` as a code path the schema says
-   cannot be reached, which is the `IC-3` shape.
+The same commit shipped the schema-shape gate this file's sibling asked for —
+`required_names_no_key_that_has_a_declared_alias` (`src/server.rs:2842`) — so the class is
+guarded rather than only this instance repaired.
 
-Either way, add the gate: for every registered tool, for every name in `required`, call
-`call()` with that param omitted (type-valid dummies elsewhere) and assert an error — and
-for every optional param that the tool's *own* error path names as required, assert it is in
-`required`. This is `assert_required_are_advertised` run in both directions over the whole
-registry, not the librarian half.
+**Verified 2026-09-09 at the runtime, not only in the diff:** `workspace(post_compact=true)` with
+no `action` returns `{"flushed": true, …}`. `src/tools/config/mod.rs:45-62` carries no `required`
+array for this tool — the `"required": ["path"]` at `:161` belongs to a different tool and is not
+this one's.
 
+**Stale repro line, noted so the next reader does not lose time:** this file's § *Reproduction*
+pipes `scripts/probe_tool_surface.py --json` into a snippet that indexes the result as a list of
+tools. The probe now returns an object (`surface`, `calls`, `total`, `schema`, `desc`, `annot`,
+`unmodelled`, `prose`, `machine`), so that line raises `TypeError` rather than printing the
+required array. Read the schema at `src/tools/config/mod.rs` instead.
+
+**Cause A is NOT closed by this.** The sibling
+`docs/issues/2026-09-02-advertised-required-overstates-what-the-code-enforces.md` owns the alias
+half and stays open; the gate existing is not the same claim as the alias instances being gone.
 ## Tests added
 
 None yet. Owed: the bidirectional `required` probe above; a `workspace`-specific pin that

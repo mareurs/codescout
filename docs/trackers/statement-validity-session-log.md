@@ -1443,7 +1443,7 @@ file at `status: taken`, mtime 10:25:13; `6c99e005` committed 10:26:40.
 
 <!-- New F-N / W-N entries are inserted above this line. This file declares
      entry_prefix: [F, W], so it is a guarded ledger — append via
-     artifact(action="append_entry", id_prefix="W", anchor_heading="## Template for new entries",
+     doc(action="append_entry", id_prefix="W", anchor_heading="## Template for new entries",
               title=..., body=...)
      which allocates the id and writes the `## <ID> — <title>` heading itself.
      Also add the matching Index / Wins Index row. -->

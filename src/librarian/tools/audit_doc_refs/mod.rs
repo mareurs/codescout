@@ -453,6 +453,7 @@ pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &[
     "src/prompts/workspace_onboarding_prompt.md",
 ];
 
+// cap-class: RESULT_CAP audit_doc_refs.files — probed
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -662,6 +663,7 @@ fn build_basename_index(
 ) -> std::collections::HashMap<String, Vec<std::path::PathBuf>> {
     /// Soft cap — typical projects (1k–10k files) fit comfortably; monorepos
     /// stop indexing past this and degrade gracefully.
+    // cap-class: RESULT_CAP audit_doc_refs.basename_index — probed
     const MAX_INDEXED_FILES: usize = 50_000;
 
     let mut index: std::collections::HashMap<String, Vec<std::path::PathBuf>> =

@@ -113,12 +113,10 @@ impl Tool for EditCode {
         json!({
             "type": "object",
             "required": ["symbol", "action"],
-            "anyOf": [
-                { "required": ["path"] },
-                { "required": ["file_path"] },
-                { "required": ["relative_path"] },
-                { "required": ["file"] }
-            ],
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "symbol":   {
                     "type": "string",

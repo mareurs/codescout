@@ -29,9 +29,9 @@ Recovering "early-Fable" (`claude-fable-5`) quality in codescout via prompts / t
 3. **Research** holds the sourcing + local-trace evidence behind both.
 
 Query examples:
-- `artifact(action="find", tags=["fable"])`
-- `artifact(action="get", id="35de33286cd34f87", entry_filter={"dimension":{"eq":"exploration"}})`
-- `artifact(action="get", id="ad1af8262fdce357", entry_filter={"and":[{"status":{"eq":"open"}},{"priority":{"eq":"high"}}]})`
+- `doc(action="find", tags=["fable"])`
+- `doc(action="get", id="35de33286cd34f87", entry_filter={"dimension":{"eq":"exploration"}})`
+- `doc(action="get", id="ad1af8262fdce357", entry_filter={"and":[{"status":{"eq":"open"}},{"priority":{"eq":"high"}}]})`
 
 ## Related
 
@@ -62,6 +62,6 @@ Two follow-ons executed under the architecture lens (build what leaves a durable
 
 **Standing watch (#2).** `lf.py mismatches` gained a `--check` exit-code contract (exit 2 on any requested≠served mismatch; TDD via a pure `mismatch_exit_code` helper, 4 tests). Drives a systemd `--user` timer `llm-mismatch-watch.timer` (daily oneshot; a reroute leaves it in `failed` state = the alert, no notification plumbing). Shipped **llm-proxy:`481b31e`**, verified both paths (clean scan → exit 0/Result=success; forced mismatch → Result=exit-code/ExecMainStatus=2/failed). 300/300 recent traces now carry served_model.
 
-**Self-reflection lane (#3 → FND-17).** Bucketed 2000 traces by `served_model` (= the model that drove the agent). Local agent tool-use shows **no fable degradation**: engagement parity (fable 83% tool_use / 15.5% end_turn vs opus 82%/9.6%, sonnet 90%/9.4%), and a clean within-subject 62-call fable window (session 34c9183a) had fully intact codescout tool discipline (0 native Bash, 1 glue Read, idiomatic symbols/artifact/edit_markdown). Cohort thin (2 sessions, 89 calls). Corroborates FND-14/16.
+**Self-reflection lane (#3 → FND-17).** Bucketed 2000 traces by `served_model` (= the model that drove the agent). Local agent tool-use shows **no fable degradation**: engagement parity (fable 83% tool_use / 15.5% end_turn vs opus 82%/9.6%, sonnet 90%/9.4%), and a clean within-subject 62-call fable window (session 34c9183a) had fully intact codescout tool discipline (0 native Bash, 1 glue Read, idiomatic symbols/artifact/edit_file). Cohort thin (2 sessions, 89 calls). Corroborates FND-14/16.
 
 cc.py bug filed **llm-proxy:`40f1645`** (hardcoded `~/.claude` + lossy `--project` path encoding; the root cause behind FT-10).

@@ -376,5 +376,5 @@ See `docs/templates/session-log.md` for the canonical definitions
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via
-     artifact(action="update", patch={body_edits: [...]}). Also update the
+     doc(action="update", patch={body_edits: [...]}). Also update the
      matching Index / Wins Index row at the top. -->

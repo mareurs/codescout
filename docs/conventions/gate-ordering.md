@@ -24,8 +24,12 @@ gate was added or upgraded because a narrower form shipped a defect; the paragra
 which command they justify.
 
 > **The gate sentence in `CLAUDE.md` is pinned byte-for-byte** by
-> `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs:1993`).
-> It scopes to the run beginning ``**Run `cargo fmt``` and ending `before completing any task.**`,
+> `claude_md_gate_lists_its_four_commands_in_the_load_bearing_order` (`src/prompts/mod.rs`).
+> The line number this used to carry (`:1993`) was stale by 375 lines when checked on
+> 2026-09-09 and is deliberately not replaced with a fresh one: a symbol name survives every
+> edit above it, and a line number is a positional reference that decays exactly like the
+> commit SHAs and orphaned refs this corpus keeps tripping over.
+> It scopes to the run beginning ``**Run `./scripts/fmt-mine.sh``` and ending `before completing any task.**`,
 > then asserts the four backtick-delimited commands appear in ascending byte order *within that
 > slice*. Its own panic message reads: *"if it moved, move this test with it — do not delete it."*
 > Two traps it is shaped around: `cargo test --workspace` is a **prefix** of the lean form, so a

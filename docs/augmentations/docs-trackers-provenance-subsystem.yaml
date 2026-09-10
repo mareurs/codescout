@@ -22,9 +22,9 @@ prompt: |-
   open the pipeline to check a number) and `note` (metadata about the row itself — verbatim
   meta-line text, the provenance of a derived field, or a recorded loss).
 
-  APPEND: artifact(action="append_entry", id="e12cd7e0060ed9b8", id_prefix="PV",
+  APPEND: doc(action="append_entry", id="e12cd7e0060ed9b8", id_prefix="PV",
   entry_collection="items", entry={...}) — assigns the next id atomically.
-  QUERY: artifact(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq":
+  QUERY: doc(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq":
   "decision"}}). Note `entry_total` reports rows CONSIDERED (the whole collection), not rows
   matched — that asymmetry is how a typo'd filter field is detectable (considered 30,
   matched 0).
