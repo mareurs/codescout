@@ -164,10 +164,26 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 // writer at `:414` and `SHORT_NOTE` at `:377`; at this HEAD they are `:422` and `:385`,
 // an 8-line drift, so the census's line numbers were re-verified rather than trusted.
 //
-// 17 of 18 killed. The one that did not is `index_state.skipped_sample`, and its row
-// carries the finding: its declared marker names the capped payload rather than a
-// disclosure beside it, so no mutation of the line the census names can suppress a
-// marker while leaving the cap standing.
+// Of the 18 rows in the table above — the 2026-09-03 sweep's own population, scoped that
+// way on purpose so a later append cannot falsify the ratio — 17 were killed. The one that
+// did not is `index_state.skipped_sample`, and its row carries the finding: its declared
+// marker names the capped payload rather than a disclosure beside it, so no mutation of the
+// line the census names can suppress a marker while leaving the cap standing.
+//
+// ---- APPENDED 2026-09-10 (`doctor` per-project isolation merge) ----
+//
+// Same method, one new cap, run separately from the sweep above rather than folded into
+// it. Run against the MERGED WORKTREE, not a clean checkout — stated plainly rather than
+// implying the protocol's "`git status --short` empty between rows" precondition held,
+// because it did not: the merge resolution was uncommitted at the time. What that
+// precondition protects against is TWO live mutations compiling a tree that never existed,
+// and there was exactly one. The mutated line and the observed red are recorded so the next
+// reader can re-run this against a clean tree and disagree if it fails to reproduce.
+//
+// doctor.outside_roots_display             | doctor.rs:1356-1359 elision count | doctor.rs:10794
+//   observed `left: Null / right: Number(4)`, message "14 roots seeded, 10 shown, 4 elided".
+//   The truncation itself was left standing — the mutated tree still `take(10)`s and simply
+//   stops saying that it did, which is `IC-13` exactly.
 
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
 /// 2026-09-02 census in `tests/result_caps.rs`. The id list is derived from
@@ -459,6 +475,24 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             marker: Marker::TextContains("…"),
             mutation: Mutation::Killed,
             cited_test: "a_long_caveat_is_truncated_without_splitting_a_character",
+        },
+    },
+    ProbeRow {
+        // Added 2026-09-10 with the `doctor` per-project isolation merge, which is what
+        // introduced the constant: `OUTSIDE_ROOTS_DISPLAY_LIMIT` collapses
+        // `outside_roots_by_project` to its ten highest-count roots at every scope below
+        // `all`. The cited test seeds FOURTEEN roots against that ten-root cap, so the
+        // bound is genuinely crossed rather than merely configured.
+        //
+        // The marker is the elision COUNT beside the capped map, not the map itself — the
+        // distinction `index_state.skipped_sample` records as a finding. And
+        // `catalog_health.outside_roots_total` stays exact and unconditional at every
+        // scope, so a caller is handed both the total and the shortfall.
+        id: "doctor.outside_roots_display",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.catalog_health.outside_roots_elided"),
+            mutation: Mutation::Killed,
+            cited_test: "outside_roots_by_project_collapses_to_the_top_ten_by_count",
         },
     },
     // -- src/tools/format.rs --
