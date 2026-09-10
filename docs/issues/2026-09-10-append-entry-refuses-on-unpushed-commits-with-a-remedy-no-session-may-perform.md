@@ -1,11 +1,13 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/shared-resource-carries-no-owner
 - librarian
 - append-entry
 - guard-remedy
+claimed_at: 2026-09-10
+claimed_by: 26cb9b5b-2c9c-489e-97d9-3a907c8b2941
 closed: null
 opened: 2026-09-10
 owner: marius
@@ -199,13 +201,28 @@ can.
 Not implemented. Three parts, in dependency order; the first is the one that unblocks work and
 is cheap.
 
-**1 — Move the check from allocate-time to push-time.** Allocate optimistically. At allocate the
-answer is unknowable; at push it is a `git fetch` away. A `pre-push` check can compare each
-touched ledger's local `entry_high_water_<PREFIX>` against the remote file's and refuse — or
-better, renumber — before the divergence ever reaches a shared branch. This also puts the
-refusal in front of a party who *can* act: the push is already a user-initiated action, so a
-refusal there interrupts something the user chose to do rather than something a session was
-told to do.
+**1 — Site the check where the answer exists: `pre-push`, on a DIVERGENT push.** Allocate
+optimistically. At allocate time the answer is unknowable — the competing allocation is, by
+definition, also unpushed and therefore invisible.
+
+**Corrected 2026-09-10 (peer sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`), verified at the
+bytes.** This section first said the check needs a `git fetch`. It does not: the `pre-push` hook
+already receives the remote's real tip on stdin and the existing guard already trusts it —
+`scripts/pre-push-foreign-session-guard.sh:129` reads
+`local_ref local_sha remote_ref remote_sha`, and `:153` builds `range=("$remote_sha..$local_sha")`.
+So the remote's committed `entry_high_water_<PREFIX>` is reachable without a network call.
+
+**And the subtlety this section originally missed, which changes what "at push time" means.** On
+a **fast-forward** push the remote's ledger is an ancestor of yours, so no collision exists and
+none is detectable — there is nothing to check. The collision is *born in the MERGE* after a
+rejected push. The knowable moment is therefore a **divergent** push, where `remote_sha` is not
+an ancestor and `pre-push` runs before git rejects it. So part 1 is not "move the check later";
+it is **site the check at the one moment the answer exists**, and that moment is narrower than
+"push".
+
+This also puts the refusal in front of a party who *can* act: a push is already a user-initiated
+action, so refusing there interrupts something the user chose to do rather than something a
+session was told to do.
 
 **2 — `doctor --fix=renumber_uncited_duplicate`.** For an `entry_defined_twice` violation where
 the later definition has **zero inbound `cites` edges**, allocate a fresh id, rewrite the
@@ -238,10 +255,20 @@ reader of the ledger until someone remembers it.
 
 ## Resume
 
-Decide whether part 1 alone is enough to unblock (it is, for the observed symptom) or whether
-part 2 ships with it. Before either, re-run the reproduction on the current tree — the guard was
-last touched around `2026-09-06` per its own CI-failure comment, and the parts below assume the
-`entry_defined_twice` check is still read-only with no `fix=`.
+**Claimed 2026-09-10** by peer sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941` (`codescout-29`)
+on their operator's instruction, through the catalog. What they closed is the **Evidence**
+subsection they added at `887a8b5a`, not a numbered Fix part: `git rev-list '@{upstream}'..HEAD --
+<ledger>` returns 0 while the guard refuses, because git's default history simplification omits a
+MERGE that touched the path while the guard's revwalk diffs against `parent(0)` and sees it. The
+refusal said *"push this ledger's commits"* and never said WHICH, so the reader could not check
+it. **Parts 1, 2 and 3 below remain open.**
+
+Decide between part 1 (site the check at a divergent push) and part 2 (answer the narrower
+working-tree question) — they are alternatives, not stages. Ship part 3 either way. Before
+starting, re-run the reproduction: this guard was last touched around 2026-09-06 per its own
+CI-failure comment, and `ledger_unpushed_commits` was mid-refactor on 2026-09-10 (widening from
+`bool` to `Vec<String>` so the refusal can name the offending commits), so its signature and
+behaviour may both have moved.
 
 ## References
 
