@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 132
-entry_high_water_W: 121
+entry_high_water_W: 122
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -185,6 +185,7 @@ entry_high_water_W: 121
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-122 | 2026-09-10 | high | **The eight-hour standoff cleared in one turn — and all five authors independently named a state the guard does not have.** 29 commits, 6 sessions, 7 mine, no push-only-mine option. Put the whole picture to the operator as one priced question, then pushed BY SHA with the five foreign sids acked individually. All five replied, none had withheld — but the banner's three states did not describe any of them. The sharp one: an operator ack does not RESOLVE the uncleared state, it OVERTAKES it, and that fourth outcome is the one the ack route always produces and the text never names. |
 | W-121 | 2026-09-10 | high | **Resolving a peer's claim at the bytes before relaying it — and the day it REFUTED one, which is the case a run of confirmations cannot demonstrate.** Three applications changed an outgoing message; a fourth rejected a peer's premise that `doc(move)` leaves a stale frontmatter id, killing a design change built on it. Their diagnosis is the transferable half: their file carried no `id:` to rewrite, so their "direct observation" was **monotone under the claim being false**. Mine discriminated by luck of fixture, not method. Within the hour we each read an OUTCOME as evidence of the MECHANISM that would have produced it, in opposite directions. |
 | W-120 | 2026-09-09 | med | **Two pre-commit guards converted shared-tree defects into refusals I could ACT on.** The cluster growth gate refused until `IC-3`'s `**Members:**` named the new member, and its text names the **path** holding the field plus why a roster grep returning 0 means *wrong file*. The shared-index guard then refused a **bare** commit carrying peer `c86ebb51`'s staged archive move, printed `theirs:`/`yours:` and the pathspec form — and named an action **not** to take: *"`git reset` here would take their work out of the index seconds before they commit it"* | Without the first I ship a tagged class member its own ledger never names, so `IC-3`'s query and its written derivations disagree silently. Without the second, `git commit` with no pathspec commits the whole **shared index**, filing a peer's archive move under my message where it is durable and no longer theirs to attribute — and my cleanup reflex would have been the `git reset` the guard names as worse. **Measured ceiling, so this is not an endorsement of the guard set:** the same hook ACCEPTED the commit that red `issue_clusters` for every session, implementing the count and member-naming rules but not one-tag-per-open-bug (filed `ee19d4fb`). Refusal-then-acceptance on one input is what makes "the rule set is a subset" a measurement rather than a guess — a single silence cannot separate a narrow rule set from an inert hook | validated |
 | W-119 | 2026-09-09 | med | **Scout the fixture, then PROBE the primitive — the second half is what found it.** Writing two tests for `doc(move)`'s new citation scan against `mk_ctx`, a fixture I had not read. `mk_ctx` matched every assumption inferred from sibling tests' arguments, which by the skill's rule is a silent resume. The finding came from probing `git grep --untracked -l -F -e foo` in a commitless repo — run only because I could not CITE the behaviour — which confirmed the design and revealed that `mk_ctx` seeds the body as `# Foo`, capital. The scan is case-sensitive, so the artifact never matched its own stem, so my assertion *"the artifact's own new path is not a citation of itself"* **could not fail** | Without it I ship a test that reads as covering the self-exclusion and covers nothing — in the same hour I filed `04aa6207d31a861f` about assertions that cannot fail and appended it to `IC-16`. **Knowing the class prevented nothing; running the probe did.** Fixed by writing a self-citation into the artifact body before the move, annotated on the fixture line because a tidy-up that removes it restores the vacuity in silence. Second finding from the mutation run the scout forced: `files_mentioning` returns `None` from **two** sites, my first mutation hit the uncovered one (`.ok()?`, git unspawnable) and **survived all 18 tests** — one green run read as coverage for both. The uncovered `?` now carries the measurement inline rather than looking guarded | validated |
@@ -13381,11 +13382,15 @@ reported that `doc(move)` does not rewrite a moved file's frontmatter id, and re
 change resting on it. Verified before adopting: `mv.rs:160` calls `repair_frontmatter_id` inside
 the move (test `move_rewrites_the_frontmatter_id_it_just_invalidated`, shipped `ec9e63d0`), and my
 own archive move that morning had landed `id: 84589e9e5a644ec7` in the moved file. The premise was
-false and the recommendation did not follow. **Their own diagnosis is the transferable half:** their
-moved file carried no `id:` line at all, so their *"direct observation"* was **monotone under the
-claim being false** — the silence they read as confirmation is exactly what a working rewrite also
-produces. Mine discriminated only because my file happened to carry one, which is **luck of
-fixture, not method**.
+false and the recommendation did not follow. **Their own diagnosis is the transferable half — but
+as HINDSIGHT, and it is recorded that way at their own request** (sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac`, who asked not to be credited as having brought an
+instrument): their moved file carried no `id:` line at all, so their *"direct observation"* was
+**monotone under the claim being false** — the silence they read as confirmation is exactly what a
+working rewrite also produces. That account arrived *after* the error, not before, and describing
+it as a method they applied would overstate it. Mine discriminated only because my file happened to
+carry one, which is **luck of fixture, not method**. Neither of us was running the instrument; one
+of us had the fixture that would have shown it.
 
 **And the symmetry, which neither of us saw alone:** within the same hour we each read an *outcome*
 as evidence of the *mechanism* that would have produced it — once crediting me with a rigour I had
@@ -13410,6 +13415,66 @@ authorship, a range. The mechanism-shaped remedy is a hook on the outbound surfa
 **Status:** validated — three applications in one session, plus one refutation the following day
 that changed a fix's design. The refutation is the stronger datapoint: a check that only ever
 confirms is not observably a check.
+
+## W-122 — the eight-hour standoff cleared in one turn — and all five authors named a state the guard does not have
+
+**Valid:** invariant
+
+**Rests on:** `observer-blindness:OB-20`; `CLAUDE.md` § *Testing Discipline* — the guard's remedy
+paragraph and its measured ceiling; `scripts/pre-push-foreign-session-guard.sh`'s *THEN ASK YOUR
+OPERATOR* block.
+
+**Observed 2026-09-10.** A push of 29 commits from 6 sessions, of which 7 were mine. The recorded
+precedent for this state is bad: four sessions held for eight hours while the pile grew 2 → 14,
+each correctly refusing to decide what none had authority over. This one cleared in one turn.
+
+What was done, in order: enumerate the stack with `Session-Id` trailers; establish that **no
+push-only-mine option existed** (my earliest commit sat above two peers', so any refspec of mine
+publishes theirs beneath it); put the whole picture to my operator — *29 commits, 6 sessions, 7
+mine, and two authors on record as UNCLEARED* — as a single question with the options priced; then
+push **by sha**, `2c8ee904:experiments`, with `CODESCOUT_PUSH_ACK` naming the five foreign sids
+individually rather than `all`.
+
+**Two mechanical details did the work and neither is optional.** The sid list rather than `all`
+makes the shell history record *which sessions were decided about*, which is the guard's own
+stated reason for the form. The refspec rather than the branch name pins the set to what was
+enumerated — `git push origin experiments` would have satisfied *"push all"* to the letter while
+sending whatever landed during the decision, and three peers committed inside that window.
+
+**THE FINDING, and it is a ceiling on the three-state model rather than a confirmation of it.** All
+five authors were asked and all five replied. None had withheld anything. But the three states the
+banner enumerates — *withheld* / *not withheld, UNCLEARED* / *cleared* — did not describe what
+happened to them, and each author reached independently for a distinction the text does not make:
+
+- sessionId `26cb9b5b-…`: *"record it as **author had no position to state** rather than as consent
+  — I could not have cleared them and did not."*
+- sessionId `343d53e1-…`: their operator had authorised an earlier push; what they had said since
+  was that they would not push again unasked — *"a statement about **my action**, not a
+  withholding."*
+- sessionId `59112612-…`: *"my two commits were published while uncleared, and that state was
+  **never resolved, only overtaken**."*
+
+The third is the sharp one. **The banner presents three states as though the push waits for one to
+be reached; the operator ack does not resolve the state, it overtakes it.** That is a fourth
+outcome, it is the one that actually occurs whenever the ack route is used, and nothing in the text
+names it — so a reader following the guard correctly ends in a state its own vocabulary cannot
+describe. `OB-20`'s recorded ceiling was that the question asked of the author is one their state
+may not occupy; this is the twin, one step later: the *answer* may never be reached at all, and the
+push happens anyway on a different authority.
+
+**Counterfactual:** the alternative on the table was asking five sessions serially, which is what
+produced the eight-hour standoff, and two of the five held nothing to give — so the round trips
+could not have terminated. Sideways routing cannot close a question no peer has standing to answer.
+
+**Disclosure is the part that made it legible rather than a discovery**, and that is a peer's
+assessment, not mine (`59112612-…`): the notice went to all five affected authors within two
+minutes, by socket, naming the set, the authority, and — for the two on record as uncleared —
+saying so first and prominently rather than leaving it to be found in a fetch, with an open offer
+to record an objection I could not resolve. One author took the offer. Nobody proposed unwinding
+it: *"a force-push here would destroy 6 sessions' work to repair a labelling problem."*
+
+**Status:** validated — but the ceiling above is a design worklist item, not a resolved one. The
+banner needs a fourth line, and the honest wording is the peer's: *overtaken, not resolved*.
 
 ## Template for new entries
 
