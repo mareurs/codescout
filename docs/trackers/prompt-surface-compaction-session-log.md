@@ -2106,11 +2106,37 @@ headroom 0"*. Re-measured after a rebuild the following morning — **under two 
 time later** — the surface is **56485**. Nothing went red. Both instruments simply returned the
 new value and agreed with each other, exactly as they had agreed on the old one.
 
-**Cause, identified not guessed.** The −811 chars are **entirely in `schema`** (49479 → 48668);
-`desc` (7060) and `annot` (757) are unchanged to the byte. That points at `b057cc6d` —
-*"fix(doctor): scope `params_behind_body` and `params_status_drift`; generate the hint from the
-list"* — a hint that had been spelled out in the schema is now derived, and the saving lands in
-exactly the field a schema change would touch.
+**Cause — `2735df73`, corrected 2026-09-10 after this entry was written.** The −811 chars are
+**entirely in `schema`** (49479 → 48668); `desc` (7060) and `annot` (757) are unchanged to the byte.
+That localisation was right and the SHA was wrong: the cause is `2735df73`, *"fix(schemas): drop
+the API-illegal top-level `anyOf` from seven tools"*, which also performed the ratchet
+(`TOOL_SURFACE_CHAR_BUDGET` 57296 → 56485) this entry is named for — so the commit that moved the
+number is itself an instance of the finding. Reported by `b0b9bc40`, its author, and verified here.
+
+**The 811 bytes were never padding.** A top-level `oneOf`/`allOf`/`anyOf` is rejected by the
+Anthropic Messages API, so Claude Code drops the whole tool client-side rather than 400 the
+request: seven path-taking tools were **unreachable for eight days behind four green schema
+gates**. The write-up is
+`docs/issues/archive/2026-09-10-seven-tools-carried-an-api-illegal-top-level-anyof-and-were-dropped-client-side.md`
+(patch-id `f306405970ed6ad23a5b494e6e560acef34f8cd8`). Read alongside `F-11`: a surface *shrinking*
+is not evidence of trimming, and this shrink bought seven tools back.
+
+**How the mis-attribution happened, which is worth more than the correction.** Two mechanisms, and
+only the first was outside my reach. **(1)** On a shared checkout the author's edits were sitting
+**uncommitted in the working tree** when the binaries were built (09:56/09:58); `cargo test`
+compiled them while `git log` showed only committed history, and `2735df73` was not committed until
+**10:07:38**. Field-localisation plus the newest plausible commit subject is a sound-looking
+inference that **cannot see another session's dirty tree**. **(2)** The half that was mine: a later
+command in the same session listed the unpushed set and `2735df73` appeared in my own output, with
+a subject naming schemas explicitly. I had formed the attribution before that evidence existed and
+**did not revisit it when it arrived** — the reading was correct when made and I never re-derived
+it. My first theory for (1) was that the pathspec `src/**/*.rs` had been too narrow; that is
+**falsified** — it matches `2735df73`'s files.
+
+**So the rule this entry now carries:** on a shared checkout, a measurement taken from a BUILD and
+an attribution taken from `git log` are readings of two different trees, and nothing in either
+output says so. Attribute from the diff, or ask the author — or, at minimum, re-derive the
+attribution at write time rather than at measure time.
 
 **The correction to `F-11`, which is the part worth keeping.** `F-11` reported *"budget 57296,
 headroom 0"* and glossed it as a design choice: *"the ceiling was set to the post-collapse total,
@@ -2139,9 +2165,10 @@ and this ledger now holds a measured interval for how fast: under two hours, one
 
 **What this does not establish.** Not that `F-11` should be edited — it is a dated observation and
 its `**Valid:**` field is doing its job. Not that the ratchet is wrong; re-setting a ceiling to a
-new floor is a defensible design and this entry takes no position on it. And the 811 chars are
-attributed to `b057cc6d` by field-localisation plus commit subject, which is strong but is not the
-same as having diffed the schema before and after.
+new floor is a defensible design and this entry takes no position on it. **The original
+attribution of the 811 chars to `b057cc6d` was WRONG and is corrected above** — the hedge this
+paragraph carried (*"strong, but not the same as having diffed the schema before and after"*) was
+load-bearing and is the only reason the claim was not stated flatly.
 
 **Valid:** dated 2026-09-10
 
