@@ -8,7 +8,7 @@ opened: 2026-09-09
 owner: marius
 related: []
 severity: high
-unverified: 'The guard exists and is CI-enforced, but CLAUDE.md''s gate still names bare `cargo fmt`, so a session following the documented path still reaches the unsafe command. Adoption is an operator call: the gate sentence is pinned byte-for-byte by a test and changing it changes the gate every session on this shared checkout runs.'
+unverified: 'the -- <path> non-scoping is measured via `cargo fmt --check -v` target enumeration, not by observing an actual cross-session rewrite; no damage occurred in the observed instance because no .rs file was dirty at that moment. RE-DERIVED INDEPENDENTLY 2026-09-10 at bf0a5241 by a second session that had not seen the first measurement: same 36 entry points both ways, and the re-run found the claim slightly UNDERSTATED (scoped = bare + 1 argument, not equal). Published as a denominator per CLAUDE.md''s instrument-the-doubt law, not absorbed as a catch.'
 ---
 
 # BUG: the documented gate's first command rewrites every peer's uncommitted Rust
@@ -78,6 +78,81 @@ a clean result. The victim gets a diff they did not make in a file that may be u
 usually discovers it much later, and cannot attribute it — `cargo fmt` leaves no record of
 who ran it. The party who could notice is not the party who acts.
 
+## The documented escape hatch has a narrowed form that LOOKS scoped and is not (2026-09-10)
+
+This file's mitigation is `scripts/fmt-mine.sh` plus the documented escape hatch: when it refuses,
+*"ask the named owner, or if you have decided it is safe, run `cargo fmt` yourself."* That hatch is
+correct and it has a trap one step in.
+
+Observed: an SDD implementer hit the refusal (`src/server.rs` classified `UNKNOWN` — subagent writes
+are unattributable, tracked separately), did everything the hatch asks — reported the refusal text
+verbatim, confirmed real formatting drift existed **in its own added code** via
+`cargo fmt --check`, decided it was safe — and then ran:
+
+```
+cargo fmt -- src/server.rs
+```
+
+and reported it as *"scoped to that one file only."* **It is not scoped at all.** Measured the same
+day with `cargo fmt --check -v -- src/server.rs`, which enumerates what it will actually hand to
+rustfmt:
+
+```
+[custom-build] build.rs
+[lib]          crates/codescout-embed/src/lib.rs
+[test]         crates/codescout-embed/tests/ollama_probe_installs_its_own_crypto_provider.rs
+[example]      examples/activate_leak_probe.rs
+[bin]          src/bin/sync_project.rs
+[lib]          src/lib.rs
+[bin]          src/main.rs
+[test]         tests/audit_doc_refs.rs
+... every remaining tests/*.rs target
+```
+
+Every target in the workspace, and rustfmt follows `mod` declarations from each entry point — so
+the blast radius of the "scoped" form is **strictly WIDER than the bare form, never equal to it**.
+That correction is the sharper root cause and it was measured, not reasoned:
+`cargo fmt --check -v` prints the actual `rustfmt` invocation as its last line, and the two forms
+differ by exactly one argument.
+
+```
+scoped:  rustfmt --edition 2021 src/server.rs --check <36 workspace entry points>
+bare:    rustfmt --edition 2021              --check <the same 36>
+```
+
+**Cargo APPENDS the pathspec to rustfmt's argv; it does not filter the target list.** So
+`-- src/server.rs` adds a 37th file to a set that already spans `build.rs`,
+`crates/codescout-embed/`, `examples/` and every `tests/*.rs`. The whole workspace is enumerated
+*before* any `mod` is followed, which is why "rustfmt follows `mod`" — true, and the form this
+section first carried — understates it: `mod`-following widens an already-total set rather than
+being the reason the set is total. There is no argument position in which this form narrows
+anything.
+
+This repo's own `CLAUDE.md` already says `cargo fmt` *"takes no pathspec"*; what is new is that the
+natural attempt to add one **succeeds silently**: exit 0, no warning, no mention of the other 30-odd
+targets it just formatted.
+
+**Why this is worse than the bare form and belongs in this file rather than a new one.** The bare
+form is documented as dangerous and a careful reader hesitates. The `-- <path>` form is what that
+same careful reader reaches for *because* they hesitated — it is the shape of narrowing the hatch,
+it reads as compliance with the warning, and it produces a written claim ("one file only") that a
+reviewer then has no reason to check. Same act, a slightly WIDER radius, plus a false assurance the bare form
+never offered. That is this file's own claim about the guard, one layer out: the mitigation moved
+the hazard rather than removing it.
+
+**No damage this time, and the reason is luck rather than the scoping.** Verified: no `.rs` file was
+dirty in the worktree at that moment, and the two Rust files a peer had in flight
+(`tests/e2e/eval_common/proc.rs`, `tests/result_caps.rs`) were committed before that run. Also
+note what would NOT have detected damage: the implementer's evidence was `git status`, and a
+reformat of an already-dirty file does not change its dirty status — it silently alters the content.
+So *"git status shows only unrelated files"* is not evidence of no cross-session write, and this
+file's central blind spot is exactly that.
+
+**What is actually owed.** Either `scripts/fmt-mine.sh`'s refusal text should name the correct
+narrowed form (`rustfmt <file>` formats one file; `cargo fmt` cannot), or `CLAUDE.md`'s escape-hatch
+sentence should say that the hatch has no narrowed form. The refusal text is the better site: it is
+read at the moment the decision is made, by the party making it. That is a change to a served
+surface, so it is recorded here as the finding rather than applied.
 ## Evidence
 
 ### The damage is real but cheap; the recoverability is what is not
