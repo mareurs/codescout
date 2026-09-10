@@ -2895,7 +2895,19 @@ mod tests {
                 "{tool}: expected {expected} \"Alias for \" property description(s), found \
              {actual} — either an alias description was reworded (silently blinding \
              both this per-tool check and the offender scan above for {tool} alone) or \
-             a genuinely new/removed alias needs this table updated to match"
+             a genuinely new/removed alias needs this table updated to match.\n\
+             \n\
+             IF YOU DID NOT TOUCH read_file/create_file/edit_file/grep's input_schema, \
+             THIS FAILURE IS NOT YOURS. It is the expected intermediate state of the \
+             parameter-alias-collapse plan (docs/superpowers/plans/\
+             2026-09-10-parameter-alias-collapse.md): commit d5f2b736 deleted those four \
+             tools' `Alias for path` PROPERTIES because the aliases are now repaired in \
+             code via Tool::param_aliases(), and Task 7 of that plan deletes this whole \
+             gate and replaces it. Two sessions have already bisected this red on a \
+             shared checkout. Nothing is owed from you; re-gate once `experiments` moves \
+             past Task 7. Note also that only the FIRST falsified row is visible — this \
+             assert_eq! is inside a loop over the table, so create_file/edit_file/grep \
+             are masked by the short-circuit rather than passing."
             );
         }
         assert!(

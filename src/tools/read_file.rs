@@ -58,6 +58,20 @@ impl Tool for ReadFile {
         // `output_id`/`file_id` join the path family: `path` already accepts
         // `@tool_*`/`@cmd_*`/`@file_*` handles via `strip_buffer_ref_quotes`, so these
         // were renames of `path`, never a separate capability.
+        //
+        // LOAD-BEARING, and the detail is that this is NOT
+        // `crate::fs::PATH_PARAM_ALIAS_MAP`: the last two pairs are exactly the two
+        // that constant does not carry. Replacing this array with the shared map to
+        // "tidy for consistency" breaks two things and NEITHER REDS.
+        //   `read_file(output_id=…, heading=…)` starts refusing with "missing required
+        //   parameter 'path'" — the `call()` fallback below resolves the alias into a
+        //   LOCAL and never writes `input["path"]`, so `markdown::read` re-resolves
+        //   from `path` + `PATH_PARAM_ALIASES` only and finds nothing.
+        //   `read_file(output_id="@tool_x")` silently loses its `corrections` advisory
+        //   while still succeeding.
+        // `output_id` is the highest-traffic alias in the corpus, so "nobody sends it"
+        // is measurably false. `path_aliases_and_alias_map_agree` (`src/fs/mod.rs`) pins
+        // the other two copies of this set against each other and cannot see this one.
         &[
             ("file_path", "path"),
             ("relative_path", "path"),
@@ -76,10 +90,14 @@ impl Tool for ReadFile {
         let mut input = input;
         normalize_line_nav_aliases(&mut input);
 
-        // Redundant second layer: `Tool::call_content` already normalizes every alias in
-        // `param_aliases()` (see `param_alias.rs`) onto `path` before `call()` ever runs,
-        // so a caller reaching this fallback arrived via a direct `call()` in a test that
-        // bypasses that boundary. Kept rather than deleted because those tests exist.
+        // Second layer, and redundant only for THREE of the five pairs.
+        // `Tool::call_content` normalizes everything in `param_aliases()` onto `path`
+        // before `call()` ever runs, so a caller reaching this fallback arrived via a
+        // direct `call()` in a test that bypasses that boundary — true of `file_path`,
+        // `relative_path` and `file`, which `PATH_PARAM_ALIASES` also carries. It is
+        // FALSE for `output_id`/`file_id`: this chain is their only other resolver, so
+        // if `param_aliases()` above is ever narrowed to the shared map, the failure is
+        // silent here rather than loud. Kept because those direct-`call()` tests exist.
         let raw_path = input["path"]
             .as_str()
             .or_else(|| {
@@ -94,7 +112,7 @@ impl Tool for ReadFile {
             .ok_or_else(|| {
                 RecoverableError::with_hint(
                     "missing required parameter 'path'",
-                    "read_file(path=\"src/x.rs\") — or read a buffer: read_file(path=\"@tool_abc\"). Aliases: file_path, relative_path, file, output_id.",
+                    "read_file(path=\"src/x.rs\") — or read a buffer: read_file(path=\"@tool_abc\").",
                 )
             })?;
         let path = strip_buffer_ref_quotes(raw_path);

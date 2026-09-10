@@ -927,7 +927,7 @@ new `high` findings.
 - [ ] **Step 4: Commit** — all doc surfaces in ONE commit.
 ---
 
-## Task 7: Replace the four vacuous gates with five
+## Task 7: Replace the four vacuous gates
 
 The old gates find offenders by parsing `"Alias for "` descriptions. With the properties
 gone they have nothing to scan and **pass by finding nothing** — an absence assertion is
@@ -1099,6 +1099,28 @@ Delete the items listed under **Files**. `cargo clippy` will name anything left 
 Run: `cargo test --workspace 2>&1`
 Expected: PASS. The Task 4/5 red is now resolved.
 
+- [ ] **Step 3a: Add a fifth gate — `read_file`'s two extra alias pairs**
+
+Added after Task 4's review. `ReadFile::param_aliases()` is a THIRD copy of the path
+accept-set and deliberately does not return `crate::fs::PATH_PARAM_ALIAS_MAP`: it adds
+`("output_id", "path")` and `("file_id", "path")`, which that constant does not carry.
+`path_aliases_and_alias_map_agree` pins the other two copies against each other and
+cannot see this one, and **none of the four gates above catches its narrowing** —
+`every_declared_alias_is_absent_from_the_schema`'s non-vacuity floor is `checked >= 20`
+against a live population of 26, so dropping two pairs stays green.
+
+What a narrowing costs, measured: `read_file(output_id=…, heading=…)` starts refusing
+with "missing required parameter 'path'" (the `call()` fallback resolves the alias into
+a local and never writes `input["path"]`, so `markdown::read` re-resolves from `path` +
+`PATH_PARAM_ALIASES` only), and a plain `read_file(output_id="@tool_x")` silently loses
+its `corrections` advisory while still succeeding. `output_id` is the highest-traffic
+alias in the corpus, so the silent branch is the common one.
+
+Assert that `ReadFile.param_aliases()` contains both `("output_id", "path")` and
+`("file_id", "path")` — two lines, in `src/server.rs` beside the other four gates. The
+fixture-line annotation on `read_file.rs:57` states the same fact in prose; this is the
+half that reds.
+
 - [ ] **Step 4: Observe a RED for each new gate**
 
 | mutation | must red |
@@ -1107,8 +1129,9 @@ Expected: PASS. The Task 4/5 red is now resolved.
 | change `edit_code`'s `("content","body")` to `("content","bodyy")` | `every_declared_alias_is_absent_from_the_schema` (canonical not advertised) |
 | make `normalize_params` return `Vec::new()` early | `every_declared_alias_is_normalized_and_announced` |
 | add `("x","path")` to `Onboarding::param_aliases` | `call_content_overriders_declare_no_aliases` |
+| replace `ReadFile::param_aliases()`'s array with `crate::fs::PATH_PARAM_ALIAS_MAP` | the Step 3a gate |
 
-Revert each. Record the four in the commit message.
+Revert each. Record all five in the commit message.
 
 - [ ] **Step 5: Run the full gate, then commit**
 
