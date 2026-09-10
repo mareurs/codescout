@@ -252,8 +252,18 @@ impl Check {
     /// looking that up in `cited_from_here` (which holds artifact ids) would be a
     /// category error, not merely a guaranteed miss.
     ///
-    /// Every other declared check passes its own finding's artifact id — confirmed
-    /// by reading each of this file's `.admit(...)` call sites, not assumed.
+    /// Every other declared check is assumed to pass its own finding's artifact id
+    /// as `id` — that claim is now known to be **unverified** for 10 of the 37
+    /// members here: `AbsPathMustBeAbsolute`, `AdsColonInAbsPath`,
+    /// `BackslashInAbsPath`, `BackslashInGitRoot`, `DeclaredRootMissing`,
+    /// `DotdotSegmentInAbsPath`, `MissingFile`, `PrematureArchiveCitation`,
+    /// `SidecarShapeDrift`, and `SidecarUnparseable` never call `.admit(...)`
+    /// anywhere in this file, so there was no call site to read for them (Task 8
+    /// re-verification of a Task 7 claim that had said every member was "confirmed
+    /// by reading each of this file's `.admit(...)` call sites, not assumed").
+    /// Membership on this list is INERT for a check that never calls `admit` —
+    /// nothing here relies on a verification that did not happen, but a future
+    /// reader should not either.
     pub(super) fn admits_relevance_exemption(self) -> bool {
         matches!(
             self,
@@ -1032,7 +1042,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              Rows are ordered by abs_path, so the window is stable across calls: \
              librarian(action=\"doctor\", limit={total_outside}) returns all of them, \
              or limit={sample_limit}, offset={next_offset} for the next page. \
-             catalog_health.outside_roots_by_project counts every row, elided AND scoped-out ones included. \
+             catalog_health.outside_roots_total counts every row, elided AND scoped-out ones included \
+             (outside_roots_by_project itself may show only the top roots by count below scope=all). \
              A row here is under NO managed root, NO umbrella sibling, and NO repo the catalog has commits for — \
              so nothing on this machine claims it and doc(move)/doc(delete) have nothing to resolve it against."
         ));
@@ -1045,7 +1056,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              report because they belong to a workspace this machine knows about — an umbrella sibling of the \
              active project, or a repo the catalog holds commits for. See \
              catalog_health.outside_roots_scoped_by_project. The metric is unscoped: \
-             outside_roots_by_project still counts them, so cross-repo exposure is not understated."
+             catalog_health.outside_roots_total still counts them, so cross-repo exposure is not understated."
         ));
     }
     if !outside_scope_refused_by_project.is_empty() {
@@ -1066,9 +1077,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              of this report for a DIFFERENT reason: nothing on this machine claims them — not an umbrella \
              sibling, not a repo the catalog holds commits for — but they fall outside the active scope's own \
              roots. See catalog_health.outside_roots_scoped_by_project, the SAME published map (both reasons \
-             are folded into one map there). The metric is unscoped: outside_roots_by_project still counts \
-             them, so cross-repo exposure is not understated — only the worklist is limited to the active \
-             scope."
+             are folded into one map there). The metric is unscoped: catalog_health.outside_roots_total still \
+             counts them, so cross-repo exposure is not understated — only the worklist is limited to the \
+             active scope."
         ));
     }
     if !entry_validity_scoped_by_project.is_empty() {
@@ -1206,11 +1217,60 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .collect();
         catalog_health.insert("move_candidates_detail".to_string(), json!(detail));
     }
+    // Ruling 17 requires the METRIC to stay global at every scope; it does not
+    // require the DISPLAY to. `outside_roots_total` is that metric: emitted
+    // unconditionally, including at `Scope::All` and including when the map below
+    // is empty, so a reader never has to sum a (possibly truncated) map to learn
+    // the real exposure.
+    let outside_roots_total: usize = outside_by_project.values().sum();
+    catalog_health.insert(
+        "outside_roots_total".to_string(),
+        json!(outside_roots_total),
+    );
     if !outside_by_project.is_empty() {
-        catalog_health.insert(
-            "outside_roots_by_project".to_string(),
-            json!(outside_by_project),
-        );
+        // Below `Scope::All`, `outside_roots_by_project` collapses to the top
+        // `OUTSIDE_ROOTS_DISPLAY_LIMIT` roots by row count — on the live catalog this
+        // map held 112 entries, ~114 lines of a 316-line health block. The tail is
+        // reported in SIBLING fields (outside_roots_shown/_elided, outside_rows_elided),
+        // never as pseudo-keys inside the map itself: every other value here is
+        // rows-under-one-root, and a `_other_roots`/`_other_rows` pair would break
+        // `sum(values())` for `outside_roots_by_project_counts_elided_rows_too` (below)
+        // and hand a key-iterating caller two fake roots. At `Scope::All` the map stays
+        // unabridged and both elided fields report 0 — Ruling 17 governs the metric,
+        // not the point at which the display is allowed to widen.
+        const OUTSIDE_ROOTS_DISPLAY_LIMIT: usize = 10;
+        let total_roots = outside_by_project.len();
+        let collapse = !matches!(doctor_scope.scope, super::scope::Scope::All)
+            && total_roots > OUTSIDE_ROOTS_DISPLAY_LIMIT;
+        if collapse {
+            let mut by_count: Vec<(String, usize)> = outside_by_project.into_iter().collect();
+            // Highest row count first; tie-break lexically so the displayed set is
+            // deterministic rather than riding on BTreeMap's incidental key order.
+            by_count.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            let displayed: std::collections::BTreeMap<String, usize> = by_count
+                .into_iter()
+                .take(OUTSIDE_ROOTS_DISPLAY_LIMIT)
+                .collect();
+            let shown_rows: usize = displayed.values().sum();
+            catalog_health.insert("outside_roots_shown".to_string(), json!(displayed.len()));
+            catalog_health.insert(
+                "outside_roots_elided".to_string(),
+                json!(total_roots - displayed.len()),
+            );
+            catalog_health.insert(
+                "outside_rows_elided".to_string(),
+                json!(outside_roots_total - shown_rows),
+            );
+            catalog_health.insert("outside_roots_by_project".to_string(), json!(displayed));
+        } else {
+            catalog_health.insert("outside_roots_shown".to_string(), json!(total_roots));
+            catalog_health.insert("outside_roots_elided".to_string(), json!(0usize));
+            catalog_health.insert("outside_rows_elided".to_string(), json!(0usize));
+            catalog_health.insert(
+                "outside_roots_by_project".to_string(),
+                json!(outside_by_project),
+            );
+        }
     }
     if !outside_scoped_by_project.is_empty() {
         catalog_health.insert(
@@ -2066,7 +2126,11 @@ fn outside_roots_group(path: &str) -> String {
 /// one of those is SCOPED OUT of the returned violations and counted into the
 /// returned map instead — Ruling 17: the metric stays global, the worklist is
 /// the active developer's. The caller owes folding that map into
-/// `catalog_health.outside_roots_by_project` so the global count is unchanged.
+/// `catalog_health.outside_roots_by_project` so the global count is unchanged —
+/// still true of the fold itself, but a reader should not READ the count from that
+/// map: below `Scope::All` it may show only the top roots by row count, and
+/// `catalog_health.outside_roots_total` is the field that stays exact and
+/// unconditional at every scope.
 /// Pass an empty slice to get the pre-2026-08-27 behaviour of reporting every
 /// firing row.
 ///
@@ -10434,6 +10498,141 @@ mod tests {
             shown.iter().all(|p| p.starts_with("/elsewhere/alpha")),
             "alphabetical order clusters the window: {shown:?}"
         );
+    }
+    /// Fourteen distinct outside-managed-roots project roots, each with a DISTINCT
+    /// row count (root `k` gets `k + 1` rows, total 105), under an ACTIVE current
+    /// project so the default scope resolves to `Scope::Project` rather than
+    /// `Scope::All` — the collapse under test is a deliberate no-op at `Scope::All`.
+    /// `ctx_with_outside_rows` cannot exercise this: it spreads every row over
+    /// exactly two projects regardless of `n`, so `outside_roots_by_project` never
+    /// exceeds the display limit there.
+    fn ctx_with_many_outside_roots() -> ToolContext {
+        seed_many_outside_roots(ctx_rooted_at(
+            Catalog::open_in_memory().unwrap(),
+            std::path::Path::new("/managed/project"),
+        ))
+    }
+
+    /// Same fourteen-root, distinct-row-count catalog as [`ctx_with_many_outside_roots`],
+    /// but with NO active current project — `resolve_scope` then leaves an explicit
+    /// `scope="all"` (or the defaulted scope) as literal `Scope::All` rather than
+    /// aliasing it to `Scope::Umbrella` (which `resolve_scope` does whenever
+    /// `current.umbrella` is `Some(..)`, and which still collapses — only `Scope::All`
+    /// is exempt). A current project WOULD also make `scope="all"` without a configured
+    /// umbrella an error (`an_explicit_all_scope_without_an_umbrella_is_refused`,
+    /// confirmed pre-existing behavior, not something this task changes).
+    fn ctx_with_many_outside_roots_no_active_project() -> ToolContext {
+        seed_many_outside_roots(
+            TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+                .with_root(crate::librarian::workspace::Root {
+                    name: "managed".to_string(),
+                    path: PathBuf::from("/managed/project"),
+                })
+                .build(),
+        )
+    }
+
+    fn seed_many_outside_roots(ctx: ToolContext) -> ToolContext {
+        for root_idx in 0..14usize {
+            let count = root_idx + 1;
+            for row in 0..count {
+                seed_artifact(
+                    &ctx.catalog.lock(),
+                    &format!("outside-{root_idx:02}-{row:02}"),
+                    &format!("/elsewhere/root{root_idx:02}/docs/doc-{row:02}.md"),
+                );
+            }
+        }
+        ctx
+    }
+
+    /// R3 (Task 8): a collapse must pick the top N BY ROW COUNT, not merely
+    /// truncate to N entries — `shown.len() <= 10` alone would pass a collapse
+    /// that keeps the lexically-first ten instead of the highest-count ten.
+    /// Every root here has a distinct count, so a mis-ordered collapse is
+    /// visible: it would either include `/elsewhere/root00` (count 1, the
+    /// lowest) or omit one of the genuinely-highest roots. The arithmetic
+    /// assertion at the end is the one that catches a collapse that loses rows
+    /// rather than merely reordering them.
+    #[tokio::test]
+    async fn outside_roots_by_project_collapses_to_the_top_ten_by_count() {
+        let ctx = ctx_with_many_outside_roots();
+        let report = call(&ctx, json!({})).await.unwrap();
+        let health = &report["catalog_health"];
+
+        assert_eq!(
+            health["outside_roots_total"],
+            json!(105),
+            "outside_roots_total is the exact global sum — 1+2+...+14"
+        );
+
+        let by_project = health["outside_roots_by_project"].as_object().unwrap();
+        assert_eq!(
+            by_project.len(),
+            10,
+            "the display collapses to the top 10 roots below scope=all: {by_project:#?}"
+        );
+        assert_eq!(health["outside_roots_shown"], json!(10));
+        assert_eq!(
+            health["outside_roots_elided"],
+            json!(4),
+            "14 roots seeded, 10 shown, 4 elided"
+        );
+        assert_eq!(
+            health["outside_rows_elided"],
+            json!(10),
+            "the 4 lowest-count roots (1+2+3+4 rows) are the ones elided"
+        );
+
+        // Exactly the top ten BY COUNT — roots with counts 5..=14 (root04..root13) —
+        // never the first ten found by some other order.
+        for root_idx in 4..14usize {
+            let key = format!("/elsewhere/root{root_idx:02}");
+            assert_eq!(
+                by_project.get(&key).and_then(Value::as_u64),
+                Some((root_idx + 1) as u64),
+                "root{root_idx:02} (count {}) must be displayed: {by_project:#?}",
+                root_idx + 1
+            );
+        }
+        // The lowest-count root must be the one omitted, not merely SOME root —
+        // this is what a lexical (rather than by-count) collapse would get wrong,
+        // since "/elsewhere/root00" sorts FIRST.
+        assert!(
+            !by_project.contains_key("/elsewhere/root00"),
+            "the lowest-count root (count 1) must be elided, not displayed: {by_project:#?}"
+        );
+
+        let shown_rows: u64 = by_project.values().map(|v| v.as_u64().unwrap()).sum();
+        let total = health["outside_roots_total"].as_u64().unwrap();
+        let elided_rows = health["outside_rows_elided"].as_u64().unwrap();
+        assert_eq!(
+            shown_rows + elided_rows,
+            total,
+            "arithmetic must close: sum(displayed) + outside_rows_elided == outside_roots_total"
+        );
+    }
+
+    /// At `Scope::All` the collapse is a deliberate no-op: the metric and the
+    /// display agree, and `outside_roots_elided`/`outside_rows_elided` are both 0
+    /// even though there are more than 10 roots — collapsing here would be exactly
+    /// the false negative Ruling 17 exists to avoid.
+    #[tokio::test]
+    async fn outside_roots_by_project_stays_unabridged_at_scope_all() {
+        let ctx = ctx_with_many_outside_roots_no_active_project();
+        let report = call(&ctx, json!({"scope": "all"})).await.unwrap();
+        let health = &report["catalog_health"];
+
+        assert_eq!(health["outside_roots_total"], json!(105));
+        let by_project = health["outside_roots_by_project"].as_object().unwrap();
+        assert_eq!(
+            by_project.len(),
+            14,
+            "scope=all must not collapse the display: {by_project:#?}"
+        );
+        assert_eq!(health["outside_roots_shown"], json!(14));
+        assert_eq!(health["outside_roots_elided"], json!(0));
+        assert_eq!(health["outside_rows_elided"], json!(0));
     }
 
     /// docs/PROGRESSIVE_DISCOVERABILITY.md § Pattern 1: an overflow hint must
