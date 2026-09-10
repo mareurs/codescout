@@ -123,6 +123,27 @@ range must route to *ask the rung's author* and must **not** contain a refspec f
 the ≥1 case still naming one — otherwise the assertion is monotone under the refspec advice being
 deleted for everybody, which is the fix this file rejects.
 
+**There is an in-repo exemplar for this exact shape — copy it rather than inventing one.**
+`src/librarian/tools/doctor.rs:7455-7461` asserts `v.detail.contains("delete")` on a drift
+finding's catalog-is-right branch, and writes the reason into the failure message: *"Without it the
+prescribed export skips this artifact by its own precondition, reports `exported: 0`, and exits 0
+— a clean no-op the reader reads as 'nothing needed doing'."* That is a test **about remedy text**
+rather than about a predicate, which is the half a 96-assertion predicate suite cannot reach. Its
+sibling at `:14459` pins `skipped == 1` on a second run, on the rationale that *"`exported: 0`
+alone is indistinguishable from `nothing matched`"* — the same distinction this bug is about, one
+surface over.
+
+**And the property to assert is ANSWERABILITY, not correctness** — sessionId
+`343d53e1-2c36-4063-9517-7459472e9b31`'s refinement, and it sharpens what the pairing above buys.
+A remedy's *correctness* is untestable as prose and pinning its sentences reds on every rewording.
+What is cheap and reds on exactly the regression that happens is: **does it still name a party who
+can ACT?** Not merely a second addressee (`OB-20`'s shape test, which buys arrival), but one whose
+answer has a branch the reader can use — `OB-20`'s measured ceiling is a guard that named the right
+party and asked them a binary their state did not occupy. For this file: the zero-commit branch
+must name the rung's author *and* the three states, because "ask them" without the enumeration
+reproduces exactly the unanswerable question `OB-20` records.
+
+
 **Why no existing assertion reaches it:** the suite's ~96 assertions are about the guard's
 predicate — who is refused. The remedy text is untested by construction, which is the parent bug's
 own finding and `CLAUDE.md` § *Testing Discipline*'s named gap.
