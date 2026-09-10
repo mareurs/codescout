@@ -75,11 +75,16 @@ Three costs, in increasing order of importance:
 - **`symbols`' `name`/`query` and `name_path`/`symbol`.** True synonyms, but `symbols`
   **carries no top-level `required` at all** (`src/tools/symbol/symbols.rs:134-160`), so no
   false claim exists there and the change scenario that funds the path collapse is provably
-  absent. Collapsing it would buy ~130 chars on a surface already measured as 100% cache-read
-  and worth ~$0.0004 per request, plus tidiness. Consistency across the family is an
-  aesthetic, not a change scenario. **Revisit-when:** a `usage.db` split on those four param
-  names shows a retry or error asymmetry — an ambiguity cost is measurable, and nobody has
-  measured it.
+  absent. **Now also measured, and the measurement changes what a future pass should do rather
+  than reversing this one** (`docs/usage-reports/2026-09-10-usage-analysis.md`, 3-day window):
+  `name` **566** vs `query` **11** — a 51:1 preference for the *alias* — and `name_path` **370**
+  vs `symbol` **310**, a near coin-flip. So the ambiguity cost this document earlier called
+  "measurable and unmeasured" is **real**, and the canonical pick proposed in the first draft of
+  this spec (`query` and `symbol`, chosen for family consistency) was **backwards**: it would
+  have converted the overwhelming majority form into the corrected one. If `symbols` is reopened,
+  the canonical is picked from usage — `name` — not from consistency with its siblings.
+  Consistency remains an aesthetic, not a change scenario; what changed is that the ambiguity now
+  has a number.
 - **`librarian`'s `root`/`old_root`.** Unverified whether `root` names the same parameter for
   `merge_worktree` and `doctor` as it does for `rehome`. Not collapsed on an assumption.
 - **`read_file`'s `offset`/`limit`.** These are a different calling convention, not a rename:
@@ -99,6 +104,26 @@ Three costs, in increasing order of importance:
 | conflict rule | canonical wins, and the ignored key is named in the `corrections` note | existing behaviour (`require_path_param` prefers `path`) plus the new announcement |
 
 ## Inventory and canonical choice
+
+**Measured 2026-09-10** from `input_json` across the three busiest projects, 3-day window
+(full derivation: `docs/usage-reports/2026-09-10-usage-analysis.md`). The counts matter because
+two of the four path aliases turn out to be **dead**, and because the error queries cannot see
+any of this — a repaired alias is classed `success`, so the law's own frequency is invisible to
+`/analyze-usage`:
+
+| parameter | calls / 3d | consequence for this collapse |
+|---|---:|---|
+| `path` (canonical) | 8,481 | the name to keep, by a factor of 28 over every alias combined |
+| `output_id` | 152 | live; will generate `corrections` notes |
+| `file_path` | 147 | live; will generate `corrections` notes |
+| `relative_path` | **0** | **dead — de-advertising costs nothing observable** |
+| `file` | **0** | **dead — de-advertising costs nothing observable** |
+
+Two things follow. **De-advertising `relative_path` and `file` is free** — zero calls across
+12,597 tool calls, while both are carried in eight schemas, eight `FIXTURE NOTE` comments and the
+alias gate's `EXPECTED_ALIAS_COUNTS_BY_TOOL`. And the announcement has a **measured volume**:
+`file_path` + `output_id` ≈ 299/3d ≈ **100 notes/day** under the every-call cadence. That is the
+number to revisit if the cadence ever feels noisy — not a guess about it.
 
 | tool | properties removed | canonical | note |
 |---|---|---|---|
