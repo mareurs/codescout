@@ -15,7 +15,7 @@ related:
 severity: high
 ---
 
-# BUG: subagent writes produce no transcript record, so `file-provenance.py` returns UNKNOWN for every file an SDD task writes — and `fmt-mine.sh`, the gate's first command, refuses on all of them
+# BUG: subagent writes produce no transcript record, so `file-provenance.py` returns UNKNOWN for every file an SDD task writes — and `fmt-mine.sh`, the gate's first command, cannot format any of them
 
 ## Summary
 
@@ -23,9 +23,21 @@ severity: high
 that wrote it. Subagent tool calls do not appear in those transcripts at all — there are **zero**
 `isSidechain: true` records — so every file written by a subagent attributes to nobody.
 `scripts/fmt-mine.sh` consumes that verdict and formats only what it can attribute, so the
-**mandatory first command of this project's gate refuses on the normal output of this project's
-own `subagent-driven-development` skill.** The script's own comment claims to handle sidechain
-records, which is a documented behaviour the substrate cannot support.
+**mandatory first command of this project's gate cannot format the normal output of this
+project's own `subagent-driven-development` skill.** The script's own comment claims to handle
+sidechain records, which is a documented behaviour the substrate cannot support.
+
+**Scoped 2026-09-10, correcting this file's own first draft.** The blindness is total — provenance
+sees *no* subagent write — but the **refusal is conditional**: `fmt-mine.sh` runs
+`cargo fmt -- --check` as stage 1 and `exit 0`s there when nothing would be rewritten
+(`scripts/fmt-mine.sh:34-36`, `:80-85`), which its own comment calls *"the overwhelmingly common
+case"*. So the gate only refuses when a subagent-written file **actually needs reformatting**.
+The first draft said *"refuses on all of them"*, which overstated the frequency while getting the
+mechanism right. Witnessed both ways inside one task: SDD Task 1's implementation round hit the
+refusal and fell back to `cargo fmt`; its fix round exited 0 with no fallback, because that
+round's edits needed no reformatting. **Severity stays high** — when it bites it blocks the gate's
+first command with no owner to ask and no `--force` — but a reader sizing the exposure should
+expect it on *some* task rounds, not all.
 
 ## Symptom (Effect)
 
@@ -112,7 +124,8 @@ Measured 2026-09-10 by the counts above; predicate read at `285064ad`.
 `scripts/fmt-mine.sh:73` sets `PROVENANCE="${FMT_MINE_PROVENANCE:-$ROOT/scripts/file-provenance.py}"`
 and invokes it at `:124`. So the mandatory first gate command inherits this blind spot directly.
 `CLAUDE.md` § *Development Commands* states the script *"formats what `scripts/file-provenance.py`
-attributes to you and **refuses** the rest"* — which, for subagent output, is everything.
+attributes to you and **refuses** the rest"* — which, for subagent output, is everything it is
+asked to format, on the rounds where anything needs formatting at all.
 
 ### There is no `--force`, by design
 
