@@ -324,6 +324,54 @@ EOF
 
 ### Task 2: `DoctorScope` — one scoping unit, applied at the SQL layer
 
+> **⚠ SEQUENCING CORRECTION 2026-09-10 — DO TASK 4 FIRST. Task 2 cannot land before it.**
+> Attempted as written and reverted; three findings, each verified at the bytes rather
+> than reasoned about.
+>
+> 1. **Steps 4 and 5 contradict each other.** Step 4 splices `scope.sql_and()` into
+>    `scan_artifact_paths`'s query. That scan produces `outside_roots_by_project`, whose
+>    contract — Ruling 17, restated in the function's own doc comment at
+>    `src/librarian/tools/doctor.rs` — is that the METRIC stays global while the WORKLIST
+>    narrows. A `WHERE` clause removes the foreign rows before they can be counted, so
+>    the metric empties at `scope=project`, and **Step 5's own assertion
+>    (`the cross-repo metric must stay global at scope=project`) fails against Step 4.**
+>
+> 2. **Narrowing per-row instead breaks a different announcement.** Gating the row checks
+>    on `scope.admit(...)` preserves the metric but reds
+>    `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not` with *"the
+>    drop must be announced, not silent"* — pre-filtering removes violations before the
+>    `SCOPED_ROW_CHECKS` `retain` can count and announce them. **That retain is what Task
+>    4 retires.** Hence the swap: unify the announcements first, then Task 2's wiring is a
+>    one-line splice.
+>
+>    The general property, which is why all three attempts failed the same way: `doctor`
+>    has five scoping mechanisms and **each owns its own announcement**, so any sixth
+>    narrowing applied before they are unified takes an announcement with it. Not three
+>    bugs — one property, met three times.
+>
+> 3. **Task 2 is NOT "shippable alone", and the toolchain says so.** `cargo clippy
+>    --workspace --all-targets -- -D warnings` refuses to compile a `DoctorScope` no
+>    caller uses: *"associated function `new` is never used"*, `-D dead-code`. So Steps
+>    1–3 cannot be committed as a unit; the struct and its first consumer must land
+>    together. Do not answer this with `#[allow(dead_code)]` — that suppresses the guard
+>    that is correctly reporting the sequencing problem.
+>
+> **Fixture corrections for whoever picks this up** (Step 1 as written does not compile):
+> `insert_artifact_row` and `ctx_at` do not exist. The real helpers are `seed_artifact`
+> and `ctx_rooted_at`, and both are private to `doctor.rs`'s own `#[cfg(test)] mod tests`,
+> so a sibling `doctor/scope.rs` cannot reach them — write local twins. Also, `doctor`
+> resolves scope with `UmbrellaPolicy::Require`, so Step 5's `scope="all"` call is
+> **refused outright** without a configured umbrella (*"scope=\"all\" requires a
+> configured umbrella"*); the fixture needs `cp.umbrella = Some(..)` plus
+> `.with_umbrellas(vec![Umbrella { name, members }])`.
+>
+> No rename is needed: edition 2021 lets `doctor.rs` and `doctor/scope.rs` coexist, so
+> `mod scope;` in `doctor.rs` is the whole wiring — the 15,620-line file stays put.
+>
+> Reverted rather than landed behind `#[ignore]` + `#[allow(dead_code)]`: both would be
+> green-looking states that suppress the two guards actually reporting the problem.
+> — sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`
+
 **Files:**
 - Create: `src/librarian/tools/doctor/scope.rs`
 - Modify: `src/librarian/tools/doctor.rs:1714-1772` (`scan_artifact_paths`), `:326` (`call` builds and threads it)
@@ -769,6 +817,19 @@ EOF
 ---
 
 ### Task 4: Retire `SCOPED_ROW_CHECKS` and admit the two checks that started firing
+
+> **⚠ PROMOTED TO FIRST 2026-09-10 — this task now precedes Task 2.** Derivation in Task
+> 2's banner. Short form: `doctor` has five scoping mechanisms and each owns its own
+> announcement, so a sixth narrowing added before they are unified silently takes an
+> announcement with it. Measured twice — an SQL splice empties
+> `outside_roots_by_project`, a per-row gate reds
+> `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not` with *"the drop
+> must be announced, not silent"*. Both are Ruling 17 failures introduced by the fix for
+> Ruling 17.
+>
+> Land `DoctorScope` (Task 2 Steps 1–3) **in this task's commit**, not before it: clippy's
+> `-D dead-code` refuses a struct with no consumer, so the unit and its first caller are
+> one commit whether or not the plan splits them.
 
 **Files:**
 - Modify: `src/librarian/tools/doctor.rs:551-587` (delete the const and the `retain`), `:4308` (`scan_params_behind_body`), `:4518` (`scan_params_status_drift`), and the seven scans the const named
