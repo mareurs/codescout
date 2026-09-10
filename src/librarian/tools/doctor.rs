@@ -1240,6 +1240,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // not the point at which the display is allowed to widen.
         const OUTSIDE_ROOTS_DISPLAY_LIMIT: usize = 10;
         let total_roots = outside_by_project.len();
+        // `Scope::All` is unreachable whenever a project is active: `resolve_scope`
+        // under `UmbrellaPolicy::Require` aliases an explicit `all` to
+        // `Scope::Umbrella` when the active project has an umbrella, and ERRORS
+        // when it does not. That is deliberate — it IS the user's ceiling (at most
+        // umbrella siblings, never the whole machine) — so do not "fix" it by
+        // loosening the policy. A caller who wants the full inventory regardless of
+        // scope already has a route: the response's own `limit`/`offset` paging, or
+        // reading `outside_roots_total`, which stays exact and unconditional at
+        // every scope.
         let collapse = !matches!(doctor_scope.scope, super::scope::Scope::All)
             && total_roots > OUTSIDE_ROOTS_DISPLAY_LIMIT;
         if collapse {
@@ -10656,7 +10665,9 @@ mod tests {
         );
         assert!(
             hint.contains("outside_roots_by_project"),
-            "hint must point at the field that accounts for the elided rows; got: {hint}"
+            "hint must still name outside_roots_by_project as the caveat that it may not \
+             show every root below scope=all — outside_roots_total is the field that \
+             actually accounts for the elided rows; got: {hint}"
         );
         assert!(
             hint.contains("15 elided"),
