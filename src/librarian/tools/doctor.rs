@@ -272,17 +272,37 @@ impl Check {
     /// reds it (the cited foreign row gets reseated).
     ///
     /// Every other declared check is assumed to pass its own finding's artifact id
-    /// as `id` — that claim is now known to be **unverified** for 10 of the 37
+    /// as `id` — that claim was **unverified** as of Task 8 for 10 of the 37
     /// members here: `AbsPathMustBeAbsolute`, `AdsColonInAbsPath`,
     /// `BackslashInAbsPath`, `BackslashInGitRoot`, `DeclaredRootMissing`,
     /// `DotdotSegmentInAbsPath`, `MissingFile`, `PrematureArchiveCitation`,
-    /// `SidecarShapeDrift`, and `SidecarUnparseable` never call `.admit(...)`
-    /// anywhere in this file, so there was no call site to read for them (Task 8
-    /// re-verification of a Task 7 claim that had said every member was "confirmed
-    /// by reading each of this file's `.admit(...)` call sites, not assumed").
-    /// Membership on this list is INERT for a check that never calls `admit` —
-    /// nothing here relies on a verification that did not happen, but a future
-    /// reader should not either.
+    /// `SidecarShapeDrift`, and `SidecarUnparseable` called `.admit(...)` nowhere
+    /// in this file at the time, so there was no call site to read for any of
+    /// them (Task 8 re-verification of a Task 7 claim that had said every member
+    /// was "confirmed by reading each of this file's `.admit(...)` call sites,
+    /// not assumed").
+    ///
+    /// **C3 (2026-09-09 whole-branch review round 2) closed that gap for 8 of the
+    /// 10 — membership on THIS list is now LIVE, not inert, for them.**
+    /// `AbsPathMustBeAbsolute`, `AdsColonInAbsPath`, `BackslashInAbsPath`,
+    /// `DotdotSegmentInAbsPath` and `MissingFile` gate through
+    /// `scan_artifact_paths`'s dynamic `scope.admit(&v.check, ...)` site;
+    /// `BackslashInGitRoot`, `PrematureArchiveCitation` and `SidecarShapeDrift`
+    /// each gate at their own literal call site. All eight now call `.admit(...)`
+    /// on their own finding's real `(id, abs_path)`, so this list's exemption
+    /// applies to a verified claim for them.
+    ///
+    /// **The remaining two stay genuinely inert, for different structural
+    /// reasons.** `DeclaredRootMissing` never calls `.admit(...)` at all —
+    /// `scan_declared_project_roots` takes no `DoctorScope` — so it needs no
+    /// exemption from THIS list to begin with; see its own EXEMPT entry in
+    /// `every_declared_check_is_scope_gated_or_a_named_exemption` for why.
+    /// `SidecarUnparseable` calls `.admit(...)` too, but always under the literal
+    /// name `"sidecar_shape_drift"` — `scan_sidecar_shape_drift` never passes the
+    /// string `"sidecar_unparseable"` to `admit`, so `Check::SidecarUnparseable`'s
+    /// own membership here is never read. Nothing here relies on a verification
+    /// that does not happen for either of these two, but a future reader should
+    /// not either.
     pub(super) fn admits_relevance_exemption(self) -> bool {
         matches!(
             self,
@@ -1962,8 +1982,10 @@ async fn run_fix(
 /// whole-branch review round 2, Critical 1) — tracked independently, not fixed
 /// by this comment. This comment previously claimed the opposite ("an operator
 /// authorising `confirm=true`"), which was false: there was never a call to
-/// authorise. Read `docs/issues/` for the open bug file before assuming a
-/// `confirm=false` (or omitted) call here is safe to run.
+/// authorise.
+/// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
+/// is the open bug file — read it before assuming a `confirm=false` (or
+/// omitted) call here is safe to run.
 fn reseat_worktree(
     ctx: &ToolContext,
     scope: &mut scope::DoctorScope,
@@ -5677,8 +5699,16 @@ fn scan_sidecar_shape_drift(
         // drift still tallied into `row_checks_scoped_by_project` under
         // `sidecar_shape_drift` — see `worktree_scoped_row_now_scopes_with_every_other_check`,
         // which caught it.) Both findings still share one check name in the `admit()` call —
-        // `sidecar_shape_drift` — because both are about the same (id, abs_path) pair and
-        // neither is on `admits_relevance_exemption`'s allow-list.
+        // `sidecar_shape_drift` — because both are about the same (id, abs_path) pair. Both
+        // `SidecarShapeDrift` and `SidecarUnparseable` ARE on `admits_relevance_exemption`'s
+        // allow-list, but only `sidecar_shape_drift`'s membership is ever read here — the
+        // literal name passed to `admit()` never varies, so `SidecarUnparseable`'s own
+        // membership on that list is inert (see its doc comment there). One consequence of
+        // the shared literal name: a scoped-out `sidecar_unparseable` row tallies under
+        // `sidecar_shape_drift` in `scope.scoped_out()`, not under its own name — today both
+        // findings fold into the same per-root `sidecar_shape_drift` aggregate in the
+        // published report either way, so no published number differs, but `scoped_out`'s
+        // keyed-by-check design should not be credited with distinguishing the two here.
         let Ok(content) = std::fs::read_to_string(abs_path) else {
             continue;
         };
@@ -12215,15 +12245,21 @@ mod tests {
     /// dedicated `cited_prefix_scoped` fold, admitted only via `.as_str()`, never a
     /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly two variants
     /// today, each with a structural reason it needs no per-row scope gate of its own:
-    /// - `SidecarUnparseable` shares its sibling `SidecarShapeDrift`'s single `admit()` call
-    ///   site (`scan_sidecar_shape_drift` gates once, on the same `(id, abs_path)`, before
-    ///   emitting either finding) — a separate fold would double-count the same gate.
+    /// - `SidecarUnparseable` shares its sibling `SidecarShapeDrift`'s check name at BOTH of
+    ///   `scan_sidecar_shape_drift`'s two `admit()` call sites — one guarding the
+    ///   unparseable-sidecar push, one guarding the shape-drift push, each on the same
+    ///   `(id, abs_path)` for its own row — because the function always calls `admit()`
+    ///   under the literal name `"sidecar_shape_drift"`, never `"sidecar_unparseable"`. A
+    ///   separate fold would double-count gates that already share a name.
     /// - `DeclaredRootMissing` — `scan_declared_project_roots` only ever reads
-    ///   `ctx.current_project`'s own `.codescout/workspace.toml`, and every `Violation::new`
-    ///   call there passes `id: None`, `abs_path` set to the *declared* root path (which
-    ///   need not exist on disk, that being the finding) rather than a catalogued artifact's
-    ///   `abs_path` — so this check can structurally never surface a foreign-repo row: there
-    ///   is no other repo's `workspace.toml` for it to have read in the first place.
+    ///   `ctx.current_project`'s own `.codescout/workspace.toml`, and both `Violation::new`
+    ///   call sites there pass `id: None`, `abs_path` set to `config_display` — the active
+    ///   project's own `workspace.toml` path, RepoPath-displayed — never the declared root
+    ///   being complained about (which need not exist on disk, that being the finding) and
+    ///   never a catalogued artifact's `abs_path` — so this check can structurally never
+    ///   surface a foreign-repo row: there is no other repo's `workspace.toml` for it to
+    ///   have read in the first place. Stronger than "some path that need not exist": the
+    ///   `abs_path` on every finding here is a path this check itself just opened and read.
     ///
     /// Both no-overlap (via the plain `+` length sum below, checked before the sets are
     /// unioned) and no-leftover (`accounted == all`) are asserted, so a variant double-
@@ -12264,7 +12300,9 @@ mod tests {
         // explaining the structural reason defeats the whole point of this test: it exists
         // to force that explanation, not to make the assertion pass.
         let exempt: std::collections::BTreeSet<&str> = [
-            // Shares scan_sidecar_shape_drift's single admit() call site with SidecarShapeDrift.
+            // Shares scan_sidecar_shape_drift's check name at both admit() call sites with
+            // SidecarShapeDrift — the function calls admit() under "sidecar_shape_drift" at
+            // both pushes, never under "sidecar_unparseable".
             Check::SidecarUnparseable.as_str(),
             // scan_declared_project_roots reads only ctx.current_project's own
             // workspace.toml and emits id: None — structurally never a foreign-repo row.

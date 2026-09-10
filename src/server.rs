@@ -3619,7 +3619,18 @@ mod tests {
     /// spot — the clause was already at its operative-facts minimum, and trimming a
     /// neighbouring action's coverage to fund this one is the thing this log exists to
     /// forbid. docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_303;
+    ///
+    /// **57_303 → 57_359 (2026-09-10, +56): `reseat_worktree` named as the `fix` clause's
+    /// one exception to "DRY RUN until confirm=true".** The `fix` param's schema description
+    /// said every fix "is a DRY RUN until confirm=true" without qualification, but
+    /// `reseat_worktree` never reads `confirm` and applies immediately — so a caller reading
+    /// only the schema had no signal that this one fix is unconditionally live (2026-09-09
+    /// whole-branch review round 2, I1). Gross addition was 56 (`" (reseat_worktree: applies
+    /// immediately, ignores confirm)"` inserted mid-clause); nothing was paid on the spot —
+    /// the surrounding clause was already at its operative-facts minimum, and trimming a
+    /// neighbouring fix's coverage to fund this one is the thing this log exists to forbid.
+    /// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_359;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

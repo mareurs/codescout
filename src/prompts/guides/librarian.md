@@ -309,8 +309,9 @@ a **dry run until `confirm=true`** — so reading this after your first call has
 cost you nothing on those, which is why it lives here rather than in the tool
 schema. **`reseat_worktree` is the one exception: it does NOT read `confirm` at
 all and applies on the same call that reports it** — a separate, pre-existing
-bug (2026-09-09 whole-branch review round 2, Critical 1), tracked
-independently and not fixed by this correction. Treat any `reseat_worktree`
+bug (2026-09-09 whole-branch review round 2, Critical 1),
+`docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`,
+tracked independently and not fixed by this correction. Treat any `reseat_worktree`
 call as live, not a preview, regardless of whether `confirm` was passed. The
 report these repair is project-scoped by default too; a foreign finding
 surfaces only when a local artifact cites it (umbrella siblings only).
