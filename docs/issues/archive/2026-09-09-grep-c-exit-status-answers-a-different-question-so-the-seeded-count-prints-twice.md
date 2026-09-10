@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
-closed: ''
+closed: 2026-09-10
 opened: 2026-09-09
 owner: marius
 related: []
@@ -117,8 +117,8 @@ single `echo`, so the line break is inside the variable rather than in the forma
 
 ## Fix
 
-Applied 2026-09-09 at `scripts/install-hooks.sh:397` — exactly the shape this file prescribed,
-including its refusal of `|| true`:
+Applied 2026-09-09 to the stage-log seeding block in `scripts/install-hooks.sh` — exactly the
+shape this file prescribed, including its refusal of `|| true`:
 
 ```sh
 seeded="$(grep -c . "$seed_log" 2>/dev/null)"
@@ -140,8 +140,41 @@ $ echo $?
 The test file already recorded the same `-e` fact independently at
 `tests/pre-push-foreign-session-guard.sh:696`.
 
-**Not yet committed** — no `fix_sha` / `fix_patch_id` yet, so this file stays `open`. Archive
-is gated on the fix being on `experiments`.
+**Fixed on `experiments`** at `db4da39c`, patch-id
+`9c043a7d1c0eacc9ec63fedef410fe31ff3dde2a`, 2026-09-09 16:52 +0300 — authored by sessionId
+`c86ebb51-7ae3-477d-b755-f25db6180782`, a peer, not the session that filed this. On
+`origin/experiments`.
+
+### Re-derived independently before archiving, 2026-09-10
+
+The paragraph above replaced one reading *"Not yet committed — no `fix_sha` / `fix_patch_id`
+yet, so this file stays `open`"*. That sentence was written minutes before the commit that
+falsified it and was never updated, so together with `status: open` it handed a later reader
+**two independent stale signals pointing the same way** — the shape that reads as corroboration
+rather than as decay. It cost one session a recommendation to fix an already-fixed bug. The
+transferable half: a `status:` field carries no instant, so nothing marks it as a claim that can
+go stale, and § *Testing Discipline*'s rule that a count needs its instant and its tree holds
+about frontmatter too.
+
+So the archive is gated on a fresh derivation rather than on the record above:
+
+| run | result |
+|---|---|
+| suite as committed | 96 passed, 0 failed, exit 0 |
+| **production path mutated** — `\|\| echo 0` restored | **94 passed, 2 failed, exit 1** |
+
+The two that fired are *"no line begins with a bare wrapped count"* and *"renders a single 0"* —
+the same pair the author recorded at 88/2, the totals differing only because six assertions have
+landed since. Their honest note re-confirms as well: *"exactly one summary line"* stayed **green**
+under the armed mutation, and so did the control.
+
+**Mutated on a relocated copy, never on the shared script — and that is faithful, not a
+second-level re-implementation.** `installer_fixture` already does `cp "$INSTALLER"
+"$REPO/scripts/install-hooks.sh"`, and `INSTALLER` resolves through `$(dirname "$0")/../scripts`
+— so copying `scripts/` and the test file into a scratch tree moves *what the fixture copies*,
+and `cmp` confirms both are byte-identical. The mutation lands on the production path with no
+blast radius on a checkout four sessions share. Mutating `scripts/install-hooks.sh` in place is
+what deleted three live hooks out of the real checkout earlier the same day.
 ## Tests added
 
 Added to `tests/pre-push-foreign-session-guard.sh` — section *"the seeded stage-log count is one
@@ -174,9 +207,23 @@ log for `seeded, N` should tolerate `N` being followed by a newline.
 
 ## Resume
 
-Apply the two-line form above to the `seeded=` assignment in `scripts/install-hooks.sh`,
-and add the `^[0-9]+ inherited` absence assertion to the installer section of
-`tests/pre-push-foreign-session-guard.sh`. Confirm the RED by restoring `|| echo 0`.
+Fixed at `db4da39c` (patch-id `9c043a7d1c0eacc9ec63fedef410fe31ff3dde2a`), on
+`origin/experiments`, with a two-sided regression test plus a control. The RED was observed by
+the author at fix time and re-derived independently before archiving — see § *Fix*. Nothing is
+outstanding.
+
+**The tag stays `cluster/unclassified` deliberately.** The mechanism is *a caller composing
+control flow on an exit status that answers a different question than the one it reads*, and no
+`IC-N` in the closed set names it — `IC-2` is a gate substituting a proxy for an event it
+**cannot** observe, whereas here the status is perfectly observable and was simply misread.
+Forcing the nearest tag would add a non-member to a class's promotion count, which is the
+*"a wrong confirmation is a foreclosure"* failure this file's own § *Evidence* records, applied
+to taxonomy instead of to a clearing.
+
+**A neighbouring class may be real, and is NOT claimed here.** `04aa6207d31a861f` records
+`|| RESULT=""` supplying *a plausible value rather than a status*; this file records `|| echo 0`
+doing the same. That is n=2 in one subsystem — short of both the count bar (≥3) and the spread
+bar (≥2 subsystems). It is an observation for whoever meets the third instance, not a class.
 
 ## References
 

@@ -118,7 +118,7 @@ where the swallowed error could be a *code defect* rather than an expected absen
 > an exit status into the number it already means" — which would be true of a fallback that
 > substituted, and this one adds.
 >
-> **Filed independently as `2b1c3aaa9b09534d` by another session**, who found it after I had
+> **Filed independently as `d81efeef5252bfcc` by another session**, who found it after I had
 > published it as clear. That is the cost of the error and the reason it is retracted in
 > place rather than edited away: § *Testing Discipline* asks that a re-derivation which
 > confirms be published, because a confirmation is a **denominator**. A confirmation that is
