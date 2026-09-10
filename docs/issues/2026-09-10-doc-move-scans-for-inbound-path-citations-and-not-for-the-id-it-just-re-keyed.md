@@ -29,28 +29,45 @@ prose and left to the caller's memory, with **no signal at all** when it is skip
 ## Symptom (Effect)
 
 A prose citation of the old 16-hex id survives the move, resolves to nothing, and nothing reports
-it. It is strictly quieter than the path half: `audit_doc_refs` scores a dead path-shaped token at
-`high` and reds CI, and there is no id-shaped equivalent — so the unserved half is also the half
-with no downstream backstop.
+it.
 
-The reader who meets it later gets `unknown id`, which is a *correct* error about a *stale premise*
-— indistinguishable from a typo, and it costs a re-derivation to tell apart.
+**The unserved population is PROSE ids specifically, and the narrower claim is the stronger one.**
+An earlier draft of this file said a dead id has "no equivalent backstop", which is false of
+*frontmatter* ids: `librarian(action="doctor")` reports `frontmatter_id_mismatch` and ships
+`fix=repair_frontmatter_id` to repair it. Narrowed 2026-09-10 on sessionId
+`59112612-5fc8-4b31-8c8c-e19220d99eac`'s correction — saying exactly which half nothing covers is
+worth more than the wider claim.
 
+**One re-key has three consequences, three observers, and only one fires without someone deciding
+to look:**
+
+| what goes stale | caught by | fires when |
+|---|---|---|
+| the old **path**, cited anywhere | `audit_doc_refs` — `policy_default` is `high` | CI, unprompted |
+| the file's own **frontmatter id** | `doc(move)` rewrites it in the same call (`mv.rs`, test `move_rewrites_the_frontmatter_id_it_just_invalidated`); `doctor`'s `frontmatter_id_mismatch` catches the ones a bare `git mv` left | never needed after a `doc(move)`; a manual scan otherwise |
+| the old **id**, cited in prose | nothing | at some later reader's call site, as `unknown id` |
+
+That last one is a *correct* error about a *stale premise* — indistinguishable from a typo, and it
+costs a re-derivation to tell apart.
 ## Reproduction
 
 Both instances are from 2026-09-10, roughly forty minutes apart, by two sessions who had each read
-the guide text that names the obligation:
+the guide text naming the obligation:
 
-1. sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac` archived a bug file and had to hand-repoint
-   `04aa6207d31a861f`'s citation of a re-keyed id (`2b1c3aaa9b09534d` → `d81efeef5252bfcc`).
+1. sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac` hand-repointed `04aa6207d31a861f`'s citation of
+   a re-keyed id (`2b1c3aaa9b09534d` → `d81efeef5252bfcc`). **A near-miss with a documentation
+   backstop, not a catch by the tool** — their own sharpening, and it matters: they swept for the
+   old path *and* the old id because `get_guide("tracker-conventions")` says to sweep both. A
+   session that had not read that sentence would have missed it exactly as instance 2 did. A guide
+   sentence is the weakest possible mechanism, which strengthens this filing rather than softening
+   it.
 2. sessionId `c86ebb51-7ae3-477d-b755-f25db6180782` (this author) archived
    `2026-09-09-the-pre-push-remedy-…`, acted on the returned `inbound_path_citations` list of four,
    re-pointed all four — and left `750c60a5135d52f9` live in prose, because no field named it. The
    move response had reported `id_changed: true` on the same screen.
 
-Instance 2 is the informative one: the caller **did** read the response and act on it. What they
-acted on was the field that existed.
-
+Instance 2 is the honest one: the caller **did** read the response and act on it. What they acted
+on was the field that existed.
 ## Environment
 
 `experiments`, 2026-09-10. `src/librarian/tools/mv.rs`, current HEAD.
@@ -98,7 +115,7 @@ provisional slug `half-an-obligation-served-and-half-narrated`.
 ## Fix
 
 Not applied. Add `inbound_id_citations` + `inbound_id_citation_count` beside the path pair, from a
-second `files_mentioning(&root_path, &previous_id_hex, &a.new_rel_path)`, and keep the same
+second `files_mentioning(&root_path, &previous_id_hex, …)`, keeping the same
 `null`-means-scan-could-not-run convention the neighbouring fields already document.
 
 **Do not fold the two into one list.** They are re-pointed differently — a path citation becomes
@@ -108,6 +125,21 @@ the new path, an id citation becomes the new id — and a caller sizing a commit
 catalog indexes markdown only, so an id quoted in a `.rs` comment or a shell script can never
 become an edge, and this repo's guard scripts do quote ids.
 
+**Open question — whether the id scan should inherit the path scan's self-exclusion.**
+`mv.rs:262-265` excludes the artifact's own new path, on the stated grounds that *"a file carrying
+its former slug in a superseded note cites itself, which is not work"*. It was suggested that an
+id-keyed scan must NOT inherit it, because a moved file keeps the frontmatter id it was moved away
+from — **and that premise is false for `doc(move)`, verified 2026-09-10 two ways.** `mv.rs` rewrites
+the frontmatter id in the same call as the graft (test
+`move_rewrites_the_frontmatter_id_it_just_invalidated`, shipped `858f22ec` 2026-08-16), and this
+file's own sibling move that day landed `id: 84589e9e5a644ec7` in the archived file. Stale
+frontmatter ids come from a bare `git mv` or from a move predating that fix, not from this tool.
+
+So the suggestion does not follow from its premise. **A weaker independent case survives and is
+left open rather than adopted:** a moved file's *body* may cite its own former id in a superseded
+note, which the frontmatter rewrite does not touch and the exclusion would hide. Whether that is
+"work" is the same judgement the path scan already made in the other direction, and it should be
+made deliberately rather than inherited.
 ## Tests added
 
 None — nothing is fixed. `mv.rs` already carries
