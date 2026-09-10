@@ -3109,6 +3109,23 @@ mod tests {
     /// pure-function and per-tool-count level by `every_declared_alias_is_absent_from_the_
     /// schema` / `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, but NOT at the real dispatch
     /// boundary. That gap is real and is not closed here.
+    ///
+    /// **AND A FOURTH RENDER PATH IS UNCOVERED FOR EVERY TOOL, including the four above:
+    /// the ERROR path.** `call_content` consumes the advisory at three sites and all three
+    /// sit below the `?` on `self.call(input, ctx).await`, so any `Err` from `call()`
+    /// returns before the advisory is attached and `route_tool_error` composes the whole
+    /// response from the error value alone. Every case below deliberately asserts
+    /// `is_error != Some(true)` — i.e. this gate covers the SUCCESS path only, by
+    /// construction. A caller sending `read_file(file_path=…)` with a bad path is repaired,
+    /// fails on the path, and never learns `file_path` is not a parameter. KNOWN, tracked
+    /// in `docs/issues/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
+    ///
+    /// This paragraph exists because the count itself was the blind spot last time: the
+    /// design spec said three render paths, the governing ADR's Consequences said "all
+    /// three", and three separate reviews confirmed all three were covered — two of them
+    /// tracing the paths deliberately. Nobody asked whether three was the right number. A
+    /// count published as a scope is not a scope that was verified, so this gate states its
+    /// own scope rather than leaving a reader to infer it from the cases present.
     #[tokio::test]
     async fn the_dispatch_boundary_normalizes_and_announces_for_real_tool_calls() {
         assert!(
