@@ -2355,3 +2355,294 @@ fn param_aliases_defaults_to_empty_so_a_tool_opts_in() {
     }
     assert!(Bare.param_aliases().is_empty());
 }
+
+// ---- Task 3: wiring `normalize_params`/`correction_notice` into `call_content` ----
+//
+// .superpowers/sdd/2026-09-10-parameter-alias-collapse/task-3-brief.md,
+// docs/adrs/2026-07-10-repair-and-continue-input-handling.md § Amendment 2026-09-10.
+
+/// A tool that declares an alias, echoes what `call()` actually received, and can
+/// be switched between the two OutputForms and a large payload. One fixture for
+/// all three render paths so the paths are the only variable.
+struct AliasEcho {
+    form: OutputForm,
+    big: bool,
+}
+
+#[async_trait::async_trait]
+impl Tool for AliasEcho {
+    fn name(&self) -> &str {
+        "alias_echo"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{"path":{"type":"string","description":"p"}}})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path")]
+    }
+    fn output_form(&self) -> OutputForm {
+        self.form
+    }
+    // FIXTURE NOTE: the compact form deliberately renders ONLY `seen` — it models a
+    // real tool that selects the fields it knows about. If this ever echoes the whole
+    // value, the compact-text test stops discriminating and would pass on a framework
+    // key it never re-attached.
+    fn format_compact(&self, result: &serde_json::Value) -> Option<String> {
+        Some(format!("seen={}", result["seen"]))
+    }
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        let seen: Vec<String> = input.as_object().unwrap().keys().cloned().collect();
+        let mut out = serde_json::json!({ "seen": seen.join(","), "path": input["path"] });
+        if self.big {
+            out["filler"] = serde_json::json!("x".repeat(15_000));
+        }
+        Ok(out)
+    }
+}
+
+fn text_of(blocks: &[rmcp::model::Content]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| b.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn call_sees_the_canonical_key_never_the_alias() {
+    let ctx = bare_ctx().await;
+    let tool = AliasEcho {
+        form: OutputForm::Json,
+        big: false,
+    };
+    let out = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(
+        t.contains("seen=\"path\"") || t.contains("\"seen\": \"path\""),
+        "call() must receive `path` and no `file_path`: {t}"
+    );
+}
+
+#[tokio::test]
+async fn correction_reaches_the_caller_on_the_json_path() {
+    let ctx = bare_ctx().await;
+    let tool = AliasEcho {
+        form: OutputForm::Json,
+        big: false,
+    };
+    let out = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(
+        t.contains("file_path") && t.contains("alias_echo"),
+        "json path must carry the correction: {t}"
+    );
+}
+
+#[tokio::test]
+async fn correction_reaches_the_caller_on_the_compact_text_path() {
+    // THE REGRESSION THAT ALREADY HAPPENED ONCE, to `workspace_notice`:
+    // docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md
+    // `format_compact` renders only the fields the tool knows about, so a key the
+    // framework added after `call()` returned is dropped unless re-attached HERE.
+    let ctx = bare_ctx().await;
+    let tool = AliasEcho {
+        form: OutputForm::Text,
+        big: false,
+    };
+    let out = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(
+        t.contains("seen="),
+        "the compact render must still be present: {t}"
+    );
+    assert!(
+        t.contains("file_path"),
+        "compact-text path dropped the correction — this is the 2026-09-02 bug: {t}"
+    );
+}
+
+#[tokio::test]
+async fn correction_reaches_the_caller_on_the_buffered_path() {
+    let ctx = bare_ctx().await;
+    let tool = AliasEcho {
+        form: OutputForm::Json,
+        big: true,
+    };
+    let out = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(t.contains("output_id"), "payload should have buffered: {t}");
+    assert!(
+        t.contains("file_path"),
+        "the returned envelope must carry the correction, not just the buffer: {t}"
+    );
+}
+
+#[tokio::test]
+async fn no_alias_means_no_notice_anywhere() {
+    let ctx = bare_ctx().await;
+    let tool = AliasEcho {
+        form: OutputForm::Json,
+        big: false,
+    };
+    let out = tool
+        .call_content(serde_json::json!({ "path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(
+        !t.contains("not a parameter"),
+        "a clean call must not be decorated: {t}"
+    );
+}
+
+/// Drives Step 6's fourth mutation (move `normalize_params` below the `write_path`
+/// capture). `write_path` reads `input.get("path")` before `self.call()`; if
+/// normalization ran after that capture, a `file_path`-only write would resolve no
+/// `path` key and the write-path annotation would carry no filename — a hole none of
+/// the correction tests above can see, because the correction itself is still
+/// announced; only the annotation goes missing.
+///
+/// **Deviation from the task-3 brief's literal snippet**, which drives this scenario
+/// through the real `crate::tools::CreateFile`. As of this task no production tool
+/// overrides `param_aliases()` — that wiring is Task 4/5's job per the plan's file-
+/// responsibility table (`docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md`
+/// line 45) — so `CreateFile.param_aliases()` still returns `&[]` today and a
+/// `file_path` input would never reach `normalize_params` regardless of ordering,
+/// which would make the brief's literal test pass or fail for a reason unrelated to
+/// the ordering it claims to check. `AliasWriteEcho` below declares the alias itself
+/// so the mutation actually exercises what this test names.
+struct AliasWriteEcho;
+
+#[async_trait::async_trait]
+impl Tool for AliasWriteEcho {
+    fn name(&self) -> &str {
+        "alias_write_echo"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path")]
+    }
+    fn is_write(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!("ok"))
+    }
+}
+
+#[tokio::test]
+async fn normalization_precedes_the_write_path_capture() {
+    let ctx = bare_ctx().await;
+    let out = AliasWriteEcho
+        .call_content(serde_json::json!({ "file_path": "notes.txt" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    assert!(
+        t.contains("notes.txt"),
+        "the write-path annotation must name the file even when given as file_path: {t}"
+    );
+}
+
+/// Ruling 6: two aliases racing for one canonical, with the canonical itself never
+/// supplied, is genuine ambiguity rather than a rename — `superseded_by` names it.
+/// `write` toggles `is_write` so one fixture drives both halves of the ADR's
+/// write-asymmetry clause: writes must hard-error, reads repair-and-note.
+struct AmbiguousAlias {
+    write: bool,
+}
+
+#[async_trait::async_trait]
+impl Tool for AmbiguousAlias {
+    fn name(&self) -> &str {
+        "ambiguous_alias"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path"), ("relative_path", "path")]
+    }
+    fn is_write(&self, _input: &serde_json::Value) -> bool {
+        self.write
+    }
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "path": input["path"] }))
+    }
+}
+
+#[tokio::test]
+async fn a_write_tool_hard_errors_on_two_racing_aliases_with_no_canonical() {
+    let ctx = bare_ctx().await;
+    let tool = AmbiguousAlias { write: true };
+    let err = tool
+        .call_content(
+            serde_json::json!({ "file_path": "a.rs", "relative_path": "b.rs" }),
+            &ctx,
+        )
+        .await
+        .expect_err("an ambiguous write target must hard-error, not silently pick a winner");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("file_path") && msg.contains("a.rs"),
+        "must name the winning key and its value: {msg}"
+    );
+    assert!(
+        msg.contains("relative_path") && msg.contains("b.rs"),
+        "must name the losing key and its value too: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn a_read_tool_repairs_and_notes_the_same_ambiguous_input() {
+    let ctx = bare_ctx().await;
+    let tool = AmbiguousAlias { write: false };
+    let out = tool
+        .call_content(
+            serde_json::json!({ "file_path": "a.rs", "relative_path": "b.rs" }),
+            &ctx,
+        )
+        .await
+        .expect("a read tool must repair-and-note, never hard-error, on the same input");
+    let t = text_of(&out);
+    assert!(t.contains("a.rs"), "the first alias's value must win: {t}");
+    assert!(
+        t.contains("relative_path"),
+        "the notice must name the superseded alias: {t}"
+    );
+}

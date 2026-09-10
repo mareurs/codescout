@@ -976,7 +976,89 @@ pub trait Tool: Send + Sync {
     /// pointer was empirically ~1.3% (F-3 in
     /// `docs/trackers/prompt-guide-refactor-session-log.md`); V2 closes that
     /// gap by delivering the content directly.
-    async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
+    async fn call_content(&self, mut input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
+        // Parameter-alias normalization is the FIRST statement in this function,
+        // ahead of everything below that reads `input`: `selector_key`,
+        // `is_write` and `write_path` all inspect it pre-`call()`, and
+        // `write_path` in particular reads the literal key "path" — so a
+        // `create_file(file_path=…)` call would lose its write-path annotation
+        // entirely if normalization ran later. Mutates `input` in place: never
+        // clone `input` itself, which for `create_file`/`edit_file` carries a
+        // whole file body.
+        // docs/adrs/2026-07-10-repair-and-continue-input-handling.md § Amendment 2026-09-10.
+        let aliases = self.param_aliases();
+        // Snapshot the raw value under each alias key BEFORE normalization can
+        // remove it. This is needed only for the ambiguous-write escalation
+        // below, which must name the discarded value, not just its key — and
+        // by the time `normalize_params` returns, a superseded alias's value is
+        // gone (it was `obj.remove`d and never reinserted anywhere). Clones a
+        // handful of short strings, never `input` itself.
+        let alias_values: std::collections::HashMap<&'static str, String> = aliases
+            .iter()
+            .filter_map(|(received, _)| {
+                input
+                    .get(*received)
+                    .and_then(Value::as_str)
+                    .map(|v| (*received, v.to_string()))
+            })
+            .collect();
+        let corrections = crate::tools::param_alias::normalize_params(&mut input, aliases);
+        let param_notice = crate::tools::param_alias::correction_notice(self.name(), &corrections);
+        // Ruling 6 (ADR amendment above): two aliases racing for one canonical
+        // key, with the canonical never supplied directly, is genuine
+        // ambiguity — "more than one plausible reading" — and the ADR's
+        // write-asymmetry clause ("auto-accepting an explicit write target is
+        // safe; auto-guessing one must still hard-error") requires a hard
+        // error here rather than silently writing the first alias's value and
+        // discarding the second. Reads keep repair-and-note; only
+        // `superseded_by` (never plain `conflicted`, where the caller supplied
+        // the canonical directly — an explicit target) escalates, and only for
+        // writes. `normalize_params` itself stays infallible — this is the
+        // boundary's decision, not the rewriter's.
+        if self.is_write(&input) {
+            if let Some(bad) = corrections.iter().find(|c| c.superseded_by.is_some()) {
+                let winner_key = bad.superseded_by.clone().unwrap_or_default();
+                let winner_val = alias_values
+                    .get(winner_key.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                let loser_val = alias_values
+                    .get(bad.received.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                let canonical = bad.canonical;
+                let loser_key = bad.received.clone();
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "{tool}: ambiguous write target — '{winner_key}' = \"{winner_val}\" and \
+                         '{loser_key}' = \"{loser_val}\" were both supplied for '{canonical}', and \
+                         '{canonical}' itself was never sent. Refusing to guess which one you meant.",
+                        tool = self.name(),
+                    ),
+                    format!(
+                        "Send '{canonical}' directly, or send only one of '{winner_key}' / '{loser_key}'."
+                    ),
+                )
+                .into());
+            }
+        }
+        // Ruling 9: the advisory is an OBJECT keyed by what was corrected, plus
+        // its own `hint` — matching the shape `find.rs`/`update.rs` already use
+        // for `corrections`, not a bare string (a third shape for one concept).
+        // Built ONCE, after normalization, before `self.call`; cloned into each
+        // render site below.
+        let param_corrections: Option<Value> = (!corrections.is_empty()).then(|| {
+            serde_json::json!({
+                "params": corrections.iter().map(|c| serde_json::json!({
+                    "received": c.received,
+                    "canonical": c.canonical,
+                    "conflicted": c.conflicted,
+                    "superseded_by": c.superseded_by,
+                })).collect::<Vec<_>>(),
+                "hint": param_notice.clone().unwrap_or_default(),
+            })
+        });
+
         // Captured BEFORE `self.call` consumes `input` — never clone `input`
         // itself (some tools, e.g. `create_file`/`edit_file`, carry whole
         // file bodies in it).
@@ -1134,6 +1216,9 @@ pub trait Tool: Send + Sync {
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
             }
+            if let Some(c) = &param_corrections {
+                buffered["corrections"] = c.clone();
+            }
             Content::text(
                 serde_json::to_string_pretty(&buffered)
                     .unwrap_or_else(|_| format!("{{\"output_id\":\"{ref_id}\"}}")),
@@ -1146,6 +1231,11 @@ pub trait Tool: Send + Sync {
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut val, notice);
+            }
+            if let Some(c) = &param_corrections {
+                if let Some(obj) = val.as_object_mut() {
+                    obj.insert("corrections".to_string(), c.clone());
+                }
             }
             if form == OutputForm::Text {
                 if let Some(text) = self.format_compact(&val) {
@@ -1164,9 +1254,21 @@ pub trait Tool: Send + Sync {
                     // ("so the warning sits in the channel that is actually read"): the
                     // notice changes how the content below should be read, so it has to
                     // arrive before it, not after a result the reader has already believed.
-                    Content::text(match &workspace_notice {
-                        Some(notice) => format!("⚠ {notice}\n\n{text}"),
-                        None => text,
+                    //
+                    // `param_notice` (the hint STRING) is prefixed here too, for the same
+                    // reason: `format_compact` renders only the fields the tool selected,
+                    // so `param_corrections` (the OBJECT) has nowhere to land on this path
+                    // — a text renderer cannot carry a JSON object, which is why both
+                    // `param_notice` and `param_corrections` were built above.
+                    Content::text({
+                        let mut prefix = String::new();
+                        if let Some(notice) = &workspace_notice {
+                            prefix.push_str(&format!("⚠ {notice}\n\n"));
+                        }
+                        if let Some(n) = &param_notice {
+                            prefix.push_str(&format!("⚠ {n}\n\n"));
+                        }
+                        format!("{prefix}{text}")
                     })
                 } else {
                     Content::text(
