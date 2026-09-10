@@ -8,7 +8,7 @@ opened: 2026-09-10
 owner: marius
 related: []
 severity: high
-unverified: fix is uncommitted in the working tree — no fix SHA or patch-id recorded yet; and the drop itself was never observed directly here, only inferred from the API contract plus the client-side rewrite this session's client performs
+unverified: the client-side drop was never observed directly — it is established from the documented API rejection plus the fact that this session's client demonstrably rewrites the construct rather than forwarding it; no run against a forwarding (non-sanitizing) client was available
 ---
 
 # BUG: seven tools carried an API-illegal top-level `anyOf` and were dropped client-side, invisibly
@@ -152,8 +152,14 @@ re-introducing the defect. Both were rewritten as part of this fix.
 
 ## Fix
 
-Applied in the working tree; **uncommitted at filing, so no SHA or patch-id is recorded
-yet.** Four parts:
+Fixed on `experiments`:
+
+- **SHA** `2735df73` (`2735df7384a9543f31e91841a8ed1b18a0c04667`), branch `experiments` —
+  positional, and dies when `experiments` is rebased.
+- **patch-id** `f306405970ed6ad23a5b494e6e560acef34f8cd8` — content hash of the diff,
+  survives rebase and cherry-pick.
+
+Four parts:
 
 1. **Removed the top-level `anyOf` from all seven schemas**, each replaced by a four-line
    comment naming the API constraint and pointing at the new gate, so the next reader does
@@ -223,11 +229,9 @@ there is no client-side workaround: rebuild from a tree carrying this fix
 
 ## Resume
 
-N/A — fix applied and both regression gates observed red under mutation. Outstanding only:
-commit it, then record the fix SHA **and** its patch-id
-(`git show <sha> | git patch-id --stable`) in § Fix, and archive via
-`doc(action="move", …)` once the four-command gate is green on `experiments`.
-
+N/A — fixed and archived. Both regression gates were observed red under mutation, the
+four-command gate is green in both lanes, and the fix is committed on `experiments` as
+`2735df73` / patch-id `f306405970ed6ad23a5b494e6e560acef34f8cd8`.
 ## References
 
 - `src/server.rs:2802` — `required_names_no_key_that_has_a_declared_alias`, the gate whose
