@@ -2799,372 +2799,15 @@ mod tests {
         );
     }
 
-    /// A schema's `required` array is a claim about what a call MUST supply. An alias
-    /// property lets a caller satisfy the underlying need without ever naming the
-    /// required key — so naming that key alone in `required` is false the moment an
-    /// alias exists; the true requirement is an alternation, which a flat `required`
-    /// array cannot express. Nor can anything else in the schema: the one construct
-    /// that states an alternation — a top-level `anyOf` — is rejected by the Anthropic
-    /// Messages API, which drops the whole tool client-side (see
-    /// `no_tool_schema_declares_a_top_level_combinator`). So the remedy is to say
-    /// NOTHING about which name is needed and enforce presence in `call()`. This gate
-    /// checks only that the schema does not state something FALSE.
-    ///
-    /// The alias relation is derived from the schema's own prose, not a hand-list: a
-    /// property whose description opens `Alias for <name>` declares itself an alias of
-    /// `<name>`. That is real data — `get_path_param`/`require_path_param`
-    /// (`src/fs/mod.rs`) genuinely accept `path` or any of `PATH_PARAM_ALIASES`
-    /// (`file_path`, `relative_path`, `file`) at runtime, and `file_path`'s schema text
-    /// already says so. So this needs no per-tool input and catches a new alias
-    /// property the moment it is added with a `required` entry it falsifies.
-    ///
-    /// Measured 2026-09-02: `read_markdown(file_path="docs/issues/_TEMPLATE.md")` with
-    /// no `path` returned the whole document — `file_path` genuinely discharges the
-    /// requirement `required: ["path"]` claims to hold alone. Five tools were affected
-    /// (read_file, create_file, edit_file, edit_markdown, read_markdown — the last two
-    /// since folded into edit_file and read_file respectively); `grep`
-    /// declares the same `file_path` alias but does not require `path`, so it is
-    /// unaffected and correctly not flagged.
-    ///
-    /// The remedy is the schema, not the code: `file_path` is a deliberate, documented
-    /// alias, so the fix is to stop the `required` array from claiming `path` alone —
-    /// never to make the code refuse aliases.
-    ///
-    /// KNOWN, DELIBERATE EXCLUSION — the non-path alias family. Both this gate and its
-    /// constant-driven companion below are scoped to path-shaped aliases: this one by
-    /// the literal `"Alias for "` prose prefix, the other by `PATH_PARAM_ALIASES`
-    /// (`src/fs/mod.rs`). `edit_code`'s `symbol` param also accepts `name_path` as an
-    /// alias (documented inline inside `symbol`'s own description, `edit_code.rs:117-120`,
-    /// not as a separate `"name_path": {"description": "Alias for symbol"}` property),
-    /// and `edit_code`'s `body`/`content` are likewise alias-like without either gate's
-    /// vocabulary reaching them (`edit_code.rs:133-140`). Neither gate can see these —
-    /// covering them is not required, but leaving the gap uncovered *and undeclared* is
-    /// what this note fixes. If `edit_code`'s `required` ever names `symbol` or `body`
-    /// alone while `name_path`/`content` could discharge it, no automated check here
-    /// will catch it; that would need a `name_path`/`content`-aware companion gate,
-    /// which is out of scope for this pass.
-    #[tokio::test]
-    async fn required_names_no_key_that_has_a_declared_alias() {
-        let (_dir, server) = make_server().await;
-        let mut offenders = Vec::new();
-        let mut alias_counts_by_tool: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
-        for t in &server.tools {
-            let schema = t.input_schema();
-            let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
-                continue;
-            };
-            // property name -> the name it declares itself an alias of.
-            //
-            // FIXTURE NOTE — the literal `"Alias for "` prefix parsed here (by
-            // `parse_declared_aliases`) is what makes a schema property register as
-            // an alias for this test's purposes. Reword it (e.g. to "Same as path")
-            // on any property and that property silently drops out of `aliases` —
-            // the derivation goes quiet, not red, on its own. The per-tool
-            // assertion below (`EXPECTED_ALIAS_COUNTS_BY_TOOL`) is what turns that
-            // silence into a failing assertion, scoped to the one tool that was
-            // reworded, instead of a global sum no single tool's reword can move.
-            //
-            // Alias counting must NOT be gated on a top-level `required` array
-            // existing — three tools (read_file, create_file, edit_file) leave their
-            // path requirement to `call()` entirely and carry no top-level
-            // `required` at all, so gating the count on `required` being present
-            // (as the offender scan below correctly does, since an offender needs
-            // a `required` to name the key) would silently record 0 aliases for
-            // exactly those tools and make their `EXPECTED_ALIAS_COUNTS_BY_TOOL`
-            // entries unconditionally fail. Caught by re-running this test after adding
-            // the table, 2026-09-02: read_file showed "expected 4, found 0".
-            let aliases = parse_declared_aliases(props);
-            alias_counts_by_tool.insert(t.name(), aliases.len());
-            // Round 4 fix: `required` is now derived by the SAME function the synthetic
-            // fixture calls (`schema_required_names`), not a hand-typed copy of the
-            // extraction — a mutated or dead production derivation fails the fixture too,
-            // not just this real sweep. An empty result (no top-level `required`, or an
-            // absent one) is equivalent to the old `continue`: `find_alias_offenders`'s
-            // outer loop simply runs zero times.
-            let required = schema_required_names(&schema);
-            // Round 3 fix: this now calls the SAME offender-matching function the synthetic
-            // fixture test below calls, rather than a hand-typed copy of the loop — a mutated
-            // or dead production detector fails the fixture too, not just this real sweep.
-            offenders.extend(find_alias_offenders(t.name(), &required, &aliases));
-        }
-        for (tool, expected) in EXPECTED_ALIAS_COUNTS_BY_TOOL {
-            let actual = alias_counts_by_tool.get(tool).copied().unwrap_or(0);
-            assert_eq!(
-                actual, *expected,
-                "{tool}: expected {expected} \"Alias for \" property description(s), found \
-             {actual} — either an alias description was reworded (silently blinding \
-             both this per-tool check and the offender scan above for {tool} alone) or \
-             a genuinely new/removed alias needs this table updated to match.\n\
-             \n\
-             IF YOU DID NOT TOUCH read_file/create_file/edit_file/grep's input_schema, \
-             THIS FAILURE IS NOT YOURS. It is the expected intermediate state of the \
-             parameter-alias-collapse plan (docs/superpowers/plans/\
-             2026-09-10-parameter-alias-collapse.md): commit d5f2b736 deleted those four \
-             tools' `Alias for path` PROPERTIES because the aliases are now repaired in \
-             code via Tool::param_aliases(), and Task 7 of that plan deletes this whole \
-             gate and replaces it. Two sessions have already bisected this red on a \
-             shared checkout. Nothing is owed from you; re-gate once `experiments` moves \
-             past Task 7. Note also that only the FIRST falsified row is visible — this \
-             assert_eq! is inside a loop over the table, so create_file/edit_file/grep \
-             are masked by the short-circuit rather than passing."
-            );
-        }
-        assert!(
-            offenders.is_empty(),
-            "these schemas name a required key that another property declares itself an \
-         alias of — the true requirement is an alternation, which no schema construct \
-         the API accepts can state. Drop the key from `required` and enforce presence \
-         in `call()`; do NOT add a top-level `anyOf`, which is API-illegal and gets the \
-         tool dropped client-side:\n  {}",
-            offenders.join("\n  ")
-        );
-    }
-
-    /// Shared by the real sweep above and by
-    /// `alias_offender_detection_catches_a_synthetic_offender`: derive a schema's
-    /// property-name -> alias-target pairs from `"Alias for <name>"`-prefixed
-    /// descriptions, exactly as `required_names_no_key_that_has_a_declared_alias`
-    /// consumes them. Kept as one function so the synthetic-fixture test below
-    /// exercises the *actual* derivation, not a re-typed copy of it that could drift.
-    fn parse_declared_aliases(props: &serde_json::Map<String, Value>) -> Vec<(&str, &str)> {
-        props
-            .iter()
-            .filter_map(|(name, def)| {
-                let d = def.get("description")?.as_str()?;
-                let rest = d.strip_prefix("Alias for ")?;
-                let target = rest.split(|c: char| c.is_whitespace()).next()?;
-                Some((name.as_str(), target))
-            })
-            .collect()
-    }
-
-    /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
-    /// `alias_offender_detection_catches_a_synthetic_offender`: derive a schema's top-level
-    /// `required` array as `Vec<&str>`, or an empty vec when the schema has no `required` key
-    /// at all (the tools that leave their path alternation to `call()`). Round 4 fix:
-    /// before this extraction, `find_alias_offenders` was shared and well-tested but its
-    /// INPUT derivation was still two lines re-typed at both call sites — the reviewer set
-    /// the production-only `required.iter().filter_map(...).collect()` line to `Vec::new()`
-    /// and every alias test, including the synthetic fixture, stayed green: the production
-    /// scan was structurally dead one line above the shared function, and nothing noticed.
-    /// Hoisting the derivation itself means the fixture enters the pipeline one hop earlier.
-    fn schema_required_names(schema: &Value) -> Vec<&str> {
-        schema
-            .get("required")
-            .and_then(|r| r.as_array())
-            .map(|required| required.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
-    /// `alias_offender_detection_catches_a_synthetic_offender`: given a `required` array and
-    /// the aliases `parse_declared_aliases` derived for the same schema, return one formatted
-    /// offender string per (required key, alias) pair where an alias declares itself an alias
-    /// of a required key. `label` prefixes each message — the tool's name in production, or
-    /// `"synthetic"` in the fixture test — so extracting this cost neither call site its
-    /// existing wording. Round 3 fix: previously the synthetic test re-typed this loop
-    /// instead of calling the production one, so a broken *production* offender scan (e.g.
-    /// `if *target == req && false`) left every alias test green — the fixture guarded a
-    /// private copy of the logic, not the logic it was added to guard.
-    fn find_alias_offenders<'a>(
-        label: &str,
-        required: &[&'a str],
-        aliases: &[(&'a str, &'a str)],
-    ) -> Vec<String> {
-        let mut offenders = Vec::new();
-        for req in required {
-            for (alias_name, target) in aliases {
-                if *target == *req {
-                    offenders.push(format!(
-                        "{label}: required=[{req:?}] but {alias_name:?} is declared an alias of it"
-                    ));
-                }
-            }
-        }
-        offenders
-    }
-
-    /// Tools known (as of this writing) to declare at least one `"Alias for path"`
-    /// property, with the exact count each currently carries. Grepped 2026-09-02:
-    /// `grep(pattern="Alias for path")` across the tree — 10 files, 29 sites total
-    /// (`read_file` carries a fourth, `output_id`, whose description opens `"Alias
-    /// for path — ..."` and so also parses). This table is what makes a
-    /// *single-tool* reword catch-able: `total_aliases_found > 0` (the prior form of
-    /// this sanity check) summed across all 26 tools, so ~26 other surviving sites
-    /// kept the sum positive no matter what happened to any one tool — rewording
-    /// every `"Alias for path"` description on `edit_code` alone left the global sum
-    /// unaffected and the check green. A per-tool minimum closes exactly that gap:
-    /// rewording `edit_code`'s three sites drops `edit_code`'s own count to 0, which
-    /// this table catches specifically, independent of every other tool's wording.
-    /// (Companion guard for the derivation *logic* itself, independent of production
-    /// wording entirely, is `alias_offender_detection_catches_a_synthetic_offender`
-    /// below — the two are complementary, not redundant: this table catches a
-    /// *production* reword, the synthetic fixture catches a broken *detector*.)
-    const EXPECTED_ALIAS_COUNTS_BY_TOOL: &[(&str, usize)] = &[
-        ("read_file", 4),
-        ("create_file", 3),
-        ("edit_file", 3),
-        ("call_graph", 3),
-        ("edit_code", 3),
-        ("references", 3),
-        ("symbol_at", 3),
-        ("grep", 1),
-    ];
-
-    /// Synthetic-fixture companion to the per-tool table above. Built from a schema
-    /// value that is NOT read from any production tool, so it cannot be emptied by
-    /// fixing (or breaking) production schemas — it locks down that
-    /// `parse_declared_aliases` plus the offender-matching loop it feeds still
-    /// correctly flags an obvious offender, independent of what today's 26 tools
-    /// happen to say. `EXPECTED_ALIAS_COUNTS_BY_TOOL` catches a *production* reword;
-    /// this catches a broken *detector* (e.g. someone "fixing" the prefix match to
-    /// require a trailing period, silently blinding every real site at once).
-    #[test]
-    fn alias_offender_detection_catches_a_synthetic_offender() {
-        // Round 4 fix (M3): the fixture used to be 1 required key x 1 alias, which cannot
-        // distinguish a correct N-way match from a `.take(1)`-style truncation, and whose
-        // `assert_eq!(offenders.len(), 1)` was monotone-safe against widened comparisons
-        // (`starts_with`, `contains`, `if true`) — 1 was already this fixture's ceiling, so
-        // no over-counting mutation could ever be caught. Now: 2 required keys, 3 aliases
-        // (one, `verb`, deliberately does NOT match any required key), so the expected
-        // offender count (2) is a number a buggy detector can both undershoot (truncation,
-        // wrong-field comparison) and overshoot (matching `verb` too) past.
-        //
-        // Round 4 fix (M4): `file_path`'s description carries trailing prose after the
-        // target word, mirroring `read_file`'s real `output_id` alias text ("Alias for
-        // path — pass a returned..."). The old fixture's single-word description could not
-        // catch `parse_declared_aliases` losing its whitespace truncation (dropping
-        // `.split(...).next()` for a bare `rest`) — target would still equal `"path"`
-        // either way. Here, without truncation, the parsed target becomes the whole
-        // trailing tail instead of `"path"`, which fails the `aliases` assertion below.
-        let schema = serde_json::json!({
-            "type": "object",
-            "required": ["path", "symbol"],
-            "properties": {
-                "path": { "type": "string", "description": "canonical path param" },
-                "file_path": {
-                    "type": "string",
-                    "description": "Alias for path — pass a returned reference here"
-                },
-                "symbol": { "type": "string", "description": "canonical symbol param" },
-                "name_path": { "type": "string", "description": "Alias for symbol" },
-                "action": { "type": "string", "description": "canonical action param" },
-                "verb": { "type": "string", "description": "Alias for action" }
-            }
-        });
-        let props = schema.get("properties").unwrap().as_object().unwrap();
-        let aliases = parse_declared_aliases(props);
-        assert_eq!(
-            aliases,
-            vec![
-                ("file_path", "path"),
-                ("name_path", "symbol"),
-                ("verb", "action")
-            ],
-            "the synthetic fixture's alias declarations were not parsed correctly — either \
-     parse_declared_aliases is broken independent of any production schema, or it lost \
-     the whitespace truncation that isolates the target word from trailing prose \
-     (file_path's description has trailing text after \"path\", exactly like read_file's \
-     real output_id alias)"
-        );
-        // Round 4 fix (M5): `required` is now derived by the SAME `schema_required_names`
-        // the production sweep above calls, instead of a re-typed copy of that extraction —
-        // a mutated or dead production derivation (e.g. its body set to `Vec::new()`) fails
-        // this fixture too, not just the real sweep.
-        let required = schema_required_names(&schema);
-        // Round 3 fix: calls the SAME find_alias_offenders the production sweep above calls,
-        // instead of a re-typed copy of its loop. Previously this test built its own inline
-        // offender loop, so mutating the PRODUCTION loop alone (e.g. `if *target == req &&
-        // false`, making the real scan unreachable) left this test green — it was asserting
-        // about a private copy, not the logic it exists to guard.
-        let offenders = find_alias_offenders("synthetic", &required, &aliases);
-        assert_eq!(
-            offenders.len(),
-            2,
-            "expected exactly 2 offenders: required=[\"path\",\"symbol\"] with file_path and \
-     name_path each declared aliases of a required key. `verb` (declared an alias of \
-     `action`, which is NOT required) must NOT count — a count of 2 here rules out both \
-     under-counting (e.g. a `.take(1)`-truncated alias scan, or a wrong-field \
-     comparison) and over-counting (e.g. a loosened match that also catches `verb`):\n  {}",
-            offenders.join("\n  ")
-        );
-    }
-
-    /// Scope: tools verified by reading `call()` to reach `require_path_param` with
-    /// `path` (or an alias) genuinely required — i.e. excluding tools where `path` is
-    /// optional (`grep`, whose `required` is `["pattern"]` alone; `symbols`,
-    /// `list_overview`, which use `get_path_param` with `path` optional).
-    ///
-    /// SUPERSEDED FORM, and the supersession is the point. Until 2026-09-10 this test
-    /// asserted the opposite of what it asserts now: that each of these schemas carries
-    /// an `anyOf` branch per accepted alias, so the schema *states* the alternation
-    /// `require_path_param` accepts. That is correct JSON Schema and unshippable — the
-    /// Anthropic Messages API rejects an `input_schema` carrying `oneOf`/`allOf`/`anyOf`
-    /// at the top level outright, so a client must drop such a tool before sending or
-    /// the whole request 400s. Seven tools were therefore unreachable from any session
-    /// whose client did not rewrite the construct, and the server never learned: it is
-    /// never consulted, so every server-side probe came back clean.
-    ///
-    /// So the alternation is now stated NOWHERE in the schema and enforced ONLY by
-    /// `require_path_param` (`src/fs/mod.rs`), which accepts `path` plus every
-    /// `PATH_PARAM_ALIASES` entry and fails with a hint naming them. What this test
-    /// still buys is the honesty half — the half a schema *can* express without a
-    /// combinator: a flat `required` must not name `path` OR any alias, because either
-    /// is a false claim the moment a sibling name discharges the same need. Widened
-    /// from the old form, which checked `path` alone: `required: ["file_path"]` is the
-    /// same lie and the old shape let it through.
-    #[tokio::test]
-    async fn path_requiring_tools_never_name_path_or_an_alias_in_required() {
-        let (_dir, server) = make_server().await;
-        let mut offenders = Vec::new();
-        let mut seen = 0usize;
-        for t in &server.tools {
-            if !TOOLS_REQUIRING_PATH_VIA_ALIASES.contains(&t.name()) {
-                continue;
-            }
-            seen += 1;
-            let schema = t.input_schema();
-            let Some(req) = schema.get("required").and_then(|r| r.as_array()) else {
-                continue;
-            };
-            for name in std::iter::once("path").chain(crate::fs::PATH_PARAM_ALIASES.iter().copied())
-            {
-                if req.iter().any(|v| v.as_str() == Some(name)) {
-                    offenders.push(format!(
-                        "{}: flat required=[...] names {name:?}, which a sibling in {:?} \
-                         can discharge instead — require_path_param accepts any of them \
-                         at runtime, so naming one alone is false. Drop it from \
-                         `required` and let call() enforce presence; do NOT reach for a \
-                         top-level `anyOf`, which is API-illegal (see \
-                         no_tool_schema_declares_a_top_level_combinator).",
-                        t.name(),
-                        crate::fs::PATH_PARAM_ALIASES,
-                    ));
-                }
-            }
-        }
-        // Non-vacuity: this population is a hand-list intersected with the live
-        // registry, so a renamed or unregistered tool would silently drop out and leave
-        // the sweep green over nothing. Assert the intersection is complete.
-        assert_eq!(
-            seen,
-            TOOLS_REQUIRING_PATH_VIA_ALIASES.len(),
-            "expected to inspect all {} path-requiring tools, inspected {seen} — a name \
-             in TOOLS_REQUIRING_PATH_VIA_ALIASES no longer matches a registered tool, \
-             which would make this sweep vacuous for it",
-            TOOLS_REQUIRING_PATH_VIA_ALIASES.len(),
-        );
-        assert!(
-            offenders.is_empty(),
-            "these schemas name a path key in a flat `required` that an alias can \
-             discharge:\n  {}",
-            offenders.join("\n  ")
-        );
-    }
-
     /// The tools whose `call()` reaches `require_path_param` with `path` (or an alias)
-    /// genuinely required. Declared once and shared by the two tests around it.
+    /// genuinely required. Declared once, consumed by
+    /// `no_tool_schema_declares_a_top_level_combinator` below (the non-vacuity check
+    /// that the defect's tool class is actually in the registry). Task 7 of
+    /// `docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md` deleted the
+    /// second consumer this comment used to name
+    /// (`path_requiring_tools_never_name_path_or_an_alias_in_required`) along with the
+    /// alias-honesty gates it plans replaced — this const survives because it is not
+    /// one of them, only a companion to one.
     const TOOLS_REQUIRING_PATH_VIA_ALIASES: &[&str] = &[
         "read_file",
         "create_file",
@@ -3242,6 +2885,193 @@ mod tests {
             "these tools carry an API-illegal top-level schema combinator and will be \
              dropped client-side:\n  {}",
             offenders.join("\n  ")
+        );
+    }
+
+    /// No property may describe itself as an alias, because no property IS one any
+    /// more — `Tool::param_aliases` holds the accept-set and the schema advertises
+    /// exactly one name per concept. Reds if a collapsed alias is reintroduced as a
+    /// property, which is the regression this collapse invites.
+    ///
+    /// Scoped to the ONE prose form the 26 collapsed properties actually used —
+    /// `d.starts_with("Alias for ")`, verified by `git log -p` over the four
+    /// collapsed-tool files, which show only `"Alias for path"` / `"Alias for body"`,
+    /// never a parenthetical form. `read_file`'s `offset`/`limit` say
+    /// "Native-Read-style alias" and are deliberately NOT matched: they are a second
+    /// calling convention, not a rename, and remain advertised on purpose.
+    ///
+    /// DELIBERATELY NARROWER than the plan draft, which also matched
+    /// `d.contains("(alias of ")`. That second form is real in this tree, but it is
+    /// `symbols.rs`'s `name`/`name_path` — `"(alias of query)"` / `"(alias of
+    /// symbol)"` — which the ADR amendment and Task 6 place OUT OF SCOPE (`symbols`
+    /// carries no top-level `required`, so no false schema claim exists there). Adding
+    /// the parenthetical match here would make this gate fail immediately against
+    /// code no task in this plan touches, not against a regression — verified by
+    /// running it: it failed on `symbols.name`/`symbols.name_path` before any
+    /// mutation was applied.
+    #[tokio::test]
+    async fn no_schema_property_declares_itself_an_alias() {
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+                continue;
+            };
+            for (name, def) in props {
+                let Some(d) = def.get("description").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if d.starts_with("Alias for ") {
+                    offenders.push(format!(
+                        "{}.{name}: description declares an alias — move it to \
+                         param_aliases() and delete the property",
+                        t.name()
+                    ));
+                }
+            }
+        }
+        assert!(
+            server.tools.len() >= 15,
+            "truncated registry: {} tools",
+            server.tools.len()
+        );
+        assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
+    }
+
+    /// The honesty gate, inverted. A name in `param_aliases()` must NOT also be a
+    /// property: advertising it re-creates the ambiguity the collapse removed, and
+    /// makes `required` unstateable again — which is what produced the API-illegal
+    /// top-level `anyOf` (see `no_tool_schema_declares_a_top_level_combinator`).
+    #[tokio::test]
+    async fn every_declared_alias_is_absent_from_the_schema() {
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        let mut checked = 0usize;
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let props = schema.get("properties").and_then(|p| p.as_object());
+            for (received, canonical) in t.param_aliases() {
+                checked += 1;
+                if props.is_some_and(|p| p.contains_key(*received)) {
+                    offenders.push(format!(
+                        "{}: {received:?} is both a declared alias and an advertised \
+                         property; delete the property",
+                        t.name()
+                    ));
+                }
+                if !props.is_some_and(|p| p.contains_key(*canonical)) {
+                    offenders.push(format!(
+                        "{}: alias {received:?} canonicalises to {canonical:?}, which is \
+                         not an advertised property — the rewrite would produce a key no \
+                         caller can discover",
+                        t.name()
+                    ));
+                }
+            }
+        }
+        assert!(
+            checked >= 20,
+            "expected the collapsed alias population, saw {checked} — this sweep is \
+             vacuous if the declarations went missing"
+        );
+        assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
+    }
+
+    /// PER ALIAS, not per tool: an aggregate cannot verify a per-member claim. Drives
+    /// the real dispatch path, because a direct `call()` bypasses the normalizer and
+    /// would prove nothing.
+    #[tokio::test]
+    async fn every_declared_alias_is_normalized_and_announced() {
+        let (_dir, server) = make_server().await;
+        let mut checked = 0usize;
+        for t in &server.tools {
+            for (received, canonical) in t.param_aliases() {
+                checked += 1;
+                let mut input = serde_json::json!({});
+                input[*received] = serde_json::json!("probe-value");
+                let corrections =
+                    crate::tools::param_alias::normalize_params(&mut input, t.param_aliases());
+                assert!(
+                    input.get(*received).is_none(),
+                    "{}: {received:?} survived normalization",
+                    t.name()
+                );
+                assert_eq!(
+                    input[*canonical],
+                    serde_json::json!("probe-value"),
+                    "{}: {received:?} did not land on {canonical:?}",
+                    t.name()
+                );
+                let notice = crate::tools::param_alias::correction_notice(t.name(), &corrections)
+                    .unwrap_or_else(|| panic!("{}: {received:?} produced no notice", t.name()));
+                assert!(
+                    notice.contains(received) && notice.contains(t.name()),
+                    "{}: notice must name the key and the tool: {notice}",
+                    t.name()
+                );
+            }
+        }
+        assert!(checked >= 20, "vacuous: only {checked} aliases seen");
+    }
+
+    /// `call_content` is where normalization happens, so a tool that OVERRIDES it opts
+    /// out of the mechanism entirely — silently. `Onboarding` is the only override in
+    /// the tree (`src/tools/onboarding.rs`). This gate is a hand-list because the trait
+    /// gives no way to ask "did you override this"; keeping the list short is the point.
+    #[tokio::test]
+    async fn call_content_overriders_declare_no_aliases() {
+        const OVERRIDES_CALL_CONTENT: &[&str] = &["onboarding"];
+        let (_dir, server) = make_server().await;
+        let mut seen = 0usize;
+        for t in &server.tools {
+            if !OVERRIDES_CALL_CONTENT.contains(&t.name()) {
+                continue;
+            }
+            seen += 1;
+            assert!(
+                t.param_aliases().is_empty(),
+                "{} overrides call_content AND declares aliases, so its aliases are \
+                 never normalized or announced. Either drop the override or normalize \
+                 inside it.",
+                t.name()
+            );
+        }
+        assert_eq!(
+            seen,
+            OVERRIDES_CALL_CONTENT.len(),
+            "OVERRIDES_CALL_CONTENT names a tool that is not registered; re-derive it \
+             with grep(pattern=\"fn call_content\", glob=\"src/**/*.rs\")"
+        );
+    }
+
+    /// `ReadFile::param_aliases()` is a THIRD copy of the path accept-set and
+    /// deliberately does NOT return `crate::fs::PATH_PARAM_ALIAS_MAP`: it adds
+    /// `("output_id", "path")` and `("file_id", "path")`, which that constant does not
+    /// carry. `path_aliases_and_alias_map_agree` (`src/fs/mod.rs`) pins the other two
+    /// copies against each other and cannot see this one, and none of the four gates
+    /// above catches its narrowing — `every_declared_alias_is_absent_from_the_schema`'s
+    /// non-vacuity floor is `checked >= 20` against a live population of 26, so dropping
+    /// two pairs from just this one tool stays green under it (a POPULATION assertion
+    /// cannot verify a per-MEMBER claim). Narrowing this array back to the shared map
+    /// costs two things, neither of which reds any gate above: `read_file(output_id=…,
+    /// heading=…)` starts refusing with "missing required parameter 'path'" (the
+    /// `call()` fallback resolves the alias into a local and never writes
+    /// `input["path"]`), and a plain `read_file(output_id="@tool_x")` silently loses its
+    /// `corrections` advisory while still succeeding — `output_id` is the highest-
+    /// traffic alias in the corpus, so that silent branch is the common one. The
+    /// fixture-line annotation on `read_file.rs` states the same fact in prose; this is
+    /// the half that reds.
+    #[tokio::test]
+    async fn read_file_still_declares_its_two_extra_alias_pairs() {
+        let aliases = ReadFile.param_aliases();
+        assert!(
+            aliases.contains(&("output_id", "path")),
+            "ReadFile::param_aliases() lost (\"output_id\", \"path\"): {aliases:?}"
+        );
+        assert!(
+            aliases.contains(&("file_id", "path")),
+            "ReadFile::param_aliases() lost (\"file_id\", \"path\"): {aliases:?}"
         );
     }
 
