@@ -14,16 +14,21 @@ kind: bug
 
 ## Summary
 
-Two unfixed residuals split out of
+**Three** unfixed residuals on the `CODESCOUT_PUSH_ACK` surface of
+`scripts/pre-push-foreign-session-guard.sh`. The first two were split out of
 `docs/issues/archive/2026-09-09-pre-push-guard-filters-on-the-local-ref-shape-so-a-refspec-push-bypasses-it.md`
-so that archiving its titular defect — fixed at `d6847322` — does not bury them. Both are on
-the `CODESCOUT_PUSH_ACK` surface of `scripts/pre-push-foreign-session-guard.sh`, and neither
-was touched by that fix.
+so that archiving its titular defect — fixed at `d6847322` — did not bury them; the third
+arrived later, from inside the second instance below. None was touched by that fix. (The
+file's name predates the third and names only the first two.)
 
 1. The inert-ack note reports *"authored no commit in this push"* for two different states,
    one of which it makes false.
 2. Nothing in the banner says an ack records **one operator's decision** rather than the
    named authors' consent — the mirror of a rule the banner already states in one direction.
+3. **Nothing binds the ack's sid list to what the operator was actually told.** The deeper
+   cut of (2): even the lesser claim an ack *does* make — *"my operator decided about these
+   sids"* — is unchecked, because the operator decided over the pusher's **prose** and the
+   ack carries **sids**, with no surface connecting them.
 
 ## Symptom (Effect)
 
@@ -80,6 +85,30 @@ publish a named set. It is silent on whether each named author's operator would 
 nothing in the banner says so. An ack naming six sessionIds reads as six authorisations while
 being one decision. Raised by sessionId `b0015a98-e290-46de-8ed1-3c94bc73a987`, whose own
 phrasing of the incident blurred the same distinction and who flagged it themselves.
+
+**(3)** The ack's entire lifecycle is: read `$CODESCOUT_PUSH_ACK` from the environment
+(`:84`), normalise it (`:96-106`), match its tokens against the sids in the range. **There is
+no step anywhere that connects the list to a record of what the operator was told or decided**
+— verified by construction at `752450b2`, not inferred. The comment at `:80-81` states the
+intent the code cannot enforce: *"the ack is meant to record a decision, not dismiss a
+prompt."*
+
+**And the banner makes the sids correct-by-construction, which is the sharp edge.** `:341`
+prints `CODESCOUT_PUSH_ACK="$foreign_sids" git push <args>` — the guard computes the list for
+the pusher. So the sid half can be machine-perfect, copied from the guard's own output, while
+the authorisation was formed over a prose sentence naming a different set. **The more
+trustworthy the list looks, the less it says about what was authorised.**
+
+Raised by sessionId `343d53e1-2c36-4063-9517-7459472e9b31` from inside their own instance,
+where it was a near-miss rather than a failure: their ack named this file's author and
+`c86ebb51` correctly, while the sentence their operator decided over said *"5 commits from the
+live peer"* and was wrong about who. They re-read the refusal and corrected it before acting.
+Had they not, **the ack would have carried two correct sids under an authorisation formed over
+one — machine-truthful and substantively false, with nothing anywhere able to tell the
+difference.** They offered it as a sharpening of (2); it is numbered separately because the
+mechanisms differ — (2) is about the *scope* of the consent an ack represents, (3) about the
+*fidelity* of the record to the decision that produced it — and because (3) survives (2) being
+fixed.
 
 ## Evidence
 
@@ -138,7 +167,20 @@ count the guard already has.
 **(2)** One line in the banner, beside the existing *"a peer CANNOT grant"*: an ack records
 the pusher's operator's decision and does not speak for the named authors' operators.
 
-**Both are edits to a shared safety surface that gates every session's push on this
+**(3)** No obvious fix, and saying so is the honest state rather than a placeholder. The gap
+is between a machine-readable list and a human decision formed in prose, and nothing in a git
+hook can witness the second. Two directions that do **not** work, both rejected here so nobody
+re-derives them: requiring the pusher to paste what they told their operator produces a
+second unverifiable prose artefact; and refusing the ack unless the sids were copied from the
+guard's own output makes the machine-perfect half *more* authoritative, which is the defect
+rather than its remedy. The reachable move is to stop the banner implying the binding exists
+— `:341` hands the pusher a ready-made list, and a line saying **the guard computed these
+sids, it did not witness your operator's decision about them** costs one sentence and removes
+the false assurance without pretending to close the gap. Filed as *no obvious fix* per this
+repo's own habit of recording the asymmetry rather than filling it (see `IC-18` § *Mechanism
+status*, which does the same for author-written selectors).
+
+**All three are edits to a shared safety surface that gates every session's push on this
 checkout.** Rewording it is not a drive-by, which is why these were recorded rather than
 applied.
 
@@ -161,6 +203,16 @@ Add the empty-population branch to the note at
 `scripts/pre-push-foreign-session-guard.sh:194-196`, and the one-line mirror to the banner
 beside the existing peer-cannot-grant sentence. Then add the both-directions shape assertion
 to `tests/pre-push-foreign-session-guard.sh`.
+
+For (3), add the one-line disclaimer beside `:341` rather than attempting a binding. Do not
+reach for the two rejected directions recorded in § *Fix*.
+
+**A reviewer is available and has volunteered:** sessionId
+`343d53e1-2c36-4063-9517-7459472e9b31`, who raised (3), offered to read carefully on the
+grounds that *"I have now been the failure case, which is a poor qualification for authority
+and a decent one for review"*. They explicitly declined to touch the guard themselves — a
+second author arriving with an unrequested patch to a shared safety mechanism being its own
+hazard — which is the same reason these are filed and not applied.
 
 ## References
 
