@@ -306,6 +306,52 @@ assertion **standing alone** where a per-member claim is being made is.
 level that REACHES THE PRODUCTION PATH.** A second level can be present, named for exactly the job,
 and dead.
 
+### A third cause of two correct readings — one symbol, two ROLES, no drift at all
+
+The section above gives two ways two verified parties cite different lines for one fact: the symbol
+moved (rename), or the tree differs (insertion above, another branch). Both are **scope**
+disagreements, and both have a remedy — name the branch, or `git grep <pattern> HEAD`. Measured
+2026-09-10: there is a third that presents identically and **defeats both remedies**, because
+nothing moved and no scope differs.
+
+Two sessions on `experiments`, `src/server.rs` clean in both (`git diff --stat` empty), disagreed by
+99 lines about one table-driven gate:
+
+| line | role |
+|---|---|
+| `:2847` | `async fn required_names_no_key_that_has_a_declared_alias` |
+| `:2891` | `for (tool, expected) in EXPECTED_ALIAS_COUNTS_BY_TOOL` |
+| `:2893` | the `assert_eq!` — **the panic site** |
+| `:2992` | `const EXPECTED_ALIAS_COUNTS_BY_TOOL` — **the data site** |
+
+Rust module items are order-independent, so the `const` legally sits 99 lines *below* the test that
+reads it. One party held the panic line out of a failure log; the other had resolved the symbol and
+cited its definition. Both were reading the same bytes of the same tree at the same instant, and
+both were right about different things.
+
+**Why this is worse than either listed cause, rather than another example of them.** Re-reading
+returns the same two numbers; `git grep <pattern> HEAD` confirms the tree never moved; naming the
+branch changes nothing. Every instrument this page offers for the first two causes returns
+*agreement that the disagreement is real*, so the reflex "one of us must be wrong" is
+unfalsifiable — and the three explanations actually offered in that exchange (stale tree, two
+assertion sites, a mis-transcription) were all wrong, in a session that had this page's laws in
+context.
+
+**And it falsifies this page's own remedy for one case.** *"Prefer citing the symbol and letting
+`symbols` find the line"* is what produced the mismatch: symbol resolution lands on the
+**definition**, while a failing test hands the reader the **assertion**. For a table-driven gate
+those are different lines by construction, and the more disciplined party is the one holding the
+number that will never appear in any failure output.
+
+So the convention, which costs nothing and is the whole finding: **a panic line is always the
+assertion, never the data it reads.** When citing a gate whose data lives in a `const` table, cite
+the `assert_eq!` — that is the number the next reader will be holding. Cite the table's definition
+only as a second, labelled coordinate.
+
+Raised as a discrepancy by sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941` against a citation of
+mine, who then withdrew all three of their own explanations once the fourth was verified at the
+bytes; the role-pair cause and the convention are this session's.
+
 ### A second subsystem — and a DIFFERENT way to be vacuous
 
 **Scope first, per the rule immediately above.** Every symbol in this subsection lives on branch

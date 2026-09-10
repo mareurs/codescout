@@ -790,7 +790,36 @@ it) but update its comment to say it is now a redundant second layer, naming
 - [ ] **Step 3: Run the tests**
 
 Run: `cargo test --workspace 2>&1`
-Expected: the four schema gates in `src/server.rs` FAIL — `EXPECTED_ALIAS_COUNTS_BY_TOOL` now finds 0 aliases where it expects 3-4. **This is the expected intermediate state**; Task 7 replaces them. Every other test must pass. If anything else fails, stop.
+Expected: **exactly ONE test fails** —
+`server::tests::required_names_no_key_that_has_a_declared_alias`, panicking at
+**`src/server.rs:2893`** on `EXPECTED_ALIAS_COUNTS_BY_TOOL`'s **first** row:
+`read_file: expected 4 "Alias for " property description(s), found 0`, `left: 0
+right: 4`. Confirmed verbatim in both lanes, 2026-09-10.
+**This is the expected intermediate state**; Task 7 deletes that gate. Every other
+test must pass. If anything else fails, stop.
+
+Cite `:2893` — the `assert_eq!` — when matching your run against this step. The
+table itself is defined 99 lines LOWER, at `:2992`, because Rust module items are
+order-independent and the `const` sits below the test that reads it. Two correct
+readers holding `:2893` and `:2992` are describing the panic site and the data
+site, not disagreeing.
+
+**Do not read the single failure as a narrow blast radius, and do not go looking for
+three more reds.** This task falsifies **four rows** of that table — read_file 4,
+create_file 3, edit_file 3, grep 1 — but the rows live inside **one** test, and its
+`assert_eq!` runs inside a loop over the table, so it panics on `read_file` and the
+other three are **unobservable** until that row is gone. `1 failed` is therefore
+evidence about the loop's first iteration, not about how many tools this task
+touched. Rows are not tests; do not restate the count as a number of gates.
+
+Two neighbouring gates stay GREEN, and neither green is evidence:
+
+- `path_requiring_tools_never_name_path_or_an_alias_in_required` **cannot** fail from
+  this change in either direction — deleting an alias property can only shrink the
+  offender set it scans.
+- `tool_surface_under_budget` asserts `total <= TOOL_SURFACE_CHAR_BUDGET`, and this
+  task only *removes* characters, so it passes with fresh headroom whether or not the
+  collapse is correct. Task 8 ratchets it to the new measured total.
 
 - [ ] **Step 4: Commit**
 
