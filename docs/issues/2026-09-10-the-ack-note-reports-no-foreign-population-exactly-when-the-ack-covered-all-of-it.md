@@ -134,6 +134,38 @@ different sids, different authorship shapes — were one observation, because th
 is not the property under test. Widening the fixture would not have found it; enumerating the
 states would.
 
+**SHARPENED BY THE SAME AUTHOR AFTER THE FIX LANDED, and the sharper form is the one to carry — it
+is a general claim about test design and this file is only where it happens to be written down.**
+The nastier property is not that a control can repeat a member; it is that **the fixture varied
+convincingly and the state did not.** Rows 6a and 6b differ on *three* visible axes — sid,
+authorship shape, and whether a foreign population exists at all — and none of the three is the
+axis the predicate branches on. In their words: *"every additional row I could have written by
+varying what looked variable would have been a third sample of the same state."*
+
+So *"widen the sample"* is not merely insufficient against this — it is **actively reassuring**,
+because each new row looks different from the last. That is the failure mode `CLAUDE.md` records
+for the recording-filter law, arriving from the input side instead of the output side.
+
+**The remedy is enumeration OF THE STATES THE PREDICATE CAN SEE, not of the inputs.** Here the
+predicate distinguished three — none acked, some acked, all acked — and two rows existed, neither
+of them `all`. *"Nothing about the fixtures would have told me that; only asking the predicate what
+it distinguishes would."* **Promotion candidate** for § *Testing Discipline* /
+`docs/conventions/what-green-is-evidence-for.md`; deliberately not promoted from here, because a
+law belongs in that file with its derivation and this is one instance.
+
+**Landed 2026-09-10 by the author, 116 passed / 0 failed.** `foreign_pre_ack_n` is incremented in
+the `elif [ "$sid" != "$me" ]` branch **before** `acked "$sid" && continue`, giving three arms:
+`foreign_pre_ack_n == 0` keeps the existing wording; `$foreign_report` empty now says *"your ack
+authorised N commit(s) by another session, and that is why this push is allowed"* **plus the
+mirror** — that it records the pusher's operator's decision, does not speak for the authors', and
+leaves each of them exactly as UNCLEARED as they were; otherwise the per-token notes are untouched.
+
+**And the `some` arm proved the split rather than a flip, from a row that already existed.** Row 6b
+— ack names `BOB`, `CAROL` authored the foreign commit — reaches the third arm and still passes; a
+fix that inverted the branch wholesale would red there. That row was written for a different reason
+and earned its keep on an axis its author did not have in mind — the one direction this file's own
+finding runs the other way.
+
 **The comment is an aggravating factor rather than a mitigation, and that is the author's own
 reading.** The coupling argument was supplied by a third session (`343d53e1-…`) as a stronger
 justification for a line already written on weaker grounds, and recorded as a comment without
