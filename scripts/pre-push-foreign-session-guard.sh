@@ -125,6 +125,14 @@ commit_rows=""
 # docs/issues/archive/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md
 mine_n=0
 total_n=0
+# COUNTED BEFORE THE ACK TEST, and that is the whole reason it exists. `$foreign_report` and
+# `$foreign_sids` are both appended AFTER `acked "$sid" && continue`, so a fully-matching ack
+# leaves both empty -- indistinguishable from a push that carried no foreign commits at all.
+# Nothing else in this script records the pre-ack population, so the note below could not
+# tell "the ack did all of its work" from "there was no work", and reported the second.
+# Measured in production by sessionId c86ebb51: 52 commits, 6 foreign sids, all acked, and
+# the guard said there was no foreign population. Filed a60bdb57.
+foreign_pre_ack_n=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
@@ -171,6 +179,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             untrailered_n=$((untrailered_n + 1))
             untrailered_report="${untrailered_report}    ${sha:0:8}  ${subject}"$'\n'
         elif [ "$sid" != "$me" ]; then
+            # BEFORE the ack test, deliberately. See `foreign_pre_ack_n`'s declaration.
+            foreign_pre_ack_n=$((foreign_pre_ack_n + 1))
             acked "$sid" && continue
             case ",$foreign_sids," in
                 *",$sid,"*) ;;
@@ -198,33 +208,38 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
     # shellcheck disable=SC2086
     set -- $(printf '%s' "$ack" | tr -d '[:space:]')
     IFS="$_ifs2"
-    # TWO STATES WORE ONE SENTENCE, AND THE NOTE MADE ONE OF THEM FALSE. Per-token, "X
-    # authored no commit in this push" is a claim about X and reads as "you named the wrong
-    # sid" -- correct when a foreign population exists and X is absent from it. When the
-    # population is EMPTY the same sentence is true of every sid alive and informative about
-    # none: nobody authored a foreign commit, so there was nothing for any ack to apply to.
-    # A pusher told to "check you named the sid you meant" goes looking for a typo that is
-    # not there. Split on $foreign_report, which is already built above, and say it once for
-    # the push rather than once per token -- the fact is about the range, not about a sid.
+    # THREE STATES, NOT TWO, AND THE MIDDLE ONE USED TO BE REPORTED AS THE FIRST. Per-token,
+    # "X authored no commit in this push" is a claim about X and reads as "you named the wrong
+    # sid" -- correct when foreign commits remain and X is absent from them. The other two
+    # states are about the RANGE, not about a sid, so each is said once.
     #
-    # THIS BORROWS `:228`'s DISCRIMINATOR RATHER THAN COMPUTING ITS OWN, and that is the
-    # point rather than a shortcut. `[ -n "$foreign_report" ] || exit 0` below is what the
-    # guard already trusts to decide whether to act at all, so testing the same expression
-    # here cannot disagree with it: if `-z` were the wrong question, the guard would already
-    # be refusing on the wrong population. Re-deriving emptiness from `$foreign_sids` or a
-    # count would introduce a second source of truth that can drift from the first while
-    # both look correct. If you change `:228`'s discriminator, change this one with it --
-    # a switch there leaves this branch silently answering a question the guard no longer
-    # asks, and the note then fires on the wrong side with no test necessarily reaching it.
-    # (Coupling named by sessionId 343d53e1-2c36-4063-9517-7459472e9b31, reviewing the
-    # commit that added this branch; the original author keyed on `$foreign_report` because
-    # it was the variable in scope, which is the same line for a weaker reason.)
-    if [ -z "$foreign_report" ]; then
+    # WHY NOT `$foreign_report`, WHICH THIS BRANCH USED TO TEST: it is appended AFTER
+    # `acked "$sid" && continue`, so a fully-matching ack empties it. Testing it here reported
+    # "there was no foreign population" on a push whose ack had authorised six of them --
+    # measured in production, sessionId c86ebb51, 52 commits, filed a60bdb57.
+    #
+    # A CORRECT REASON FOR THE WRONG QUESTION IS WHAT PRODUCED THAT. The comment removed from
+    # here argued that borrowing `:228`'s `[ -n "$foreign_report" ] || exit 0` discriminator
+    # "cannot disagree with it", and that is sound -- about WHETHER TO REFUSE. It is unsound
+    # about WHETHER AN ACK APPLIED, because the ack is precisely what empties the variable.
+    # The soundness of one question was transferred to the other and written down as a
+    # coupling. Keep the two apart: `:228` asks whether foreign work REMAINS,
+    # `$foreign_pre_ack_n` asks whether any EXISTED.
+    if [ "$foreign_pre_ack_n" -eq 0 ]; then
         printf '\n  note: CODESCOUT_PUSH_ACK was set, but this push carries\n' >&2
         printf '  no commits by another session -- there was no foreign population for it to\n' >&2
         printf '  apply to, and the push was allowed on that basis, not on the ack. Nothing\n' >&2
         printf '  was authorised because nothing needed authorising. Harmless; a stale ack in\n' >&2
         printf '  a shell history is a habit, not an error.\n' >&2
+    elif [ -z "$foreign_report" ]; then
+        # THE ACK DID ALL OF ITS WORK. Say so plainly: naming every sid rather than reaching
+        # for `all` is the behaviour this guard wants, and the note it used to print told
+        # that pusher their care bought nothing.
+        printf '\n  note: your ack authorised %d commit(s) by another session, and that is\n' \
+            "$foreign_pre_ack_n" >&2
+        printf '  why this push is allowed -- every foreign author in the range was named.\n' >&2
+        printf '  The ack records YOUR operator decision about them; it does not speak for\n' >&2
+        printf '  theirs, and it leaves each of them exactly as UNCLEARED as they were.\n' >&2
     else
         for _tok in "$@"; do
             [ -n "$_tok" ] || continue

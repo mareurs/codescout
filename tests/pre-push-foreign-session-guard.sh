@@ -1041,6 +1041,39 @@ has   "ack semantics: the sid list is not a witnessed binding" "$OUT" "did not w
 has   "ack semantics: says the ack overtakes rather than resolves" \
       "$OUT" "OVERTAKES THE THREE-STATE QUESTION RATHER THAN ANSWERING IT"
 
+# Row 6f -- THE STATE ROWS 6a AND 6b BOTH MISSED, and the one that fires the wrong branch.
+#
+# 6a and 6b are each "the ack matched NOTHING", in two flavours: empty foreign population,
+# and a non-empty one the acked sid is absent from. Neither reaches "the ack matched
+# EVERYTHING" -- and that is the case the note gets backwards, because `acked "$sid" &&
+# continue` runs BEFORE the $foreign_report append, so a fully-matching ack leaves that
+# variable empty and the empty-population branch fires. The note then reports that there
+# was no foreign population and that the push was allowed "not on the ack", when there was
+# one and the ack is the entire reason it was allowed.
+#
+# WORSE THAN A WRONG SENTENCE: it argues against the behaviour the guard wants. A pusher who
+# names every sid rather than using `all` is told the careful form bought nothing, and the
+# natural response is to drop the ack or reach for `all` -- which this file's own header says
+# exists to be avoided so the guard cannot be switched off by habit.
+#
+# Found in production by sessionId c86ebb51 on a 52-commit push naming 6 foreign sids, all
+# acked; reported as a60bdb57. Not by reading -- two sessions had enumerated that population
+# minutes earlier, which is what made the note's claim visibly false.
+new_repo
+commit "$ALICE" "alice base"
+R6F_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+commit "$CAROL" "carol foreign"
+R6F_TIP="$(sha)"
+# Both foreign sids acked, so the push is ALLOWED -- and allowed BY THE ACK. Dropping either
+# sid from this list turns the row into 6b (a partial ack refuses) and it stops covering the
+# branch: the ack must match EVERY foreign author for $foreign_report to end up empty.
+run "$ALICE" "$BOB,$CAROL" "refs/heads/main $R6F_TIP refs/heads/main $R6F_BASE"
+eq    "fully acked: allowed"                      "$EC" 0
+hasnt "fully acked: does NOT claim an empty set"  "$OUT" "no commits by another session"
+hasnt "fully acked: does NOT deny the ack's role" "$OUT" "not on the ack"
+has   "fully acked: names the population it authorised" "$OUT" "2 commit(s) by another session"
+
 echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
