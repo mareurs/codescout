@@ -72,7 +72,7 @@ Branch `experiments`, upstream `origin/experiments`. Seven Claude sessions share
 
 Two mechanisms compound, and only the second is a defect.
 
-**1 — the guard, which is correctly built.** `ledger_has_unpushed_commits`
+**1 — the guard, which is correctly built.** `ledger_unpushed_commits`
 (`src/librarian/tools/append_entry.rs:423`) walks `@{upstream}..HEAD` and returns true if any
 commit's diff touches this ledger's own path. It is **per-file, not per-branch**, and its doc
 comment records why: *"Measured on codescout 2026-09-02: HEAD was 34 commits ahead of
@@ -133,7 +133,7 @@ $ git log --full-history --format='%h %p %s' '@{upstream}'..HEAD -- docs/tracker
 ```
 
 **`git log`/`git rev-list` apply history simplification by default and omit a MERGE commit that
-touched the path**; `ledger_has_unpushed_commits` walks each commit in the range and reads its
+touched the path**; `ledger_unpushed_commits` walks each commit in the range and reads its
 diff, so it sees `8cf67de0` and refuses. Both are correct about their own question. The guard
 is right; the diagnostic is the thing that lies, and it lies in the **allowing** direction, so
 the reader concludes the ledger is clear and is then refused with nothing to reconcile.
@@ -185,7 +185,7 @@ can.
 ## Hypotheses tried
 
 1. **Hypothesis** — the guard is branch-wide and therefore trivially over-broad. **Test** —
-   read `ledger_has_unpushed_commits`. **Verdict** — rejected. It is per-file, deliberately,
+   read `ledger_unpushed_commits`. **Verdict** — rejected. It is per-file, deliberately,
    with a measurement behind the choice. The over-blocking is real but narrower than it looks:
    it hits exactly the ledgers under active use.
 2. **Hypothesis** — a direct `edit_file` write is an acceptable workaround. **Verdict** —
@@ -272,7 +272,7 @@ behaviour may both have moved.
 
 ## References
 
-- `src/librarian/tools/append_entry.rs:423` — `ledger_has_unpushed_commits`; `:170` — the refusal.
+- `src/librarian/tools/append_entry.rs:423` — `ledger_unpushed_commits`; `:170` — the refusal.
 - `src/librarian/tools/doctor.rs:3172` — `scan_entry_defined_twice`, the detection half.
 - `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` — the
   collision this guard was built to answer.

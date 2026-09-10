@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: 'Mechanism NOT established. Seven candidate causes were ruled out at the bytes (below); the surviving ones are untested. Reproduced ONCE, on one ledger, on a checkout with a linked worktree — n=1, and no second ledger was probed because every probe mutates a high-water mark. Do not read this as ''the guard is dead'': `unpushed_is_per_file_not_per_branch` and `allocation_is_refused_while_the_ledger_has_unpushed_commits` both pass, so it demonstrably fires in a fixture.'
+unverified: 'Mechanism NOT established. Seven candidate causes were ruled out at the bytes (below); the surviving ones are untested. Reproduced ONCE, on one ledger, on a checkout with a linked worktree — n=1, and no second ledger was probed because every probe mutates a high-water mark. Do not read this as ''the guard is dead'': `unpushed_is_per_file_not_per_branch` and `allocation_is_refused_while_the_ledger_unpushed_commits` both pass, so it demonstrably fires in a fixture.'
 ---
 
 # `append_entry` allocated an id on a ledger with three unpushed commits, which is the state the guard refuses
@@ -19,7 +19,7 @@ unverified: 'Mechanism NOT established. Seven candidate causes were ruled out at
 returning `F-107` and writing `entry_high_water_F: 107` — while
 `docs/trackers/bug-fix-session-log.md` had three commits in `@{upstream}..HEAD`.
 
-That is exactly the state `ledger_has_unpushed_commits` exists to refuse, and it is the
+That is exactly the state `ledger_unpushed_commits` exists to refuse, and it is the
 state `get_guide("tracker-conventions")` tells every author will be refused:
 
 > **Not while the ledger's own commits are unpushed.** `append_entry` also refuses when the
@@ -65,7 +65,7 @@ from outside.
 
 ## Why the passing tests do not settle it
 
-`unpushed_is_per_file_not_per_branch`, `allocation_is_refused_while_the_ledger_has_unpushed_commits`
+`unpushed_is_per_file_not_per_branch`, `allocation_is_refused_while_the_ledger_unpushed_commits`
 and `allocation_proceeds_when_the_ledger_has_no_unpushed_commits` all pass. They build their
 own repo in a tempdir — no linked worktree, a local remote, and a path the fixture controls
 end to end. So they establish the helper's *logic* and say nothing about the two surviving
@@ -82,7 +82,7 @@ artifact(action="append_entry", id="2dd9d90bc83f9f49", id_prefix="F", ...)      
 
 **Costly to re-run**: every probe allocates an id and advances a committed high-water mark.
 The cheap next step is a unit test that passes a *file* path to
-`ledger_has_unpushed_commits` — the current three all pass a path the fixture built — and a
+`ledger_unpushed_commits` — the current three all pass a path the fixture built — and a
 second that builds a fixture with a linked worktree. Both are assertions about the two
 surviving candidates rather than a re-run of this observation.
 
@@ -94,7 +94,7 @@ surviving candidates rather than a re-run of this observation.
 
 ## References
 
-- `src/librarian/tools/append_entry.rs:369` — `ledger_has_unpushed_commits`
+- `src/librarian/tools/append_entry.rs:369` — `ledger_unpushed_commits`
 - `src/librarian/tools/append_entry.rs:154` — the call site and its `is_ledger` condition
 - `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` — the
   bug this guard closed, whose failure mode a silent allowance reopens

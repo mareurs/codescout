@@ -327,7 +327,13 @@ git commit -m "feat(doctor): entry_defined_twice — the cross-host merge collis
 
 **Interfaces:**
 - Consumes: `git2` (already a workspace dependency; precedent `src/retrieval/index_state.rs:327` `behind_count`).
-- Produces: `fn ledger_has_unpushed_commits(abs_path: &std::path::Path) -> bool`.
+- Produces: `fn ledger_unpushed_commits(abs_path: &std::path::Path) -> Vec<String>`.
+  *(Widened 2026-09-10 at `73caa355` from `-> bool`, and renamed with it. The bool told the
+  caller a refusal was warranted and threw away the commits it had already walked, so the
+  refusal could not name them — and `git log '@{upstream}'..HEAD -- <ledger>` disagrees with
+  this helper, because default history simplification omits a merge that touched the path
+  while the revwalk diffs against `parent(0)` and sees it. Empty means allow, so the
+  every-failure-path-allows contract is unchanged.)*
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -343,7 +349,7 @@ git commit -m "feat(doctor): entry_defined_twice — the cross-host merge collis
         let led = tmp.path().join("ledger.md");
         std::fs::write(&led, "x").unwrap();
         commit_all(&repo, "first");
-        assert!(!ledger_has_unpushed_commits(&led));
+        assert!(ledger_unpushed_commits(&led).is_empty());
     }
 
     /// A path outside any git repository must ALLOW, not panic.
@@ -352,7 +358,7 @@ git commit -m "feat(doctor): entry_defined_twice — the cross-host merge collis
         let tmp = tempfile::tempdir().unwrap();
         let led = tmp.path().join("ledger.md");
         std::fs::write(&led, "x").unwrap();
-        assert!(!ledger_has_unpushed_commits(&led));
+        assert!(ledger_unpushed_commits(&led).is_empty());
     }
 
     /// THE DISCRIMINATION THAT MATTERS. A branch-wide check passes a refusal-only
@@ -520,7 +526,7 @@ git commit -m "feat(append_entry): per-file upstream-freshness helper" -- src/li
 - Modify: `src/librarian/tools/append_entry.rs:93-103` region (immediately after the worktree guard) and its `mod tests`
 
 **Interfaces:**
-- Consumes: `ledger_has_unpushed_commits` from Task 3; `RecoverableError::with_hint(String, String)`; `artifact::get(&cat, &a.id)` returning a row with `.abs_path`.
+- Consumes: `ledger_unpushed_commits` from Task 3 (named `ledger_has_unpushed_commits` when this plan was written; renamed and widened to `Vec<String>` at `73caa355`, 2026-09-10 — the fenced code in this plan is deliberately left as prescribed, since it records what the task was told to write); `RecoverableError::with_hint(String, String)`; `artifact::get(&cat, &a.id)` returning a row with `.abs_path`.
 - Produces: no new public surface — a new early-return in `call`.
 
 - [ ] **Step 1: Write the failing test**
@@ -644,4 +650,3 @@ Do NOT archive. The record is `mitigated` with a live `unverified:`, and the pee
 - **Out of scope, per spec:** renumber/repair, fetching before comparison, host-partitioned id spaces. No task implements any of them.
 - **Type consistency:** `duplicate_definitions(&str, &[String]) -> Vec<(String, Vec<u32>)>` is defined in Task 1 and consumed in Task 2 with that signature. `ledger_has_unpushed_commits(&Path) -> bool` is defined in Task 3 and consumed in Task 4 with that signature.
 - **Known gap the executor must resolve, not guess:** Task 2's tests call `mk_ctx`, `seed_ledger`, `run`, `violations_named`, and Task 4's call `mk_ctx_at`, `seed_prose`. The first four exist in `doctor.rs`'s test module (`violations_named` at `:10762`); `seed_prose` exists in `append_entry.rs`'s (`:537`). **`mk_ctx_at` does not exist** — `append_entry.rs`'s `mk_ctx` (`:294`) takes no path. Task 4 Step 1 must first add `mk_ctx_at(root: &Path)` following `mk_ctx`'s body with the tempdir replaced by `root`. This is named here rather than left to discovery because a missing helper reads like a broken test.
-
