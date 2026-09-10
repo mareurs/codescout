@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-09
-closed: ''
-severity: high
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
-kind: bug
+closed: 2026-09-10
+opened: 2026-09-09
+owner: marius
+related: []
+severity: high
 ---
 
 # BUG: the pre-push guard filters on the LOCAL ref shape, so `git push origin <sha>:<branch>` bypasses it entirely and publishes foreign commits with exit 0
@@ -164,12 +164,36 @@ here as context; it wants its own reproduction and may want its own file.
 
 ## Fix
 
-Not applied. **Key the filter on the destination, not the source:** test `_remote_ref` against
-`refs/heads/*` instead of `local_ref`. That field is `refs/heads/<branch>` under both push
-forms, which makes the two routes agree by construction — the property currently missing.
+**FIXED on `experiments` at `d6847322`**, patch-id
+**`03c1fcd5aee6ca1fb98399a0386437e33c586b06`**, published. Not by this file's author.
 
-Keep a guard for `local_sha = ZERO` (branch deletion), which is orthogonal and already
-handled at `:123`.
+The repair is the one prescribed below: decide the branch from **field 3** (the ref being
+UPDATED, which carries the branch under both push forms) when field 1 is a bare sha. The
+fix's own comment at `scripts/pre-push-foreign-session-guard.sh:126-132` records the sharp
+half of § *Evidence* in the code — *"that form is the one this guard's OWN remedy text
+recommends ("use a refspec at EVERY rung"), so following the refusal disarmed the guard that
+emitted it."*
+
+**Verified 2026-09-10 by re-running this file's own reproduction, and the result is exactly
+inverted:**
+
+| | at filing | after `d6847322` |
+|---|---|---|
+| `git push origin <branch>` | `EXIT=1` REFUSING | `EXIT=1` REFUSING |
+| `git push origin <sha>:refs/heads/<branch>` | `EXIT=0`, foreign **published** | `EXIT=1` REFUSING, **not published** |
+| direct probe, SHA-shaped `local_ref` | `exit=0` | `exit=1` |
+
+**The banner needed no rewording, which is the better outcome.** § *Evidence* argued the
+refusal text instructs the reader into the bypassing form. That is now *correct advice* — the
+recommended route is guarded — so the fix repaired the instruction by making the world match
+it rather than by editing the words. Nothing is owed on that finding.
+
+**TWO RESIDUALS ARE NOT FIXED AND HAVE MOVED**, so that archiving this file does not bury
+them: the inert-ack note's ambiguity (`:194-196`, unchanged) and the missing mirror on what
+an ack can grant. Both now live in
+`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
+The first is materially de-fanged by this fix — with the scan no longer skippable, an empty
+population is much harder to reach — but the sentence still cannot distinguish the two cases.
 
 Second, independent of the filter: **the inert-ack note must distinguish *no such author in
 the range examined* from *nothing was examined*.** As written it reports the same sentence for
@@ -195,12 +219,15 @@ collapses into neither.
 
 ## Tests added
 
-None yet. The regression test must supply a **SHA-shaped `local_ref`** on stdin — the one
-input the existing 86-assertion suite cannot express — and assert refusal, paired with the
-`refs/heads/` form asserting the identical outcome over the identical range. Acceptance
-criterion is an observed RED: with the filter restored to `local_ref`, the SHA-shaped case
-must fail while the `refs/heads/` case stays green, so the pair discriminates in both
-directions.
+`d6847322` added 66 lines to `tests/pre-push-foreign-session-guard.sh`, a section named
+**`== which FIELD names the branch depends on the push form ==`**, carrying the SHA-shaped
+`local_ref` fixture this section asked for — the one input the previous 86-assertion suite
+could not express, because every fixture in it wrote `refs/heads/main`.
+
+Independently re-verified 2026-09-10 by the reproduction in § *Reproduction*, run against the
+fixed guard in a throwaway with a local remote. Both push forms now refuse and the foreign
+commit is not published; the by-hand probe over one fixed range returns `exit=1` for **both**
+`local_ref` shapes, where it returned `exit=1` / `exit=0` at filing.
 
 ## Workarounds
 
@@ -211,10 +238,11 @@ until this is fixed that advice must not be followed while anything foreign is b
 
 ## Resume
 
-Change `:124` to filter on `_remote_ref` (renaming it, since it stops being unused), add the
-SHA-shaped-`local_ref` fixture described above, and confirm the observed RED by reverting the
-filter. Then re-word the inert-ack note to separate an empty population from an unmatched
-author.
+N/A — fixed at `d6847322` (patch-id `03c1fcd5aee6ca1fb98399a0386437e33c586b06`), published on
+`experiments`, regression test present, reproduction independently re-run against the fix.
+
+The two unfixed residuals moved to
+`docs/issues/2026-09-10-the-inert-ack-note-and-the-missing-mirror-on-what-an-ack-grants.md`.
 
 ## References
 
