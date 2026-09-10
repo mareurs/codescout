@@ -8,8 +8,8 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 10
-entry_high_water_W: 17
+entry_high_water_F: 11
+entry_high_water_W: 18
 entry_prefix:
 - F
 - W
@@ -83,6 +83,7 @@ entry_prefix:
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 | F-10 | 2026-09-03 | med | self-friction | mitigated | I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed in 10 hours, found by a peer, on the gate carrying my own prediction that it would |
+| F-11 | 2026-09-09 | med | prompt-surface | open | The collapse's byte win is 2.7% — a merge moves parameters into the survivors rather than deleting them, so a tool COUNT is a bad proxy for surface cost; and `budget 57296, headroom 0` leaves no slack |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -104,6 +105,7 @@ entry_prefix:
 | W-15 | 2026-09-02 | med | A substring join on `input_json` reads a value as a key — join on the key (`json_extract`) and read the rows before publishing a count | A bug file would have opened with "8 field instances in 30 days" for a defect with 0 real ones; a second join the same hour read 48 for a real count of 1 | open |
 | W-16 | 2026-09-03 | med | Price a schema restructuring against its own scaffolding before proposing it — compare the bytes the new shape *requires* against the bytes the old shape spends on the same fact | Would have shipped `oneOf` narrowing on `doc` as a size reduction: +2,022 chars at the optimal encoding, ~2× the whole five-tool collapse's saving and in the opposite direction — and provably unwinnable, since 17 minimal branches (794) already exceed every action-qualifier prefix in the tool (616) | validated |
 | W-17 | 2026-09-03 | high | Ask of a candidate cut "does this DESCRIBE the parameter, or DISPLACE something the model would otherwise reach for?" — redundancy analysis is structurally blind to the second, and routes you straight at it | Would have proposed cutting the `workspace` routing clause — the surface's largest duplicate at 2,244 redundant chars across 18 tools — which `prompt-hamsa-audit-log:A-28` had already measured at 8/10 against base 10/10 and marked KEEP; every failure was the model reaching for global `activate`, which clobbers a concurrent parent on a machine running 16 sessions. The proposal would have carried a correctly-derived number and read as the session's strongest finding | validated |
+| W-18 | 2026-09-10 | med | Probe the binary that is actually SERVED, not the one the script defaults to — then control for the instrument having ignored your choice | `F-11`'s figure was measured on `target/debug` under default features while the live binary is `cargo rb` (`server-stack,local-embed`), so it would have been a default-lane number quoted about a server-stack binary — which CLAUDE.md warns against by name. Identical results would ALSO be produced by `--binary` being ignored, so the finding rests on the bogus-path control rather than on the agreement | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -1994,6 +1996,107 @@ inclusion list got hand-typed in the first place.
 **Rests on:** `3e8193a0` (patch-id `a6584765c1e76bfaea7b2697eb991b4e63571c2e`); the peer's
 uncommitted extension to `src/prompts/mod.rs` read at 2026-09-03; `IC-14` member 7 in
 `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md`.
+
+## F-11 — the collapse's byte win is 2.7%, because a merge moves parameters rather than deleting them
+
+**Observed:** This log's headline `tools/list` figure was **27 tools / 58,882 chars**, measured
+before the 2026-09-02 collapse and annotated in-place as over-counted. Its replacement — a
+~28.7k-token re-measurement — went into `resume-tool-surface-structural-mechanisms` at `284c82bd`,
+which is now `status: archived`. So the live tracker carried a number known to be wrong, and the
+correction sat in a closed record: two documents, neither of which a reader gets right alone.
+
+**Re-derived 2026-09-09, not cited.** Both instruments, run in the same session, agree exactly:
+
+| | desc | schema | annot | TOTAL | tools |
+|---|---|---|---|---|---|
+| `scripts/probe_tool_surface.py` | 7060 | 49479 | 757 | **57296** | 21 |
+| `cargo test --lib tool_surface_report_lengths` | 7060 | 49479 | 757 | **57296** | 21 |
+
+The agreement is the point, not a formality: the probe's own trap 1/2 says a mismatch between it
+and `list_tools` makes any delta meaningless. Two independent readers of the same surface, so this
+is corroboration rather than one instrument quoted twice.
+
+**The finding, and it inverts the expectation the collapse was argued on.** Six tools removed
+bought **1,586 chars — 2.7%**. A collapse is a **merge, not a deletion**: the folded tools'
+parameters moved into the survivors rather than leaving. The same run shows where they went —
+`doc` alone is **18,556 chars over 62 params**, and `librarian` **10,276 over 41**, together 50% of
+the whole surface across two tools. **So a tool COUNT is a bad proxy for surface cost**, and this
+log had been reasoning in tool counts. The probe already reports the cut that does track cost —
+`prose 37,625 (65.7%) / machine 19,671 (34.3%)` — and its trap 4 warns that prose cuts must not aim
+at `desc`, which is tool descriptions only; parameter descriptions live inside `schema`.
+
+**And the budget now has zero slack:** the same test prints `budget 57296, headroom 0`. The ceiling
+was set to the post-collapse total, so the next parameter added to any tool reds the gate. That is
+a design choice worth knowing before someone reads the red as a regression rather than as the
+budget doing its job.
+
+**Build provenance, added 2026-09-10.** These four numbers were taken with
+`scripts/probe_tool_surface.py`, whose `--binary` defaults to `target/debug/codescout`, and with
+`cargo test --lib`, which runs default features. The live binary is neither: `cargo rb` is
+`--release --features server-stack,local-embed`. Re-probed against BOTH at the same instant, the
+advertised surface is identical on all six dimensions, so `57296` describes the served binary too.
+See the paired `W` entry for the controls. Without it this figure would be a default-lane number
+quoted about a server-stack binary, which `CLAUDE.md` § *Development Commands* warns against by name.
+
+**What this does not establish.** Nothing here says the collapse was not worth doing — the argument
+for it was Iron Law legibility and one call shape per concern, not bytes, and 2.7% is only a
+refutation of the *byte* case if someone made one. It also says nothing about resident prompt cost:
+`A-38` records that Claude Code injects tool **names** and defers ~85% of schema to `ToolSearch`,
+so wire chars and per-turn chars are different quantities and this is the wire one.
+
+**Valid:** dated 2026-09-09
+
+**Rests on:** `scripts/probe_tool_surface.py` and `src/server.rs`'s `tool_surface_report_lengths`,
+both run 2026-09-09; `docs/trackers/prompt-hamsa-audit-log.md:A-38` for the deferral calibration;
+`docs/plans/2026-09-09-tool-collapse-post-merge-queue.md` § *OWED* item 6, which owed this entry.
+
+## W-18 — the tool surface is build-invariant across server-stack, so F-11's debug-binary figure is citable for the live one
+
+**Observed:** `scripts/probe_tool_surface.py`'s `--binary` defaults to `target/debug/codescout`
+(`:165`), and `cargo test --lib` runs default features. The live MCP binary is neither: `cargo rb`
+is `build --release --features server-stack,local-embed` (`.cargo/config.toml`), and
+`~/.cargo/bin/codescout` symlinks to `target/release/codescout`. So `F-11`'s measurement was taken
+against a build no session runs, on a feature set `CLAUDE.md` warns about by name — *"the default
+lane is VACUOUS for `server-stack`… green here is silence about code the running binary uses."*
+
+**Scouted after a `cargo rb` + `/mcp` reconnect, both binaries probed at the same instant:**
+
+| build | tools | desc | schema | annot | TOTAL | prose | machine |
+|---|---|---|---|---|---|---|---|
+| `target/release` (`server-stack,local-embed`, live) | 21 | 7060 | 49479 | 757 | 57296 | 37625 | 19671 |
+| `target/debug` (default features) | 21 | 7060 | 49479 | 757 | 57296 | 37625 | 19671 |
+
+**Identical on every dimension — the advertised surface is BUILD-INVARIANT across that feature
+set.** The two flags add a vector backend and an embedder; neither registers a tool nor widens a
+schema.
+
+**Three controls, because a confirming result is what a broken instrument also returns.** Identical
+numbers are exactly what *"`--binary` is ignored and both runs probed one binary"* would produce,
+and that alternative is a priori likelier than the finding. (1) `--binary` is honoured: a bogus path
+exits 1 with `FileNotFoundError` rather than silently falling back. (2) The two files are genuinely
+different — distinct `sha256sum`, 332 MB vs 64 MB. (3) Tool count read independently of the byte
+totals: 21 both sides. Without control 1 in particular this entry would be an artifact wearing the
+shape of a finding.
+
+**Counterfactual — narrow, and no defect is claimed.** What changes is the *citability* of `57296`.
+Before the scout it was a number from a build nobody runs, and a reader applying this repo's own
+server-stack warning would have been right to distrust it; `F-11` quotes it as the post-collapse
+surface, which is a claim about the served binary. Cost: two probe runs and three controls. The
+scout also caught an omission `F-11` could not have disclosed on its own — it stated no build
+provenance at all, and a reader had no way to supply it.
+
+**What this does NOT establish.** Only the **advertised** surface — `tools/list` over stdio. Nothing
+about runtime behaviour under `server-stack`, where `VectorBackend::resolve()` defaults to Qdrant
+and the hybrid sparse+reranker path is live; that lane is CI's `test-server-stack` and this probe
+cannot see it. Build-invariance of a wire payload is not feature-parity. It is also one observation
+at one commit, not a standing guarantee — a tool registered behind `#[cfg(feature = "server-stack")]`
+would break it silently and nothing here would notice.
+
+**Valid:** dated 2026-09-10
+
+**Rests on:** `.cargo/config.toml`'s `rb` alias; `scripts/probe_tool_surface.py`:165 for the default
+binary; `CLAUDE.md` § *Development Commands* for the server-stack vacuity warning;
+`prompt-surface-compaction-session-log:F-11`, whose figure this qualifies.
 
 ## Template for new entries
 
