@@ -185,7 +185,7 @@ entry_high_water_W: 122
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-122 | 2026-09-10 | high | **The eight-hour standoff cleared in one turn — and all five authors independently named a state the guard does not have.** 29 commits, 6 sessions, 7 mine, no push-only-mine option. Put the whole picture to the operator as one priced question, then pushed BY SHA with the five foreign sids acked individually. All five replied, none had withheld — but the banner's three states did not describe any of them. The sharp one: an operator ack does not RESOLVE the uncleared state, it OVERTAKES it, and that fourth outcome is the one the ack route always produces and the text never names. |
+| W-122 | 2026-09-10 | high | **Second datapoint for `W-116` at 6 sessions / 29 commits — cite that entry, not this one, for the ordering finding.** What is new: all five authors replied and none of the banner's three states described any of them. They enumerate what an AUTHOR can hold, and an operator ack is not an author state — it routes around the question rather than answering it. The remedy is not a fourth line (read too late) but the guard naming the operator route AT REFUSAL, which `:378`'s "THEN" and `:387`'s "IF EVERY" both sequence behind a determination that cannot terminate. Also records where this went further than `W-116` and why that was luck. |
 | W-121 | 2026-09-10 | high | **Resolving a peer's claim at the bytes before relaying it — and the day it REFUTED one, which is the case a run of confirmations cannot demonstrate.** Three applications changed an outgoing message; a fourth rejected a peer's premise that `doc(move)` leaves a stale frontmatter id, killing a design change built on it. Their diagnosis is the transferable half: their file carried no `id:` to rewrite, so their "direct observation" was **monotone under the claim being false**. Mine discriminated by luck of fixture, not method. Within the hour we each read an OUTCOME as evidence of the MECHANISM that would have produced it, in opposite directions. |
 | W-120 | 2026-09-09 | med | **Two pre-commit guards converted shared-tree defects into refusals I could ACT on.** The cluster growth gate refused until `IC-3`'s `**Members:**` named the new member, and its text names the **path** holding the field plus why a roster grep returning 0 means *wrong file*. The shared-index guard then refused a **bare** commit carrying peer `c86ebb51`'s staged archive move, printed `theirs:`/`yours:` and the pathspec form — and named an action **not** to take: *"`git reset` here would take their work out of the index seconds before they commit it"* | Without the first I ship a tagged class member its own ledger never names, so `IC-3`'s query and its written derivations disagree silently. Without the second, `git commit` with no pathspec commits the whole **shared index**, filing a peer's archive move under my message where it is durable and no longer theirs to attribute — and my cleanup reflex would have been the `git reset` the guard names as worse. **Measured ceiling, so this is not an endorsement of the guard set:** the same hook ACCEPTED the commit that red `issue_clusters` for every session, implementing the count and member-naming rules but not one-tag-per-open-bug (filed `ee19d4fb`). Refusal-then-acceptance on one input is what makes "the rule set is a subset" a measurement rather than a guess — a single silence cannot separate a narrow rule set from an inert hook | validated |
 | W-119 | 2026-09-09 | med | **Scout the fixture, then PROBE the primitive — the second half is what found it.** Writing two tests for `doc(move)`'s new citation scan against `mk_ctx`, a fixture I had not read. `mk_ctx` matched every assumption inferred from sibling tests' arguments, which by the skill's rule is a silent resume. The finding came from probing `git grep --untracked -l -F -e foo` in a commitless repo — run only because I could not CITE the behaviour — which confirmed the design and revealed that `mk_ctx` seeds the body as `# Foo`, capital. The scan is case-sensitive, so the artifact never matched its own stem, so my assertion *"the artifact's own new path is not a citation of itself"* **could not fail** | Without it I ship a test that reads as covering the self-exclusion and covers nothing — in the same hour I filed `04aa6207d31a861f` about assertions that cannot fail and appended it to `IC-16`. **Knowing the class prevented nothing; running the probe did.** Fixed by writing a self-citation into the artifact body before the move, annotated on the fixture line because a tidy-up that removes it restores the vacuity in silence. Second finding from the mutation run the scout forced: `files_mentioning` returns `None` from **two** sites, my first mutation hit the uncovered one (`.ok()?`, git unspawnable) and **survived all 18 tests** — one green run read as coverage for both. The uncovered `?` now carries the measurement inline rather than looking guarded | validated |
@@ -13420,9 +13420,17 @@ confirms is not observably a check.
 
 **Valid:** invariant
 
-**Rests on:** `observer-blindness:OB-20`; `CLAUDE.md` § *Testing Discipline* — the guard's remedy
-paragraph and its measured ceiling; `scripts/pre-push-foreign-session-guard.sh`'s *THEN ASK YOUR
-OPERATOR* block.
+**Rests on:** `W-116`, which is the primary entry for this and which I should have cited before
+writing a line of the below — it already holds the ordering finding (*the guard's own "ASK THE
+AUTHOR … THEN ASK YOUR OPERATOR" sequences a parallelisable pair, and the authors' answers are
+context rather than a gate*), the eight-hour measurement, and *an ack is spent when it is used*.
+**This entry is its second datapoint at larger n, plus one thing it does not contain.** Also
+`observer-blindness:OB-20`; `scripts/pre-push-foreign-session-guard.sh:378,387`.
+
+**Not a rediscovery, and the near-miss is worth recording given F-132 sits two entries above.** I
+had the ordering finding in hand from today's push and was about to write it up as new; a peer's
+reply sent me to the Wins Index, where `W-116` had held it since 2026-09-09. Caught by looking,
+which is the unconditional check F-132 says has to happen at writing time.
 
 **Observed 2026-09-10.** A push of 29 commits from 6 sessions, of which 7 were mine. The recorded
 precedent for this state is bad: four sessions held for eight hours while the pile grew 2 → 14,
@@ -13454,17 +13462,40 @@ happened to them, and each author reached independently for a distinction the te
 - sessionId `59112612-…`: *"my two commits were published while uncleared, and that state was
   **never resolved, only overtaken**."*
 
-The third is the sharp one. **The banner presents three states as though the push waits for one to
-be reached; the operator ack does not resolve the state, it overtakes it.** That is a fourth
-outcome, it is the one that actually occurs whenever the ack route is used, and nothing in the text
-names it — so a reader following the guard correctly ends in a state its own vocabulary cannot
-describe. `OB-20`'s recorded ceiling was that the question asked of the author is one their state
-may not occupy; this is the twin, one step later: the *answer* may never be reached at all, and the
-push happens anyway on a different authority.
+The third is the sharp one, **and a peer sharpened it further after this entry was published**
+(sessionId `26cb9b5b-…`): the three states are not *incomplete*, they are the **wrong shape**. They
+enumerate what an **author can hold**, and an operator authorisation is not an author state at all.
+So the ack route does not answer the guard's question — it **routes around it on a different
+authority**, which is why no author's reply was ever on the critical path (`W-116`'s finding,
+reached here from the opposite direction).
 
-**Counterfactual:** the alternative on the table was asking five sessions serially, which is what
-produced the eight-hour standoff, and two of the five held nothing to give — so the round trips
-could not have terminated. Sideways routing cannot close a question no peer has standing to answer.
+**And their correction to my proposed remedy is right, which is why it is recorded instead of
+mine.** I wrote that the banner needs a fourth line. A fourth line would make the text honest and
+change nobody's behaviour, because by the time it is read the push has already happened. **The
+leverage is at refusal time**, and the guard's two mentions of the ack route are both sequenced
+behind the author question — `:378` opens with *"**THEN** ask your operator"*, and `:387` gates it
+on *"**IF EVERY** author below you is uncleared"*, a determination that requires every round trip to
+terminate. When authors hold nothing to give, it cannot. **So the eight-hour standoff is what
+following the documented order produces** — `OB-1` position 3 failing in the guard's own text: the
+correct path does not end in a safe state, it ends in a wait. The edit that would help is the
+guard saying *at refusal* that operator authorisation is available and requires no author to reach
+any state. Not written here: it is a mechanism change affecting every session, and `26cb9b5b-…`
+is surfacing it to their operator rather than writing it. Recorded as theirs, unclaimed.
+
+**Counterfactual:** the alternative on the table was asking five sessions serially — `W-116`'s
+measured trap — and two of the five held nothing to give, so the round trips could not have
+terminated. Sideways routing cannot close a question no peer has standing to answer.
+
+**Where this went FURTHER than `W-116`, stated precisely because it is the part that could be read
+as a shortcut:** `W-116` asked the authors and the operator in parallel. I asked **only** the
+operator, and notified the authors after the push. What made that defensible rather than a
+corner-cut is `W-116`'s own condition — the operator must be asked with the authors' state named as
+unknown-or-uncleared, never with silence read as assent — and two of the five were already on
+record with me as UNCLEARED from earlier exchanges, which is what I put to my operator. **For the
+other three I had no statement and said so rather than inferring one.** All three later confirmed
+they had withheld nothing, but that is luck, not method: had any of them been holding work, the
+notice would have arrived after the fact. `W-116`'s parallel form has no such gap and remains the
+form to follow. This one traded a real risk for latency and got away with it.
 
 **Disclosure is the part that made it legible rather than a discovery**, and that is a peer's
 assessment, not mine (`59112612-…`): the notice went to all five affected authors within two
