@@ -3657,28 +3657,37 @@ mod tests {
     /// neighbouring action's coverage to fund this one is the thing this log exists to
     /// forbid. docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
     ///
-    /// **56_492 → 56_548 (2026-09-10, +56): `reseat_worktree` named as the `fix` clause's
-    /// one exception to "DRY RUN until confirm=true".** The `fix` param's schema description
-    /// said every fix "is a DRY RUN until confirm=true" without qualification, but
-    /// `reseat_worktree` never reads `confirm` and applies immediately — so a caller reading
-    /// only the schema had no signal that this one fix is unconditionally live (2026-09-09
-    /// whole-branch review round 2, I1). Gross addition was 56 (`" (reseat_worktree: applies
-    /// immediately, ignores confirm)"` inserted mid-clause); nothing was paid on the spot —
-    /// the surrounding clause was already at its operative-facts minimum, and trimming a
-    /// neighbouring fix's coverage to fund this one is the thing this log exists to forbid.
+    /// **56_492 → 56_548 → 56_492 (2026-09-10, +56 then −56): a documented exception,
+    /// then the fix that removed the thing it documented.** The `fix` param's schema said
+    /// every fix "is a DRY RUN until confirm=true" without qualification while
+    /// `reseat_worktree` never read `confirm` at all, so 56 chars bought
+    /// `" (reseat_worktree: applies immediately, ignores confirm)"` mid-clause
+    /// (2026-09-09 whole-branch review round 2, I1). Later the same day
+    /// `reseat_worktree` was given a real dry-run branch, which made the warning FALSE,
+    /// and it came out again.
+    ///
+    /// **The 56 came back by fixing the mechanism, not by trimming the warning — and the
+    /// difference is the whole reason this entry survives its own round trip.** A reader
+    /// scanning for reclaimed bytes must not read this as a precedent for shortening an
+    /// operative fact to fund something else, which is what the rule above forbids; the
+    /// warning was not shortened, it was made untrue. The general form is worth having on
+    /// this surface: **documenting a defect costs schema budget every session pays for on
+    /// every request, so a doc-only fix for a code defect is a rental, not a settlement.**
     /// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
     ///
-    /// **The two entries above were authored against the 57_296 baseline** on
+    /// **The `+7` entry above was authored against the 57_296 baseline** on
     /// `doctor-per-project-isolation` and re-based onto the −811 ratchet when that branch
-    /// merged on 2026-09-10. Their GROSS costs (+7, +56) are what the additions actually
-    /// bought and are unchanged by the rebasing; only the endpoints moved, and they are
-    /// restated from the ratcheted base so the log reads as one sequence rather than two
-    /// that disagree about where they start. Both figures were re-measured after the merge
-    /// rather than carried across it — the two changes touch disjoint clauses of
-    /// `librarian`'s schema, so their costs compose, but that is a claim the report run
-    /// settles and not one arithmetic may assume.
+    /// merged on 2026-09-10. Its GROSS cost (+7) is what the addition actually bought and
+    /// is unchanged by the rebasing; only the endpoints moved, and they are restated from
+    /// the ratcheted base so the log reads as one sequence rather than two that disagree
+    /// about where they start. Every figure here was re-measured by a report run rather
+    /// than carried across the merge or derived by arithmetic — including the return to
+    /// 56_492, which the run confirms rather than the subtraction implying.
+    ///
+    /// Report run 2026-09-10 after the `confirm` fix: TOTAL (21 tools) = 56_492,
+    /// headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_548;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_492;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

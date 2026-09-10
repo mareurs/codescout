@@ -1762,7 +1762,7 @@ async fn run_fix(
             let cat = ctx.catalog.lock();
             let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx, &cat.conn)?;
             drop(cat);
-            reseat_worktree(ctx, &mut doctor_scope, scope_fallback)
+            reseat_worktree(ctx, &mut doctor_scope, scope_fallback, confirm)
         }
         // Sweep-all WITHIN ONE ROOT, dry-run by default. Reuses `mv`'s repair so the
         // invariant has exactly one implementation: a move writes the new id going
@@ -2003,28 +2003,42 @@ async fn run_fix(
 /// so an operator can tell which root it applied to and what it excluded
 /// after the fact.
 ///
-/// **`confirm` is NOT read here — this fix is NOT dry-run gated, unlike
-/// `prune_missing` and `repair_frontmatter_id`.** `run_fix`'s `"reseat_worktree"`
-/// match arm calls straight into this function without inspecting `confirm` at
-/// all; every no-collision row this scope admits is reseated on the SAME call
-/// that reported it. This is a separate, pre-existing bug (2026-09-09
-/// whole-branch review round 2, Critical 1) — tracked independently, not fixed
-/// by this comment. This comment previously claimed the opposite ("an operator
-/// authorising `confirm=true`"), which was false: there was never a call to
-/// authorise.
-/// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
-/// is the open bug file — read it before assuming a `confirm=false` (or
-/// omitted) call here is safe to run.
+/// **`confirm=false` (or omitted) is a DRY RUN, the same contract every other
+/// `fix=` mode honours.** Candidate rows are reported under `would_reseat` and
+/// nothing is written; `confirm=true` applies them and reports them under
+/// `reseated`. Both arrays are ALWAYS present, one of them empty, so a caller
+/// keying on `reseated` reads zero from a preview rather than `null` — an absent
+/// key is a silence, and this response is read by an operator deciding whether a
+/// destructive re-key already happened.
+///
+/// **The preview and the apply walk one loop and share every gate**, which is
+/// what makes them unable to disagree: the same `admit()` scope gate, the same
+/// `registered` skip, the same `no_collision` classification, and the same
+/// `artifact::get` race check (a row that vanished since the scan is dropped from
+/// the preview exactly as it is from the apply, so the preview never promises a
+/// row `confirm=true` would not find). This mirrors `prune_missing`'s dry run,
+/// whose own comment records the same obligation — *"the dry-run preview's totals
+/// never promise more than `confirm=true` would actually delete"*.
+///
+/// This closes `docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
+/// (`IC-15`, a parameter accepted then silently dropped). Before it, this function
+/// took no `confirm` parameter at all and `run_fix`'s `"reseat_worktree"` arm called
+/// straight into it, so there was no dry-run branch to take and no call to
+/// authorise — every no-collision row the scope admitted was re-keyed on the same
+/// call that reported it. Three doc surfaces documented that exception while it
+/// stood; all three are back to the unqualified rule.
 fn reseat_worktree(
     ctx: &ToolContext,
     scope: &mut scope::DoctorScope,
     scope_fallback: bool,
+    confirm: bool,
 ) -> Result<Value> {
     let mut cat = ctx.catalog.lock();
     // Owned Vec: the immutable borrow of `cat.conn` ends here, before the
     // mutable `graft_rows` calls below.
     let violations = scan_worktree_scoped(scope, &cat.conn)?;
     let mut reseated = Vec::new();
+    let mut would_reseat = Vec::new();
     let mut collisions = Vec::new();
     let mut skipped = Vec::new();
     for v in &violations {
@@ -2047,6 +2061,21 @@ fn reseat_worktree(
                     continue; // race: row vanished since the scan; nothing to reseat
                 };
                 let id_m = ids::artifact_id_from_abs(Path::new(main_path));
+                if !confirm {
+                    // Dry run. Reached only AFTER every gate the apply path passes
+                    // through — scope admission, the `registered` skip, the
+                    // `no_collision` match and the `artifact::get` race check above —
+                    // so this row is one `confirm=true` would genuinely have written.
+                    // Placing the branch here rather than at the top of the function
+                    // is the whole point: an early return would preview a population
+                    // derived by different code from the one that applies.
+                    would_reseat.push(json!({
+                        "old_id": id_w,
+                        "new_id": id_m,
+                        "new_path": main_path,
+                    }));
+                    continue;
+                }
                 let row_m = ArtifactRow {
                     id: id_m.clone(),
                     abs_path: PathBuf::from(main_path),
@@ -2086,9 +2115,11 @@ fn reseat_worktree(
         .get("worktree_scoped_row")
         .cloned()
         .unwrap_or_default();
-    Ok(json!({
+    let mut out = json!({
         "fix": "reseat_worktree",
+        "mode": if confirm { "applied" } else { "dry_run" },
         "reseated": reseated,
+        "would_reseat": would_reseat,
         "collisions": collisions,
         "skipped": skipped,
         "scoped_out": scoped_out,
@@ -2100,7 +2131,16 @@ fn reseat_worktree(
         }
         .to_json(),
         "scope_fallback": scope_fallback,
-    }))
+    });
+    if !confirm {
+        // Emitted on every dry run, including one with nothing to apply — the
+        // shape `prune_missing`'s dry-run branch already uses. A reader comparing
+        // the two repairs should not have to work out why they differ, and
+        // `mode` plus an empty `would_reseat` already says "nothing to do"
+        // unambiguously without the hint having to hedge.
+        out["hint"] = json!("re-run with confirm=true to apply these reseats");
+    }
+    Ok(out)
 }
 
 /// Delete every catalog row anchored under a dead repo `root`: `artifact` rows
@@ -14467,10 +14507,11 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, true, None)
             .await
             .unwrap();
         assert_eq!(out["fix"], "reseat_worktree");
+        assert_eq!(out["mode"], "applied");
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
         assert_eq!(out["reseated"][0]["old_id"], "wt-row");
@@ -14494,6 +14535,122 @@ mod tests {
         assert_eq!(abs_path, expected_main);
         assert!(artifact::get(&cat, "wt-row").unwrap().is_none());
     }
+    /// `confirm=false` previews and writes nothing; `confirm=true` on the SAME fixture
+    /// writes. Closes
+    /// `docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
+    /// (`IC-15`): before the fix this function took no `confirm` parameter at all, so
+    /// every no-collision row the scope admitted was re-keyed on the call that reported
+    /// it and there was no second call to authorise.
+    ///
+    /// **Both halves are in one test on purpose, and it is not for brevity.** A test
+    /// asserting only that the dry run left the catalog alone is MONOTONE under "the
+    /// repair is broken and never writes anything" — it passes just as well against a
+    /// `reseat_worktree` gutted to a no-op, which is the mutation most likely to be
+    /// introduced by someone tidying this branch. Driving the apply afterwards, from the
+    /// same seeded state, is what makes the first half discriminating: the only
+    /// difference between the two calls is `confirm`, so the two outcomes cannot both be
+    /// produced by a function that ignores it — in either direction. The pre-fix code
+    /// fails the first half; a no-op fails the second.
+    #[tokio::test]
+    async fn reseat_worktree_dry_runs_unless_confirm_is_true() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+        let main_doc = main_root.join("docs/x.md");
+        let id_m = crate::librarian::ids::artifact_id_from_abs(&main_doc);
+        let expected_wt = crate::util::fs::RepoPath::from_path(&wt_doc).to_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        // --- confirm omitted (false): report, write nothing ---
+        let preview = run_fix(&ctx, "reseat_worktree", None, None, false, None)
+            .await
+            .unwrap();
+        assert_eq!(preview["mode"], "dry_run");
+        assert!(
+            preview["reseated"].as_array().unwrap().is_empty(),
+            "a dry run reseats nothing, and `reseated` must read as zero rather than \
+             be absent — a caller keying on it gets null from a missing key: {preview}"
+        );
+        assert_eq!(
+            preview["would_reseat"].as_array().unwrap().len(),
+            1,
+            "the candidate is REPORTED, not silently withheld: {preview}"
+        );
+        assert_eq!(preview["would_reseat"][0]["old_id"], "wt-row");
+        assert_eq!(
+            preview["would_reseat"][0]["new_id"], id_m,
+            "the preview names the id the apply will mint, so the two can be compared"
+        );
+        assert!(
+            preview["hint"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("confirm=true"),
+            "the dry run names the call that applies it: {preview}"
+        );
+
+        // The catalog is untouched: the worktree row is still there, at the worktree
+        // path, and the main-path id has not been minted. Asserted against the DB
+        // rather than against the response, because the response is the thing under
+        // test and cannot be its own witness.
+        {
+            let cat = ctx.catalog.lock();
+            let abs_path: String = cat
+                .conn
+                .query_row(
+                    "SELECT abs_path FROM artifact WHERE id = ?1",
+                    params!["wt-row"],
+                    |r| r.get(0),
+                )
+                .expect("the dry run must leave the worktree row in place");
+            assert_eq!(abs_path, expected_wt);
+            assert!(
+                artifact::get(&cat, &id_m).unwrap().is_none(),
+                "the dry run must not mint the main-path row"
+            );
+        }
+
+        // --- confirm=true on the same state: apply ---
+        let applied = run_fix(&ctx, "reseat_worktree", None, None, true, None)
+            .await
+            .unwrap();
+        assert_eq!(applied["mode"], "applied");
+        assert_eq!(
+            applied["reseated"].as_array().unwrap().len(),
+            1,
+            "the same candidate the preview named is now applied: {applied}"
+        );
+        assert!(
+            applied["would_reseat"].as_array().unwrap().is_empty(),
+            "on an apply, `would_reseat` reads as zero rather than being absent"
+        );
+        assert_eq!(applied["reseated"][0]["new_id"], id_m);
+
+        let cat = ctx.catalog.lock();
+        assert!(
+            artifact::get(&cat, "wt-row").unwrap().is_none(),
+            "the worktree-keyed row is grafted away by the apply"
+        );
+        let abs_path: String = cat
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE id = ?1",
+                params![id_m],
+                |r| r.get(0),
+            )
+            .expect("the apply mints the main-path row");
+        assert_eq!(
+            abs_path,
+            crate::util::fs::RepoPath::from_path(&main_doc).to_string()
+        );
+    }
 
     #[tokio::test]
     async fn reseat_worktree_leaves_collisions_for_graft() {
@@ -14516,9 +14673,16 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
+        // `confirm=true`, and it is load-bearing rather than incidental. Both
+        // assertions below are ABSENCE assertions (`reseated` empty, abs_path
+        // unmoved) and are therefore monotone under "nothing is ever reseated" — so
+        // on a dry run they would both hold while testing nothing about collision
+        // handling. The claim is *collisions are skipped by a run that reseats*, which
+        // requires a run that reseats.
+        let out = run_fix(&ctx, "reseat_worktree", None, None, true, None)
             .await
             .unwrap();
+        assert_eq!(out["mode"], "applied");
         assert!(out["reseated"].as_array().unwrap().is_empty());
         assert_eq!(out["collisions"].as_array().unwrap().len(), 1);
 
@@ -14569,9 +14733,10 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
+        let out = run_fix(&ctx, "reseat_worktree", None, None, true, None)
             .await
             .unwrap();
+        assert_eq!(out["mode"], "applied");
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
         assert_eq!(out["reseated"][0]["old_id"], "wt-row");
@@ -14862,9 +15027,13 @@ mod tests {
         );
 
         let ctx = TestToolContextBuilder::new(cat).build();
-        let out = run_fix(&ctx, "reseat_worktree", None, None, false, None)
+        // `confirm=true` for the same reason as the collision test: "a registered row
+        // must not be reseated" is monotone under a dry run, which reseats nothing at
+        // all, so a preview would satisfy it without exercising the `registered` skip.
+        let out = run_fix(&ctx, "reseat_worktree", None, None, true, None)
             .await
             .unwrap();
+        assert_eq!(out["mode"], "applied");
         assert!(
             out["reseated"].as_array().unwrap().is_empty(),
             "a registered row must not be reseated — it belongs to merge_worktree: {out}"

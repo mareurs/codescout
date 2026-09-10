@@ -304,22 +304,16 @@ librarian(action="context", anchor_id="<id>", max_tokens=N)  ← link-graph neig
 ### doctor repairs — what each `fix=` mode does
 <!-- serves: librarian.doctor -->
 
-Every mode WRITES and is scoped (`root=` or the active project). Most modes are
-a **dry run until `confirm=true`** — so reading this after your first call has
-cost you nothing on those, which is why it lives here rather than in the tool
-schema. **`reseat_worktree` is the one exception: it does NOT read `confirm` at
-all and applies on the same call that reports it** — a separate, pre-existing
-bug (2026-09-09 whole-branch review round 2, Critical 1),
-`docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`,
-tracked independently and not fixed by this correction. Treat any `reseat_worktree`
-call as live, not a preview, regardless of whether `confirm` was passed. The
-report these repair is project-scoped by default too; a foreign finding
+Every mode WRITES, is scoped (`root=` or the active project), and is a **dry run
+until `confirm=true`** — so reading this after your first call has cost you
+nothing, which is why it lives here rather than in the tool schema. The report
+these repair is project-scoped by default too; a foreign finding
 surfaces only when a local artifact cites it (umbrella siblings only).
 
 | `fix=` | what it does |
 |---|---|
 | `prune_missing` | Drops `artifact` + `commits` rows under a dead/renamed root. |
-| `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Takes the same `scope` as the report, via one shared `DoctorScope`. Collisions are **reported, not reseated** — resolve those with `doc(action="graft")`. **Applies immediately — `confirm` is not read; there is no dry-run preview for this mode.** |
+| `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Takes the same `scope` as the report, via one shared `DoctorScope`. Collisions are **reported, not reseated** — resolve those with `doc(action="graft")`. A dry run lists candidates under `would_reseat`; `confirm=true` applies them and lists them under `reseated`. |
 | `rehome` | Migrates a moved repo's rows from `old_root` to `new_root`, preserving ids and history. |
 | `repair_frontmatter_id` | Rewrites every `frontmatter_id_mismatch` file's `id:` to its catalog row's id, for every artifact under one root. A file with **no** frontmatter id is left alone rather than stamped — stamping one would newly subject it to the librarian guard. |
 | `mint_slugs` | Backfills `artifact.slug` where NULL. |
