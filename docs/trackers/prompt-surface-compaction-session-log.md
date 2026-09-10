@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 12
+entry_high_water_F: 13
 entry_high_water_W: 18
 entry_prefix:
 - F
@@ -85,6 +85,7 @@ entry_prefix:
 | F-10 | 2026-09-03 | med | self-friction | mitigated | I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed in 10 hours, found by a peer, on the gate carrying my own prediction that it would |
 | F-11 | 2026-09-09 | med | prompt-surface | open | The collapse's byte win is 2.7% — a merge moves parameters into the survivors rather than deleting them, so a tool COUNT is a bad proxy for surface cost; and `budget 57296, headroom 0` leaves no slack |
 | F-12 | 2026-09-10 | med | prompt-surface | open | `F-11`'s 57296 decayed to 56485 in under two hours with no alarm — two agreeing instruments protect a number synchronically and not against decay; and the budget is a RATCHET re-set to each new total, not the post-collapse ceiling `F-11` called it |
+| F-13 | 2026-09-10 | high | self-friction | open | I designed a cross-cutting input-repair mechanism an accepted ADR already specified, and picked a field name contradicting it — searched for the mechanism, never for the policy |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -2192,6 +2193,68 @@ its bug file and patch-id above (`b057cc6d` appears here only as the SHA this en
 wrongly named);
 `prompt-surface-compaction-session-log:F-11` for the superseded figure and the corrected gloss;
 `prompt-surface-compaction-session-log:W-18` for the build-invariance claim this re-confirms.
+
+## F-13 — I designed a cross-cutting input-repair mechanism an accepted ADR already specified, and picked a field name contradicting it — searched for the mechanism, never for the policy
+
+**Valid:** dated 2026-09-10
+
+**Severity:** high · **Category:** self-friction · **Status:** open
+
+**Observed:** 2026-09-10, after the top-level-`anyOf` fix (`2735df73`). The operator asked for
+a better shape than "the schema states nothing": advertise one param name, accept the others in
+code, and return a note that a wrong param was corrected. I ran the full brainstorming → spec →
+plan pipeline on it, wrote `docs/superpowers/specs/2026-09-10-parameter-alias-collapse-design.md`
+and `docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md` (nine tasks, 1137 lines,
+committed `782446d7` + `cb5afa36`), and chose `warning` as the advisory field — deriving it from
+`Guidance`'s doc comment in `src/tools/core/types.rs`.
+
+All of it was already decided. `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` is
+**accepted**, deciders "Marius (with the Architecture Snow Lion)", and its Decision is the
+operator's request verbatim: *repair the input, execute, return the result, attach an advisory
+correction note — never `RecoverableError`*. Its Context cites a 72-DB / ~152k-call `usage.db`
+sweep. Its named examples are `file_path` for `path` and buffer handles under `output_id` — my
+exact scope. The field is **`corrections`**, shaped `{keyed, hint}`
+(`src/librarian/tools/find.rs:1290`).
+
+**Why `warning` was wrong at the root, not merely different:** `Guidance` attaches to a
+`RecoverableError`. This is definitionally the path where no error is returned, so the enum I
+reasoned from does not govern it. Shipping it would have put a **third** vocabulary on one
+concept — `filter_warnings`, `corrections`, `warning` — across ~26 sites and nine tasks.
+
+**What the search missed, which is the reusable part.** I searched for the *mechanism* and never
+for the *policy*: `grep "warning"`, `grep "Alias for "`, `symbols(Guidance)`, `read_file` on
+`call_content`. Every one of those asks how the code behaves. None of them can surface a
+decision, because an ADR records a decision and names no implementation. `docs/adrs/` was never
+opened. **Before designing anything cross-cutting, list `docs/adrs/` — it is one `ls`.** A spec
+that contradicts an accepted ADR is not a design disagreement; it is a missed read.
+
+**The leak this exposed, which is real and separate.** The ADR's law is half-implemented, and
+nobody had recorded that. Cited on types and call sites, not on a grep's absence:
+`get_path_param` (`src/fs/mod.rs:233`), `require_path_param` (`:251`) and
+`require_str_param_or_hint` (`src/tools/core/params.rs:139`) all repair the alias and return
+`Option<&str>` / `Result<&str>` — **a function returning `&str` structurally cannot report a
+correction to its caller**, so the note was unreachable from the helper rather than merely
+absent. Two librarian handlers (`find.rs`, `update.rs`) do the whole law; the path family has
+repaired silently since `e92529e8`. The ADR's own Sites list calls those tools *"path aliases +
+teaching hints"* — and the hint rides the **error** path, which a successful repair means you
+never reach. Amendment landed `6b7427da`.
+
+**A confirming probe that does NOT discriminate, recorded because it reads as evidence.** I
+called `grep(pattern="^name =", file_path="Cargo.toml")` and got results with no advisory field.
+`grep` is `OutputForm::Text`, so its response is `format_compact` output — that result is equally
+consistent with "no note exists" and "a note exists and the compact renderer drops it", which is
+the exact bug class this same design pass was built around
+(`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`).
+The claim rests on the return types above, not on this call.
+
+**Filed late, and the delay is its own datapoint.** This entry was written in full at ~10:50 and
+could not be allocated: `append_entry` refuses while the ledger has unpushed commits, and the
+only remedy it names is a push, which no session may perform unasked. It sat parked in a
+gitignored file until a *different* session's operator authorised a 29-commit push at 08:11Z,
+which cleared the condition as a side effect. **Nothing about that resolution path was available
+to the party the guard refused.** Filed as
+`docs/issues/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`
+(high).
 
 ## Template for new entries
 
