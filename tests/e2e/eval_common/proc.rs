@@ -18,7 +18,7 @@ pub fn git_restore<P: AsRef<Path>>(fixture_src: P) -> std::io::Result<Output> {
 /// causing fixture mutations to persist across harness retries.
 ///
 /// This `git ls-files` call is NOT an instance of the index-stage defect that
-/// `docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md`
+/// `docs/issues/archive/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md`
 /// covers, and is annotated so nobody re-audits it: `--error-unmatch` makes this a PREDICATE on
 /// one path, and only `.status.success()` is read. A path listed at three index stages exits 0
 /// exactly as a cleanly-tracked one does. The defect needs a POPULATION that gets counted or

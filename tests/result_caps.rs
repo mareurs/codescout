@@ -598,7 +598,7 @@ fn tracked_rs_paths(stdout: &str) -> Vec<String> {
 /// `git ls-files src | grep -c doctor` returned 4 for two files mid-merge, and
 /// `git add` of the conflicted paths — changing no byte of any `.rs` file —
 /// took the lane from red to green.
-/// docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
+/// docs/issues/archive/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
 fn tracked_src_files() -> Vec<String> {
     let out = Command::new("git")
         .args(["ls-files", "src"])
@@ -2742,7 +2742,7 @@ enum CitedTestResolution {
 /// content change at all — makes evaporate. It fired on two rows on 2026-09-10, one of
 /// them `Probed`/`Killed` since 2026-09-03, which is why it read as "the merge broke an
 /// unrelated cap citation".
-/// docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
+/// docs/issues/archive/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md
 fn ambiguity_message(id: &str, cited_test: &str, declarers: &[String]) -> String {
     let distinct: std::collections::BTreeSet<&String> = declarers.iter().collect();
     if distinct.len() < declarers.len() {
@@ -3073,7 +3073,7 @@ fn probed_rows_cite_a_real_test() {
 /// `git ls-files` output with a path at three index stages yields that path ONCE.
 ///
 /// The regression guard for
-/// `docs/issues/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md`.
+/// `docs/issues/archive/2026-09-10-git-ls-files-counts-index-stages-so-a-merge-makes-cited-tests-ambiguous.md`.
 /// The fixture is real `git ls-files src` output captured mid-merge on 2026-09-10, with
 /// `doctor.rs` at stages 1/2/3 — the shape that made [`resolve_cited_test`] report every
 /// test in that file as declared three times.

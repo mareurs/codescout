@@ -1,5 +1,5 @@
 ---
-id: '987b146635cae607'
+id: f91c6e17cb0d16d5
 kind: bug
 status: fixed
 title: 'BUG: git ls-files counts index stages, so a merge conflict makes every cited test look declared-three-times'
@@ -148,6 +148,51 @@ audits — upward — and the census pages that consume it say only that they ar
 
 ## Fix
 
+**Fix commits, all on `experiments`:**
+
+| commit | patch-id | scope |
+|---|---|---|
+| `aeab4ee2` | `a383c873c73a6012482076d50ab381c68e39d23f` | `result_caps.rs` selector + remedy text |
+| `7d952e16` | `24f33ee16da61dc677a3470602e1ba9a53733448` | `issue_clusters.rs`, both sites |
+| `9fa6012a` | `f6b62ca24dd9f89995d6ddf2060cf96d577bbf92` | the pre-commit hook, one probe, one annotation |
+
+**The floor in § Evidence is now fully resolved — enumerated, not swept.** All six named
+sites were verified individually against this file's own discriminator, and the enumeration
+beat the sweep twice over:
+
+| site | consumer | verdict |
+|---|---|---|
+| `pre-commit-ledger-counts.py` `bug_files()` | `actual_counts` COUNTS per class | **fixed** `9fa6012a` |
+| `pre-commit-ledger-counts.py` `class_files()` | `full_ledger_text` CONCATENATES | **fixed** `9fa6012a` |
+| `probe-double-frontmatter.py` `scan()` | `len(hits)` printed; `--apply` WRITES | **fixed** `9fa6012a` |
+| `probe-cluster-census.py` | imports `bug_files` | covered by row 1 |
+| `probe-caveat-density.py` | imports `bug_files` | covered by row 1 |
+| `proc.rs` `assert_tracked` | `--error-unmatch`, exit status only | **no defect**, annotated as such |
+
+Two of the five were not sites at all — both probes declare *"IT RE-DERIVES NOTHING"* and
+import from the hook, so one fix covers three callers. A blanket "add a set everywhere"
+sweep would have added two redundant dedups and still missed that `bug_files` is the shared
+one. And one site had no defect, which a sweep would have "fixed" while teaching the next
+reader that a predicate on a single path is an instance of this class.
+
+**The hook outranks the Rust site this file was opened about.** `actual_counts` turns its
+population into a per-class tally, and that file is the pre-commit gate that REFUSES a
+commit when tallies disagree. A conflicted file under `docs/issues/` therefore blocks work
+rather than misreporting it, over a number that stops being reproducible the moment the
+merge resolves.
+
+**Neither pinning mechanism could have caught it, and one of them had already written down
+why.** `the_hook_script_agrees_with_this_gate` runs in a clean tree, where the two forms
+are byte-identical. And `probe-caveat-density.py`'s `_self_check` says of itself that it
+and the gate SHARE `bug_files`, so *"a defect inside a shared function is invisible here:
+both sides compute it wrong and agree, which at the point of use is indistinguishable from
+corroboration."* This defect is exactly that. The comment predicted its own blind spot and
+the blind spot held — which is why the sites were read rather than trusted to the gates.
+
+`bug_files_at("head")` and `class_files("head")` need no guard: they read `git ls-tree`, and
+a tree lists each path once, having no stages. Said at the call sites so the asymmetry does
+not read as an omission.
+
 **FIXED 2026-09-10.** Both halves, because fixing only the selector leaves the message
 ready to misdirect the next reader who reaches `Ambiguous` by some other route.
 
@@ -204,23 +249,18 @@ anyway. If `probed_rows_cite_a_real_test` names a row whose cited test you did n
 
 ## Resume
 
-**The `result_caps.rs` site is closed. One further site is now VERIFIED to share the
-defect — promoted from the unverified floor by reading it, not by assuming:**
+Nothing owed. Every site named in § Evidence's floor is resolved — four fixed, one covered
+transitively, one verified defect-free and annotated so the next audit does not re-derive
+it. The three cross-implementation pinning tests
+(`the_ledger_parsers_agree_on_a_fixture`, `the_hook_script_agrees_with_this_gate`,
+`the_hook_script_agrees_on_both_yaml_tag_styles`) are green across the change, and all
+three scripts run on all three sources.
 
-`tests/issue_clusters.rs:207` — `tracked_open_bug_files()` runs `git ls-files docs/issues`,
-filters, and `collect()`s into a `Vec` with no dedup. Its own doc comment says *"Tracked
-bug FILES"*, so a path appearing three times violates the function's own contract, and
-dedup is unambiguously correct there rather than a judgement call. Remedy is the same one
-line (`BTreeSet` in the collect). Left unfixed deliberately: this bug file scoped itself to
-`result_caps.rs`, and the Evidence section's instruction was to decide **per site**, which
-is now done for this one — the decision is "yes, fix it", the act is not taken here.
-
-**Still unverified, and not to be swept:** `scripts/pre-commit-ledger-counts.py:91`/`:205`,
-`scripts/probe-cluster-census.py`, `scripts/probe-caveat-density.py`,
-`scripts/probe-double-frontmatter.py:66`, `tests/e2e/eval_common/proc.rs:22`. What separates
-a hazard from a harmless site is whether the caller COUNTS or uniqueness-checks the
-population, or merely iterates it — an iterating reader processes a conflicted file three
-times and, being idempotent, does not care.
+One thing to carry forward rather than re-learn: **the discriminator that made this
+tractable was "does the caller COUNT or CONCATENATE, or merely iterate?"** — not "does this
+call dedup?". Iterating readers are idempotent and genuinely fine; counting and
+concatenating readers produce a wrong number or a tripled text. Applied to six sites it
+gave six different answers, three of them "no change needed".
 ## References
 - `tests/result_caps.rs:567-584` (`tracked_src_files`, the selector)
 - `tests/result_caps.rs:2688-2700` (`resolve_cited_test` and its first-match doc comment)
