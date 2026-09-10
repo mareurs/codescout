@@ -86,11 +86,19 @@ so the value is deserialized by nothing and discarded.
 
 It is *declared* for the whole tool: `src/librarian/tools/librarian.rs:64-68` defines one
 flat JSON schema shared by all 11 actions, with `scope` carrying
-`"default": "project"` and a **prose** enumeration of which actions honour it
-(`context/reindex/workspace_state_at/link_scan`, plus `audit_doc_refs` which rejects
-non-`project`). `doctor` is absent from that prose — correctly — but prose is not a
-constraint, so the schema still accepts the param for `doctor` and the handler still
-ignores it.
+`"default": "project"` and a **prose** enumeration of which actions honour it — AT THE
+TIME this bug was filed, that prose read `context/reindex/workspace_state_at/link_scan`,
+plus `audit_doc_refs` which rejects non-`project`. `doctor` was absent from that prose —
+correctly, for that snapshot — but prose was never a constraint, so the schema still
+accepted the param for `doctor` and the handler still ignored it.
+
+**Stale as of the fix (2026-09-09 whole-branch review round 2, Important 4): the prose
+now reads `context/reindex/workspace_state_at/link_scan/doctor` — `doctor` was added once
+the handler actually started reading the param (see the Fix section's cohort).** The
+paragraph above is left in its original, now-superseded form because it is the
+reproduction's own diagnosis of the bug as it stood, not a live claim about current
+schema text; read `src/librarian/tools/librarian.rs`'s own `scope` property for the
+current prose rather than this file.
 
 The tool's own param probe predicts this in writing. `librarian.rs:234-239`:
 
