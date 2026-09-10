@@ -413,7 +413,7 @@ Two consequences worth planning for:
 
 - **Re-point prose that cites the old id**, in the same commit as the move — the
   same discipline the guide already requires for citations of the old *path*.
-  `id_changed: true` is the signal.
+  `inbound_id_citations` names them.
 - **Do not cache an id across a move.** The old id stops resolving immediately;
   a later call with it returns `unknown id`.
 

@@ -1,7 +1,7 @@
 ---
-id: fbcd7b25cb5f45cf
+id: e23a819ab15aa2ee
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc(move) scans the repo for inbound PATH citations and not for the ID it just re-keyed, while instructing the caller to re-point both'
 owners:
 - marius
@@ -114,48 +114,71 @@ provisional slug `half-an-obligation-served-and-half-narrated`.
 
 ## Fix
 
-Not applied. Add `inbound_id_citations` + `inbound_id_citation_count` beside the path pair, from a
-second `files_mentioning(&root_path, &previous_id_hex, …)`, keeping the same
-`null`-means-scan-could-not-run convention the neighbouring fields already document.
+Applied. `citing_ids` is a second `files_mentioning(&root_path, &a.id, "")` beside the existing
+path scan in `src/librarian/tools/mv.rs`, surfaced as `inbound_id_citations` +
+`inbound_id_citation_count` next to their path twins, with the same
+`null`-means-the-scan-could-not-run convention and the same `CITATION_SAMPLE` cap.
 
-**Do not fold the two into one list.** They are re-pointed differently — a path citation becomes
-the new path, an id citation becomes the new id — and a caller sizing a commit needs them apart.
+**The three design constraints this file recorded before the fix existed, all held:**
 
-**Do not derive the id half from `cites` edges** for exactly the reason the path half does not: the
-catalog indexes markdown only, so an id quoted in a `.rs` comment or a shell script can never
-become an edge, and this repo's guard scripts do quote ids.
+- **The lists stay separate.** They are re-pointed differently — a path citation becomes the new
+  path, an id citation becomes the new `id` from the same response — and a caller sizing a commit
+  needs them apart.
+- **Not derived from `cites` edges.** The catalog indexes markdown only, so an id quoted in a
+  `.rs` comment or a shell script can never become an edge, and this repo's guard scripts quote
+  ids.
+- **The open question is answered, and the answer is NO.** The id scan does **not** inherit the
+  path scan's self-exclusion. The path scan excludes the new path because a file carrying its
+  former *slug* in a superseded note cites itself, which is not work. For the id the reverse
+  holds: this same call has already rewritten the moved file's frontmatter `id:`
+  (`repair_frontmatter_id`), so the only way the new path can still match `previous_id` is that
+  its **body** names it — a dead 16-hex token in prose, which is precisely the population nothing
+  else catches. Excluding it would hide the one hit that is always genuine.
 
-**Open question — whether the id scan should inherit the path scan's self-exclusion.**
-`mv.rs:262-265` excludes the artifact's own new path, on the stated grounds that *"a file carrying
-its former slug in a superseded note cites itself, which is not work"*. It was suggested that an
-id-keyed scan must NOT inherit it, because a moved file keeps the frontmatter id it was moved away
-from — **and that premise is false for `doc(move)`, verified 2026-09-10 two ways.** `mv.rs` rewrites
-the frontmatter id in the same call as the graft (test
-`move_rewrites_the_frontmatter_id_it_just_invalidated`, shipped `858f22ec` 2026-08-16), and this
-file's own sibling move that day landed `id: 84589e9e5a644ec7` in the archived file. Stale
-frontmatter ids therefore do not come from this tool. **What they DO come from is measured, and it
-is not what an earlier draft of this paragraph guessed** — it said *"a bare `git mv`, or a move
-predating that fix"*, which named a cause nobody had counted. The measured population is
-**worktree-minted ids**: `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
-(`e82deca98330f72c`) records 8 of 8 live instances minted in a worktree since removed, now 9 of 9
-with the row this file's review turned up — closed positively, by hashing the worktree path, rather
-than by elimination. Correcting my own sentence here because it was the identical shape I had just
-flagged in `doctor`'s message: a plausible cause stated where a measured one was available.
+**Three read surfaces changed in the same commit, because leaving them narrating the obligation
+would reproduce the defect one layer up.** `artifact.rs`'s `new_rel_path` schema text said *"re-point
+prose citing the old one"*; it now names both fields and their `null` convention.
+`src/prompts/guides/librarian.md` § *Archiving / Moving Trackers* and
+`src/prompts/guides/tracker-conventions.md` both said `id_changed: true` **is the signal** — true
+before, and now the weaker of two available statements. Both name the list instead.
 
-So the suggestion does not follow from its premise. **A weaker independent case survives and is
-left open rather than adopted:** a moved file's *body* may cite its own former id in a superseded
-note, which the frontmatter rewrite does not touch and the exclusion would hide. Whether that is
-"work" is the same judgement the path scan already made in the other direction, and it should be
-made deliberately rather than inherited.
+Fix SHA: *(recorded below at archive time)*
 ## Tests added
 
-None — nothing is fixed. `mv.rs` already carries
-`a_citation_scan_that_cannot_run_reports_null_not_an_empty_list` (`:627`) and
-`the_citation_scan_sees_an_untracked_citing_file` (`:693`); the id half wants both shapes again,
-plus one asserting the two lists stay **separate** on an artifact cited by path in one file and by
-id in another. Note that a test asserting only *"the id list is non-empty"* would be monotone under
-the two scans being merged, which is the fix this file rejects.
+Three, in `src/librarian/tools/mv.rs`, each with an observed RED against the **production** path.
 
+- `the_id_scan_reports_null_when_it_cannot_run` — mirrors the path twin deliberately: the two
+  fields are read as a pair, so a caller told `null` means *unasked* for one and handed `[]` for
+  the other has been given two different contracts by one response.
+- `the_two_citation_lists_stay_separate` — the fixture is built so **neither citer can satisfy the
+  other's assertion**: one file mentions only the stem, the other only the 16-hex id, and neither
+  string occurs in the other file. `git grep -F` is a plain substring match, so the id-citer says
+  *"the tracker"* rather than naming the file — any mention of the stem there would put it in both
+  lists for an honest reason and destroy the discrimination. Annotated on the line.
+- `the_id_scan_reports_the_moved_files_own_body_citing_its_old_id` — pins the exclusion decision,
+  and carries **a control**: it also asserts the moved file's frontmatter no longer contains the
+  old id. Without that, a regressed `repair_frontmatter_id` would make the test pass for the wrong
+  reason and read as coverage of a decision it was no longer testing.
+
+**Observed RED, 2026-09-10, one mutation per claim, restored in the same command so no window
+stayed open:**
+
+| mutation of the production line | red |
+|---|---|
+| `.or(Some(Vec::new()))` — collapse `null` to an empty list | `the_id_scan_reports_null_when_it_cannot_run` |
+| `let citing_ids = citing_files.clone()` — merge the two lists | `the_two_citation_lists_stay_separate` **and** the self-body test |
+| `files_mentioning(…, &a.id, &a.new_rel_path)` — inherit the exclusion | the self-body test |
+
+Control re-run after restore: 21 passed, 0 failed, file byte-identical to the original. The merge
+mutation killing **two** tests is honest rather than redundant — merging both mixes the lists and
+re-imports the path scan's exclusion, so each test names a different thing that broke.
+
+**Mutated in place rather than on a relocated copy, and the trade is stated because the opposite
+call was made earlier the same day.** A shell guard can be *live wrong* for the seconds it is
+patched; a `cargo test --lib` mutation changes no committed bytes, does not rebuild
+`target/debug/codescout` (which `tests/cli_doc.rs` resolves at run time), and each window was one
+second of test runtime. A separate worktree would have cost a full cold build to remove a hazard
+that is not the same hazard.
 ## Workarounds
 
 After any `doc(action="move")` reporting `id_changed: true`, grep the repo for `previous_id` by
@@ -163,8 +186,8 @@ hand. It is one command and it is not optional; the response will not remind you
 
 ## Resume
 
-Implement the second scan in `mv.rs:262-265` and thread two fields into the `json!` at `:324`.
-
+Nothing owed. The open question in `## Fix` is answered and its answer is pinned by a test with a
+control.
 ## References
 
 - `src/librarian/tools/mv.rs` — the scan and the response object

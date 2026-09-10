@@ -827,8 +827,9 @@ How artifacts reference each other, and who maintains the link graph:
   **Entry IDs are stable; artifact ids are not.** A 16-hex artifact id is
   `sha256(abs_path)`, so it changes whenever the file moves — archiving one is
   the common case. Prefer an entry ID or a rel_path when the target is likely to
-  be archived, and re-point 16-hex citations in the same commit as the move
-  (`id_changed: true` in the move response is the signal).
+  be archived, and re-point 16-hex citations in the same commit as the move —
+  `inbound_id_citations` in the move response names the files to fix, so this is
+  a list to work through rather than a sweep to remember.
 - **`link_scan` derives the edges.** `librarian(action="link_scan")` parses
   artifact bodies, resolves citations (entry tokens by their defining
   heading; archived definers lose ties to active ones; ambiguous tokens are

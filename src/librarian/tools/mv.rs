@@ -264,6 +264,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .and_then(|s| s.to_str())
         .and_then(|stem| files_mentioning(&root_path, stem, &a.new_rel_path));
 
+    // THE ID HALF OF THE SAME OBLIGATION, and it was missing for as long as the path half
+    // existed. `previous_id` and `id_changed` are reported three fields down and the tool
+    // schema tells the caller to "re-point prose citing the old one" — with no scan behind
+    // it, so one half was served and the other narrated. Both are the same call with a
+    // different needle. Measured 2026-09-10: two sessions hand-repointed a stale id forty
+    // minutes apart, the second having read this response and acted on the field that
+    // existed.
+    // docs/issues/archive/2026-09-10-doc-move-scans-for-inbound-path-citations-and-not-for-the-id-it-just-re-keyed.md
+    //
+    // KEPT SEPARATE FROM `citing_files` ON PURPOSE: the two are re-pointed differently — a
+    // path citation becomes the new path, an id citation becomes the new id — and a caller
+    // sizing a commit needs them apart. Merging them would also make any "the id list is
+    // non-empty" assertion vacuous.
+    //
+    // AND IT DOES NOT INHERIT THE SELF-EXCLUSION ABOVE — the empty `exclude` is deliberate,
+    // not an oversight. That exclusion exists because a file carrying its former SLUG in a
+    // superseded note cites itself, which is not work. The id case is the opposite: this
+    // call has already rewritten the moved file's frontmatter `id:` to the new value
+    // (`repair_frontmatter_id`, above), so the only way the new path can still match
+    // `previous_id` is that its BODY cites it — a dead 16-hex token in prose, which is
+    // precisely the population nothing else catches. `audit_doc_refs` scores a stale
+    // path-shaped token at `high`; there is no id-shaped equivalent, and `doctor`'s
+    // `frontmatter_id_mismatch` only reaches the frontmatter this call just fixed. Excluding
+    // the new path here would hide the one hit that is always genuine.
+    let citing_ids = files_mentioning(&root_path, &a.id, "");
+
     Ok(json!({
         "id": new_id,
         // The id is derived from the path, so a move mints a new one. Reported
@@ -328,6 +354,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // complete population is its own defect class. The count is what a caller sizes the
         // commit from; the sample is only what they start with.
         "inbound_path_citation_count": citing_files.as_ref().map(|f| f.len()),
+        // Same `null`-means-the-scan-could-not-run convention as its path twin above, and
+        // the same cap. A caller reads these as a pair: paths become the new path, ids
+        // become `id` from this very response.
+        "inbound_id_citations": citing_ids
+            .as_ref()
+            .map(|f| f.iter().take(CITATION_SAMPLE).cloned().collect::<Vec<_>>()),
+        "inbound_id_citation_count": citing_ids.as_ref().map(|f| f.len()),
         "stage_together": [to_forward_slash(&old_full), to_forward_slash(&new_full)],
         // Deliberately path-free. `stage_together` is relativized by
         // `path_strip::PATH_KEYS` and a prose string is not, so a path embedded here
@@ -711,6 +744,211 @@ mod tests {
             "with a list this short the count and the sample must agree; they diverge only \
          above the cap, and a count that disagrees below it means one of them is derived \
          from the wrong set"
+        );
+    }
+
+    /// The id scan reports `null` when it could not run, exactly as its path twin does.
+    ///
+    /// Mirrors `a_citation_scan_that_cannot_run_reports_null_not_an_empty_list` on purpose:
+    /// the two fields are read as a pair, so a caller who learns that `null` means "unasked"
+    /// for one and gets `[]` for the other has been told two different things by one
+    /// response. The tmp fixture is not a git repo, so the scan fails outright.
+    ///
+    /// Mutation this kills: `.unwrap_or_default()` on `citing_ids`, or seeding it with
+    /// `Some(vec![])` when git is unavailable.
+    #[tokio::test]
+    async fn the_id_scan_reports_null_when_it_cannot_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result["inbound_id_citations"].is_null(),
+            "no git repo means the id scan never ran; an empty array would claim it found \
+             nothing: {}",
+            result["inbound_id_citations"]
+        );
+        assert!(
+            result["inbound_id_citation_count"].is_null(),
+            "the count must be null for the same reason the list is: {}",
+            result["inbound_id_citation_count"]
+        );
+    }
+
+    /// The two citation lists must stay SEPARATE, and this is the assertion that pins it.
+    ///
+    /// **Why separate rather than one list:** they are re-pointed differently — a path
+    /// citation becomes the new path, an id citation becomes the new `id` from this same
+    /// response — and a caller sizing a commit needs to know how many of each. Merging them
+    /// would also make any "the id list is non-empty" assertion vacuous, because the path
+    /// citer would satisfy it.
+    ///
+    /// The fixture is built so **neither citer can satisfy the other's assertion**: one file
+    /// mentions only the stem `foo`, the other only the 16-hex id, and neither string occurs
+    /// in the other file. That is what makes a merge detectable — under a merged list both
+    /// citers appear in both fields and all four assertions below flip together.
+    ///
+    /// Mutations this kills: returning `citing_files` for `inbound_id_citations`; passing the
+    /// stem rather than `a.id` as the id scan's needle; concatenating the two.
+    #[tokio::test]
+    async fn the_two_citation_lists_stay_separate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for either scan to run at all"
+        );
+
+        // Cites the PATH only. The word `foo` must not appear in the id-citer below, or this
+        // file stops discriminating a merge.
+        let path_citer = tmp.path().join("docs/cites-the-path.md");
+        std::fs::create_dir_all(path_citer.parent().unwrap()).unwrap();
+        std::fs::write(&path_citer, "see `docs/trackers/foo.md`\n").unwrap();
+
+        // Cites the ID only. Deliberately says "the tracker" rather than naming the file: the
+        // stem is a substring of the path citer's text and `git grep -F` is a plain substring
+        // match, so any mention of `foo` here would put this file in BOTH lists for an honest
+        // reason and destroy the discrimination.
+        let id_citer = tmp.path().join("docs/cites-the-id.md");
+        std::fs::write(&id_citer, "the tracker `aabbccdd11223344` explains why\n").unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let names = |v: &serde_json::Value| -> Vec<String> {
+            v.as_array()
+                .expect("the scan ran, so the list must be present rather than null")
+                .iter()
+                .map(|x| x.as_str().unwrap_or_default().to_string())
+                .collect()
+        };
+        let paths = names(&result["inbound_path_citations"]);
+        let ids = names(&result["inbound_id_citations"]);
+
+        assert!(
+            paths.iter().any(|p| p.ends_with("cites-the-path.md")),
+            "the path citer belongs to the path list: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.ends_with("cites-the-id.md")),
+            "an id citation is not a path citation; a merged list would put it here: {paths:?}"
+        );
+        assert!(
+            ids.iter().any(|p| p.ends_with("cites-the-id.md")),
+            "the id citer must be named so the caller can re-point it to the new id: {ids:?}"
+        );
+        assert!(
+            !ids.iter().any(|p| p.ends_with("cites-the-path.md")),
+            "a path citation is not an id citation; a merged list would put it here: {ids:?}"
+        );
+        assert_eq!(
+            result["inbound_id_citation_count"].as_u64(),
+            Some(ids.len() as u64),
+            "below the cap the count and the sample must agree, or one is derived from the \
+             wrong set"
+        );
+    }
+
+    /// The id scan must NOT exclude the moved file's own new path — the opposite of the path
+    /// scan, and the difference is the whole point of the field.
+    ///
+    /// The path scan excludes the new path because a file carrying its former SLUG in a
+    /// superseded note cites itself, which is not work. For the id the reverse holds. This
+    /// call has already rewritten the moved file's frontmatter `id:` to the new value, so the
+    /// only way the new path can still match `previous_id` is that its BODY names it — a dead
+    /// 16-hex token in prose, which is exactly the population nothing else catches.
+    /// `audit_doc_refs` scores a stale path-shaped token at `high`; there is no id-shaped
+    /// equivalent, and `frontmatter_id_mismatch` only reaches the frontmatter this call just
+    /// fixed. So the self-hit here is genuine work, and hiding it would leave the one citation
+    /// with no other backstop unreported.
+    ///
+    /// The body write below is load-bearing for the same reason the sibling test's is: without
+    /// it the moved file never matches its own old id and this assertion cannot fail. Do not
+    /// "tidy" it away.
+    ///
+    /// Mutation this kills: passing `&a.new_rel_path` as the id scan's `exclude`, i.e. copying
+    /// the path scan's call shape without thinking about which direction it runs in.
+    #[tokio::test]
+    async fn the_id_scan_reports_the_moved_files_own_body_citing_its_old_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for the scan to run at all"
+        );
+
+        // A superseded note in the artifact's OWN body, naming the id it is about to lose.
+        let src = tmp.path().join("docs/trackers/foo.md");
+        let seeded = std::fs::read_to_string(&src).unwrap();
+        std::fs::write(
+            &src,
+            format!("{seeded}\nsuperseding the note filed as `aabbccdd11223344`\n"),
+        )
+        .unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let ids: Vec<String> = result["inbound_id_citations"]
+            .as_array()
+            .expect("the scan ran, so the list must be present rather than null")
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+            .collect();
+
+        assert!(
+            ids.iter().any(|p| p.ends_with("docs/archive/foo.md")),
+            "the moved file's own body cites a now-dead id and nothing else will report it: \
+             {ids:?}"
+        );
+
+        // THE CONTROL, and it is what stops this test passing under a broken frontmatter
+        // repair. The file must be listed because of the BODY note, not because its `id:` line
+        // still asserts the old value — if the repair regressed, this test would go green for
+        // the wrong reason and read as coverage of the exclusion decision.
+        let moved = std::fs::read_to_string(tmp.path().join("docs/archive/foo.md")).unwrap();
+        assert!(
+            !moved.contains("id: aabbccdd11223344"),
+            "the frontmatter id must already be repaired, or the assertion above is measuring \
+             the repair's failure rather than the exclusion decision: {moved:?}"
         );
     }
 
