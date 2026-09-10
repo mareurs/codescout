@@ -17,7 +17,7 @@ server index.
 ```json
 {
   "tool": "symbols",
-  "arguments": { "pattern": "AuthService", "relative_path": "src/services/auth.rs" }
+  "arguments": { "pattern": "AuthService", "path": "src/services/auth.rs" }
 }
 ```
 
@@ -48,7 +48,7 @@ body:
   "tool": "symbols",
   "arguments": {
     "pattern": "verify_token",
-    "relative_path": "src/services/auth.rs",
+    "path": "src/services/auth.rs",
     "include_body": true,
     "detail_level": "full"
   }
@@ -150,9 +150,9 @@ tracing usages of a known symbol.
 
 | You know... | Start with |
 |-------------|------------|
-| File path | `symbols(file)` |
+| File path | `symbols(path)` |
 | Function/class name | `symbols(pattern)` |
-| Who calls a function | `references(name_path, file)` |
+| Who calls a function | `references(name_path, path)` |
 | A concept or behaviour | `semantic_search(query)` |
 | Nothing (unfamiliar area) | `tree` → `symbols` → `semantic_search` |
 | Exact string or import | `grep(regex)` |

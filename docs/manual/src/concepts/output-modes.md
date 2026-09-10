@@ -77,7 +77,7 @@ Pass `detail_level: "full"` to any tool that supports it:
   "tool": "symbols",
   "arguments": {
     "pattern": "verify_token",
-    "relative_path": "src/services/auth.rs",
+    "path": "src/services/auth.rs",
     "include_body": true,
     "detail_level": "full"
   }

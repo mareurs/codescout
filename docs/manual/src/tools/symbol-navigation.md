@@ -41,7 +41,7 @@ reading or editing.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `relative_path` | string | no | project root | File, directory, or glob pattern (e.g. `src/**/*.rs`) |
+| `path` | string | no | project root | File, directory, or glob pattern (e.g. `src/**/*.rs`) |
 | `depth` | integer | no | 1 | Depth of children to include (0 = top-level names only, 1 = direct children) |
 | `detail_level` | string | no | exploring | `"full"` activates focused mode with symbol bodies |
 | `offset` | integer | no | 0 | Skip this many files (focused mode pagination) |
@@ -53,7 +53,7 @@ reading or editing.
 {
   "tool": "symbols",
   "arguments": {
-    "relative_path": "src/auth/middleware.rs"
+    "path": "src/auth/middleware.rs"
   }
 }
 ```
@@ -83,7 +83,7 @@ from `start_line` to `end_line`.
 {
   "tool": "symbols",
   "arguments": {
-    "relative_path": "src/handlers/"
+    "path": "src/handlers/"
   }
 }
 ```
@@ -97,7 +97,7 @@ project root (`.`), walks the entire source tree recursively.
 {
   "tool": "symbols",
   "arguments": {
-    "relative_path": "src/**/*.py",
+    "path": "src/**/*.py",
     "depth": 0
   }
 }
@@ -129,7 +129,7 @@ their source body.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `pattern` | string | yes | — | Symbol name or substring (case-insensitive) |
-| `relative_path` | string | no | — | Restrict to this file or glob pattern |
+| `path` | string | no | — | Restrict to this file or glob pattern |
 | `include_body` | boolean | no | false | Include source body in results |
 | `depth` | integer | no | 0 | Depth of children to include |
 | `detail_level` | string | no | exploring | `"full"` for bodies and pagination |
@@ -172,7 +172,7 @@ their source body.
   "tool": "symbols",
   "arguments": {
     "pattern": "authenticate_user",
-    "relative_path": "src/auth/service.rs",
+    "path": "src/auth/service.rs",
     "include_body": true,
     "detail_level": "full"
   }
@@ -205,7 +205,7 @@ their source body.
   "tool": "symbols",
   "arguments": {
     "pattern": "test_",
-    "relative_path": "tests/**/*.rs"
+    "path": "tests/**/*.rs"
   }
 }
 ```
@@ -214,8 +214,8 @@ their source body.
 
 - Pattern matching is case-insensitive substring matching. `"auth"` matches
   `AuthService`, `authenticate_user`, and `reauth_token`.
-- Without `relative_path`, uses `workspace/symbol` (one LSP request per
-  language), which is fast. With `relative_path`, uses per-file document
+- Without `path`, uses `workspace/symbol` (one LSP request per
+  language), which is fast. With `path`, uses per-file document
   symbols, which is slower but scoped.
 - `name_path` in the result uses `/` as a separator for nested symbols, e.g.
   `AuthService/authenticate_user`. You need this value for
@@ -235,7 +235,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
-| `relative_path` | string | yes | — | File that contains the symbol definition |
+| `path` | string | yes | — | File that contains the symbol definition |
 | `detail_level` | string | no | exploring | `"full"` for pagination |
 | `offset` | integer | no | 0 | Skip this many results |
 | `limit` | integer | no | 50 | Max results per page |
@@ -247,7 +247,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
   "tool": "references",
   "arguments": {
     "name_path": "AuthService/authenticate_user",
-    "relative_path": "src/auth/service.rs"
+    "path": "src/auth/service.rs"
   }
 }
 ```
@@ -287,7 +287,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
   "tool": "references",
   "arguments": {
     "name_path": "Logger/log",
-    "relative_path": "src/logging.rs",
+    "path": "src/logging.rs",
     "detail_level": "full",
     "offset": 0,
     "limit": 25
@@ -297,7 +297,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 **Tips:**
 
-- Both `name_path` and `relative_path` are required. The LSP needs to locate
+- Both `name_path` and `path` are required. The LSP needs to locate
   the symbol's definition position before it can find references.
 - `name_path` must match the `name_path` value from `symbols` or
   `symbols` output, not just the bare name. For a top-level function, the
