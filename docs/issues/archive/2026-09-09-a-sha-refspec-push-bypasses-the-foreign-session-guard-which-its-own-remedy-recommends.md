@@ -14,6 +14,32 @@ fix_sha: d68473222e84830618e347e290ab0d656f49fa0f
 fixed: 2026-09-09
 ---
 
+> **DUPLICATE — do not count this file.** The same defect was already filed by sessionId
+> `59112612-5fc8-4b31-8c8c-e19220d99eac` as
+> `docs/issues/archive/2026-09-09-pre-push-guard-filters-on-the-local-ref-shape-so-a-refspec-push-bypasses-it.md`
+> (`7e0968e2ddfcbc07`), which has precedence. Both are archived against the same fix,
+> `d6847322` / patch-id `03c1fcd5aee6ca1fb98399a0386437e33c586b06`.
+>
+> **Kept rather than deleted, because the two are not redundant in content:** the earlier filing
+> reasons from the guard's stdin contract; this one carries the runtime A/B (exit 1 / 8289 bytes
+> against exit 0 / 0 bytes), the six-vacuous-ack measurement, and the mutation matrix behind the
+> test. Deleting it loses evidence; counting it twice corrupts every population over
+> `docs/issues/`.
+>
+> **Its `cluster/guard-narrower-than-its-name` tag is WITHDRAWN from `IC-14`'s member list.** One
+> defect is one member, the earlier filing's classification has precedence, and a duplicate must
+> not move a promotion threshold. Note recorded on `IC-14`'s `**Members:**` line.
+>
+> **How it happened, recorded because the mechanism is reusable and the lapse was this author's.**
+> The earlier filing was `750c60a5135d52f9` before archiving re-keyed it, and that row **was in
+> the 96-artifact open-bug list this file's author read at 14:1x the same day** — title truncated
+> mid-word at *"so git push ori…"*. It was not missed for want of a query. A duplicate check was
+> run before filing a different bug two hours earlier and **skipped here**, because this defect
+> arrived by direct measurement rather than by reading, and a finding that arrives as a surprise
+> does not present as a rediscovery. **Novelty of the discovery ROUTE is not novelty of the
+> DEFECT** — and the two are indistinguishable from the inside, which is why the check has to be
+> unconditional rather than run when something feels familiar.
+
 ## Summary
 
 `scripts/pre-push-foreign-session-guard.sh:124` filters the pre-push hook's stdin rows to
