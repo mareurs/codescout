@@ -1,18 +1,55 @@
 ---
-status: open
-opened: 2026-09-10
-closed: ''
-severity: low
-owner: marius
-related: []
+kind: bug
+status: mitigated
 tags:
 - cluster/record-asserts-an-unchecked-completion
-kind: bug
+closed: 2026-09-10
+opened: 2026-09-10
+owner: marius
+related: []
+severity: low
+unverified: 'residual 3 is NOT closed and cannot be: nothing binds the ack''s sid list to what the operator was actually told. Only the false assurance was removed, per the bug''s own prescribed reachable move. Residuals 1 and 2 are genuinely fixed with regression tests.'
 ---
 
 # BUG: the inert-ack note cannot say *nothing was examined*, and nothing states that an ack grants only on the pusher's behalf
 
 ## Summary
+
+> **PARTIALLY RESOLVED 2026-09-10 — residuals 1 and 2 fixed, residual 3 mitigated only, and
+> a fourth item added that was not in this file when it was written.** Fixed on `experiments`;
+> SHA and patch-id in § *Fix*. Applied by sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`
+> **on its operator's explicit instruction** — which is the standing the two earlier sessions
+> correctly judged they did not have. The reason these sat filed rather than applied was
+> sound and is worth preserving: a second author arriving with an unrequested patch to a
+> shared safety surface is its own hazard.
+>
+> - **(1) fixed.** The inert-ack note now branches on `foreign_report`. An ack set on a push
+>   with no foreign commits says the population was empty and that the push was allowed on
+>   that basis rather than on the ack — said once for the range, not once per token, because
+>   the fact is about the range. The old per-token wording is unchanged for the case it was
+>   right about.
+> - **(2) fixed.** The mirror now sits beside *"a peer CANNOT grant"*: an ack records the
+>   pusher's operator's decision and does not speak for the operators of the sessions it
+>   names.
+> - **(3) MITIGATED, NOT FIXED, and the gap is unchanged.** Only the false assurance was
+>   removed, exactly as § *Fix* prescribed: the banner now says the guard computed those sids
+>   from the range and did not witness the operator's decision about them. Neither rejected
+>   direction was attempted. `unverified:` in frontmatter carries this so a query can read it.
+> - **(4) NEW, not from this file.** The banner never said what taking the ack route *does*
+>   to the three-state question. It overtakes it: an ack is not a fourth author state and
+>   moves nobody into `cleared`, so every author below stays UNCLEARED and the table cannot
+>   describe the outcome. Raised independently by **3 of 5** authors polled after the
+>   2026-09-10 ack push — sids `26cb9b5b`, `343d53e1`, `59112612` — the sharpest form being
+>   *"never resolved, only overtaken"*. Recorded here rather than opened as a fifth file
+>   because it is the same surface and the same class.
+>
+> **Line numbers in § *Resume* below are stale** — `0a6a2c9d` moved them. The inert-ack note
+> is no longer at `:194-196`, and `:341` is now the rung-author sentence, not the sid list.
+>
+> **Review not obtained.** sessionId `343d53e1-2c36-4063-9517-7459472e9b31` volunteered in
+> § *Resume* and has not been asked; the change is committed on the operator's instruction
+> with a green suite, not on a reviewer's sign-off. Surfaced to my operator as an open
+> option rather than treated as satisfied.
 
 **Three** unfixed residuals on the `CODESCOUT_PUSH_ACK` surface of
 `scripts/pre-push-foreign-session-guard.sh`. The first two were split out of
@@ -157,6 +194,23 @@ class of confusion in the peer direction and silent in the pusher direction.
    0 matches.
 
 ## Fix
+
+> **APPLIED 2026-09-10.** SHA `ca977f51` on **`experiments`**; patch-id
+> `9b7bc9fd70a5d44a0e2696b76d661619221b63cb`. The SHA dies on the next rebase of
+> `experiments`; the patch-id survives rebase and cherry-pick, so cite that one.
+>
+> Residuals 1 and 2 are fixed as § *Summary*'s banner describes. Residual 3 is **mitigated
+> only** — the disclaimer beside the prefilled list, which is precisely the reachable move
+> prescribed below and nothing more. Neither rejected direction was attempted. A fourth item,
+> not in this file when it was written, shipped in the same commit: the banner now says the
+> ack route **overtakes** the three-state question rather than answering it.
+>
+> Regression tests: Row 6 of `tests/pre-push-foreign-session-guard.sh`, four assertions, all
+> watched RED first. 6a and 6b are behavioural and are each other's control — 6b holds the
+> old wording under test for the case it is right about, so a fix that merely deleted it reds
+> there rather than passing. 6c–6e are shape assertions on prose, annotated as such in the
+> file: they establish that each step still exists, never that it is correct. 112 passed, 0
+> failed.
 
 Not applied.
 
