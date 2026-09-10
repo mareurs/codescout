@@ -13,6 +13,25 @@ topic: tool parameter surface
 
 # Parameter alias collapse — advertise one name, correct the rest at runtime
 
+## Authority — this is an ADR amendment, not a new decision
+
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md` (**accepted**) already decided the
+runtime half: *repair the input, execute, return the result, attach an advisory correction note
+— never `RecoverableError`.* Its Context cites a 72-DB / ~152k-call `usage.db` sweep and names
+`file_path` for `path` and buffer handles under `output_id` as its examples. **That is this
+document's scope, and this document does not get to redecide it.**
+
+Read the **Amendment 2026-09-10** section of that ADR before this spec. It records the two
+things that were genuinely open:
+
+1. the law was half-implemented — the path family repairs and never notes, because the helpers
+   return `&str` and structurally cannot report a correction; and
+2. the ADR governs *acceptance* of a synonym and never addressed whether it should also be
+   *advertised* as a schema property, which is the gap that produced the API-illegal `anyOf`.
+
+Where this spec and the ADR disagree, the ADR wins. In particular the advisory field is
+`corrections` and not a new name.
+
 ## Problem
 
 Eight tools advertise the same file path under up to five names — `path`, `file_path`,
@@ -49,24 +68,35 @@ Three costs, in increasing order of importance:
 
 ## Non-goals
 
-- **Rejecting aliases.** Tolerance is permanent. Callers are retrained by the warning, not
+- **Rejecting aliases.** Tolerance is permanent. Callers are retrained by the `corrections`
+  note, not
   by a failure. No deprecation window, no future hard error — that is a separate decision if
   it is ever wanted.
+- **`symbols`' `name`/`query` and `name_path`/`symbol`.** True synonyms, but `symbols`
+  **carries no top-level `required` at all** (`src/tools/symbol/symbols.rs:134-160`), so no
+  false claim exists there and the change scenario that funds the path collapse is provably
+  absent. Collapsing it would buy ~130 chars on a surface already measured as 100% cache-read
+  and worth ~$0.0004 per request, plus tidiness. Consistency across the family is an
+  aesthetic, not a change scenario. **Revisit-when:** a `usage.db` split on those four param
+  names shows a retry or error asymmetry — an ambiguity cost is measurable, and nobody has
+  measured it.
+- **`librarian`'s `root`/`old_root`.** Unverified whether `root` names the same parameter for
+  `merge_worktree` and `doctor` as it does for `rehome`. Not collapsed on an assumption.
 - **`read_file`'s `offset`/`limit`.** These are a different calling convention, not a rename:
   `limit` is a *count* folded into `end_line` (`end_line = offset + limit - 1`). Collapsing
   them would mean computing rather than renaming, and a wrong computation is silent. Out of
   scope by decision.
 - **`edit_code`'s `name_path`/`content`.** Already correct — advertised as one property each,
-  alias accepted in `call()` and documented inline. They gain only the warning.
+  alias accepted in `call()` and documented inline. They gain only the `corrections` note.
 
 ## Decisions already taken
 
 | decision | value | who |
 |---|---|---|
-| scope | path family + true duplicates (`symbols`, `librarian`); not `offset`/`limit` | operator, 2026-09-10 |
-| register | `warning`, not `hint` | derived from `Guidance`'s own doc comments (`src/tools/core/types.rs`): `Warning` is "off-golden-path — reconsider before proceeding", which is what a non-canonical name is |
-| cadence | announce on every affected call, statelessly | operator, 2026-09-10 — per-session suppression needs state on a server shared by many sessions, and a compacted or resumed context never sees the warning it already consumed |
-| conflict rule | canonical wins, and the ignored key is named in the warning | existing behaviour (`require_path_param` prefers `path`) plus the new announcement |
+| scope | **path family only** — 23 alias properties across 8 tools. NOT `symbols`, NOT `librarian`, NOT `offset`/`limit` | operator, 2026-09-10; narrowed the same day after verifying `symbols` carries no top-level `required` (see Non-goals) |
+| register | `corrections`, shaped `{keyed, hint}` as `src/librarian/tools/find.rs:1290` shapes it | **ADR 2026-07-10 amendment**. A first draft chose `warning`, derived from `Guidance`'s doc comment — wrong at the root, because `Guidance` attaches to a `RecoverableError` and this is the path where none is returned. `warning` would be a THIRD vocabulary for one concept beside `filter_warnings` and `corrections`. |
+| cadence | announce on every affected call, statelessly | operator, 2026-09-10 — per-session suppression needs state on a server shared by many sessions, and a compacted or resumed context never sees the note it already consumed |
+| conflict rule | canonical wins, and the ignored key is named in the `corrections` note | existing behaviour (`require_path_param` prefers `path`) plus the new announcement |
 
 ## Inventory and canonical choice
 
@@ -75,15 +105,19 @@ Three costs, in increasing order of importance:
 | `read_file` | `file_path`, `relative_path`, `file`, `output_id` | `path` | `path` already accepts `@tool_*`/`@cmd_*`/`@file_*` handles via `strip_buffer_ref_quotes`, so `output_id` is a rename, not a capability. `file_id` is already accepted with no property — the target shape. |
 | `create_file` | `file_path`, `relative_path`, `file` | `path` | |
 | `edit_file` | `file_path`, `relative_path`, `file` | `path` | |
-| `edit_code` | `file_path`, `relative_path`, `file` | `path` | `name_path`→`symbol` and `content`→`body` already collapsed; add warnings only |
+| `edit_code` | `file_path`, `relative_path`, `file` | `path` | `name_path`→`symbol` and `content`→`body` are already collapsed (prose on the canonical property, not siblings); they gain the `corrections` note only |
 | `references` | `file_path`, `relative_path`, `file` | `path` | |
 | `symbol_at` | `file_path`, `relative_path`, `file` | `path` | |
 | `call_graph` | `file_path`, `relative_path`, `file` | `path` | |
 | `grep` | `file_path` | `path` | `path` is optional here; the collapse is unaffected by that |
-| `symbols` | `name`, `name_path` | `query`, `symbol` | see below |
-| `librarian` | `root` | `old_root` | **inverted**: the schema itself says `old_root` is the "preferred alias… the one the doctor hints and error text surface", so the alias is canonical and `root` is the back-compat name |
+| `symbols` | — | — | **out of scope**; see Non-goals |
+| `librarian` | — | — | **out of scope**; see Non-goals |
 
-**`symbols` canonical choice.** Keep `query` and `symbol`, drop `name` and `name_path`.
+**`symbols` was considered and dropped.** The reasoning is in Non-goals above: it carries no
+top-level `required`, so there is no false claim to repair and no change scenario to fund the
+change. `docs/manual/src/tools/api-redesign.md` documents `name_path` → `symbol` as an intended
+rename, which is why it looked in-scope at first — an intended rename is not the same thing as
+a defect, and this pass fixes a defect.
 Two reasons: `symbol` is already the family-wide name for this concept on `references`,
 `call_graph` and `edit_code`, so keeping it is what makes the family consistent; and
 `docs/manual/src/tools/api-redesign.md` already documents `name_path` → `symbol` as the
@@ -121,7 +155,7 @@ normalize_params(&mut input, self.param_aliases())  ->  Vec<Correction>
     ... existing selector / is_write / write_path capture ...
     ... self.call(input, ctx) ...
     ... existing strip / annotate ...
-announce_corrections(&mut val, &corrections)        // sets `warning`
+announce_corrections(&mut val, &corrections)        // sets `corrections`
     ... and appends to the compact summary (see 3)
 ```
 
@@ -148,7 +182,7 @@ This is the design's sharpest edge, and the first draft of this spec got it wron
 two paths. There are three, and `Tool::call_content` already threads an existing notice
 through every one of them.
 
-| path | condition | what the caller receives | does a `val["warning"]` survive? |
+| path | condition | what the caller receives | does a `val["corrections"]` survive? |
 |---|---|---|---|
 | buffered | `exceeds_inline_limit` | a fresh `{output_id, summary, hint, buffered_bytes}` envelope; `val` goes into the buffer | **no** — the caller never reads `val` |
 | compact text | small + `OutputForm::Text` | `format_compact(&val)` rendered as text | **no** — `format_compact` selects the fields the tool knows about, and a framework-added key is not one of them |
@@ -165,15 +199,16 @@ shipped bug:
 "precisely the read surface it exists to caveat". `src/tools/symbol/edit_code.rs:184` is the
 same lesson at tool scope: *"a warning only present in the raw JSON is a silent fix."*
 
-So `announce_corrections` threads exactly like `workspace_notice` does:
+So `announce_corrections` threads exactly like `workspace_notice` does, setting **`corrections`**
+— never a new field name — at each of:
 
 1. buffered envelope — inject alongside `output_id`/`summary`, via the `inject_notice` shape.
 2. compact-text branch — prefix the rendered text, matching the existing
    `format!("⚠ {notice}\n\n{text}")` treatment, because a correction changes how the content
    should be read and must arrive before it.
-3. pretty-JSON branch — set `val["warning"]`.
+3. pretty-JSON branch — set `val["corrections"]`.
 
-**Do not implement this by setting `val["warning"]` early and hoping.** That is the exact
+**Do not implement this by setting `val["corrections"]` early and hoping.** That is the exact
 shape of the bug cited above: it looks correct, passes a JSON-shaped test, and is silent on
 the two paths most callers actually get.
 
@@ -213,8 +248,10 @@ nothing:
 
 - `edit_code`'s `symbol`: *"Alias: `name_path` … is accepted."*
 - `edit_code`'s `body`: *"Alias: `content` … is accepted."*
-- `librarian`'s `old_root`: *"Preferred alias of root…"* — must be rewritten anyway, since
-  `root` stops being advertised and `old_root` becomes simply the parameter name.
+
+Both are prose on the *canonical* property rather than separate properties, so nothing is
+de-advertised — the runtime note replaces a sentence, and the aliases keep working. `librarian`'s
+`old_root` description is **left alone**: `librarian` is out of scope.
 
 `read_file`'s `offset`/`limit` descriptions keep the phrase "Native-Read-style alias" because
 those params are out of scope and genuinely remain a second convention. Gate 1's patterns
@@ -254,10 +291,13 @@ then warn on every call it recommends.
   tool schema"* as the reason not to document them. **That becomes false** — after this change
   an alias is discoverable nowhere and is announced only when used. The rule must be rewritten,
   not deleted: the new reason not to document aliases is that there is exactly one name.
-- `src/prompts/guides/symbol-navigation.md` teaches `symbols(name_path=…)` in four places and
-  is **served into sessions**. Must become `symbols(symbol=…)`.
-- `docs/manual/src/**` uses `relative_path` and `references(name_path, path)` across roughly
-  ten examples. Mechanical, but a reader copying them would now be warned.
+- `docs/manual/src/**` uses `relative_path` across roughly ten examples. Mechanical, but a
+  reader copying them would now be corrected on every call.
+- **No served-guide edit is required, because `symbols` is out of scope.** Had it been in,
+  `src/prompts/guides/symbol-navigation.md` teaches `symbols(name_path=…)` four times — and
+  that guide is `include_str!`'d (`src/prompts/mod.rs:591`), so it ships atomically with the
+  binary and carries no cache-staleness risk. The churn would have been plain work, not risk;
+  it is simply unfunded.
 - The four prompt surfaces are gated for stale *tool names* only, not stale *parameter*
   names, so nothing catches this class automatically. That gap is why this section exists and
   is itself worth a follow-up gate.
@@ -273,7 +313,8 @@ headroom is removed rather than banked.
 ## Testing
 
 - Per-alias round trip through `call_content` for all ~26 aliases (gate 3 above).
-- Conflict case: both canonical and alias supplied, different values — canonical wins, warning
+- Conflict case: both canonical and alias supplied, different values — canonical wins, the
+  `corrections` note
   names the ignored key.
 - **One test per render path**, because they are three independent mechanisms and a JSON-shaped
   test says nothing about the other two: a small `OutputForm::Json` response (field present),
@@ -291,7 +332,7 @@ headroom is removed rather than banked.
 
 ## Rejected alternatives
 
-- **Per-tool helper, each `call()` attaches its own warning.** `edit_code` alone has four
+- **Per-tool helper, each `call()` attaches its own `corrections` note.** `edit_code` alone has four
   success return sites and `read_file` branches through markdown, buffer and JSON paths; every
   branch would have to remember. A missed branch is silent, and the compact-form propagation
   would be re-solved eight times. This is CLAUDE.md's loudness law — an alarm nothing reaches

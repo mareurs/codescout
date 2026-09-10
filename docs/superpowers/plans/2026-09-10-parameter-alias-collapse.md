@@ -20,13 +20,13 @@ topic: tool parameter surface
 
 **Tech Stack:** Rust, `serde_json`, `async_trait`, tokio test harness.
 
-**Spec:** `docs/superpowers/specs/2026-09-10-parameter-alias-collapse-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-10-parameter-alias-collapse-design.md` — and, above it, the **Amendment 2026-09-10** section of `docs/adrs/2026-07-10-repair-and-continue-input-handling.md`, which is the binding authority. Read the ADR amendment first.
 
 ## Global Constraints
 
 - **Never clone `input`.** `create_file`/`edit_file` carry whole file bodies in it; `call_content` warns about this three times. Normalization mutates in place and returns a small `Vec`.
 - **Tolerance is permanent.** An alias is always accepted. No task may make one an error.
-- **Register is `warning`**, never `hint` — per `Guidance`'s own doc comment in `src/tools/core/types.rs`.
+- **Register is `corrections`**, shaped `{keyed, hint}` as `src/librarian/tools/find.rs:1290` shapes it. NOT `warning` — see the ADR amendment. `Guidance`/`warning` belongs to the `RecoverableError` path, which this is definitionally not.
 - **Cadence is every affected call, stateless.** No per-session suppression.
 - **Canonical wins on conflict**, and the ignored key is named.
 - **Gate order for every commit:** `./scripts/fmt-mine.sh`, then `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, then `cargo test --workspace --no-default-features`, then `cargo test --workspace`. Chain the two test lanes with `;`, never `&&`.
@@ -43,7 +43,7 @@ topic: tool parameter surface
 | `src/tools/core/types.rs` | `Tool::param_aliases()` declaration; the three-site threading inside `call_content` | 2, 3 |
 | `src/fs/mod.rs` | `PATH_PARAM_ALIAS_MAP` beside the existing `PATH_PARAM_ALIASES` | 1 |
 | `src/tools/{read_file,create_file,grep}.rs`, `src/tools/edit_file/mod.rs`, `src/tools/symbol/{edit_code,references,symbol_at,call_graph/mod}.rs` | `param_aliases()` impl + schema property deletion | 4, 5 |
-| `src/tools/symbol/symbols.rs`, `src/librarian/tools/librarian.rs` | the two non-path collapses | 6 |
+| `src/tools/symbol/symbols.rs`, `src/librarian/tools/librarian.rs` | **OUT OF SCOPE — no task touches these.** See the ADR amendment: `symbols` carries no top-level `required`, so the change scenario funding the path collapse is provably absent there; `librarian`'s `root` is unverified across actions. | — |
 | `src/server.rs` | replace 4 gates with 5; ratchet the budget | 7, 8 |
 | `src/prompts/README.md`, `src/prompts/guides/symbol-navigation.md`, `docs/manual/src/**` | coupled doc surfaces | 6, 9 |
 
@@ -579,7 +579,7 @@ Site A — the buffered envelope. After the existing `workspace_notice` injectio
                 inject_notice(&mut buffered, notice);
             }
             if let Some(n) = &param_notice {
-                buffered["warning"] = Value::String(n.clone());
+                buffered["corrections"] = Value::String(n.clone());
             }
 ```
 
@@ -607,7 +607,7 @@ Site C — the small-output value, before the form branch:
             }
             if let Some(n) = &param_notice {
                 if let Some(obj) = val.as_object_mut() {
-                    obj.insert("warning".to_string(), Value::String(n.clone()));
+                    obj.insert("corrections".to_string(), Value::String(n.clone()));
                 }
             }
 ```
@@ -762,80 +762,55 @@ Expected: same four gates still red from Task 4; nothing else new.
 
 ---
 
-## Task 6: The two non-path collapses, with their coupled docs
+## Task 6: The coupled doc surfaces the collapse falsifies
 
-`symbols` is the only task in this plan that changes a name our own served guidance
-teaches. The doc edits are **not** optional follow-up — shipped separately, every session
-following the guide gets warned on every call.
+**Scope narrowed 2026-09-10.** This task originally collapsed `symbols` and `librarian` too.
+Both are now out of scope per the ADR amendment — `symbols` carries no top-level `required`
+(`src/tools/symbol/symbols.rs:134-160`) so the change scenario funding the path collapse is
+provably absent there, and `librarian`'s `root` is unverified across `merge_worktree`/`doctor`.
+**No code changes remain in this task.** What remains is the doc surfaces the path collapse
+falsifies, and they must not be deferred: shipped separately, our own documentation teaches a
+name that now gets corrected on every call it recommends.
 
 **Files:**
-- Modify: `src/tools/symbol/symbols.rs:135-145`
-- Modify: `src/librarian/tools/librarian.rs:110`
-- Modify: `src/prompts/guides/symbol-navigation.md` (4 sites)
-- Modify: `docs/manual/src/concepts/tool-selection.md`, `docs/manual/src/tools/symbol-navigation.md`, `docs/manual/src/tools/tool-workflows.md`
+- Modify: `src/prompts/README.md` (the rule at line ~33)
+- Modify: `docs/manual/src/concepts/tool-selection.md`, `docs/manual/src/tools/symbol-navigation.md`, `docs/manual/src/concepts/output-modes.md`, `docs/manual/src/concepts/progressive-disclosure.md`
 
-- [ ] **Step 1: Collapse `symbols`**
+**Interfaces:** none — documentation only.
 
-Delete the `name` and `name_path` properties. Keep `query` and `symbol`. Add:
+- [ ] **Step 1: Rewrite the `src/prompts/README.md` rule**
 
-```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
-        // `symbol` is the family-wide name for this concept on references/call_graph/
-        // edit_code; `docs/manual/src/tools/api-redesign.md` already documents
-        // name_path -> symbol as the intended rename. This completes it.
-        &[
-            ("name", "query"),
-            ("name_path", "symbol"),
-            ("file_path", "path"),
-            ("relative_path", "path"),
-            ("file", "path"),
-        ]
-    }
-```
-
-Note `symbols` takes `path` optionally via `get_path_param`, so the path family applies here too.
-
-- [ ] **Step 2: Collapse `librarian`'s `root`**
-
-Delete the `root` property. Rewrite `old_root`'s description to drop "Preferred alias of root — use this name, it's the one the doctor hints and error text surface", since it is now simply the parameter name. Add:
-
-```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
-        &[("root", "old_root")]
-    }
-```
-
-**Verify before committing:** `librarian`'s `call()` reads `root` for `merge_worktree` and `doctor` as well as `rehome`. Run `grep(pattern="\"root\"", path="src/librarian/tools/")` and confirm every read is the same parameter. **If `root` means something different for `merge_worktree` than for `rehome`, they are not aliases and this step must be dropped** — report that finding instead of forcing it.
-
-- [ ] **Step 3: Update the served guide**
-
-In `src/prompts/guides/symbol-navigation.md`, replace all four `symbols(name_path=…)` with `symbols(symbol=…)` and `symbols(name=…)` with `symbols(query=…)`.
-
-- [ ] **Step 4: Update `src/prompts/README.md:33`**
-
-The sentence "aliases (`file_path`, `limit`) are discoverable from the tool schema" is now false. Replace with:
+The sentence "aliases (`file_path`, `limit`) are discoverable from the tool schema" is now
+false — after this collapse an alias is in no schema at all. Replace item 5 with:
 
 ```markdown
 5. **Don't document every param.** Pagination (`offset`, `limit`, `detail_level`) is
    discoverable from the tool schema. Aliases are NOT in the schema at all — there is
-   exactly one advertised name per concept, and a caller who sends another is corrected
-   at runtime with a `warning` naming the right one (`src/tools/core/param_alias.rs`).
-   Only document params that change behavior in non-obvious ways.
+   exactly one advertised name per concept, and a caller who sends another is repaired
+   at runtime with a `corrections` note naming the right one
+   (`src/tools/core/param_alias.rs`, per ADR 2026-07-10). Only document params that
+   change behavior in non-obvious ways.
 ```
 
-- [ ] **Step 5: Update the manual examples**
+- [ ] **Step 2: Replace `relative_path` with `path` in the manual examples**
 
-Replace `relative_path` with `path` and `references(name_path, path)` with `references(symbol, path)` in the four manual files listed above. Leave `docs/manual/src/tools/api-redesign.md` alone — it is a historical rename table.
+Run `grep(pattern="relative_path", glob="docs/manual/**")` to get the live list, then replace
+each occurrence in a JSON example or parameter table with `path`. Leave
+`docs/manual/src/tools/api-redesign.md` alone — it is a historical rename table, and rewriting
+history to satisfy a linter is the thing that section exists to record.
 
-- [ ] **Step 6: Run the tests, then the doc-ref audit**
+**Do NOT touch `src/prompts/guides/symbol-navigation.md`.** It teaches
+`symbols(name_path=…)`, `symbols` is out of scope, and that name still works unchanged.
+
+- [ ] **Step 3: Verify no live citation of a collapsed name remains**
 
 ```
-cargo test --workspace 2>&1
+grep(pattern="relative_path|\"file\"[[:space:]]*:", glob="docs/manual/**")
 ```
-Then `librarian(action="audit_doc_refs")` and confirm no new `high` findings.
+Expected: no hits in a call example. Then `librarian(action="audit_doc_refs")` and confirm no
+new `high` findings.
 
-- [ ] **Step 7: Commit** — code and every doc surface in ONE commit.
-
+- [ ] **Step 4: Commit** — all doc surfaces in ONE commit.
 ---
 
 ## Task 7: Replace the four vacuous gates with five
@@ -1064,18 +1039,23 @@ A green suite is not evidence that the served surface changed — the gates read
 cargo rb
 ```
 Then run a `tools/list` probe against the built binary with a project active and assert, in
-the returned JSON: zero properties named `file_path`/`relative_path`/`file`/`output_id`/`name`/`name_path`/`root`, and zero top-level `anyOf`/`oneOf`/`allOf`.
+the returned JSON: zero properties named `file_path`/`relative_path`/`file`/`output_id`, and
+zero top-level `anyOf`/`oneOf`/`allOf`. **`name`/`name_path`/`root` must still be present** —
+`symbols` and `librarian` are out of scope, and their absence would mean scope leaked.
 
 - [ ] **Step 2: Exercise one corrected call end to end**
 
 Reconnect (`/mcp`) and call `read_file(file_path="Cargo.toml", toml_key="package")`.
-Expected: the file content **and** a `warning` naming `file_path` and `path`.
+Expected: the file content **and** a `corrections` note naming `file_path` and `path`.
 
 - [ ] **Step 3: Exercise the compact-text path specifically**
 
-Call `symbols(name_path="Tool/call_content", path="src/tools/core/types.rs")`.
-Expected: the symbol body **and** a `⚠` line naming `name_path` → `symbol`. This is the
-path that regressed for `workspace_notice`; confirm it on the wire, not only in a test.
+Call `grep(pattern="^name =", file_path="Cargo.toml")` — `grep` is `OutputForm::Text` and
+carries the `file_path` alias, so this is the render path that regressed for
+`workspace_notice`.
+Expected: the match lines **and** a `⚠` line naming `file_path` → `path`. Confirm it on the
+wire, not only in a test: before this change the identical call returns the matches with no
+advisory at all (measured 2026-09-10), so the difference is observable.
 
 - [ ] **Step 4: Append the outcome to the session log**
 
@@ -1089,7 +1069,9 @@ the three wire probes. Consult `docs/TAXONOMY.md` for the exact call and artifac
 
 ## Self-Review
 
-**Spec coverage.** Goals: one advertised name → Tasks 4, 5, 6. Always accepted → Task 1 (`normalize_params` never errors) + the retained per-call fallbacks (Task 4 Step 2, Task 5 Step 4). Announced on every shape → Task 3. Structurally impossible to forget → Task 3 (one boundary) + Task 7 gate 3 (per alias) + gate 4 (the override hole). Non-goals: `offset`/`limit` appear in no task; no task makes an alias an error. Design §1 → Task 2; §2 → Task 3 Step 3; §3 → Task 3 Steps 4/6; §4 → Task 4 Step 2, Task 5 Step 4; §5 → Task 5 Step 3, Task 6 Step 2. Inventory rows all mapped (`grep` → Task 4, `librarian` → Task 6). Gate replacement → Task 7. Coupled surfaces → Task 6. Budget → Task 8. Testing → Tasks 1/3/7 plus Task 9 for the wire.
+**Spec coverage.** Goals: one advertised name → Tasks 4, 5. Always accepted → Task 1 (`normalize_params` never errors) + the retained per-call fallbacks (Task 4 Step 2, Task 5 Step 4). Announced on every shape → Task 3. Structurally impossible to forget → Task 3 (one boundary) + Task 7 gate 3 (per alias) + gate 4 (the override hole). Non-goals: `offset`/`limit`, `symbols` and `librarian` appear in no task, and Task 9 Step 1 asserts their params are still present so scope cannot leak silently; no task makes an alias an error. Design §1 → Task 2; §2 → Task 3 Step 3; §3 → Task 3 Steps 4/6; §4 → Task 4 Step 2, Task 5 Step 4; §5 → Task 5 Step 3. Inventory rows all mapped (`grep` → Task 4; `symbols`/`librarian` explicitly unmapped). Gate replacement → Task 7. Coupled surfaces → Task 6. Budget → Task 8. Testing → Tasks 1/3/7 plus Task 9 for the wire.
+
+**Authority consistency.** The advisory field is `corrections` in every task that writes it (Task 1's `correction_notice`, Task 3's three sites, Task 6's README text, Task 9's two probes). `warning` appears in this plan only where it names the rejected alternative. If a task ever writes `warning`, it contradicts `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` and is wrong regardless of what this plan says.
 
 **Placeholder scan.** No TBD/TODO. Every code step carries real code. The two places that say "read the existing helper and reuse it verbatim" (Task 3 Step 1's `make_ctx`, Task 5 Step 4's `grep`) are deliberate: inventing a fixture name that does not exist would be worse than naming the lookup, and both name the exact command to run.
 
