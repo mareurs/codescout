@@ -258,7 +258,7 @@ Add to `src/fs/mod.rs`, directly below the existing `PATH_PARAM_ALIASES` (line ~
 /// pairs for `Tool::param_aliases`. Derived from one list by hand rather than
 /// generated, because `param_aliases` must be `&'static` and a const fn cannot
 /// build it; `path_aliases_and_alias_map_agree` (below) pins the two together.
-pub(crate) const PATH_PARAM_ALIAS_MAP: crate::tools::core::param_alias::AliasMap = &[
+pub(crate) const PATH_PARAM_ALIAS_MAP: crate::tools::param_alias::AliasMap = &[
     ("file_path", "path"),
     ("relative_path", "path"),
     ("file", "path"),
@@ -383,7 +383,7 @@ In `src/tools/core/types.rs`, inside `pub trait Tool`, immediately above `fn sel
     /// enforces that.
     ///
     /// Defaults to empty: a tool opts in.
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         &[]
     }
 ```
@@ -415,6 +415,50 @@ precedent in the same function — follow it site for site.
 - Consumes: `normalize_params`, `correction_notice` (Task 1); `param_aliases` (Task 2).
 - Produces: no new public API. Behaviour: `call()` never sees an alias key; the response carries the notice on all three paths.
 
+### CONTROLLER RULINGS — added after Task 1, binding on this task
+
+Two things the plan as first written got wrong. Both are settled; do not re-decide them.
+
+**Ruling 9 — the field's SHAPE, not just its name.** The snippets below originally wrote
+`Value::String(notice)`. That is a third shape for one concept: `find.rs:1290` writes
+`{filter, hint}` and `update.rs:763` writes a bare array. The advisory must be an OBJECT keyed by
+what was corrected, plus its own `hint`:
+
+```rust
+// Build ONCE, after normalization, before `self.call`. Cloned into each render site.
+let param_corrections: Option<Value> = (!corrections.is_empty()).then(|| {
+    serde_json::json!({
+        "params": corrections.iter().map(|c| serde_json::json!({
+            "received": c.received,
+            "canonical": c.canonical,
+            "conflicted": c.conflicted,
+            "superseded_by": c.superseded_by,
+        })).collect::<Vec<_>>(),
+        "hint": param_notice.clone().unwrap_or_default(),
+    })
+});
+```
+
+Sites A and C assign `param_corrections`; site B (compact text) still prefixes the **`hint`
+string**, because a text renderer cannot carry an object.
+
+**Ruling 6 — the ambiguous case must escalate for WRITES.** Task 1 shipped
+`Correction::superseded_by: Option<String>`, which distinguishes *an earlier alias already
+claimed this canonical* from *the caller supplied the canonical*. Two differing alias values and
+no canonical (`create_file(file_path="a.rs", file="b.rs")`) is what ADR 2026-07-10 reserves
+`RecoverableError` for — *"ambiguous — more than one plausible reading"* — under its
+write-asymmetry clause: *"auto-accepting an explicit write target is safe; auto-guessing one must
+still hard-error."* Today that call writes `a.rs`, discards `b.rs`, and says nothing, because
+`json!("ok")` tools repair silently.
+
+So in `call_content`, after normalization: if any `Correction` has `superseded_by.is_some()`
+**and** `self.is_write(&input)` is true, return a `RecoverableError` naming both keys and both
+values rather than proceeding. Reads keep repair-and-note. `normalize_params` itself stays
+infallible — the escalation is the boundary's decision, not the rewriter's.
+
+Add a test for each side: a write tool with two differing aliases errors; a read tool with the
+same input repairs and notes.
+
 - [ ] **Step 1: Write the three failing render-path tests plus the ordering test**
 
 In `src/tools/core/tests.rs`. These drive `call_content`, **not** `call` — a direct
@@ -436,7 +480,7 @@ impl crate::tools::Tool for AliasEcho {
     fn input_schema(&self) -> serde_json::Value {
         serde_json::json!({"type":"object","properties":{"path":{"type":"string","description":"p"}}})
     }
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         &[("file_path", "path")]
     }
     fn output_form(&self) -> crate::tools::core::types::OutputForm { self.form }
@@ -554,7 +598,13 @@ Expected: FAIL — `call_sees_the_canonical_key_never_the_alias` shows `seen=fil
 - [ ] **Step 3: Normalize at the top of `call_content`**
 
 In `src/tools/core/types.rs`, make `input` mutable and normalize as the **first**
-statement of `call_content`, above the `selector` capture:
+statement of `call_content`, above the `selector` capture. Note the type path is
+`crate::tools::param_alias::…` — `mod core` is private, reachable only via `pub use core::*`
+(established in Task 1; the plan's original `crate::tools::param_alias::…` does not
+compile). **Also delete the `#[allow(dead_code)]` on `PATH_PARAM_ALIAS_MAP`
+(`src/fs/mod.rs:240`) in this task** — Task 1 added it because nothing consumed the constant,
+and wiring it here makes the allow a lie. `#[expect]` was verified unavailable: the agreement
+test reads the constant from `#[cfg(test)]`, which reds `unfulfilled_lint_expectations`.
 
 ```rust
     async fn call_content(&self, mut input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
@@ -564,9 +614,9 @@ statement of `call_content`, above the `selector` capture:
         // write-path annotation entirely if this runs later. Mutates in place: never
         // clone `input`, which for create_file/edit_file holds a whole file body.
         let corrections =
-            crate::tools::core::param_alias::normalize_params(&mut input, self.param_aliases());
+            crate::tools::param_alias::normalize_params(&mut input, self.param_aliases());
         let param_notice =
-            crate::tools::core::param_alias::correction_notice(self.name(), &corrections);
+            crate::tools::param_alias::correction_notice(self.name(), &corrections);
         let selector = self.selector_key(&input);
 ```
 
@@ -578,13 +628,15 @@ Site A — the buffered envelope. After the existing `workspace_notice` injectio
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
             }
-            if let Some(n) = &param_notice {
-                buffered["corrections"] = Value::String(n.clone());
+            if let Some(c) = &param_corrections {
+                buffered["corrections"] = c.clone();
             }
 ```
 
 Site B — the compact-text branch. Extend the existing prefix so both notices reach
-the channel that is actually read:
+the channel that is actually read. **This site uses `param_notice` (the hint STRING), not
+`param_corrections` (the object)** — a text renderer cannot carry an object, which is why
+both values are built:
 
 ```rust
                     Content::text({
@@ -605,9 +657,9 @@ Site C — the small-output value, before the form branch:
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut val, notice);
             }
-            if let Some(n) = &param_notice {
+            if let Some(c) = &param_corrections {
                 if let Some(obj) = val.as_object_mut() {
-                    obj.insert("corrections".to_string(), Value::String(n.clone()));
+                    obj.insert("corrections".to_string(), c.clone());
                 }
             }
 ```
@@ -672,7 +724,7 @@ the FIXTURE NOTE comment above them** (it documents a gate that no longer exists
 7). Then add:
 
 ```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         // `output_id`/`file_id` join the path family: `path` already accepts
         // `@tool_*`/`@cmd_*`/`@file_*` handles via `strip_buffer_ref_quotes`, so these
         // were renames of `path`, never a separate capability.
@@ -690,7 +742,7 @@ the FIXTURE NOTE comment above them** (it documents a gate that no longer exists
 comments, then add to each:
 
 ```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         crate::fs::PATH_PARAM_ALIAS_MAP
     }
 ```
@@ -725,7 +777,7 @@ Commit with the gates red, stating in the message that Task 7 replaces them and 
 - [ ] **Step 2: Add the declaration to `references`, `symbol_at`, `call_graph`**
 
 ```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         crate::fs::PATH_PARAM_ALIAS_MAP
     }
 ```
@@ -736,7 +788,7 @@ Delete the trailing `Alias: \`name_path\` … is accepted.` sentence from `symbo
 description and the `Alias: \`content\` …` sentence from `body`'s, then:
 
 ```rust
-    fn param_aliases(&self) -> crate::tools::core::param_alias::AliasMap {
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
         &[
             ("file_path", "path"),
             ("relative_path", "path"),
@@ -915,7 +967,7 @@ monotone under removal. They must be replaced, not edited.
                 checked += 1;
                 let mut input = serde_json::json!({});
                 input[*received] = serde_json::json!("probe-value");
-                let corrections = crate::tools::core::param_alias::normalize_params(
+                let corrections = crate::tools::param_alias::normalize_params(
                     &mut input,
                     t.param_aliases(),
                 );
@@ -930,7 +982,7 @@ monotone under removal. They must be replaced, not edited.
                     "{}: {received:?} did not land on {canonical:?}",
                     t.name()
                 );
-                let notice = crate::tools::core::param_alias::correction_notice(
+                let notice = crate::tools::param_alias::correction_notice(
                     t.name(),
                     &corrections,
                 )
