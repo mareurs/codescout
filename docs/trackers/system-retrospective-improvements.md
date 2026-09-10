@@ -8,6 +8,7 @@ tags:
 - improvements
 - task-list
 topic: birds-eye retrospective findings and the six structural improvement tasks derived from them
+expects_augmentation: docs/augmentations/docs-trackers-system-retrospective-improvements.yaml
 ---
 
 # System Retrospective 2026-09 — Improvement Tasks

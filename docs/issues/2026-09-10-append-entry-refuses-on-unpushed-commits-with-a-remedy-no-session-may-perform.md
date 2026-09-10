@@ -115,6 +115,45 @@ And the analogous pile is already visible — 23 commits.
 
 ## Evidence
 
+### The obvious verification command disagrees with the guard, and returns the reassuring answer
+
+Measured 2026-09-10 by sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941` while trying to land two
+entries parked by this very bug. A session that wants to know *"will `append_entry` refuse on this
+ledger?"* reaches for the range the refusal names:
+
+```
+$ git rev-list '@{upstream}'..HEAD -- docs/trackers/bug-fix-session-log.md | wc -l
+0
+$ git rev-list --full-history '@{upstream}'..HEAD -- docs/trackers/bug-fix-session-log.md | wc -l
+1
+$ git log --full-history --format='%h %p %s' '@{upstream}'..HEAD -- docs/trackers/bug-fix-session-log.md
+8cf67de0 2bfb2e15 36bfccd3 Merge branch 'experiments' into doctor-per-project-isolation
+```
+
+**`git log`/`git rev-list` apply history simplification by default and omit a MERGE commit that
+touched the path**; `ledger_has_unpushed_commits` walks each commit in the range and reads its
+diff, so it sees `8cf67de0` and refuses. Both are correct about their own question. The guard
+is right; the diagnostic is the thing that lies, and it lies in the **allowing** direction, so
+the reader concludes the ledger is clear and is then refused with nothing to reconcile.
+
+That cost one refused call and a confident wrong prediction here. It is a separate defect from
+the titular one and needs no code change to `append_entry` — what it needs is for the refusal to
+name the blocking commits itself, since it has already computed them. **The hint says "push this
+ledger's commits" and never says WHICH**, so the reader cannot check the claim, cannot tell how
+many there are, and cannot discover that the answer is a merge rather than an ordinary commit.
+
+**And it sharpens the titular defect rather than merely sitting beside it.** The blocking commit
+here is `8cf67de0` — a merge a PEER created, folding a branch that had touched this ledger. This
+session authored none of it. So the remedy is not merely unperformable because pushing is
+user-initiated; the commits the caller is told to push are **not theirs to push** under the
+pre-push foreign-session guard either, which would refuse that push in turn and route them to
+the rung's author. After any merge on a shared branch this is the normal case, not the edge one:
+two guards in the same repo, each correctly refusing, composing into a state with no legal move.
+
+**Not fixed here.** Recorded so the next session does not re-derive it, and so the reproduction
+in this file is read with the right instrument: use `--full-history`, or do not predict the
+guard at all.
+
 ### The detection half of a reconciliation already exists
 
 `doctor`'s `entry_defined_twice` (`src/librarian/tools/doctor.rs:3172`) detects precisely the
