@@ -1,7 +1,7 @@
 ---
 id: '28f197a703b6f903'
 kind: bug
-status: open
+status: taken
 title: 'BUG: the ack note reports "no commits by another session" exactly when the ack covered every one of them'
 owners:
 - marius
@@ -109,8 +109,44 @@ correctly-executed ack rather than an edge case — but that is an argument, not
 
 ## Fix
 
-Not applied. Test the thing the sentence claims, not the thing the guard refuses on. `ack_matched`
-is already in scope and is non-empty exactly when the ack applied to something:
+**TAKEN 2026-09-10 by sessionId `26cb9b5b-2c9c-489e-97d9-3a907c8b2941`**, the branch's author, who
+confirmed the defect at the bytes and is fixing it as part of the work their operator directed.
+They will use the counter at `:173`, before the ack test, and three arms rather than two: no
+foreign population / foreign population fully acked / foreign commits remaining. Do not duplicate
+this — the file is contended and a rename sweep is in flight.
+
+**AND THE TEST-SIDE FINDING IS THEIRS, recorded here because it is sharper than anything in this
+file and would otherwise live only in a message.** The branch shipped with two new rows, and
+*both* test the same state:
+
+| row | fixture | state exercised |
+|---|---|---|
+| 6a | `ALICE` authors both commits, ack names `BOB` | ack matched **nothing** |
+| 6b | ack names `BOB`, `CAROL` authored the foreign commit | ack matched **nothing** |
+
+*"6b was the control I was pleased with and it controlled the wrong axis: population empty versus
+not, when the axis that mattered was ack-matched-**all** versus none. Three states, two tested, and
+the untested one is the defect."*
+
+That is `CLAUDE.md` § *Testing Discipline*'s population law with a twist worth naming: **a
+deliberate control can be a second sample of the same member.** Two rows that differ visibly —
+different sids, different authorship shapes — were one observation, because the property they vary
+is not the property under test. Widening the fixture would not have found it; enumerating the
+states would.
+
+**The comment is an aggravating factor rather than a mitigation, and that is the author's own
+reading.** The coupling argument was supplied by a third session (`343d53e1-…`) as a stronger
+justification for a line already written on weaker grounds, and recorded as a comment without
+asking which question it was sound about. So a correct observation about one question was promoted
+to a defence of another, by a route that made it *more* credible at each hop.
+
+---
+
+Fix as originally specified, retained because the author adopted it and the reasoning is the
+testable part:
+
+Test the thing the sentence claims, not the thing the guard refuses on. `ack_matched` is already in
+scope and is non-empty exactly when the ack applied to something:
 
 - `-n "$ack_matched"` → the ack **did** apply; name what it covered. This is the case that
   currently misreports, and it deserves a positive note rather than silence: *"authorised N
@@ -122,21 +158,27 @@ is already in scope and is non-empty exactly when the ack applied to something:
 
 **Do not fix by counting `$foreign_sids`** — it is populated after the same `continue` and is empty
 for the identical reason. The pre-ack population is not currently recorded anywhere; a counter
-incremented at `:173`, before the ack test, is the smallest honest addition.
-
+incremented at `:173`, before the ack test, is the smallest honest addition. `ack_matched` answers
+*did the ack apply* but not *how many were there*, which is why both are wanted.
 ## Tests added
 
-None — nothing is fixed. The suite has the fixtures for this: `run <pusher> <ack> <stdin-line>`
-already takes an ack argument and `hasnt` already exists. The discriminating case is a **two-row
-pair over one fixture**, because either row alone is monotone:
+None by me — the author is writing them with the fix. The shape, unchanged from the original
+filing and now sharpened by their row-6 finding:
+
+The discriminating case is a **two-row pair over one fixture**, because either row alone is
+monotone:
 
 - foreign commits present, ack names all of them → must NOT say *"no commits by another session"*
 - no foreign commits at all, ack set → must say it
 
 Asserting only the first passes under a note that never fires; asserting only the second passes
-under today's bug. The pair is what discriminates, which is the same shape as row 5's
-`mine_n` pair added earlier the same day.
+under today's bug.
 
+**Enumerate the states rather than varying the fixture.** The existing rows 6a and 6b vary sid and
+authorship and land on the same state twice; the axis is *how much of the foreign population the
+ack covered* — none / some / all — and only the third arm reaches this defect. A row for **some**
+is worth having too: it is the only one that can catch a fix which flips the branch wholesale
+instead of splitting it three ways.
 ## Workarounds
 
 Ignore the note when you named sids and the push carried other sessions' commits. Verify with
