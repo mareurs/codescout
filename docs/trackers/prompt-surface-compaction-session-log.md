@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 11
+entry_high_water_F: 12
 entry_high_water_W: 18
 entry_prefix:
 - F
@@ -84,6 +84,7 @@ entry_prefix:
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 | F-10 | 2026-09-03 | med | self-friction | mitigated | I wrote the correct selection RULE in a comment and hand-enumerated one of the two files it selects — re-armed in 10 hours, found by a peer, on the gate carrying my own prediction that it would |
 | F-11 | 2026-09-09 | med | prompt-surface | open | The collapse's byte win is 2.7% — a merge moves parameters into the survivors rather than deleting them, so a tool COUNT is a bad proxy for surface cost; and `budget 57296, headroom 0` leaves no slack |
+| F-12 | 2026-09-10 | med | prompt-surface | open | `F-11`'s 57296 decayed to 56485 in under two hours with no alarm — two agreeing instruments protect a number synchronically and not against decay; and the budget is a RATCHET re-set to each new total, not the post-collapse ceiling `F-11` called it |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -2097,6 +2098,57 @@ would break it silently and nothing here would notice.
 **Rests on:** `.cargo/config.toml`'s `rb` alias; `scripts/probe_tool_surface.py`:165 for the default
 binary; `CLAUDE.md` § *Development Commands* for the server-stack vacuity warning;
 `prompt-surface-compaction-session-log:F-11`, whose figure this qualifies.
+
+## F-12 — F-11's figure decayed in under two hours, and the budget is a ratchet rather than the post-collapse ceiling I called it
+
+**Observed:** `F-11` was written 2026-09-09 with `TOTAL 57296` and the line *"budget 57296,
+headroom 0"*. Re-measured after a rebuild the following morning — **under two hours of working
+time later** — the surface is **56485**. Nothing went red. Both instruments simply returned the
+new value and agreed with each other, exactly as they had agreed on the old one.
+
+**Cause, identified not guessed.** The −811 chars are **entirely in `schema`** (49479 → 48668);
+`desc` (7060) and `annot` (757) are unchanged to the byte. That points at `b057cc6d` —
+*"fix(doctor): scope `params_behind_body` and `params_status_drift`; generate the hint from the
+list"* — a hint that had been spelled out in the schema is now derived, and the saving lands in
+exactly the field a schema change would touch.
+
+**The correction to `F-11`, which is the part worth keeping.** `F-11` reported *"budget 57296,
+headroom 0"* and glossed it as a design choice: *"the ceiling was set to the post-collapse total,
+so the next parameter added to any tool reds the gate."* The gate now reads **`budget 56485,
+headroom 0`**. The ceiling was not set once at the collapse — it is a **RATCHET**, re-set to the
+new total whenever the surface shrinks, so `headroom 0` is the standing invariant rather than a
+transient state anyone should read as news. The *form* of `F-11`'s claim survives (the next
+addition still reds the gate); the reasoning under it was wrong, and a reader who took the
+"post-collapse ceiling" framing would expect the number to hold and be surprised twice — once by
+the decay, once by the budget having followed it down.
+
+**`W-18` re-verified and HELD, including its premise.** Release and debug are identical again —
+21 tools, 56485, matching on all six dimensions — so build-invariance survived a rebuild that
+moved the surface. Its premise was re-checked rather than assumed: the live `target/release`
+binary still carries `server-stack` and `local-embed` (72 and 7 matching strings), despite
+shrinking **64.6 MB → 4.6 MB**. **The cause of that size change was NOT determined and is not
+claimed here** — only that it is not a loss of the two features `W-18` depends on.
+
+**What this establishes about the class, and it is the reason for the entry.** `F-11` carried two
+independently-derived instruments agreeing to the byte, and that agreement bought **nothing**
+against decay. Agreement is *synchronic* — it says two readers of the same surface concur at one
+instant. Decay is *diachronic*. When the surface moved, both instruments moved with it and agreed
+just as strongly on the new number, so the very property that made the figure trustworthy is the
+property that guarantees its staleness is silent. **A corroborated number is not a durable one**,
+and this ledger now holds a measured interval for how fast: under two hours, one commit, no alarm.
+
+**What this does not establish.** Not that `F-11` should be edited — it is a dated observation and
+its `**Valid:**` field is doing its job. Not that the ratchet is wrong; re-setting a ceiling to a
+new floor is a defensible design and this entry takes no position on it. And the 811 chars are
+attributed to `b057cc6d` by field-localisation plus commit subject, which is strong but is not the
+same as having diffed the schema before and after.
+
+**Valid:** dated 2026-09-10
+
+**Rests on:** `scripts/probe_tool_surface.py` and `src/server.rs`'s `tool_surface_report_lengths`,
+both re-run 2026-09-10 against both binaries; `b057cc6d` for the cause;
+`prompt-surface-compaction-session-log:F-11` for the superseded figure and the corrected gloss;
+`prompt-surface-compaction-session-log:W-18` for the build-invariance claim this re-confirms.
 
 ## Template for new entries
 
