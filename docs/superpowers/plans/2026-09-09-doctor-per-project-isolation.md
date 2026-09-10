@@ -831,6 +831,41 @@ EOF
 > `-D dead-code` refuses a struct with no consumer, so the unit and its first caller are
 > one commit whether or not the plan splits them.
 
+> **⚠ SUPERSEDED 2026-09-10 by `b057cc6d` — Steps 1–5 below are wrong and were not
+> followed.** The measured half of this task (scope `params_behind_body` and
+> `params_status_drift`) shipped; the mechanism change did not, because two verifications
+> at the bytes falsified it.
+>
+> 1. **Membership must be keyed by CHECK NAME, not by scan.** `frontmatter_id_mismatch`
+>    *and* `frontmatter_id_is_not_a_catalog_id` are emitted from inside
+>    `scan_artifact_paths`' row loop (`:1796`; the function spans `:1756-1968`) — a scan
+>    that must **not** be scoped wholesale, since it owns `outside_roots_by_project`. A
+>    per-scan `admit` gate cannot express *"these two names from that scan, and nothing
+>    else it emits"*, which is precisely what `SCOPED_ROW_CHECKS` does. The const is
+>    load-bearing, not legacy.
+> 2. **Step 3 names the wrong function.** `scan_frontmatter_id_mismatches` has exactly one
+>    non-test caller — `run_fix` at `:1354` — so it is never reached in the report path.
+>    Gating it narrows a repair that is already root-scoped and changes the report by
+>    nothing, while both check names above lose their scoping entirely. The existing guard
+>    `row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not` seeds
+>    `frontmatter_id_mismatch`, so it catches one of the two; `frontmatter_id_is_not_a_catalog_id`
+>    has no scoping test at all and the regression would have shipped silently.
+> 3. **Blast radius unpriced.** The nine scans have ~65 call sites, ~50 of them direct unit
+>    tests on `(&cat.conn)`. "Add `scope: &mut DoctorScope`" is nine signatures and ~56
+>    edits, not nine.
+>
+> Corrections to the numbers and fixtures, measured 2026-09-10 at HEAD `903e2332`:
+> `params_behind_body` is **3** findings (not 4), still 2 foreign — the foreign counts in
+> the prose below are right and the total moved. `seed_params_behind_body` and `ctx_at` do
+> not exist; use `seed_tracker(&cat, id, dir, body, ids)` and `ctx_rooted_at(cat, &root)`.
+> Seeding two byte-identical trackers under different roots fires **two** scoped checks per
+> ledger, not one, so Step 1's `assert_eq!(…, 1)` on the tally is wrong — assert the kept
+> and dropped counts are equal instead, with a `>= 1` floor against `0 == 0`.
+>
+> A defect found while doing it and fixed in the same commit: the hint sentence naming the
+> scoped-out checks listed **six of the seven**, omitting `frontmatter_status_mismatch`. It
+> is now generated from the const, which is typed `&[Check]`.
+
 **Files:**
 - Modify: `src/librarian/tools/doctor.rs:551-587` (delete the const and the `retain`), `:4308` (`scan_params_behind_body`), `:4518` (`scan_params_status_drift`), and the seven scans the const named
 - Test: `src/librarian/tools/doctor.rs` `mod tests`
