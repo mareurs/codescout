@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 132
-entry_high_water_W: 122
+entry_high_water_W: 123
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -185,6 +185,7 @@ entry_high_water_W: 122
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-123 | 2026-09-10 | high | **The live probe named the blast radius a Critical could only hypothesise — and proved the binary BEFORE touching a destructive path.** After `cargo rb` + `/mcp`, one `librarian(action="doctor", fix="reseat_worktree")` call with `confirm` omitted returned `mode: "dry_run"`, empty `reseated` and `would_reseat`, and `scoped_out: {whatsapp-cli: 2}`. Catalog byte-identical either side: 4786 rows, digest `1f8784f932f042bc`. Binary identity was established from COMPILED-IN STRINGS (3 new markers present, both old ones at 0), not from mtime and not from my own tool-list text, which was captured pre-rebuild — that check is what made the probe safe to run at all, since the pre-fix repair took no root. Two gates fired and they are SEPARABLE: `mode` is the `confirm` thread (`ebaae018`), the rows being refused-and-tallied rather than offered is the shared `DoctorScope` (`fe1c41e3`). | Pre-fix that same call would have `artifact::upsert` + `graft::graft_rows`'d TWO NAMED ROWS in an unrelated repository — `whatsapp-cli/docs/issues/2026-08-13-workspace-param-inconsistent-in-worktree.md` and `whatsapp-cli/docs/trackers/session-log.md` — one of them a session log whose entry history lives only in the catalog and never in git, which is the history the reseat feature exists to preserve. Bound, stated rather than glossed: `would_reseat` was empty, so the live call exercised the preview's PRESENCE and the refusal path, never its contents; `reseat_worktree_dry_runs_unless_confirm_is_true` covers that and this entry must not be read as covering it. | validated |
 | W-122 | 2026-09-10 | high | **Second datapoint for `W-116` at 6 sessions / 29 commits — cite that entry, not this one, for the ordering finding.** What is new: all five authors replied and none of the banner's three states described any of them. They enumerate what an AUTHOR can hold, and an operator ack is not an author state — it routes around the question rather than answering it. The remedy is not a fourth line (read too late) but the guard naming the operator route AT REFUSAL, which `:378`'s "THEN" and `:387`'s "IF EVERY" both sequence behind a determination that cannot terminate. Also records where this went further than `W-116` and why that was luck. |
 | W-121 | 2026-09-10 | high | **Resolving a peer's claim at the bytes before relaying it — and the day it REFUTED one, which is the case a run of confirmations cannot demonstrate.** Three applications changed an outgoing message; a fourth rejected a peer's premise that `doc(move)` leaves a stale frontmatter id, killing a design change built on it. Their diagnosis is the transferable half: their file carried no `id:` to rewrite, so their "direct observation" was **monotone under the claim being false**. Mine discriminated by luck of fixture, not method. Within the hour we each read an OUTCOME as evidence of the MECHANISM that would have produced it, in opposite directions. |
 | W-120 | 2026-09-09 | med | **Two pre-commit guards converted shared-tree defects into refusals I could ACT on.** The cluster growth gate refused until `IC-3`'s `**Members:**` named the new member, and its text names the **path** holding the field plus why a roster grep returning 0 means *wrong file*. The shared-index guard then refused a **bare** commit carrying peer `c86ebb51`'s staged archive move, printed `theirs:`/`yours:` and the pathspec form — and named an action **not** to take: *"`git reset` here would take their work out of the index seconds before they commit it"* | Without the first I ship a tagged class member its own ledger never names, so `IC-3`'s query and its written derivations disagree silently. Without the second, `git commit` with no pathspec commits the whole **shared index**, filing a peer's archive move under my message where it is durable and no longer theirs to attribute — and my cleanup reflex would have been the `git reset` the guard names as worse. **Measured ceiling, so this is not an endorsement of the guard set:** the same hook ACCEPTED the commit that red `issue_clusters` for every session, implementing the count and member-naming rules but not one-tag-per-open-bug (filed `ee19d4fb`). Refusal-then-acceptance on one input is what makes "the rule set is a subset" a measurement rather than a guess — a single silence cannot separate a narrow rule set from an inert hook | validated |
@@ -13506,6 +13507,61 @@ it: *"a force-push here would destroy 6 sessions' work to repair a labelling pro
 
 **Status:** validated — but the ceiling above is a design worklist item, not a resolved one. The
 banner needs a fourth line, and the honest wording is the peer's: *overtaken, not resolved*.
+
+## W-123 — The live probe named the blast radius Critical C1 could only hypothesise — 2 rows in an unrelated repo
+
+**Valid:** dated 2026-09-10
+
+**Observed:** After `cargo rb` + `/mcp`, one live `librarian(action="doctor",
+fix="reseat_worktree")` call with `confirm` omitted returned `mode: "dry_run"`,
+`reseated: []`, `would_reseat: []`, and — the part no fixture had —
+`scoped_out: {"/home/marius/work/claude/whatsapp/.claude/worktrees/whatsapp-cli": 2}`.
+The catalog was byte-identical either side: 4786 artifact rows and digest
+`1f8784f932f042bc` before and after (`sha256sum` over `id||abs_path` ordered by `id`).
+
+**The counterfactual, which is why this is a win and not a status line.** Those two rows
+are real and named:
+`whatsapp/.claude/worktrees/whatsapp-cli/docs/issues/2026-08-13-workspace-param-inconsistent-in-worktree.md`
+and `whatsapp/.claude/worktrees/whatsapp-cli/docs/trackers/session-log.md`. Pre-fix,
+`reseat_worktree` read no `confirm` and took no root, so this same call would have
+`artifact::upsert` + `graft::graft_rows`'d **both of them, in an unrelated repository, on
+the call that reported them**. One is a session log, whose entry history lives only in the
+catalog and not in git — exactly the history the reseat feature exists to preserve.
+Critical C1 was written as a hypothetical about "an unrelated repo's row"; this names the
+repo and the two files.
+
+**Two gates, one call, and they are separable.** `mode: "dry_run"` is `ebaae018` (the
+`confirm` thread). The two rows being *refused and tallied* rather than *offered* is
+`fe1c41e3` (the repair sharing the report's `DoctorScope`). Either alone leaves a hole: a
+confirm gate over a machine-wide population still previews foreign rows, and a scoped
+repair that ignores `confirm` still applies on sight.
+
+**What the probe could NOT establish, said plainly.** `would_reseat` was empty, so the live
+call did not exercise the preview's *contents* — only its presence and the refusal path.
+The populated-preview case is covered by
+`reseat_worktree_dry_runs_unless_confirm_is_true`, whose fixture seeds a no-collision row
+and drives both halves. A live probe on a machine with nothing in scope to reseat is
+monotone under "the preview is broken and always empty"; the fixture is what discriminates
+there, and this entry should not be read as covering it.
+
+**Publishing the confirmation as a denominator.** Three probes were run at the end of the
+plan and all came back clean; this is a fourth, at the live tool boundary, after a
+rebuild. Recording a confirming run costs one entry and keeps the population of checks
+honest — the alternative is a ledger holding only catches, which makes the corpus look
+self-correcting.
+
+**Severity/Impact:** high value — the blast radius that was previously unbounded is now
+named, measured at 2 rows in 1 foreign repo on this machine, and closed in both
+directions.
+
+**Status:** validated
+
+**Rests on:** `docs/issues/archive/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
+(the `confirm` bug, fixed `ebaae018`);
+`docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
+(the scope bug, 19-commit cohort); CLAUDE.md § *Testing Discipline* — *loudness is a
+property of a PATH, not of a failure*, of which this is the reached-path case: the guard
+fired, on a real population, at the surface a caller actually calls.
 
 ## Template for new entries
 
