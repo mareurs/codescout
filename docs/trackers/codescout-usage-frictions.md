@@ -2302,3 +2302,35 @@ anchoring commit
 
 **Rests on:** the default window remaining commit-relative, stated at
 `scripts/file-provenance.py:325`, which is the whole mechanism.
+
+
+## Template for new entries
+
+<!-- Insert new U-N entries above this line.
+
+  ONE CALL allocates the id and writes the section:
+
+    doc(action="append_entry", id="c43df94e69ca915f", id_prefix="U",
+             anchor_heading="## Template for new entries",
+             title="<title>", body="**Status:** ...")
+
+  Passing `anchor_heading` + `title` + `body` TOGETHER is what selects that path.
+  Omit any of the three and the call only reserves the id, leaving a
+  reserved-but-unwritten number as a live failure mode.
+
+  Entries here are `### U-N — <title>`. The dash-and-title is not decoration:
+  `link_scan` defines a citable token in that shape and in no other, so a heading
+  without it defines nothing and every citation of that id dangles.
+
+  This ledger has no index table — the headings ARE the index. Never hand-grep the
+  highest U-N: a max read is stale by the time you write, and the allocator already
+  counts ids the body claims.
+
+  `edit_file` is refused here — the ledger declares `entry_prefix`.
+
+  ADDED 2026-09-10. `docs/TAXONOMY.md` had prescribed this exact call, naming this
+  exact anchor, since before the heading existed — so the documented one-call path
+  degraded silently to reserve-only. Found while fixing the same defect in the H-N
+  ledger; 2 of the 6 trackers TAXONOMY names with a concrete artifact id were
+  affected, the other 4 already had the heading.
+-->

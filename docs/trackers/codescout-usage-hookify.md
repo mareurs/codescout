@@ -607,3 +607,35 @@ to catch.
 live, until a Claude Code restart — verified by disagreement rather than assumed: a live `Bash`
 call satisfying every predicate was silent, while the identical input piped straight to the hook
 emitted correctly. Sound code, absent registration.
+
+
+## Template for new entries
+
+<!-- Insert new H-N entries above this line.
+
+  ONE CALL allocates the id and writes the section:
+
+    doc(action="append_entry", id="e522954737601d13", id_prefix="H",
+             anchor_heading="## Template for new entries",
+             title="<title>", body="**Status:** warn | deny | shipped | rejected ...")
+
+  Passing `anchor_heading` + `title` + `body` TOGETHER is what selects that path.
+  Omit any of the three and the call only reserves the id, leaving a
+  reserved-but-unwritten number as a live failure mode.
+
+  Entries here are `### H-N — <title>`. The dash-and-title is not decoration:
+  `link_scan` defines a citable token in that shape and in no other, so a heading
+  without it defines nothing and every citation of that id dangles.
+
+  This ledger has no index table — the headings ARE the index. Never hand-grep the
+  highest H-N: a max read is stale by the time you write, and the allocator already
+  counts ids the body claims.
+
+  `edit_file` is refused here — the ledger declares `entry_prefix`.
+
+  ADDED 2026-09-10, and the reason is worth one line. `docs/TAXONOMY.md` had
+  prescribed this exact call, naming this exact anchor, since before the heading
+  existed. The documented one-call path therefore degraded silently to reserve-only,
+  and two entries (H-10, H-11) were hand-written under precisely the failure mode
+  the third paragraph above warns about.
+-->
