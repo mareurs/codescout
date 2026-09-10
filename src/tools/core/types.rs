@@ -1242,23 +1242,52 @@ pub trait Tool: Send + Sync {
                     // of those shapes must not have this framework write
                     // silently clobber the tool's own. Not reachable today —
                     // no in-tree tool both declares `param_aliases()` and
-                    // writes `corrections` itself — so this branch has no
-                    // live caller yet; it is cheap to get right now rather
-                    // than left as a footgun for whichever tool does.
+                    // writes `corrections` itself — so neither arm below has
+                    // a live caller yet; it is cheap to get both right now
+                    // rather than leave either as a footgun for whichever
+                    // tool does.
+                    //
+                    // Item 1 (2026-09 re-review): `c` is shaped `{params,
+                    // hint}` (Ruling 9), DELIBERATELY mirroring `find.rs`'s
+                    // `{filter, hint}` — one field name, one concept, per the
+                    // ADR. That shared shape is exactly why a flat per-key
+                    // `insert` is wrong: `hint` collides with every in-tree
+                    // writer of `corrections` (find.rs, and any future one
+                    // following the same convention), so the merge below used
+                    // to silently overwrite the tool's own teaching text with
+                    // ours. Nesting our own advisory under the dedicated key
+                    // `param_aliases` — rather than merging key-by-key — makes
+                    // a collision impossible by construction: that key names
+                    // THIS mechanism specifically, so no tool's own
+                    // `corrections` object can already be using it. The cost
+                    // (see the design note in the commit message) is a shape
+                    // that depends on whether `corrections` was already
+                    // present; the `None` arm below is untouched so every
+                    // existing pinned assertion (a tool with no `corrections`
+                    // of its own) keeps the flat `{params, hint}` shape.
                     match obj.get_mut("corrections") {
                         Some(existing) if existing.is_object() => {
-                            if let (Some(existing_obj), Some(c_obj)) =
-                                (existing.as_object_mut(), c.as_object())
-                            {
-                                for (k, v) in c_obj {
-                                    existing_obj.insert(k.clone(), v.clone());
-                                }
+                            if let Some(existing_obj) = existing.as_object_mut() {
+                                existing_obj.insert("param_aliases".to_string(), c.clone());
                             }
                         }
-                        Some(_) => {
-                            // Already holds a non-object shape (e.g.
-                            // update.rs's bare array) — leave it alone rather
-                            // than clobber it with ours.
+                        Some(existing) => {
+                            // Item 2: already holds a non-object shape (e.g.
+                            // update.rs's bare array from a top-level-param
+                            // lift). This USED TO leave it alone — which reads
+                            // as "don't clobber the tool's value" but actually
+                            // means the framework's own advisory is dropped
+                            // entirely, not deferred: nothing else re-attaches
+                            // it. Promote `corrections` into an object that
+                            // keeps the tool's original value under `tool`
+                            // and adds ours under `param_aliases`, so both
+                            // reach the caller instead of one silently
+                            // replacing the other.
+                            let tool_value = existing.take();
+                            *existing = serde_json::json!({
+                                "tool": tool_value,
+                                "param_aliases": c.clone(),
+                            });
                         }
                         None => {
                             obj.insert("corrections".to_string(), c.clone());

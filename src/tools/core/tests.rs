@@ -2489,6 +2489,21 @@ async fn correction_reaches_the_caller_on_the_compact_text_path() {
         t.contains("file_path"),
         "compact-text path dropped the correction — this is the 2026-09-02 bug: {t}"
     );
+    // Item 4: `t.contains("file_path")` above is presence-only and is equally
+    // satisfied by dumping the serialized `{params, hint}` OBJECT into the text
+    // renderer instead of the HINT STRING (`param_notice`) that
+    // `types.rs:1297` actually prefixes — a text renderer cannot carry a JSON
+    // object (that's why `param_notice` and `param_corrections` are built as
+    // two separate values at all), so a regression that substitutes one for
+    // the other would still contain the substring "file_path" (it's nested
+    // inside the serialized `params[0].received` field) and pass the
+    // assertion above unnoticed. A `{` before the compact render is the tell.
+    assert!(
+        !t.contains('{'),
+        "Site B must carry the correction HINT STRING, not a serialized \
+         corrections object — a JSON blob dumped into the text renderer would \
+         still satisfy the substring check above: {t}"
+    );
 }
 
 #[tokio::test]
@@ -2519,6 +2534,135 @@ async fn correction_reaches_the_caller_on_the_buffered_path() {
     );
 }
 
+// ---- Fix round 2: the merge branch at types.rs ~:1235 had NO test at all —
+// every fixture above leaves `val`'s own `corrections` key absent, so only the
+// `None` arm (a flat, uncontested insert) was ever exercised. The two
+// fixtures below are the only in-tree tools that BOTH declare
+// `param_aliases()` AND return their own `corrections` from `call()`, which is
+// what puts the `Some(object)` and `Some(non-object)` arms under test for the
+// first time.
+
+/// MANDATORY GUARD (item 1). Mirrors `find.rs`'s `{filter, hint}` shape
+/// exactly — `hint` INCLUDED — because that is precisely what collides with
+/// the framework's own `{params, hint}` advisory at the merge site. Without
+/// this fixture a regression from the current nested merge back to a flat
+/// per-key `insert` (which silently overwrites one `hint` with the other) is
+/// invisible: no other test in this file gives `val` a pre-existing
+/// `corrections` object to merge into.
+struct AliasAndOwnObjectCorrections;
+
+#[async_trait::async_trait]
+impl Tool for AliasAndOwnObjectCorrections {
+    fn name(&self) -> &str {
+        "alias_and_own_object_corrections"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path")]
+    }
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "path": input["path"],
+            // LOAD-BEARING: the key is `hint`, matching find.rs:1290's own
+            // `{filter, hint}` shape byte-for-byte. Renaming it to anything
+            // else stops exercising the collision this fixture exists for.
+            "corrections": { "filter": [], "hint": "TOOL" },
+        }))
+    }
+}
+
+#[tokio::test]
+async fn merge_preserves_both_the_tools_own_hint_and_the_framework_alias_hint() {
+    let ctx = bare_ctx().await;
+    let out = AliasAndOwnObjectCorrections
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("json path must be valid JSON: {e}: {t}"));
+    assert_eq!(
+        v["corrections"]["hint"], "TOOL",
+        "the tool's OWN corrections.hint must survive the merge — a flat per-key \
+         `insert` of the framework's `{{params, hint}}` object would silently \
+         overwrite it because both shapes use the key `hint`: {t}"
+    );
+    assert!(
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "the framework's own alias-correction advisory must ALSO reach the caller, \
+         nested under a key that cannot collide with the tool's own: {t}"
+    );
+}
+
+/// MANDATORY GUARD (item 2). Mirrors `update.rs:763`'s bare-ARRAY
+/// `corrections` shape (`out["corrections"] = json!(corrections)`) — latent
+/// in-tree today because `update.rs` itself never declares `param_aliases()`,
+/// which is exactly why nothing would have caught this arm silently dropping
+/// the framework's advisory.
+struct AliasAndOwnArrayCorrections;
+
+#[async_trait::async_trait]
+impl Tool for AliasAndOwnArrayCorrections {
+    fn name(&self) -> &str {
+        "alias_and_own_array_corrections"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path")]
+    }
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "path": input["path"],
+            // LOAD-BEARING: a bare array, not an object — this is what routes
+            // through the `Some(_)` non-object arm (types.rs) rather than the
+            // `Some(object)` arm the fixture above exercises. An object here
+            // would silently stop testing item 2 while still passing.
+            "corrections": ["lifted: status"],
+        }))
+    }
+}
+
+#[tokio::test]
+async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory() {
+    let ctx = bare_ctx().await;
+    let out = AliasAndOwnArrayCorrections
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("json path must be valid JSON: {e}: {t}"));
+    assert_eq!(
+        v["corrections"]["tool"][0], "lifted: status",
+        "the tool's own bare-array corrections must survive being promoted to hold \
+         the framework's advisory too: {t}"
+    );
+    assert!(
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "item 2: the framework's advisory must reach the caller even when \
+         `corrections` already held a non-object shape — this arm used to silently \
+         drop it instead: {t}"
+    );
+}
+
 #[tokio::test]
 async fn no_alias_means_no_notice_anywhere() {
     let ctx = bare_ctx().await;
@@ -2545,14 +2689,22 @@ async fn no_alias_means_no_notice_anywhere() {
 /// announced; only the annotation goes missing.
 ///
 /// **Deviation from the task-3 brief's literal snippet**, which drives this scenario
-/// through the real `crate::tools::CreateFile`. As of this task no production tool
-/// overrides `param_aliases()` — that wiring is Task 4/5's job per the plan's file-
-/// responsibility table (`docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md`
-/// line 45) — so `CreateFile.param_aliases()` still returns `&[]` today and a
-/// `file_path` input would never reach `normalize_params` regardless of ordering,
-/// which would make the brief's literal test pass or fail for a reason unrelated to
-/// the ordering it claims to check. `AliasWriteEcho` below declares the alias itself
-/// so the mutation actually exercises what this test names.
+/// through the real `crate::tools::CreateFile`. At the time this test was written, no
+/// production tool overrode `param_aliases()` — that wiring was Task 4/5's job per the
+/// plan's file-responsibility table
+/// (`docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md` line 45) — so
+/// `CreateFile.param_aliases()` returned `&[]` and a `file_path` input would never have
+/// reached `normalize_params` regardless of ordering, which would have made the
+/// brief's literal test pass or fail for a reason unrelated to the ordering it claims
+/// to check. `AliasWriteEcho` below declares the alias itself so the mutation actually
+/// exercises what this test names.
+///
+/// Since superseded: Task 4 landed (`d5f2b736`) and `CreateFile.param_aliases()`
+/// (`src/tools/create_file.rs:52`) now returns `crate::fs::PATH_PARAM_ALIAS_MAP`, so a
+/// `file_path` input to the real `CreateFile` DOES reach `normalize_params` today. That
+/// does not retire this fixture — a dedicated fixture that declares nothing else and
+/// carries no side effects still isolates the ordering claim more cleanly than routing
+/// through a real write tool's full validation path would, so `AliasWriteEcho` stays.
 struct AliasWriteEcho;
 
 #[async_trait::async_trait]
@@ -2681,6 +2833,35 @@ async fn a_write_tool_hard_errors_on_two_racing_aliases_with_no_canonical() {
     assert!(
         msg.contains("'relative_path' = \"b.rs\""),
         "must name the losing key paired with ITS OWN value too: {msg}"
+    );
+    // Item 3: everything above pins the ERROR MESSAGE. The escalation's
+    // GUIDANCE (`RecoverableError::with_hint(...)`, types.rs ~:1031-1041) has
+    // no coverage at all — mutating `with_hint(...)` to `new(...)` drops the
+    // remedy text entirely and every assertion above stays green, because
+    // `Display` only appends guidance when present and neither assertion
+    // above touches that span. Pin the SHAPE of the remedy, not its wording:
+    // it must name BOTH escape routes, and both are things the caller can
+    // actually do (resend with only the canonical key, or resend with only
+    // one of the two conflicting aliases) — so asserting on them is asserting
+    // on an answerable route, not just an arrival. Token-match (not raw
+    // substring) so "path" inside "file_path"/"relative_path" doesn't
+    // falsely count as naming the canonical route.
+    fn names_token(haystack: &str, word: &str) -> bool {
+        haystack
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|tok| tok == word)
+    }
+    let hint = err
+        .downcast_ref::<RecoverableError>()
+        .and_then(|e| e.hint())
+        .expect("the ambiguous-write error must carry a Hint guidance naming the escape routes");
+    assert!(
+        names_token(hint, "path")
+            && names_token(hint, "file_path")
+            && names_token(hint, "relative_path"),
+        "the hint must name the canonical key as the direct-send route AND both racing \
+         aliases as the only-send-one-of route — reds under `with_hint` -> `new`, and \
+         survives a rewording that keeps both routes: {hint}"
     );
 }
 
