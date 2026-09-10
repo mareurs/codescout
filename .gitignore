@@ -151,3 +151,9 @@ docs/**/.codescout/
 
 # SDD isolated worktrees
 .worktrees/
+
+# SDD per-plan scratch workspaces — ledger, task briefs, implementer reports and
+# review packages, one directory per plan. Scratch by design: the git history is
+# the durable record, and `subagent-driven-development` deletes the directory
+# once a plan's final review is clean.
+.superpowers/
