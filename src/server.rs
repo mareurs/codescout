@@ -3743,8 +3743,27 @@ mod tests {
     ///
     /// Report run 2026-09-10 after the `confirm` fix: TOTAL (21 tools) = 56_492,
     /// headroom 0.
+    ///
+    /// **Ratcheted DOWN 2026-09-10, 56_492 → 54_873 (−1_619), by collapsing duplicate
+    /// alias properties out of eight tools' schemas.** `create_file`, `edit_file`,
+    /// `edit_code`, `grep`, `read_file`, `call_graph`, `references` and `symbol_at`
+    /// each used to declare a second schema property purely to spell an alias
+    /// (`file_path`/`relative_path`/`name_path` and friends) — roughly 26 such
+    /// properties across the eight tools, each one a full property block (name, type,
+    /// description) paid on every advertised surface for a fact that is really "this
+    /// argument has two spellings". The Anthropic Messages API rejects a top-level
+    /// `anyOf`/`oneOf`/`allOf` in `input_schema` (the same constraint the 57_296 →
+    /// 56_485 entry above hit for path alternation), so a schema-level union was never
+    /// shippable either — the honest fix was to drop the surface entirely and repair
+    /// aliases at runtime via `Tool::param_aliases()` (`src/tools/core/param_alias.rs`),
+    /// which normalizes an alias to its canonical key before the tool ever sees `Args`.
+    /// This is not a saving earned by trimming prose: the deleted properties were
+    /// redundant schema, not description budget, and the bytes bought nothing a caller
+    /// couldn't already get from the alias resolving silently at call time. Per the rule
+    /// above, the headroom this freed is removed, not banked. Report run 2026-09-10:
+    /// TOTAL (21 tools) = 54_873, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_492;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 54_873;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
