@@ -67,11 +67,19 @@ const BODY_PARAM_HINT: &str = "Pass the code as body=\"...\" — for 'replace' t
 
 /// Read the replacement code, accepting `content` as an alias for `body`.
 ///
-/// `edit_file`'s markdown grammar and `doc(update)` call this argument `content`, `edit_code`
-/// calls it `body`, and callers carry a whole call shape over from one to the other.
-/// The alias costs nothing and removes a round-trip from the find-then-edit path the
-/// Iron Laws prescribe. Canonical `body` wins if both are present, matching
-/// `require_str_param_or_hint`'s precedence.
+/// SECOND layer. `Tool::param_aliases()` below declares `("content", "body")`, and
+/// `call_content` rewrites it onto `body` before `call()` ever runs — so every
+/// caller that goes through the boundary never reaches the `.or_else` here at all.
+/// This fallback is redundant for ALL of it, not just part: unlike `read_file`'s
+/// `output_id`/`file_id` (which the shared `PATH_PARAM_ALIAS_MAP` does not carry,
+/// so that second layer is the only other resolver for those two), every pair
+/// `edit_code` declares — the path family via `require_path_param`, `symbol` via
+/// `name_path` below, and `body` via `content` here — has a matching first-layer
+/// entry. Kept anyway because direct-`call()` tests (bypassing `call_content`)
+/// depend on it. `edit_file`'s markdown grammar and `doc(update)` call this
+/// argument `content`, `edit_code` calls it `body`, and callers carry a whole call
+/// shape over from one to the other — that's the alias's origin. Canonical `body`
+/// wins if both are present, matching `require_str_param_or_hint`'s precedence.
 ///
 /// Unlike `edit_file`'s `action="edit"`, an absent value here is never silently
 /// treated as empty — both call sites refuse. That asymmetry is deliberate: an empty
@@ -120,18 +128,9 @@ impl Tool for EditCode {
             "properties": {
                 "symbol":   {
                     "type": "string",
-                    "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\". Alias: `name_path` (symbols()' name for the same address) is accepted."
+                    "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\"."
                 },
                 "path":     { "type": "string", "description": "File path (relative to project root) containing the symbol." },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["edit_code"] == 3) parses it. This is
-                // the exact site the Round 2 review demonstrated: rewording all three
-                // to e.g. "Same as path" while `required` still names "path" alone
-                // must go red per-tool, not just globally.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
                 "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"], "description": "Edit to perform." },
                 "new_name": {
                     "type": "string",
@@ -144,8 +143,7 @@ impl Tool for EditCode {
                     "type": "string",
                     "description": format!(
                         "{} 'replace': the new symbol body. 'insert': the code to inject. \
-                     Not read by 'rename' or 'remove'. Alias: `content` \
-                     (edit_file's name for the same argument) is accepted.",
+                     Not read by 'rename' or 'remove'.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
                 },
@@ -165,6 +163,16 @@ impl Tool for EditCode {
                 }
             }
         })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[
+            ("file_path", "path"),
+            ("relative_path", "path"),
+            ("file", "path"),
+            ("name_path", "symbol"),
+            ("content", "body"),
+        ]
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -194,8 +202,12 @@ impl Tool for EditCode {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         guard_worktree_write(ctx).await?;
-        // `name_path` is an accepted alias: `symbols` — the tool Iron Law 1 sends you
-        // to first — calls this same address `name_path`, so the value gets copied
+        // `name_path` is an accepted alias, primarily via `Tool::param_aliases()`
+        // below (`("name_path", "symbol")`), which `call_content` rewrites before
+        // `call()` runs. This `require_str_param_or_hint` fallback is a SECOND,
+        // redundant layer — kept only because direct-`call()` tests bypass
+        // `call_content` entirely. `symbols` — the tool Iron Law 1 sends you to
+        // first — calls this same address `name_path`, so the value gets copied
         // straight from that call into this one. Refusing the sibling's spelling made
         // the prescribed find-then-edit handoff cost a round-trip.
         // docs/issues/archive/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md

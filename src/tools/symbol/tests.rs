@@ -7476,6 +7476,24 @@ async fn edit_code_accepts_the_sibling_tools_names_for_symbol_and_body() {
 /// A refusal has to teach the alias, or the alias only helps callers who already
 /// know it exists — which is nobody, since the mistake is made by callers reasoning
 /// from the sibling tool.
+///
+/// This test used to also assert that the SCHEMA prose (the `symbol` and `body`
+/// property descriptions) named `name_path` / `content` — "so a caller can
+/// discover them without first triggering a refusal." Amendment 2026-09-10 to
+/// `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` forbids exactly
+/// that: a co-equal alias mention makes `required: ["symbol"]` / a `body`
+/// requirement read like something an alias alone can satisfy, and the schema
+/// must advertise exactly one name per concept. Those two assertions are
+/// deleted, not weakened — discovery now happens through the `corrections`
+/// advisory `call_content` attaches when `param_aliases()` rewrites `name_path`
+/// or `content` onto the canonical key, and that is *strictly better* than a
+/// co-equal schema property: it arrives at the moment of the actual mistake and
+/// names the canonical parameter directly, where the property only worked if
+/// the caller read a schema they had, by definition, already misread. The two
+/// refusal assertions below stay: they check what `require_str_param_or_hint`
+/// itself names as its own accept-list at the layer that emits it, which is a
+/// different claim from a hand-copied schema mention and cannot go stale
+/// relative to the thing it describes.
 #[tokio::test]
 async fn edit_code_refusals_name_the_accepted_aliases() {
     let dir = tempdir().unwrap();
@@ -7505,24 +7523,6 @@ async fn edit_code_refusals_name_the_accepted_aliases() {
     assert!(
         msg.contains("content"),
         "the missing-body refusal must name the accepted alias; got: {msg}"
-    );
-
-    // And the schema must advertise both, so a caller can discover them without
-    // first triggering a refusal.
-    let schema = EditCode.input_schema();
-    assert!(
-        schema["properties"]["symbol"]["description"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("name_path"),
-        "schema must advertise the `symbol` alias"
-    );
-    assert!(
-        schema["properties"]["body"]["description"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("content"),
-        "schema must advertise the `body` alias"
     );
 }
 

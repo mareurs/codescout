@@ -237,12 +237,6 @@ impl Tool for References {
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
                 "path": { "type": "string", "description": "File containing the symbol" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["references"] == 3) parses it.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
@@ -250,6 +244,11 @@ impl Tool for References {
             }
         })
     }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
+    }
+
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let name_path = require_str_param(&input, "symbol")?;
         let rel_path = require_path_param(&input)?;

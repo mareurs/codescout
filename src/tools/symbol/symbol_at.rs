@@ -363,12 +363,6 @@ impl Tool for SymbolAt {
             // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
-                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
-                // src/server.rs's required_names_no_key_that_has_a_declared_alias
-                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["symbol_at"] == 3) parses it.
-                "file_path": { "type": "string", "description": "Alias for path" },
-                "relative_path": { "type": "string", "description": "Alias for path" },
-                "file": { "type": "string", "description": "Alias for path" },
                 "line": { "type": "integer", "description": "1-indexed line number" },
                 "col": { "type": "integer", "description": "1-indexed column. Preferred — LSP-native, no identifier-mismatch risk. When known (e.g. from symbols), pass directly." },
                 "identifier": { "type": "string", "description": "Optional fallback when col not known. The substring is searched on the line; mismatch errors. Prefer col." },
@@ -379,6 +373,10 @@ impl Tool for SymbolAt {
                 }
             }
         })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
