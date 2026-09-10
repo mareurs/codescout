@@ -142,6 +142,23 @@ Say what is known and stop. The mismatch is certain; the cause is not. Either:
 The repair itself is correct either way: rewriting the `id:` to the catalog row's id is right
 whatever minted the old value. Only the explanation is wrong.
 
+**Why the wrong explanation costs more than an imprecise one, which is the argument for doing the
+cheap half now rather than waiting for the trial-hash.** Since `ec9e63d0` (2026-08-16) `doc(move)`
+repairs the frontmatter id in the same call as the graft (`mv.rs:160`, test
+`move_rewrites_the_frontmatter_id_it_just_invalidated`), so the move route **cannot produce this
+finding** — and has been unable to for the entire life of every file the message has fired on. A
+message naming as its sole cause a route the tool cannot take is not merely imprecise: it is
+**unfalsifiable in the reader's hands**, because checking the named cause always exonerates and
+never redirects. `git log --follow` comes back clean, the reader concludes the message is confused
+rather than that they are looking in the wrong place, and the actual cause is never reached from
+here. That is strictly worse than saying nothing about cause, and it is what the disjunction above
+fixes for zero derivation cost.
+
+The unreachability observation is sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`'s; the
+consequence drawn from it — the second clause, that the reader's check cannot fail — is sessionId
+`c86ebb51-7ae3-477d-b755-f25db6180782`'s. Split because the halves were earned separately and
+crediting them flat would read as one finding.
+
 Fix SHA: *(not yet fixed)*
 Patch-id: *(not yet fixed)*
 
