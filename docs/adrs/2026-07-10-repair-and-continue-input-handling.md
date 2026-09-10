@@ -188,11 +188,13 @@ object-shaped `corrections` gets a `param_aliases` key added; a non-object
 **Two paths this does NOT cover, and both matter more than the sentence above.**
 The `OutputForm::Text` compact render carries the advisory as a `⚠`-prefixed
 hint STRING with **no `corrections` key at all** — a text renderer cannot carry an
-object, so that asymmetry is by design, but it means two of the four
-alias-declaring tools (`read_file` and `grep`) deliver no key on the path they
-mostly take. And the buffered envelope, while it does carry the framework's
-advisory, drops a tool's OWN `corrections` entirely — a separate open defect
-tracked in
+object, so that asymmetry is by design, but it means five of the eight
+alias-declaring tools (`read_file`, `grep`, `references`, `symbol_at`,
+`call_graph` — every alias-declaring tool whose `output_form()` is
+`OutputForm::Text`; only `create_file`, `edit_file` and `edit_code` are
+`OutputForm::Json`) deliver no key on the path they mostly take. And the
+buffered envelope, while it does carry the framework's advisory, drops a
+tool's OWN `corrections` entirely — a separate open defect tracked in
 `docs/issues/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
 
 **Unchanged by this amendment — the DECISION, whose factual claim has since gone

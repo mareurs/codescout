@@ -3063,6 +3063,157 @@ mod tests {
         assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
     }
 
+    /// Item 1, Opus review of Task 5 (2026-09-10): nothing previously drove
+    /// `normalize_params` over any REAL tool's `param_aliases()` map. Every
+    /// existing exerciser used a synthetic fixture map instead — `param_alias.rs`'s
+    /// own unit tests build a local `const MAP`, and Task 3's tests in
+    /// `src/tools/core/tests.rs` do the same — or, like the two gates directly
+    /// above, read `input_schema()`/`param_aliases()` and never call
+    /// `normalize_params` at all. That hole was opened by `0711600d`, which deleted
+    /// `every_declared_alias_is_normalized_and_announced` on the argument that
+    /// `the_dispatch_boundary_normalizes_and_announces_for_real_tool_calls` below
+    /// subsumes it. True for the four tools that gate drives (`grep`, `read_file`,
+    /// `create_file`, `edit_file`) — false for `edit_code`, `references`,
+    /// `symbol_at` and `call_graph`, which are LSP-blocked at that boundary (see
+    /// its own "NOT covered" paragraph), so for those four nothing remained.
+    ///
+    /// **`EXPECTED_ALIAS_PAIRS` below is HARDCODED, deliberately independent of
+    /// `t.param_aliases()`, and that independence is the entire point.** A first
+    /// draft of this gate derived "the declared canonical" from the very
+    /// `param_aliases()` array under test — so `normalize_params` was checked
+    /// for internal self-consistency only, and mutating `edit_code`'s
+    /// `("content", "body")` to `("content", "symbol")` moved BOTH the actual
+    /// output and the "expected" value together, staying green. Verified by
+    /// running that draft against the mutation before replacing it: no red.
+    /// The table below is transcribed by hand from each tool's live
+    /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
+    /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
+    /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
+    /// counts (28 pairs, 8 tools) — so a live-array mutation and this table now
+    /// disagree, which is what makes the check non-vacuous.
+    ///
+    /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic
+    /// single-key input through `normalize_params`, driven by the tool's CURRENT
+    /// `param_aliases()` (never a copy of this table), and assert the value
+    /// lands under the HARDCODED `canonical` and that `correction_notice` names
+    /// both keys. PER-MEMBER, not per-tool: a per-tool loop that only checked
+    /// "some pair normalized" would miss a same-count key-identity substitution,
+    /// exactly the gap `read_file_still_declares_its_two_extra_alias_pairs`'s own
+    /// comment names one layer up, for one tool only.
+    ///
+    /// Each synthetic input carries ONLY the one `received` key under test, so a
+    /// tool with several aliases sharing one canonical (`read_file`'s five all
+    /// resolve to `path`) never manufactures the `conflicted`/`superseded_by`
+    /// states `normalize_params`'s own unit tests already cover — this gate's
+    /// claim is narrower and orthogonal: THIS pair, alone, normalizes correctly.
+    ///
+    /// **Counterfactual, observed RED, not committed as a mutation test:**
+    /// changing `edit_code`'s `("content", "body")` to `("content", "symbol")` in
+    /// `src/tools/symbol/edit_code.rs` reds this gate — the live array now sends
+    /// the sentinel to `symbol`, which disagrees with this table's hardcoded
+    /// `("edit_code", "content", "body")` entry — while leaving
+    /// `every_declared_alias_is_absent_from_the_schema` and
+    /// `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL` green: both `body` and `symbol` stay
+    /// advertised schema properties and the pair count is unchanged, so neither
+    /// the per-tool table nor the schema-presence check sees anything wrong.
+    /// That three-way split (this gate red, those two green) is the finding
+    /// motivating this gate; this doc comment records it as evidence, not as
+    /// something this file executes on every run.
+    const EXPECTED_ALIAS_PAIRS: &[(&str, &str, &str)] = &[
+        ("edit_file", "file_path", "path"),
+        ("edit_file", "relative_path", "path"),
+        ("edit_file", "file", "path"),
+        ("call_graph", "file_path", "path"),
+        ("call_graph", "relative_path", "path"),
+        ("call_graph", "file", "path"),
+        ("references", "file_path", "path"),
+        ("references", "relative_path", "path"),
+        ("references", "file", "path"),
+        ("symbol_at", "file_path", "path"),
+        ("symbol_at", "relative_path", "path"),
+        ("symbol_at", "file", "path"),
+        ("grep", "file_path", "path"),
+        ("grep", "relative_path", "path"),
+        ("grep", "file", "path"),
+        ("create_file", "file_path", "path"),
+        ("create_file", "relative_path", "path"),
+        ("create_file", "file", "path"),
+        ("edit_code", "file_path", "path"),
+        ("edit_code", "relative_path", "path"),
+        ("edit_code", "file", "path"),
+        ("edit_code", "name_path", "symbol"),
+        ("edit_code", "content", "body"),
+        ("read_file", "file_path", "path"),
+        ("read_file", "relative_path", "path"),
+        ("read_file", "file", "path"),
+        ("read_file", "output_id", "path"),
+        ("read_file", "file_id", "path"),
+    ];
+
+    #[tokio::test]
+    async fn every_declared_alias_pair_normalizes_to_its_own_canonical() {
+        assert_eq!(
+            EXPECTED_ALIAS_PAIRS.len(),
+            EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL
+                .iter()
+                .map(|(_, n)| n)
+                .sum::<usize>(),
+            "EXPECTED_ALIAS_PAIRS's length must match the per-tool counts above — a \
+             mismatch means this table and that one now disagree about the population"
+        );
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        for (tool_name, received, canonical) in EXPECTED_ALIAS_PAIRS {
+            let Some(t) = server.tools.iter().find(|t| t.name() == *tool_name) else {
+                offenders.push(format!("{tool_name}: not found in the registry"));
+                continue;
+            };
+            let aliases = t.param_aliases();
+            let mut input = Value::Object({
+                let mut m = serde_json::Map::new();
+                m.insert(received.to_string(), Value::String("sentinel-value".into()));
+                m
+            });
+            let corrections = crate::tools::param_alias::normalize_params(&mut input, aliases);
+            let matches: Vec<_> = corrections
+                .iter()
+                .filter(|c| c.received == *received)
+                .collect();
+            if matches.len() != 1 {
+                offenders.push(format!(
+                    "{tool_name}: ({received:?}, {canonical:?}) -> expected exactly one \
+                     Correction for {received:?} from the tool's CURRENT param_aliases(), got \
+                     {}: {aliases:?}",
+                    matches.len()
+                ));
+                continue;
+            }
+            let c = matches[0];
+            if c.canonical != *canonical {
+                offenders.push(format!(
+                    "{tool_name}: {received:?} normalized to canonical {:?}, expected {canonical:?} \
+                     — param_aliases() no longer matches EXPECTED_ALIAS_PAIRS",
+                    c.canonical
+                ));
+            }
+            if input.get(*canonical).and_then(Value::as_str) != Some("sentinel-value") {
+                offenders.push(format!(
+                    "{tool_name}: {received:?} -> {canonical:?} did not carry the caller's \
+                     value: {input}"
+                ));
+            }
+            let notice = crate::tools::param_alias::correction_notice(t.name(), &corrections);
+            match notice {
+                Some(n) if n.contains(received) && n.contains(&format!("'{canonical}'")) => {}
+                other => offenders.push(format!(
+                    "{tool_name}: correction_notice for ({received:?}, {canonical:?}) did not \
+                     name both keys: {other:?}"
+                )),
+            }
+        }
+        assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
+    }
+
     /// Replaces `every_declared_alias_is_normalized_and_announced` and
     /// `call_content_overriders_declare_no_aliases` (both deleted): the two were proxies
     /// for one claim — the dispatch boundary normalizes and announces for every
@@ -3105,10 +3256,16 @@ mod tests {
     /// **NOT covered, and why:** `call_graph`, `references`, `symbol_at` and `edit_code`
     /// all declare aliases too, but their `call()` paths need a live LSP session —
     /// `make_server` below gives an empty tempdir with no language server attached, and no
-    /// LSP-fixture harness exists in this module. Their aliases are still exercised at the
-    /// pure-function and per-tool-count level by `every_declared_alias_is_absent_from_the_
-    /// schema` / `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, but NOT at the real dispatch
-    /// boundary. That gap is real and is not closed here.
+    /// LSP-fixture harness exists in this module. Their aliases ARE exercised at the
+    /// pure-function level, over each tool's REAL `param_aliases()` map, by
+    /// `every_declared_alias_pair_normalizes_to_its_own_canonical` above — `normalize_params`
+    /// needs no language server, so that gate is not LSP-blocked the way a real `call()`
+    /// is. `every_declared_alias_is_absent_from_the_schema` / `EXPECTED_ALIAS_PAIR_COUNTS_
+    /// BY_TOOL` cover a different claim (schema presence/absence and pair counts, never a
+    /// call into `normalize_params`) and do not provide this. What remains genuinely NOT
+    /// covered for these four is the real dispatch boundary itself — `call_content`
+    /// end-to-end through a live `call()` — which still needs the LSP-fixture harness this
+    /// module does not have. That narrower gap is real and is not closed here.
     ///
     /// **AND A FOURTH RENDER PATH IS UNCOVERED FOR EVERY TOOL, including the four above:
     /// the ERROR path.** `call_content` consumes the advisory at three sites and all three

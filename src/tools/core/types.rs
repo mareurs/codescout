@@ -1304,12 +1304,15 @@ pub trait Tool: Send + Sync {
                     // because that is what the concept is called here, and the
                     // unconditional insert below would silently destroy it.
                     // Verified zero today, not
-                    // assumed zero: `param_aliases()` is implemented only by
-                    // `CreateFile`, `EditFile`, `Grep`, `ReadFile` (none of
-                    // which write their own `corrections`), and `corrections`
-                    // is written only by `find.rs:1290` and `update.rs:763`,
-                    // both under `doc`, which declares no aliases. Re-verify
-                    // this pairing before trusting it stays empty — a false
+                    // assumed zero: `param_aliases()` is now implemented by
+                    // eight tools — `CreateFile`, `EditFile`, `Grep`,
+                    // `ReadFile`, `EditCode`, `References`, `SymbolAt`,
+                    // `CallGraph` (the last four added after this comment was
+                    // first written, and re-checked here) — and none of the
+                    // eight writes its own `corrections`; `corrections` is
+                    // written only by `find.rs:1290` and `update.rs:763`, both
+                    // under `doc`, which declares no aliases. Re-verify this
+                    // pairing before trusting it stays empty — a false
                     // "impossible" claim here is worse than none, per
                     // CLAUDE.md's Testing Discipline: it is what stops the
                     // next reader from checking.

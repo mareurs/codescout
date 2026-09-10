@@ -7480,20 +7480,50 @@ async fn edit_code_accepts_the_sibling_tools_names_for_symbol_and_body() {
 /// This test used to also assert that the SCHEMA prose (the `symbol` and `body`
 /// property descriptions) named `name_path` / `content` — "so a caller can
 /// discover them without first triggering a refusal." Amendment 2026-09-10 to
-/// `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` forbids exactly
-/// that: a co-equal alias mention makes `required: ["symbol"]` / a `body`
-/// requirement read like something an alias alone can satisfy, and the schema
-/// must advertise exactly one name per concept. Those two assertions are
-/// deleted, not weakened — discovery now happens through the `corrections`
-/// advisory `call_content` attaches when `param_aliases()` rewrites `name_path`
-/// or `content` onto the canonical key, and that is *strictly better* than a
-/// co-equal schema property: it arrives at the moment of the actual mistake and
-/// names the canonical parameter directly, where the property only worked if
-/// the caller read a schema they had, by definition, already misread. The two
-/// refusal assertions below stay: they check what `require_str_param_or_hint`
-/// itself names as its own accept-list at the layer that emits it, which is a
-/// different claim from a hand-copied schema mention and cannot go stale
-/// relative to the thing it describes.
+/// `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` did not FORBID that
+/// mention — the alias name sat in a trailing sentence inside the canonical
+/// property's OWN description, never as a separate schema property, so
+/// `required: ["symbol", "action"]` stayed true throughout and no top-level
+/// `anyOf` pressure ever existed here (unlike the path family the amendment was
+/// written about). `body` itself appears in no `required` array at all — its
+/// obligation is prose, via `required_for(BODY_REQUIRED_ACTIONS)`. The mention
+/// was simply out of scope for Amendment 2 (which scopes itself to the path
+/// family) and was deleted for consistency with its one-name-per-concept rule,
+/// not because the amendment reached this file and forbade it.
+///
+/// Those two assertions are deleted, not weakened — discovery now happens
+/// through the `corrections` advisory `call_content` attaches when
+/// `param_aliases()` rewrites `name_path` or `content` onto the canonical key.
+/// That is a DIFFERENT teaching channel for a different audience, not a
+/// strictly-better replacement for the same one: the advisory fires only on a
+/// call that already sent the alias, so it never helps a caller who has not yet
+/// guessed one; the (deleted) schema mention only ever helped a caller reading
+/// the schema cold, before making any call at all. Each covers a moment the
+/// other does not.
+///
+/// The two refusal assertions below stay, but not for the reason a prior version
+/// of this comment claimed. **That claim was false and has been corrected**: it
+/// said these assertions "check what `require_str_param_or_hint` itself names as
+/// its own accept-list at the layer that emits it" and therefore "cannot go
+/// stale relative to the thing it describes." Checked against the function
+/// (`src/tools/core/params.rs:139-159`): `require_str_param_or_hint` never reads
+/// its `aliases` slice to build either the error or the hint. The error is the
+/// generic `format!("missing '{name}' parameter", ...)`, naming nothing from
+/// `aliases`; the hint is whatever literal string the CALLER passed in, verbatim
+/// — here, a hand-written sentence in `edit_code.rs`'s `call()` (naming
+/// `name_path`) and the separate `BODY_PARAM_HINT` const (naming `content`).
+/// Both merely agree with the real accept-lists (`&["name_path"]`, the alias
+/// driving `content`) TODAY. Nothing ties them together: shrinking either
+/// accept-list to `&[]` would leave the hand-written hint still naming the old
+/// alias, and both assertions below would stay green regardless.
+///
+/// The rule this comment now follows, replacing the false one above:
+/// **a refusal may MENTION an alias; it may not ENUMERATE the alias set.** A hint
+/// string is free to name one specific alias by hand, same as any other prose,
+/// and that is all these two assertions verify — that the two hand-written hints
+/// still contain the words `name_path` and `content`. Neither assertion, and
+/// nothing in `require_str_param_or_hint`, derives that mention from the live
+/// accept-list, so neither can catch the accept-list and the hint drifting apart.
 #[tokio::test]
 async fn edit_code_refusals_name_the_accepted_aliases() {
     let dir = tempdir().unwrap();
