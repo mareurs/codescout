@@ -78,12 +78,20 @@ def class_files(source: str) -> list:
 
     Source-matching is load-bearing and is the reason this is not a bare glob: the hook's
     whole point is comparing what is STAGED against what is on disk, and a disk glob would
-    silently mix the two -- reporting a class file's worktree content against an index-sourced
-    ledger. `head` and `index` therefore go through git, and only `worktree` touches disk.
+    silently mix the two -- reporting a per-class file's worktree content against an
+    index-sourced ledger. `head` and `index` therefore go through git, and only `worktree`
+    touches disk.
 
-    Tracked-only for the git sources, matching the rest of this hook: an untracked class file
-    is invisible here, so a local green defers rather than clears. That is the documented
+    Tracked-only for the git sources, matching the rest of this hook: an untracked per-class
+    file is invisible here, so a local green defers rather than clears. That is the documented
     posture (see the module header), not an oversight.
+
+    Deduplicated for the git sources: `git ls-files` reports index ENTRIES, so a file unmerged
+    in an in-flight merge is listed once per stage. `full_ledger_text` CONCATENATES every path
+    this returns, so a duplicate splices one cluster's text into the ledger three times, and
+    `parse_bare_n_claims` -- which extends a list rather than a set -- then reports each of its
+    violations three times in the refusal. `ls-tree` needs no such guard: a tree lists each path
+    once, having no stages.
     """
     if source == "head":
         out = _git("ls-tree", "-r", "--name-only", "HEAD", LEDGER_DIR)
@@ -92,7 +100,7 @@ def class_files(source: str) -> list:
     else:
         d = pathlib.Path(LEDGER_DIR)
         return sorted(_repo_path(p) for p in d.glob("*.md")) if d.is_dir() else []
-    return sorted(p for p in out.splitlines() if p.endswith(".md"))
+    return sorted({p for p in out.splitlines() if p.endswith(".md")})
 
 
 def class_file_for(slug: str, source: str) -> str:
@@ -199,12 +207,28 @@ def read(path: str, source: str) -> str | None:
 
 
 def bug_files() -> list[str]:
-    """Mirrors `tracked_all_bug_files` -- the INDEX population, so untracked files are excluded."""
-    return [
-        p
-        for p in _git("ls-files", "docs/issues").splitlines()
-        if p.endswith(".md") and not p.endswith("_TEMPLATE.md")
-    ]
+    """Mirrors `tracked_all_bug_files` -- the INDEX population, so untracked files are excluded.
+
+    Deduplicated, and here that is not cosmetic. `git ls-files` reports index ENTRIES: while a
+    merge holds an unresolved conflict the unmerged path is listed once per stage (1/2/3), so one
+    bug file arrives three times. `actual_counts` below turns this into a PER-CLASS TALLY, so a
+    single conflicted file under `docs/issues/` trebles a class's count and this hook then REFUSES
+    the commit over a number nobody can reproduce once the merge resolves. A gate that blocks
+    work, not a test that reports -- which is why this site outranks the Rust one it mirrors.
+
+    NEITHER PINNING MECHANISM REACHES IT. `the_hook_script_agrees_with_this_gate` runs in a clean
+    tree, where the deduplicated and un-deduplicated forms are byte-identical. And
+    `probe-caveat-density.py`'s `_self_check` says so about itself: it and this gate SHARE this
+    function, so a defect inside it makes both sides agree, which at the point of use is
+    indistinguishable from corroboration.
+    """
+    return sorted(
+        {
+            p
+            for p in _git("ls-files", "docs/issues").splitlines()
+            if p.endswith(".md") and not p.endswith("_TEMPLATE.md")
+        }
+    )
 
 
 def valid_slugs(ledger: str) -> set[str]:

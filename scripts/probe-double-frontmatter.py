@@ -62,9 +62,16 @@ REPO = subprocess.run(
 
 def scan():
     """Every tracked .md whose body opens with a real second frontmatter mapping."""
-    files = subprocess.run(
-        ["git", "ls-files", "*.md"], capture_output=True, text=True, cwd=REPO
-    ).stdout.split()
+    # `sorted(set(...))`: `git ls-files` reports index ENTRIES, so a path unmerged in an
+    # in-flight merge is listed once per stage (1/2/3). `hits` is reported as a COUNT by the
+    # caller, and under --apply the same file would be rewritten once per stage.
+    files = sorted(
+        set(
+            subprocess.run(
+                ["git", "ls-files", "*.md"], capture_output=True, text=True, cwd=REPO
+            ).stdout.split()
+        )
+    )
     found = []
     for rel in files:
         path = pathlib.Path(REPO, rel)
