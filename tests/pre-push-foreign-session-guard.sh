@@ -922,15 +922,54 @@ eq  "tag push: still skipped"                 "$EC" 0
 run "$ALICE" - "refs/heads/main $ZERO refs/heads/main $FIELD_BASE"
 eq  "branch deletion: still skipped (INERT -- see comment)" "$EC" 0
 
-# ROW 5 IS DELIBERATELY ABSENT, and named so nobody credits this block with covering it.
-# A pusher who owns ZERO commits in the range has no sha to name, so "use a refspec at
-# every rung" is not merely disarming (row 2) but INAPPLICABLE -- and the reader's next
-# move is the branch form the same text warns against. That is a defect in the MESSAGE,
-# not in this filter, and it survives the fix asserted above: register 2 of three in the
-# bug file. Contributed by sessionId 26cb9b5b-2c9c-489e-97d9-3a907c8b2941 from being in
-# that state on a live push. When the message gains that branch, assert here that the
-# refusal shown to a zero-commit pusher routes to ASK THE RUNG'S AUTHOR and names no
-# refspec they cannot form.
+# ROW 5 -- THE REMEDY BRANCHES ON THE READER, not only on the range. A pusher who owns ZERO
+# commits in the range has no sha to name, so "use a refspec at every rung" is not merely
+# disarming (row 2) but INAPPLICABLE -- and the reader's next move is the branch form the same
+# text warns against. Register 2 of three in the parent bug; contributed by sessionId
+# 26cb9b5b-2c9c-489e-97d9-3a907c8b2941 from being in that state on a live push.
+#
+# ONE FIXTURE, ONE VARIABLE: rows 5a and 5b push the IDENTICAL range and differ only in who is
+# pushing. That is what makes the pair discriminating rather than two separate observations --
+# nothing about the commits, the ladder or the rung moves between them, so any difference in
+# the banner is attributable to $me alone.
+#
+# 5a IS THE PAIRED CONTROL AND IS NOT OPTIONAL. `hasnt <your-sha>:` on its own is monotone
+# under deleting the refspec advice for EVERYBODY, which is the fix the bug file explicitly
+# rejects (at mine_n >= 1 the advice prevents a real hazard). Only the pair reds in both
+# directions.
+#
+# MEASURED, both directions, 2026-09-10, on a COPY of the guard so the live one was never
+# briefly wrong on a tree four sessions share: forcing the branch always-true (the pre-fix
+# behaviour) reds 5b's three assertions and leaves 5a green; forcing it always-false reds 5a's
+# two and leaves 5b green. Each direction has its own witness.
+new_repo
+commit "$ALICE" "alice base"
+R5_BASE="$(sha)"
+commit "$BOB" "bob foreign"
+commit "$ALICE" "alice on top"
+R5_TIP="$(sha)"
+
+# Row 5a -- pusher owns 1 of the 2. The refspec sentence must survive.
+run "$ALICE" - "refs/heads/main $R5_TIP refs/heads/main $R5_BASE"
+eq    "owns a rung: refused"                      "$EC" 1
+has   "owns a rung: refspec advice kept"          "$OUT" "git push origin <your-sha>:main"
+hasnt "owns a rung: not told they own nothing"    "$OUT" "YOU AUTHOR 0 OF"
+
+# Row 5b -- same range, a pusher who authored none of it.
+run "$CAROL" - "refs/heads/main $R5_TIP refs/heads/main $R5_BASE"
+eq    "owns nothing: refused"                     "$EC" 1
+hasnt "owns nothing: names no refspec to form"    "$OUT" "<your-sha>:"
+has   "owns nothing: says so, with the unit"      "$OUT" "0 OF THE 2 COMMIT(S)"
+has   "owns nothing: routes to the rung's author" "$OUT" "ASK THAT AUTHOR TO PUSH IT THEMSELVES"
+# ANSWERABILITY, not merely arrival (OB-20's measured ceiling): the party named must be asked
+# a question whose answers their state can actually occupy, so the three-state enumeration has
+# to reach this branch too. "Ask them" without it reproduces the unanswerable binary exactly.
+# THIS ONE IS INERT UNDER BOTH BRANCH MUTATIONS ABOVE -- ANNOTATED SO NOBODY CREDITS IT WITH
+# COVERING THE BRANCH. The three-state block is emitted unconditionally, outside $remedy, so it
+# survives either polarity. What it does guard is a future edit that moves the enumeration
+# INTO the mine_n >= 1 branch, or drops it -- the regression the ceiling predicts, and the one
+# no assertion in this block would otherwise see.
+has   "owns nothing: and the three states reach it" "$OUT" "not withheld, UNCLEARED"
 
 echo
 echo "-------------------------------------------"

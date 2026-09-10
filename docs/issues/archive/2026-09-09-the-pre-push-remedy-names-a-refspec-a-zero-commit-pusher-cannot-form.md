@@ -1,7 +1,7 @@
 ---
-id: '194220fd8464b68d'
+id: 84589e9e5a644ec7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the pre-push remedy names a refspec a zero-commit pusher cannot form, and steers them to the branch push it warns against'
 owners:
 - marius
@@ -99,56 +99,56 @@ inventing a denominator — the same refusal this corpus made for the parent bug
 
 ## Fix
 
-Not applied. Branch the remedy on whether the pusher authors anything in the range, which the
-guard already knows:
+Applied. The guard counts the pusher's own commits in the range (`mine_n`, incremented in the
+same scan that builds `commit_rows`) and branches the remedy paragraph on it, into `$remedy`,
+before the banner heredoc:
 
-- **owns ≥1 commit** — current text, unchanged. The refspec advice is correct and load-bearing.
-- **owns 0 commits** — do not name a refspec. Route to *ask the author of the rung below*, and say
-  explicitly that there is no push of their own to make, so a branch push here publishes only
-  someone else's work.
+- **owns >= 1 commit** — the previous text verbatim, refspec advice included. It is correct
+  and load-bearing there, and register 1's field-3 repair is what finally lets the guard see
+  that push form.
+- **owns 0 commits** — no refspec is named. The banner states the count with its unit (*"YOU
+  AUTHOR 0 OF THE N COMMIT(S) IN THIS PUSH"*), says there is nothing of theirs to send, routes
+  to *ASK THAT AUTHOR TO PUSH IT THEMSELVES*, and names the branch push as the move the state
+  invites and the one to refuse.
 
-**Do not fix by deleting the refspec sentence** — for a pusher who does own commits it prevents a
-real hazard, and register 1's repair now makes it a form the guard can see.
+The three-state enumeration is emitted **outside** `$remedy` and therefore reaches both
+branches — which is the answerability half rather than the arrival half, and the reason the
+zero-commit route names a party whose reply has a branch the reader can use.
 
-
+**`docs/RELEASE.md` § *Publishing a stack several sessions wrote* was changed in the same
+commit, and that half is not optional.** The banner's closing line cites that page for the
+derivations, so a remedy branched in the guard and unconditional in the page sends a reader
+from a correct refusal straight to the sentence the refusal was rewritten to avoid. Branching
+one surface and not the other would have left the defect reachable by the guard's own
+footnote.
 ## Tests added
 
-None — nothing is fixed. This is row 5 of the plan in
-`tests/pre-push-foreign-session-guard.sh` § *which FIELD names the branch depends on the push
-form*, where it is already written up as deliberately absent so no reader credits that block with
-covering it.
+Row 5 of `tests/pre-push-foreign-session-guard.sh` § *which FIELD names the branch depends on
+the push form*, which previously carried a `DELIBERATELY ABSENT` annotation. Now 8 assertions
+in two rows over **one fixture with one variable**: 5a and 5b push the identical range and
+differ only in `$me`, so nothing about the commits, the ladder or the rung moves between them
+and any difference in the banner is attributable to the pusher alone.
 
-The assertion, when the branch exists: a refusal shown to a pusher authoring **0** commits in the
-range must route to *ask the rung's author* and must **not** contain a refspec form. Pair it with
-the ≥1 case still naming one — otherwise the assertion is monotone under the refspec advice being
-deleted for everybody, which is the fix this file rejects.
+- **5a (owns 1 of 2)** — refused; `git push origin <your-sha>:main` still present; does not
+  say *"YOU AUTHOR 0 OF"*.
+- **5b (owns 0 of 2, same range)** — refused; contains no `<your-sha>:`; states
+  `0 OF THE 2 COMMIT(S)`; routes to *ASK THAT AUTHOR TO PUSH IT THEMSELVES*; the three-state
+  enumeration reaches it.
 
-**There is an in-repo exemplar for this exact shape — copy it rather than inventing one.**
-`src/librarian/tools/doctor.rs:7455-7461` asserts `v.detail.contains("delete")` on a drift
-finding's catalog-is-right branch, and writes the reason into the failure message: *"Without it the
-prescribed export skips this artifact by its own precondition, reports `exported: 0`, and exits 0
-— a clean no-op the reader reads as 'nothing needed doing'."* That is a test **about remedy text**
-rather than about a predicate, which is the half a 96-assertion predicate suite cannot reach. Its
-sibling at `:14459` pins `skipped == 1` on a second run, on the rationale that *"`exported: 0`
-alone is indistinguishable from `nothing matched`"* — the same distinction this bug is about, one
-surface over.
+**Observed RED, both directions, 2026-09-10** — mutating the *production* path, on a copy of
+the guard so the live one was never briefly wrong on a tree several sessions share. Forcing the
+branch always-true (the pre-fix behaviour) reds 5b's three assertions and leaves 5a green;
+forcing it always-false reds 5a's two and leaves 5b green. Each direction has its own witness,
+which a single-sided pair cannot have — and 5a exists precisely because `hasnt <your-sha>:`
+alone is monotone under deleting the refspec advice for everybody, the fix this file rejects.
 
-**And the property to assert is ANSWERABILITY, not correctness** — sessionId
-`343d53e1-2c36-4063-9517-7459472e9b31`'s refinement, and it sharpens what the pairing above buys.
-A remedy's *correctness* is untestable as prose and pinning its sentences reds on every rewording.
-What is cheap and reds on exactly the regression that happens is: **does it still name a party who
-can ACT?** Not merely a second addressee (`OB-20`'s shape test, which buys arrival), but one whose
-answer has a branch the reader can use — `OB-20`'s measured ceiling is a guard that named the right
-party and asked them a binary their state did not occupy. For this file: the zero-commit branch
-must name the rung's author *and* the three states, because "ask them" without the enumeration
-reproduces exactly the unanswerable question `OB-20` records.
+**One assertion is INERT for the branch and is annotated as such on its own line:** *"the three
+states reach it"* survives both polarities, because that block is emitted unconditionally
+outside `$remedy`. It is kept as a guard against a future edit moving the enumeration *into*
+the `mine_n >= 1` branch — the regression `OB-20`'s ceiling predicts — and not credited with
+covering the branch itself.
 
-
-**Why no existing assertion reaches it:** the suite's ~96 assertions are about the guard's
-predicate — who is refused. The remedy text is untested by construction, which is the parent bug's
-own finding and `CLAUDE.md` § *Testing Discipline*'s named gap.
-
-
+Suite: **104 passed, 0 failed** (was 96).
 ## Workarounds
 
 Ask the author of the commit below you and let them push it. This is what the guard's *other*
@@ -158,13 +158,9 @@ correct action is in the text — just not in the branch that a zero-commit read
 
 ## Resume
 
-Add the zero-commit branch to the refusal, then write row 5 in
-`tests/pre-push-foreign-session-guard.sh` and demand an observed red by reverting the branch.
-
-**Check the third register while you are there:** the refspec sentence is *correct and
-load-bearing* for the ≥1 case, so the two repairs must not collide.
-
-
+Nothing owed. **Register 3** — the third register enumerated on the parent bug — was checked
+while here and did not collide: the refspec sentence stays intact and unedited on the `>= 1`
+path, which is what the parent's `## Fix` asked.
 ## References
 
 - `docs/issues/archive/2026-09-09-a-sha-refspec-push-bypasses-the-foreign-session-guard-which-its-own-remedy-recommends.md`

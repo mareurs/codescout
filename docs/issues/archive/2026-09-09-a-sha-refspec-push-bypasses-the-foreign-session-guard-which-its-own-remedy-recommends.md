@@ -157,12 +157,14 @@ esac
 renaming, so the underscore's claim that it was unused was true. Deletions stay handled by the
 existing `$ZERO` check above; tag pushes still fall out because neither field is `refs/heads/*`.
 
-**Registers 2 and 3 are NOT closed by this, and register 2 now has its own live file** —
-`docs/issues/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md`
+**Register 3 is NOT closed by this; register 2 now IS, in its own file** —
+`docs/issues/archive/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md`
 (`cluster/hint-composed-without-the-request`, `IC-22`). Split deliberately: this file archives as
-fixed, and leaving register 2 inside it would archive a live defect. Register 3 needs nothing — it
+fixed, and leaving register 2 inside it would have archived a live defect — the split is what let
+it be picked up and closed on its own evidence a day later. Register 3 needs nothing — it
 is the observation that the refspec sentence is *correct* for a pusher who owns commits, which is
-why neither repair may delete it.
+why neither repair may delete it, and register 2's fix explicitly kept it on the `mine_n >= 1`
+path for that reason.
 
 **What the fix does NOT buy, stated because the archived status will imply otherwise:** the guard
 now *sees* the refspec form; it does not make the refspec form safe to reach for. A refspec sends

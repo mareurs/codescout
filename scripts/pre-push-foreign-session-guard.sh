@@ -117,6 +117,14 @@ untrailered_n=0
 # the SUBJECT into the sid. Prepended rather than appended because git log runs newest-first
 # and the ladder is only legible bottom-up.
 commit_rows=""
+# HOW MANY OF THE COMMITS IN THIS PUSH ARE THE PUSHER'S OWN. The refusal's refspec advice
+# ("use a refspec at EVERY rung") substitutes a sha the reader must own, so it is
+# unfollowable at mine_n == 0 -- and the reader's natural next move is the branch form the
+# same paragraph warns against. The guard already holds both inputs (the trailers and $me),
+# so it can branch the advice instead of presuming.
+# docs/issues/archive/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md
+mine_n=0
+total_n=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
@@ -158,6 +166,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     while IFS=$'\x1f' read -r sha sid subject; do
         [ -n "${sha:-}" ] || continue
         commit_rows="${sha:0:8}"$'\x1f'"${sid:-}"$'\x1f'"${subject}"$'\n'"${commit_rows}"
+        total_n=$((total_n + 1))
         if [ -z "${sid:-}" ]; then
             untrailered_n=$((untrailered_n + 1))
             untrailered_report="${untrailered_report}    ${sha:0:8}  ${subject}"$'\n'
@@ -168,6 +177,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
                 *) foreign_sids="${foreign_sids:+$foreign_sids,}$sid" ;;
             esac
             foreign_report="${foreign_report}    ${sha:0:8}  ${sid}  ${subject}"$'\n'
+        else
+            mine_n=$((mine_n + 1))
         fi
     done < <(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${range[@]}" 2>/dev/null)
 done
@@ -287,19 +298,18 @@ case "$(state_of "$rung_sid")" in
     *)    rung_line="its author could not be resolved from this host -- that is not the same as gone" ;;
 esac
 
-cat >&2 <<EOF
-
-  REFUSING THE PUSH: it would publish commits belonging to another session.
-
-  A commit held back pending its operator's decision and one merely not yet pushed are
-  byte-identical, and git records nothing that separates them. This guard does not decide
-  that. It asks the question at the one moment it is still answerable.
-
-  THE STACK, oldest first. Addresses resolved live, just now:
-
-$plan
-  Your session id:  $me
-
+# THE REMEDY BRANCHES ON WHETHER THE READER OWNS ANYTHING IN THE RANGE, because the refspec
+# form needs a sha of theirs to substitute. Composed from the computed ladder alone -- a
+# property of the RANGE -- it prescribed a refspec to readers who had no sha of their own,
+# and the move that state actually produces is the branch push the same sentence warns
+# against. Observed live 2026-09-09 by a session whose only unpushed work had been swept into
+# a peer's pathspec commit, leaving a range it had authored none of.
+# cluster/hint-composed-without-the-request (IC-22).
+#
+# DO NOT COLLAPSE THE BRANCHES BY DELETING THE REFSPEC SENTENCE. At mine_n >= 1 it prevents a
+# real hazard, and the field-3 repair above is what finally lets this guard SEE that form.
+if [ "$mine_n" -gt 0 ]; then
+remedy="$(cat <<EOF
   THE LADDER CLEARS THIS WITH ZERO ACKS, and it is the resolution rather than a fallback:
   each commit becomes pushable BY ITS OWN AUTHOR the moment the one below it is published.
   The lowest foreign rung is
@@ -313,6 +323,45 @@ $plan
   including commits above you:
 
       git push origin <your-sha>:$branch
+EOF
+)"
+else
+remedy="$(cat <<EOF
+  YOU AUTHOR 0 OF THE $total_n COMMIT(S) IN THIS PUSH. There is no refspec for you to form,
+  because a refspec names a sha of your own and you hold none in this range. Every route
+  from here publishes work that is not yours.
+
+  THE LADDER STILL CLEARS THIS WITH ZERO ACKS -- but not by you pushing. Each commit becomes
+  pushable BY ITS OWN AUTHOR the moment the one below it is published. The lowest foreign
+  rung is
+
+    $rung_sha
+    $rung_line
+
+  ASK THAT AUTHOR TO PUSH IT THEMSELVES, and ask them the three-state question below rather
+  than "may I push this" -- you are not waiting for your turn on the ladder, you are waiting
+  for THEIR push. When the stack clears you will still have nothing of your own to send.
+
+  Pushing the branch name is the move this state invites and the one to refuse: it sends the
+  entire foreign stack and adds nothing of yours to it.
+EOF
+)"
+fi
+
+cat >&2 <<EOF
+
+  REFUSING THE PUSH: it would publish commits belonging to another session.
+
+  A commit held back pending its operator's decision and one merely not yet pushed are
+  byte-identical, and git records nothing that separates them. This guard does not decide
+  that. It asks the question at the one moment it is still answerable.
+
+  THE STACK, oldest first. Addresses resolved live, just now:
+
+$plan
+  Your session id:  $me
+
+$remedy
 
   IT STALLS ON AN UNCLEARED AUTHOR, which is the common case and not the exception. Ask the
   AUTHOR which of three states they are in:

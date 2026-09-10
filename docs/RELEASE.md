@@ -402,6 +402,20 @@ hook teaches `--no-verify`.*
   origin/<branch>..<your-sha>` must be `1` — check it *before* the push, not after: the push
   output tells you what happened, the count tells you what is about to, and only the second
   can stop you.
+- **A pusher who owns NOTHING in the range has no rung, and the refspec advice above is not
+  merely inapplicable to them — it points at the hazard.** `<your-sha>` has no binding, so a
+  reader in that state reaches for `git push origin <branch>`, which is the one form that
+  publishes the whole foreign stack. The state is ordinary rather than exotic: a peer
+  committing by pathspec over a shared ledger sweeps up your staged rows (the bullet above),
+  and your unpushed range is then entirely someone else's. Observed live 2026-09-09. The
+  correct move is to ask the lowest rung's author to push it *themselves* and to keep asking
+  the three-state question rather than *"may I push this"* — you are not waiting for a turn,
+  and when the stack clears you will still have nothing of your own to send. The guard now
+  branches its remedy on this rather than presuming a rung
+  (`docs/issues/archive/2026-09-09-the-pre-push-remedy-names-a-refspec-a-zero-commit-pusher-cannot-form.md`),
+  which is why the derivation belongs here too: **the banner cites this page, so advice that
+  is branched in one and unconditional in the other sends the reader from a correct refusal
+  to the sentence it was written to replace.**
 - **First precondition — every commit must have an identified author.** That is what the
   `Session-Id` trailer buys. Attribute the stack by adjacency instead and the ladder is
   destroyed: you cannot know whose rung is whose, so there is no order to take them in and
