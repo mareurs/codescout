@@ -2173,7 +2173,9 @@ load-bearing and is the only reason the claim was not stated flatly.
 **Valid:** dated 2026-09-10
 
 **Rests on:** `scripts/probe_tool_surface.py` and `src/server.rs`'s `tool_surface_report_lengths`,
-both re-run 2026-09-10 against both binaries; `b057cc6d` for the cause;
+both re-run 2026-09-10 against both binaries; `2735df73` for the cause and for the ratchet, with
+its bug file and patch-id above (`b057cc6d` appears here only as the SHA this entry originally and
+wrongly named);
 `prompt-surface-compaction-session-log:F-11` for the superseded figure and the corrected gloss;
 `prompt-surface-compaction-session-log:W-18` for the build-invariance claim this re-confirms.
 
