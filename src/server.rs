@@ -3655,7 +3655,7 @@ mod tests {
     /// addition was 7 (`/doctor` appended to the action list); nothing was paid on the
     /// spot — the clause was already at its operative-facts minimum, and trimming a
     /// neighbouring action's coverage to fund this one is the thing this log exists to
-    /// forbid. docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
+    /// forbid. docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
     ///
     /// **56_492 → 56_548 → 56_492 (2026-09-10, +56 then −56): a documented exception,
     /// then the fix that removed the thing it documented.** The `fix` param's schema said
@@ -3673,7 +3673,7 @@ mod tests {
     /// warning was not shortened, it was made untrue. The general form is worth having on
     /// this surface: **documenting a defect costs schema budget every session pays for on
     /// every request, so a doc-only fix for a code defect is a rental, not a settlement.**
-    /// docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
+    /// docs/issues/archive/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md
     ///
     /// **The `+7` entry above was authored against the 57_296 baseline** on
     /// `doctor-per-project-isolation` and re-based onto the −811 ratchet when that branch

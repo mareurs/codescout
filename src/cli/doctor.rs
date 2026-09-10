@@ -82,14 +82,22 @@ pub struct DoctorArgs {
 #[cfg(test)]
 const SCANNER_PARAMS_THE_CLI_OMITS: &[(&str, &str)] = &[(
     "scope",
-    "The scanner accepts `scope`, validates it against an enum, echoes it back in the \
-     response — and never widens the scanned population with it: `effective_scope` has \
-     exactly two uses in doctor.rs, the `resolve_scope` binding and that echo, while every \
-     scan takes `roots = managed_roots(ctx)`. Verified at the bytes 2026-09-09; open as \
-     docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md. \
-     Exposing `--scope` would give the CLI a flag whose only observable effect is making \
-     the report ASSERT a scope it did not apply, which is worse than not having it. Add \
-     the flag in the same commit that wires the selector, not before.",
+    "The scanner accepts `scope`, validates it against an enum, and — since the \
+     per-project isolation work landed on `experiments` 2026-09-10 — genuinely narrows \
+     the scanned population with it through the shared `DoctorScope::admit` gate. **The \
+     original reason for this omission is therefore SPENT, and this entry is retained as \
+     an omission that is now owed rather than justified.** It read, until that date: \
+     *never widens the scanned population with it, `effective_scope` has exactly two \
+     uses, exposing `--scope` would give the CLI a flag whose only observable effect is \
+     making the report ASSERT a scope it did not apply* — all true on 2026-09-09, all \
+     false now, and it closed with *add the flag in the same commit that wires the \
+     selector, not before*. The selector is wired; the flag is the outstanding half, \
+     tracked as `BL-65` in `docs/trackers/open-issue-work-queue.md`. Note what did NOT \
+     catch this: `every_declared_omission_names_a_real_param_and_gives_a_reason` checks \
+     that a reason EXISTS, never that it is still TRUE, so a justification the codebase \
+     has since invalidated stays green here indefinitely — found only by re-reading this \
+     string while re-pointing a citation in it. Fix history: \
+     docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md.",
 )];
 
 /// The `--fail-on-violations` decision, extracted from [`run`] because `run` ends in

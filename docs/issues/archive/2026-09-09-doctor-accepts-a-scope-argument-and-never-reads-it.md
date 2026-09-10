@@ -1,14 +1,14 @@
 ---
-id: d4b61746950b86b7
+id: 33e740960f758b6d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doctor accepts a scope argument and never reads it — scope=all silently under-reports by 636 rows'
 tags:
 - librarian
 - doctor
 - schema-drift
 - cluster/accepted-parameter-silently-dropped
-closed: null
+closed: 2026-09-10
 opened: 2026-09-09
 owner: marius
 related:
@@ -195,8 +195,11 @@ and publish no count, so a reader cannot tell whether `terminal_status_without_f
 
 ## Fix
 
-> **FIXED as of 2026-09-10 — do NOT archive yet; the remaining precondition is the merge
-> to `experiments`, not any code.** `26b60af8` (patch-id
+> **FIXED, and LANDED on `experiments` 2026-09-10** at `4ff09107` (fast-forward). All
+> nineteen non-merge commits below were verified as ancestors of `experiments`
+> individually — `git merge-base --is-ancestor <sha> experiments` for each, 19 of 19 —
+> rather than inferred from the branch tip being reachable, which would be one claim
+> standing in for nineteen. `26b60af8` (patch-id
 > `39641840397a72f257450e7d36b72e197a1c67bf`, **on experiments**) typed `doctor`'s args, so
 > `scope` is deserialised, an unknown value is refused rather than ignored, and the
 > applied scope is echoed in the response. Two regression tests cover that much:
@@ -281,32 +284,65 @@ rather than trusting this table, which is a lower bound written at one instant �
 | # | SHA | patch-id | subject | on `experiments`? |
 |---|---|---|---|---|
 | 1 | `26b60af8` | `39641840397a72f257450e7d36b72e197a1c67bf` | type doctor's args so a declared scope cannot be discarded | **yes** |
-| 2 | `fe7b6658` | `acc810f2b9973b1011dfc5796d6e288f423866ef` | doctor scoping unit -- admit-based narrowing, not SQL-splice | no |
-| 3 | `67e9804e` | `ee76a6d47759c68ce481aff2028467c4989dde88` | restore Ruling 17 for scope-refused outside-roots rows | no |
-| 4 | `0334dd88` | `5f8f3190812e0a7a17d27a05db554b087dbdb95c` | fix Round-2 findings on DoctorScope -- false hint text, fold ordering, admit() validation | no |
-| 5 | `c1d8cd51` | `0a3a9c9e77b0db5fa66af06f2a3fc6ef8d04300f` | scope five more checks through DoctorScope | no |
-| 6 | `1f0cd9c1` | `1aeebf7bf5e6229c3206265ffd78576188b2c23e` | address round-3 review of doctor Task 3 DoctorScope conversion | no |
-| 7 | `55c77f25` | `299e7e8f9b97c999e36752d05ce7533ef17af03f` | retire SCOPED_ROW_CHECKS; row-grain checks admit() directly | no |
-| 8 | `15d141eb` | `34abe38ad6229550fd839a58016b1eb39a6c6060` | address round-2 review of Task 4 (row-grain scoping) | no |
-| 9 | `8cef7950` | `ff7d6e70c7d424784dc44fed3ba7d407c1f6579d` | close round-2 review gaps in row-grain scope coverage | no |
-| 10 | `cfacf2fc` | `294ad2cda6c1ede95e5bcb35266c86f2c86ab0a6` | give six silent-scoping scans a published DoctorScope tally | no |
-| 11 | `fe1c41e3` | `7aae9ca5e9a15017d23ae6e17abaf4a82d3ea3c8` | scope reseat_worktree's repair, then its report | no |
-| 12 | `bd691d24` | `0b7219f8cd6f9cc87ad6934611f52ad5b630ebd7` | Task 7 -- relevance exemption for cross-root cites, with its own denominator | no |
-| 13 | `5e78ab59` | `bd596e0a92e3e0cd32b4ec3d4725ea76a43fe2ab` | Task 7 review round 1 -- five semantic fixes to the relevance exemption | no |
-| 14 | `abc61b68` | `1e20d432272c3a89ce428ddd5953a1d50cb06075` | DoctorScope::new takes conn directly, not a second internal lock | no |
-| 15 | `566dd859` | `ad17d2428dee5f43bb4fe857ee3221478185d69d` | collapse the outside-roots inventory below scope=all | no |
+| 2 | `fe7b6658` | `acc810f2b9973b1011dfc5796d6e288f423866ef` | doctor scoping unit -- admit-based narrowing, not SQL-splice | **yes** |
+| 3 | `67e9804e` | `ee76a6d47759c68ce481aff2028467c4989dde88` | restore Ruling 17 for scope-refused outside-roots rows | **yes** |
+| 4 | `0334dd88` | `5f8f3190812e0a7a17d27a05db554b087dbdb95c` | fix Round-2 findings on DoctorScope -- false hint text, fold ordering, admit() validation | **yes** |
+| 5 | `c1d8cd51` | `0a3a9c9e77b0db5fa66af06f2a3fc6ef8d04300f` | scope five more checks through DoctorScope | **yes** |
+| 6 | `1f0cd9c1` | `1aeebf7bf5e6229c3206265ffd78576188b2c23e` | address round-3 review of doctor Task 3 DoctorScope conversion | **yes** |
+| 7 | `55c77f25` | `299e7e8f9b97c999e36752d05ce7533ef17af03f` | retire SCOPED_ROW_CHECKS; row-grain checks admit() directly | **yes** |
+| 8 | `15d141eb` | `34abe38ad6229550fd839a58016b1eb39a6c6060` | address round-2 review of Task 4 (row-grain scoping) | **yes** |
+| 9 | `8cef7950` | `ff7d6e70c7d424784dc44fed3ba7d407c1f6579d` | close round-2 review gaps in row-grain scope coverage | **yes** |
+| 10 | `cfacf2fc` | `294ad2cda6c1ede95e5bcb35266c86f2c86ab0a6` | give six silent-scoping scans a published DoctorScope tally | **yes** |
+| 11 | `fe1c41e3` | `7aae9ca5e9a15017d23ae6e17abaf4a82d3ea3c8` | scope reseat_worktree's repair, then its report | **yes** |
+| 12 | `bd691d24` | `0b7219f8cd6f9cc87ad6934611f52ad5b630ebd7` | Task 7 -- relevance exemption for cross-root cites, with its own denominator | **yes** |
+| 13 | `5e78ab59` | `bd596e0a92e3e0cd32b4ec3d4725ea76a43fe2ab` | Task 7 review round 1 -- five semantic fixes to the relevance exemption | **yes** |
+| 14 | `abc61b68` | `1e20d432272c3a89ce428ddd5953a1d50cb06075` | DoctorScope::new takes conn directly, not a second internal lock | **yes** |
+| 15 | `566dd859` | `ad17d2428dee5f43bb4fe857ee3221478185d69d` | collapse the outside-roots inventory below scope=all | **yes** |
+| 16 | `240b7531` | `66434dccabaa98aba52b7b194bf1674064b19953` | Task 9 -- sweep doctor's scope claims, name the Scope::All trap in comments | **yes** |
+| 17 | `6fc18304` | `4cab2565e570afe3c2316a19523eb30340b60f70` | whole-branch review round 2 -- three Criticals, two Importants, one Minor | **yes** |
+| 18 | `2bfb2e15` | `7facca854a76a76caac2667b39b19357eebee51e` | correct three dry-run claims, verify M1/M2 exemption comments | **yes** |
+| 19 | `ccfdbf4a` | `54522a04cdf684cdcc77e7cf2e88eaf628b388e9` | the ProbeRow the doctor.rs cap-class annotation requires | **yes** |
 
 **Row #12 (`bd691d24`) is not in the plan's own cohort list and was found only by
 re-deriving `git log --format=%H experiments..HEAD` rather than trusting it** — the plan
 named 14 total entries (13 SHAs plus `26b60af8`) where 15 exist. This is exactly the kind
 of drift the derivation instruction above warns about.
 
-Fourteen of these fifteen commits (everything except #1) are on
-`doctor-per-project-isolation` and are **NOT YET on `experiments`**
-(`git merge-base --is-ancestor 566dd859 experiments` → NO, verified 2026-09-10). CLAUDE.md
-archives a bug only once its fix is verified on `experiments`; that merge — not owned by
-this task, and not owned by any single session on a shared branch — is the one remaining
-precondition. No further code change is owed here.
+**The table above ran to 15 rows until 2026-09-10 and the real figure was 19** — rows
+16-19 were found by re-deriving `git log --no-merges 0f060fe3..4ff09107 ^7a097d68` rather
+than by trusting it, which is the second time this one table has been short (row #12 was
+the first). The derivation instruction in the caption is not decoration; both misses were
+found by following it and neither would have been found by reading.
+
+**How the merge landed, and the three merge commits it took.** Integration was a MERGE
+rather than a rebase, deliberately: a rebase rewrites every SHA, and this table's whole
+point is that the SHAs resolve. `experiments` had moved 133 commits ahead of `0f060fe3`
+by then and moved twice more mid-flight, so three rounds were needed —
+`8cf67de0` (content conflicts in `doctor.rs` and `server.rs`), `4485eeb0` (the
+parameter-alias collapse), `4ff09107` (docs). `experiments` was then fast-forwarded, so
+its history is linear through them.
+
+**No patch-id is recorded for those three, and the reason is sharper than CLAUDE.md's
+rule states.** The rule says a merge commit has none because `git show` emits no diff.
+Measured here: true of `4485eeb0` (a clean merge — 457 bytes, no diff, empty patch-id),
+and **false of `8cf67de0`**, whose conflict resolution makes `git show` emit a 32,634-byte
+combined diff from which `git patch-id --stable` returns a plausible
+`9817e7c6…`. That value hashes only the resolution hunks, not the change the merge
+delivers, so recording it would be worse than recording nothing — the documented failure
+mode is an empty field you notice, and the actual one for a conflicted merge is a
+well-formed wrong answer. Cite the constituent commits, which is what this table is.
+
+**The one conflict worth a note for whoever reads `doctor.rs` next.** `experiments` grew a
+parallel `SCOPED_ROW_CHECKS` array (`b057cc6d`) solving the same problem from a
+`retain()` filter rather than an `admit()` gate, with the same first 11 members in the
+same order. It was removed in favour of `ROW_GRAIN_SCOPED_CHECKS` (22 members, verified a
+strict superset member by member), but **two things ported forward rather than being
+dropped**: its per-member measurements (`params_behind_body` firing 3 times with 2
+foreign, `params_status_drift` 3 with 1, and which members were added on a sighting versus
+swept in on structure) and its two tests, one of which — `the_scoped_row_check_hint_names_
+every_check_it_scoped` — asserts on the real report's hint string with a doc comment
+recording that the generator-versus-itself version of it "passed instantly against the
+live drift". Nothing of that branch's was lost; the merge kept the better half of both.
 ## Tests added
 
 None yet. Planned, mirroring the precedent's four

@@ -439,7 +439,7 @@ impl Violation {
 /// Every argument `doctor` accepts, typed.
 ///
 /// Typed rather than read through `args.get(...)`: the untyped form is what let a
-/// declared `scope` be discarded in silence (`d4b61746950b86b7`), and it is what
+/// declared `scope` be discarded in silence (`33e740960f758b6d`), and it is what
 /// exempted `fix`/`offset` from the `librarian.rs` param probe — an exemption whose
 /// own comment predicted this bug in writing.
 ///
@@ -2020,7 +2020,7 @@ async fn run_fix(
 /// whose own comment records the same obligation — *"the dry-run preview's totals
 /// never promise more than `confirm=true` would actually delete"*.
 ///
-/// This closes `docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
+/// This closes `docs/issues/archive/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
 /// (`IC-15`, a parameter accepted then silently dropped). Before it, this function
 /// took no `confirm` parameter at all and `run_fix`'s `"reseat_worktree"` arm called
 /// straight into it, so there was no dry-run branch to take and no call to
@@ -7118,7 +7118,7 @@ mod tests {
     }
 
     /// `scope` was declared in the shared librarian schema with `"default": "project"`
-    /// and read by nothing (`d4b61746950b86b7`) — `scope="all"` returned a
+    /// and read by nothing (`33e740960f758b6d`) — `scope="all"` returned a
     /// byte-identical response buffer to `scope="project"` against a derived
     /// expectation of ~805 rows against 169. These three pin the plumbing: a bad
     /// value must be refused rather than swallowed, and the applied scope must be
@@ -14537,7 +14537,7 @@ mod tests {
     }
     /// `confirm=false` previews and writes nothing; `confirm=true` on the SAME fixture
     /// writes. Closes
-    /// `docs/issues/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
+    /// `docs/issues/archive/2026-09-10-reseat-worktree-applies-immediately-and-drops-confirm.md`
     /// (`IC-15`): before the fix this function took no `confirm` parameter at all, so
     /// every no-collision row the scope admitted was re-keyed on the call that reported
     /// it and there was no second call to authorise.

@@ -22,7 +22,7 @@ topic: doctor per-project isolation
 
 **Tech Stack:** Rust · `rusqlite` · `serde` · `tokio` (tests) · the librarian catalog at `~/.local/share/librarian/catalog.db`
 
-**Spec:** `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `d4b61746950b86b7`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/archive/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target. **FIXED and archived 2026-09-09** at `953c98f3` (patch-id `8de7522768dd6dacacd293eae5d881442470422a`), in the prescribed order: the typed `Args` landed first (`26b60af8`), the wrapper second. Note its id changed on archiving — the old `a06de4dfc30c2e8d` no longer resolves.
+**Spec:** `docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` (artifact `33e740960f758b6d`) § *Fix* and § *Tests added*. Sequenced-after sibling: `docs/issues/archive/2026-09-09-cli-doctor-passes-an-empty-args-map-so-no-fix-or-paging-is-reachable.md` — **out of scope for this plan**, deliberately, because Task 1 changes the projection its fix would target. **FIXED and archived 2026-09-09** at `953c98f3` (patch-id `8de7522768dd6dacacd293eae5d881442470422a`), in the prescribed order: the typed `Args` landed first (`26b60af8`), the wrapper second. Note its id changed on archiving — the old `a06de4dfc30c2e8d` no longer resolves.
 
 ## Global Constraints
 
@@ -32,7 +32,7 @@ topic: doctor per-project isolation
 - **All work on `experiments`.** `master` is protected. Never commit in-progress work to `master`.
 - **Ruling 17 is invariant:** the reported worklist narrows, the `*_scoped_by_project` and `outside_roots_by_project` metrics stay global at every scope. A metric that shrinks when the worklist does is the false negative this plan must not introduce.
 - **Every commit message ends with:** `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
-- **Cite `F-125` / `W-117`** (`docs/trackers/bug-fix-session-log.md`) in commit messages that close part of this, and the bug id `d4b61746950b86b7`.
+- **Cite `F-125` / `W-117`** (`docs/trackers/bug-fix-session-log.md`) in commit messages that close part of this, and the bug id `33e740960f758b6d`.
 - **Wire strings are public vocabulary.** Check names (`"terminal_status_with_caveat"`, …) are pinned beside their enum variants on purpose and named in prose across `docs/`. Never derive one from an identifier; never rename one in this plan.
 
 ---
@@ -71,7 +71,7 @@ Add to `doctor.rs`'s `mod tests`. `TestToolContextBuilder` and `unscoped_ctx()` 
 
 ```rust
 /// `scope` was declared in the shared schema with `"default": "project"` and read by
-/// nothing (`d4b61746950b86b7`). These three pin the plumbing: a bad value must be
+/// nothing (`33e740960f758b6d`). These three pin the plumbing: a bad value must be
 /// refused rather than swallowed, and the applied scope must be readable in the
 /// response — without which a caller cannot tell a scoped result from an unscoped one.
 #[tokio::test]
@@ -155,7 +155,7 @@ Replace the untyped reads at the head of `call`. Keep `run_fix`'s dispatch behav
 /// Every argument `doctor` accepts, typed.
 ///
 /// Typed rather than read through `args.get(...)`: the untyped form is what let a
-/// declared `scope` be discarded in silence (`d4b61746950b86b7`), and it is what
+/// declared `scope` be discarded in silence (`33e740960f758b6d`), and it is what
 /// exempted `fix`/`offset` from the `librarian.rs` param probe — an exemption whose
 /// own comment predicted this bug in writing.
 ///
@@ -312,7 +312,7 @@ own comment predicted this bug.
 No finding moves yet: this accepts, validates and echoes the scope. The
 worklist narrowing follows.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 Refs: bug-fix-session-log:F-125, W-117
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
@@ -706,7 +706,7 @@ foreign files before dropping them.
 
 Ruling 17 preserved: outside_roots_by_project still counts the scoped-out rows.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 Refs: bug-fix-session-log:W-117
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
@@ -824,7 +824,7 @@ Five scans lose their bespoke ctx filters and tally maps for one shared
 mechanism. entry_indegree stays corpus-wide — narrowing the exposure metric
 would hide a foreign citer and manufacture the false negative Ruling 17 names.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -864,7 +864,7 @@ EOF
 > `src/librarian/tools/doctor/scope.rs`) retires `SCOPED_ROW_CHECKS` at `55c77f25` and
 > scopes all nine checks through `DoctorScope`. It is **99 commits behind `experiments`**
 > as of 2026-09-10; the rebase is the only thing left, and it is what bug
-> `d4b61746950b86b7` is waiting on. Read that branch before writing any code here.
+> `33e740960f758b6d` is waiting on. Read that branch before writing any code here.
 >
 > **RETRACTION 2026-09-10.** This banner previously read *"SUPERSEDED — Steps 1–5 below
 > are wrong"* and argued the mechanism change was structurally impossible. **That
@@ -1009,7 +1009,7 @@ params_status_drift 3 times, 1 foreign.
 
 Neither has a fix= mode, so scoping their report scopes nothing else.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1099,7 +1099,7 @@ whether terminal_status_without_fix_anchor: 9 was repo-local or machine-wide.
 The author holds the scope parameter, so the gap is invisible from where they
 sit — CLAUDE.md Observer Blindness.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1203,7 +1203,7 @@ than encoded as an asymmetry.
 Rewrites row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not,
 which pinned the old behaviour as intended. Deliberate, not collateral.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1325,7 +1325,7 @@ cross-root cites edges the rule was computed over, and says what to run when
 that is zero. A rule whose failure no observer would notice is decoration
 however loudly written.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1400,7 +1400,7 @@ feat(doctor): collapse the outside-roots inventory below scope=all
 ships unconditionally as outside_roots_total, the top 10 roots stay, the tail
 folds into _other_roots/_other_rows, and scope=all still returns everything.
 
-Bug: d4b61746950b86b7
+Bug: 33e740960f758b6d
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1413,7 +1413,7 @@ EOF
 
 **Files:**
 - Modify: `src/prompts/source.md` (if it names `doctor`'s scope behaviour), `.codescout/system-prompt.md`, `src/librarian/tools/guide_*` doctor sections, `CLAUDE.md` § *Querying active trackers* if it describes doctor's scope
-- Modify: `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
+- Modify: `docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
 
 - [ ] **Step 1: Find every surface that describes doctor's scope**
 
@@ -1448,8 +1448,8 @@ git show <sha> | git patch-id --stable      # content hash, survives rebase
 Write both into the bug file's § *Fix*, then archive through the librarian — never a bare `git mv`, which orphans the catalog row:
 
 ```
-doc(action="update", id="d4b61746950b86b7", patch={"status": "fixed", "extra": {"closed": "2026-09-XX"}})
-doc(action="move", id="d4b61746950b86b7", new_rel_path="docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md")
+doc(action="update", id="33e740960f758b6d", patch={"status": "fixed", "extra": {"closed": "2026-09-XX"}})
+doc(action="move", id="33e740960f758b6d", new_rel_path="docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md")
 ```
 
 `doc(action="move")` **mints a new id** (`id = sha256(abs_path)`) and grafts the history; read `id`/`previous_id` from the response and do not reuse the cached id.

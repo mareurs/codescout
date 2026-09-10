@@ -35,7 +35,7 @@ risk: the **parse logic**"); the name is what a hurried reader takes, and
 ## Symptom (Effect)
 
 Measured live 2026-09-09. Commit `bd7d7eb1` added a second `cluster/` tag to
-`docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`:
+`docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`:
 
 | surface | verdict |
 |---|---|
@@ -148,7 +148,7 @@ beats a lesson addressed to an author who has already concluded they are safe.
 
 ## References
 
-- `docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
+- `docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
   — the file whose tags were the instance.
 - codescout memory `cargo-test-lib-skips-integration` — the `--lib` false-green
   that made the first verification attempt of this read as passing.

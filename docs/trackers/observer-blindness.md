@@ -2515,7 +2515,7 @@ class leaves open.
 
 **Rests on:** `CLAUDE.md` § *Testing Discipline* — *an assertion computed over a POPULATION cannot
 verify a claim about a MEMBER*, of which this is the measurement-side twin;
-`docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` and its probe-floor
+`docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md` and its probe-floor
 sibling; the mutation runs behind `7168c1f0` / `6e178e5c`.
 
 **Class:** a coverage metric — a kill rate, a `checked >= N` floor, a pass count — whose

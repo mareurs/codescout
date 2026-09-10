@@ -8,7 +8,7 @@ tags:
 opened: 2026-09-10
 owner: marius
 related:
-- docs/issues/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
+- docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md
 severity: low
 ---
 
