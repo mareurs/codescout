@@ -46,10 +46,27 @@ unverified: 'residual 3 is NOT closed and cannot be: nothing binds the ack''s si
 > **Line numbers in § *Resume* below are stale** — `0a6a2c9d` moved them. The inert-ack note
 > is no longer at `:194-196`, and `:341` is now the rung-author sentence, not the sid list.
 >
-> **Review not obtained.** sessionId `343d53e1-2c36-4063-9517-7459472e9b31` volunteered in
-> § *Resume* and has not been asked; the change is committed on the operator's instruction
-> with a green suite, not on a reviewer's sign-off. Surfaced to my operator as an open
-> option rather than treated as satisfied.
+> **Review not obtained, and a peer reading is not it.** sessionId
+> `343d53e1-2c36-4063-9517-7459472e9b31` volunteered in § *Resume* and was never asked; the
+> change is committed on the operator's instruction with a green suite, not on a reviewer's
+> sign-off. Surfaced to my operator as an open option rather than treated as satisfied.
+>
+> They then read the diff unprompted and reported (2026-09-10), and **explicitly declined to
+> have it recorded as review**: *"it does not make the commits reviewed, and if your operator
+> wants that recorded they should say so rather than infer it from this."* Recorded on those
+> terms. What they did do is worth more than a sign-off would have been: they **mutated the
+> production path on a `/tmp` copy** — `if [ -z "$foreign_report" ]` to `if false`, the
+> pre-fix behaviour — and ran the suite there, getting `FAIL` on 6a and `PASS` on 6b, 111/1.
+> That demonstrates the mutual-control claim instead of accepting *"watched RED"*, and it was
+> done on a copy because this test file's own header prices mutating a shared guard and says
+> not to. They found nothing to change.
+>
+> One thing their read added that the diff does not show: the branch keys on `$foreign_report`,
+> which at `:228` is also the guard's own `[ -n "$foreign_report" ] || exit 0` refuse/allow
+> discriminator — so the predicate is not a proxy for *"was there a foreign population"*, it is
+> the identical expression the guard already trusts to decide whether to act at all. Re-deriving
+> emptiness from `$foreign_sids` or a count would have introduced the second source of truth
+> this avoids.
 
 **Three** unfixed residuals on the `CODESCOUT_PUSH_ACK` surface of
 `scripts/pre-push-foreign-session-guard.sh`. The first two were split out of
@@ -135,6 +152,18 @@ prints `CODESCOUT_PUSH_ACK="$foreign_sids" git push <args>` — the guard comput
 the pusher. So the sid half can be machine-perfect, copied from the guard's own output, while
 the authorisation was formed over a prose sentence naming a different set. **The more
 trustworthy the list looks, the less it says about what was authorised.**
+
+**Attribution, split 2026-09-10 because the adjacency below was misleading.** The paragraph
+above is sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac`'s — that the guard *computes* the
+list, so the machine-perfect half is the carrier of the false assurance. `343d53e1`'s own
+contribution was the weaker form: that the ack is machine-checkable while the authorisation is
+prose, with nothing binding them. The two sat as one block directly above a line naming
+`343d53e1`, which read as crediting both to them.
+
+*Corrected on `343d53e1`'s own statement, volunteered to reduce their credit rather than
+claim it — so this rests on a self-report, which is the strongest evidence available for who
+thought of what and is weaker than a channel. `59112612` has not confirmed it and may
+sharpen or decline the credit.*
 
 Raised by sessionId `343d53e1-2c36-4063-9517-7459472e9b31` from inside their own instance,
 where it was a near-miss rather than a failure: their ack named this file's author and

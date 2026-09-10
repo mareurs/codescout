@@ -206,6 +206,19 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
     # A pusher told to "check you named the sid you meant" goes looking for a typo that is
     # not there. Split on $foreign_report, which is already built above, and say it once for
     # the push rather than once per token -- the fact is about the range, not about a sid.
+    #
+    # THIS BORROWS `:228`'s DISCRIMINATOR RATHER THAN COMPUTING ITS OWN, and that is the
+    # point rather than a shortcut. `[ -n "$foreign_report" ] || exit 0` below is what the
+    # guard already trusts to decide whether to act at all, so testing the same expression
+    # here cannot disagree with it: if `-z` were the wrong question, the guard would already
+    # be refusing on the wrong population. Re-deriving emptiness from `$foreign_sids` or a
+    # count would introduce a second source of truth that can drift from the first while
+    # both look correct. If you change `:228`'s discriminator, change this one with it --
+    # a switch there leaves this branch silently answering a question the guard no longer
+    # asks, and the note then fires on the wrong side with no test necessarily reaching it.
+    # (Coupling named by sessionId 343d53e1-2c36-4063-9517-7459472e9b31, reviewing the
+    # commit that added this branch; the original author keyed on `$foreign_report` because
+    # it was the variable in scope, which is the same line for a weaker reason.)
     if [ -z "$foreign_report" ]; then
         printf '\n  note: CODESCOUT_PUSH_ACK was set, but this push carries\n' >&2
         printf '  no commits by another session -- there was no foreign population for it to\n' >&2
@@ -225,6 +238,13 @@ if [ -n "$ack" ] && [ "$ack_matched" != "all" ]; then
     fi
 fi
 
+# A SECOND READER DEPENDS ON THIS EXPRESSION, not just on this early return. The inert-ack
+# note above branches on `-z "$foreign_report"` to distinguish "you named a sid that authored
+# nothing" from "there was no foreign population at all", and it does so by borrowing THIS
+# line's discriminator rather than computing its own -- deliberately, so the two cannot
+# disagree. Switching this to a count, a `$foreign_sids` test, or an earlier return without
+# updating that branch leaves it answering a question the guard no longer asks, and the note
+# then fires on the wrong side. Both ends carry this clause; neither is the whole record.
 [ -n "$foreign_report" ] || exit 0
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '<branch>')"
