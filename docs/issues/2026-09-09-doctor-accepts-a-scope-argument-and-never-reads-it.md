@@ -14,7 +14,7 @@ owner: marius
 related:
 - a00b99a98e5401dd
 severity: medium
-unverified: Typed/validated/echoed only (26b60af8). The population selector still ignores `scope` — the headline 636-row under-report is LIVE. Verified at the bytes 2026-09-09.
+unverified: 'CLEARED 2026-09-10. Was: "Typed/validated/echoed only (26b60af8). The population selector still ignores `scope` -- the headline 636-row under-report is LIVE." That claim is stale: 14 further commits (fe7b6658..566dd859, full SHA+patch-id table in Sec Fix) gave every scan a shared DoctorScope unit, so the population selector now reads scope. Re-measured 2026-09-10 via the worktree''s own built CLI binary (./target/debug/codescout doctor, HEAD 566dd859, clean tree): catalog_health.outside_roots_total = 2041 (exact, unconditional at every scope per Ruling 17) -- not a like-for-like replacement for the original 636 (which summed 4 categories: 462 outside-roots + 113 entry-validity + 21 cited-prefix + 40 row-grain); the fuller 4-category analog on this catalog at this instant is 2041 + 116 + 21 + 433 = 2611. Remaining precondition is the merge from doctor-per-project-isolation to experiments (14 of 15 fix-cohort commits are not yet there), not any code -- do NOT archive until that merge lands.'
 ---
 
 > **Cluster:** `cluster/accepted-parameter-silently-dropped` (`IC-15`, n=20 before this
@@ -187,75 +187,118 @@ and publish no count, so a reader cannot tell whether `terminal_status_without_f
 
 ## Fix
 
-> **PARTIAL as of 2026-09-09 — do NOT archive; the headline symptom is still live.**
-> `26b60af8` (patch-id `39641840397a72f257450e7d36b72e197a1c67bf`, **experiments**) typed
-> `doctor`'s args, so `scope` is now deserialised, an unknown value is refused rather
-> than ignored, and the applied scope is echoed in the response. Two regression tests
-> cover that much: `an_unknown_scope_value_is_refused_rather_than_ignored` and
+> **FIXED as of 2026-09-10 — do NOT archive yet; the remaining precondition is the merge
+> to `experiments`, not any code.** `26b60af8` (patch-id
+> `39641840397a72f257450e7d36b72e197a1c67bf`, **on experiments**) typed `doctor`'s args, so
+> `scope` is deserialised, an unknown value is refused rather than ignored, and the
+> applied scope is echoed in the response. Two regression tests cover that much:
+> `an_unknown_scope_value_is_refused_rather_than_ignored` and
 > `the_applied_scope_is_echoed_in_the_response`.
 >
-> **The population selector still does not read it.** Verified at the bytes 2026-09-09:
-> `effective_scope` has exactly two uses in `src/librarian/tools/doctor.rs` — the
-> `resolve_scope` binding, and echoing itself back in the `"scope"` block of the
-> response. Every scan takes `roots`, and `roots = super::managed_roots(ctx)`, derived
-> from the context alone. So `scope="all"` still returns a project-scoped report and the
-> 636 dropped rows are still dropped.
+> **The population selector reads it now.** Fourteen further commits (listed in full
+> below) gave every scan a shared `DoctorScope` unit that six ad-hoc scoping mechanisms
+> collapsed onto, threaded `fix=reseat_worktree`'s repair and its report through that same
+> unit so the two cannot disagree, added a cites-based relevance exemption (`artifact_link`
+> and `entry_cite`) that admits a foreign finding only when a local artifact cites it
+> (narrowed to umbrella siblings, matching the user's stated ceiling), and made
+> `catalog_health.outside_roots_total` exact and unconditional at every scope. `scope="all"`
+> no longer silently re-labels a project-scoped report as widened.
 >
-> **And the shape changed in a direction worth naming — without changing the class.**
-> Before, the param was discarded in silence. Now the response *asserts* `scope: all` over
-> a population that is project-scoped, which a caller cannot distinguish from a correctly
-> widened one. The pre-fix silence at least under-claimed. That reads at first like
-> `IC-3` (declaration is not execution), and it was briefly retagged so — wrongly. **The
-> class stays `IC-15`, on this ledger's own precedent:** IC-15 moved
+> **And the shape changed in a direction worth naming when `26b60af8` alone had landed —
+> kept here because the wrong turn is instructive.** Before that commit, the param was
+> discarded in silence. For the window between `26b60af8` and the rest of this cohort, the
+> response *asserted* `scope: all` over a population that was still project-scoped, which a
+> caller could not distinguish from a correctly widened one — a state strictly worse than
+> the original silence, which at least under-claimed. That reads at first like `IC-3`
+> (declaration is not execution), and it was briefly retagged so — wrongly. **The class
+> stayed `IC-15`, on this ledger's own precedent:** IC-15 moved
 > `cli-artifact-drops-time-scope-and-extra` out to IC-3 *because no CLI flag existed, so
 > nothing was accepted*, and states its own claim as "a value the caller passed and the
-> system took, then did not use". `scope` is accepted here — parsed, type-checked and
-> enum-validated — and then not used, which is that sentence exactly. What `26b60af8`
-> changed is the **feedback**, not the class: acceptance is now explicit rather than
-> silent, the same wrinkle IC-15 already records for `read-only-true-is-inert-at-every-root`,
-> whose echoed `read_only: false` put a discriminator in a field nobody reads.
->
-> (Recorded because the wrong turn is instructive: a fix for the sibling class can make an
-> IC-15 member *look* like an IC-3 one, since every stage of wiring is now present except
-> the one that reads the value. The discriminator is whether the parameter is accepted at
-> all — not how much machinery sits between acceptance and the drop.)
->
-> Remaining work is the original Fix below: thread `effective_scope` into `managed_roots`
-> (or into the row filter) so the scanned population actually widens. A regression test
-> must assert a **row-count difference** between `scope="project"` and `scope="all"` over
-> a two-root fixture — asserting the echoed value cannot fail against this bug, since the
-> echo is precisely the half that already works.
+> system took, then did not use". `scope` was accepted — parsed, type-checked and
+> enum-validated — and, for that window, not used, which is that sentence exactly. What
+> `26b60af8` changed on its own was the **feedback**, not the class: acceptance became
+> explicit rather than silent, the same wrinkle IC-15 already records for
+> `read-only-true-is-inert-at-every-root`, whose echoed `read_only: false` put a
+> discriminator in a field nobody reads. (A fix for a sibling class can make an IC-15
+> member *look* like an IC-3 one, since every stage of wiring can be present except the one
+> that reads the value. The discriminator is whether the parameter is accepted at all —
+> not how much machinery sits between acceptance and the drop.) The rest of the cohort is
+> what closes that window for good.
 
-**Ship the implement path, not the reject path — the opposite of the `audit_doc_refs`
-precedent, and the difference is load-bearing.** That bug rejected `repo`/`umbrella`
-because `audit_doc_refs` walks the filesystem and widening was real feature work. Here
-the widening machinery already exists five times over; what is missing is only the
-caller's control over it. Rejecting non-`project` would leave the 636 scoped-out rows
-permanently unreachable *and* leave five mechanisms uncollapsed.
+**Shipped the implement path, not the reject path — the opposite of the `audit_doc_refs`
+precedent, and the difference was load-bearing.** That bug rejected `repo`/`umbrella`
+because `audit_doc_refs` walks the filesystem and widening was real feature work. Here the
+widening machinery already existed five times over; what was missing was only the
+caller's control over it. Rejecting non-`project` would have left the scoped-out rows
+permanently unreachable *and* left five mechanisms uncollapsed.
 
-Planned, in one change:
+**One correction to the plan actually implemented: the SQL-splice route (originally
+planned item 3 below, citing `bug-fix-session-log:W-117` as proof it was reusable) was
+abandoned, not shipped.** Task 2's implementer proved with a `git stash` control that a
+scoped-out tally requires observing the rows the SQL layer would have excluded before they
+ever reach the handler — so splicing `apply_scope`'s `FilterNode` into each raw
+`conn.prepare` scan and Ruling 17 (the metric stays global, the worklist narrows) are
+mutually exclusive by construction. `W-117`'s specific instance is recorded falsified in
+`bug-fix-session-log:W-117`; its pattern (scout whether the abstraction is *consumable*,
+not merely present) is preserved as sound. What shipped instead:
 
-1. Give `doctor` a typed `Args` struct with `#[serde(default)] scope: Option<Scope>`,
-   which also brings `fix`/`limit`/`offset` under the `librarian.rs` param probe and lets
-   the `accepts_any_json` exemption at `:239` be deleted.
-2. Resolve via `scope::resolve_scope(requested, current, UmbrellaPolicy::Require,
-   Scope::Project)` — `default = Project` per `scope.rs:11`, `Require` because `doctor` is
-   a search-shaped surface like `find`, not an orientation surface like `context`.
-3. Apply at the **SQL layer**, not as a sixth post-hoc filter: `apply_scope` yields a
-   `FilterNode`, `filter::compile` is `pub` (`src/librarian/filter.rs:92`) and returns
-   `SqlFragment { sql, params }`, which each raw `conn.prepare` scan splices exactly as
-   `cat_find::find` does (`src/librarian/catalog/find.rs:20-26`). Verified reusable —
-   `bug-fix-session-log:W-117`. This also removes the per-repo `read_to_string` cost that
-   post-hoc scoping cannot.
-4. Echo the applied scope (`ScopeApplied::to_json`) and any `scope_fallback` in the
-   response, so a widened-because-no-active-project result explains itself.
-5. Re-grain the 13 `cp.git_root` sites to `Scope::Project` (`cp.abs_path` + `main_root`
-   worktree overlay) so "project" means here what it means in `doc(action="find")`.
-6. Preserve Ruling 17: the `*_scoped_by_project` metrics stay global at every scope.
+1. `doctor` got a typed `Args` struct with `#[serde(default)] scope: Option<Scope>`,
+   bringing `fix`/`limit`/`offset` under the `librarian.rs` param probe and letting the
+   `accepts_any_json` exemption be deleted. (`26b60af8`)
+2. `scope::resolve_scope(requested, current, UmbrellaPolicy::Require, Scope::Project)` —
+   `Require` because `doctor` is a search-shaped surface like `find`, not an orientation
+   surface like `context`. (`26b60af8`)
+3. A new `DoctorScope` unit (`src/librarian/tools/doctor/scope.rs`) applies scope by
+   **admission**, not by SQL: every scan calls `doctor_scope.admit(check, id, abs_path)`
+   per candidate row, folding scoped-out rows into a published tally instead of excluding
+   them before they can be counted. Six ad-hoc scoping mechanisms (`known_workspace_roots`,
+   four per-scan `ctx` filters, the `SCOPED_ROW_CHECKS` retain-list, and the silent inline
+   `containing_root` checks) collapsed onto this one unit. (`fe7b6658` through `cfacf2fc`)
+4. `fix=reseat_worktree`'s repair takes the same resolved `DoctorScope` as the report, so
+   repair and report share one scope and cannot disagree. (`fe1c41e3`)
+5. A cites-based relevance exemption (`artifact_link` and `entry_cite`) admits a foreign
+   finding when a local artifact cites it, narrowed to umbrella members so the user's
+   ceiling ("at most umbrella siblings, only if it affects the current project") holds.
+   (`bd691d24`, `5e78ab59`)
+6. The applied scope and any `scope_fallback` are echoed in the response, and
+   `catalog_health.outside_roots_total` is an exact, unconditional-at-every-scope sum —
+   the metric stays global (Ruling 17) even as the collapsed display narrows below
+   `scope=all`. (`566dd859`)
 
-**SHA:** N/A — not yet fixed.
-**patch-id:** N/A — not yet fixed.
+**Fix cohort — SHA and patch-id for every commit** (`git show <sha> | git patch-id
+--stable`; derive independently with `git log --format=%H experiments..doctor-per-project-isolation`
+rather than trusting this table, which is a lower bound written at one instant —
+2026-09-10):
 
+| # | SHA | patch-id | subject | on `experiments`? |
+|---|---|---|---|---|
+| 1 | `26b60af8` | `39641840397a72f257450e7d36b72e197a1c67bf` | type doctor's args so a declared scope cannot be discarded | **yes** |
+| 2 | `fe7b6658` | `acc810f2b9973b1011dfc5796d6e288f423866ef` | doctor scoping unit -- admit-based narrowing, not SQL-splice | no |
+| 3 | `67e9804e` | `ee76a6d47759c68ce481aff2028467c4989dde88` | restore Ruling 17 for scope-refused outside-roots rows | no |
+| 4 | `0334dd88` | `5f8f3190812e0a7a17d27a05db554b087dbdb95c` | fix Round-2 findings on DoctorScope -- false hint text, fold ordering, admit() validation | no |
+| 5 | `c1d8cd51` | `0a3a9c9e77b0db5fa66af06f2a3fc6ef8d04300f` | scope five more checks through DoctorScope | no |
+| 6 | `1f0cd9c1` | `1aeebf7bf5e6229c3206265ffd78576188b2c23e` | address round-3 review of doctor Task 3 DoctorScope conversion | no |
+| 7 | `55c77f25` | `299e7e8f9b97c999e36752d05ce7533ef17af03f` | retire SCOPED_ROW_CHECKS; row-grain checks admit() directly | no |
+| 8 | `15d141eb` | `34abe38ad6229550fd839a58016b1eb39a6c6060` | address round-2 review of Task 4 (row-grain scoping) | no |
+| 9 | `8cef7950` | `ff7d6e70c7d424784dc44fed3ba7d407c1f6579d` | close round-2 review gaps in row-grain scope coverage | no |
+| 10 | `cfacf2fc` | `294ad2cda6c1ede95e5bcb35266c86f2c86ab0a6` | give six silent-scoping scans a published DoctorScope tally | no |
+| 11 | `fe1c41e3` | `7aae9ca5e9a15017d23ae6e17abaf4a82d3ea3c8` | scope reseat_worktree's repair, then its report | no |
+| 12 | `bd691d24` | `0b7219f8cd6f9cc87ad6934611f52ad5b630ebd7` | Task 7 -- relevance exemption for cross-root cites, with its own denominator | no |
+| 13 | `5e78ab59` | `bd596e0a92e3e0cd32b4ec3d4725ea76a43fe2ab` | Task 7 review round 1 -- five semantic fixes to the relevance exemption | no |
+| 14 | `abc61b68` | `1e20d432272c3a89ce428ddd5953a1d50cb06075` | DoctorScope::new takes conn directly, not a second internal lock | no |
+| 15 | `566dd859` | `ad17d2428dee5f43bb4fe857ee3221478185d69d` | collapse the outside-roots inventory below scope=all | no |
+
+**Row #12 (`bd691d24`) is not in the plan's own cohort list and was found only by
+re-deriving `git log --format=%H experiments..HEAD` rather than trusting it** — the plan
+named 14 total entries (13 SHAs plus `26b60af8`) where 15 exist. This is exactly the kind
+of drift the derivation instruction above warns about.
+
+Fourteen of these fifteen commits (everything except #1) are on
+`doctor-per-project-isolation` and are **NOT YET on `experiments`**
+(`git merge-base --is-ancestor 566dd859 experiments` → NO, verified 2026-09-10). CLAUDE.md
+archives a bug only once its fix is verified on `experiments`; that merge — not owned by
+this task, and not owned by any single session on a shared branch — is the one remaining
+precondition. No further code change is owed here.
 ## Tests added
 
 None yet. Planned, mirroring the precedent's four
