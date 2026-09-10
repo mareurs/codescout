@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 11
+entry_high_water_H: 12
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -608,6 +608,48 @@ live, until a Claude Code restart — verified by disagreement rather than assum
 call satisfying every predicate was silent, while the identical input piped straight to the hook
 emitted correctly. Sound code, absent registration.
 
+
+### H-12 — Run the hook suite in CI, behind a deny-list that cannot rot into silence
+
+**Status:** shipped. `claude-plugins:502365e` — a `full-suite` job in
+`.github/workflows/cross-platform-hooks.yml` running `tests/run-all.sh` on ubuntu-latest.
+
+**The gap was not that the suite was failing.** It was green and **unreachable**: CI ran 2
+suites on 3 OSes while the runner discovers 43, so every hook suite in the repo was green on
+its author's laptop and silent on everyone else's change. Locally those two states are
+indistinguishable, which is § *Testing Discipline*'s *loudness is a property of a PATH*
+applied to a whole suite rather than to one alarm.
+
+**What the measurement found, and it was not what I went looking for.** Running the suite
+under an empty `HOME` — the shape of a fresh runner — fails exactly **five** suites, all
+reading ambient `~/.claude*` through `detect.mjs`'s `HOME` / `CLAUDE_CONFIG_DIR` resolution.
+Real `HOME`: 43 pass. Empty `HOME`: those five fail, the other 38 pass. A hermeticity defect
+in the tests, not a defect in the hooks — they are not known-broken and must not be read so.
+
+**Filed nowhere new.** `claude-plugins:docs/issues/2026-08-05-test-run-all-pre-existing-failures-under-fresh-wsl.md`
+already owned it as a `zombie` whose re-open trigger read *"a non-Arch host, **or CI widened
+to the full suite set**"* — this work is the second half of that trigger, so the bug was
+re-opened and 5 of its 16 never-root-caused suites now have a cause. Found on the very
+machine class whose three green runs that file correctly refused to accept as evidence: the
+variable was never the OS, it was the ambient profile.
+
+**The deny-list is the design, not a detail.** `CS_TEST_SKIP` excludes by name, so discovery
+stays glob-driven and a suite added tomorrow is covered **by default** — an allow-list would
+silently un-cover every future suite, the same failure the runner's own `nullglob` guard
+exists to prevent one layer down. `run-all.sh` now prints what it skipped, and **exits
+non-zero when a listed name matches no discovered suite**, so renaming a suite cannot convert
+the exclusion into silence. Both behaviours verified by exit code rather than by reading the
+script — 1 for a stale name, 0 for the CI shape under an empty `HOME`.
+
+**What it does not buy:** the five stay uncovered, and 11 of the original 16 still require a
+WSL host to observe. Remaining work is in the bug — pin `HOME` per run as
+`tests/test-pre-edit-hint.sh` already does, then delete each name from the list.
+
+**Rests on:** § *Testing Discipline* — an alarm nothing reaches is exactly as informative as
+no alarm; and ADR-2026-08-27's clause that a negative result must name its scope, which is
+why the skip list is printed rather than applied quietly.
+
+**Valid:** conditional — the five suites become hermetic and the deny-list empties
 
 ## Template for new entries
 
