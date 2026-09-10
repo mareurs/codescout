@@ -2722,10 +2722,19 @@ mod tests {
     /// change. Scope: walks `properties` at the schema root only — nested item schemas
     /// (e.g. `edit_file.edits.items.properties.*`, `doc.augment.properties.*`) are
     /// invisible to it and are not asserted here.
+    ///
+    /// Also asserts `required ⊆ properties`, registry-wide, no hand-list: deleting
+    /// `path_requiring_tools_never_name_path_or_an_alias_in_required` (correct, post-collapse
+    /// `required: ["path"]` is honest) left its residue uncovered — `required: ["file_path"]`
+    /// (a key no caller can discover, since `path_requiring_tools_never_name_path_or_an_alias_
+    /// in_required` is exactly the check that used to catch this) would red nothing. This
+    /// loop already walks every tool's top-level schema for the description check above, so
+    /// the subset check rides the same iteration rather than adding a second one.
     #[tokio::test]
     async fn every_property_has_a_description() {
         let (_dir, server) = make_server().await;
         let mut blank = Vec::new();
+        let mut required_not_advertised = Vec::new();
         for t in &server.tools {
             let schema = t.input_schema();
             let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
@@ -2740,11 +2749,28 @@ mod tests {
                     blank.push(format!("{}.{}", t.name(), name));
                 }
             }
+            if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
+                for key in required {
+                    if let Some(key) = key.as_str() {
+                        if !props.contains_key(key) {
+                            required_not_advertised.push(format!(
+                                "{}: required names {key:?}, not in properties",
+                                t.name()
+                            ));
+                        }
+                    }
+                }
+            }
         }
         assert!(
             blank.is_empty(),
             "params with no description:\n  {}",
             blank.join("\n  ")
+        );
+        assert!(
+            required_not_advertised.is_empty(),
+            "a key in `required` a caller cannot discover (not in `properties`):\n  {}",
+            required_not_advertised.join("\n  ")
         );
     }
 
@@ -2802,12 +2828,7 @@ mod tests {
     /// The tools whose `call()` reaches `require_path_param` with `path` (or an alias)
     /// genuinely required. Declared once, consumed by
     /// `no_tool_schema_declares_a_top_level_combinator` below (the non-vacuity check
-    /// that the defect's tool class is actually in the registry). Task 7 of
-    /// `docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md` deleted the
-    /// second consumer this comment used to name
-    /// (`path_requiring_tools_never_name_path_or_an_alias_in_required`) along with the
-    /// alias-honesty gates it plans replaced — this const survives because it is not
-    /// one of them, only a companion to one.
+    /// that the defect's tool class is actually in the registry).
     const TOOLS_REQUIRING_PATH_VIA_ALIASES: &[&str] = &[
         "read_file",
         "create_file",
@@ -2888,17 +2909,26 @@ mod tests {
         );
     }
 
+    /// The one-line predicate `no_schema_property_declares_itself_an_alias` sweeps the
+    /// registry with, extracted so the fixture test below can pin it directly against
+    /// real strings rather than re-typing the registry sweep as a second copy of the
+    /// loop — which would be an un-annotated fixture, not a control.
+    fn description_declares_an_alias(d: &str) -> bool {
+        d.starts_with("Alias for ")
+    }
+
     /// No property may describe itself as an alias, because no property IS one any
     /// more — `Tool::param_aliases` holds the accept-set and the schema advertises
     /// exactly one name per concept. Reds if a collapsed alias is reintroduced as a
     /// property, which is the regression this collapse invites.
     ///
     /// Scoped to the ONE prose form the 26 collapsed properties actually used —
-    /// `d.starts_with("Alias for ")`, verified by `git log -p` over the four
-    /// collapsed-tool files, which show only `"Alias for path"` / `"Alias for body"`,
-    /// never a parenthetical form. `read_file`'s `offset`/`limit` say
-    /// "Native-Read-style alias" and are deliberately NOT matched: they are a second
-    /// calling convention, not a rename, and remain advertised on purpose.
+    /// `description_declares_an_alias` (`d.starts_with("Alias for ")`), verified by
+    /// `git log -p` over the four collapsed-tool files, which show only `"Alias for
+    /// path"` / `"Alias for body"`, never a parenthetical form. `read_file`'s
+    /// `offset`/`limit` say "Native-Read-style alias" and are deliberately NOT matched:
+    /// they are a second calling convention, not a rename, and remain advertised on
+    /// purpose.
     ///
     /// DELIBERATELY NARROWER than the plan draft, which also matched
     /// `d.contains("(alias of ")`. That second form is real in this tree, but it is
@@ -2908,7 +2938,10 @@ mod tests {
     /// the parenthetical match here would make this gate fail immediately against
     /// code no task in this plan touches, not against a regression — verified by
     /// running it: it failed on `symbols.name`/`symbols.name_path` before any
-    /// mutation was applied.
+    /// mutation was applied. **Uncovered residue, named rather than silently left:**
+    /// a schema-only alias resolved inside `call()` and never declared via
+    /// `param_aliases()` — exactly `symbols.rs`'s shape — reds nothing in this gate or
+    /// anywhere else in this file; no gate in this module checks that case.
     #[tokio::test]
     async fn no_schema_property_declares_itself_an_alias() {
         let (_dir, server) = make_server().await;
@@ -2922,7 +2955,7 @@ mod tests {
                 let Some(d) = def.get("description").and_then(|v| v.as_str()) else {
                     continue;
                 };
-                if d.starts_with("Alias for ") {
+                if description_declares_an_alias(d) {
                     offenders.push(format!(
                         "{}.{name}: description declares an alias — move it to \
                          param_aliases() and delete the property",
@@ -2939,20 +2972,63 @@ mod tests {
         assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
     }
 
+    /// Positive/negative control for `description_declares_an_alias`, using two REAL
+    /// strings rather than synthetic ones: the positive is the exact deleted
+    /// `read_file.output_id` description (`git log -p -S '"output_id"' --
+    /// src/tools/read_file.rs`); the negative is `read_file`'s LIVE `limit`
+    /// description, which contains the word "alias" but is not this prose form — the
+    /// discriminating case a blind `contains("alias")` would get wrong.
+    #[test]
+    fn description_declares_an_alias_matches_only_the_real_alias_prose() {
+        assert!(description_declares_an_alias(
+                "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back."
+            ));
+        assert!(!description_declares_an_alias(
+                "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted."
+            ));
+    }
+
+    /// Per-tool declared-alias-pair counts, restoring the SHAPE of the deleted
+    /// `EXPECTED_ALIAS_COUNTS_BY_TOOL` (`68262001`) — which counted schema-property
+    /// descriptions and correctly went to zero once the collapse deleted them — over
+    /// the domain that replaced it: alias PAIRS declared via `param_aliases()`. A
+    /// population floor (`checked >= 20` against a true population of 28) leaves 8
+    /// pairs of slack, more than any single tool's entire alias set, so a member
+    /// shrink (e.g. `edit_code`'s hand-written 5-pair array collapsed to the shared
+    /// 3-pair `PATH_PARAM_ALIAS_MAP` "for consistency") reds nothing under it — a
+    /// POPULATION assertion cannot verify a per-MEMBER claim. Counts derived directly
+    /// from each tool's `param_aliases()` body this session, not transcribed from any
+    /// plan or prior report: `edit_file`/`call_graph`/`references`/`symbol_at`/`grep`/
+    /// `create_file` each return the shared 3-pair `PATH_PARAM_ALIAS_MAP`; `edit_code`
+    /// and `read_file` each carry an independent 5-pair array. 6*3 + 2*5 = 28.
+    const EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL: &[(&str, usize)] = &[
+        ("edit_file", 3),
+        ("call_graph", 3),
+        ("references", 3),
+        ("symbol_at", 3),
+        ("edit_code", 5),
+        ("grep", 3),
+        ("create_file", 3),
+        ("read_file", 5),
+    ];
+
     /// The honesty gate, inverted. A name in `param_aliases()` must NOT also be a
     /// property: advertising it re-creates the ambiguity the collapse removed, and
     /// makes `required` unstateable again — which is what produced the API-illegal
     /// top-level `anyOf` (see `no_tool_schema_declares_a_top_level_combinator`).
+    ///
+    /// PER TOOL below, not aggregate — see `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`'s own
+    /// comment for why a population floor was not enough.
     #[tokio::test]
     async fn every_declared_alias_is_absent_from_the_schema() {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
-        let mut checked = 0usize;
+        let mut counted: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for t in &server.tools {
             let schema = t.input_schema();
             let props = schema.get("properties").and_then(|p| p.as_object());
             for (received, canonical) in t.param_aliases() {
-                checked += 1;
+                *counted.entry(t.name()).or_insert(0) += 1;
                 if props.is_some_and(|p| p.contains_key(*received)) {
                     offenders.push(format!(
                         "{}: {received:?} is both a declared alias and an advertised \
@@ -2970,78 +3046,196 @@ mod tests {
                 }
             }
         }
-        assert!(
-            checked >= 20,
-            "expected the collapsed alias population, saw {checked} — this sweep is \
-             vacuous if the declarations went missing"
+        assert_eq!(
+            counted.len(),
+            EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL.len(),
+            "an alias-declaring tool is not named in EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL \
+             (or a named one declared zero pairs): {counted:?}"
         );
+        for (tool, expected) in EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL {
+            let actual = counted.get(tool).copied().unwrap_or(0);
+            assert_eq!(
+                actual, *expected,
+                "{tool}: declared {actual} alias pairs, expected {expected} — a \
+                 per-tool member shrink is invisible to a population floor"
+            );
+        }
         assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
     }
 
-    /// PER ALIAS, not per tool: an aggregate cannot verify a per-member claim. Drives
-    /// the real dispatch path, because a direct `call()` bypasses the normalizer and
-    /// would prove nothing.
+    /// Replaces `every_declared_alias_is_normalized_and_announced` and
+    /// `call_content_overriders_declare_no_aliases` (both deleted): the two were proxies
+    /// for one claim — the dispatch boundary normalizes and announces for every
+    /// alias-declaring tool — and NEITHER drove the boundary. The deleted gate's own doc
+    /// comment said it "drives the real dispatch path, because a direct `call()` bypasses
+    /// the normalizer and would prove nothing" — that sentence was FALSE: the gate only
+    /// ever called the pure `normalize_params`/`correction_notice` functions directly, and
+    /// never touched `call_content`. This gate drives `call_tool_inner`, the real MCP
+    /// entry point (the same harness `no_absolute_project_paths_in_rendered_output` uses),
+    /// for four real, registered tools:
+    ///
+    /// - `grep(pattern=…, file_path=…)` — `OutputForm::Text`, small output: pins the
+    ///   compact-text `⚠ '…' is not a parameter …` hint form (Site B in `call_content`).
+    /// - `read_file(output_id=…)` — also `OutputForm::Text`, but its `format_compact`
+    ///   NEVER returns `None` (unconditionally `Some(format_read_file(result))` outside
+    ///   the markdown branch), so its small-output path takes the SAME compact-text
+    ///   branch as grep and can never show the JSON `corrections.param_aliases` address.
+    ///   Only `call_content`'s OUTER buffered-envelope path (Site A — JSON
+    ///   unconditionally, regardless of `output_form()`) carries that address. The
+    ///   fixture file below (6000 `"` characters, one line) is sized so the ESCAPED,
+    ///   wrapped JSON (`\"` doubles every byte, ~12KB) crosses the ~10,000-byte
+    ///   buffering threshold while the RAW file text (6000 bytes) stays under
+    ///   `read_full_file`'s own, separate, inner `exceeds_inline_limit` check — so
+    ///   `read_file`'s own file-summarization buffering never fires and `call_content`'s
+    ///   outer one does, which is the only way this tool's JSON corrections address is
+    ///   ever reachable.
+    /// - `create_file(file_path=…, content=…)` and `edit_file(file_path=…, old_string=…,
+    ///   new_string=…)` — `OutputForm::Json` (the default), small output: pin the JSON
+    ///   `corrections.param_aliases.hint` address directly, no buffering trick needed.
+    ///
+    /// Each case asserts BOTH the real side effect (the alias's value actually reached
+    /// the tool — a file was searched/read/created/edited) and the tool-appropriate
+    /// advisory surface: a population count of "some tools have an advisory" does not
+    /// establish that a GIVEN tool's real boundary call does. `Onboarding.param_aliases()
+    /// .is_empty()` is asserted directly below, preserving the deleted
+    /// `call_content_overriders_declare_no_aliases` gate's concern (the one in-tree
+    /// `call_content` override) without a hand-list of tool names whose only job was to
+    /// repeat that concern.
+    ///
+    /// **NOT covered, and why:** `call_graph`, `references`, `symbol_at` and `edit_code`
+    /// all declare aliases too, but their `call()` paths need a live LSP session —
+    /// `make_server` below gives an empty tempdir with no language server attached, and no
+    /// LSP-fixture harness exists in this module. Their aliases are still exercised at the
+    /// pure-function and per-tool-count level by `every_declared_alias_is_absent_from_the_
+    /// schema` / `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, but NOT at the real dispatch
+    /// boundary. That gap is real and is not closed here.
     #[tokio::test]
-    async fn every_declared_alias_is_normalized_and_announced() {
-        let (_dir, server) = make_server().await;
-        let mut checked = 0usize;
-        for t in &server.tools {
-            for (received, canonical) in t.param_aliases() {
-                checked += 1;
-                let mut input = serde_json::json!({});
-                input[*received] = serde_json::json!("probe-value");
-                let corrections =
-                    crate::tools::param_alias::normalize_params(&mut input, t.param_aliases());
-                assert!(
-                    input.get(*received).is_none(),
-                    "{}: {received:?} survived normalization",
-                    t.name()
-                );
-                assert_eq!(
-                    input[*canonical],
-                    serde_json::json!("probe-value"),
-                    "{}: {received:?} did not land on {canonical:?}",
-                    t.name()
-                );
-                let notice = crate::tools::param_alias::correction_notice(t.name(), &corrections)
-                    .unwrap_or_else(|| panic!("{}: {received:?} produced no notice", t.name()));
-                assert!(
-                    notice.contains(received) && notice.contains(t.name()),
-                    "{}: notice must name the key and the tool: {notice}",
-                    t.name()
-                );
-            }
-        }
-        assert!(checked >= 20, "vacuous: only {checked} aliases seen");
-    }
+    async fn the_dispatch_boundary_normalizes_and_announces_for_real_tool_calls() {
+        assert!(
+            Onboarding.param_aliases().is_empty(),
+            "onboarding overrides call_content AND would declare aliases, so they'd never be \
+             normalized or announced — either drop the override or normalize inside it"
+        );
 
-    /// `call_content` is where normalization happens, so a tool that OVERRIDES it opts
-    /// out of the mechanism entirely — silently. `Onboarding` is the only override in
-    /// the tree (`src/tools/onboarding.rs`). This gate is a hand-list because the trait
-    /// gives no way to ask "did you override this"; keeping the list short is the point.
-    #[tokio::test]
-    async fn call_content_overriders_declare_no_aliases() {
-        const OVERRIDES_CALL_CONTENT: &[&str] = &["onboarding"];
-        let (_dir, server) = make_server().await;
-        let mut seen = 0usize;
-        for t in &server.tools {
-            if !OVERRIDES_CALL_CONTENT.contains(&t.name()) {
-                continue;
-            }
-            seen += 1;
-            assert!(
-                t.param_aliases().is_empty(),
-                "{} overrides call_content AND declares aliases, so its aliases are \
-                 never normalized or announced. Either drop the override or normalize \
-                 inside it.",
-                t.name()
-            );
+        let (dir, server) = make_server().await;
+
+        macro_rules! call {
+            ($tool:expr, $input:tt) => {{
+                let req = CallToolRequestParams::new($tool)
+                    .with_arguments(serde_json::from_value(serde_json::json!($input)).unwrap());
+                let result = server
+                    .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                    .await
+                    .unwrap();
+                assert_ne!(
+                    result.is_error,
+                    Some(true),
+                    "{}: call errored — an alias that fails to reach its canonical key \
+                     typically shows up here as \"missing required parameter\": {result:?}",
+                    $tool
+                );
+                // Only the PRIMARY content block (index 0) is the tool's own
+                // render. `call_tool_inner` may append auto-injected guide-hint
+                // blocks after it (see `guide_blocks`'s doc comment above) — an
+                // unrelated side channel whose own prose can carry `{`/`}` and
+                // would corrupt an exact-shape assertion on the tool's render.
+                result
+                    .content
+                    .iter()
+                    .find_map(|c| c.as_text().map(|t| t.text.clone()))
+                    .unwrap_or_default()
+            }};
         }
+
+        // --- grep: OutputForm::Text, small output -> compact-text ⚠ hint (Site B) ---
+        std::fs::write(dir.path().join("grep_target.txt"), "needle sentence one\n").unwrap();
+        let text = call!("grep", { "pattern": "needle", "file_path": "." });
+        assert!(
+            text.contains("needle sentence one"),
+            "grep: the file_path alias's value did not reach the real search: {text}"
+        );
+        assert!(
+            text.contains("⚠ 'file_path' is not a parameter of grep"),
+            "grep: compact-text alias advisory missing or malformed: {text}"
+        );
+        assert!(
+            text.contains("corrected to 'path'"),
+            "grep: advisory must name the canonical key: {text}"
+        );
+        assert!(
+            !text.contains('{'),
+            "grep: this is the compact-text form, not JSON — a `{{` means the tool fell \
+             back to pretty-JSON and this pin is no longer testing what it claims: {text}"
+        );
+
+        // --- read_file: force the OUTER buffered-envelope path — see the doc comment
+        // above for the byte-budget derivation.
+        let big = "\"".repeat(6000);
+        std::fs::write(dir.path().join("big.txt"), &big).unwrap();
+        let text = call!("read_file", { "output_id": "big.txt" });
+        let val: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("read_file: buffered envelope was not JSON: {e}\n{text}"));
+        assert!(
+            val.get("buffered_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                > 10_000,
+            "read_file: expected the OUTER buffered envelope (buffered_bytes > 10000), \
+             meaning the fixture no longer crosses the threshold this pin depends on: {val}"
+        );
+        let hint = val["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| panic!("read_file: corrections.param_aliases.hint missing: {val}"));
+        assert!(
+            hint.contains("output_id") && hint.contains("read_file") && hint.contains("'path'"),
+            "read_file: {hint}"
+        );
+
+        // --- create_file: OutputForm::Json, small output -> JSON corrections.param_aliases ---
+        let text = call!(
+            "create_file",
+            { "file_path": "created.txt", "content": "hello" }
+        );
         assert_eq!(
-            seen,
-            OVERRIDES_CALL_CONTENT.len(),
-            "OVERRIDES_CALL_CONTENT names a tool that is not registered; re-derive it \
-             with grep(pattern=\"fn call_content\", glob=\"src/**/*.rs\")"
+            std::fs::read_to_string(dir.path().join("created.txt")).unwrap(),
+            "hello",
+            "create_file: the file_path alias's value did not reach the real write"
+        );
+        let val: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("create_file: response was not JSON: {e}\n{text}"));
+        let hint = val["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("create_file: corrections.param_aliases.hint missing: {val}")
+            });
+        assert!(
+            hint.contains("file_path") && hint.contains("create_file"),
+            "create_file: {hint}"
+        );
+
+        // --- edit_file: OutputForm::Json, small output -> JSON corrections.param_aliases ---
+        std::fs::write(dir.path().join("edit_target.txt"), "hello world\n").unwrap();
+        let text = call!(
+            "edit_file",
+            {
+                "file_path": "edit_target.txt",
+                "old_string": "hello",
+                "new_string": "hi"
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("edit_target.txt")).unwrap(),
+            "hi world\n",
+            "edit_file: the file_path alias's value did not reach the real edit"
+        );
+        let val: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("edit_file: response was not JSON: {e}\n{text}"));
+        let hint = val["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| panic!("edit_file: corrections.param_aliases.hint missing: {val}"));
+        assert!(
+            hint.contains("file_path") && hint.contains("edit_file"),
+            "edit_file: {hint}"
         );
     }
 
@@ -3049,17 +3243,21 @@ mod tests {
     /// deliberately does NOT return `crate::fs::PATH_PARAM_ALIAS_MAP`: it adds
     /// `("output_id", "path")` and `("file_id", "path")`, which that constant does not
     /// carry. `path_aliases_and_alias_map_agree` (`src/fs/mod.rs`) pins the other two
-    /// copies against each other and cannot see this one, and none of the four gates
-    /// above catches its narrowing — `every_declared_alias_is_absent_from_the_schema`'s
-    /// non-vacuity floor is `checked >= 20` against a live population of 26, so dropping
-    /// two pairs from just this one tool stays green under it (a POPULATION assertion
-    /// cannot verify a per-MEMBER claim). Narrowing this array back to the shared map
-    /// costs two things, neither of which reds any gate above: `read_file(output_id=…,
-    /// heading=…)` starts refusing with "missing required parameter 'path'" (the
-    /// `call()` fallback resolves the alias into a local and never writes
-    /// `input["path"]`), and a plain `read_file(output_id="@tool_x")` silently loses its
-    /// `corrections` advisory while still succeeding — `output_id` is the highest-
-    /// traffic alias in the corpus, so that silent branch is the common one. The
+    /// copies against each other and cannot see this one. A narrowing of the COUNT (e.g.
+    /// collapsing this 5-pair array down to the shared 3-pair `PATH_PARAM_ALIAS_MAP`) is
+    /// now caught above, by `every_declared_alias_is_absent_from_the_schema`'s per-tool
+    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 28 — derived from each
+    /// tool's `param_aliases()` body, not transcribed): `read_file` is asserted to declare
+    /// exactly 5 pairs, so dropping either extra pair reds it directly. What a COUNT
+    /// cannot catch is a same-count KEY-IDENTITY substitution — e.g. `("output_id",
+    /// "path")` silently rewritten to `("output_ref", "path")` — which is exactly why this
+    /// gate is kept rather than deleted once the count table landed. Narrowing this array
+    /// back to the shared map costs two things, neither of which the per-tool COUNT alone
+    /// names: `read_file(output_id=…, heading=…)` starts refusing with "missing required
+    /// parameter 'path'" (the `call()` fallback resolves the alias into a local and never
+    /// writes `input["path"]`), and a plain `read_file(output_id="@tool_x")` silently
+    /// loses its `corrections` advisory while still succeeding — `output_id` is the
+    /// highest-traffic alias in the corpus, so that silent branch is the common one. The
     /// fixture-line annotation on `read_file.rs` states the same fact in prose; this is
     /// the half that reds.
     #[tokio::test]
