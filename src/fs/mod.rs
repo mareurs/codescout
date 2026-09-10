@@ -229,6 +229,21 @@ pub(crate) async fn resolve_glob_for(
 /// signature) is by far the most common miss; `relative_path`/`file` predate it.
 pub(crate) const PATH_PARAM_ALIASES: &[&str] = &["file_path", "relative_path", "file"];
 
+/// The same accept-set as [`PATH_PARAM_ALIASES`], as `(received, canonical)`
+/// pairs for `Tool::param_aliases`. Derived from one list by hand rather than
+/// generated, because `param_aliases` must be `&'static` and a const fn cannot
+/// build it; `path_aliases_and_alias_map_agree` (below) pins the two together.
+///
+/// `#[allow(dead_code)]`: unread until Task 3 wires `Tool::param_aliases` to
+/// return it for every path-taking tool — this task (Task 1) only builds the
+/// standalone normalizer. Remove the allow when that wiring lands.
+#[allow(dead_code)]
+pub(crate) const PATH_PARAM_ALIAS_MAP: crate::tools::param_alias::AliasMap = &[
+    ("file_path", "path"),
+    ("relative_path", "path"),
+    ("file", "path"),
+];
+
 /// Extract an optional file path parameter from input, accepting "path" plus
 /// the `PATH_PARAM_ALIASES` (`file_path`, `relative_path`, `file`).
 pub(crate) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>> {
@@ -428,6 +443,25 @@ pub(crate) async fn tag_external_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The alias accept-set exists twice — as names (`PATH_PARAM_ALIASES`, consumed
+    /// by the per-call helpers) and as pairs (`PATH_PARAM_ALIAS_MAP`, consumed by the
+    /// dispatch normalizer). Adding to one and not the other is silent: the helper
+    /// would accept a name the normalizer never renames, so `call()` would see the
+    /// alias key and no correction would be announced.
+    #[test]
+    fn path_aliases_and_alias_map_agree() {
+        let from_map: Vec<&str> = PATH_PARAM_ALIAS_MAP.iter().map(|(a, _)| *a).collect();
+        assert_eq!(
+            from_map, PATH_PARAM_ALIASES,
+            "PATH_PARAM_ALIAS_MAP and PATH_PARAM_ALIASES must list the same aliases \
+             in the same order"
+        );
+        assert!(
+            PATH_PARAM_ALIAS_MAP.iter().all(|(_, c)| *c == "path"),
+            "every path alias must canonicalise to \"path\""
+        );
+    }
 
     #[test]
     fn is_mux_disconnect_matches_lsp_server_disconnected() {

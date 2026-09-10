@@ -1,5 +1,6 @@
 pub mod guards;
 pub(crate) mod guide_emit;
+pub mod param_alias;
 pub mod params;
 pub(crate) mod path_strip;
 pub mod types;
