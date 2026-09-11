@@ -2700,7 +2700,7 @@ async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory(
     );
 }
 
-// ---- The ERROR path (2026-09-10 bug `950440ec3d9a256e`). Every fixture above
+// ---- The ERROR path (2026-09-10 bug `50ac8439bae8b9bf`, archived). Every fixture above
 // returns `Ok`, so every render site exercised above sits below the `?` that used
 // to swallow the advisory whole. These are the fixture-level twin of
 // `src/server.rs`'s `the_dispatch_boundary_announces_the_repair_when_call_errs`:

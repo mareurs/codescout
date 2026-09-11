@@ -36,9 +36,12 @@ Read this when touching `source.md` (the single source for the `server_instructi
    at runtime (`src/tools/core/param_alias.rs`, per ADR 2026-07-10) and told about it
    on success: a `corrections` key for JSON-output tools, a bare `⚠`-prefixed hint
    string for the two `OutputForm::Text` tools (`read_file`, `grep`), which have no
-   `corrections` key to nest it in. **Not yet on the error path** — the advisory is
-   currently dropped when the call itself fails
-   (`docs/issues/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`).
+   `corrections` key to nest it in. **On the error path too, since `295a928e`** — a
+   `RecoverableError` carries the advisory at the same `corrections.param_aliases`
+   address for every tool regardless of `output_form()`, because `route_tool_error`
+   always emits JSON and there is no compact-text render to prefix. A plain `anyhow`
+   error (`isError: true`) deliberately does not carry it; the reasoning is at
+   `attach_param_corrections_to_error` in `src/tools/core/types.rs`.
    Only document params that change behavior in non-obvious ways.
 6. **Prompt caching matters.** Keep section order stable between releases so the static prefix benefits from automatic caching. Don't reorganize for cosmetic reasons.
 7. **You are the consumer.** When writing or reviewing prompt changes, think as the agent who will read this mid-task. Ask: "Would this have helped me find the right tool chain naturally?" Test by simulating a realistic task and checking whether the prompt guided you to the right flow. Usage data (`usage.db`) is the ground truth — if a tool has near-zero calls despite being useful, the prompt isn't surfacing it.
