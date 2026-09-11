@@ -1954,6 +1954,40 @@ mod tests {
         }
     }
 
+    /// The denylist gate above is only worth its green if the Iron Laws are inside the
+    /// surface it scans.
+    ///
+    /// `rendered_server_instructions_contains_no_deprecated_tool_names` is an ABSENCE
+    /// assertion over `build_server_instructions`, so it is monotone under that surface
+    /// shrinking: narrow the builder to emit only the quickref and the denylist passes over
+    /// a text that no longer contains the block it was protecting. Nothing in it would say
+    /// so.
+    ///
+    /// That coverage is load-bearing and was measured rather than assumed. Reinstating the
+    /// stale Iron Law 4 from
+    /// `docs/issues/archive/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`
+    /// — `NEVER read_file markdown → read_markdown`, unbackticked — reds the denylist gate
+    /// and leaves `prompt_surfaces_reference_only_real_tools` green, because the latter is
+    /// backtick-scoped and the former is not. The bug predicted EVERY prompt-surface gate
+    /// would stay green; one does not, and this test is what keeps that true.
+    #[test]
+    fn rendered_server_instructions_includes_the_iron_laws() {
+        let rendered = build_server_instructions(None);
+        assert!(
+            rendered.contains("## Iron Laws"),
+            "the Iron Laws are absent from the rendered server instructions, so the \
+             deprecated-name denylist above now scans a surface that does not contain them \
+             — it would pass without checking the most load-bearing prose in the system"
+        );
+        // Not just the heading: the numbered body has to be there too, or a surviving
+        // header would satisfy the assertion above while the laws themselves were gone.
+        assert!(
+            rendered.contains("1. NEVER") && rendered.contains("6."),
+            "the Iron Laws heading is present but its numbered body is not; the denylist \
+             gate is scanning a stub"
+        );
+    }
+
     /// Tool names that have been removed/renamed and must never appear in any
     /// prompt surface the model reads. Single source of truth, shared by the
     /// rendered-`server_instructions` gate above and the `CLAUDE.md` gate below.
