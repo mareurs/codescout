@@ -10,9 +10,11 @@ tags:
 - git-workflow
 - authorisation
 closed: null
+last_observed: 2026-09-11
 opened: 2026-09-06
 owner: marius
 severity: high
+verified_open: 2026-09-11 at HEAD 6c31ef0f — trailer census (10 kinds, none answers publishability), zero git-notes refs, remedy unadopted in both candidate surfaces
 ---
 
 # BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator's say-so
@@ -313,6 +315,64 @@ So a reader who reaches for it in the one case it fits **gets exit 0 from a chec
 **Not filed as a new bug.** Same mechanism, same class; recorded here so the count is a count and
 not two half-records. Reported by the pusher, `26cb9b5b`, who disclosed it before the author read
 it off the remote.
+
+### Instance 2026-09-11 — the ack route taken end-to-end, and the claim re-verified at the bytes
+
+**Verify-open verdict: still open, central claim intact.** Re-derived at HEAD `6c31ef0f`,
+2026-09-11, by two reads rather than by re-reasoning:
+
+- **Trailer census over the branch** — `Co-Authored-By`, `Session-Id`, `Gate`, `Verified`,
+  `Recon`, `GuideLedger`, `ENTRIES`, `Divergence`, `Coverage`, `CodeScoutServer`. Ten trailer
+  kinds in active use and **not one answers *may this be published***.
+- **`git notes`** — no refs exist at all, so the other candidate carrier is empty rather than
+  underused.
+- **The Fix was not adopted.** Neither `docs/RELEASE.md` nor `CLAUDE.md` carries the
+  *"cannot publish → do not commit"* convention. `RELEASE.md:424` carries the **three-state
+  question** instead, which is the thing you ASK, not a thing that is RECORDED.
+
+So the Summary's sentence — *"There is no field, trailer, ref or note that answers may this be
+published"* — is true today, and the guard's own `state_of()`
+(`scripts/pre-push-foreign-session-guard.sh:426`) resolves `gone` / `LIVE` / `?`, which is
+session **liveness** and not authorisation. The three authorisation states at `:520-527` live in
+prose addressed to a human.
+
+**What HAS changed, and it is worth distinguishing from "unaddressed": the guard now documents
+its own insufficiency.** Its banner states outright that an ack *"is not a fourth author state
+and it does not move anyone into cleared: every author below you stays exactly as UNCLEARED as
+they were, and the push proceeds on a different authority instead"*, and warns against reading
+one's own ack back later as evidence anyone agreed. It also flags that its computed sid list is
+*"the guard's arithmetic, not a witnessed binding"* — it never saw the operator's decision and
+cannot. That is this bug's claim, restated by the mechanism at the moment of use. A guard that
+names the gap it cannot close is a materially different state from one that hides it, and this
+file should not be read as though nothing happened since 2026-09-06.
+
+**NEW — the same disease one level up, on the party this file does not examine: the PUSHER.**
+This file is about the *author's* state being unrecorded. Today's guard names a second failure
+mode that is not in this file, and it afflicts the operator's own decision:
+
+> *"AN AUTHORISATION NAMES A SET; A BRANCH PUSH SENDS A PREFIX. They coincide only when nothing
+> lands between the decision and the push, which on a shared tree is the unusual case.
+> `git push origin experiments` satisfies 'push what I authorised' to the letter while sending
+> whatever arrived since."* Measured window: ninety seconds.
+
+The operator authorised a set described to them **in prose** (25 commits, 3 mine, 22 across three
+peer sessions). Nothing binds that prose to a commit range: the authorisation is as unrecorded as
+the authorship state this file is about, and it decays faster. The remedy is to re-derive the
+range, compare it against what was actually decided, and **push the decided set by sha** —
+done here as `git push origin 6c31ef0f:experiments`, with the ack sids derived independently
+from that range before reading the guard's list (they matched).
+
+**Why this matters for `## Resume`, which is currently under-scoped.** The proposed convention
+— *a session that cannot publish must not commit* — addresses the **author** side and does
+nothing for this one. A pusher's authorisation can go stale between the sentence and the push
+even when every author below them is perfectly disciplined about committing. Whatever is decided
+about the convention, the pusher-side half needs its own answer, and *"push by sha, never by
+branch name"* is a candidate that is already enforced in the guard and documented nowhere else.
+
+**Not a harm report.** All 25 commits were covered by the operator's authorisation and no
+author was withholding, so nothing was published against anyone's intent. This is an
+observation about the *procedure*, recorded because the path was exercised end-to-end rather
+than reasoned about.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
@@ -482,3 +542,15 @@ sequence this would extend.
 Then decide whether it earns a mechanism or stays a policy. A convention nobody can
 be reminded of at the moment it matters is a policy, and this ledger's own standing
 position is that a trigger the model must notice is a policy rather than a mechanism.
+
+**Third, and added 2026-09-11 because the two decisions above do not reach it: the
+PUSHER-side half.** Everything above concerns the author's state. The guard has since
+named a second failure mode that survives a perfectly disciplined author — *an
+authorisation names a SET; a branch push sends a PREFIX*, with a measured ninety-second
+window between the operator's sentence and the push. The operator's decision is itself
+unrecorded prose, and `git push origin <branch>` honours it to the letter while sending
+whatever landed since. *Push the decided set by sha, never by branch name* is the
+candidate answer; it is already enforced inside
+`scripts/pre-push-foreign-session-guard.sh` and documented on no read surface a session
+consults before pushing. Deciding the author-side convention does **not** dispose of
+this — see § *Evidence*, instance 2026-09-11.
