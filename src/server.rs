@@ -2904,6 +2904,177 @@ mod tests {
         "symbol_at",
     ];
 
+    /// The population for the shrink-guard coverage gate below: a property name
+    /// that, at the TOP LEVEL of a tool's input schema, means the caller hands
+    /// this tool content to write.
+    ///
+    /// Derived from the registry rather than from a grep over write primitives,
+    /// and the difference is measured. Deriving it as "source files that read
+    /// existing content and then write over it" (`read_to_string` plus one of
+    /// `atomic_write`/`fs::write`/`write_lines`) selected 70 files under `src/`,
+    /// 66 of which would have needed an exemption — a list nobody reads, which
+    /// registers as coverage while checking nothing. That predicate also MISSED
+    /// `create_file`, which overwrites without reading and so matches neither half
+    /// of its conjunction. Schema-derived, the population is 5 of 21 tools.
+    const CONTENT_PROPS: &[&str] = &["body", "content", "new_string"];
+
+    /// Tool name -> a source path that must contain a `shrink_guard::check` call.
+    ///
+    /// The mapping is declared, but every entry is VERIFIED against the filesystem
+    /// by `every_guarded_call_site_still_holds_its_guard`, so a path that rots or a
+    /// guard that is deleted reds here instead of decaying into a list of claims
+    /// nobody rechecks.
+    const GUARDED: &[(&str, &str)] = &[
+        ("doc", "src/librarian/tools/update.rs"),
+        ("edit_file", "src/tools/markdown/edit_markdown.rs"),
+        ("memory", "src/memory/mod.rs"),
+        ("edit_code", "src/tools/symbol/edit_code.rs"),
+    ];
+
+    /// A content-bearing tool that deliberately runs no shrink guard, with the
+    /// reason. Same shape as `tests/feature_lanes.rs`'s `EXEMPT` and for the same
+    /// purpose: an escape hatch that must state its own justification, so the
+    /// silent option is the one removed.
+    const EXEMPT: &[(&str, &str)] = &[(
+        "create_file",
+        "under `overwrite: true` it writes caller content over an existing file, but never \
+         READS that file — so it cannot compute a shrink report without an added read, which \
+         is a behaviour change rather than a wiring fix. Tracked in the bug file named by \
+         every_content_bearing_tool_is_shrink_guarded_or_has_a_reason, under 'What is still owed'.",
+    )];
+
+    fn shrink_gate_repo_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// Every registered tool that accepts caller-supplied content, by name.
+    fn content_bearing_tools(server: &CodeScoutServer) -> Vec<String> {
+        server
+            .tools
+            .iter()
+            .filter(|t| {
+                let schema = t.input_schema();
+                CONTENT_PROPS
+                    .iter()
+                    .any(|p| schema.get("properties").and_then(|o| o.get(*p)).is_some())
+            })
+            .map(|t| t.name().to_string())
+            .collect()
+    }
+
+    /// The class gate for the shrink-guard bug (docs/issues/, 2026-09-10, "the
+    /// shrink guard covers three prose write paths and not the code one").
+    ///
+    /// `shrink_guard::check` was wired to three of four destructive-write surfaces
+    /// for months. A fourth call site closes that instance; this closes the class,
+    /// which is what the bug file asked for and what the guard module's own header
+    /// argues for when it records that "three copies is how the gap below
+    /// survived". A fifth content-bearing tool now reds here unless it is guarded
+    /// or given a reason.
+    ///
+    /// CEILING, stated because a reader would otherwise credit this with more than
+    /// it proves: it establishes that each surface's module CONTAINS a guard call,
+    /// not that the call runs on the right operands or is even reachable. A guard
+    /// handed the whole file instead of the replaced range satisfies this test.
+    /// That property is per-surface and belongs to the surface's own tests —
+    /// `replace_warns_when_the_new_body_is_less_than_half_the_symbol` and its
+    /// silent twin in `tests/symbol_lsp.rs` are `edit_code`'s, and they were driven
+    /// to an observed RED by exactly that mutation.
+    #[tokio::test]
+    async fn every_content_bearing_tool_is_shrink_guarded_or_has_a_reason() {
+        let (_dir, server) = make_server().await;
+        let population = content_bearing_tools(&server);
+
+        let guarded: std::collections::BTreeSet<&str> = GUARDED.iter().map(|(t, _)| *t).collect();
+        let exempt: std::collections::BTreeSet<&str> = EXEMPT.iter().map(|(t, _)| *t).collect();
+
+        let uncovered: Vec<&String> = population
+            .iter()
+            .filter(|t| !guarded.contains(t.as_str()) && !exempt.contains(t.as_str()))
+            .collect();
+
+        assert!(
+            uncovered.is_empty(),
+            "these tools accept caller-supplied content and write it, but run no shrink \
+             guard and are not exempt: {uncovered:?}\n\n\
+             Pick one:\n  \
+             - call `crate::util::shrink_guard::check(old, new)` on the content being \
+             REPLACED — not the whole file, which is monotone under this defect for any \
+             region that is a small fraction of it — and add the tool to GUARDED with its \
+             call-site path, or\n  \
+             - add it to EXEMPT with the reason it cannot be guarded.\n\n\
+             Silently leaving it unguarded is the option this test removes: `edit_code` was \
+             unguarded while being the surface Iron Law 2 MANDATES for structural edits, and \
+             it returned `status: \"ok\"` on a write that deleted 27 lines."
+        );
+    }
+
+    /// `GUARDED` is a list of claims about other files. Unchecked it decays the way
+    /// every hand-maintained citation list decays — and it would decay into looking
+    /// like coverage, because the gate above reads only the tool NAMES.
+    #[test]
+    fn every_guarded_call_site_still_holds_its_guard() {
+        for (tool, path) in GUARDED {
+            let full = shrink_gate_repo_root().join(path);
+            let src = std::fs::read_to_string(&full)
+                .unwrap_or_else(|e| panic!("GUARDED names {path} for `{tool}`, unreadable: {e}"));
+            assert!(
+                src.contains("shrink_guard::check"),
+                "GUARDED claims `{tool}` is guarded at {path}, but that file contains no \
+                 `shrink_guard::check` call. Either the guard was removed — in which case that \
+                 surface silently accepts arbitrary deletion again — or the call moved and \
+                 this entry needs repointing."
+            );
+        }
+    }
+
+    /// The two gates above are worth their green only if their inputs are real. A
+    /// renamed schema property, a registry change, or a typo in `CONTENT_PROPS`
+    /// would empty the population and make both pass by finding nothing to check —
+    /// vacuous green, the exact failure `the_guard_is_not_vacuous` in
+    /// `tests/feature_lanes.rs` exists to prevent, reproduced one level up.
+    ///
+    /// The known answers are load-bearing, measured 2026-09-11: `edit_code` must be
+    /// IN (it is the surface the bug was about), `create_file` must be IN (it is
+    /// the fixture the previous grep-derived predicate missed, which is why that
+    /// predicate was discarded), and `read_file` must be OUT (the control — it
+    /// takes a path and writes nothing). Losing any one means the predicate has
+    /// drifted into selecting on something other than caller-supplied content.
+    #[tokio::test]
+    async fn the_content_bearing_population_is_not_vacuous() {
+        let (_dir, server) = make_server().await;
+        let population = content_bearing_tools(&server);
+
+        assert!(
+            population.len() >= 4,
+            "expected at least the four known content-bearing tools; got {population:?} — \
+             CONTENT_PROPS or the tool registry has moved"
+        );
+        assert!(
+            population.len() < server.tools.len(),
+            "the predicate selected EVERY registered tool ({} of {}), so it discriminates nothing",
+            population.len(),
+            server.tools.len()
+        );
+        assert!(
+            population.iter().any(|t| t == "edit_code"),
+            "`edit_code` must be selected — it is the surface this gate exists for. got: \
+             {population:?}"
+        );
+        assert!(
+            population.iter().any(|t| t == "create_file"),
+            "`create_file` must be selected — it is the known-answer fixture. A predicate that \
+             misses it is the grep-derived one this gate replaced, which failed for exactly \
+             that reason. got: {population:?}"
+        );
+        assert!(
+            !population.iter().any(|t| t == "read_file"),
+            "`read_file` is the control: it takes a path and writes nothing. Selecting it means \
+             the predicate matches something other than caller-supplied content. got: \
+             {population:?}"
+        );
+    }
+
     /// **Schema ACCEPTABILITY — the question the four schema-honesty gates could not ask.**
     ///
     /// The Anthropic Messages API rejects a tool whose `input_schema` carries `oneOf`,
