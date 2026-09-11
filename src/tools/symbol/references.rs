@@ -241,7 +241,7 @@ impl Tool for References {
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
                 "scope": {
-                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
                     "default": "project",
                     // Nested combinator, not root-level — see the identical comment in
                     // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
@@ -261,7 +261,13 @@ impl Tool for References {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let name_path = require_str_param(&input, "symbol")?;
         let rel_path = require_path_param(&input)?;
-        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+        let scope_raw = input["scope"].as_str();
+        let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
+            crate::tools::RecoverableError::with_hint(
+                format!("unrecognized scope '{raw}'"),
+                crate::library::scope::SCOPE_ACCEPTED_HINT,
+            )
+        })?;
 
         let full_path =
             resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;

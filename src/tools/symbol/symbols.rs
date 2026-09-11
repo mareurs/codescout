@@ -157,14 +157,16 @@ impl Tool for Symbols {
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
                 "scope": {
-                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
                     "default": "project",
                     // Nested combinator, not root-level (no_tool_schema_declares_a_top_level_combinator,
                     // src/server.rs, forbids the latter but confirms the former is "fine and
-                    // deliberately unchecked"). Scope::parse silently falls back to Project for any
-                    // unrecognized string, which a bare enum here would mask; this expresses the real
-                    // accepted set honestly — the closed vocabulary, OR the open-ended `lib:<name>`
-                    // prefix — without falsely rejecting a valid `lib:<name>` value.
+                    // deliberately unchecked"). `Scope::parse` now REJECTS any unrecognized string
+                    // (RecoverableError at the call site) rather than silently falling back to
+                    // Project, so a bare enum here would still mask the open-ended `lib:<name>`
+                    // form; this expresses the real accepted set honestly — the closed vocabulary,
+                    // OR the open-ended `lib:<name>` prefix — without falsely rejecting a valid
+                    // `lib:<name>` value.
                     "oneOf": [
                         { "type": "string", "enum": ["project", "libraries", "all"] },
                         { "type": "string", "pattern": "^lib:.+$" }
@@ -255,7 +257,13 @@ impl Tool for Symbols {
         let include_body_explicit = optional_bool_param(&input, "include_body");
         let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
         let depth = optional_u64_param(&input, "depth").unwrap_or(0) as usize;
-        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+        let scope_raw = input["scope"].as_str();
+        let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
+            RecoverableError::with_hint(
+                format!("unrecognized scope '{raw}'"),
+                crate::library::scope::SCOPE_ACCEPTED_HINT,
+            )
+        })?;
 
         let root = ctx
             .agent

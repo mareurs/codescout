@@ -47,10 +47,39 @@ impl Tool for IndexProject {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         use crate::agent::IndexingState;
 
-        let scope_str = input["scope"].as_str().unwrap_or("project");
+        // Strict parse, shared with symbols/references/semantic_search — an
+        // unrecognized value (typo, or "umbrella" from doc/librarian's other
+        // scope axis) is a caller error, not a silent fold into project scope.
+        let scope_raw = input["scope"].as_str();
+        let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
+            crate::tools::RecoverableError::with_hint(
+                format!("unrecognized scope '{raw}'"),
+                crate::library::scope::INDEX_SCOPE_ACCEPTED_HINT,
+            )
+        })?;
+
+        // `Scope::parse` accepts the full symbol-family vocabulary (`libraries`/`all`
+        // included) because the parser is shared — but `index` has no "index
+        // everything" operation, so those two values parse successfully and must
+        // still be refused here, narrower than the shared parser. If this arm were
+        // missing, `index`'s schema (project/lib:<name> only) would be lying again.
+        if matches!(
+            scope,
+            crate::library::scope::Scope::Libraries | crate::library::scope::Scope::All
+        ) {
+            return Err(crate::tools::RecoverableError::with_hint(
+                format!(
+                    "scope '{}' is not valid for index — index only accepts 'project' or 'lib:<name>'",
+                    scope_raw.unwrap_or("all")
+                ),
+                crate::library::scope::INDEX_SCOPE_ACCEPTED_HINT,
+            )
+            .into());
+        }
 
         // Library scope: delegate to library indexing logic (replaces index_library tool)
-        if let Some(lib_name) = scope_str.strip_prefix("lib:") {
+        if let crate::library::scope::Scope::Library(lib_name) = scope {
+            let lib_name = lib_name.as_str();
             let force = parse_bool_param(&input["force"]);
 
             // Guard against concurrent runs — mirror the project-scope branch
@@ -863,7 +892,7 @@ impl Tool for Index {
                 },
                 "scope": {
                     "default": "project",
-                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library.",
+                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
                     // Nested combinator, not root-level — see the identical comment in
                     // src/tools/symbol/symbols.rs's "scope" property. Narrower than the
                     // symbol-family form: `index` only ever accepts "project" or "lib:<name>",

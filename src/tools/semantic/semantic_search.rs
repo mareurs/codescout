@@ -578,7 +578,7 @@ impl Tool for SemanticSearch {
                 "detail_level": { "type": "string", "description": "'full' for complete chunks (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "scope": {
-                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
                     // Nested combinator, not root-level — see the identical comment in
                     // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
                     "oneOf": [
@@ -617,12 +617,21 @@ impl Tool for SemanticSearch {
             )
             .into());
         }
-        if input
-            .get("scope")
-            .and_then(|v| v.as_str())
-            .map(|s| s.starts_with("lib:"))
-            .unwrap_or(false)
-        {
+        // Strict parse: an unrecognized `scope` (e.g. a typo, or "umbrella" from
+        // doc/librarian's different scope axis) is a caller error, not a silent
+        // fold into project-scope search. `Scope::Libraries`/`Scope::All` parse
+        // fine but are otherwise UNUSED below — this backend only ever searches
+        // `project_id`'s own collection (Phase 7 note above) — so passing them
+        // does not yet broaden the search; only `Scope::Library` is rejected
+        // outright, below, as genuinely unsupported.
+        let scope_raw = input.get("scope").and_then(|v| v.as_str());
+        let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
+            crate::tools::RecoverableError::with_hint(
+                format!("unrecognized scope '{raw}'"),
+                crate::library::scope::SCOPE_ACCEPTED_HINT,
+            )
+        })?;
+        if matches!(scope, crate::library::scope::Scope::Library(_)) {
             return Err(crate::tools::RecoverableError::with_hint(
                 "library scope is not yet supported by the Qdrant retrieval stack",
                 "Track L-12 in docs/trackers/2026-05-07-legacy-retrieval-removal.md; \

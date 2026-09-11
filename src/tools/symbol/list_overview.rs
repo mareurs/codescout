@@ -202,7 +202,13 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
     let depth = optional_u64_param(&input, "depth").unwrap_or(1) as usize;
     let guard = OutputGuard::from_input(&input);
     let include_docs = parse_bool_param(&input["include_docs"]);
-    let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+    let scope_raw = input["scope"].as_str();
+    let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
+        RecoverableError::with_hint(
+            format!("unrecognized scope '{raw}'"),
+            crate::library::scope::SCOPE_ACCEPTED_HINT,
+        )
+    })?;
 
     // Helper: collect docstrings for a file path as a JSON array
     let collect_docstrings = |path: &std::path::Path| -> Vec<Value> {

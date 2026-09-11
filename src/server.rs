@@ -3978,8 +3978,30 @@ mod tests {
     /// elsewhere: the alternative (leaving the mismatch undocumented in the schema) is
     /// the exact defect this batch exists to fix. Report run 2026-09-10: TOTAL
     /// (21 tools) = 55_056, headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-11, 55_056 → 55_355 (+299), because the entry above
+    /// documented the schema half of the fix but not the runtime half.** The nested
+    /// `oneOf` only stopped a client that validates its own tool schema before
+    /// sending — probed live: `references(scope="umbrella", ...)` returned identical
+    /// results to no `scope` at all, so nothing client-side was actually enforcing it.
+    /// The defect was `Scope::parse` (`src/library/scope.rs`) itself: it took `Option<&str>
+    /// -> Self` and could not fail, so ANY unrecognized string — not just the ones a
+    /// `oneOf` happens to catch — silently coerced to `Scope::Project`. Fixed at the
+    /// source: `parse` now returns `Result<Self, String>`, and its three tool-argument
+    /// call sites (`symbols`, `references`, `semantic_search` — `list_overview` is
+    /// `symbols`' own path, not a fourth caller) map `Err` to a `RecoverableError`
+    /// naming the rejected value. `index` shares the same parser but has a narrower
+    /// accepted set (no `libraries`/`all`), so its call site additionally rejects those
+    /// two post-parse with its own hint (`INDEX_SCOPE_ACCEPTED_HINT`) rather than reusing
+    /// `SCOPE_ACCEPTED_HINT` — otherwise its schema would still be lying about what it
+    /// accepts. The +299 bytes are one added clause per schema (all four `scope`
+    /// descriptions, plus `index`'s, now state in one clause that this `scope` is a
+    /// different axis from `doc`/`librarian`'s `scope`) — the cross-reference
+    /// previously existed only in a runtime response hint (`src/prompts/mod.rs`),
+    /// never in the schema a caller actually reads before calling. Report run
+    /// 2026-09-11: TOTAL (21 tools) = 55_355, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_056;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_355;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
