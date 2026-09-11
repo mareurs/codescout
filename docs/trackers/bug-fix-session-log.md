@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 132
-entry_high_water_W: 123
+entry_high_water_W: 124
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -185,6 +185,7 @@ entry_high_water_W: 123
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-124 | 2026-09-11 | high | **A probe composed from a bug's TITLE confirmed the half that was never broken.** Checking whether `50aed1562ca29abc` had been fixed by nine alias-collapse commits, I built the probe from its title — an overflowing `grep` with a bad param name — and got a clean structured `corrections.param_aliases` in the envelope. The file's own § *Summary* says the FRAMEWORK advisory "attaches on all three render paths, **including** the buffered overflow envelope": the half I probed was never the defect. The real one is the TOOL's own `corrections`, and the stated reproduction (`doc(find, rel_path=…, limit=200)`) shows it still live at `13859878` — key NAMED in the shape listing, value left in the buffer. Control run on ONE tool in BOTH response shapes, so it is not tool-specific. | A false "fixed" report to my operator and to the bug's author, on a real passing measurement with a plausible mechanism attached — and the step after "fixed" is archiving, which moves the evidence out with the bug. Nothing downstream catches it: the probe genuinely passed. **Generalises:** CLAUDE.md's *run the reproduction* rule is written for the FIXING phase; the CLOSING phase needs it identically and resists it more, because the expected answer is the reassuring one and a passing substituted probe is never interrogated. | validated |
 | W-123 | 2026-09-10 | high | **The live probe named the blast radius a Critical could only hypothesise — and proved the binary BEFORE touching a destructive path.** After `cargo rb` + `/mcp`, one `librarian(action="doctor", fix="reseat_worktree")` call with `confirm` omitted returned `mode: "dry_run"`, empty `reseated` and `would_reseat`, and `scoped_out: {whatsapp-cli: 2}`. Catalog byte-identical either side: 4786 rows, digest `1f8784f932f042bc`. Binary identity was established from COMPILED-IN STRINGS (3 new markers present, both old ones at 0), not from mtime and not from my own tool-list text, which was captured pre-rebuild — that check is what made the probe safe to run at all, since the pre-fix repair took no root. Two gates fired and they are SEPARABLE: `mode` is the `confirm` thread (`ebaae018`), the rows being refused-and-tallied rather than offered is the shared `DoctorScope` (`fe1c41e3`). | Pre-fix that same call would have `artifact::upsert` + `graft::graft_rows`'d TWO NAMED ROWS in an unrelated repository — `whatsapp-cli/docs/issues/2026-08-13-workspace-param-inconsistent-in-worktree.md` and `whatsapp-cli/docs/trackers/session-log.md` — one of them a session log whose entry history lives only in the catalog and never in git, which is the history the reseat feature exists to preserve. Bound, stated rather than glossed: `would_reseat` was empty, so the live call exercised the preview's PRESENCE and the refusal path, never its contents; `reseat_worktree_dry_runs_unless_confirm_is_true` covers that and this entry must not be read as covering it. | validated |
 | W-122 | 2026-09-10 | high | **Second datapoint for `W-116` at 6 sessions / 29 commits — cite that entry, not this one, for the ordering finding.** What is new: all five authors replied and none of the banner's three states described any of them. They enumerate what an AUTHOR can hold, and an operator ack is not an author state — it routes around the question rather than answering it. The remedy is not a fourth line (read too late) but the guard naming the operator route AT REFUSAL, which `:378`'s "THEN" and `:387`'s "IF EVERY" both sequence behind a determination that cannot terminate. Also records where this went further than `W-116` and why that was luck. |
 | W-121 | 2026-09-10 | high | **Resolving a peer's claim at the bytes before relaying it — and the day it REFUTED one, which is the case a run of confirmations cannot demonstrate.** Three applications changed an outgoing message; a fourth rejected a peer's premise that `doc(move)` leaves a stale frontmatter id, killing a design change built on it. Their diagnosis is the transferable half: their file carried no `id:` to rewrite, so their "direct observation" was **monotone under the claim being false**. Mine discriminated by luck of fixture, not method. Within the hour we each read an OUTCOME as evidence of the MECHANISM that would have produced it, in opposite directions. |
@@ -13562,6 +13563,47 @@ directions.
 (the scope bug, 19-commit cohort); CLAUDE.md § *Testing Discipline* — *loudness is a
 property of a PATH, not of a failure*, of which this is the reached-path case: the guard
 fired, on a real population, at the surface a caller actually calls.
+
+## W-124 — A probe composed from a bug's TITLE confirmed the half that was never broken
+
+**Valid:** dated 2026-09-11
+
+**Observed:** Post-rebuild recon. Probing whether `50aed1562ca29abc` ("the buffered envelope
+drops the tool's own `corrections`") had been fixed by the nine alias-collapse commits that
+landed after it, I composed a probe from the bug's TITLE — an overflowing `grep` call with a
+bad param name — and got a clean confirmation: the envelope carried a structured
+`corrections.param_aliases` object. I was one sentence from reporting the bug fixed.
+
+Re-reading the file's own § *Summary* before writing that up stopped it. The summary says the
+FRAMEWORK's param-alias advisory "attaches on all three render paths, **including the buffered
+overflow envelope**" — i.e. the half I had just probed was never the defect. The actual bug is
+the TOOL's own `corrections` (`find.rs` reporting that it lifted `rel_path` into a filter).
+Running the reproduction the file states — `doc(action="find", rel_path="docs/issues",
+limit=200)` — showed it still live at `13859878`: the envelope names the key in its shape
+listing and leaves the value in the buffer.
+
+**Pattern:** Two unrelated mechanisms shared the key name `corrections`. A probe of one returns
+a true, well-formed, reassuring result that is **no evidence whatever** about the other — the
+`IC-6` no-disambiguator shape, met while *verifying* rather than while parsing.
+
+**Counterfactual:** A false "fixed" report to my user and to the bug's author, on a live
+measurement, with a plausible mechanism attached. The likely next step is archiving — and an
+archive moves the evidence out with the bug, so a wrong close costs more than a wrong fix.
+Nothing downstream would have caught it: the probe really did pass, and the commits really did
+touch alias corrections.
+
+**What generalises:** CLAUDE.md's *"run the reproduction before reading the fix plan"* is
+written for the FIXING phase. **The CLOSING phase needs it identically and resists it more**,
+because the expected answer is the reassuring one — a substituted probe returning "fixed" is
+never interrogated the way one returning "still broken" would be. So: **run the reproduction
+the FILE states, never one composed from its title**, and when a bug file distinguishes two
+mechanisms in its § *Summary*, that sentence is the discriminator rather than background.
+
+**Recorded where it will be met:** the control is in the bug file itself (`9e972253`), so the
+next reader probing that file meets the trap before running it, rather than having to find
+this entry.
+
+**Status:** validated
 
 ## Template for new entries
 
