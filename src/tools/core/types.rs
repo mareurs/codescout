@@ -307,7 +307,7 @@ fn annotate_write_path(val: &mut Value, path: &str) {
 /// `call_graph`, `doc`, `symbols`) and none writes its own `corrections`;
 /// `corrections` is written only by `find.rs` and `update.rs`, both under `doc`.
 /// Re-verify that pairing before trusting it stays empty.
-fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) {
+pub(crate) fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) {
     match obj.get_mut("corrections") {
         Some(existing) if existing.is_object() => {
             if let Some(existing_obj) = existing.as_object_mut() {
@@ -350,7 +350,31 @@ fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) 
 /// caller straight back through the alias it was not told about.
 /// `docs/issues/archive/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
 ///
-/// **Both error types now carry it, via two different carriers.** A
+/// **Two carriers here is a fact about THIS function, never a scope for the dispatch
+/// it feeds — and publishing it as one is what produced `696f3be9902ebf17`.** The
+/// sentence that used to open this paragraph said "both error types", which is true
+/// and was read as coverage; `route_tool_error` had *three* outcomes, and the middle
+/// one consulted neither carrier. Derive the count at the surface you actually mean.
+/// Counted from the code 2026-09-11, not transcribed:
+///
+/// - **This function: 2 carriers**, one per arm of `e.downcast::<RecoverableError>()`
+///   — the `extra` map on `Ok`, an [`AdvisedError`] wrapper on `Err`. A third error
+///   type with its own splice point would move this number and only this one.
+/// - **`route_tool_error`: 3 outcomes** — `RecoverableError`, the LSP-transient
+///   `-32800`/`-32801` arm, and the fatal `else`. A fourth arm moves this number and
+///   no other, which is the whole reason it is no longer the advisory's bound.
+/// - **`route_tool_error`: 2 response SHAPES**, and this is the count that does bound
+///   the advisory's addresses. An object-shaped body (arms 1 and 2) takes it at
+///   `corrections.param_aliases`, the same address the success path uses; plain text
+///   (arm 3) cannot hold an object at all, so it takes the `⚠ {hint}` prefix.
+///   `ErrorRender` (`src/server.rs`) is that pair made explicit and attached once
+///   after arm selection, so an arm added later cannot be added without it.
+/// - **`call_content`: 4 render paths** — the buffered envelope, the
+///   `OutputForm::Text` compact render, the pretty-JSON value, and this error path,
+///   which is the fourth and was added by `295a928e` after the spec, the governing
+///   ADR and three separate task reviews had all enumerated three.
+///
+/// The two carriers themselves. A
 /// [`RecoverableError`] (`isError: false`, "bad input, self-correct and retry")
 /// already had a splice point: `route_tool_error` puts its `extra` map into the
 /// response body at the top level, so the advisory lands at
@@ -366,9 +390,13 @@ fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) 
 /// wrapper this needed: it carries the advisory as a separate field while its
 /// `Display`/`Debug`/`source()` all delegate to the inner error unchanged, so
 /// `route_tool_error` still shows the tool's own message and still logs the full
-/// chain — it only gains a `⚠ {hint}\n\n` prefix, matching the same prefix
+/// chain. What it gains depends on which SHAPE the dispatch selected, not on which
+/// arm: on the fatal text, a `⚠ {hint}\n\n` prefix, matching the same prefix
 /// convention `call_content`'s own compact-text success renderer already uses for
-/// this same `hint` string. `docs/issues/archive/2026-09-11-the-alias-advisory-still-does-not-reach-the-plain-anyhow-error-path.md`.
+/// this same `hint` string; on an object-shaped body — the LSP-transient arm — the
+/// `corrections.param_aliases` key instead, because that shape can hold an object and
+/// a caller should parse one address.
+/// `docs/issues/archive/2026-09-11-the-alias-advisory-still-does-not-reach-the-plain-anyhow-error-path.md`.
 ///
 /// **The alternative carrier considered and rejected: joining `RecoverableError`'s
 /// existing [`Guidance`] (`hint` / `warning` / `must_follow`).** A `RecoverableError`
@@ -379,7 +407,10 @@ fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) 
 /// **Also out of scope, and not a hole:** `call_content`'s ambiguous-write refusal
 /// returns before `param_corrections` is ever built. It needs no advisory, because its
 /// message already names both alias keys and both discarded values.
-fn attach_param_corrections_to_error(e: anyhow::Error, c: Option<&Value>) -> anyhow::Error {
+pub(crate) fn attach_param_corrections_to_error(
+    e: anyhow::Error,
+    c: Option<&Value>,
+) -> anyhow::Error {
     let Some(c) = c else { return e };
     match e.downcast::<RecoverableError>() {
         Ok(mut rec) => {

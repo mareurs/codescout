@@ -1682,25 +1682,42 @@ async fn build_resource_registry(
     rr
 }
 
-/// Route a tool `Err(e)` to the appropriate `CallToolResult`.
+/// The two response SHAPES `route_tool_error` can produce, chosen by
+/// [`select_error_render`] and finished by [`route_tool_error`].
 ///
-/// - [`RecoverableError`] → `isError: false` with a JSON body containing
-///   `"error"`, optional guidance under its variant-named key
-///   (`hint` / `warning` / `must_follow`), and any `extra` fields spliced
-///   in at the top level.  Sibling parallel calls are **not** aborted.
-/// - Any other error → `isError: true` (fatal; something truly broke).
-///   The full `anyhow` context chain is logged server-side via
-///   `tracing::error!`; only the outermost message goes over the wire. This
-///   keeps `with_context` chains (which often include absolute paths) out
-///   of MCP responses for the HTTP transport, where error oracles can leak
-///   filesystem layout to an authenticated-but-untrusted client. If the error
-///   is a [`crate::tools::AdvisedError`] (a parameter alias was silently
-///   corrected before the call failed), the text also carries a `⚠ {hint}`
-///   prefix — the message itself is untouched, so a caller reading past the
-///   prefix still sees exactly what the tool would have said unwrapped.
+/// **This type is the mechanism, and it is why the fix for `696f3be9902ebf17` was not a
+/// second `downcast_ref` inside the arm that was missing one.** That arm was the second
+/// of three outcomes to be added and the second to be written without the advisory;
+/// closing it in place would have made the count three and left outcome four — whenever
+/// it arrives — exposed in exactly the same way. With the dispatch returning a shape
+/// rather than a finished `CallToolResult`, an arm added below **cannot** skip the
+/// advisory: there is nothing for it to return early with.
 ///
-/// [`RecoverableError`]: crate::tools::RecoverableError
-fn route_tool_error(e: anyhow::Error) -> CallToolResult {
+/// The two variants are not two arms — they are the two CARRIERS the advisory has. An
+/// object-shaped body can hold it at `corrections.param_aliases`, the address the
+/// success path and the buffered envelope also use; plain text cannot hold an object at
+/// all, so there it becomes a `⚠ {hint}` prefix. Arms 1 and 2 both produce `Body` today;
+/// that is the point — they share one attachment site because they share one carrier.
+enum ErrorRender {
+    /// An object-shaped body, rendered as pretty JSON with `isError: false` so sibling
+    /// parallel tool calls are not aborted.
+    Body(serde_json::Value),
+    /// Plain wire text, rendered with `isError: true`. Only the outermost message —
+    /// the `anyhow` context chain is logged server-side by the arm that chose this.
+    Fatal(String),
+}
+
+/// Choose which shape `route_tool_error` renders, WITHOUT finishing the response.
+///
+/// The return type is the guard described on [`ErrorRender`]: this function is not
+/// permitted to build a `CallToolResult`, so no arm here can return past the advisory
+/// attachment that follows it. Add an arm by returning another `ErrorRender`.
+///
+/// Side effects belong here rather than at the call site because they are properties of
+/// the arm, not of the shape: the transient arm logs at WARN (it renders as `ok: true`
+/// and would otherwise be invisible in diagnostic logs), the fatal arm logs the full
+/// `anyhow` context chain at ERROR.
+fn select_error_render(e: &anyhow::Error) -> ErrorRender {
     if let Some(rec) = e.downcast_ref::<crate::tools::RecoverableError>() {
         let mut body = serde_json::json!({ "ok": false, "error": rec.message });
         if let Some(g) = &rec.guidance {
@@ -1711,8 +1728,7 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
                 obj.insert(k.clone(), v.clone());
             }
         }
-        let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
-        CallToolResult::success(vec![Content::text(text)])
+        ErrorRender::Body(body)
     } else if e.to_string().contains("code -32800") || e.to_string().contains("code -32801") {
         // Transient LSP errors:
         // - -32800 RequestCancelled: server cancelled (workspace lock, cold indexing).
@@ -1721,13 +1737,18 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
         //   cancels requests against the stale snapshot).
         // Treat both as recoverable so sibling parallel tool calls are not aborted.
         // Log at WARN so this is visible in diagnostic logs (otherwise it appears as ok=true).
+        //
+        // `e.to_string()` is the INNER error's text when `e` is an `AdvisedError`, whose
+        // Display delegates by design — which is precisely how a wrapped LSP failure
+        // reaches this arm rather than the fatal one, and why the advisory could not be
+        // left to a downcast that lived only down there (`696f3be9902ebf17`).
         let code = if e.to_string().contains("code -32801") {
             "-32801"
         } else {
             "-32800"
         };
         tracing::warn!("LSP transient error ({}): {}", code, e);
-        let body = serde_json::json!({
+        ErrorRender::Body(serde_json::json!({
             "error": e.to_string(),
             "hint": "The LSP server returned a transient error (RequestCancelled -32800 or \
                      ContentModified -32801). The client already auto-retries idempotent \
@@ -1740,30 +1761,82 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
                      --system-path to avoid contention on the IntelliJ platform's .app.lock.\n\
                      Wait and retry; or for non-idempotent methods (rename, applyEdit) \
                      re-issue manually after confirming server state."
-        });
-        let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
-        CallToolResult::success(vec![Content::text(text)])
+        }))
     } else {
         // Log the full context chain server-side (`{:#}` walks `.source()`
         // chain). Only the outermost message crosses the wire. Unchanged by
-        // the prefix below: `AdvisedError`'s Display/Debug delegate fully to
-        // its inner error, so this line's output is identical whether `e` is
-        // bare or wrapped.
+        // the prefix the caller adds: `AdvisedError`'s Display/Debug delegate
+        // fully to its inner error, so this line's output is identical whether
+        // `e` is bare or wrapped.
         tracing::error!(error = format!("{e:#}"), "tool error");
-        // A wrapped `AdvisedError` carries a parameter-alias advisory that has
-        // nowhere else to land on this branch (no JSON body here, just text) —
-        // prefixed, not appended, matching `call_content`'s own compact-text
-        // success renderer's choice for this same `hint` string: the notice
-        // changes how the message below it should be read, so it has to
-        // arrive first. See `attach_param_corrections_to_error`.
-        let prefix = e
-            .downcast_ref::<crate::tools::AdvisedError>()
-            .and_then(|adv| adv.corrections.get("hint"))
-            .and_then(|v| v.as_str())
-            .filter(|h| !h.is_empty())
-            .map(|h| format!("⚠ {h}\n\n"))
-            .unwrap_or_default();
-        CallToolResult::error(vec![Content::text(format!("{prefix}{e}"))])
+        ErrorRender::Fatal(e.to_string())
+    }
+}
+
+/// Route a tool `Err(e)` to the appropriate `CallToolResult`.
+///
+/// - [`RecoverableError`] → `isError: false` with a JSON body containing
+///   `"error"`, optional guidance under its variant-named key
+///   (`hint` / `warning` / `must_follow`), and any `extra` fields spliced
+///   in at the top level.  Sibling parallel calls are **not** aborted.
+/// - A transient LSP error (`-32800` / `-32801`) → `isError: false` with its own
+///   `{"error", "hint"}` body, so sibling parallel calls survive a cold-index window.
+/// - Any other error → `isError: true` (fatal; something truly broke).
+///   The full `anyhow` context chain is logged server-side via
+///   `tracing::error!`; only the outermost message goes over the wire. This
+///   keeps `with_context` chains (which often include absolute paths) out
+///   of MCP responses for the HTTP transport, where error oracles can leak
+///   filesystem layout to an authenticated-but-untrusted client.
+///
+/// **Arm selection and advisory attachment are two steps, deliberately.**
+/// [`select_error_render`] chooses the shape; this function attaches the
+/// parameter-alias advisory to whichever shape came back. A wrapped
+/// [`crate::tools::AdvisedError`] means a parameter alias was silently corrected
+/// before the call failed: on an object-shaped body the advisory lands at
+/// `corrections.param_aliases` (the address arm 1, the success path and the buffered
+/// envelope all use), and on the fatal text — which has no body to splice into — as a
+/// `⚠ {hint}` prefix. Either way the message itself is untouched, so a caller reading
+/// past the prefix still sees exactly what the tool would have said unwrapped.
+///
+/// [`RecoverableError`]: crate::tools::RecoverableError
+fn route_tool_error(e: anyhow::Error) -> CallToolResult {
+    // Read ONCE, above the dispatch, for every arm. `AdvisedError` never wraps a
+    // `RecoverableError` — `attach_param_corrections_to_error` merges into `extra` on
+    // that branch and wraps only on the other — so this is `None` for the
+    // `RecoverableError` arm and the advisory is already spliced into its body by the
+    // time we get here. No double attach; `merge_param_corrections` would be
+    // idempotent regardless (same key, same value).
+    let advisory = e
+        .downcast_ref::<crate::tools::AdvisedError>()
+        .map(|adv| &adv.corrections);
+    match select_error_render(&e) {
+        ErrorRender::Body(mut body) => {
+            if let (Some(c), Some(obj)) = (advisory, body.as_object_mut()) {
+                // The SAME function `call_content`'s small-output success path calls,
+                // so the advisory's address is a property of the mechanism rather than
+                // of which branch you landed on. Merges under `corrections`, so an
+                // arm's own `hint` — the LSP retry guidance, in particular — is
+                // preserved rather than overwritten: the bug's whole point is that
+                // both facts must arrive together.
+                crate::tools::merge_param_corrections(obj, c);
+            }
+            let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+            CallToolResult::success(vec![Content::text(text)])
+        }
+        ErrorRender::Fatal(message) => {
+            // No JSON body on this shape, just text — so the advisory is prefixed, not
+            // spliced, matching `call_content`'s own compact-text success renderer's
+            // choice for this same `hint` string: the notice changes how the message
+            // below it should be read, so it has to arrive first. See
+            // `attach_param_corrections_to_error`.
+            let prefix = advisory
+                .and_then(|c| c.get("hint"))
+                .and_then(|v| v.as_str())
+                .filter(|h| !h.is_empty())
+                .map(|h| format!("⚠ {h}\n\n"))
+                .unwrap_or_default();
+            CallToolResult::error(vec![Content::text(format!("{prefix}{message}"))])
+        }
     }
 }
 
@@ -7083,6 +7156,187 @@ mod tests {
         let err = anyhow::anyhow!("LSP error (code -32603): internal error");
         let result = route_tool_error(err);
         assert_eq!(result.is_error, Some(true));
+    }
+
+    // ── route_tool_error × the parameter-alias advisory, ONE GATE PER ARM ───
+    //
+    // `route_tool_error` dispatches to three outcomes and the advisory has to reach
+    // all three. It reached two: bug `696f3be9902ebf17` — the LSP-transient arm
+    // composed its own body and consulted no advisory, so an aliased call to any of
+    // the five LSP-backed alias-declaring tools lost it during a cold-index window,
+    // while that arm's own `hint` ("Wait and retry") routed the caller straight back
+    // through the alias they were never told about.
+    //
+    // One gate per ARM rather than one per feature: a mutation run answers a question
+    // about one site, and these three sites have different carriers
+    // (`RecoverableError.extra`, `AdvisedError` + JSON body, `AdvisedError` + text
+    // prefix). Arms 1 and 3 already worked at filing time and are kept as POSITIVE
+    // CONTROLS — they are what makes a red in arm 2 a measurement rather than a broken
+    // harness, which is exactly how the bug's own reproduction was run.
+
+    /// The advisory object the three gates below share — the same Ruling-9
+    /// `{params, hint}` shape `call_content` builds, hand-built here only because these
+    /// gates drive `route_tool_error` directly rather than through a whole tool call.
+    ///
+    /// **Load-bearing fixture detail:** `hint` must stay non-empty and must keep naming
+    /// `file_path`, a token that appears in no arm's own output. Replace it with
+    /// anything an arm could have produced by itself (e.g. wording drawn from the LSP
+    /// boilerplate) and all three gates keep passing while discriminating nothing.
+    fn alias_advisory_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "params": [{
+                "received": "file_path",
+                "canonical": "path",
+                "conflicted": false,
+                "superseded_by": serde_json::Value::Null,
+            }],
+            "hint": "'file_path' is not a parameter of references — corrected to 'path'. \
+                     Use 'path' next time.",
+        })
+    }
+
+    /// ARM 1 — `RecoverableError`, whose carrier is `extra` (merged by
+    /// `attach_param_corrections_to_error`'s `Ok` branch) and whose address is
+    /// `corrections.param_aliases`.
+    ///
+    /// POSITIVE CONTROL. This arm already carried the advisory when
+    /// `696f3be9902ebf17` was filed, so a red here says the harness or the carrier
+    /// broke, not that the arm regressed — and without it a red in
+    /// `..._lsp_transient_arm...` below could not be distinguished from
+    /// "`attach_param_corrections_to_error` stopped attaching anything at all".
+    #[test]
+    fn the_advisory_reaches_the_recoverable_arm_of_route_tool_error() {
+        let advisory = alias_advisory_fixture();
+        let err = crate::tools::attach_param_corrections_to_error(
+            crate::tools::RecoverableError::new("path not found: no-such.rs").into(),
+            Some(&advisory),
+        );
+        let result = route_tool_error(err);
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "arm 1 is the RecoverableError arm and must stay isError:false"
+        );
+        let text = &result.content[0].as_text().unwrap().text;
+        let body: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            body["error"], "path not found: no-such.rs",
+            "the tool's own message must survive the advisory — it is ADDITIVE: {body}"
+        );
+        let hint = body["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| panic!("arm 1: corrections.param_aliases.hint missing: {body}"));
+        assert!(
+            hint.contains("file_path"),
+            "arm 1: the advisory must name the alias actually sent: {hint}"
+        );
+    }
+
+    /// ARM 2 — the LSP-transient `-32800` / `-32801` branch. THE BUG
+    /// (`696f3be9902ebf17`): this arm builds `{"error", "hint"}` from scratch and,
+    /// before the fix, never consulted `AdvisedError`.
+    ///
+    /// `AdvisedError`'s `Display` delegates to its inner error by design (so the tool's
+    /// own message survives), and that delegation is exactly what lets a wrapped LSP
+    /// error satisfy this arm's `contains` and never reach the downcast that used to
+    /// live only in arm 3.
+    ///
+    /// Asserts BOTH facts arrive: the arm's own LSP retry guidance is preserved
+    /// verbatim in `hint`, and the advisory lands beside it at
+    /// `corrections.param_aliases` — the same address arm 1 and the success path use.
+    /// Overwriting `hint` with the advisory would reproduce this defect in the other
+    /// direction, so the LSP half is asserted too.
+    #[test]
+    fn the_advisory_reaches_the_lsp_transient_arm_of_route_tool_error() {
+        for raw in [
+            "LSP request failed: code -32800 (RequestCancelled)",
+            "LSP request failed: code -32801 (ContentModified)",
+        ] {
+            let advisory = alias_advisory_fixture();
+            let err = crate::tools::attach_param_corrections_to_error(
+                anyhow::anyhow!(raw),
+                Some(&advisory),
+            );
+            let result = route_tool_error(err);
+            assert_ne!(
+                result.is_error,
+                Some(true),
+                "{raw}: the transient arm routes to isError:false so sibling parallel \
+                 calls survive — if this flips, the case is no longer on arm 2"
+            );
+            let text = &result.content[0].as_text().unwrap().text;
+            let body: serde_json::Value = serde_json::from_str(text)
+                .unwrap_or_else(|e| panic!("{raw}: arm-2 body was not JSON: {e}\n{text}"));
+            assert_eq!(
+                body["error"], raw,
+                "{raw}: the inner error text must survive — AdvisedError's Display \
+                 delegates, so a change here means the wrapper started leaking"
+            );
+            let lsp_hint = body["hint"].as_str().unwrap_or_default();
+            assert!(
+                lsp_hint.contains("Wait and retry"),
+                "{raw}: the arm's own LSP retry guidance must be PRESERVED, not \
+                 overwritten by the advisory — both facts have to arrive together: \
+                 {lsp_hint}"
+            );
+            let advisory_hint = body["corrections"]["param_aliases"]["hint"]
+                .as_str()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{raw}: corrections.param_aliases.hint missing on the LSP-transient \
+                         arm — this is bug 696f3be9902ebf17: {body}"
+                    )
+                });
+            assert!(
+                advisory_hint.contains("file_path"),
+                "{raw}: the advisory must name the alias actually sent: {advisory_hint}"
+            );
+            assert_eq!(
+                body["corrections"]["param_aliases"]["params"][0]["canonical"], "path",
+                "{raw}: the structured half must ride along too, not just the prose: {body}"
+            );
+        }
+    }
+
+    /// ARM 3 — the fatal `else`, whose carrier is the `⚠ {hint}` text prefix because
+    /// there is no JSON body to splice into.
+    ///
+    /// SECOND POSITIVE CONTROL, and it holds a different thing fixed than arm 1: arm 1
+    /// checks the `RecoverableError` carrier, this one checks the `AdvisedError`
+    /// carrier. Arm 2 shares arm 3's carrier, so a green here beside a red there
+    /// localises the defect to the arm rather than to the wrapper.
+    #[test]
+    fn the_advisory_reaches_the_fatal_arm_of_route_tool_error() {
+        let advisory = alias_advisory_fixture();
+        let err = crate::tools::attach_param_corrections_to_error(
+            anyhow::anyhow!("unsupported language"),
+            Some(&advisory),
+        );
+        let result = route_tool_error(err);
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "arm 3 is genuinely fatal and must stay isError:true — the advisory must \
+             not have flipped it into a RecoverableError"
+        );
+        let text = &result.content[0].as_text().unwrap().text;
+        assert!(
+            text.contains("unsupported language"),
+            "arm 3: the tool's own message must survive verbatim: {text}"
+        );
+        assert!(
+            text.contains("file_path"),
+            "arm 3: the advisory must name the alias actually sent: {text}"
+        );
+        let advisory_pos = text
+            .find('⚠')
+            .unwrap_or_else(|| panic!("arm 3: expected a '⚠'-prefixed advisory: {text}"));
+        let message_pos = text.find("unsupported language").unwrap();
+        assert!(
+            advisory_pos < message_pos,
+            "arm 3: the advisory must be PREFIXED, not appended — it changes how the \
+             message below it should be read: {text}"
+        );
     }
 
     // ── timeout dispatch ───────────────────────────────────────────────────
