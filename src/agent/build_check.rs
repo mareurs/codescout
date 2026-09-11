@@ -222,8 +222,10 @@ pub(crate) fn checkout_is_shared(sessions: &[LiveSession], root: &Path) -> bool 
 /// Canonicalize for comparison, falling back to the literal path. macOS reaches a
 /// tempdir through the `/var` → `/private/var` symlink and Windows `canonicalize` yields
 /// the `\\?\` form, so a raw comparison disagrees with itself across platforms — the same
-/// trap `ledger_unpushed_commits` documents
-/// (`src/librarian/tools/append_entry.rs:451-467`).
+/// trap a since-removed helper in `append_entry.rs` (`ledger_unpushed_commits`, removed
+/// 2026-09-11 along with the refusal it served — see
+/// docs/issues/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md)
+/// once documented identically: canonicalize BOTH sides before comparing, never one.
 fn canonical(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }

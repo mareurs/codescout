@@ -1075,6 +1075,89 @@ hasnt "fully acked: does NOT deny the ack's role" "$OUT" "not on the ack"
 has   "fully acked: names the population it authorised" "$OUT" "2 commit(s) by another session"
 
 echo
+echo "== entry-id collision scan (Fix Part 1, cd808780d9ea2db9) =="
+#
+# Two clones each allocate the SAME next id from a common base before either sees the
+# other's commit; the merge that reconciles them combines both definitions instead of
+# resolving them. This is the collision `append_entry`'s removed allocate-time refusal
+# never actually prevented -- codescout:docs/issues/archive/2026-09-10-append-entry-
+# refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md.
+ledger_base() {  # writes ledger.md at HEAD with high-water N and one heading R-N
+    printf -- '---\nentry_prefix: R\n---\n\n# L\n\n## R-%s -- a\n' "$1" > "$REPO/ledger.md"
+    printf -- 'entry_high_water_R: %s\n' "$1" >> "$REPO/ledger.md"
+    git -C "$REPO" add ledger.md
+    git -C "$REPO" commit -q -m "base at R-$1"
+}
+ledger_append() {  # <title-suffix> -- appends the NEXT numbered heading + bumps the mark
+    n=$(($(grep -oE '^## R-[0-9]+' "$REPO/ledger.md" | tail -1 | grep -oE '[0-9]+$') + 1))
+    printf -- '## R-%s -- from %s\n' "$n" "$1" >> "$REPO/ledger.md"
+    sed -i -E "s/^entry_high_water_R: [0-9]+/entry_high_water_R: $n/" "$REPO/ledger.md"
+    git -C "$REPO" add ledger.md
+    git -C "$REPO" commit -q -m "allocate R-$n from $1"
+}
+
+new_repo
+ledger_base 1
+COLLISION_BASE="$(sha)"
+git -C "$REPO" branch -q other
+ledger_append A                                    # main:   R-2 "from A"
+git -C "$REPO" checkout -q other
+ledger_append B                                     # other:  R-2 "from B", same base
+git -C "$REPO" checkout -q main
+git -C "$REPO" merge -q --no-edit other >/dev/null 2>&1 || {
+    # Genuinely conflicting hunks (git's merge algorithm is not guaranteed to auto-
+    # combine two same-anchor appends): resolve by keeping BOTH headings, unresolved --
+    # exactly what a human "keeping both without renumbering" produces, and exactly the
+    # silent case this scan exists to catch.
+    {
+        printf -- '---\nentry_prefix: R\n---\n\n# L\n\n## R-1 -- a\n'
+        printf -- '## R-2 -- from A\n## R-2 -- from B\n'
+        printf -- 'entry_high_water_R: 2\n'
+    } > "$REPO/ledger.md"
+    git -C "$REPO" add ledger.md
+    git -C "$REPO" commit -q -m "merge other into main"
+}
+COLLISION_TIP="$(sha)"
+run "$ALICE" - "refs/heads/main $COLLISION_TIP refs/heads/main $COLLISION_BASE"
+eq  "genuine duplicate: refused"                  "$EC" 1
+has "genuine duplicate: names the token"          "$OUT" "R-2"
+has "genuine duplicate: names the file"           "$OUT" "ledger.md"
+has "genuine duplicate: explains the mechanism"   "$OUT" "before either saw the"
+
+# CONTROL: the identical shape, but the merge RESOLVED the duplicate (one side
+# renumbered before merging) -- must NOT refuse. Proves the scan reads the merge's
+# actual tree rather than just "both parents advanced the same prefix".
+new_repo
+ledger_base 1
+RESOLVED_BASE="$(sha)"
+git -C "$REPO" branch -q other
+ledger_append A
+git -C "$REPO" checkout -q other
+ledger_append B
+git -C "$REPO" checkout -q main
+git -C "$REPO" merge -q --no-edit other >/dev/null 2>&1 || true
+{
+    printf -- '---\nentry_prefix: R\n---\n\n# L\n\n## R-1 -- a\n'
+    printf -- '## R-2 -- from A\n## R-3 -- from B (renumbered)\n'
+    printf -- 'entry_high_water_R: 3\n'
+} > "$REPO/ledger.md"
+git -C "$REPO" add ledger.md
+git -C "$REPO" commit -q -m "merge other into main, resolved" --allow-empty 2>/dev/null || true
+RESOLVED_TIP="$(sha)"
+run "$ALICE" - "refs/heads/main $RESOLVED_TIP refs/heads/main $RESOLVED_BASE"
+eq  "already-resolved duplicate: allowed"         "$EC" 0
+
+# CONTROL: an ordinary non-merge push over the same kind of ledger content must be
+# completely unaffected -- proves the scan is merge-gated, not a blanket ledger scan.
+new_repo
+ledger_base 1
+NONMERGE_BASE="$(sha)"
+ledger_append A
+NONMERGE_TIP="$(sha)"
+run "$ALICE" - "refs/heads/main $NONMERGE_TIP refs/heads/main $NONMERGE_BASE"
+eq  "non-merge push: allowed"                     "$EC" 0
+
+echo
 echo "-------------------------------------------"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

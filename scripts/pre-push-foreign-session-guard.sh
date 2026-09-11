@@ -161,6 +161,109 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         range=("$remote_sha..$local_sha")
     fi
 
+    # --- ENTRY-ID COLLISION SCAN --------------------------------------------------
+    #
+    # codescout:docs/issues/archive/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md
+    # (Fix Part 1). `append_entry` used to refuse at ALLOCATE time whenever a
+    # declared ledger had unpushed commits, on the theory that this was the moment
+    # to catch two hosts independently allocating the same `PREFIX-N` id. It never
+    # actually prevented that collision (a peer at origin allocates from origin's
+    # mark regardless of whether this caller is refused) and its only remedy named
+    # an action ("push this ledger's commits") no session may perform unasked. That
+    # check is gone; THIS is where the collision is actually catchable.
+    #
+    # WHY A MERGE COMMIT, NOT "remote_sha is not an ancestor of local_sha". The
+    # obvious siting -- refuse when this push is "divergent" -- fires on the WRONG
+    # push. The collision is born in the merge that resolves a REJECTED push: host A
+    # pushes first and succeeds; host B's push is rejected non-fast-forward (git's
+    # own doing, before this hook can act on it); B fetches and merges, producing
+    # merge commit M; B pushes M. At THAT push, `remote_sha` (A's tip) is trivially
+    # an ancestor of `local_sha` (M's own parent) -- an ordinary fast-forward, the
+    # opposite of "divergent". A check gated on ancestry fires on the doomed first
+    # attempt (before any merge exists, nothing to inspect yet) and is silent on the
+    # second attempt, which is the one that actually publishes the collision.
+    #
+    # So: inspect every MERGE COMMIT newly present in the range being pushed, not
+    # the outer local/remote relationship. Every object this needs -- the merge and
+    # both its parents -- is guaranteed present locally; you cannot hold a commit
+    # without its parents. Unlike a check that tries to read `remote_sha`'s tree on
+    # a divergent first attempt (that object may genuinely not be fetched yet -- a
+    # real network dependency), this has no missing-object blind spot.
+    #
+    # THE TEST: for a merge M with parents P1, P2 and base=merge-base(P1,P2), if a
+    # ledger's `entry_high_water_<PREFIX>` (a plain committed frontmatter scalar --
+    # `src/librarian/catalog/augmentation.rs`'s `ENTRY_HIGH_WATER_PREFIX`, no catalog
+    # access needed) advanced past base on BOTH sides, a collision in the resulting
+    # id range is mathematically guaranteed -- two hosts each allocated from the same
+    # base mark before either saw the other's commit. A targeted `git grep` for each
+    # candidate `## PREFIX-N` heading inside M's own tree then NAMES the duplicate,
+    # or confirms the merge already resolved it (a careful human bumped the mark and
+    # renumbered, leaving one occurrence, not two).
+    #
+    # Best-effort throughout, matching this script's own contract: any git failure
+    # degrades to "found nothing", never to blocking a push this scan cannot judge.
+    entry_id_collisions=""
+    if [ "$remote_sha" != "$ZERO" ]; then
+        while read -r mc; do
+            [ -n "$mc" ] || continue
+            # shellcheck disable=SC2207
+            parents=($(git show -s --format='%P' "$mc" 2>/dev/null))
+            [ "${#parents[@]}" -eq 2 ] || continue   # non-merge, or octopus: skip, best-effort
+            p1="${parents[0]}"; p2="${parents[1]}"
+            base="$(git merge-base "$p1" "$p2" 2>/dev/null)" || continue
+            [ -n "$base" ] || continue
+
+            # Ledger paths touched by the merge at all -- cheap prefilter before the
+            # per-prefix high-water reads below.
+            while read -r path; do
+                [ -n "$path" ] || continue
+                case "$path" in *.md) ;; *) continue ;; esac
+
+                mark_at() {  # <sha> <prefix> -> the committed high-water number, or empty
+                    git show "$1:$path" 2>/dev/null \
+                        | grep -m1 -E "^entry_high_water_${2}:[[:space:]]*[0-9]+" \
+                        | grep -oE '[0-9]+$'
+                }
+                for prefix in $(git show "$mc:$path" 2>/dev/null \
+                                | grep -oE '^entry_high_water_[A-Za-z0-9]+:' \
+                                | sed -E 's/^entry_high_water_//; s/:$//'); do
+                    b="$(mark_at "$base" "$prefix")"
+                    a="$(mark_at "$p1" "$prefix")"
+                    c="$(mark_at "$p2" "$prefix")"
+                    [ -n "$b" ] && [ -n "$a" ] && [ -n "$c" ] || continue
+                    [ "$a" -gt "$b" ] 2>/dev/null || continue
+                    [ "$c" -gt "$b" ] 2>/dev/null || continue
+
+                    lo=$((b + 1)); hi=$(( a < c ? a : c ))
+                    n="$lo"
+                    while [ "$n" -le "$hi" ]; do
+                        tok="${prefix}-${n}"
+                        hits="$(git grep -c -E "^## ${tok}([[:space:]]|$)" "$mc" -- "$path" 2>/dev/null)"
+                        # `git grep -c` output is `<path>:<count>`; a real duplicate is count >= 2.
+                        cnt="${hits##*:}"
+                        if [ -n "$cnt" ] && [ "$cnt" -ge 2 ] 2>/dev/null; then
+                            entry_id_collisions="${entry_id_collisions}    ${tok}  in ${path}  (merge ${mc:0:8})\n"
+                        fi
+                        n=$((n + 1))
+                    done
+                done
+            done < <(git diff --name-only "$p1" "$mc" -- '*.md' 2>/dev/null)
+        done < <(git log --format='%H' --merges "${range[@]}" 2>/dev/null)
+    fi
+
+    if [ -n "$entry_id_collisions" ]; then
+        printf '\n  REFUSING THE PUSH: it carries a merge that defines an entry id twice.\n\n' >&2
+        printf '  Two clones each allocated the token below from their own committed\n' >&2
+        printf '  entry_high_water_ mark before either saw the others commit; the merge\n' >&2
+        printf '  combined both definitions rather than resolving them. Duplicate id(s):\n\n' >&2
+        printf '%b' "$entry_id_collisions" >&2
+        printf '\n  Fix in your local merge commit: renumber the LATER definition to a fresh\n' >&2
+        printf '  id (never a suffix), re-point any citation that meant it, amend, and push\n' >&2
+        printf '  again. If the duplicate has no citations yet this is mechanical; if it is\n' >&2
+        printf '  already cited elsewhere, decide which definition keeps the token.\n\n' >&2
+        exit 1
+    fi
+
     # One `git log` for the whole range, not one per commit: this runs on every push and a
     # guard people find slow is a guard people uninstall.
     #
