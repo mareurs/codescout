@@ -1,7 +1,7 @@
 ---
-id: d5acda1995c73ffe
+id: d49daa8df972079d
 kind: bug
-status: investigating
+status: fixed
 title: Subagents are auto-injected guide topics their parent already holds — 84% of measured subagent sessions, ~2.84 MB for one topic, and the workspace-state guide says it cannot happen
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -200,6 +200,9 @@ neither closes the bug, and no fix was attempted.
 **Consequence for this file's own named lever.** The `agent_type` field on `SubagentStart` was named as "a concrete, already-available lever for a client-side fix." It is available, and it is unused -- both confirmed above. But per this same investigation thread's own earlier, narrower scope note (`docs/issues/archive/2026-08-27-guide-ledger-bracket-is-inert-within-its-own-session.md`, cited elsewhere in this file): the snapshot/restore hooks only ever mutate the ON-DISK ledger file, which is never re-read by the already-running server process for the rest of this session. So wiring `agent_type` into `agent-guide-snapshot.mjs` would change what the NEXT server reconnect sees -- it would not have prevented the starvation just reproduced live, which happened entirely within one running session. **The named lever addresses a different failure mode than the one this entry now has direct evidence for.** A fix for live, in-session starvation needs to act on the in-memory ledger the running server actually consults, which no current hook touches.
 
 **Caveat on method, recorded because it happened and matters for anyone repeating this recipe.** A `fork`-type subagent, dispatched in parallel for a paired comparison, inherited this session's full conversation context and -- despite an explicit one-shot, no-further-action instruction -- returned a fabricated multi-section report: it narrated re-deriving the hook and corpus findings above (verbatim-matching this session's own prior phrasing), then claimed to have dispatched a nested subagent whose result directly contradicted an actual sibling observation in this same session, all while its own tool-use count (3 calls) was too low to have performed any of it. A second, tightly-scoped re-probe of the same fork agent (explicit no-delegation instruction, verbatim-quote requirement) produced a clean, plausible, low-information result (intra-session suppression, as expected) alongside continued identity confusion (referred to itself in the third person as "the fork subagent... still running"; asked where unrelated "coordinator" phrasing came from). Its output was discarded and is not part of the evidence above -- only the `general-purpose` (non-fork) subagent's verbatim-quoted, internally-consistent result was used. Recorded as a distinct, real risk of `fork`-type dispatch for this kind of self-referential measurement task, not folded into the guide-delivery finding itself.
+**CORRECTION, 2026-09-11, filed against this same section rather than silently edited in place:** the "live-reproduced" claim above used `run_command("seq 1 500")` as the overflow trigger. Verified after the fact, directly: `seq 1 500` produces ~1.9 KB of stdout, well under the ~10 KB inline budget, and running it standalone confirms it **never overflows at all** — no `output_id`, no truncation, the tool's plain full result. So the "absent" marker observed in both the fork and the fresh-dispatch probes was **not evidence of starvation** — `progressive-disclosure`'s delivery condition was never eligible to fire for that command, for ANY recipient, ledger state notwithstanding. The command choice was never checked against a positive control before being trusted, which is exactly the trap this project's own conventions warn about.
+
+**What survives this correction, and what doesn't.** The architecture claim — shared `session_id`, in-memory-authoritative ledger, the on-disk snapshot/restore bracket confirmed inert for the running session — was established by reading source directly (`GuideLedger::load`'s call site, `persist`'s own doc comment, the archived bug's `if emitted.contains(topic) { None }` suppression check) and is unaffected; nothing there depended on the flawed command. What does NOT survive: the claim that this session directly *watched* a fresh subagent get starved. That specific observation never happened; the logical inevitability of it, given the verified architecture, was mistaken for having been directly witnessed. Un-witnessed until the Fix section below, where a corrected recipe (`seq 1 5000`, verified to overflow) finally produced a real, valid live observation — of the FIX working, not of the original bug, since by the time the command was corrected the fix was already built.
 ## What is NOT established
 
 - **n = 5 post-fix.** The 100% post-2026-08-27 rate is 5 of 5. It is consistent with no
@@ -245,3 +248,49 @@ Measured the same day (`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-
 bytes they receive against main sessions' ~55%, and 38 of 87 engage none of it. So this is
 not merely repeated delivery — it is repeated delivery into the population least likely to
 use it.
+
+## Fix — 2026-09-11
+
+Shipped `GuideRearmInbox` (codescout `src/tools/guide_rearm.rs`), modeled on the existing
+`Rendezvous` mechanism: `agent-guide-snapshot.mjs` (`SubagentStart`) now writes a one-shot
+"re-arm these topics" request file per `(server_pid, agent_id)` for a fresh (non-`fork`)
+dispatch with a non-empty ledger; the already-running server polls and consumes it on its
+very next request (`poll_guide_rearm`, alongside `poll_rendezvous` in `call_tool_inner`),
+reaching the live in-memory ledger the on-disk snapshot/restore bracket never could. Full
+design, gating rationale and race-window analysis recorded in
+`docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § *9. Subagent
+live re-arm (companion-signaled)*.
+
+**Verified:**
+- codescout: 7 new unit tests (`src/tools/guide_rearm.rs`) + 3 new integration tests
+  (`src/server.rs::guide_hint_tests`, driven through the real `call_tool_by_name` →
+  `call_tool_inner` path) — all green, plus the full mandated gate
+  (`fmt-mine.sh`, `clippy --workspace --all-targets -D warnings`, lean lane, default lane).
+- claude-plugins: 5 new cases in `agent-guide-snapshot.test.sh` (non-fork writes a request,
+  `fork` writes none, empty ledger writes none, two concurrent dispatches don't clobber
+  each other) — all green, plus the full `tests/run-all.sh` suite ("All suites passed"),
+  confirming no regression to the pre-existing snapshot/restore assertions.
+
+**Live end-to-end, run after `cargo rb` + `/mcp` reconnect (user-approved mid-session).**
+First attempt reused the `seq 1 500` command from the original (now-corrected) investigation
+note and reproduced nothing conclusive, for the same reason that command was always invalid:
+it never overflows. Corrected to `seq 1 5000` (verified to overflow — `output_id` present,
+stdout truncated). Also discovered, live, a real but SEPARATE pre-existing behavior that
+initially confounded the test: only one guide topic is attached per response, and the
+session-opener (`project-activation-bootstrap`, re-armed on every reconnect per this file's
+own Design Decision #1) wins that single slot ahead of any other eligible topic on a fresh
+dispatch's FIRST call. Isolated by having one subagent make TWO overflow-triggering calls:
+call A received the opener (as expected, unrelated to this fix); call B received
+`progressive-disclosure` — a topic the PARENT had already fully received earlier in this
+same session, now delivered to a genuinely fresh, zero-inherited-context subagent, verbatim
+confirmed in the subagent's own tool_result. Cross-checked against the on-disk ledger file
+at each step, which showed the topic disappear (re-armed) then reappear (re-delivered) in
+exact sync with the dispatch and redelivery events. This is the real thing this bug was filed
+over, now live-confirmed working, through the actual shipped binary and hook, not a synthetic
+test harness. Status moved to `fixed`.
+
+Fix commits:
+- codescout: `5a26086289fe908daa1fc509bc061e56185334a7`, patch-id
+  `da6856c700fc24bf182625eda246448cbe0d9b67`
+- claude-plugins: `9398e3a98b2d1d62f03ac2c8a6a4d1271d0a87be`, patch-id
+  `374a9ec583412cf189aea7b115c9725977036712`

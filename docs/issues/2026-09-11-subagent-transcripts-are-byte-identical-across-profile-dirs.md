@@ -14,7 +14,7 @@ topic: subagent guide delivery / transcript corpus hygiene
 ## Symptom
 
 While re-deriving the parent/subagent guide-injection join for
-`docs/issues/2026-08-31-subagents-receive-guides-their-parent-already-holds.md` (Investigation
+`docs/issues/archive/2026-08-31-subagents-receive-guides-their-parent-already-holds.md` (Investigation
 2026-09-11), a corpus scan across this machine's three Claude Code profile dirs
 (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`) found **228 of 1,606 distinct
 `(parent-session-uuid, agent-transcript-filename)` keys present under 2 or 3 of the three

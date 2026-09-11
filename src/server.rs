@@ -1072,7 +1072,7 @@ impl CodeScoutServer {
     /// existing snapshot/restore hook bracket around a subagent's lifetime only
     /// edits the ON-DISK ledger file, which this already-running process never
     /// re-reads. This is what reaches the live in-memory ledger instead.
-    /// docs/issues/2026-08-31-subagents-receive-guides-their-parent-already-holds.md
+    /// docs/issues/archive/2026-08-31-subagents-receive-guides-their-parent-already-holds.md
     fn poll_guide_rearm(&self) {
         let topics = self.guide_rearm.poll();
         if topics.is_empty() {
