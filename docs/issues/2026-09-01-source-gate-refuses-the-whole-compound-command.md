@@ -1,16 +1,18 @@
 ---
-status: open
+kind: bug
+status: taken
+tags:
+- cluster/guard-narrower-than-its-name
+- run_command
+- il3
+- shell-gate
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
+closed: null
 opened: 2026-09-01
-closed:
-severity: low
 owner: marius
 related: []
-tags:
-  - cluster/guard-narrower-than-its-name
-  - run_command
-  - il3
-  - shell-gate
-kind: bug
+severity: low
 unverified: 'No regression test yet. Severity is low by blast radius (the remedy is "split the command") but the frequency is high — it fired twice in one session on compound commands whose offending clause was incidental to the measurement. The IC-14 tag is on the SUB-SHAPE the class calls "axis omission": the gate covers the axis "does any token in this string name a source file" and its NAME/message speaks of "shell access to source files", which a reader maps to the clause, not the string.'
 ---
 
@@ -214,40 +216,48 @@ gate is broken rather than that a sibling clause tripped it.
 
 ## Fix
 
-Split the command on top-level separators (`;`, `&&`, `||`, newline) and evaluate **both**
-gates' predicates per resulting command. Refuse only if a command in the list offends — and
-name it, which the pipe gate already does:
+**Re-scouted before fixing, per this file's own root-cause correction, and found
+the scope narrower than the title implies.** `check_source_file_access`
+(`src/util/path_security.rs:1694`) already decomposes into `;`/`&&`/`||`/`\n`-
+separated "runs", each further split on `|` into "stages", with `cd` tracked
+across runs — this must have landed via one of the several archived heredoc/
+newline/cd-tracking bugs referenced in its own comments (all dated
+2026-08-17), none of which were filed as *this* bug. So the gate no longer
+refuses on an unrelated clause; it correctly finds the one specific segment
+that reads project source. What was still true, verified live before fixing:
+the returned hint never named that segment, so a caller facing a 3-clause
+command had to guess which one tripped it.
 
-```
-shell access to source files is blocked
-  offending clause: grep -c fn src/main.rs
-  (the other 2 clauses were not run)
-```
+**Fixed:** `check_source_file_access` now prepends
+`offending clause: \`<segment>\` (N other clause(s) in this command were/was
+not run).` to its hint, mirroring `detect_il3_violation`'s existing pattern
+(which already named its offender). The sibling count is computed over the
+WHOLE command (not just the segments scanned before the first match, which
+the detection loop deliberately short-circuits past via `break 'runs`) and is
+omitted entirely for a single-clause command, where naming it would be noise.
 
-Deliberately out of scope: running the permitted clauses anyway. Partial execution of a
-refused command is a worse contract than refusing all of it — the caller cannot tell which
-side effects happened. Refuse everything, but say what to remove.
+**Not fixed, and deliberately left as a residual rather than folded in:**
+`is_dangerous_command` (`src/util/path_security.rs:806`) still evaluates its
+regex patterns over the WHOLE command string, not per-segment. It is a
+different design from `check_source_file_access` (substring/regex matching
+for known-dangerous patterns, including inside a `<<` heredoc body via its
+own separate `locate()`/`heredoc_body_note` path) rather than token-based
+command analysis, so decomposing it is a materially different change with its
+own tradeoffs — not a copy-paste of this fix. Left for its own bug file if
+someone wants to take it, per this repo's "don't force a fit" rule; not filed
+here since it would need its own reproduction and design discussion.
 
-**One splitter, not two.** Both gates need the same decomposition, and CLAUDE.md § *Parsers
-Over a Namespace* records four independent shell gates in this process each separately
-mis-parsing a heredoc — a fifth parser is how that count reached four. Whatever splits the
-string must be shared, and it owes the same escape/disambiguator answer as any other parser
-here: a `;` inside a quoted string or a heredoc body is not a separator.
-
-SHA: not yet fixed.
-patch-id: not yet fixed.
-
+Fix SHA: *(recorded once committed — see below)*
+Patch-id: *(recorded once committed — see below)*
 ## Tests added
 
-None yet. Shape: the three probes as a table test —
-`("echo x; wc -l Cargo.toml", allowed)`,
-`("echo x; wc -l Cargo.toml; grep -c fn src/main.rs", refused_naming_clause_3)`, and
-`("echo x; find . -name '*.toml' | head -2", refused_naming_clause_2)`. The two refusal rows
-must assert on the **clause named in the message**, not merely on refusal, or they pass
-today and pin only half the fix. The `allowed` row is the discriminator: it is what proves
-the clauses are individually permitted, so **do not delete it as redundant** — without it,
-both refusal rows are satisfied by a gate that refuses everything.
-
+`util::path_security::tests::source_file_access_names_the_offending_clause_in_a_compound_command`
+and `..._omits_the_sibling_note_for_a_single_clause`
+(`src/util/path_security.rs`) — the first reproduces this file's own
+reproduction (an unrelated clause on either side of the real offender) and
+asserts both the named clause and the correct sibling count; the second
+guards against the note appearing where there is nothing to distinguish the
+clause from.
 ## Workarounds
 
 Issue source-file reads as their own call, and keep compound measurement commands free of
@@ -258,12 +268,11 @@ count, not content), so `wc -l src/main.rs` inside a compound command is fine �
 
 ## Resume
 
-Locate both gates — `grep(pattern="shell access to source files is blocked")` and
-`grep(pattern="IL3 violation")` — and confirm hypothesis 1 in the code for each (this
-file's root cause is observation-only for both). Then find whether either already has a
-top-level splitter that can be shared, per the one-splitter rule in *Fix*, and add the
-three-row table test with the `allowed` row failing-first for the message assertions.
-
+N/A for the fix in this file — done. If `is_dangerous_command`'s lack of
+per-segment evaluation turns out to matter in practice (a dangerous pattern
+in one clause suppressing unrelated safe clauses, or a false match inside an
+inert quoted string in another clause), file it as its own bug rather than
+reopening this one — the mechanism and the fix shape both differ.
 ## References
 
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a negative result names its

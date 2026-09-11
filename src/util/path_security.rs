@@ -1768,7 +1768,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
         .into_iter()
         .next()
         .unwrap_or_default();
-    let hint: String = match first_cmd.as_str() {
+    let remedy: String = match first_cmd.as_str() {
         "grep" => {
             let pat = extract_grep_pattern(blocked.as_str()).unwrap_or_default();
             if is_identifier_pattern(&pat) {
@@ -1796,7 +1796,30 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             .to_string(),
     };
 
-    Some(hint)
+    // Name the offending clause, mirroring `detect_il3_violation`'s pattern: a compound
+    // command still refuses in full (running the permitted clauses anyway is a worse
+    // contract -- the caller could not tell which side effects happened), but the caller
+    // should not have to re-derive which of several clauses tripped it. `runs` was
+    // already computed above; re-splitting each run on `|` here is cheap (no regex, no
+    // filesystem check) and lets this count the WHOLE command rather than stopping at
+    // the first offender, which the detection loop above deliberately does via `break`.
+    let total_clauses: usize = runs
+        .iter()
+        .map(|run| split_outside_quotes(run, &["|"]).len())
+        .sum();
+    let others = total_clauses.saturating_sub(1);
+    let clause_note = if others > 0 {
+        format!(
+            "offending clause: `{}` ({others} other clause{} in this command {} not run). ",
+            blocked.trim(),
+            if others == 1 { "" } else { "s" },
+            if others == 1 { "was" } else { "were" },
+        )
+    } else {
+        String::new()
+    };
+
+    Some(format!("{clause_note}{remedy}"))
 }
 
 /// The shell's working directory for a segment, as far as the gate can tell.
@@ -3393,6 +3416,35 @@ mod tests {
         assert!(
             hint.contains("grep"),
             "sed hint should mention grep, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn source_file_access_names_the_offending_clause_in_a_compound_command() {
+        // The reproduction from the bug this fixes: an unrelated clause on either
+        // side of the real offender must not be left for the caller to guess at.
+        let hint = check_source_file_access_at_root(
+            "echo repro-clause-one; cat src/main.rs; echo repro-clause-three",
+        )
+        .expect("the middle clause reads project source and must still block");
+        assert!(
+            hint.contains("offending clause: `cat src/main.rs`"),
+            "the hint must name the specific clause that tripped it, not just that \
+             SOME clause did: {hint}"
+        );
+        assert!(
+            hint.contains("2 other clauses"),
+            "the sibling count must reflect the whole command, not just the segments \
+             scanned before the offender was found: {hint}"
+        );
+    }
+
+    #[test]
+    fn source_file_access_omits_the_sibling_note_for_a_single_clause() {
+        let hint = check_source_file_access_at_root("cat src/main.rs").expect("must still block");
+        assert!(
+            !hint.contains("offending clause:"),
+            "a lone clause has no siblings to distinguish it from, so naming it is noise: {hint}"
         );
     }
 
