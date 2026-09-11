@@ -40,6 +40,16 @@
 //! down and the shared schema holds sibling actions' keys, so every `Args` sees keys that are
 //! not its own. See the note on `find::Args`.
 //!
+//! **The call sites are deliberately not numbered.** They carried `Site N of M` until
+//! 2026-09-11 and the M decayed twice — once when `artifact_event.rs` was deleted, once when
+//! `artifact_refresh.rs` folded into `artifact.rs` — leaving three live sites labelled 1, 2
+//! and 4 "of 4", which is a reader's problem in both directions: two totals wrong and a gap
+//! implying a site that no longer exists. Numbering also conflates the two directions, which
+//! are separate call sites of separate functions. The membership is one call away —
+//! `references(symbol="assert_all_honored", path="src/tools/param_probe.rs")`, and the same
+//! for `assert_required_are_advertised` — so each site names its tool and its direction and
+//! stores no count.
+//!
 //! **Known blindness, and it must be declared per call site.** A param read through an
 //! untyped accessor (`args.get(k).and_then(Value::as_str)`), or deserialised into a bare
 //! `Value`, has no ill-typed value — every wrong type reads as absent, or parses — so the

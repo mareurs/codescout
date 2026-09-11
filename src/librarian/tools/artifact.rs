@@ -546,7 +546,7 @@ mod tests {
         );
     }
 
-    /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
+    /// Probe site for `doc`, forward direction. The rationale that used to live here — why two calls are compared rather
     /// than one asserted to fail, why `deny_unknown_fields` is unavailable (measured: adding
     /// it once broke every `doc(update)` call), and what the `accepts_any_json` escape
     /// admits — now lives on `crate::tools::param_probe`, shared with `librarian` and
@@ -696,7 +696,7 @@ mod tests {
         }
     }
 
-    /// Site 1 of 4, reverse direction. See
+    /// Probe site for `doc`, reverse direction. See
     /// `crate::tools::param_probe::assert_required_are_advertised`.
     ///
     /// Written before the fix it demanded, and red on first run: `graft` required

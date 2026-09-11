@@ -178,7 +178,7 @@ mod tests {
         assert!(err.downcast_ref::<RecoverableError>().is_some());
     }
 
-    /// Site 2 of 4. Rationale, the `deny_unknown_fields` measurement, and the reason the
+    /// Probe site for `librarian`, forward direction. Rationale, the `deny_unknown_fields` measurement, and the reason the
     /// probe compares two calls rather than asserting one fails all live on
     /// `crate::tools::param_probe`.
     ///
@@ -253,7 +253,7 @@ mod tests {
         )
         .await;
 
-        // Reverse direction, site 2 of 4 — see `param_probe::assert_required_are_advertised`.
+        // Reverse direction for `librarian` — see `param_probe::assert_required_are_advertised`.
         // Reuses the same `required` table rather than restating it: the point of the check is
         // that the two representations agree, so a second copy would defeat it.
         assert_required_are_advertised("librarian", &Librarian.input_schema(), &spec);
