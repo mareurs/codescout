@@ -41,9 +41,10 @@
 //! not its own. See the note on `find::Args`.
 //!
 //! **Known blindness, and it must be declared per call site.** A param read through an
-//! untyped accessor (`args.get(k).and_then(Value::as_str)`) has no ill-typed value — every
-//! wrong type reads as absent — so the probe cannot speak for it. Those keys go in
-//! `accepts_any_json`, which is an admission, never a pass.
+//! untyped accessor (`args.get(k).and_then(Value::as_str)`), or deserialised into a bare
+//! `Value`, has no ill-typed value — every wrong type reads as absent, or parses — so the
+//! probe cannot speak for it. Those keys go in `accepts_any_json`, which is an admission,
+//! never a pass.
 //!
 //! **One deliberate difference from the two hand-written probes this replaces:** they built a
 //! single `ToolContext` per key and shared it between the base and probe calls; `call` here
@@ -59,6 +60,9 @@ pub(crate) struct Spec<'a> {
     /// Every action the tool dispatches. A label naming anything else is skipped.
     pub actions: &'a [&'a str],
     /// Keys the probe is structurally blind to. An admission, not a pass.
+    ///
+    /// A nested key is named by its dotted path (`"augment.params"`); a bare name skips the
+    /// top-level key and, with it, any recursion into it.
     pub accepts_any_json: &'a [&'a str],
     /// Minimum type-valid args for an action, chosen to fail resolution *after*
     /// deserialisation so a deser error is visibly different from the baseline.
@@ -80,8 +84,40 @@ fn outcome(r: &anyhow::Result<Value>) -> String {
     }
 }
 
-/// Sweep every action-labelled key. Returns `(checked, unhonored)`.
-pub(crate) async fn sweep<F, Fut>(schema: &Value, spec: &Spec<'_>, call: F) -> (usize, Vec<String>)
+/// What one sweep found.
+///
+/// `checked` counts action/key **pairs**, nested keys included — see `assert_all_honored`'s
+/// note on why a per-key figure cannot back a floor.
+///
+/// **`unprobeable` is the field this struct exists for.** The sweep used to return
+/// `(checked, unhonored)` and walk one level of `properties`, so a key moved inside a nested
+/// object left the probe's reach with no error, no warning and no change in its own pass/fail
+/// — nine keys did exactly that in one commit
+/// (`docs/issues/archive/2026-09-02-param-probe-does-not-recurse-so-nesting-a-key-removes-it-from-guard-reach.md`).
+/// Recursion closes that hole where it can reach; this field is how the sweep says where it
+/// still cannot, rather than reporting success over a population it quietly shrank.
+pub(crate) struct Sweep {
+    pub checked: usize,
+    pub unhonored: Vec<String>,
+    pub unprobeable: Vec<String>,
+}
+
+/// Sweep every action-labelled key, one level of nesting included.
+///
+/// **Nested keys inherit their parent's label, and that is the load-bearing half.** Recursing
+/// alone would have been vacuous: every child of `doc.event` carries a bare description
+/// (`"event author"`, `"git commit to anchor the event to"`) with no `<action>:` prefix, so a
+/// label scan of the children matches nothing. The action a child belongs to is the one its
+/// parent object is labelled for — which is exact here, since an object like `event` exists
+/// for one action only.
+///
+/// **The nested probe varies a parent the call site already supplies, and never invents one.**
+/// `required(action)` hands back a type-valid parent object (`{"kind":"note","payload":{…}}`
+/// for `event_create`); the probe clones it and ill-types one child. A parent the site does
+/// not supply cannot be probed — adding the object *and* the bogus key varies two things at
+/// once, so base and probe would differ for the wrong reason — and that case goes to
+/// `unprobeable` rather than being skipped in silence.
+pub(crate) async fn sweep<F, Fut>(schema: &Value, spec: &Spec<'_>, call: F) -> Sweep
 where
     F: Fn(Value) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Value>>,
@@ -91,8 +127,11 @@ where
         .expect("schema has properties")
         .clone();
 
-    let mut checked = 0usize;
-    let mut unhonored = Vec::new();
+    let mut out = Sweep {
+        checked: 0,
+        unhonored: Vec::new(),
+        unprobeable: Vec::new(),
+    };
 
     for (name, spec_v) in &props {
         if name == "action" || spec.accepts_any_json.contains(&name.as_str()) {
@@ -128,21 +167,89 @@ where
             base_args.insert("action".into(), json!(action));
 
             let base = call(Value::Object(base_args.clone())).await;
-            let mut probe_args = base_args;
+            let mut probe_args = base_args.clone();
             probe_args.insert(name.clone(), ill_typed(declared));
             let probed = call(Value::Object(probe_args)).await;
 
             if outcome(&base) == outcome(&probed) {
-                unhonored.push(format!("{action}:{name} (declared {declared})"));
+                out.unhonored
+                    .push(format!("{action}:{name} (declared {declared})"));
             }
-            checked += 1;
+            out.checked += 1;
+
+            // A `"type": "object"` param with no `properties` map of its own is free-form
+            // (`filter`, `patch`, `entry`, `extra`, …) — there is nothing to descend into
+            // and its contents are not schema-declared, so there is no coverage to lose.
+            let Some(children) = spec_v["properties"].as_object() else {
+                continue;
+            };
+
+            let Some(parent_base) = base_args.get(name).and_then(Value::as_object).cloned() else {
+                out.unprobeable.push(format!(
+                    "{action}:{name}.* ({} nested key(s)) — required(\"{action}\") supplies no \
+                     `{name}` object for the probe to vary",
+                    children.len()
+                ));
+                continue;
+            };
+
+            for (child, child_v) in children {
+                if child_v["description"].as_str().is_none() {
+                    continue;
+                }
+                // `accepts_any_json` addresses a nested key by its dotted path. Widening the
+                // sweep without widening its escape leaves a site unable to declare a
+                // blindness it has — and the first two keys recursion reached, `doc`'s
+                // `augment.params` and `augment.params_schema` (both `Option<Value>`, so no
+                // value is ill-typed for them), would have read as IC-15 defects the probe
+                // simply cannot speak for.
+                let path = format!("{name}.{child}");
+                if spec.accepts_any_json.contains(&path.as_str()) {
+                    continue;
+                }
+                // One level, declared rather than assumed: a child that declares its own
+                // `properties` is a floor this sweep does not reach. Saying so is the whole
+                // point — an undeclared depth limit is the defect that produced `unprobeable`.
+                //
+                // **Counted by describable grandchildren, not by the object's existence.** A
+                // grandchild with no description is skipped at every level and belongs to
+                // `every_property_has_a_description`, a different guard — reporting it here
+                // would fire on `doc`'s real `event.source` (three bare `{"type": …}` entries)
+                // where no coverage is at stake. An alarm that cries on a case with nothing to
+                // act on is one somebody eventually silences.
+                let deep = child_v["properties"]
+                    .as_object()
+                    .map(|g| g.values().filter(|v| v["description"].is_string()).count())
+                    .unwrap_or(0);
+                if deep > 0 {
+                    out.unprobeable.push(format!(
+                        "{action}:{name}.{child}.* ({deep} described key(s)) — nested deeper \
+                         than one level"
+                    ));
+                }
+
+                let child_declared = child_v["type"].as_str().unwrap_or("string");
+                let mut parent = parent_base.clone();
+                parent.insert(child.clone(), ill_typed(child_declared));
+
+                let mut probe_args = base_args.clone();
+                probe_args.insert(name.clone(), Value::Object(parent));
+                let probed = call(Value::Object(probe_args)).await;
+
+                if outcome(&base) == outcome(&probed) {
+                    out.unhonored.push(format!(
+                        "{action}:{name}.{child} (declared {child_declared})"
+                    ));
+                }
+                out.checked += 1;
+            }
         }
     }
 
-    (checked, unhonored)
+    out
 }
 
-/// `sweep` plus the two assertions every call site owes.
+/// `sweep` plus the three assertions every call site owes.
 ///
 /// The `floor` is not a target. It exists because `unhonored.is_empty()` is **monotone
 /// under the label convention breaking**: if `<action>:` prefixes were renamed away, every
@@ -158,6 +265,13 @@ where
 /// margin between floor and count is exactly the number of labels that can go missing in
 /// silence, so these are set at the measurement and a schema shrink must move them
 /// deliberately.
+///
+/// **The `unprobeable` assertion is not a duplicate of the floor.** The floor catches the
+/// sweep covering *fewer pairs than it used to*; `unprobeable` catches it covering fewer
+/// than it *claims to right now* — a nested object it descended into and could not vary.
+/// A floor cannot see that, because a sweep that skips a nested object silently never had
+/// those pairs in its count to begin with, which is how nine keys left guard reach without
+/// moving a single number.
 pub(crate) async fn assert_all_honored<F, Fut>(
     tool: &str,
     schema: &Value,
@@ -168,12 +282,24 @@ pub(crate) async fn assert_all_honored<F, Fut>(
     F: Fn(Value) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Value>>,
 {
-    let (checked, unhonored) = sweep(schema, spec, call).await;
+    let Sweep {
+        checked,
+        unhonored,
+        unprobeable,
+    } = sweep(schema, spec, call).await;
     assert!(
         unhonored.is_empty(),
         "{tool}: these schema keys are labelled for an action whose Args has no such \
          field, so serde discards them silently — the shape of IC-15. Either add the \
          field or move the guidance off the key: {unhonored:?}"
+    );
+    assert!(
+        unprobeable.is_empty(),
+        "{tool}: the sweep reached these nested schema keys and could not probe them, so \
+         they are advertised but unguarded. Fix it in this file, not in param_probe: give \
+         `required(<action>)` a type-valid parent object for each, or flatten the key out \
+         of the nested object. Leaving them here is the IC-14 shape — a guard narrower \
+         than its name: {unprobeable:?}"
     );
     assert!(
         checked >= floor,
@@ -259,12 +385,59 @@ mod tests {
         anyhow::bail!("{action}: resolution failed")
     }
 
+    /// The nested counterpart of `honours_id_except_beta`: the `event` object and its `kind`
+    /// child are type-checked, and `bogus` is **discarded** — serde's behaviour for a schema
+    /// key the `Args` does not carry, one level down.
+    ///
+    /// The parent's own type check is load-bearing, not scenery: without it the top-level
+    /// `event` probe (ill-typed to `[]`) would fall through to the same baseline error and be
+    /// reported unhonored, so the fixture would red on a key that is fine.
+    async fn honours_event_kind_only(args: Value) -> anyhow::Result<Value> {
+        if let Some(ev) = args.get("event") {
+            if !ev.is_object() {
+                anyhow::bail!("event must be an object");
+            }
+            if let Some(v) = ev.get("kind") {
+                if !v.is_string() {
+                    anyhow::bail!("event.kind must be a string");
+                }
+            }
+        }
+        anyhow::bail!("resolution failed")
+    }
+
     fn spec(actions: &'static [&'static str]) -> Spec<'static> {
         Spec {
             actions,
             accepts_any_json: &[],
             required: |_| Map::new(),
         }
+    }
+
+    /// As `spec`, but `required` hands back a type-valid `event` parent — the shape a real
+    /// call site's `probe_required` supplies and the one the nested probe varies.
+    fn spec_with_event_parent() -> Spec<'static> {
+        Spec {
+            actions: &["event_create"],
+            accepts_any_json: &[],
+            required: |_| {
+                let mut m = Map::new();
+                m.insert("event".into(), json!({"kind": "note"}));
+                m
+            },
+        }
+    }
+
+    fn event_schema(children: Value) -> Value {
+        json!({
+            "properties": {
+                "event": {
+                    "type": "object",
+                    "description": "event_create: the event",
+                    "properties": children
+                }
+            }
+        })
     }
 
     /// `beta` is the SECOND slash token, and that placement is the whole test: a fixture
@@ -278,7 +451,7 @@ mod tests {
             }
         });
 
-        let (_checked, unhonored) =
+        let Sweep { unhonored, .. } =
             sweep(&schema, &spec(&["alpha", "beta"]), honours_id_except_beta).await;
 
         assert_eq!(
@@ -299,7 +472,9 @@ mod tests {
             }
         });
 
-        let (checked, unhonored) = sweep(
+        let Sweep {
+            checked, unhonored, ..
+        } = sweep(
             &schema,
             &spec(&["alpha", "gamma", "delta"]),
             honours_id_except_beta,
@@ -310,6 +485,139 @@ mod tests {
         assert_eq!(
             checked, 3,
             "one key labelled for three actions is three action/key pairs, not one"
+        );
+    }
+
+    /// The reproduction from
+    /// `docs/issues/archive/2026-09-02-param-probe-does-not-recurse-so-nesting-a-key-removes-it-from-guard-reach.md`,
+    /// inverted into a guard. `bogus` is unhonored and nested; a sweep that walks one level
+    /// reports nothing and passes, which is how nine real keys left guard reach in silence.
+    ///
+    /// **`kind` is in the fixture to pin the inheritance rule, not for symmetry.** Neither
+    /// child carries an `<action>:` label — the real ones do not either (`"event author"`,
+    /// `"event kind"`) — so a recursion that scanned children for their own labels would
+    /// match nothing and stay green on `bogus`. Both children being probed is what shows the
+    /// action came from the parent.
+    #[tokio::test]
+    async fn a_nested_key_is_probed_under_its_parents_action() {
+        let schema = event_schema(json!({
+            "kind": {"type": "string", "description": "event kind"},
+            "bogus": {"type": "string", "description": "declared but absent from Args"}
+        }));
+
+        let Sweep {
+            checked,
+            unhonored,
+            unprobeable,
+        } = sweep(&schema, &spec_with_event_parent(), honours_event_kind_only).await;
+
+        assert_eq!(
+            unhonored,
+            vec!["event_create:event.bogus (declared string)".to_string()],
+            "a nested key the Args does not carry must be reported; `event.kind` is \
+             honoured and `event` itself is type-checked"
+        );
+        assert_eq!(
+            checked, 3,
+            "the parent plus both children are three action/key pairs"
+        );
+        assert!(unprobeable.is_empty(), "{unprobeable:?}");
+    }
+
+    /// The sweep's own edge, said out loud. A nested object the call site's `required` does
+    /// not supply cannot be varied — adding the object *and* the bogus key changes two things
+    /// at once — so the pairs are lost either way. Reporting them is the difference between
+    /// this bug and its fix: the count is the same, the silence is not.
+    #[tokio::test]
+    async fn a_nested_object_absent_from_required_is_reported_unprobeable() {
+        let schema = event_schema(json!({
+            "kind": {"type": "string", "description": "event kind"},
+            "bogus": {"type": "string", "description": "declared but absent from Args"}
+        }));
+
+        let Sweep {
+            unprobeable,
+            unhonored,
+            ..
+        } = sweep(&schema, &spec(&["event_create"]), honours_event_kind_only).await;
+
+        assert_eq!(
+            unprobeable,
+            vec![
+                "event_create:event.* (2 nested key(s)) — required(\"event_create\") supplies \
+                 no `event` object for the probe to vary"
+                    .to_string()
+            ],
+            "a parent the site does not supply must be named, never skipped"
+        );
+        assert!(
+            unhonored.is_empty(),
+            "unreachable is not the same claim as unhonored: {unhonored:?}"
+        );
+    }
+
+    #[tokio::test]
+    /// The recursion is one level, and the limit is declared rather than assumed. `doc`'s
+    /// real schema has exactly this shape — `event.source` is an object with its own
+    /// `properties` — so this is the live case, not a hypothetical.
+    ///
+    /// **`uri` carrying a description is the load-bearing detail.** The report is counted by
+    /// *describable* grandchildren, because a bare `{"type": …}` grandchild is skipped at
+    /// every level and loses no coverage — which is why the real `event.source` is silent
+    /// here. Drop the description from this fixture and the test passes while asserting
+    /// nothing.
+    async fn a_child_object_deeper_than_one_level_is_reported_unprobeable() {
+        let schema = event_schema(json!({
+            "kind": {"type": "string", "description": "event kind"},
+            "source": {
+                "type": "object",
+                "description": "external signal source",
+                "properties": {"uri": {"type": "string", "description": "the uri"}}
+            }
+        }));
+
+        let Sweep { unprobeable, .. } =
+            sweep(&schema, &spec_with_event_parent(), honours_event_kind_only).await;
+
+        assert_eq!(
+            unprobeable,
+            vec![
+                "event_create:event.source.* (1 described key(s)) — nested deeper than one \
+                 level"
+                    .to_string()
+            ],
+            "a grandchild the sweep does not reach must say so; an undeclared depth limit \
+             is the defect this field exists for"
+        );
+    }
+
+    /// The other half of the rule above, and the one that keeps the alarm worth reading: a
+    /// grandchild-bearing object whose grandchildren are all bare `{"type": …}` reports
+    /// nothing, because nothing was probeable there to begin with. This is `doc`'s real
+    /// `event.source`, copied shape-for-shape — the case that made the first cut of this
+    /// report fire where no coverage was at stake.
+    #[tokio::test]
+    async fn a_child_object_with_no_described_grandchildren_is_silent() {
+        let schema = event_schema(json!({
+            "kind": {"type": "string", "description": "event kind"},
+            "source": {
+                "type": "object",
+                "description": "external signal source",
+                "properties": {
+                    "uri": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "payload": {}
+                }
+            }
+        }));
+
+        let Sweep { unprobeable, .. } =
+            sweep(&schema, &spec_with_event_parent(), honours_event_kind_only).await;
+
+        assert!(
+            unprobeable.is_empty(),
+            "no described grandchild means no lost coverage, so the depth limit has \
+             nothing to report: {unprobeable:?}"
         );
     }
 }

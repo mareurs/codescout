@@ -562,18 +562,18 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // Floor is **action/key pairs**, not keys, and measured not chosen: 80 pairs over
-        // the 17 actions, read 2026-09-09 from `sweep`'s own `checked`. The previous 30 was
-        // half of a 58-KEY reading, and both halves of that were wrong for the same reason —
-        // `sweep` only ever probed a shared key's first action, so 58 undercounted the pairs
-        // it should have covered and 30 could not have detected the shortfall. Set at the
-        // measurement: the gap between floor and count is how many labels can go missing
-        // silently, so a deliberate schema shrink moves this number.
+        // Floor is **action/key pairs**, not keys, and measured not chosen: 95 pairs over
+        // the 17 actions, read 2026-09-11 from `sweep`'s own `checked`. The previous 80 was
+        // a correct reading of a sweep that walked one level; recursion added the 15 nested
+        // pairs it could reach — `event`'s 9 described children and `augment`'s 8 less the
+        // two `Option<Value>` keys declared blind in `probe_spec`. Set at the measurement:
+        // the gap between floor and count is how many labels can go missing silently, so a
+        // deliberate schema shrink moves this number.
         assert_all_honored(
             "doc",
             &Artifact.input_schema(),
             &probe_spec(),
-            80,
+            95,
             |args| async move { Artifact.call(&mk_ctx(), args).await },
         )
         .await;
@@ -684,7 +684,14 @@ mod tests {
     fn probe_spec() -> crate::tools::param_probe::Spec<'static> {
         crate::tools::param_probe::Spec {
             actions: &PROBE_ACTIONS,
-            accepts_any_json: &[],
+            // Both are `Option<Value>` on `augment::Args`, so **no value is ill-typed for
+            // them** — the probe's declared structural blindness, not a pass. Measured
+            // 2026-09-11, the first run after `sweep` learned to recurse: they were the only
+            // two of the 17 newly-reachable nested keys to come back unhonored, and reading
+            // the struct showed why. `augment::Args` carries `#[serde(deny_unknown_fields)]`,
+            // so a nested key it does not know is refused loudly rather than dropped — which
+            // is the opposite of IC-15 and the reason this admission costs nothing here.
+            accepts_any_json: &["augment.params", "augment.params_schema"],
             required: probe_required,
         }
     }
