@@ -203,7 +203,7 @@ enum Commands {
     ///
     /// Deliberately does NOT enumerate every check: this text named four of
     /// them, which read as the whole set, and the drift is tracked as
-    /// `docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
+    /// `docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
     /// Run the command for the live list rather than trusting a count here.
     #[cfg(feature = "librarian")]
     Doctor(codescout::cli::doctor::DoctorArgs),

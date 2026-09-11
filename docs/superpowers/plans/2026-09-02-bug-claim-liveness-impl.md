@@ -1240,7 +1240,7 @@ be a confident wrong answer at scale."
 - Consumes: the check names from Task 4.
 - Produces: nothing code-facing.
 
-**Why this is a task and not a footnote.** Measured 2026-09-02: `doctor` runs 23 `scan_*` checks and five surfaces describe it as a *catalog-drift* scanner over ~6. The newest check before this one, `non_terminal_status_with_fix_anchor`, appears on **none** of them. Following local precedent would ship `scan_claim_liveness` wired and undiscoverable. Filed as `docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`; scouted in `bug-claim-liveness-session-log:F-1` and `F-2`.
+**Why this is a task and not a footnote.** Measured 2026-09-02: `doctor` runs 23 `scan_*` checks and five surfaces describe it as a *catalog-drift* scanner over ~6. The newest check before this one, `non_terminal_status_with_fix_anchor`, appears on **none** of them. Following local precedent would ship `scan_claim_liveness` wired and undiscoverable. Filed as `docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`; scouted in `bug-claim-liveness-session-log:F-1` and `F-2`.
 
 **Scope boundary:** this task names the *new* check on three surfaces. Re-describing `doctor` by check family — the filed bug's option B — is **out of scope here** and stays with that bug, along with the two rustdoc module headers.
 
@@ -1302,7 +1302,7 @@ says it lists a subset of 23 and names the machine-local blind spot."
 
 - **IC class files.** A bug has one obvious unit of work; an `IC-N` class does not. Prove the shape on bug files first.
 - **Auto-release of dead claims.** Report-only by design.
-- **Re-describing `doctor` by check family.** Stays with `docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`, including the two rustdoc headers.
+- **Re-describing `doctor` by check family.** Stays with `docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`, including the two rustdoc headers.
 - **A `claimed_by` catalog column.** `extra` is not indexed; `find(status="taken")` is the entry point, and per-claimer queries have no caller yet.
 - **Same-profile bare-name addressing.** The spec's § *The messaging affordance* offers a bare `name` when the claimer shares the reader's profile and the `uds:` path otherwise. This plan emits the `uds:` form **always**, and the divergence is deliberate: `doctor` does not know which profile its *reader* is in, so the branch is not computable where the message is composed. Per `CLAUDE.md` § *Reaching a Peer Session* the socket path delivers in both cases while a bare name refuses cross-profile, so always-`uds:` is the strictly safer of the two. Revisit only if a same-profile reader finds the path form inconvenient — it is not wrong, just verbose.
 

@@ -1,11 +1,11 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: null
+closed: 2026-09-11
 opened: 2026-09-08
 owner: marius
 related: []
@@ -90,8 +90,8 @@ anchors only." — under budget (`TOOL_SURFACE_CHAR_BUDGET` had zero headroom at
 fix time; the replacement is 2 chars shorter than the original, not longer, so
 no other description needed trimming).
 
-Fix SHA: *(recorded at archive time — see Resume)*
-Patch-id: *(recorded at archive time — see Resume)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
 ## Tests added
 
 None added — this is a one-line schema-string correction with no behavior

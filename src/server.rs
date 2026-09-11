@@ -4121,7 +4121,7 @@ mod tests {
     /// `non_terminal_status_with_fix_anchor`, shipped on none of the three prose
     /// surfaces that describe `doctor`, so an agent had no way to learn it existed
     /// short of reading the `scan_*` functions directly
-    /// (`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`).
+    /// (`docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`).
     /// Naming `claim_liveness` here is exactly "an action no agent could discover"
     /// from the policy below. There was zero headroom before this change too, so a
     /// raise was unavoidable once the clause was trimmed as far as it would go

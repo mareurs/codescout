@@ -136,8 +136,9 @@ follow-up pass; `server.rs` sees frequent concurrent activity in this shared
 checkout and the sites are numerous enough to warrant their own careful pass
 rather than a rushed tail-end edit.
 
-Fix SHA: *(recorded at archive time for the partial fix — see Resume; this bug
-stays open until the remainder lands)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
+(covers the partial fix only — this bug stays open until the remaining `src/server.rs` sites are fixed and a follow-up SHA is recorded)
 ## Tests added
 
 None — doc/comment-only corrections, no behavior change. `cargo check

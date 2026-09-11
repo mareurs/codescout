@@ -282,7 +282,7 @@ currently describe `doctor` as a *catalog-drift* scanner over ~6 checks when it 
 so the convention of describing a new check has already lapsed — the newest check,
 `non_terminal_status_with_fix_anchor`, appears in none of them. Following local precedent
 here would ship `scan_claim_liveness` **wired and undiscoverable**. Filed as
-`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`;
+`docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`;
 scouted in `bug-claim-liveness-session-log:F-1`. The implementation plan must treat #9-11
 as required, not optional.
 

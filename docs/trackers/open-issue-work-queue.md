@@ -770,7 +770,7 @@ fix=…)` offers six repairs; `codescout doctor` offers none — its args are `-
 **Both halves are closed.** Seven of the scanner's eight params are now flags, and the
 `about` text no longer says "Read-only scan" — it also stopped enumerating four checks,
 which was feeding
-`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
+`docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
 The eighth param, `scope`, is deliberately not exposed and the omission is **declared** in
 `SCANNER_PARAMS_THE_CLI_OMITS`: the scanner accepts and validates it and never widens the
 scanned population with it, so a `--scope` flag's only observable effect would be making

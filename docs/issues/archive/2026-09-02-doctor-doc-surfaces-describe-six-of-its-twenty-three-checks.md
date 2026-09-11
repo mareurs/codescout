@@ -1,7 +1,7 @@
 ---
-id: '88c3f36937d83ed6'
+id: d529dc6966ae8b90
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: every doc surface describes `doctor` as a catalog-drift scanner, hiding ~17 of its 23 checks'
 owners:
 - marius
@@ -10,7 +10,7 @@ tags:
 topic: doctor check discoverability
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: ''
+closed: 2026-09-11
 opened: 2026-09-02
 owner: marius
 related: []
@@ -258,8 +258,8 @@ NOT touched: the much larger `//! Checks (MVP)` numbered list further down in
 `doctor.rs`'s module doc, which is its own, separate staleness (documents ~8
 of 26 checks) — out of scope for the five sites this bug named.
 
-Fix SHA: *(recorded at archive time — see Resume)*
-Patch-id: *(recorded at archive time — see Resume)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
 ## Tests added
 
 None new — doc/description-only correction. Re-ran green: `tool_surface_under_budget`,

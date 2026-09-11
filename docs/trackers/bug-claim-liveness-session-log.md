@@ -375,7 +375,7 @@ Nothing errored. Both sweeps returned a plausible integer, and the smaller one w
 consistent with everything else I believed.
 
 **Impact.** `F-1` and
-`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`
+`docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`
 both shipped claiming three, and the design's § *Wiring* row #10 read "the `librarian` MCP
 tool description" with **no path**, because the sweep never located it — an implementer
 would have had to re-find it. All three are now corrected to five with `path:line` per

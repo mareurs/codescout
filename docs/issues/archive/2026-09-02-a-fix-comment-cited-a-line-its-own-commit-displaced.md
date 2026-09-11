@@ -1,13 +1,13 @@
 ---
-id: fe2ff2436150990d
+id: ca0e27c814c74be0
 kind: bug
-status: taken
+status: fixed
 title: A fix comment cited a line its own commit displaced, and the site was wrong before it moved
 tags:
 - cluster/doc-contradicted-by-code
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: null
+closed: 2026-09-11
 opened: 2026-09-02
 owner: marius
 severity: low
@@ -97,8 +97,8 @@ a test doc comment (`doctor.rs`, in
 sibling test) that cited `append_entry.rs` generically — not wrong, but
 inconsistent with the corrected site.
 
-Fix SHA: *(recorded at archive time — see Resume)*
-Patch-id: *(recorded at archive time — see Resume)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
 ## Tests added
 
 None — doc-comment-only correction, no behavior change. `cargo check

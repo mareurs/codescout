@@ -1,13 +1,13 @@
 ---
-id: e81b767ba3701316
+id: c521ffdc4e2ab940
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: two sibling cluster-tag parsers justify dual-form support with corpus measurements that have decayed — one now false, one uncheckable'
 tags:
 - cluster/doc-contradicted-by-code
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: null
+closed: 2026-09-11
 opened: 2026-09-04
 owner: marius
 related: []
@@ -171,8 +171,8 @@ re-measuring (per this file's own warning against resetting the clock):
   dropped, keeping the load-bearing claim ("the corpus uses both forms;
   reading only one silently under-reports") which needs no figure at all.
 
-Fix SHA: *(recorded at archive time — see Resume)*
-Patch-id: *(recorded at archive time — see Resume)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
 ## Tests added
 
 None — these are doc-comment-only corrections with no behavior change;
