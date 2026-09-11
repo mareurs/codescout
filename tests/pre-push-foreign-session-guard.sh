@@ -1075,7 +1075,7 @@ hasnt "fully acked: does NOT deny the ack's role" "$OUT" "not on the ack"
 has   "fully acked: names the population it authorised" "$OUT" "2 commit(s) by another session"
 
 echo
-echo "== entry-id collision scan (Fix Part 1, cd808780d9ea2db9) =="
+echo "== entry-id collision scan (Fix Part 1, 9c7c5bc9168404be) =="
 #
 # Two clones each allocate the SAME next id from a common base before either sees the
 # other's commit; the merge that reconciles them combines both definitions instead of

@@ -1,13 +1,13 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 tags:
 - cluster/shared-resource-carries-no-owner
 - librarian
 - append-entry
 - guard-remedy
-claimed_at: 2026-09-10
-claimed_by: 26cb9b5b-2c9c-489e-97d9-3a907c8b2941
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-10
 owner: marius
@@ -20,13 +20,20 @@ severity: high
 
 ## Summary
 
-`append_entry` — the *only* write path into a declared ledger — refuses whenever that ledger's
-own file has commits not on `@{upstream}`. The single remedy it offers is "push this ledger's
-commits". Every session in this project operates under a standing instruction that pushing
-happens only when the user asks, so the refused party structurally cannot perform the remedy.
-Meanwhile the guard's own source says it **does not prevent the collision it names**. The result
-is a hard block on a mandated workflow step, bought with a mitigation its author labelled
-partial.
+`append_entry` — the *only* write path into a declared ledger — refused whenever that ledger's
+own file has commits not on `@{upstream}`. The refusal named two paths: push (which every
+session's standing instruction forbids performing unasked), or park the entry worktree-local
+and fold it in later. **Correction, 2026-09-11 (live-reproduced independently by peer sessionId
+8bd791df-5ff4-40fe-af30-69cc3fefc2f7, who hit this same refusal blocked on their OWN commit from
+90 minutes earlier in the same session — no peer required):** the second path is a DEFERRAL, not
+a remedy. It does not unblock the mandated step, it postpones it into an untracked obligation —
+the entry lives in a session scratchpad that dies with the session, invisible to every `find` and
+every `Status: open` sweep, and nothing anywhere notices if it is never folded in. That is a
+worse failure mode than the original wording suggested: not merely unperformable, but silently
+convertible into lost work. Meanwhile the guard's own source said it **does not prevent the
+collision it names**. The result was a hard block on a mandated workflow step, bought with a
+mitigation its author labelled partial and whose only "performable" path quietly drops the work
+on the floor.
 
 ## Symptom (Effect)
 
@@ -239,12 +246,72 @@ stand without it.
 **Explicitly rejected: a `force` flag on `append_entry`.** It would be used every time, by every
 session, because the refusal is unactionable — which is the same failure one level down.
 
+## Fix — 2026-09-11
+
+Implemented **Part 1 only** (Part 2 — `doctor --fix=renumber_uncited_duplicate` — and Part 3 —
+provenance stamping — remain open, by explicit user decision; they are alternatives/additions,
+not blocking stages).
+
+**A design correction, found before implementing, not after:** this file's own Part 1 text said
+to site the check on a "divergent push" (`remote_sha` not an ancestor of `local_sha`). Worked
+through the actual git mechanics and that is the WRONG push. The collision is born in the merge
+that resolves a *rejected* push (host A pushes first and succeeds; host B's push is rejected
+non-fast-forward by git itself; B fetches, merges, producing merge commit M; B pushes M). At
+that second, successful push, `remote_sha` (A's tip) is trivially an ancestor of `local_sha`
+(M's own parent) — an ordinary fast-forward, the opposite of "divergent". A check gated on
+ancestry fires on the doomed first attempt (nothing to inspect yet — no merge exists) and is
+silent on the second attempt, which is the one that actually publishes the collision.
+
+**What shipped instead:** `scripts/pre-push-foreign-session-guard.sh` gained a second,
+independent check inside its existing per-ref loop (not a new script — pre-push's stdin is
+single-use, and the existing loop already computes the range this needs). For every merge
+commit newly present in the pushed range, it reads `entry_high_water_<PREFIX>` (a plain
+git-tracked frontmatter scalar, `src/librarian/catalog/augmentation.rs`'s
+`ENTRY_HIGH_WATER_PREFIX` — no catalog access needed) at the merge's base and both parents. If
+both parents advanced the same prefix past the base, a collision is mathematically guaranteed;
+a targeted `git grep` for each candidate `## PREFIX-N` heading inside the merge's own tree names
+the exact duplicate, or confirms it was already resolved. Every object this needs is guaranteed
+present locally (you cannot hold a commit without its parents) — no missing-object blind spot,
+unlike a check that tries to read the *first* divergent push's remote tree (which may genuinely
+not be fetched yet).
+
+`append_entry.rs`'s `ledger_unpushed_commits` and its refusal are removed entirely —
+"allocate optimistically", per this file's own Part 1 wording. New regression test
+(`allocation_succeeds_while_the_ledger_has_unpushed_commits`) asserts success against the exact
+fixture the old tests asserted refusal against. New pre-push test cases (genuine duplicate
+refuses and names the token; an already-resolved duplicate does not; a non-merge push is
+unaffected) were confirmed red against the pre-fix script and green against the post-fix one —
+not merely written green.
+
+Fix commits:
+- `232f133cc6471753cc74d205fb9bc7c1ecbb1b9e`, patch-id `5027ebf3716e897f37b2e300da28a92fad37ffb6`
+
+Also closed as moot by this fix:
+`docs/issues/2026-09-02-the-unpushed-ledger-guard-allowed-an-append-it-documents-as-refused.md`
+(id `2609d357a1794d8b`) — its unresolved mystery (why the guard sometimes silently failed to
+fire) no longer matters once the guard it was about no longer exists.
+
+**Note on peer `8bd791df`'s separate finding, recorded here rather than acted on:** the
+RELEASE.md ladder check (`git rev-list --count origin/<branch>..<sha>` must be 1 before pushing
+a rung) has the identical failure shape one level up — it measures "how many of mine are
+unpublished" and is silent on "has the remote moved elsewhere", so `count==1` on a branch whose
+remote has independently diverged still gets rejected non-fast-forward, or worse, would drop
+remote commits if it were not. Out of scope for this fix (different mechanism, different file);
+worth a sibling assertion (`count==1 AND git merge-base --is-ancestor origin/<branch> <sha>`)
+if RELEASE.md's ladder check is ever revisited.
 ## Tests added
 
-None — not fixed. The regression test for part 1 is that `append_entry` succeeds against a
-ledger with unpushed commits touching it, and that a `pre-push` run against a ledger whose
-remote mark has advanced refuses with a remedy the pusher can perform. Both must be observed
-red under mutation before they count.
+**2026-09-11, Part 1:**
+- `src/librarian/tools/append_entry.rs::allocation_succeeds_while_the_ledger_has_unpushed_commits`
+  — the exact fixture the removed tests asserted refusal against now asserts success.
+- `tests/pre-push-foreign-session-guard.sh` — three new cases: a merge with a genuine duplicate
+  id refuses and names the token/file; a merge where the duplicate was already renumbered before
+  merging does not refuse; an ordinary non-merge push over the same ledger shape is unaffected.
+  Confirmed red against the pre-fix script (3 of 5 assertions failed, including the exit-code
+  one) and green against the post-fix one — not merely written green.
+
+Part 2 (doctor auto-repair) and Part 3 (provenance stamping) remain unimplemented, by explicit
+user decision — no test debt for them here.
 
 ## Workarounds
 

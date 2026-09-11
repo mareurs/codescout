@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: wontfix
 tags:
 - cluster/repro-env-diverges-from-gate-env
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -63,6 +65,19 @@ from outside.
   so worktree-aware discovery is a live variable here and absent from every fixture.
 - Something inside the revwalk / `diff_tree_to_tree` path.
 
+**Closed as moot, 2026-09-11.** The guard this bug is about — `append_entry`'s
+`ledger_unpushed_commits`-based refusal — was removed entirely as Part 1 of
+`docs/issues/archive/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`
+(fix commit `232f133cc6471753cc74d205fb9bc7c1ecbb1b9e`). `append_entry` now allocates
+optimistically and never refuses on this condition, so the question this file asks — why did
+the guard sometimes silently fail to fire when it should have refused — no longer has a subject.
+The seven ruled-out candidates and two surviving ones (a file-path vs directory-path argument to
+`git2::Repository::discover()`; a linked-worktree interaction) are recorded here in case a
+similar shape resurfaces elsewhere, but nobody will investigate them further for THIS guard,
+because this guard is gone. Not folded into the other bug's own record: this is a genuinely
+separate defect (a guard firing inconsistently) from the one that motivated removing it (a
+guard whose remedy nobody could perform), and conflating them would credit the removal with
+having explained a mechanism it never needed to explain.
 ## Why the passing tests do not settle it
 
 `unpushed_is_per_file_not_per_branch`, `allocation_is_refused_while_the_ledger_unpushed_commits`
