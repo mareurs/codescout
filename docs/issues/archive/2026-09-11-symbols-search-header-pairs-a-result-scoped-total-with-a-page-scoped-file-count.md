@@ -1,13 +1,15 @@
 ---
-id: '0649a087dabaee59'
+id: 7ec9bf3ea062c87c
 kind: bug
-status: open
+status: fixed
 title: symbols search renders a result-scoped match total beside a page-scoped file count, so the same query answers 4 files or 11
 owners:
 - marius
 tags:
 - cluster/capped-result-presented-as-complete
 topic: overflow reporting scope
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 ## Summary
@@ -94,6 +96,40 @@ the match total and the breakdown-overflow hint are result-scoped and the file c
 None — filed on first observation. No fix attempted; `src/tools/symbol/` is being actively worked
 by another session.
 
+## Fix
+
+Fixed. `finalize_search_results` (`src/tools/symbol/symbols.rs`) now serializes a top-level
+`files_count`, computed over the FULL pre-truncation match set as `by_file_entries.len() +
+by_file_overflow_count` — both already derived by `build_by_file` for the by_file-overflow fix
+(`94aedcd9`), just never surfaced as a standalone count. `format_search_symbols`
+(`src/tools/symbol/display.rs`) prefers this field over `groups.len()`, falling back to the
+latter only when the field is absent — the exact explicit-field-first pattern `grep.rs`'s
+`format_grep` already uses for its own `files_count` (checked and confirmed identical before
+writing this fix, not assumed from the bug's own citation).
+
+**Mutation-verified**: `symbols_with_overflow_names_the_true_file_count_not_the_page_one`
+(2 shown symbols across 2 files, `total: 57`, `files_count: 11`) observed RED against the
+pre-fix renderer ("57 matches in 2 files") and GREEN after. A control test,
+`symbols_without_files_count_falls_back_to_the_page_count`, confirms every pre-existing fixture
+shape (no `files_count` key) renders identically to before — the fix is additive.
+
+**SHA:** `8898aa7b40a3ada74b56dee152971558b398fa8a`
+**patch-id:** `60ce33b0c4cba5c5594e3cd000c08733c61ef16f`
+
+## Tests added
+
+`src/tools/symbol/tests.rs`, next to `symbols_with_overflow`:
+
+- `symbols_with_overflow_names_the_true_file_count_not_the_page_one` — asserts the header uses
+  the explicit `files_count` (11) over the page's own distinct-file count (2).
+- `symbols_without_files_count_falls_back_to_the_page_count` — over-match guard: the fallback
+  path (every existing fixture) is unaffected.
+
+Both observed RED/GREEN as described above.
+
+## Resume
+
+Done — see § Fix. Nothing left to resume.
 ## Workarounds
 
 Do not read the header's file count as a property of the result unless the call returned
