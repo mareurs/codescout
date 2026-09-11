@@ -1693,7 +1693,11 @@ async fn build_resource_registry(
 ///   `tracing::error!`; only the outermost message goes over the wire. This
 ///   keeps `with_context` chains (which often include absolute paths) out
 ///   of MCP responses for the HTTP transport, where error oracles can leak
-///   filesystem layout to an authenticated-but-untrusted client.
+///   filesystem layout to an authenticated-but-untrusted client. If the error
+///   is a [`crate::tools::AdvisedError`] (a parameter alias was silently
+///   corrected before the call failed), the text also carries a `⚠ {hint}`
+///   prefix — the message itself is untouched, so a caller reading past the
+///   prefix still sees exactly what the tool would have said unwrapped.
 ///
 /// [`RecoverableError`]: crate::tools::RecoverableError
 fn route_tool_error(e: anyhow::Error) -> CallToolResult {
@@ -1741,9 +1745,25 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
         CallToolResult::success(vec![Content::text(text)])
     } else {
         // Log the full context chain server-side (`{:#}` walks `.source()`
-        // chain). Only the outermost message crosses the wire.
+        // chain). Only the outermost message crosses the wire. Unchanged by
+        // the prefix below: `AdvisedError`'s Display/Debug delegate fully to
+        // its inner error, so this line's output is identical whether `e` is
+        // bare or wrapped.
         tracing::error!(error = format!("{e:#}"), "tool error");
-        CallToolResult::error(vec![Content::text(e.to_string())])
+        // A wrapped `AdvisedError` carries a parameter-alias advisory that has
+        // nowhere else to land on this branch (no JSON body here, just text) —
+        // prefixed, not appended, matching `call_content`'s own compact-text
+        // success renderer's choice for this same `hint` string: the notice
+        // changes how the message below it should be read, so it has to
+        // arrive first. See `attach_param_corrections_to_error`.
+        let prefix = e
+            .downcast_ref::<crate::tools::AdvisedError>()
+            .and_then(|adv| adv.corrections.get("hint"))
+            .and_then(|v| v.as_str())
+            .filter(|h| !h.is_empty())
+            .map(|h| format!("⚠ {h}\n\n"))
+            .unwrap_or_default();
+        CallToolResult::error(vec![Content::text(format!("{prefix}{e}"))])
     }
 }
 
@@ -3700,12 +3720,18 @@ mod tests {
     /// (`read_file` is `Text`, `create_file` is `Json`) asserting the IDENTICAL address —
     /// that agreement is the claim, not an accident of picking similar tools.
     ///
-    /// **Scope, stated rather than left to be inferred from the cases present.** Only
-    /// `RecoverableError` (`isError: false`) carries the advisory; a plain `anyhow` error
-    /// (`isError: true`) deliberately does not, and `attach_param_corrections_to_error`
-    /// (`src/tools/core/types.rs`) holds the reasoning. The fixture-level twin of this
-    /// gate, including the fatal-error boundary and the merge arms, is
-    /// `src/tools/core/tests.rs`'s `*_on_the_error_path` block.
+    /// **Scope, stated rather than left to be inferred from the cases present.**
+    /// `RecoverableError` (`isError: false`) carries the advisory via `extra`; a plain
+    /// `anyhow` error (`isError: true`) carries it via `AdvisedError`, a wrapper that
+    /// leaves the tool's own message and `.source()` chain untouched and only adds a
+    /// `⚠ {hint}` prefix to the wire text — see `attach_param_corrections_to_error`
+    /// (`src/tools/core/types.rs`) for why a bare `.context()`/`format!` could not do
+    /// this. The fatal-error case is a SEPARATE gate directly below
+    /// (`the_dispatch_boundary_prefixes_the_repair_onto_a_fatal_error_too`), not folded
+    /// into this one, to keep the RecoverableError/anyhow contrast this gate's own
+    /// design depends on. The fixture-level twin of both, including the fatal-error
+    /// boundary and the merge arms, is `src/tools/core/tests.rs`'s `*_on_the_error_path`
+    /// block.
     #[tokio::test]
     async fn the_dispatch_boundary_announces_the_repair_when_call_errs() {
         let (dir, server) = make_server().await;
@@ -3822,6 +3848,59 @@ mod tests {
             server.find_tool("create_file").unwrap().output_form(),
             crate::tools::OutputForm::Json,
             "create_file is this gate's OutputForm::Json half; same hazard as above"
+        );
+    }
+
+    /// The follow-up to the gate above: a plain `anyhow` error (`isError: true`) now
+    /// ALSO carries the advisory, via `AdvisedError` — closing the gap that gate's own
+    /// "Scope" paragraph used to describe as deliberate and permanent.
+    /// `symbol_at` on a file whose language `ast::detect_language` does not recognize
+    /// is a real, in-tree `anyhow::anyhow!("unsupported language")` failure (never a
+    /// `RecoverableError`), reached with an aliased `file_path` — the reproduction
+    /// shape named in
+    /// `docs/issues/archive/2026-09-11-the-alias-advisory-still-does-not-reach-the-plain-anyhow-error-path.md`.
+    #[tokio::test]
+    async fn the_dispatch_boundary_prefixes_the_repair_onto_a_fatal_error_too() {
+        let (dir, server) = make_server().await;
+        std::fs::write(dir.path().join("blob.xyz"), b"not source code\n").unwrap();
+
+        let req = CallToolRequestParams::new("symbol_at").with_arguments(
+            serde_json::from_value(serde_json::json!({ "file_path": "blob.xyz", "line": 1 }))
+                .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "unsupported-language is a genuinely fatal error and must stay isError: true \
+             — the advisory must not have flipped it into a RecoverableError: {result:?}"
+        );
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .unwrap_or_default();
+        assert!(
+            text.contains("unsupported language"),
+            "the tool's own message must survive verbatim, not be overwritten: {text}"
+        );
+        assert!(
+            text.contains("file_path") && text.contains("symbol_at"),
+            "the alias advisory must reach the fatal-error text, naming the alias \
+             actually sent and the tool: {text}"
+        );
+        let advisory_pos = text.find('⚠').unwrap_or_else(|| {
+            panic!("expected a '⚠'-prefixed advisory ahead of the tool's own message: {text}")
+        });
+        let message_pos = text.find("unsupported language").unwrap();
+        assert!(
+            advisory_pos < message_pos,
+            "the advisory must be PREFIXED, not appended — it changes how the message \
+             below it should be read, same convention as the success path's compact-text \
+             renderer: {text}"
         );
     }
 

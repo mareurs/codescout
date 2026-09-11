@@ -2855,10 +2855,17 @@ async fn the_error_paths_advisory_does_not_clobber_the_errors_own_corrections() 
 
 #[tokio::test]
 async fn a_fatal_error_is_left_untouched_and_that_is_the_documented_boundary() {
-    // POSITIVE half first: the fatal error's text is unchanged, which is what
-    // `route_tool_error` sends over the wire on that branch (it deliberately emits
-    // only the outermost message and logs the `.source()` chain server-side,
-    // because an error oracle over HTTP can leak filesystem layout).
+    // POSITIVE half first: the fatal error's message and TYPE are unchanged at
+    // THIS layer (`call_content`'s own return value) — it is still a bare
+    // `anyhow::Error` here, not converted to `RecoverableError`, which would flip
+    // `isError` and stop aborting siblings. What DOES change, one layer further
+    // out at `route_tool_error` (`src/server.rs`), is the wire TEXT: a `⚠ {hint}`
+    // prefix, when an alias was involved — tested end-to-end there by
+    // `the_dispatch_boundary_prefixes_the_repair_onto_a_fatal_error_too`, since a
+    // fixture-level test at this layer has no `route_tool_error` to observe the
+    // prefix through. This test's claim is narrower than its name once implied:
+    // the error's IDENTITY is untouched, not that nothing downstream ever reads
+    // its `AdvisedError` wrapper.
     //
     // The absence half below is monotone under removal — it would also pass if the
     // whole advisory mechanism died — so it is NOT coverage on its own. It is here
@@ -2878,7 +2885,8 @@ async fn a_fatal_error_is_left_untouched_and_that_is_the_documented_boundary() {
     assert_eq!(
         err.to_string(),
         "LSP crashed unexpectedly",
-        "a fatal error's message must reach `route_tool_error` byte-identical"
+        "a fatal error's message must reach `route_tool_error` byte-identical — \
+         `AdvisedError`'s Display delegates fully to its inner error"
     );
     assert!(
         err.downcast_ref::<crate::tools::RecoverableError>()

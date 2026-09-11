@@ -350,23 +350,28 @@ fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) 
 /// caller straight back through the alias it was not told about.
 /// `docs/issues/archive/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
 ///
-/// **Scope — deliberately `RecoverableError` only, and this is the design choice, not
-/// an oversight.** That class is `isError: false`, "bad input, self-correct and
-/// retry", which is the only class where "the name you sent is not a parameter"
-/// changes the next call; and `route_tool_error` splices its `extra` map into the
+/// **Both error types now carry it, via two different carriers.** A
+/// [`RecoverableError`] (`isError: false`, "bad input, self-correct and retry")
+/// already had a splice point: `route_tool_error` puts its `extra` map into the
 /// response body at the top level, so the advisory lands at
-/// `corrections.param_aliases` — the same address the success path uses, so a caller
-/// parses one shape rather than two. A plain `anyhow` error (`isError: true`, "stop
-/// and surface to the user") is left untouched on purpose: `route_tool_error`
-/// deliberately sends only the outermost message on that branch and logs the context
-/// chain server-side, because an error oracle over the HTTP transport can leak
-/// filesystem layout to an authenticated-but-untrusted client. Widening the message
-/// there would either overwrite the original error text (`anyhow::Context` prepends)
-/// or drop the `.source()` chain the log depends on. If that gap ever needs closing,
-/// it needs a wrapper error type that re-exports `source()`, not a `format!`.
+/// `corrections.param_aliases` — the same address the success path uses.
 ///
-/// The alternative carrier considered and rejected: joining `RecoverableError`'s
-/// existing [`Guidance`] (`hint` / `warning` / `must_follow`). A `RecoverableError`
+/// A plain `anyhow` error (`isError: true`, "stop and surface to the user") had no
+/// splice point — `route_tool_error` deliberately sends only the outermost message
+/// on that branch and logs the context chain server-side, because an error oracle
+/// over the HTTP transport can leak filesystem layout to an authenticated-but-
+/// untrusted client. Widening the message there directly would either overwrite the
+/// original error text (`anyhow::Context` prepends) or drop the `.source()` chain
+/// the log depends on (`format!` flattens it to a `String`). [`AdvisedError`] is the
+/// wrapper this needed: it carries the advisory as a separate field while its
+/// `Display`/`Debug`/`source()` all delegate to the inner error unchanged, so
+/// `route_tool_error` still shows the tool's own message and still logs the full
+/// chain — it only gains a `⚠ {hint}\n\n` prefix, matching the same prefix
+/// convention `call_content`'s own compact-text success renderer already uses for
+/// this same `hint` string. `docs/issues/archive/2026-09-11-the-alias-advisory-still-does-not-reach-the-plain-anyhow-error-path.md`.
+///
+/// **The alternative carrier considered and rejected: joining `RecoverableError`'s
+/// existing [`Guidance`] (`hint` / `warning` / `must_follow`).** A `RecoverableError`
 /// carries at most one `Guidance`, so joining would have meant either overwriting the
 /// tool's own recovery text — the bug file's whole point is that both facts must
 /// arrive together — or concatenating two registers into one field.
@@ -381,8 +386,14 @@ fn attach_param_corrections_to_error(e: anyhow::Error, c: Option<&Value>) -> any
             merge_param_corrections(&mut rec.extra, c);
             rec.into()
         }
-        // Not a `RecoverableError` — see the scope paragraph above.
-        Err(e) => e,
+        // Not a `RecoverableError` — wrap it so the advisory still reaches
+        // `route_tool_error`, without touching Display/Debug/source(). See the
+        // doc comment above.
+        Err(e) => AdvisedError {
+            inner: e,
+            corrections: c.clone(),
+        }
+        .into(),
     }
 }
 
@@ -609,6 +620,44 @@ impl std::fmt::Display for RecoverableError {
 }
 
 impl std::error::Error for RecoverableError {}
+
+/// Carries a plain `anyhow` error's alias-correction advisory across
+/// `route_tool_error`'s success/error boundary. Internal plumbing between
+/// `attach_param_corrections_to_error` and `route_tool_error` only — never
+/// constructed by a tool's own `call()`, unlike [`RecoverableError`].
+///
+/// Exists to avoid the two failure modes `attach_param_corrections_to_error`'s
+/// doc comment identifies for the obvious alternatives: it does not touch the
+/// inner error's `Display` (so `route_tool_error` still shows the tool's own
+/// message, not a wrapper's), and it does not flatten the source chain into a
+/// `String` (so server-side logging via `tracing::error!("{:#}", …)` still
+/// walks it).
+pub(crate) struct AdvisedError {
+    pub(crate) inner: anyhow::Error,
+    pub(crate) corrections: Value,
+}
+
+impl std::fmt::Display for AdvisedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            write!(f, "{:#}", self.inner)
+        } else {
+            write!(f, "{}", self.inner)
+        }
+    }
+}
+
+impl std::fmt::Debug for AdvisedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
+impl std::error::Error for AdvisedError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
 
 /// Returns the largest byte offset `<= n` that lands on a UTF-8 char boundary.
 /// Prevents `&str[..n]` panics when `n` points into a multi-byte character.
