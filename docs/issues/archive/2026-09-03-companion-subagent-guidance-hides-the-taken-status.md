@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-03
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
-kind: bug
+closed: 2026-09-11
+opened: 2026-09-03
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: the companion plugin tells every subagent to query `status="open"` alone, hiding the `taken` state the code just gained
@@ -112,20 +112,22 @@ list, and a duplicate filing as the cost.
 
 ## Fix
 
-1. `claude-plugins/codescout-companion/hooks/subagent-guidance.mjs:61` →
+1. Fixed. `claude-plugins/codescout-companion/hooks/subagent-guidance.mjs:61` →
    `doc(action="find", kind="bug", filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})`,
    with the one-line gloss the codescout surfaces carry (`taken` = a live session holds it).
-2. **The general fix is the interesting one.** `companion_surfaces_reference_only_real_tools`
-   already reaches into the plugin. Extending it — or adding a sibling — to assert that any
-   `kind="bug"` triage query in a companion surface names the full non-terminal status set
-   would close the class rather than the instance. Without that, the next status added repeats
-   this exactly, and the branch that adds it will again sweep its own repo completely.
+2. **Not done here.** The general fix — extending
+   `companion_surfaces_reference_only_real_tools` (or a sibling) to assert that any
+   `kind="bug"` triage query in a companion surface names the full non-terminal status
+   set — is a gate-design decision on its own merits, left for a follow-up.
 
-SHA: *pending.* patch-id: *pending.*
+SHA: `claude-plugins:9044f89039a7899fce8b3c2593849c8567e10c2f`
+patch-id: `0d574effb11da6a7854f159503e6bfeb17d3277f`
 
 ## Tests added
 
-None yet. Item 2 above is the test.
+None — `subagent-guidance.mjs` has no test harness in the companion-plugin repo
+(no test script in its package.json). Verified with `node --check` for syntax
+only. Item 2 (the general gate) is what would prevent recurrence; not built here.
 
 ## Workarounds
 
@@ -134,9 +136,10 @@ and run the four-status form from `get_guide("project-activation-bootstrap")` in
 
 ## Resume
 
-Apply fix 1 in `claude-plugins` (its own repo, its own gate; cite the SHA with the
-`<repo>:<sha>` prefix). Then decide fix 2 on its own merits — it is a gate-design question,
-not a follow-up to the one-line edit, and it is the only part that prevents recurrence.
+N/A — fixed. If a future status is added to the bug lifecycle, this same class
+(a companion-repo prose surface not reached by any codescout gate) will recur;
+whether to build the general gate at that point, or now preemptively, is the
+open design call noted in Fix.
 
 ## References
 
