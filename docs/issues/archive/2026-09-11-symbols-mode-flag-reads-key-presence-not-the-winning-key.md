@@ -1,14 +1,14 @@
 ---
-id: fedf989bfc42a718
+id: 64d5aa926c9e2f32
 kind: bug
-status: open
+status: fixed
 title: symbols reads its exact-vs-substring mode off key presence, not off the key that supplied the pattern
 owners:
 - marius
 tags:
 - cluster/accepted-parameter-silently-dropped
 topic: tool parameter surface
-closed: null
+closed: 2026-09-11
 opened: 2026-09-11
 owner: marius
 related: []
@@ -147,8 +147,12 @@ step, so the mode cannot disagree with the value that produced it.
   the two pairs; `description_declares_an_alias` widened to the parenthetical form the
   collapse just removed; `TOOL_SURFACE_CHAR_BUDGET` ratcheted 55_355 -> 55_093.
 
-SHA: *(recorded at archive)*
-patch-id: *(recorded at archive)*
+SHA: `8b396343` on **`experiments`**
+patch-id: `d2cdcc3c6ceb333fcb1f7fb3285bd062df664a03`
+
+Gate green on all four commands, in order, 2026-09-11 — lean `3721/40/0/33`, default
+`5745/52/0/36` (passed / ignored / failed / binaries), against a `3717/40/0/33` and
+`5741/52/0/36` baseline: +4 each, which is 5 tests added and 1 deleted.
 
 ## Tests added
 

@@ -12,7 +12,7 @@ closed: null
 opened: 2026-09-11
 owner: marius
 related:
-- fedf989bfc42a718
+- '64d5aa926c9e2f32'
 severity: low
 unverified: the symbols-parameter half is fixed but unrun; the get_symbols_overview half is not fixed at all
 ---
