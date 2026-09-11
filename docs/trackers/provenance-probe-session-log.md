@@ -9,6 +9,10 @@ tags:
 - measurement
 - probe
 topic: provenance-measurement
+entry_prefix:
+- F
+- W
+entry_high_water_F: 15
 ---
 
 # Session Log — Provenance Measurement Probe
@@ -43,6 +47,7 @@ topic: provenance-measurement
 | F-12 | 2026-08-04 | med | self-friction | fixed-verified | Marked R-52 settled while 19MB still sat in the repo — rule written, not applied |
 | F-13 | 2026-08-04 | high | measurement-hygiene | fixed-verified | 60% of the corpus was base64 image data; nine rounds of analysis ran on top of it |
 | F-14 | 2026-08-05 | high | measurement-hygiene | fixed-verified | Called a population "empty" from a 34-session sample read as if it were the corpus |
+| F-15 | 2026-09-11 | med | measurement-hygiene | fixed-verified | A binary's mtime cannot decide what the binary contains, because `include_str!` bakes the working tree |
 
 ## Wins Index
 
@@ -1083,6 +1088,68 @@ represents, and the stratum weights; review with whoever owns the data before
 measuring.*
 
 ---
+
+## F-15 — a binary's mtime cannot decide what the binary contains, because include_str! bakes the working tree
+
+**Valid:** invariant
+
+**Category:** measurement-hygiene
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Observed.** Asked to recon a rebuilt binary, I compared the release image's mtime against
+commit timestamps to decide what it contained:
+
+```
+release image built      15:43:31
+ada993d6  authored       15:44:52   fix(provenance): …   <- "therefore NOT in the image"
+7ff820f5  authored       15:46:47   docs only
+```
+
+The inference is wrong. `strings target/release/codescout | grep -c 'Two known blind spots'`
+returns **1** — prose that `ada993d6` committed a minute *after* the build is compiled into it.
+
+**Mechanism.** `scripts/file-provenance.py` reaches the binary through `include_str!`
+(`src/tools/run_command/attribution.rs:102`, materialised at runtime beside
+`attribute-red.py`). **`include_str!` bakes the WORKING TREE at build time, not `HEAD`.** A peer
+edited the script, someone ran `cargo rb` against that dirty tree, and the peer committed a
+minute later — an ordinary shared-checkout sequence in which the artifact legitimately precedes
+the commit that contains it.
+
+**The test is unsound in BOTH directions, and the second is the dangerous one.** *Authored after
+the build* does not mean absent, as measured here. *Committed before the build* does not mean
+present either — a build takes whatever was on disk, so a change that was stashed, on another
+branch, or pulled after the build is committed-and-missing while every timestamp agrees it
+shipped. One direction over-reports staleness, the other under-reports it, and nothing in the
+mtimes distinguishes them.
+
+**This is memory `gotchas` § *MCP Binary Symlink* one layer down, and that is what makes it
+worth an entry.** That section already establishes the law for **process** staleness: *"binary
+mtime, this symlink, a clean `git status`, the last source commit and the reconnect itself all
+report fresh while stale images run"*, leaving the kernel's `(deleted)` marker as the only signal
+that does not read green in the broken world. The same holds for **content** staleness, against
+the same instruments, and it is written nowhere: a timestamp is green in both worlds, so it
+cannot be evidence about either. The discriminator is one level in — read the artifact's bytes.
+
+**The sound test, and one trap inside it.** For an embedded asset, grep the image for a sentinel
+string the change introduced. For compiled Rust, read the baked SHA — but `build.rs` bakes
+`CODESCOUT_GIT_SHA` in its **short** form, so a scan for a 40-hex commit id returns nothing and
+reads exactly like *"no SHA is baked"*. I hit that in the same pass; the sentinel-string route is
+what actually answered.
+
+**Counterfactual.** One sentence from reporting *"the binary is stale with respect to the
+provenance fix"* — to the operator, and to the peer who had authored that fix forty minutes
+earlier. Cost would have been an unnecessary `cargo rb` on a shared `target/`, and something
+worse: teaching a reader to distrust `wip_authors` output that was in fact correct, on the one
+subsystem whose entire job is to be trusted about authorship.
+
+**Rests on:** `stat -c %Y target/release/codescout` = 15:43:31 +0300 against `git log
+--format=%at` for `ada993d6` / `7ff820f5`, 2026-09-11; `strings target/release/codescout | grep
+-c 'Two known blind spots'` → 1, matching `grep -c` on `scripts/file-provenance.py` → 1;
+`src/tools/run_command/attribution.rs:102` and `materialize_into` at `:166-167`; memory
+`gotchas` § *MCP Binary Symlink*.
 
 ## Template for new entries
 
