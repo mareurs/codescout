@@ -2957,9 +2957,17 @@ async fn the_advisory_reaches_the_caller_on_the_error_path_for_both_output_forms
 #[tokio::test]
 async fn the_error_paths_advisory_does_not_clobber_the_errors_own_corrections() {
     // The `Some(object)` arm of `merge_param_corrections`, reached from the ERROR
-    // path. No in-tree tool produces this today — it is the same latent collision
-    // the success-path fixtures guard, and the shared helper is what makes one
-    // guard cover both call sites rather than two copies drifting apart.
+    // path. LIVE, not latent, and this comment said the opposite until 2026-09-11:
+    // `doc` declares aliases AND `find.rs` writes its own object-shaped
+    // `corrections`, so a real `doc(action="find", query=…)` takes this arm on every
+    // call — verified on the wire, the response carries `find.rs`'s `filter`/`hint`
+    // and `param_aliases` beside them. The stale "no in-tree tool produces this"
+    // reading is why nobody added a real-tool exerciser: a fixture guarding a latent
+    // collision reads as sufficient, while the same fixture guarding a LIVE
+    // production path leaves the integration untested. This test is real coverage of
+    // the arm either way; what was wrong was its population, not its assertions.
+    // The shared helper is what makes one guard cover both call sites rather than
+    // two copies drifting apart.
     let ctx = bare_ctx().await;
     let tool = AliasErr {
         form: OutputForm::Json,

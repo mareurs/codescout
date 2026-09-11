@@ -4757,6 +4757,30 @@ mod tests {
         let (_dir, server) = make_server().await;
         let rows = advertised_surface(&server);
         let total: usize = rows.iter().map(|(_, d, s, a)| d + s + a).sum();
+        // FLOOR FIRST, and it is not decoration: the ceiling below is monotone under
+        // REMOVAL. An empty registry sums to 0 and passes it, and every tool that
+        // disappears makes it MORE comfortable — so the assertion that reads like a
+        // guard is precisely blind to a registry that shrank. Both sibling gates in
+        // this module carry `server.tools.len() >= 15`; this one did not until
+        // 2026-09-11, which is the `total <= CEILING`-with-no-floor shape CLAUDE.md
+        // § Testing Discipline records as a measured prior defect.
+        //
+        // Deliberately NOT `total > 0`: that is the OTHER half of the same recorded
+        // defect and one surviving tool satisfies it. The ROW COUNT is what
+        // discriminates, because the failure being guarded is a registry that lost
+        // members, not a surface that emptied.
+        //
+        // 15 rather than today's population (19 lean / 21 default) on purpose: a
+        // floor equal to the current count reds on every deliberate removal, which
+        // trains the next person to raise it without looking at why it fired.
+        assert!(
+            rows.len() >= 15,
+            "advertised surface holds only {} tools; expected at least 15. The budget \
+             assertion below CANNOT catch this — it is a ceiling, and a registry that \
+             lost tools passes it more easily than a full one. If tools were removed \
+             deliberately, lower this floor in the same commit and name them.",
+            rows.len(),
+        );
         assert!(
             total <= TOOL_SURFACE_CHAR_BUDGET,
             "advertised tool surface is {total} chars across {} tools; budget is {}. \
