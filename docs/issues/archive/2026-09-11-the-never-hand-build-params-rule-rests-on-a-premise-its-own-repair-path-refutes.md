@@ -1,13 +1,14 @@
 ---
-id: '5668c67b7094cda8'
+id: ea302e013cf7c85a
 kind: bug
-status: open
+status: fixed
 title: 'BUG: CLAUDE.md''s "never hand-build a params array" rests on a premise doctor''s own repair path refutes'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
 topic: tracker params integrity
+closed: 2026-09-11
 opened: 2026-09-11
 related: []
 severity: high
@@ -169,10 +170,31 @@ different people at different times.
 
 ## Tests added
 
-None — not fixed. A regression test for direction 1 or 2 is a prose-pinning test and should
-follow § *Testing Discipline*'s shape rule: assert that the ⚠ **names an exception**, not its
-wording.
+**Shipped 2026-09-11 — two guards, both shape rather than wording, both mutation-verified
+against the PRODUCTION path rather than their own inputs.** § *Testing Discipline* demands an
+observed RED, never an assertion's existence, so each was run against a reverted fix:
 
+| guard | mutation applied | result |
+|---|---|---|
+| `claude_md_params_array_rule_names_its_one_exception` (`src/prompts/mod.rs`) | reverted `CLAUDE.md`'s ⚠ to its absolute pre-fix form | **RED** — and the panic prints the offending blockquote, so the next reader need not reconstruct what is missing |
+| the `CLAUDE.md` assertion added to `params_behind_body_names_a_remedy_that_can_actually_repair_it` (`src/librarian/tools/doctor.rs`) | removed the cross-reference from the `detail` string | **RED**, printing the full detail |
+
+Both assert *shape*: that the exception is NAMED, never how it is phrased. Pinning either
+sentence would red on every legitimate rewrite — the failure mode § *Testing Discipline* calls
+out for remedy text — while these red on the one regression that is actually plausible,
+someone tidying the ⚠ back to its absolute form.
+
+The first scopes its search to the ⚠'s blockquote by `>` continuation. **That scoping is
+redundant today** — `params_behind_body` occurs exactly once in `CLAUDE.md`, inside the
+carve-out itself — and is written that way because the redundancy is the half that decays: the
+day anything else in the file mentions the check, a file-wide `contains` silently stops
+discriminating and nothing reports that it has.
+
+**Also verified at runtime, which the unit tests cannot give.** After a rebuild, the served
+`librarian(action="doctor")` output carries `CLAUDE.md` and `one exception` **and still
+carries** `doc(action="augment"` — confirming the addition did not displace the half pinned by
+the pre-existing test. A claim about how a tool behaves needs the call run once and the real
+output read.
 ## Workarounds
 
 Leave `T-34` params-absent. The body is committed and is the entry's record; `entry_filter`
@@ -194,3 +216,27 @@ does not read, so no `ONBOARDING_VERSION` bump is implied. If 2: `scan_params_be
 - `docs/trackers/tool-usage-patterns.md` — the artifact both surfaces name
 - `docs/trackers/bug-claim-liveness-session-log.md` — `F-3` (doctor `detail` text asserting a
   false cause) and `W-1` (the sweep this was found in)
+
+
+## Fix provenance
+
+Fixed on `experiments` by **directions 1 and 2 together** — complements, not alternatives,
+because the rule and the finding are read by different people at different times. Direction 3
+(an `append_entry` variant that backfills a *named* id) was **not** taken: it would remove the
+exception rather than document it, and is the only path that would let the pinning test in
+`src/librarian/tools/doctor.rs` be retired rather than amended. It stays available if the
+carve-out proves too subtle in practice.
+
+- **SHA:** `aa39c1e0` (`experiments`)
+- **patch-id:** `9f5c1eaa27ba8a6ec8177526307f3b2681c1fc7d`
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash
+of the diff and survives rebase and cherry-pick. Recorded as a pair at fix time, so there is
+no promotion path to check and nothing owed later.
+
+**One caveat, stated rather than left for a reader to discover.** The gate was **red** when
+this landed, on a single failure that is not from this change and predates it at `1fe07709`:
+`every_open_bug_file_declares_one_known_defect_class`, against another session's committed bug
+file carrying no `cluster/` tag. `fmt-mine` and `clippy` were both `0`, none of the three
+changed files feeds that test, and both guards above passed in the default lane. Landed on the
+operator's explicit call rather than holding verified work in a shared working tree.

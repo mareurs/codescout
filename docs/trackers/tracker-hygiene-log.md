@@ -2237,8 +2237,10 @@ length.**
 
 ### Filed
 
-`docs/issues/2026-09-11-the-never-hand-build-params-rule-rests-on-a-premise-its-own-repair-path-refutes.md`
-(`5668c67b7094cda8`, `severity: high`, `cluster/doc-contradicted-by-code`). `doctor`'s
+`docs/issues/archive/2026-09-11-the-never-hand-build-params-rule-rests-on-a-premise-its-own-repair-path-refutes.md`
+(`ea302e013cf7c85a`, `severity: high`, `cluster/doc-contradicted-by-code`) — **fixed and
+archived the same day**: `aa39c1e0`, patch-id
+`9f5c1eaa27ba8a6ec8177526307f3b2681c1fc7d`. `doctor`'s
 `params_behind_body` remedy is **test-pinned** to name the exact
 `doc(action="augment", merge=true, augment={params: …})` call `CLAUDE.md` forbids without
 exception — and the justification `CLAUDE.md` gives (*"`append_entry` / `update_entry` exist
