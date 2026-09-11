@@ -1,10 +1,12 @@
 ---
-id: b4bf27e5a1c5b50c
+id: de47783b45cb4d09
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the alias advisory reaches RecoverableError but not a plain anyhow error — the error path was closed for one of its two error types'
 tags:
 - cluster/hint-composed-without-the-request
+claimed_at: '2026-09-11T14:10:00Z'
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 ## Summary
@@ -47,16 +49,11 @@ The consequence is that there is no splice point on this branch. Attaching the a
 
 ## Fix
 
-Not a one-liner, which is why this is filed rather than folded into `295a928e`. It needs a wrapper
-error type that carries the advisory as structured data while re-exporting `source()`, so the
-chain survives and the response composition stays in `route_tool_error`'s hands. Deciding whether
-that type is worth introducing for this alone is the open question.
+**Applied, 2026-09-11, commit `e448fb30fc2eb4fbdb6bd4ce9aa97d23f61a1607` (patch-id `2d99d44f9d5b44ddd1f58c3bb35ce9ef952fd8b9`).**
 
-**Or close it by construction instead:** if every alias-declaring tool's failure modes are
-`RecoverableError` by policy, this branch becomes unreachable for the population that can trigger
-it, and the fix is a gate asserting that rather than a new error type. That is plausibly cheaper
-and has not been checked.
+Added `AdvisedError` (`src/tools/core/types.rs`), an internal wrapper carrying the original `anyhow::Error` alongside the `corrections` `Value`, with `Display`/`Debug`/`source()` all delegating to the inner error unchanged — so `route_tool_error` still shows the tool's own message verbatim and the full `.source()` chain still reaches server-side logging. `attach_param_corrections_to_error`'s non-`RecoverableError` arm now wraps into this instead of passing the error through untouched. `route_tool_error`'s fatal-error branch computes a `⚠ {hint}\n\n` prefix from a downcast and prepends it to the wire text — matching the exact prefix convention `call_content`'s own compact-text success renderer already uses for this same `hint` string (arrival before the message it qualifies, not after).
 
+**Did not attempt the "close by construction" alternative this file's own § Fix raised** (policy: every alias-declaring tool's failures are always `RecoverableError`). Audited all ten `param_aliases()`-declaring tools' real `anyhow::bail!`/`anyhow!`/`.context(` sites before choosing: found a genuine mix — `symbol_at.rs`/`references.rs`'s "unsupported language" checks look like they could arguably be `RecoverableError` on their own merits (a separate, narrower question), while `edit_code.rs`'s write-rollback failures and `edit_file/mod.rs`'s target-file read failure are genuinely fatal and must stay `anyhow`. Forcing the latter into `RecoverableError` would misrepresent them as self-correctable. The wrapper-type approach works uniformly regardless of the underlying failure's fatality, which is the actual invariant wanted here.
 ## Why this class
 
 `cluster/hint-composed-without-the-request` (`IC-22`). On this branch the response is composed from
