@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
 - doc-drift
@@ -8,7 +8,7 @@ tags:
 - audit-doc-refs
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: null
+closed: 2026-09-11
 opened: 2026-09-02
 owner: marius
 related: []
@@ -134,13 +134,15 @@ itself.
 this is the documentation example this file itself names, quoting the stale
 form on purpose to teach the lesson.
 
-Fix SHA: *(recorded once committed — see below)*
-Patch-id: *(recorded once committed — see below)*
+Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (first pass, experiments) /
+`075b64ed25819c0d3fe6bf70781ebbd8f2621015` (second pass, experiments)
+Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015` / `c346a5ab9ecf520fb04937eb8bacf9382513edc0`
 ## Tests added
 
 None — doc/comment-only corrections, no behavior change. `cargo check
---all-targets`, `session_opening_guide_never_declares_sections`, and the full
-`guide_ledger::` test module (35 tests) re-ran green.
+--all-targets` and the full `guide_hint_tests::` module (50 tests) re-ran
+green after the second pass; the full workspace gate (fmt-mine, clippy, lean
+and default test lanes) ran green both times.
 ## Workarounds
 
 When reading a doc comment that cites a mechanism, confirm the cited symbol exists
@@ -148,15 +150,9 @@ before trusting the argument built on it. `symbols(name=…)` answers in one cal
 
 ## Resume
 
-Re-run `grep -n '!emitted.contains(SESSION_OPENING_GUIDE)' src/server.rs` (the
-literal old expression, not just `SESSION_OPENING_GUIDE`) to find the
-remaining stale sites, and fix them the same way: name
-`engines::emitters::emit_session_opener` and the property ("fires when the
-topic is absent from the ledger"), not the expression. Confirm
-`git status --short -- src/server.rs` is clean before starting, per this
-file's own original caution. Leave `src/engines/coordinator.rs`'s citation
-alone — it is the deliberate documentation example this file names, not a
-stale instance.
+N/A — fixed. All ten stale citations named in this bug are corrected; the one
+deliberate documentation example (`src/engines/coordinator.rs:55`) is
+unchanged, as intended.
 ## References
 
 - `9f1d92be` — the falsified "cite the expression" lesson, corrected in
