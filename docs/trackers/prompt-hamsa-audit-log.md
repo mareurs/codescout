@@ -2452,7 +2452,7 @@ against it is a fabricated pass.**
   for reproducibility rather than silently improved later; a tightened predicate is a different
   measurement and needs its own row.
 
-**Valid:** dated 2026-09-09; the window closes 2026-09-23.
+**Valid:** conditional — the 2026-09-23 window closes and this entry's outcome is filled in
 
 **Rests on:** `P-1`/`P-2`/`P-2a`/`P-4`/`P-5`/`P-8` above — and explicitly NOT `P-3`, which is
 unavailable for a forced-by-removal change; `A-2` for the dead-name precedent, whose soundness is

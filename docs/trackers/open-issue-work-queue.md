@@ -95,7 +95,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `d91e96485308ee2f` |
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
-| BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | mitigated + archived 2026-09-02 (`3ccfefb2`) — per-call pinning is a probe-verified escape; the structural half was **declined**, not deferred | `6a3bb4d968d1d514` |
+| BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | **done-archived** — mitigated + archived 2026-09-02 (`3ccfefb2`) — per-call pinning is a probe-verified escape; the structural half was **declined**, not deferred | `6a3bb4d968d1d514` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **done** `953c98f3`, patch-id `8de7522768dd6dac…` — fixed by the key-set coverage test this row asked for, not a fourth round of flags: the guard reads the scanner's `struct Args` field names out of source and refuses any param that is neither emitted nor declared-omitted-with-a-reason, so it reds on ADDITION to the tool, the direction all four instances failed in. Root cause is no longer inferred from `--help` — it was `Map::new()` in the wrapper, read at the bytes. `--scope` is the one declared omission, and its blocker CLEARED 2026-09-10 (`33e740960f758b6d` fixed and archived — the selector is wired, so the flag is now owed rather than deferred; the omission's reason string in `src/cli/doctor.rs` has been rewritten to say so, because its guard checks that a reason exists and never that it is still true) | `4692a5219854dcce` |
@@ -484,9 +484,13 @@ bug-first triage.
 
 ### BL-54 — Workspace `read_only` flips mid-session with no `activate` call
 
-**Status:** investigating — **cross-referenced.**
+**Status:** done-archived — mitigated + archived 2026-09-02 (`3ccfefb2`). Per-call pinning
+(`workspace=<abs path>`) is a probe-verified escape; the structural half was **declined**, not
+deferred, so nothing is outstanding here. The bug file sits at
+`docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md` carrying
+`status: mitigated`.
 
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-09-11
 
 `docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md`. Silently blocks every write.
 Also `resume-workspace-pinning-phase-4b-5:WP-5`, listed there for adjacency to the write-root

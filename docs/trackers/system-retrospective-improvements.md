@@ -205,7 +205,11 @@ no caller can reach.
 
 ## T-14 — artifact(create) stamps an `id:` that guard-locks the file
 
-**Status:** open — **HIGH**, and the first of this batch to work.
+**Status:** done 2026-09-01 — message half `0933bc95` (patch-id `42c3dcd17a52ed55`), behaviour half
+`c26943b5`; scope (2) operator-decided. Was **HIGH** and the first of this batch worked. Both
+patch-ids re-verified 2026-09-11 against the live tree, and the behaviour half is observable:
+the stamped arm now refuses **frontmatter** writes only and says so in its own refusal text
+(*"Reads and BODY edits are allowed directly"*), which is the fix rather than the defect.
 **Valid:** dated 2026-09-01
 **Bug:** `docs/issues/archive/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`
 
@@ -365,7 +369,8 @@ correctly and still deliver everything if the keys do not match real call names.
 
 ## T-16 — Overflow hint on a heading-scoped `artifact(get)` points at metadata
 
-**Status:** open — small.
+**Status:** done 2026-09-01 — `bb4688fd` (patch-id `5e6ff450ad5eaf82`), small as scoped. Patch-id
+re-verified 2026-09-11 against the live tree.
 **Valid:** dated 2026-09-01
 **Bug:** `docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`
 
@@ -390,7 +395,7 @@ fails against today's tree.
 
 ## T-17 — Both shell gates evaluate a per-command predicate over the whole command string
 
-**Status:** partially fixed 2026-09-11 — `check_source_file_access` now decomposes and names
+**Status:** in-progress — partially fixed 2026-09-11 — `check_source_file_access` now decomposes and names
 the offending clause; `is_dangerous_command` still evaluates over the whole string (left as a
 residual, different mechanism).
 **Valid:** dated 2026-09-01
