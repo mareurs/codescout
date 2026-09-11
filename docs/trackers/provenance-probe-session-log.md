@@ -1145,11 +1145,31 @@ earlier. Cost would have been an unnecessary `cargo rb` on a shared `target/`, a
 worse: teaching a reader to distrust `wip_authors` output that was in fact correct, on the one
 subsystem whose entire job is to be trusted about authorship.
 
+**Sharper remedy, added 2026-09-11 from `bug-fix-session-log:W-125` — read that before applying
+this one.** The rule above is STATIC: it tells you how to interrogate an image you already
+suspect. W-125 gives the RUNTIME half, and it is cheaper because it costs nothing extra — when
+closing a fix on the wire, pick a probe whose observable **the old build cannot produce by
+construction**, and the verification you were running anyway becomes a positive binary
+identification. Its own instance: an envelope key the previous build emitted only behind a param
+alias that does not fire on that call, so a stale binary yields a visibly different result rather
+than a plausible one. That entry cites this one by commit (`6c31ef0f`, *"an mtime that proved
+nothing"*) as the shortcut it declined to take.
+
+**Confirmed here the same day, unplanned.** Closing the `symbols` header bug
+(`0649a087dabaee59`, fixed by a peer in `8898aa7b`) I re-ran the exact query that had filed it:
+`symbols(name="scan", path="src/librarian/", kind="function", limit=5)` returned `57 matches in
+4 files` before and `57 matches in 11 files` after. The old build **cannot** print `11` on a
+five-row page — that number is the defect's absence — so the fix check identified the running
+image as a side effect, with no `strings` call and no mtime consulted. Recorded as a
+confirmation rather than a second entry: the law is W-125's, and re-filing it under a new id is
+the duplication `CLAUDE.md` § *Testing Discipline* warns about when it says to count the list
+rather than the corpus.
+
 **Rests on:** `stat -c %Y target/release/codescout` = 15:43:31 +0300 against `git log
 --format=%at` for `ada993d6` / `7ff820f5`, 2026-09-11; `strings target/release/codescout | grep
 -c 'Two known blind spots'` → 1, matching `grep -c` on `scripts/file-provenance.py` → 1;
 `src/tools/run_command/attribution.rs:102` and `materialize_into` at `:166-167`; memory
-`gotchas` § *MCP Binary Symlink*.
+`gotchas` § *MCP Binary Symlink*; `bug-fix-session-log:W-125` for the runtime half.
 
 ## Template for new entries
 
