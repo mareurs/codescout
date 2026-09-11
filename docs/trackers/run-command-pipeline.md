@@ -546,9 +546,16 @@ on it; it becomes a precondition only for an opt-in that does not exist yet.
 
 **Ruled: a gate's predicate is per-command. Evaluate it per-command, refuse the whole call, and
 name the offender.** This settles #6 and prescribes the fix for
-`docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md` in one move, because
-they are the same defect seen from two directions — that bug is the *shipped* instance and #6 is
-the *unbuilt* one.
+`docs/issues/archive/2026-09-01-source-gate-refuses-the-whole-compound-command.md` in one move,
+because they are the same defect seen from two directions — that bug is the *shipped* instance and
+#6 is the *unbuilt* one.
+
+**Status 2026-09-11:** `check_source_file_access` now names the offending clause (fixed,
+archived at the path above) — but it already decomposed by the time this was picked up (that must
+have landed via one of the archived 2026-08-17 heredoc/newline/cd bugs, not via this ruling).
+`is_dangerous_command` still does not decompose; that half of this ruling remains unbuilt and was
+deliberately left as a residual rather than folded into the same fix (different mechanism —
+substring/regex matching with its own heredoc handling, not token analysis).
 
 **For #6 concretely:** every stage runs `is_dangerous_command`, `check_source_file_access` **and**
 `detect_il3_violation`. Any offending stage refuses the whole pipeline **before any stage runs**
@@ -651,7 +658,9 @@ Open the next session with:
    (326 lines).
 5. Then #2, #4, #5, #6, #8 — all decidable as written. Note #6 (per-stage dangerous-command
    gate) now has a sibling defect worth ruling once for both:
-   `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`.
+   `docs/issues/archive/2026-09-01-source-gate-refuses-the-whole-compound-command.md` (fixed for
+   `check_source_file_access`'s naming half 2026-09-11; `is_dangerous_command` decomposition is
+   still unbuilt, see R7's status note).
 6. Tests (§ *Tests needed*), then prompt update (§ *Prompt rewrites*).
 
 **Line references in § *Architectural review* were re-anchored 2026-09-01** and are accurate

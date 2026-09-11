@@ -141,6 +141,6 @@ either way; the value is that the predicate stops computing a confident wrong re
 - `src/util/path_security.rs:1911` — `path_is_within_project`.
 - `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`
   — the sibling that fixed the cwd half.
-- `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md` — open, same
-  gate: the refusal does not say which clause offended, which is what made probes A–E
+- `docs/issues/archive/2026-09-01-source-gate-refuses-the-whole-compound-command.md` — fixed
+  2026-09-11, same gate: the refusal now names which clause offended, which is what made probes A–E
   necessary to localise this one.

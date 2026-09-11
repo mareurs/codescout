@@ -364,7 +364,8 @@ never running, so the pipe gate evaluates its per-pipeline predicate over the wh
 string as well. Both gates share one bug; they differ in that the pipe gate already **names
 the offending clause** and the source gate emits only `"shell access to source files is
 blocked"`. Filed:
-`docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`.
+`docs/issues/archive/2026-09-01-source-gate-refuses-the-whole-compound-command.md` (fixed
+2026-09-11 — the source gate now names the offending clause too).
 
 The method note is the point: **two successive framings of this friction were wrong, and both
 were reasoned from the gates' own error text.** The probe cost one call each time. An error

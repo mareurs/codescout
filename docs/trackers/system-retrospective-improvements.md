@@ -390,9 +390,11 @@ fails against today's tree.
 
 ## T-17 — Both shell gates evaluate a per-command predicate over the whole command string
 
-**Status:** open — small, but needs a design call on the splitter.
+**Status:** partially fixed 2026-09-11 — `check_source_file_access` now decomposes and names
+the offending clause; `is_dangerous_command` still evaluates over the whole string (left as a
+residual, different mechanism).
 **Valid:** dated 2026-09-01
-**Bug:** `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
+**Bug:** `docs/issues/archive/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
 
 **Why:** one offending clause in a `;`- or `&&`-separated command refuses every unrelated
 clause beside it. Verified by three probes: `echo x; wc -l Cargo.toml` runs;

@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
 - run_command
@@ -8,12 +8,11 @@ tags:
 - shell-gate
 claimed_at: 2026-09-11
 claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
-closed: null
+closed: 2026-09-11
 opened: 2026-09-01
 owner: marius
 related: []
 severity: low
-unverified: 'No regression test yet. Severity is low by blast radius (the remedy is "split the command") but the frequency is high — it fired twice in one session on compound commands whose offending clause was incidental to the measurement. The IC-14 tag is on the SUB-SHAPE the class calls "axis omission": the gate covers the axis "does any token in this string name a source file" and its NAME/message speaks of "shell access to source files", which a reader maps to the clause, not the string.'
 ---
 
 # BUG: the source-file shell gate evaluates the whole command string, so one offending clause refuses every unrelated clause beside it — and the refusal does not say which one
@@ -247,8 +246,8 @@ own tradeoffs — not a copy-paste of this fix. Left for its own bug file if
 someone wants to take it, per this repo's "don't force a fit" rule; not filed
 here since it would need its own reproduction and design discussion.
 
-Fix SHA: *(recorded once committed — see below)*
-Patch-id: *(recorded once committed — see below)*
+Fix SHA: `6acb3da0f16f32b7be8c483005c9244ff05b97b8` (experiments)
+Patch-id: `1cc6b7b72b23b8d429e52d757201893fdeb14d2d`
 ## Tests added
 
 `util::path_security::tests::source_file_access_names_the_offending_clause_in_a_compound_command`
