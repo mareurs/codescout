@@ -407,6 +407,26 @@ The server must not depend on this. No hook installed → the key never refreshe
 TTL is what catches `/clear`, one interval late. That is the Agent-Agnostic contract:
 companion *adds* enforcement, server *degrades* without it.
 
+### 9. Subagent live re-arm (companion-signaled)
+
+Added 2026-09-11 (`codescout:docs/issues/2026-08-31-subagents-receive-guides-their-parent-already-holds.md`), documenting a gap this spec's original scope never covered: everything above is about WHICH conversation the ledger is keyed to. This section is about a DIFFERENT axis entirely — a subagent dispatched from within one already-identified conversation shares its parent's `session_id` (no separate MCP identity exists for it), so the ledger cannot distinguish "the parent already has this" from "this specific recipient has never seen a byte of it." A genuinely fresh (non-`fork`) subagent falls in the second bucket, and was live-reproduced receiving silent starvation as a result.
+
+The existing companion snapshot/restore bracket (`agent-guide-snapshot.mjs` / `agent-guide-restore.mjs`, § *Companion rendezvous* sibling mechanism) only edits the ON-DISK ledger file — confirmed inert for the running session, since `GuideLedger::load` runs once at construction and the in-memory map is authoritative thereafter. It fixes only the NEXT reconnect.
+
+**Mechanism.** `agent-guide-snapshot.mjs` (`SubagentStart`), for a dispatch where `agent_type !== 'fork'` and the ledger's current key set is non-empty, writes a one-shot request file to `$XDG_STATE_HOME/codescout/guide_rearm/<server_pid>-<hash(agent_id)>.json` for each of the hook's own live server pid(s) (resolved the same way `session-start.mjs` already resolves "which running server is mine" — ppid-in-ancestry match against `$XDG_STATE_HOME/codescout/servers/`). The server (`GuideRearmInbox`, `src/tools/guide_rearm.rs`) polls this directory on every request — same funnel as `poll_rendezvous`, called from `call_tool_inner` immediately alongside it — consumes (deletes) any file addressed to its own pid, and calls the existing `GuideLedger::re_arm()` on the named topics. No ledger API changes; `re_arm` was already the surgical primitive this needed.
+
+**Gating differs from § *Companion rendezvous* above, deliberately.** That mechanism gates its optimization on `rendezvous_active()` — a latched boolean, since the alternative (skip the optimization) is itself unsafe without proof a hook is alive. This mechanism has no unsafe fallback to guard against: a request file's mere existence, addressed to this server's own pid, **is** the proof of a live companion hook — stronger and more current than a latched flag that can be true from a stamp made hours earlier. No companion installed ⇒ no file is ever written ⇒ `poll()` always finds nothing ⇒ behavior is byte-identical to today. Same Agent-Agnostic contract as every other mechanism in this spec (companion *adds*, server *degrades* without it), reached by a simpler, strictly stronger check.
+
+**One file per `(server_pid, agent_id)`, not a shared per-pid slot like § *Companion rendezvous*'s own `<pid>.json`.** That file has exactly one writer at a time by design (whole-object overwrite); two concurrently-dispatched subagents writing to a shared slot would race last-writer-wins — the same bug class already hit once for the sibling snapshot/restore mechanism (`docs/issues/archive/2026-08-27-concurrent-subagent-restores-discard-parent-guide-marks.md`). Distinct per-agent filenames make that race structurally impossible here.
+
+**No live-side counterpart needed on `SubagentStop`.** `re_arm()` only forgets delivery; it records no claimant. Whoever next touches a re-armed topic — parent or another subagent — gets it re-delivered and the ledger re-marks it delivered. Self-healing either way.
+
+**Race windows, all bounded to Decision #8's safe direction:**
+- Parent calls a tool between dispatch and the subagent's first call: the parent's call polls first, consumes the request, re-arms the named topics — parent gets a harmless redundant re-delivery. Acceptable, matches "degrade to re-sending, never to suppressing."
+- Multiple concurrent dispatches: distinct per-agent files ⇒ no lost requests; whichever call polls first consumes the union found so far.
+- No companion hook installed: `poll()` finds nothing; today's (imperfect, starving) behavior, unchanged — never made worse.
+
+Fix commit: recorded on the bug file above once shipped, per this project's SHA+patch-id convention.
 ### 7. Idle TTL
 
 **Measured 2026-08-18** — 258 sessions, 124,324 inter-call gaps, 50 `usage.db` files.

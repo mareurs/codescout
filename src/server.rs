@@ -78,6 +78,13 @@ pub struct ServerEnv {
     /// `guide_hints_dir`: no test may read, write, or garbage-collect the
     /// developer's real state directory.
     pub servers_dir: Option<PathBuf>,
+    /// Overrides the per-user directory for pending subagent guide-rearm
+    /// requests (`guide_rearm.rs`) — written by the companion's
+    /// `SubagentStart` hook, consumed by the already-running server on its
+    /// next request. `None` ⇒ derive it from `per_user_state_dir()`. Tests
+    /// set this to a tempdir, same rationale as `guide_hints_dir` and
+    /// `servers_dir`.
+    pub guide_rearm_dir: Option<PathBuf>,
     /// `CODESCOUT_PEER_ENABLED` — raw value, layered against `[peer] enabled` in
     /// project.toml by `peer_enabled_at_runtime`. `None` ⇒ not set in the
     /// environment; captured raw (not pre-parsed to bool) so the layering function
@@ -139,6 +146,7 @@ impl ServerEnv {
                 .ok()
                 .and_then(|v| parse_guide_idle_ttl(&v)),
             servers_dir: None,
+            guide_rearm_dir: None,
             #[cfg(unix)]
             peer_enabled: std::env::var("CODESCOUT_PEER_ENABLED").ok(),
             #[cfg(feature = "librarian")]
@@ -203,6 +211,12 @@ pub struct CodeScoutServer {
     /// Behind a `Mutex` because [`Rendezvous::poll`] memoizes the last mtime it
     /// parsed at, and the request path only ever holds `&self`.
     rendezvous: Arc<parking_lot::Mutex<crate::tools::rendezvous::Rendezvous>>,
+    /// Pending subagent guide-rearm requests, written by the companion's
+    /// `SubagentStart` hook and polled on every request (`poll_guide_rearm`,
+    /// alongside `poll_rendezvous`) — see `src/tools/guide_rearm.rs` module docs.
+    /// Plain field, no `Arc<Mutex<_>>`: `poll()` takes `&self` and does only
+    /// filesystem I/O, with no in-memory state to synchronize.
+    guide_rearm: crate::tools::guide_rearm::GuideRearmInbox,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
@@ -448,6 +462,14 @@ impl CodeScoutServer {
         let rendezvous = Arc::new(parking_lot::Mutex::new(
             crate::tools::rendezvous::Rendezvous::publish(servers_dir, session_key.id()),
         ));
+        // Resolved and constructed the same way as `guide_hints_dir`/`servers_dir`
+        // above: `None` in tests that inject a tempdir, real per-user state
+        // otherwise. `GuideRearmInbox::new` GCs orphaned requests from a since-dead
+        // server as part of construction — see its own doc comment.
+        let guide_rearm_dir = env.guide_rearm_dir.clone().or_else(|| {
+            crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_rearm"))
+        });
+        let guide_rearm = crate::tools::guide_rearm::GuideRearmInbox::new(guide_rearm_dir);
         let idle_ttl = env.guide_idle_ttl.unwrap_or(std::time::Duration::from_secs(
             crate::tools::guide_ledger::DEFAULT_IDLE_TTL_SECS,
         ));
@@ -500,6 +522,7 @@ impl CodeScoutServer {
             cc_session_id,
             session_key,
             rendezvous,
+            guide_rearm,
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
@@ -1039,6 +1062,26 @@ impl CodeScoutServer {
         }
         current
     }
+    /// Consume every pending subagent guide-rearm request addressed to this
+    /// process, re-arming the named topics on the live ledger. Called from
+    /// `call_tool_inner` immediately alongside `poll_rendezvous` — same funnel,
+    /// same "before `tool.call_content` decides guide delivery" requirement, so a
+    /// re-armed topic can be delivered in THIS response rather than one call late.
+    ///
+    /// See `src/tools/guide_rearm.rs` module docs for why this exists: the
+    /// existing snapshot/restore hook bracket around a subagent's lifetime only
+    /// edits the ON-DISK ledger file, which this already-running process never
+    /// re-reads. This is what reaches the live in-memory ledger instead.
+    /// docs/issues/2026-08-31-subagents-receive-guides-their-parent-already-holds.md
+    fn poll_guide_rearm(&self) {
+        let topics = self.guide_rearm.poll();
+        if topics.is_empty() {
+            return;
+        }
+        let refs: Vec<&str> = topics.iter().map(String::as_str).collect();
+        tracing::info!(topics = ?refs, "re-arming guide topics for a fresh subagent dispatch");
+        self.guide_hints_emitted.lock().re_arm(&refs);
+    }
 
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
     /// call through the whole request path.
@@ -1133,6 +1176,7 @@ impl CodeScoutServer {
         // subagent reusing this live process never updates, while the rendezvous is
         // polled on every call and tracks the conversation we are CURRENTLY serving.
         let rendezvous_session = self.poll_rendezvous();
+        self.poll_guide_rearm();
 
         let mut ctx = self.build_context(progress, peer);
         ctx.workspace_override = workspace_override;
@@ -8858,6 +8902,7 @@ mod guide_hint_tests {
         ServerEnv {
             guide_hints_dir: Some(dir.join("guide_hints")),
             servers_dir: Some(dir.join("servers")),
+            guide_rearm_dir: Some(dir.join("guide_rearm")),
             ..Default::default()
         }
     }
@@ -10358,6 +10403,185 @@ mod guide_hint_tests {
         assert!(
             !server.guide_hints_emitted.lock().contains("librarian"),
             "a tool call must poll the rendezvous and re-arm for the new conversation"
+        );
+    }
+    #[tokio::test]
+    /// The wiring itself: a request file addressed to this server's own pid must
+    /// be consumed by an ordinary tool call, and the re-arm must land BEFORE
+    /// `tool.call_content` decides guide delivery — same position requirement as
+    /// `poll_rendezvous`, proven the same way: via the SESSION_OPENING_GUIDE body
+    /// actually appearing in THIS response, not merely via the ledger state after.
+    async fn a_tool_call_polls_the_guide_rearm_inbox_and_re_arms_named_topics() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        // Ledger already carries the opener AND an unrelated topic — the request
+        // below names only the opener, so a surgical re-arm must forget the
+        // opener while leaving the unrelated topic in place.
+        {
+            let mut led = server.guide_hints_emitted.lock();
+            led.insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+            led.insert("librarian".to_string());
+        }
+
+        let request_path = rearm_dir
+            .path()
+            .join(format!("{}-testagent.json", std::process::id()));
+        std::fs::write(
+            &request_path,
+            serde_json::json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE] }).to_string(),
+        )
+        .unwrap();
+
+        let result = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        let marker = format!(
+            "<!-- auto-injected get_guide('{}')",
+            crate::prompts::SESSION_OPENING_GUIDE
+        );
+        assert!(
+            all_text(&result).contains(&marker),
+            "the re-arm must land before call_content, so this same response carries \
+             the opener's guide body"
+        );
+
+        assert!(
+            server
+                .guide_hints_emitted
+                .lock()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "the requested topic must be RE-DELIVERED and therefore re-marked \
+             delivered by this same call — re-arm only forgets delivery for one \
+             beat, it does not leave the topic permanently un-marked; the marker \
+             assertion above is the actual proof the re-arm reached the ledger \
+             before call_content decided"
+        );
+        assert!(
+            server.guide_hints_emitted.lock().contains("librarian"),
+            "an unrequested topic must survive — a surgical re-arm, not a wholesale clear"
+        );
+        assert!(
+            !request_path.exists(),
+            "the request file must be consumed (deleted) once acted on"
+        );
+    }
+
+    #[tokio::test]
+    /// The same request file must never re-fire: consumed once, a second call
+    /// must not find it again.
+    async fn a_consumed_guide_rearm_request_does_not_re_arm_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+        let request_path = rearm_dir
+            .path()
+            .join(format!("{}-testagent.json", std::process::id()));
+        std::fs::write(
+            &request_path,
+            serde_json::json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE] }).to_string(),
+        )
+        .unwrap();
+
+        server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("first dispatch ok");
+        // The first call already re-armed and re-delivered the opener, which
+        // re-marks it delivered — so a second ordinary call must not show it again.
+        let second = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("second dispatch ok");
+
+        let marker = format!(
+            "<!-- auto-injected get_guide('{}')",
+            crate::prompts::SESSION_OPENING_GUIDE
+        );
+        assert!(
+            !all_text(&second).contains(&marker),
+            "a consumed request must not re-arm the topic a second time"
+        );
+    }
+
+    #[tokio::test]
+    /// Regression guard for `poll_rendezvous`'s own suite: with no request file
+    /// ever written (the no-companion / nothing-pending case), an ordinary tool
+    /// call must leave the ledger untouched.
+    async fn no_guide_rearm_request_present_leaves_the_ledger_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+
+        server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+
+        assert!(
+            server
+                .guide_hints_emitted
+                .lock()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "with no request file, the ledger must be unaffected by guide-rearm polling"
         );
     }
 
