@@ -2332,6 +2332,12 @@ The prescription *"re-index to refresh them — `librarian(action="reindex", ree
 
 **And the row's own thesis closes the loop against itself.** If only a reader *in the failing state* can see a bad remedy, then correcting site 1 **retires the population that would have found site 2**: every reader routed through the fixed text stops being blocked, so the survivor is reachable only by someone arriving at the other surface cold. The fix does not merely leave the sibling standing — it removes the observer. Which makes the remedy a **grep for the remedy string across every user-facing surface**, not a second careful reading: the string is the site, and enumerating strings needs no observer at all.
 
+**AND THE TRIGGER HAS TO BE THE FIX — the first form of this recorded a mechanism that can fire and nothing that makes it.** The survivorship above acts on OBSERVERS, not defects, and that has a scheduling consequence: **the moment site 1 is corrected is the last instant anyone is still routed through the broken text and still has reason to look.** A periodic sweep for duplicated remedy strings, run a week later, searches a corpus whose last motivated reader has already been unblocked and moved on. It would still *find* the string — that is the whole point of choosing an observer-free instrument — but nothing would prompt anyone to RUN it, because the felt problem is gone.
+
+So the recorded shape is: **when you correct a user-facing remedy string, grep for that string across user-facing surfaces IN THE SAME CHANGE.** Not as a hygiene pass, not as a backlog item. That is § *Observer Blindness* position 3 in its **preferred** form — the correct path ends in a safe state, so compliance leaves nothing armed — rather than position 3's fallback of an unconditional policy someone has to remember to invoke. A mechanism with no trigger is worse than none recorded, because it reads as handled.
+
+Raised by sessionId `b0b9bc40-5358-4a44-b342-a2a71dc50fad` against the first form of this paragraph, which named the instrument and left out when it runs.
+
 Raised by sessionId `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who named the two-law composition and suggested it might be a new class. It is not — it is a fifth shape of this one, and the instance is the bug file above, per this tracker's own rule that an instance is a bug file and only the class is an `OB`.
 
 **Status:** open — 1 instance, 4 sessions, 2026-09-06. The mirror of a rule
