@@ -124,7 +124,7 @@ fn offenders_in(root: &Path, tracked: &BTreeSet<String>) -> Vec<String> {
         // it reds the SHARED gate for every session in the checkout, and names the
         // file as "committed" when it has never been committed at all — sending the
         // reader to look for a tracked-file problem that does not exist.
-        // docs/issues/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md
+        // docs/issues/archive/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md
         if !tracked.contains(&key) {
             continue;
         }
@@ -163,7 +163,7 @@ fn offenders_in(root: &Path, tracked: &BTreeSet<String>) -> Vec<String> {
 ///
 /// The cost was the abort more than the false positive: `cargo test` is fail-fast
 /// across binaries, so this failing hid every integration target ordered after it.
-/// docs/issues/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md
+/// docs/issues/archive/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md
 #[test]
 fn no_tracked_script_hardcodes_a_personal_home_path() {
     let found = offenders();

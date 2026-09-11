@@ -1,13 +1,14 @@
 ---
-id: '4b2b061b1b7a5bc1'
+id: 79b0a012716ff390
 kind: bug
-status: open
+status: fixed
 title: The committed-scripts gate scans the filesystem, so an untracked file reds it for everyone
 owners:
 - marius
 tags:
 - cluster/unclassified
 topic: gate population and selector naming
+closed: 2026-09-11
 opened: 2026-09-11
 owner: marius
 severity: medium
@@ -126,25 +127,53 @@ unrelated session's scratch file can hide the results of every integration targe
 
 ## Fix
 
-Not attempted — the choice is a judgement the owner should make, and both options are one-liners:
+**Fixed on `experiments` at `0e01d43d`**, patch-id `96322830a5ca2467e85f06879d9dad7cb3dd5448`.
+Recorded as a pair because they fail differently: the SHA is positional and dies when
+`experiments` is rebased, the patch-id is a content hash of the diff and survives rebase and
+cherry-pick alike.
 
-- **Filter the population by tracked status**, which makes the name true: keep the `read_dir` walk
-  and intersect it with `git ls-files`, or drive the walk from `git ls-files` directly.
-- **Or widen the name and message** to match the population — *"scripts under `scripts/`"* rather
-  than *"committed scripts"* — if scanning untracked files is wanted, on the argument that a
-  hardcoded home path is worth catching before it is committed rather than after.
+The population is now `git ls-files -- scripts`, and the test is renamed
+`no_tracked_script_hardcodes_a_personal_home_path`. Name, message and population agree.
 
-They are not equivalent and the difference is the point. The second keeps a shared gate red for
-everyone whenever anyone has a scratch script open, which is the cost actually being paid today.
-The first cannot catch a bad path until it is staged. A third option — walk untracked files but
-report them at a lower severity, or name them as untracked in the message — costs more code and
-removes the misdirection, which is the half that hurts most.
+**Narrowing loses no coverage**, which is the objection this fix turns on. `git ls-files` reports
+INDEX entries, so a file enters the population the moment it is `git add`-ed — strictly before any
+commit exists. A hardcoded home path is still caught before it can be committed; what is excluded
+is exactly the file that is not in the repo at all.
 
+The message now states that out loud — *"An untracked file is not scanned, so a scratch script in
+your working tree cannot be the cause"* — because the old one sent the reader to look for a
+tracked-file problem that did not exist. That half is the misdirection, and it cost more than the
+false positive.
+
+The option NOT taken, recorded because it is defensible: widening the name to match the filesystem
+population. Rejected because it keeps a shared gate red for everyone whenever anyone has a scratch
+script open, and the `git add` timing above means the narrow form gives that up for nothing.
 ## Tests added
 
-None; no fix was made. The reproduction above needs no fixture beyond one untracked file and is
-deterministic.
+`tests/committed_paths.rs`:
 
+- `an_untracked_script_is_excluded_and_a_tracked_one_is_not` — the fix, tested directly.
+- `the_tracked_population_is_not_vacuous` — the guard on the guard.
+
+Three mutations, three observed REDs:
+
+- disable the tracked filter → `an_untracked_script_is_excluded…` RED, **and**
+  `no_tracked_script…` reds on the same untracked file as before the fix. The original bug,
+  reproduced on the same tree, which is what makes the before/after a measurement rather than a
+  claim — the offending untracked file was never removed.
+- typo the `ls-files` pathspec → `the_tracked_population_is_not_vacuous` RED, **while the main gate
+  PASSES**. `git ls-files` exits 0 with empty output on a wrong cwd, a pathspec typo, or an
+  unreadable repo, and none of those is an error at the call site — so one wrong word silently
+  disarms the whole gate while showing green. That is the entire reason the vacuity guard exists.
+
+The exclusion fixture writes the **same offending line** into both files, tracked and untracked, so
+tracked-ness is the only variable; differing content would let the test pass while no longer
+discriminating. It runs against a tempdir rather than `scripts/` because creating a real untracked
+file there to test the exclusion would place it in every concurrent session's `git status` — the
+exact cost this filter removes.
+
+Verified by name in both gate lanes, not from either lane's total. Gate green: fmt 0, clippy 0,
+lean 3751, default 5772.
 ## Workarounds
 
 Run `cargo test --workspace --no-fail-fast` to see past it: the abort is what makes this expensive,
