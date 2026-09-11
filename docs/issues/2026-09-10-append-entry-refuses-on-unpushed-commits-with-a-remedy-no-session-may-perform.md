@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: taken
+status: investigating
 tags:
 - cluster/shared-resource-carries-no-owner
 - librarian

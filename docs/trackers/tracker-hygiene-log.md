@@ -7,10 +7,10 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 26
+entry_high_water_HY: 28
 entry_prefix: HY
 expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
-next-sweep-due: 2026-09-24
+next-sweep-due: 2026-10-11
 sweep-interval-days: 30
 ---
 
@@ -2068,6 +2068,195 @@ current `doctor` check names, which is why the entry cites them rather than the 
 **Promote-when:** a second sweep meets `docs/issues/` drift and reaches for these four
 points — at which stage D8 is specified by evidence rather than designed from scratch, and
 this entry is its input.
+
+## HY-27 — false-positive-pattern: three of four candidate cleanup populations were states the repo deliberately holds, each invisible from a different surface
+
+**Valid:** invariant
+
+**Type:** false-positive-pattern
+
+**Sweep:** 2026-09-11 (doctor-driven, not a D1–D11 run — see that sweep entry)
+
+**The pattern.** A `doctor` violation is not a worklist item, and the report cannot tell you
+which kind it is. Triaging four candidate "cleanup" populations from a 156-violation report,
+**three were states the repo deliberately holds** — and the discriminating evidence was
+outside the report in all three cases. Reject reasons, verbatim, as Phase 4 requires:
+
+| finding | reject reason |
+|---|---|
+| `terminal_status_with_caveat` × 112 | Report-only by design. `scan_terminal_status_with_caveat`'s own header: *"Reports only; there is no `fix=`. Discharging a caveat means establishing the thing it says was never established, which is work, not repair."* Archived files are included deliberately. |
+| zombie-at-archive (`13382b706c9c77b0`) | Not in the report at all — filtered on purpose by `an_open_status_bug_under_archive_is_silent` (`src/librarian/tools/doctor.rs:9846`), whose doc comment names that exact path as its motivating case. I proposed a `doc(action="move")` because the **absence** of a check read as a coverage gap. |
+| `frontmatter_id_mismatch` × 1 | Detail asserts *"a move re-keys the row and this file kept the id it was moved away from"* — false here; the id was worktree-minted. `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md` (status `open`) already records this exact id pair as the known false positive. |
+
+**Why "read the report more carefully" is the wrong instrument.** Each reject is invisible from
+a different surface: a source-function header, a test's doc comment, and a filed bug. Only the
+first finding's own `detail` string is self-describing (`entry_without_definition` on
+`provenance-subsystem.md` says *"Do NOT add a heading here to close this"* — and it was
+correctly rejected from the report alone, which is the proof the remedy is affordable). The
+other two read as actionable and are consistent with acting wrongly.
+
+**The cheap pre-triage step, which is already mandatory elsewhere.** `CLAUDE.md`
+§ *Observer Blindness* position 3 requires, before any campaign over a population, grepping
+`tests/`, `scripts/pre-commit-*` and hooks for **that population's name** — not only the docs.
+Run per population it rejected all three, at a cost of three greps. **It is not currently in
+this skill's Phase 3 or Phase 4**, which is the gap: a sweeping session reads the skill, not
+CLAUDE.md's Observer Blindness section.
+
+**Corollary — the ratio tell fired exactly as written.** 112 of ~350 archived bug files is
+~32%: *"a coverage ratio that is neither ~0% nor ~100% is a boundary someone drew before it is
+drift."* Treating that ratio as drift was one step from a 112-file campaign the check's own
+header forbids in writing.
+
+**Proposed skill change (n=1, not yet promotable).** Phase 3 gains a pre-triage line: *before
+presenting findings from any population-scale detector, grep `tests/`, `scripts/` and hooks
+for the detector's name; a hit means the population has a deliberate boundary and the findings
+are observations, not a worklist.* Promote at n=2 — a second sweep reaching a reject on a
+population the report presented as actionable.
+
+**Rests on:** `src/librarian/tools/doctor.rs` (`scan_terminal_status_with_caveat`,
+`an_open_status_bug_under_archive_is_silent`, `scan_params_behind_body`);
+`bug-claim-liveness-session-log:W-1` and `:F-3`.
+
+## HY-28 — carried forward: the 40-finding judgment-heavy entry-validity population, deferred intact with its re-derivation
+
+
+**Valid:** conditional — the next tracker-hygiene sweep triages this population
+
+**Type:** hit (deferred by scope decision, not rejected)
+
+**Sweep:** 2026-09-11
+
+**Status:** open — carried forward at the operator's explicit request ("add a task for C-judge
+to NOT forget"), so it is a named worklist item rather than a finding left to recompute.
+
+**What was deferred.** The 2026-09-11 sweep was scoped to A (bug-file claim hygiene) + B
+(catalog edge repair) + C-mech (mechanical tracker fixes). The judgment-heavy entry-validity
+population was deferred intact. **Measured 2026-09-11 ~09:45 local, at HEAD `1a34a131`, branch
+`experiments`, `scope="project"`:**
+
+| check | count | why it needs a per-item verdict |
+|---|---|---|
+| `entry_cited_from_outside_but_undeclared` | 17 | Each needs a decision on whether the entry should declare a `**Valid:**` class, priced by cross-file citation count (`exposure ≥ 5`), not by age. |
+| `cited_prefix_with_no_definer` | 9 | A prefix cited with no `## PREFIX-N` heading anywhere. `TC-N` alone is cited 120× across 15 files and declared by nothing — and `docs/issues/2026-09-04-a-namespace-owned-outside-the-corpus-cannot-declare-itself.md` argues some of these are namespaces owned *outside* this corpus, which cannot declare themselves here. |
+| `entry_conditional_past_due` | 5 | A `conditional — <event>` whose event has passed. Retire, repoint, or re-date — three different verdicts. |
+| `prefix_conflicts_live` | 3 | From `link_scan`, not `doctor`. `T-N` is the known case (`docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`, open). |
+| `entry_dated_stale` | 2 | `dated` past the freshness threshold; needs re-derivation of the underlying fact, which is the work. |
+| `params_status_drift` | 2 | `doctor` calls it a HEURISTIC, silent on ~8.6% of real disagreements, and both error directions possible. Requires reading the body and deciding which side is right. |
+| `terminal_status_without_fix_anchor` | 1 | `docs/issues/2026-09-10-a-conflicted-merge-yields-a-patch-id-and-it-is-the-wrong-one.md` — needs the real fix SHA + patch-id, and `doctor` warns the two hashes already in its prose are the commits it was *observed* at, so a reader scanning for provenance finds one and stops. |
+| `validity_unparseable` | 1 | `prompt-hamsa-audit-log:A-39` — `**Valid:** dated 2026-09-09; the window closes 2026-09-23.` Needs a verdict on which grammar branch was meant (`dated` takes no trailing text; only `conditional — <event>` carries one). |
+
+**Re-derive, do not cite this table.** Every number above decays, and three of the checks are
+priced on citation counts that move with every commit:
+
+```
+librarian(action="doctor")   # read summary.by_check, NOT the violations array
+librarian(action="link_scan") # read counts.prefix_conflicts_live
+```
+
+**Two caveats this entry owes, both required of any finding recorded here.**
+
+1. **These counts are project-scoped and the population is larger.** The same `doctor` run
+   reported **116 further entry-validity rows scoped out to 7 other project roots**
+   (`catalog_health.entry_validity_scoped_by_project`). Exposure is *not* scoped — a codescout
+   entry cited from a sibling repo still counts toward its `exposure` — so the worklist is
+   project-local while the risk is not. A sweep that reports "40" without this sentence is
+   publishing a floor under the name of a total (`issue-clusters:IC-20`).
+2. **A finding here is not automatically a fix.** Several of these checks' own `detail` strings
+   end *"this is a worklist, not a verdict"*, and `cited_prefix_with_no_definer` has a filed
+   argument that part of its population is correct-by-construction. Expect rejects; HY-27 is
+   this sweep's evidence that the reject rate on doctor-sourced findings is high.
+
+**Also deferred, for a different reason — do not fold these in.** `open_bug_cited_from_source`
+× 2 (`2026-08-31-peer-commit-captures-another-sessions-working-tree.md`,
+`2026-09-02-a-test-fixture-interpolates-a-path-into-json.md`). These are not judgment calls,
+they are *reproduction* work: `CLAUDE.md` § *Bug Tracking* requires running the reproduction
+before reading the fix plan, because the plan is a hypothesis about the reproduction. Triage
+them from a bug-fix session, not a hygiene sweep.
+
+**Rests on:** `librarian(action="doctor")` at HEAD `1a34a131`; `bug-claim-liveness-session-log:W-1`;
+`HY-27`.
+
+## Sweep 2026-09-11
+
+**Shape: doctor-driven, NOT a D1–D11 run.** Invoked from an operator request to "fix all the
+cleanup/maintenance issues" surfaced by `librarian(action="doctor")`, so the findings came from
+the substrate scanner rather than the skill's own detectors. **No detector streak advances and
+the trust state table is unchanged** — the graduation rule requires a detector to have fired
+and had every finding approved, and none of D1–D11 fired at all.
+
+**Precondition gate: fired on one of three indicators, and overridden with reasons stated.**
+`edges_missing: 302` is "in the hundreds", which the gate reads as an unrepaired catalog. Both
+co-indicators read clean (`memories.missing_count: 0` — 23 on disk, 23 in store;
+`augmentation_declared_but_absent: 0`) and `edges_unchanged` was 2017, i.e. the catalog held
+87% of desired edges. The fresh-checkout signature the gate was tuned against measured 697
+missing / 597 dangling with augmentations absent. **Read as drift in a working catalog, and
+repaired as sweep item B rather than treated as a blocker.** The gate's threshold could
+usefully gain this conjunction — "hundreds missing AND (memories missing OR augmentations
+absent)" — but that is n=1 and not proposed yet.
+
+**Scope gated with the operator** (44 findings, over the ~25 stop condition): A + B + C-mech
+approved, C-judge deferred as a named task (`HY-28`).
+
+### Applied
+
+| item | what | verification |
+|---|---|---|
+| A1 | `28f197a703b6f903` `taken` → `investigating` — `status: taken` with no readable `claimed_by:`, so the claim named nobody and nothing could ever check it | `doctor`'s own prescribed remedy |
+| A2 | `cd808780d9ea2db9` `taken` → `investigating` — claimed by session `26cb9b5b-…`, absent from all 18 live sessions on this machine. Operator-gated, because `doctor` is explicit that a claim made on another host is unresolvable here **by construction** and absence is not evidence of death | peer `codescout-75` confirmed it holds no claim on it |
+| B | `librarian(action="link_scan", write=true)` — **305 edges added, 3 pruned** | **fixpoint proven**: a second read-only scan returned `edges_missing[0]`, `edges_stale[0]`. The write reporting success is not the proof. |
+
+The B figure is 305 where the pre-sweep read said 302: a peer's two commits landed in between
+and added three citations. Predicted by that peer before the run, and consistent with it.
+
+### Rejected — 3 of 4 candidate populations
+
+All three reject reasons, and the generalization, are `HY-27`. Summary: 112
+`terminal_status_with_caveat` (report-only by design, no `fix=` exists), the zombie-at-archive
+move (filtered on purpose by a dedicated test), and `frontmatter_id_mismatch` × 1 (documented
+false positive; the detail asserts a move that did not happen).
+
+**C-mech collapsed on inspection from ~7 to 0 applied.** Estimated as mechanical from the
+`by_check` counts; reading the findings individually left one by-design non-fix
+(`entry_without_definition`, whose own detail says *"Do NOT add a heading here to close
+this"*), one documented false positive, three judgment calls moved to `HY-28`, and one hazard
+filed as a bug rather than performed — see below. **A `by_check` count is not a worklist
+length.**
+
+### Filed
+
+`docs/issues/2026-09-11-the-never-hand-build-params-rule-rests-on-a-premise-its-own-repair-path-refutes.md`
+(`5668c67b7094cda8`, `severity: high`, `cluster/doc-contradicted-by-code`). `doctor`'s
+`params_behind_body` remedy is **test-pinned** to name the exact
+`doc(action="augment", merge=true, augment={params: …})` call `CLAUDE.md` forbids without
+exception — and the justification `CLAUDE.md` gives (*"`append_entry` / `update_entry` exist
+so it is never needed"*) is the claim that remedy refutes. A session obeying both cannot repair
+the finding; one splitting the difference performs the call that took this same tracker from
+19 entries to 1 on 2026-08-16. Not performed.
+
+### Recon
+
+`bug-claim-liveness-session-log:W-1` (the mandatory pre-campaign grep, with its counterfactual)
+and `:F-3` (`doctor` detail text asserting a false cause). That ledger was the right home: its
+work stream is the session-backed `taken` status this sweep exercised in anger for the first
+time.
+
+### Peer coordination
+
+**5 sessions in this checkout (4 peers plus me), across 3 profiles, by socket enumeration at
+09:33:45** — one of them (`codescout-53`, `.claude-kat`) cross-profile and therefore invisible
+to `ListAgents` entirely. The corpus moved **three times during the sweep**: 100 → 99 (a peer
+archived a bug) → 100 (the same peer filed one). Peer identified positively off the
+`Session-Id` commit trailers, resolved through its registry row — not by name, adjacency, or
+commit range — then notified before any write, and it replied clear-to-proceed.
+
+### Not done, deliberately
+
+- **C-judge**, 40 findings → `HY-28`, with re-derivation commands rather than cited numbers.
+- **`open_bug_cited_from_source` × 2** → reproduction work, not hygiene; `HY-28` says why.
+- **Gate commands not run.** This sweep touched only markdown and catalog rows — no `.rs`, no
+  prompt surface, no `CLAUDE.md`. Recorded so the gap is visible rather than silent.
+
+Sweep committed as this commit.
 
 ## Template for new entries
 

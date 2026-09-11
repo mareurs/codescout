@@ -6,7 +6,8 @@ status: active
 tags: ["bug-tracking", "status-vocabulary", "peer-sessions", "doctor"]
 title: Session Log — Bug-Claim Liveness (taken state)
 topic: bug claim liveness
-entry_high_water_F: 2
+entry_high_water_F: 3
+entry_high_water_W: 1
 ---
 
 # Session Log — Bug-Claim Liveness (`taken` state)
@@ -71,11 +72,12 @@ at `docs/superpowers/plans/2026-09-02-bug-claim-liveness-design.md`. Opened 2026
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-09-02 | med | doc-vs-code drift | open | the design's wiring table missed three surfaces because every doc describes `doctor` as a catalog-drift scanner |
 | F-2 | 2026-09-02 | med | measurement-method drift | open | enumerating by the subject's identifiers cannot find the surfaces that omit them |
+| F-3 | 2026-09-11 | med | codescout-tool | open | doctor's detail text asserts a false cause on a finding whose false-positive class is already a filed bug |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-1 | 2026-09-11 | high | pre-campaign grep of `tests/`/`scripts/`/hooks for the population's name, before sweeping it | 115 of 119 findings "fixed": 112 caveats deleted or backfilled with unperformed verification, a `doc(move)` re-keying an id cited in 10 places incl. a test fixture, a frontmatter rewrite closing an open bug's evidence | validated |
 
 ---
 
@@ -411,6 +413,107 @@ sweep entirely.
 
 **Rests on:** `CLAUDE.md` § *Testing Discipline* (recording-filter law) and
 `docs/adrs/2026-08-27-negative-results-name-their-scope.md`.
+
+## W-1 — the mandatory pre-campaign grep turned a 119-finding "cleanup sweep" into 2 fixes and 3 rejects
+
+**Valid:** invariant
+
+**Category:** process
+
+**Status:** validated
+
+**Observed.** Asked to "fix all the cleanup/maintenance issues" against a 156-violation
+`librarian(action="doctor")` report. Four populations read as mechanical. CLAUDE.md
+§ *Observer Blindness* position 3 requires, before any campaign over a population, grepping
+`tests/`, `scripts/pre-commit-*` and hooks for **that population's name** — not only the docs.
+Run per population, it rejected three of four:
+
+- **`terminal_status_with_caveat` (112 findings, 72% of the report).**
+  `scan_terminal_status_with_caveat`'s own header — `src/librarian/tools/doctor.rs`, at the
+  function, not in any doc — reads *"Reports only; there is no `fix=`. Discharging a caveat
+  means establishing the thing it says was never established, which is work, not repair."*
+  `docs/conventions/cross-machine-catalog-resume.md` classes the same bucket "pre-existing
+  content debt". The ~32% coverage ratio was the tell CLAUDE.md names: **neither ~0% nor
+  ~100% is a boundary someone drew before it is drift.**
+- **The zombie-at-archive bug `13382b706c9c77b0`.** `doctor.rs` holds
+  `an_open_status_bug_under_archive_is_silent`, a test whose doc comment names *that exact
+  path* as its motivating case and states the filter exists because *"a source comment citing
+  an archived bug is the correct end state"* — so it "would fire on the repo's healthiest
+  records". `docs/architecture/companion-plugin.md` separately documents the file as *"now
+  marked `zombie` and carrying the full correction"*.
+- **`frontmatter_id_mismatch` on `docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`.**
+  `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+  (status `open`) names that exact id pair as a known false positive: worktree-minted, not
+  move-orphaned.
+
+**Counterfactual — what shipped without it.** 115 of 119 candidate findings get "fixed":
+112 caveats either deleted or backfilled with verification nobody performed; one
+`doc(action="move")` re-keying `13382b706c9c77b0`, which is cited by id in 4 files and by path
+in 6, one of the latter being a fixture comment inside the test that asserts the silence; and
+one frontmatter rewrite that closes the standing evidence for an open bug. **Two of the three
+were reachable only from `tests/` and a source-function header — surfaces the doctor report
+names nowhere.** The third was reachable only by grepping the artifact's own id across
+`docs/issues/`.
+
+**Why it is a win rather than ordinary care.** The rejects were not caught by reading the
+report more carefully; the report is consistent with acting wrongly on all three. The grep is
+an unconditional policy tied to a trigger that happens anyway ("about to sweep a population"),
+which is position 3's prescribed shape — *the check that runs when nobody is worried*.
+
+**Promote-when:** a second sweep session runs the same pre-campaign grep and reaches a
+reject on a population the report presented as actionable. At n=2 this earns a line in the
+hygiene skill's Phase 3 as a standing pre-triage step, rather than living only in CLAUDE.md's
+Observer Blindness section where a sweeping session may not look.
+
+## F-3 — doctor's detail text asserts a false cause on a finding whose false-positive class is already a filed bug
+
+**Valid:** invariant
+
+**Category:** codescout-tool
+
+**Severity:** med
+
+**Status:** open
+
+**Observed.** Triaging `doctor` findings as cleanup, three of four candidates were false
+positives — and the report's `detail` text discriminated on only one of them. The three sit
+at three *different* distances from the reader, which is the point:
+
+1. **Self-describing — the report is sufficient.** `entry_without_definition` on
+   `docs/trackers/provenance-subsystem.md` says it in the `detail` string: *"That is the
+   supported end state of the compaction ladder … not an omission. Do NOT add a heading here
+   to close this: a second definer makes the token ambiguous."* A reader acts correctly from
+   the report alone. This is the shape the other two owe.
+2. **The report asserts a cause that is false here.** `frontmatter_id_mismatch` on
+   `docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`
+   states *"a move re-keys the row and this file kept the id it was moved away from."* No move
+   happened — the id was **worktree-minted**, and
+   `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+   (status `open`) already records this exact id pair as the known false positive. The check
+   ships a `fix=repair_frontmatter_id`, so the prescribed action is one call away and would
+   overwrite the standing evidence for that open bug.
+3. **Correctly absent, and the absence read as a gap.** The zombie-at-archive row is filtered
+   out on purpose (`an_open_status_bug_under_archive_is_silent`). Having enumerated doctor's
+   38 checks and found no *"non-terminal status at an archive path"* among them, I proposed a
+   `doc(action="move")` — i.e. **a filter working as designed presented as missing coverage.**
+   Nothing in the report can correct this, because the report's job is to not mention it.
+
+**Cost.** Rejects 2 and 3 were reachable only by grepping `tests/` and the artifact's own id
+across `docs/issues/`. No wrong write landed, because the pre-campaign grep is unconditional
+(`W-1`) — which is exactly why the severity is `med` and not `high`: the defence held, and it
+is a policy sitting in CLAUDE.md rather than anything the tool emits.
+
+**The asymmetry worth fixing.** Case 1 shows the remedy is affordable: doctor *can* say "this
+may be the correct end state, here is why". Where a check has a known false-positive class
+already filed as a bug, the `detail` could name it — `frontmatter_id_mismatch` could carry
+*"worktree-minted ids produce this finding; see <bug>"* at roughly the cost of the sentence it
+already writes asserting the opposite. This is § *Testing Discipline*'s remedy-text law one
+layer out: the check's **predicate** is right in all three cases, and what misleads is the
+**prose** — untested by construction, and here actively wrong about causation.
+
+**Rests on:** `src/librarian/tools/doctor.rs` (the three checks and
+`an_open_status_bug_under_archive_is_silent`);
+`docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`.
 
 ## Template for new entries
 

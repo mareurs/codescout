@@ -1,7 +1,7 @@
 ---
 id: '28f197a703b6f903'
 kind: bug
-status: taken
+status: investigating
 title: 'BUG: the ack note reports "no commits by another session" exactly when the ack covered every one of them'
 owners:
 - marius
