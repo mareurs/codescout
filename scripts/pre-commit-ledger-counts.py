@@ -17,9 +17,19 @@ ledger correctly and over-count the corpus.
 
 The parse logic is duplicated from `tests/issue_clusters.rs` on purpose -- a cargo invocation
 in the commit path costs ~7s and blocks unboundedly on the shared `target/` lock. Divergence
-is closed by a MECHANISM, not by vigilance: `the_hook_script_agrees_with_this_gate` runs this
-file with `--source=worktree --json` and fails if the two derivations disagree. Change one and
-the test reddens until you change the other.
+is closed by a MECHANISM, not by vigilance: `the_hook_script_agrees_on_the_cluster_parsers` runs
+this file with `--source=worktree --json` and fails if the two derivations disagree. Change one
+and the test reddens until you change the other.
+
+**That mechanism covered the PARSERS and not the RULE SETS, and the gap shipped.** This hook
+enforced a strict subset of what `tests/issue_clusters.rs` does -- it checked stored counts and
+member growth, and never the "exactly one `cluster/<slug>` tag per open bug file" invariant -- so
+a commit adding a second tag passed here and redded the shared gate for every other session in
+the checkout. The test a reader consulted to rule that out compared `parse_index_counts` and
+`cluster_tags`, which is parser parity, not rule parity, while its name said otherwise
+(`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
+`HOOK_RULES` below is the closed answer: `--rules` prints it, and the Rust side asserts it equals
+its own declaration, where every test must be classified hook-owed or exempted with a reason.
 """
 
 from __future__ import annotations
@@ -28,6 +38,22 @@ import json
 import pathlib
 import subprocess
 import sys
+
+# Every rule this hook enforces, as a closed set, emitted by `--rules`.
+#
+# **The ids are the Rust TEST NAMES on purpose** -- a neutral id would need a translation table
+# on one side or the other, and that table is exactly the surface that drifts. A renamed test
+# reds `every_cluster_rule_is_hook_owed_or_exempt`, which checks each declared name against the
+# `#[test]` functions that actually exist, so a rename cannot silently exempt a rule.
+#
+# `a_class_gaining_a_member_names_it` has no Rust twin and is declared HOOK-ONLY on the Rust
+# side: it compares the INDEX against HEAD, a question no working-tree test can pose.
+HOOK_RULES = [
+    "a_class_gaining_a_member_names_it",
+    "every_open_bug_file_declares_one_known_defect_class",
+    "no_class_field_states_a_bare_n",
+    "no_index_row_stores_a_count",
+]
 
 LEDGER = "docs/trackers/issue-clusters.md"
 # Since 2026-09-02 the ledger is an Index file PLUS one file per class. The split was a pure
@@ -153,7 +179,7 @@ def _prime_index(paths: list[str]) -> None:
 
     `git show :<path>` spawns a subprocess per file. Measured 2026-09-01 over the 555-file
     corpus: index mode 1360 ms against worktree mode 103 ms. The config header's "<0.2s" was
-    the WORKTREE figure -- the mode `the_hook_script_agrees_with_this_gate` runs -- while the
+    the WORKTREE figure -- the mode `the_hook_script_agrees_on_the_cluster_parsers` runs -- while the
     hook itself runs index mode, so the documented number was right about a different question.
 
     Runtime is not a comfort metric here. pre-commit fails a hook when the whole-tree diff
@@ -216,7 +242,7 @@ def bug_files() -> list[str]:
     the commit over a number nobody can reproduce once the merge resolves. A gate that blocks
     work, not a test that reports -- which is why this site outranks the Rust one it mirrors.
 
-    NEITHER PINNING MECHANISM REACHES IT. `the_hook_script_agrees_with_this_gate` runs in a clean
+    NEITHER PINNING MECHANISM REACHES IT. `the_hook_script_agrees_on_the_cluster_parsers` runs in a clean
     tree, where the deduplicated and un-deduplicated forms are byte-identical. And
     `probe-caveat-density.py`'s `_self_check` says so about itself: it and this gate SHARE this
     function, so a defect inside it makes both sides agree, which at the point of use is
@@ -229,6 +255,49 @@ def bug_files() -> list[str]:
             if p.endswith(".md") and not p.endswith("_TEMPLATE.md")
         }
     )
+
+
+def open_bug_files() -> list[str]:
+    """Mirrors `tracked_open_bug_files` -- OPEN bug files only, so `docs/issues/archive/` is out.
+
+    The population is narrower than `bug_files` on purpose and the two are not interchangeable:
+    the count rules run over the whole corpus INCLUDING the archive (a fixed bug is still a
+    member of its class), while the one-tag rule runs over open files only. An archived file
+    predating the closed set would otherwise refuse every commit that touches anything, with no
+    action available to the committer -- a guard whose remedy nobody can perform.
+    """
+    return [
+        p
+        for p in bug_files()
+        if p.startswith("docs/issues/") and "/" not in p[len("docs/issues/") :]
+    ]
+
+
+def bad_tag_declarations(valid: set[str], source: str) -> list[str]:
+    """Mirrors `every_open_bug_file_declares_one_known_defect_class` -- exactly one KNOWN tag.
+
+    The Rust `verdict` is the reference and this reproduces its four arms, including the one
+    that is easy to drop: a file with NO frontmatter is a defect reported as "no cluster/ tag",
+    never a file skipped. Skipping it would make the worst-formed bug file in the corpus the one
+    the gate is quietest about.
+
+    Emits the same four strings the Rust assertion does, so a reader who hit one gate recognises
+    the other rather than debugging a second, differently-worded refusal.
+    """
+    out = []
+    for rel in open_bug_files():
+        content = read(rel, source)
+        if content is None:
+            continue
+        fm = frontmatter(content)
+        tags = cluster_tags(fm) if fm is not None else []
+        if not tags:
+            out.append(f"{rel} -- no cluster/ tag")
+        elif len(tags) > 1:
+            out.append(f"{rel} -- {len(tags)} cluster/ tags: {tags}")
+        elif tags[0] not in valid:
+            out.append(f"{rel} -- unknown slug: cluster/{tags[0]}")
+    return out
 
 
 def valid_slugs(ledger: str) -> set[str]:
@@ -555,6 +624,14 @@ def main() -> int:
             source = arg.split("=", 1)[1]
         elif arg == "--json":
             as_json = True
+        elif arg == "--rules":
+            # The closed set of rules this hook enforces, for
+            # `the_hook_enforces_every_rule_it_declares` on the Rust side. PRINTED rather than
+            # inferred: a test that scraped `main` for check blocks would be asserting about
+            # its own re-implementation of this file's structure, which is indistinguishable
+            # from coverage until you break the thing that ships.
+            print(json.dumps(sorted(HOOK_RULES)))
+            return 0
         elif arg == "--fixture-ledger":
             # Pure over stdin: both ledger parsers on a caller-supplied ledger, so
             # `the_ledger_parsers_agree_on_a_fixture` can feed shapes the LIVE corpus does not
@@ -654,7 +731,34 @@ def main() -> int:
         _emit_sequence_tail()
         return 1
 
-    # CHECK 2 -- a class that GAINS a member must say something about it.
+    # CHECK 2 -- exactly one KNOWN `cluster/<slug>` tag per OPEN bug file.
+    #
+    # Mirrors `every_open_bug_file_declares_one_known_defect_class`. It was absent here until
+    # 2026-09-11 and its absence was the filed defect: this hook enforced a strict SUBSET of the
+    # gate it mirrors, so a commit adding a second cluster tag passed the commit path and redded
+    # the shared `cargo test` for every other session in the checkout -- the cost lands on people
+    # who did not write it and cannot see why it broke.
+    # docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md
+    bad_tags = bad_tag_declarations(valid, source)
+    if bad_tags:
+        print(
+            "this commit stages an open bug file with a bad defect-class declaration:\n  "
+            + "\n  ".join(bad_tags)
+            + "\n\n"
+            "Every open bug carries exactly ONE `cluster/<slug>` tag from the closed set in\n"
+            f"{LEDGER}. Write it THROUGH THE CATALOG --\n"
+            '  doc(action="update", id=..., patch={"tags": ["cluster/<slug>"]})\n'
+            "  codescout doc update <id> --tags cluster/<slug>\n"
+            "-- because a direct frontmatter edit does not reach the catalog (BL-48), leaving the\n"
+            "tag on disk and invisible to every `find`. If no existing slug fits, add one to the\n"
+            "ledger rather than forcing a fit: a wrong declaration corrupts the counts that\n"
+            "promotion reads.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 3 -- a defect class that GAINS a member must say something about it.
     #
     # This replaces the forcing function check 1 used to be, and the replacement is the point.
     # The old count gate made a ledger edit MANDATORY, and that is why per-member derivations

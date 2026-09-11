@@ -700,7 +700,7 @@ fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
 /// (`cluster-promotion-session-log:F-4`).
 /// Both ledger parsers agree with the hook script on shapes the live corpus does not contain.
 ///
-/// [`the_hook_script_agrees_with_this_gate`] compares the two derivations over the **live**
+/// [`the_hook_script_agrees_on_the_cluster_parsers`] compares the two derivations over the **live**
 /// ledger, and that corpus is not adversarial: every real section declares a `**Slug:**` before
 /// its fields, and every historical quote is already backticked. Measured — deleting the
 /// section-boundary reset, or the backtick check, from either language leaves the corpus-driven
@@ -801,7 +801,7 @@ fn the_ledger_parsers_agree_on_a_fixture() {
 
 /// The hook script reads BOTH YAML tag styles, like [`cluster_tags`] does.
 ///
-/// Split from [`the_hook_script_agrees_with_this_gate`] because that one runs against the live
+/// Split from [`the_hook_script_agrees_on_the_cluster_parsers`] because that one runs against the live
 /// corpus, and the corpus cannot reach this branch: measured 2026-09-01, **zero** bug files
 /// carry a `cluster/` tag in flow style (`tags: [a, b]`), so deleting the inline arm from the
 /// Python leaves the corpus-driven check **green**. Verified by mutation, not assumed — that
@@ -1340,7 +1340,7 @@ fn the_bare_n_claim_parser_discriminates() {
 /// Mutation that must kill this: change `parse_index_counts` to read `cells[i + 2]`, or drop
 /// the inline-`[a, b]` arm from `cluster_tags`, in EITHER language.
 #[test]
-fn the_hook_script_agrees_with_this_gate() {
+fn the_hook_script_agrees_on_the_cluster_parsers() {
     let out = Command::new("python3")
         .args([
             "scripts/pre-commit-ledger-counts.py",
@@ -1624,5 +1624,309 @@ fn the_count_scan_reaches_the_archive() {
     assert!(
         files.len() > tracked_open_bug_files().len(),
         "the count population must be strictly wider than the open-corpus gate's"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Rule parity — the hook enforces a DECLARED subset, and the subset is closed
+// ---------------------------------------------------------------------------
+
+/// Rules enforced in BOTH places: a `#[test]` here and a check in
+/// `scripts/pre-commit-ledger-counts.py`.
+///
+/// **Why this list exists rather than a comparison of the two implementations.** The hook is a
+/// deliberate re-derivation — a `cargo` invocation in the commit path costs ~7s and blocks
+/// unboundedly on the shared `target/` lock — and until 2026-09-11 the only thing pinning the
+/// two together was [`the_hook_script_agrees_on_the_cluster_parsers`], which compares
+/// `parse_index_counts` and `cluster_tags`. That is **parser** parity. Nothing compared the
+/// **rule sets**, so a rule added here was under no obligation to appear in the hook and its
+/// absence was reported by nothing: the one-tag rule was missing for months, and a commit adding
+/// a second cluster tag passed the commit path and redded the shared gate for every other
+/// session in the checkout.
+/// (`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`)
+///
+/// The ids are **test names**, not neutral rule ids, so neither side needs a translation table —
+/// the surface that would itself drift.
+const HOOK_OWED: &[&str] = &[
+    "every_open_bug_file_declares_one_known_defect_class",
+    "no_class_field_states_a_bare_n",
+    "no_index_row_stores_a_count",
+];
+
+/// Rules the hook enforces that CANNOT be a test here, with the reason it cannot.
+///
+/// Equality rather than subset is what makes [`the_hook_enforces_every_rule_it_declares`] bite in
+/// both directions: without this list, a rule silently DELETED from the hook would leave a
+/// smaller set that a subset check still accepts.
+const HOOK_ONLY: &[(&str, &str)] = &[(
+    "a_class_gaining_a_member_names_it",
+    "compares the INDEX against HEAD; a working-tree test cannot pose that question, which is \
+     the whole reason a hook exists beside this file",
+)];
+
+/// Every other `#[test]` in this file, and why a commit hook does not owe it.
+///
+/// **The reason is the forcing function, and that is the design.** The rule this file's own hook
+/// records about itself — a gate that merely demands a line CHANGE is satisfied by a trailing
+/// space — applies here too: what stops the next rule diverging is not this list existing but
+/// that [`every_cluster_rule_is_hook_owed_or_exempt`] refuses a test absent from both lists, so
+/// whoever adds one must write down which side owes it.
+///
+/// Three entries read `OWED, not yet implemented` and name a bug file. They are a declared
+/// divergence rather than a judgement that the hook does not owe them — the distinction matters,
+/// because an "exempt" entry closes the question and these do not.
+const NOT_HOOK_OWED: &[(&str, &str)] = &[
+    (
+        "a_cluster_slug_in_prose_is_not_a_declaration",
+        "exercises the slug parser against a fixture; the hook shares no code path with it",
+    ),
+    (
+        "a_repo_path_renders_posix_even_when_the_platform_flavour_is_windows",
+        "drives the hook's own path renderer through a foreign flavour — a test OF the hook, \
+         not a rule the hook enforces",
+    ),
+    (
+        "both_yaml_tag_styles_are_read",
+        "parser coverage for `cluster_tags`; the invariant it supports is the one-tag rule, \
+         which IS hook-owed",
+    ),
+    (
+        "every_cluster_rule_is_hook_owed_or_exempt",
+        "asserts about this file's own declarations; the hook has nothing to compare",
+    ),
+    (
+        "every_declared_class_has_an_index_row",
+        "OWED, not yet implemented — the hook parses Index rows only for counts and has no \
+         count-free row parser; \
+         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
+    ),
+    (
+        "ls_files_index_stages_collapse_to_one_path_per_file",
+        "pins the dedup both sides share; a defect inside it makes both agree, so it is a \
+         property of the shared helper rather than a rule",
+    ),
+    (
+        "missing_index_rows_exempts_only_unclassified",
+        "discrimination guard proving the exemption in `every_declared_class_has_an_index_row` \
+         is that narrow",
+    ),
+    (
+        "no_mechanism_status_is_a_bare_verdict",
+        "OWED, not yet implemented — needs the mechanism-status parser ported; \
+         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
+    ),
+    (
+        "the_bare_n_claim_parser_discriminates",
+        "feeds `parse_bare_n_claims` a fixture with known answers; proves the parser behind a \
+         hook-owed rule is not vacuous, and is not itself a rule",
+    ),
+    (
+        "the_cluster_scan_discriminates",
+        "proves the tag scan can return every verdict, so the one-tag rule is not decoration",
+    ),
+    (
+        "the_count_scan_reaches_the_archive",
+        "a scope property of `actual_counts`, not an invariant a commit can violate",
+    ),
+    (
+        "the_growth_refusal_names_the_file_holding_the_members_field",
+        "asserts where the hook's refusal SENDS the reader — remedy text, which by construction \
+         the hook cannot check about itself",
+    ),
+    (
+        "the_hook_enforces_every_rule_it_declares",
+        "is the rule-parity comparison; asking the hook to enforce it is circular",
+    ),
+    (
+        "the_hook_script_agrees_on_both_yaml_tag_styles",
+        "cross-language parser parity over stdin; a test OF the hook",
+    ),
+    (
+        "the_hook_script_agrees_on_the_cluster_parsers",
+        "cross-language parser parity over the live corpus; a test OF the hook",
+    ),
+    (
+        "the_index_file_holds_no_class_sections",
+        "OWED, not yet implemented — cheap (the Index file must hold no `## IC-N —` heading) \
+         and grouped with the other two rather than shipped alone; \
+         docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
+    ),
+    (
+        "the_index_row_parser_discriminates",
+        "feeds the row parser a fixture with known answers; supports a hook-owed rule without \
+         being one",
+    ),
+    (
+        "the_ledger_parsers_agree_on_a_fixture",
+        "cross-language parser parity over a synthetic ledger; a test OF the hook",
+    ),
+    (
+        "the_mechanism_basis_scan_discriminates",
+        "vacuity guard for the mechanism-status scan",
+    ),
+    (
+        "the_scan_actually_reads_files",
+        "proves the population is non-empty, so the one-tag rule cannot pass by finding nothing",
+    ),
+    (
+        "the_slug_set_excludes_the_template_placeholder",
+        "parser coverage for `valid_slugs`; the ledger's own template is not a class",
+    ),
+];
+
+/// Every `#[test]` function name in this file, read from its own source.
+///
+/// Reading the file rather than enumerating by hand is the point: a hand-written population is
+/// exactly the thing that goes stale, and the defect this whole section exists for is a rule
+/// added on one side and noticed by nobody.
+fn declared_test_names() -> BTreeSet<String> {
+    let src = std::fs::read_to_string(repo_root().join("tests/issue_clusters.rs"))
+        .expect("this file must be readable — it is its own population");
+    // The attribute on its own line, which is how every test here is written. No self-match
+    // hazard: the occurrences of this token inside this function are all mid-line, and the
+    // comparison is against the TRIMMED whole line.
+    let mut out = BTreeSet::new();
+    let mut armed = false;
+    for line in src.lines() {
+        let t = line.trim();
+        if t == "#[test]" {
+            armed = true;
+            continue;
+        }
+        if armed {
+            if let Some(rest) = t.strip_prefix("fn ") {
+                out.insert(rest.split('(').next().unwrap_or_default().trim().to_owned());
+            }
+            armed = false;
+        }
+    }
+    out
+}
+
+/// Every test in this file is declared hook-owed or exempt, and every declared name is real.
+///
+/// **This is the mechanism; [`HOOK_OWED`] is only its input.** A list of hook-owed rules that a
+/// person maintains beside the tests reproduces the original defect one level up — add a test,
+/// forget the list, and the divergence is unguarded again with nothing reporting it. Requiring
+/// every test to appear in exactly one list makes the classification unskippable, on the same
+/// shape as `every_declared_feature_has_a_lane_or_a_reason` in `tests/feature_lanes.rs`.
+///
+/// The phantom check is what makes a RENAME loud: a declared name that resolves to no test
+/// would otherwise sit in the exempt list forever, exempting a rule that no longer exists while
+/// its successor goes unclassified.
+///
+/// Mutation that must kill this: delete any entry from [`NOT_HOOK_OWED`], or rename any test
+/// without moving its entry.
+#[test]
+fn every_cluster_rule_is_hook_owed_or_exempt() {
+    let tests = declared_test_names();
+    assert!(
+        tests.len() > 15,
+        "the scan found {} tests in this file — it has parsed almost nothing, and every \
+         assertion below would pass vacuously. Check the `#[test]` line shape.",
+        tests.len()
+    );
+
+    let owed: BTreeSet<String> = HOOK_OWED.iter().map(|s| (*s).to_owned()).collect();
+    let exempt: BTreeSet<String> = NOT_HOOK_OWED.iter().map(|(n, _)| (*n).to_owned()).collect();
+    assert!(
+        !owed.is_empty() && !exempt.is_empty(),
+        "both lists must be non-empty"
+    );
+
+    let both: Vec<&String> = owed.intersection(&exempt).collect();
+    assert!(
+        both.is_empty(),
+        "declared both hook-owed and exempt — the classification must be a partition: {both:?}"
+    );
+
+    let phantom: Vec<&String> = owed
+        .union(&exempt)
+        .filter(|n| !tests.contains(*n))
+        .collect();
+    assert!(
+        phantom.is_empty(),
+        "declared names that resolve to no `#[test]` in this file — a rename left its entry \
+         behind, which exempts a rule that no longer exists while its successor goes \
+         unclassified: {phantom:?}"
+    );
+
+    let unclassified: Vec<&String> = tests
+        .difference(&owed)
+        .filter(|n| !exempt.contains(*n))
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "these tests are in neither HOOK_OWED nor NOT_HOOK_OWED:\n  {}\n\n\
+         Decide which side owes the rule. If `scripts/pre-commit-ledger-counts.py` must also \
+         enforce it, add the check there and the name to HOOK_OWED and to the script's \
+         HOOK_RULES. If a commit hook does not owe it — parser coverage, a vacuity guard, a \
+         test OF the hook — add it to NOT_HOOK_OWED with the reason. Writing the reason is the \
+         forcing function; this list existing is not.",
+        unclassified
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    let thin: Vec<&str> = NOT_HOOK_OWED
+        .iter()
+        .chain(HOOK_ONLY.iter())
+        .filter(|(_, why)| why.split_whitespace().count() < 5)
+        .map(|(n, _)| *n)
+        .collect();
+    assert!(
+        thin.is_empty(),
+        "exemptions need a reason a reader can weigh, not a placeholder: {thin:?}"
+    );
+}
+
+/// The hook's declared rule set equals this file's declaration of it.
+///
+/// Compares against `--rules`, which the script PRINTS from its own `HOOK_RULES` constant. A
+/// test that instead scraped the script for check blocks would be asserting about its own
+/// re-implementation of that file's structure — indistinguishable from coverage until you break
+/// the thing that ships.
+///
+/// **What this does and does not buy.** It proves the two sides agree on WHICH rules the hook
+/// carries, so a rule added here and not there reds. It does not prove the hook's implementation
+/// of a rule matches this file's — that is
+/// [`the_hook_script_agrees_on_the_cluster_parsers`]'s job for the shared parsers, and for the
+/// one-tag rule it is the four refusal arms both sides emit in the same words.
+///
+/// Mutation that must kill this: remove any id from the script's `HOOK_RULES`, or add one to
+/// [`HOOK_OWED`] without implementing it in the script.
+#[test]
+fn the_hook_enforces_every_rule_it_declares() {
+    let out = Command::new("python3")
+        .args(["scripts/pre-commit-ledger-counts.py", "--rules"])
+        .current_dir(repo_root())
+        .output()
+        .expect("python3 failed to run — the hook script needs it, so this gate does too");
+    assert!(
+        out.status.success(),
+        "hook script --rules exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let theirs: BTreeSet<String> =
+        serde_json::from_slice(&out.stdout).expect("--rules must emit a JSON array of strings");
+
+    let mine: BTreeSet<String> = HOOK_OWED
+        .iter()
+        .map(|s| (*s).to_owned())
+        .chain(HOOK_ONLY.iter().map(|(n, _)| (*n).to_owned()))
+        .collect();
+
+    assert_eq!(
+        mine, theirs,
+        "the rule sets have diverged.\n\
+         Declared here (HOOK_OWED + HOOK_ONLY) vs declared by \
+         scripts/pre-commit-ledger-counts.py (HOOK_RULES).\n\
+         A rule enforced by only one side is the defect this pair exists to catch: the gate \
+         reds for every session in the checkout while the commit path lets it through.\n\
+         Reproduce: python3 scripts/pre-commit-ledger-counts.py --rules"
     );
 }
