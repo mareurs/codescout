@@ -2255,6 +2255,16 @@ and `:F-3` (`doctor` detail text asserting a false cause). That ledger was the r
 work stream is the session-backed `taken` status this sweep exercised in anger for the first
 time.
 
+**Two further recon entries from the same session are BLOCKED and parked, not dropped.**
+`append_entry` refuses while the target ledger has unpushed commits — and the blocking commit
+was this sweep's own, so a session following the documented workflow blocks itself on its
+second append. That is a live instance of `cd808780d9ea2db9`. The drafts live in
+`docs/trackers/pending-ledger-entries.md` (`330f7d7f01f4ec23`), which carries its own exit
+condition and is to be **deleted** when they land. Parked in the repo rather than a session
+scratchpad deliberately: the refusal's own fallback (*"note the entry somewhere
+worktree-local"*) converts a blocked write into an **untracked** one, and nothing would have
+noticed if they were never folded in.
+
 ### Peer coordination
 
 **5 sessions in this checkout (4 peers plus me), across 3 profiles, by socket enumeration at
