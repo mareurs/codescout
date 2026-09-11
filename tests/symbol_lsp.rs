@@ -3567,3 +3567,153 @@ pub fn other() {}
         "sibling must be preserved; got:\n{content}"
     );
 }
+
+// ── Shrink advisory on `replace` (bug 12a8a56bf8a25138) ──────────────────────
+//
+// `replace` overwrites the symbol's whole range, so a caller who supplied a
+// partial body deletes the remainder and gets `status: "ok"`. These two tests
+// are a PAIR and neither is worth much alone: the first is monotone under
+// "always warn", the second under "never warn". Mutate the production call in
+// `do_replace` in either direction and exactly one of them must red.
+
+/// Fixture for both shrink tests.
+///
+/// THREE properties here are load-bearing:
+///
+/// 1. `target` spans 10 lines and ~300 bytes. `SHRINK_GUARD_MIN_BYTES` is 200,
+///    so trimming this below 200 bytes makes `check` return `None` for a reason
+///    that has nothing to do with the ratio — and `shrink_warns` then passes
+///    while asserting nothing.
+/// 2. The file carries five lines BEFORE and five AFTER the symbol. That is what
+///    makes a range-scoped check distinguishable from a whole-file one: the
+///    assertion below pins `10 → 3 lines`, which a whole-file implementation
+///    would render as `20 → 3`. Delete the padding and the test still passes
+///    while no longer discriminating between the two.
+/// 3. The padding is real code, not `//` comments. `editing_start_line` walks
+///    back over a lead region of doc comments and attributes, which would pull
+///    comment padding into the replaced range and move the numbers.
+const SHRINK_FIXTURE: &str = "fn preamble_one() {}
+fn preamble_two() {}
+fn preamble_three() {}
+fn preamble_four() {}
+fn preamble_five() {}
+fn target() {
+    let first = compute_the_first_intermediate_value();
+    let second = compute_the_second_intermediate_value();
+    let third = combine_both_intermediates(first, second);
+    let fourth = refine_the_combined_value(third);
+    let fifth = validate_the_refined_value(fourth);
+    let sixth = normalise_the_validated_value(fifth);
+    let seventh = persist_the_normalised_value(sixth);
+    seventh
+}
+fn trailing_one() {}
+fn trailing_two() {}
+fn trailing_three() {}
+fn trailing_four() {}
+fn trailing_five() {}
+";
+
+#[tokio::test]
+async fn replace_warns_when_the_new_body_is_less_than_half_the_symbol() {
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
+        let file = root.join("src/lib.rs");
+        // `target` occupies 0-indexed lines 5..=14.
+        MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])
+    })
+    .await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                // A partial body: the shape a caller produces after reading only
+                // the top of the function out of a grep window.
+                "body": "fn target() {\n    let first = compute_the_first_intermediate_value();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let warning = result
+        .get("warning")
+        .and_then(|w| w.as_str())
+        .unwrap_or_else(|| panic!("a 10 -> 3 line replace must warn; got: {result}"));
+
+    assert!(
+        warning.contains("shrink:"),
+        "the advisory must be identifiable as the shrink one — another warning \
+         sharing this key is not a pass. got: {warning}"
+    );
+    assert!(
+        warning.contains("10 → 3 lines"),
+        "the report must be scoped to the REPLACED RANGE (10 lines), not the whole \
+         file (20 lines) — a whole-file check is monotone under this defect for any \
+         symbol that is a small fraction of its file. got: {warning}"
+    );
+    assert!(
+        warning.contains("reduced"),
+        "past tense: the write already landed, and `would reduce` in a response whose \
+         status is `ok` reads as a refusal that did not happen. got: {warning}"
+    );
+    assert!(
+        warning.contains("target"),
+        "the advisory must name the symbol it is about. got: {warning}"
+    );
+
+    // The write still lands — this surface warns, it does not refuse.
+    let on_disk = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        !on_disk.contains("persist_the_normalised_value"),
+        "replace must still apply; warning is advisory, not a refusal"
+    );
+}
+
+#[tokio::test]
+async fn replace_stays_silent_when_the_new_body_is_proportionate() {
+    // The discriminator. Without it, `shrink_warns` above is satisfied by an
+    // unconditional warning, which would fire on every legitimate replace and
+    // teach callers to ignore the field.
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])
+    })
+    .await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                // Nine lines against ten, and comparable bytes: a real edit, not a
+                // truncation. Neither arm of the guard should trip.
+                "body": "fn target() {\n    \
+                         let first = compute_the_first_intermediate_value();\n    \
+                         let second = compute_the_second_intermediate_value();\n    \
+                         let third = combine_both_intermediates(first, second);\n    \
+                         let fourth = refine_the_combined_value(third);\n    \
+                         let fifth = validate_the_refined_value(fourth);\n    \
+                         let sixth = normalise_the_validated_value(fifth);\n    \
+                         sixth\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let warning = result.get("warning").and_then(|w| w.as_str()).unwrap_or("");
+    assert!(
+        !warning.contains("shrink:"),
+        "a proportionate replace must not warn — got: {warning}"
+    );
+
+    let on_disk = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        on_disk.contains("normalise_the_validated_value"),
+        "sanity: the proportionate body must actually have been written"
+    );
+}

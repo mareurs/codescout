@@ -1,23 +1,30 @@
 ---
 id: '12a8a56bf8a25138'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: the shrink guard covers three prose write paths and not the code one'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
+unverified: 'Advisory only — edit_code(action="replace") WARNS and does not refuse, so a caller who ignores the warning still loses the code. The class-closing set-difference test the Fix section prescribed is NOT shipped (see ''What is still owed''), and src/tools/create_file.rs (overwrite: true) is an unexamined fifth destructive-write surface.'
 ---
 
 # BUG: the shrink guard covers three prose write paths and not the code one
 
 ## Summary
-`crate::util::shrink_guard::check` is wired to exactly **three** call sites — `doc(action="update")`
+`crate::util::shrink_guard::check` was wired to exactly **three** call sites — `doc(action="update")`
 body writes (`src/librarian/tools/update.rs:615`), markdown `edit_file`
-(`src/tools/markdown/edit_markdown.rs:1503`), and `memory(write)`
-(`src/tools/memory/mod.rs:770,782`). `edit_code` is not among them:
-`src/tools/symbol/edit_code.rs` contains no reference to it and the tool exposes no `force`
+(`src/tools/markdown/edit_markdown.rs:1503`), and `memory(write)` (`src/memory/mod.rs:142`, whose
+refusal text is built in `src/tools/memory/mod.rs:151`). `edit_code` was not among them:
+`src/tools/symbol/edit_code.rs` contained no reference to it and the tool exposes no `force`
 parameter.
+
+*(Citation corrected 2026-09-11: this file originally cited the memory surface at
+`src/tools/memory/mod.rs:770,782`, which is the tool layer's message, not the `check` call. The
+call is one layer down in `src/memory/mod.rs`. Found by running `references` on the guard rather
+than re-reading the file — the same drift class as the open bug
+`156ecb3578d22ece`.)*
 
 So the three surfaces that write **prose** refuse a body losing >50% of its bytes or lines, and
 the one surface Iron Law 2 **mandates** for structural code edits accepts an arbitrary net
@@ -115,47 +122,103 @@ to escape.
    reader.
 
 ## Fix
-*Not fixed by this bug file, and deliberately so — the design decision is not a drive-by.*
 
-The shape that would hold: `edit_code(action="replace")` runs
-`crate::util::shrink_guard::check(old_symbol_text, body)` over the **replaced range**, not the
-whole file, and refuses a >50% loss unless a new `force` is passed. Scoping the check to the
-range is the whole point; a whole-file check is monotone under this defect for any symbol that is
-a small fraction of its file, which is most of them.
+**Mitigated, not fixed** — `edit_code(action="replace")` now runs the guard and **warns**; it
+still does not refuse, so the loss remains possible for a caller who ignores the warning. Status is
+`mitigated` deliberately, to keep the refusal question in the open-bug queries.
 
-**The reason this needs a decision rather than a patch:** a legitimate refactor that collapses a
-long function into a short one is exactly this shape and must stay possible. So the guard is only
-worth adding together with its escape, and the escape has to be discoverable from the refusal
-text — otherwise the guard converts a silent data loss into a blocked legitimate edit, which is
-the trade CLAUDE.md's remedy-text law says to price before shipping.
+What shipped:
 
-**And it should be wired as a set-difference, not a fourth copy.** IC-14's own mechanism note
-prescribes this: *"every entry point to a guarded operation routes through the guard —
-expressible as `references()` on the guard function differenced against the public write entry
-points."* A test asserting that every destructive-write entry point appears in
-`references(shrink_guard::check)` reds when a fifth surface is added unguarded. That closes the
-class; a fourth call site only closes this instance, and the module header's *"three copies is how
-the gap survived"* is the argument against adding a fourth by hand.
+- `src/tools/symbol/edit_code.rs` computes
+  `shrink_guard::check(&lines[start..end].join("\n"), &effective_body)` immediately before the
+  splice, where `lines` (the pre-edit file) and `effective_body` are both live. **Scoped to the
+  replaced range, never the whole file** — a whole-file check is monotone under this defect for any
+  symbol that is a small fraction of its file, so it would pass on exactly the writes worth catching.
+- The advisory rides the existing `response["warning"]` key, which `range_repair` already owns at all
+  three destructive actions. The two are **joined**, not assigned: a second
+  `response["warning"] = …` silently drops the first, and the case where both fire is the one a
+  caller most needs both halves of. A lone warning renders byte-identically, so no existing
+  assertion moved — confirmed by 30 pre-existing `replace_*` tests staying green.
+- `ShrinkReport::describe_applied` is the past-tense twin of `describe`, sharing one format string
+  through a private `describe_with(verb)`. The tense is the reason it exists rather than a second
+  caller of `describe`: *"would reduce"* inside a response whose `status` is already `"ok"` reads as
+  a refusal that did not happen, sending the caller to look for a write that never landed.
 
+**Why warn and not refuse** — decided by the operator, 2026-09-11. A refactor that legitimately
+collapses a long function into a short one is byte-identical to an accidental partial body, so a
+refusal blocks the first in order to catch the second. The `force` escape the original plan
+prescribed is therefore not shipped either; there is nothing to escape.
+
+### What is still owed
+
+**The class-closing set-difference test is NOT shipped**, and the reason is worth recording because
+the obvious derivation fails in both directions.
+
+The prescribed shape was *"every entry point to a guarded operation appears in
+`references(shrink_guard::check)`"*. That needs a population. Measured 2026-09-11, deriving it as
+*"source files that read existing content and then write over it"* (`read_to_string` ∧
+{`atomic_write`, `fs::write`, `write_lines`}) yields **70 files under `src/`, of which 66 would need
+an exemption** — a list nobody reads, which would register as coverage while checking nothing. A
+coverage ratio that is neither ~0% nor ~100% is a boundary drawn by the predicate, not drift in the
+code.
+
+And the same derivation **misses a real fifth surface**: `src/tools/create_file.rs` documents that
+*"`overwrite: true` replaces an existing file"*, writes caller-supplied content over it, and never
+appears in that 70-file scan — because it does not read the file it overwrites, so it cannot compute
+a shrink report without an extra read it does not currently perform.
+
+So the honest population is *"writes caller-supplied content over existing user content"*, which is
+not expressible as a grep over read/write primitives. Designing it is its own pass. Until then this
+instance is closed and the class is not.
 ## Tests added
-None. See § Fix — the guard does not exist at this surface yet, so there is nothing to pin. The
-test worth having is the set-difference one, which belongs with the fix.
 
+`tests/symbol_lsp.rs`:
+
+- `replace_warns_when_the_new_body_is_less_than_half_the_symbol`
+- `replace_stays_silent_when_the_new_body_is_proportionate`
+
+They are a **pair**, and neither is worth much alone: the first is monotone under "always warn", the
+second under "never warn". Both were driven to an observed RED by mutating the **production** call,
+not the test inputs:
+
+| mutation | result |
+|---|---|
+| `let shrink = None` (guard disabled) | `replace_warns…` RED, silent test correctly green |
+| `check(&content, …)` (whole file, not range) | **both** RED — the positive one on `20 → 3 lines` instead of `10 → 3`, the silent one because a proportionate replace now warns spuriously at `20 → 9 lines (55%)` |
+
+The second mutation is the one that justifies the fixture's shape. `SHRINK_FIXTURE` pads the file
+with five lines of real code before and after the symbol **so that a range-scoped check and a
+whole-file check produce different numbers**; without the padding the assertion still passes and
+stops discriminating between them. The padding is code rather than `//` comments because
+`editing_start_line` walks back over a lead region of doc comments and attributes, which would pull
+comment padding into the replaced range. Both facts are annotated on the fixture.
+
+Verified by name in **both** gate lanes, rather than from either lane's total:
+`grep 'replace_warns_when' ` returns `ok` in the lean and default runs alike, as do
+`shrink_guard`'s 7 unit tests (7 in both).
 ## Workarounds
-**Read the whole symbol before replacing it.** `symbols(name=…, include_body=true)` returns the
-full body; a `grep` window does not and does not claim to. This is the workaround, not the fix,
-because it is a discipline against a silent failure — CLAUDE.md § *Observer Blindness* position 3
-is explicit that "be careful" is the wrong instrument for a class that returns a plausible answer.
 
-**And `git diff` immediately after any `edit_code(action="replace")`.** That is what caught this
-one, within a single tool call, before the truncation ever reached a commit. It is cheap and it is
-the only step that closes the loop today.
+**Read the `warning` field on every `edit_code(action="replace")` response.** It is now populated
+whenever the replacement is less than half the symbol it replaced, and it names both dimensions and
+the symbol.
 
+The pre-fix workaround still applies and is stricter: after any `replace`, compare `replaced_lines`
+against the line count of the body you supplied. That is the one arithmetic the caller cannot do
+without already knowing what they destroyed, which is why the tool now does it for you.
+
+For the surfaces still unguarded — notably `create_file(overwrite: true)` — there is no advisory.
+Read the file first.
 ## Resume
-Decide whether to wire the range-scoped shrink guard plus `force` into `edit_code`, or to accept
-the asymmetry and document it at the tool's schema instead. Either is defensible; the current
-state — guarded prose, unguarded code, and nothing saying so — is the one that is not.
 
+Design the population predicate for the set-difference test described under **What is still owed**.
+It cannot be a grep over read/write primitives: that yields 70 files needing 66 exemptions AND
+misses `src/tools/create_file.rs`, measured 2026-09-11. Start from the tool schemas instead — a
+write-capable tool whose input schema carries a caller-supplied content property (`body`, `content`,
+`new_string`) — and check that against the four known-guarded surfaces plus `create_file` as a
+known-answer fixture.
+
+Separately, decide whether `create_file(overwrite: true)` should read-before-write in order to be
+guardable at all. That is a behaviour change, not a patch, and belongs with whoever owns that tool.
 ## References
 - `src/util/shrink_guard.rs` (the guard, and its own "three copies" note)
 - `src/librarian/tools/update.rs`, `src/tools/markdown/edit_markdown.rs`,

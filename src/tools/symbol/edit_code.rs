@@ -1092,6 +1092,27 @@ impl EditCode {
             .as_ref()
             .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
 
+        // bug 12a8a56bf8a25138: `replace` overwrites the symbol's WHOLE range, so a
+        // caller who supplied a partial body — having read only the top of the
+        // function — deletes the remainder and gets `status: "ok"` back with no
+        // delta. The three PROSE write paths (doc update, markdown edit_file,
+        // memory write) already run this guard. This is the code one, and Iron Law 2
+        // mandates `edit_code` for structural edits, which makes it the surface most
+        // likely to be handed a body assembled from a partial read.
+        //
+        // Computed over the REPLACED RANGE, never the whole file. A whole-file check
+        // is monotone under this defect for any symbol that is a small fraction of
+        // its file — which is most of them — so it would pass on exactly the writes
+        // worth catching.
+        //
+        // It warns rather than refuses, and there is deliberately no `force` to
+        // escape: a refactor that legitimately collapses a long function into a short
+        // one is byte-identical to the defect, so refusing would block the first in
+        // order to catch the second. See `ShrinkReport::describe_applied` for why the
+        // warning is past tense.
+        let shrink =
+            crate::util::shrink_guard::check(&lines[start..end].join("\n"), &effective_body);
+
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
         new_lines.extend(effective_body.lines());
@@ -1189,8 +1210,26 @@ impl EditCode {
             .await;
         let mut response =
             json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) });
+        // Both advisories share one `warning` key, so they are JOINED, not assigned.
+        // A second `response["warning"] = ...` silently drops the first, and the case
+        // where both fire — a repaired range that also shrank — is precisely the one
+        // a caller needs both halves of. A lone warning still renders byte-identically:
+        // joining a one-element list is that element, so no existing assertion moves.
+        let mut warnings: Vec<String> = Vec::new();
         if let Some(r) = range_repair {
-            response["warning"] = json!(r.warning(&sym.name));
+            warnings.push(r.warning(&sym.name));
+        }
+        if let Some(report) = shrink {
+            warnings.push(format!(
+                "shrink: the replace of '{}' {}. If you supplied a partial body — having \
+                 read only part of the symbol — the remainder is gone. Re-read it with \
+                 symbols(name_path=..., include_body=true) and replace again.",
+                sym.name,
+                report.describe_applied()
+            ));
+        }
+        if !warnings.is_empty() {
+            response["warning"] = json!(warnings.join(" | "));
         }
         if !removed_attributes.is_empty() {
             response["removed_attributes"] = json!(removed_attributes);

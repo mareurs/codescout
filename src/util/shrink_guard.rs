@@ -71,15 +71,41 @@ pub struct ShrinkReport {
 }
 
 impl ShrinkReport {
-    /// The shared phrase every surface embeds, so the three messages stay
+    /// The shared phrase every surface embeds, so the messages stay
     /// consistent and always name the dimension that actually tripped.
     ///
     /// Both dimensions are always shown, including the one that held: a reader
     /// deciding whether to pass `force=true` needs to see that bytes were fine
     /// precisely *because* that is the surprising part.
     pub fn describe(&self) -> String {
+        self.describe_with("would reduce")
+    }
+
+    /// The applied-write twin of [`ShrinkReport::describe`], for a surface that
+    /// WARNS after the write instead of refusing before it.
+    ///
+    /// `edit_code(action="replace")` is that surface. It does not refuse and has
+    /// no `force` escape, because a legitimate refactor collapsing a long
+    /// function into a short one is byte-identical to an accidental partial
+    /// body — so refusing would block the first to catch the second.
+    ///
+    /// The tense is the entire reason this exists rather than a second caller of
+    /// [`ShrinkReport::describe`]. "would reduce" inside a response whose
+    /// `status` is already `"ok"` reads as a refusal that did not happen, and
+    /// sends the caller looking for a write that never landed — when in fact it
+    /// landed and took the remainder of their symbol with it.
+    pub fn describe_applied(&self) -> String {
+        self.describe_with("reduced")
+    }
+
+    /// One format string, two verbs — deliberately not two `format!` calls.
+    /// This module's own header records that "three copies is how the gap below
+    /// survived"; a forked message decays exactly the way a forked predicate
+    /// does, silently and in whichever copy is edited second.
+    fn describe_with(&self, verb: &str) -> String {
         format!(
-            "would reduce {} → {} bytes ({}%) and {} → {} lines ({}%) — over the threshold on {}",
+            "{} {} → {} bytes ({}%) and {} → {} lines ({}%) — over the threshold on {}",
+            verb,
             self.old_bytes,
             self.new_bytes,
             self.byte_pct,
