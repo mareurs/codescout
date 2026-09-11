@@ -40,6 +40,43 @@ exists to remove.
 Any `doc(action="find", rel_path=…)` whose result set exceeds the inline budget. `rel_path` is the
 cheapest trigger because the lift is unconditional; an inverted filter leaf works too.
 
+
+**RE-VERIFIED 2026-09-11 at `13859878`, still live.** Run against a release binary built from
+that commit — identity confirmed from compiled-in schema strings (`index.scope`'s
+`{"const": "project"}`, the nested `oneOf` on `symbols`/`references`, and the deleted
+`librarian.project` param), not from an mtime.
+
+```
+doc(action="find", rel_path="docs/issues", limit=200)
+```
+
+The envelope the caller receives carries `output_id`, `summary`, `hint`, `buffered_bytes`. Its
+shape listing reads `5 keys: count, items, scope, hints, corrections` — the key is NAMED and its
+value is not. Pulled out of the buffer afterwards, here is what the caller never saw:
+
+```json
+{"filter": ["top-level rel_path lifted into the filter: {rel_path: {contains: docs/issues}}"],
+ "hint": "rel_path is a create-time param; on find it was read as a filter clause. ..."}
+```
+
+**THE CONTROL, recorded here because without it a probe CONFIRMS this bug is fixed when it is
+not.** The FRAMEWORK's param-alias advisory *does* reach the envelope — measured the same day on
+one tool in both response shapes, which controls for tool-specific behaviour: `grep` with a bad
+param name returning a small result emits a prose warning banner, and the same call overflowed
+emits a structured `corrections.param_aliases` object inside the envelope. Both survive.
+
+So *"I called an overflowing tool with a bad param name and saw `corrections` in the envelope"*
+is a TRUE observation and is **no evidence whatever about this bug**. Two unrelated mechanisms
+share the key name `corrections`, and § *Summary* already says the framework half was never the
+defect — but a reader who probes that half gets a clean green and closes this file wrongly. That
+nearly happened on 2026-09-11: the probe was run, the confirmation was read, and only re-reading
+this file's own § *Summary* before reporting caught that it had tested the wrong half.
+
+The generalisation, since it is not specific to this key: **CLAUDE.md's "run the reproduction"
+rule is written for the FIXING phase, and this was the CLOSING phase.** Confirming a bug is
+fixed has the same requirement and feels lower-stakes, because the expected answer is the
+reassuring one — so a substituted probe goes unquestioned in a way it would not if the answer
+had been alarming. Run the reproduction the FILE states, not one composed from its title.
 ## Environment
 
 `experiments`, 2026-09-10. Reachable in the shipped binary — not latent, and not introduced by the
