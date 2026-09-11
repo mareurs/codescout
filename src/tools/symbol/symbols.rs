@@ -206,28 +206,20 @@ impl Tool for Symbols {
         // suppressed the regex refusal and returned 0 matches, and
         // `symbols(name="X", kind="function", name_path="zzz")` silently dropped
         // `kind`. Both were plausible answers, not errors.
+        //
+        // No error arm here: `has_name_arg` above already proved one of the two
+        // `as_str()` calls is `Some` (`serde_json::Value::is_string` is defined as
+        // `self.as_str().is_some()`), so this resolution cannot fail. A prior
+        // `ok_or_else` refusal here was provably unreachable — the same predicate
+        // decided the branch two lines up — and its removal is this fix, not a
+        // simplification of it: an unreachable "helpful" error is not a safety net,
+        // it is untested residue that reads as coverage.
+        // docs/issues/archive/2026-09-11-the-symbols-no-name-refusal-is-unreachable.md
         let (pattern, is_name_path) = input["name"]
             .as_str()
             .map(|p| (p, false))
             .or_else(|| input["symbol"].as_str().map(|p| (p, true)))
-            .ok_or_else(|| {
-                // List the keys the LLM actually sent so it can self-correct.
-                let got_keys: Vec<&str> = input
-                    .as_object()
-                    .map(|o| o.keys().map(|k| k.as_str()).collect())
-                    .unwrap_or_default();
-                RecoverableError::with_hint(
-                    format!(
-                        "missing 'name' or 'symbol' parameter (received keys: {})",
-                        if got_keys.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            got_keys.join(", ")
-                        }
-                    ),
-                    "Provide 'name' (substring search) or 'symbol' (exact identifier, e.g. 'MyStruct/my_method')",
-                )
-            })?;
+            .expect("has_name_arg above guarantees name or symbol resolves to a string");
         let mut guard = OutputGuard::from_input(&input);
         // Search uses a tighter exploring cap than the default 200.
         // Skip the clobber when caller passed an explicit limit — from_input already
