@@ -510,6 +510,42 @@ postdates the compaction, hence could only carry `bcc98c22`. Three independent c
 > a conclusion whose weakest input was never in scope. Which is why the fix has to sit with the
 > sender — the one party for whom the premise *is* checkable.
 
+**FIFTH INSTANCE, 2026-09-11 — and it adds the property that defeats this sub-pattern's own
+remedy: the check WAS run, returned a TRUE result, and was about the wrong referent.** Four
+instances by one author (sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`) inside one session:
+
+| # | the check I ran | what it was silent about |
+|---|---|---|
+| 1 | probed an overflowing `grep` for a `corrections` key; it was there | two unrelated mechanisms share that key name; the bug was the other one, and its own § *Summary* said so |
+| 2 | `unresolved` `38 -> 31` after a full reembed | a PER-QUERY sample, not a store total — 21/31/46 on three queries at one instant, so the delta compares different populations |
+| 3 | two peers' statements, each accurately recorded | *which* live peer said it — I attributed one session's blocker to another |
+| 4 | every path a peer claimed AND disclaimed was dirty; reported as *"attribution checked out exactly"* | dirtiness holds either way, so the check is **monotone under the attribution being wrong**; four of the five disclaimed paths were in fact theirs (`8b396343`) |
+
+**Why this is not just four more of instances 1-4.** Those were checks *not run* — and this
+entry's remedy is therefore "resolve the referent before you hand it on", which presumes that
+running the check would have settled it. Here the checks were run and passed. A confirming
+result that the broken world also produces cannot be fixed by running it again, harder, or
+first. **So the remedy needs the § *Testing Discipline* question attached to it: not "did I
+verify?" but "would a broken world return this same result?"** Instances 1, 2 and 4 each answer
+yes.
+
+**The ordering is the evidence for this entry's central claim, and it is unusually clean.** I
+wrote `bug-fix-session-log:W-124` — *a probe composed from a bug's TITLE confirmed the half that
+was never broken* — about instance 1, and then committed instances 3 and 4 **after** it, the
+second of them inside a message correcting a peer's version of the same error. This section's
+headline measurement (2026-08-30: four instances in one evening, every one by an author actively
+writing about the class) now has an independent replication with the entry demonstrably written
+first. Knowing the class prevented none of the three that followed.
+
+**What did work, neither of which was care.** A peer replying *"I do not know what this claim
+means"* rather than constructing a plausible reading — which caught instance 3 and forced the
+re-derivation that produced instance 2's real answer. And the shared-checkout pathspec sequence,
+a mechanism rather than a judgement, which held through all four: every commit took only its
+author's paths while both parties' attributions were wrong. That is position 3 of § *Observer
+Blindness* doing exactly what it claims — the mechanism covered the judgement, not the reverse.
+Refusal-to-interpolate is the transferable half: it is not a higher standard of care, it is
+declining to supply a referent the message did not.
+
 ### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
 
 Found 2026-08-31, and it is the sharpest thing in `OB-1` because it names a defect the
