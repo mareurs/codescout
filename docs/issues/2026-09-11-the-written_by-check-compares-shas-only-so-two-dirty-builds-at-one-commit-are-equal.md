@@ -70,6 +70,31 @@ knows it is dirty and says so on demand. The check simply does not ask.
 `CODESCOUT_GIT_DIRTY`. The sha reaches this site; the dirty flag does not, because `env!` is
 called for the sha alone.
 
+
+**The struct's doc comment is NOT wrong, and saying so precisely matters.**
+`src/retrieval/index_state.rs:115-117` reads: *"a sidecar stamped with a `git_sha` different from
+the reading binary's own `env!("CODESCOUT_GIT_SHA")` **proves a different build wrote it**, on
+every platform, with no `/proc` walk."* That is true — it is the **converse** direction, and it
+holds. The defect is entirely in the silence: nothing anywhere claims that equal shas prove the
+same build, and nothing needs to, because a guard that only ever speaks on mismatch is read as
+covering the property it is named for. Do not "fix" the comment.
+
+**IDENTITY vs ANCESTRY — the distinction this file initially collapsed, and the reason it is
+recorded here rather than quietly corrected.** From `git_dirty: true` I concluded *"the sha names a
+commit the build is not"*, and then that any claim resting on the sha was unsupported. The first
+clause is right and the inference is one step too strong. Uncommitted edits are an **additive**
+delta over the committed tree, so:
+
+- *"the build IS `78e89c80`"* — an IDENTITY claim. `git_dirty: true` refutes it outright.
+- *"the build CONTAINS `4629a95b`"* — a LOWER-BOUND claim. `git merge-base --is-ancestor 4629a95b
+  78e89c80` returns yes, so the committed tree holds the fix, and the sha supports the claim with
+  one named residual: it fails only if the uncommitted delta REVERTED it.
+
+That residual is representable and here it was not idle — `4629a95b` touched `src/server.rs`, which
+was one of the files dirty at build time. So **the sha bounds the COMMITTED content and the dirty
+flag marks an unbounded delta on top**; a lower-bound claim survives it and an identity claim does
+not. Correction owed to `codescout-75` (sessionId b0b9bc40…), whose own error was the mirror of
+mine: using identity-grade language for a lower-bound fact.
 ## Why this is a NEW instance, not the archived one
 
 `docs/issues/archive/2026-08-16-usage-db-records-a-sha-that-need-not-describe-the-built-code.md`
@@ -113,19 +138,49 @@ downstream fires.
 
 ## Fix
 
-Not attempted — filed on notice.
+Not attempted — filed on notice. **And the first prescription written here was wrong; it is kept
+below with its refutation, because it is the one a reader would otherwise re-derive.**
 
-The shape is to widen the predicate rather than the payload: compare `(sha, dirty)` and treat
-`dirty` on **either** side as "cannot establish sameness", since two dirty builds are
-unidentifiable rather than merely different. That needs `CODESCOUT_GIT_DIRTY` at this site, which
-`build.rs` already emits. Emitting a `reading_binary_dirty` beside `reading_binary_sha` is the
-smaller half and worth doing regardless — it removes the within-object asymmetry even if the
-predicate is left alone.
+**What the check can and cannot conclude.** Three cases, and only the third is the defect:
 
-Note the honest limit before writing a test: two dirty builds are not *provably* different either.
-The correct report is "unidentifiable", not "different", and an assertion claiming the latter
-would be the same defect inverted.
+| writer vs reader | conclusion | today |
+|---|---|---|
+| shas differ | **different build** — sound | reported ✓ |
+| shas equal, both clean | same build | silent ✓ |
+| shas equal, either dirty | **unknown** | silent ✗ |
 
+The correct report for row 3 is *"cannot establish sameness"*, never *"different"* — two dirty
+builds are unidentifiable rather than provably distinct, and a message claiming the latter is this
+same defect inverted.
+
+**REJECTED — my first prescription: compare `(sha, dirty)` and treat `dirty` on either side as
+"cannot establish sameness".** Refuted by `codescout-75` (sessionId b0b9bc40…): a dirty build
+reading **its own** sidecar lands in row 3, so that rule warns on every ordinary single-session run
+with a dirty tree — which is the normal state of this checkout. Over-firing here is worse than
+silence, because the warning's whole content is *"something unexpected wrote this"*. Note also that
+naive pair equality does **not** work either, in the opposite direction: `(X, true) == (X, true)`,
+so two genuinely different dirty builds at one commit still compare equal. The two obvious repairs
+fail on opposite sides.
+
+**`pid` / `exe_deleted` narrow it and do not close it.** They are already in `WriterProvenance` and
+they do discriminate the common self-comparison — but `pid` is the identity of a PROCESS, not of a
+BUILD: restarting the same binary changes it. So `pid` supports a positive *"definitely the same
+build"* (same live pid) and yields no sound negative. It converts a guaranteed false positive into
+an occasional one.
+
+**What would actually close it is a content-derived BUILD identity** — something that varies with
+uncommitted content, which `git_sha` by construction does not. A `build.rs`-baked build id is the
+obvious shape and `build.rs` already computes the dirty bit in the same function. **Flagged, not
+prescribed:** the archived `0cd1fe818951b232` records that the `build.rs` stamp *"can be stale"*
+because its rerun triggers are declared rather than universal, so a build id minted there inherits
+exactly the staleness it is meant to detect. That needs measuring before anyone builds it.
+
+**The smaller half is worth doing regardless and is independent of all the above:** emit
+`reading_binary_dirty` beside `reading_binary_sha` at `:774`. The writer's record carries
+`git_dirty` and the reader's self-identification does not, in the same JSON object — a caller
+comparing the two fields is handed a dirty-aware value on one side and a dirty-blind one on the
+other, with nothing marking the difference. That asymmetry is a defect on its own terms whatever
+happens to the predicate.
 ## Tests added
 
 None. A regression test needs two builds at one sha with different content, so the cheap version
