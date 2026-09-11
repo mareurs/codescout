@@ -172,9 +172,36 @@ The third is the one worth keeping. With the predicate typo'd the population is 
 
 ### Still genuinely owed
 
-`src/tools/create_file.rs` under `overwrite: true` remains unguarded, but now explicitly rather than invisibly: it sits in the gate's `EXEMPT` list with its reason, so it is a recorded decision instead of a gap. It cannot compute a shrink report without a read it does not currently perform, which is a behaviour change rather than a wiring fix.
+`src/tools/create_file.rs` under `overwrite: true` runs no shrink guard, and on re-examination
+**that is correct rather than a gap** — which corrects what this file said when the class gate first
+shipped.
 
-And `edit_code` still **warns** rather than refusing, so the loss remains possible for a caller who ignores the warning. That is the operator's decision of 2026-09-11, not an oversight.
+The earlier reason given was *"it cannot compute a shrink report without an added read."* That is
+mechanically true and beside the point: it already stats the path (`create_file.rs:74`), and one
+`read_to_string` would hand it the operands. The real reason is different in kind.
+
+**`overwrite: true` is already the guard.** `create_file` refuses outright when the file exists and
+the flag is absent (`create_file.rs:74-81`), so a caller reaching the destructive path has
+affirmatively declared intent. `edit_code(action="replace")` has no such opt-in — *every* replace is
+implicitly total, which is exactly what makes a partial body there an accident rather than a
+choice. And `content` is by definition the whole file, with no prior structure it is supposed to
+match: regenerating a fixture as something entirely different is ordinary use, so an advisory would
+fire on correct calls far more often than on mistaken ones — which is how a warning field gets
+trained out of a reader's attention.
+
+A second, smaller fact points the same way: `create_file` returns `json!("ok")`, a bare string under
+this repo's no-echo-write convention, so there is no response object to carry a `warning` at all.
+Attaching one would change the return contract for every caller. That is a cost, not an argument,
+and it is recorded second because it would not justify the decision on its own.
+
+So the `EXEMPT` entry now states *should not* rather than *cannot*. The distinction matters because
+a wrong reason in an exemption list is what stops the next reader re-examining it — and "we could
+not" invites someone to do the work that removes the obstacle, which here would make the tool
+worse.
+
+What remains genuinely open: `edit_code` **warns** rather than refusing, so the loss is still
+possible for a caller who ignores the warning. That is the operator's decision of 2026-09-11, not
+an oversight.
 ## Tests added
 
 `tests/symbol_lsp.rs`:

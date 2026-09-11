@@ -2937,10 +2937,15 @@ mod tests {
     /// silent option is the one removed.
     const EXEMPT: &[(&str, &str)] = &[(
         "create_file",
-        "under `overwrite: true` it writes caller content over an existing file, but never \
-         READS that file — so it cannot compute a shrink report without an added read, which \
-         is a behaviour change rather than a wiring fix. Tracked in the bug file named by \
-         every_content_bearing_tool_is_shrink_guarded_or_has_a_reason, under 'What is still owed'.",
+        "`overwrite: true` IS its guard. The tool refuses outright when the file exists and \
+         the flag is absent, so a caller reaching the destructive path has affirmatively \
+         declared intent — where `edit_code(action=\"replace\")` has no such opt-in and every \
+         replace is implicitly total, which is what makes a partial body there an accident. \
+         And `content` is by definition the whole file, with no prior structure it must match: \
+         regenerating a fixture as something entirely different is ordinary use, so a shrink \
+         advisory would fire on correct calls far more often than on mistaken ones. \
+         Mechanically it COULD be guarded — it stats the path already and one read would give \
+         it the operands — so the reason is that it should not be, not that it cannot be.",
     )];
 
     fn shrink_gate_repo_root() -> std::path::PathBuf {
