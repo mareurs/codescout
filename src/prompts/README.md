@@ -60,48 +60,60 @@ Two things about it are load-bearing.
 **Moving prose from a schema into a `get_guide` topic is not a saving by default.** Both land in the same cached prefix. A guide fired at turn K costs `X × (N−K) × cache_read + X × cache_write`, against the schema's `X × N × cache_read` — break-even at **K ≈ 12.5 turns**, and `librarian` auto-injects on the first `artifact` call. It wins only for sessions that never trigger the guide at all.
 
 Full derivation, the rejected alternatives, and the open routing experiment: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
-## All three byte budgets sit at zero headroom — budget a net-neutral edit
+## Three byte budgets, and two of the margins are invisible until you exceed them
 
-The section above governs **one of three** byte budgets over these surfaces. All three are held
-at the measured total by the same *ratchet down, never raise* policy, so in practice **there is
-no slack: any net-positive byte reds the build.** That includes a byte added to a guide section
-that is merely *served* by a topic rather than grown itself.
+Three byte budgets govern these surfaces; § *The tool-surface budget* above documents one. All
+three are held near the measured total by the same *ratchet down, never raise* policy, so the
+slack is small and **you cannot see two of the three before you spend them** — which is the
+operative reason to budget a net-neutral edit, not a claim that the margin is zero.
 
-| what it bounds | constant | test |
-|---|---|---|
-| one `serves:`-declaring guide section | `MAX_DECLARED_SECTION_BYTES`, `src/prompts/guide_index.rs` | `declared_sections_are_within_the_size_cap` |
-| everything a p50 session receives after the primary call | `CEILING`, `src/server.rs` | `a_p50_session_stays_under_the_committed_emission_byte_ceiling` |
-| the advertised `tools/list` payload | `TOOL_SURFACE_CHAR_BUDGET`, `src/server.rs` | `tool_surface_under_budget` |
+| what it bounds | constant | test | readable at rest? |
+|---|---|---|---|
+| one `serves:`-declaring guide section | `MAX_DECLARED_SECTION_BYTES`, `src/prompts/guide_index.rs` | `declared_sections_are_within_the_size_cap` | **no** |
+| everything a p50 session receives after the primary call | `CEILING`, `src/server.rs` | `a_p50_session_stays_under_the_committed_emission_byte_ceiling` | **no** |
+| the advertised `tools/list` payload | `TOOL_SURFACE_CHAR_BUDGET`, `src/server.rs` | `tool_surface_under_budget` | yes — `tool_surface_report_lengths` |
 
-**Derive the current margin; do not cite one from here.** § *The tool-surface budget* already
-records what happens to a figure written into this file, twice. Each test prints its own total
-and bound *in the failure*, so running it is the cheapest derivation there is —
-`cargo test --workspace <test name>` for any row above.
+**Only the tool surface has an at-rest reader.** `cargo test --lib tool_surface_report_lengths --
+--nocapture` prints a per-tool map and a `budget N, headroom M` line whether or not anything is
+over. The other two print **nothing on success**: their totals appear only inside the panic
+message, so the single way to learn those margins is to exceed them. That asymmetry is the same
+shape as the rest of this section — a bound published only to whoever already tripped it.
+
+**Derive it; never cite a margin from this file.** § *The tool-surface budget* records what
+happens to a figure written here, twice, and the paragraph you are reading was itself wrong
+about this on 2026-09-10 (below).
 
 **The remedy is a net-neutral edit, and the sanctioned raise is the trap.**
 `tool_surface_under_budget`'s message says raising the budget IS allowed when the bytes are
-owed — which is true, and is not a judgement it can make for you. Measured 2026-09-10 by
-sessionId `c86ebb51-7ae3-477d-b755-f25db6180782`: a **47-character** schema addition put the
-surface **47 characters** over, and separately a few hundred bytes of new guide prose broke the
-p50 ceiling — two of the three fired in one afternoon, from one feature. Both were repaired by
-rewording to the same length rather than by moving a bound: the schema traded a phrase for a
-shorter one, and the guide bullet swapped an equal-length sentence naming the new *field*
-instead of the old *flag*, which was the point of the edit anyway. Forty-seven characters
-buying a field name that fits for free are not owed.
+owed — true, and not a judgement it can make for you. On 2026-09-10 sessionId
+`c86ebb51-7ae3-477d-b755-f25db6180782` fitted a new field name into a shorter replacement phrase
+rather than taking the raise, and swapped an equal-length guide sentence naming the new *field*
+instead of the old *flag* — which was the point of the edit anyway. A field name that fits for
+free is not owed a budget increase.
 
-**And do not diagnose one of these from a single sample of a tree you are editing.** The same
-afternoon, a peer reading the working tree mid-edit measured `librarian.md` at +1 byte overall
-while one of its sections had moved by 420 B, and inferred content redistribution and a
-too-broad `serves:` declaration. The bytes were right and the inference was wrong — an addition
-minus an already-applied trim happened to net +1. What settled it was a **two-state
-measurement**: revert the guide to `HEAD`'s bytes, re-run, observe the baseline pass. One test
-run, no code read, no hypothesis needed.
+**Two ways to mis-read a gate figure, both paid for on 2026-09-10, both about the same instant.**
 
-**Why this is here and not left to the three tests.** Each states its bound only inside its own
-failure string, so the bound reaches an author *after* they have spent the bytes — and reds a
-shared checkout to do it. Moving the scope to the surface a prompt author actually opens is
-§ *Observer Blindness*'s third position; publishing it again where it already lives would not
-have helped, because the reader does not know that surface exists until it fires.
+- **A gate figure can be inflated by a CONCURRENT WRITE.** `declared_sections_are_within_the_size_cap`
+  reported a section at 2727 B that measured 2457 B on disk, because the guide `.md` is read at
+  runtime and a peer was writing it mid-gate; `tool_surface_under_budget` reads descriptions
+  compiled from a `src` file dirty at the same moment. All three passed on re-run with nothing
+  fixed. **A red here is a claim about one instant on one tree** — re-derive at rest before
+  acting on the number, and prefer the at-rest reader above where one exists.
+- **And a single sample of a tree you are editing cannot support a causal story.** The same
+  afternoon a reader measured `librarian.md` at +1 byte overall while one section had moved
+  420 B, and inferred content redistribution and a too-broad `serves:` declaration. The bytes
+  were right and the inference was wrong — an addition minus an already-applied trim netting +1.
+  What settled it was a **two-state measurement**: revert the guide to `HEAD`'s bytes, re-run,
+  observe the baseline pass.
+
+*(Corrected 2026-09-11. This section shipped at `faf1dc99` claiming all three budgets sat at
+**zero** headroom and that running any of the three tests printed its margin. Both were wrong,
+and wrong in the way the first bullet above describes: the "margin 0 B" and the 47-chars-over
+figures were read out of failure messages produced while a peer held the tree dirty. Measured at
+rest on 2026-09-11 the tool surface had **262** characters of headroom, and the other two tests
+print nothing at all when they pass. Caveat raised by sessionId
+`26cb9b5b-2c9c-489e-97d9-3a907c8b2941`, who had chased one of those false reds the day before;
+re-derived here rather than relayed.)*
 ## Versioning — when to bump ONBOARDING_VERSION
 
 Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing a surface that produces the **stored per-project system prompt** — the `onboarding_prompt` slice of `source.md`, or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system-prompt regeneration for all projects onboarded with the previous version.
