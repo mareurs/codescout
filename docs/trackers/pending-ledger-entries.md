@@ -288,6 +288,73 @@ prescribes for a coverage ratio, applied to a membership predicate instead of a 
 **Rests on:** `tests/issue_clusters.rs` `tracked_open_bug_files()`; the eight files'
 frontmatter as merged; `e4262c97`.
 
+## Draft 6 — append with `id_prefix="F"`
+
+**Title:** the verify-before-asserting habit was scoped to my own artifacts, so a claim about a
+peer's code bypassed it entirely — and "do not write their file" had quietly become "do not
+read it"
+
+**Body:**
+
+**Valid:** invariant
+
+**Category:** self-friction
+
+**Severity:** med
+
+**Status:** open — no mechanism; the remedy below is a policy and I do not have a gate for it.
+
+**Observed.** Three instances of one class in a single session — *asserting a property of a
+mechanism from its description rather than from reading it* — and the defence that caught the
+second did not fire on the third.
+
+| # | the claim | caught by |
+|---|---|---|
+| A | `doctor`'s `params_behind_body` `detail` asserts *"a move re-keys the row"* for an id that was worktree-minted | me, reading the filed bug — became the entry this ledger already holds |
+| B | my own new test's doc comment: *"the token appears in the § Development Commands region too"* | me, `grep -c` before commit — returned **1**, the carve-out itself |
+| C | told a peer their pre-push guard would see merges *"go from rare to universal"* and warned about its false-positive rate | **the peer**, by reading their own implementation |
+
+**The asymmetry is the finding.** B and C are the same defect. B triggered a check because the
+artifact was mine and opening it was reflex. C did not, and the reason is not carelessness: I
+had the peer's one-line description of their check and treated it as sufficient, because the
+artifact felt like theirs to inspect.
+
+**It was fully readable.** Their implementation — `src/librarian/tools/append_entry.rs`, the
+pre-push guard script and its test — was **dirty in the shared working tree at that moment**.
+I had already enumerated those exact paths, by name, in a provenance run, in order to avoid
+committing them. I could have opened any of them in one call. What stopped me was not access.
+
+**The conflation, stated plainly.** This checkout's discipline is *do not WRITE a peer's
+uncommitted file* — `fmt-mine.sh` refuses it, `git commit` by pathspec exists for it, and
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` measures the
+cost of getting it wrong. Somewhere that became *do not TOUCH a peer's file*, and reading is
+not touching. The write prohibition is load-bearing and correct; extending it to reads removes
+the only thing that would have stopped me making a false public claim about their work.
+
+**Why the cost is not hypothetical.** The claim was addressed TO the author, who could check
+it — the best possible case. Sent to any third party, or recorded in a ledger, *"the pre-push
+guard's false-positive rate goes up after a merge"* is a plausible, specific, wrong statement
+about a subsystem under active development, and the party best placed to refute it would never
+have seen it. Severity `med` rather than `high` only because the addressing happened to route
+it to the one reader who could falsify it.
+
+**Remedy, and it is narrow on purpose:** before asserting a property of code a peer holds,
+read the code — the same standard applied to one's own. The shared-checkout rules restrict
+writes and say nothing about reads, so no rule had to change; what needed changing is that I
+had generalised one into the other. **The tell:** a sentence of the form *"if your X does Y
+then Z"* where X is someone else's and you have not opened it. State the conditional
+explicitly, or open it.
+
+**Not generalisable to "ask fewer questions of peers."** The prediction was worth making and
+the peer said so — it prompted a stress-test they had not run. What was wrong was the
+grammar: I asserted a property where I held a hypothesis. *"Does your check key on merge
+presence or on a verified duplicate? If the former, …"* costs one sentence and is true.
+
+**Rests on:** the three instances above, 2026-09-11; the peer's reply confirming their refuse
+fires on `git grep -c '^## PREFIX-N' >= 2` in the merge's own tree rather than on merge
+presence; `observer-blindness:OB-1` for the *knowing the class prevents nothing* precedent,
+of which this is a same-session n=3.
+
 ## Addendum — fold into Draft 2, or drop
 
 **Three registry names for one sessionId inside one day, observed live.** sessionId
