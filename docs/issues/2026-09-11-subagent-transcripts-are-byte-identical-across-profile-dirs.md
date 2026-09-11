@@ -4,10 +4,10 @@ kind: bug
 status: open
 title: '228 subagent transcripts exist as byte-identical copies across 2-3 of this machine''s three CC profile dirs, origin unestablished'
 tags:
+- cluster/unclassified
 - subagents
 - transcripts
 - cross-profile
-- doc-vs-code
 topic: subagent guide delivery / transcript corpus hygiene
 ---
 
