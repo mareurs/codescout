@@ -31,6 +31,8 @@
 crates/*/.codescout/call_edges.db
 crates/*/.codescout/cc_session_id
 crates/*/.codescout/code-index.db
+crates/*/.codescout/code-index.db-shm
+crates/*/.codescout/code-index.db-wal
 crates/*/.codescout/constitution-seen/
 crates/*/.codescout/crash.log
 crates/*/.codescout/debug.log*
