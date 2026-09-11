@@ -870,6 +870,14 @@ fn finalize_search_results(
 ) -> Value {
     // Build by_file distribution from the full result set BEFORE truncation.
     let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
+    // The true distinct-file count over the FULL match set — `by_file_entries` is
+    // capped at BY_FILE_CAP (15) for display, so its length alone undercounts once a
+    // result spans more files than that. `by_file_overflow_count` is exactly how many
+    // were cut off, so the sum is the real total regardless of either cap.
+    // `format_search_symbols` (`src/tools/symbol/display.rs`) reads this instead of
+    // recomputing a count from the served page, which is a DIFFERENT, narrower scope.
+    // docs/issues/archive/2026-09-11-symbols-search-header-pairs-a-result-scoped-total-with-a-page-scoped-file-count.md
+    let files_count = by_file_entries.len() + by_file_overflow_count;
     let hint = if matches.len() > guard.max_results {
         make_search_symbols_hint(guard.max_results, &by_file_entries)
     } else {
@@ -940,7 +948,7 @@ fn finalize_search_results(
     }
 
     let total = overflow.as_ref().map_or(matches.len(), |o| o.total);
-    let mut result = json!({ "symbols": matches, "total": total });
+    let mut result = json!({ "symbols": matches, "total": total, "files_count": files_count });
     if let Some(file) = shared_file {
         result["file"] = json!(file);
     }

@@ -5152,6 +5152,54 @@ fn symbols_with_overflow_stays_silent_when_the_file_breakdown_is_not_capped() {
     );
 }
 
+/// The header's file count must be RESULT-scoped, matching `total`, not PAGE-scoped —
+/// docs/issues/2026-09-11-symbols-search-header-pairs-a-result-scoped-total-with-a-page-scoped-file-count.md.
+/// `groups.len()` only ever counts distinct files among the SERVED page (`val["symbols"]`),
+/// so a query whose 57 matches span 11 files reads "57 matches in 4 files" once anything
+/// pages. `files_count`, when present, is computed over the FULL match set
+/// (`finalize_search_results`, before `OutputGuard::cap_items` truncates) and must win.
+#[test]
+fn symbols_with_overflow_names_the_true_file_count_not_the_page_one() {
+    let val = serde_json::json!({
+        "symbols": [
+            { "kind": "Function", "file": "a.rs", "start_line": 1, "end_line": 1, "name": "f1", "symbol": "f1" },
+            { "kind": "Function", "file": "b.rs", "start_line": 1, "end_line": 1, "name": "f2", "symbol": "f2" }
+        ],
+        "total": 57,
+        "files_count": 11,
+        "overflow": { "shown": 2, "total": 57, "hint": "narrow with path=" }
+    });
+    let result = format_search_symbols(&val);
+    assert!(
+        result.starts_with("57 matches in 11 files\n"),
+        "the file count beside a result-scoped total must itself be result-scoped, got:\n{result}"
+    );
+    assert!(
+        !result.contains("in 2 files"),
+        "must not fall back to the page's own distinct-file count when the true one is \
+         available, got:\n{result}"
+    );
+}
+
+/// Over-match guard: when `files_count` is absent (the shape every pre-existing test in this
+/// file uses), the renderer must fall back to the page's own count exactly as before — proving
+/// the fix is additive, not a silent behavior change for callers that never send the field.
+#[test]
+fn symbols_without_files_count_falls_back_to_the_page_count() {
+    let val = serde_json::json!({
+        "symbols": [
+            { "kind": "Function", "file": "a.rs", "start_line": 1, "end_line": 1, "name": "f1", "symbol": "f1" },
+            { "kind": "Function", "file": "b.rs", "start_line": 1, "end_line": 1, "name": "f2", "symbol": "f2" }
+        ],
+        "total": 2
+    });
+    let result = format_search_symbols(&val);
+    assert!(
+        result.starts_with("2 matches in 2 files\n"),
+        "no files_count field means fall back to groups.len(), got:\n{result}"
+    );
+}
+
 #[test]
 fn symbols_empty() {
     let val = serde_json::json!({

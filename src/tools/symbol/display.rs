@@ -151,7 +151,18 @@ pub fn format_search_symbols(val: &Value) -> String {
         .collect();
 
     let groups = group_by_file(&normalized);
-    let files = groups.len();
+    // The header's file count must match `total`'s SCOPE — the full match set, not the
+    // served page. `groups.len()` only ever counts distinct files among `val["symbols"]`
+    // (the page), so it silently narrows once anything pages. `files_count`, when the
+    // producer sends it, is computed over the full pre-truncation match set
+    // (`finalize_search_results`, `src/tools/symbol/symbols.rs`) and wins — the same
+    // explicit-field-first pattern `grep.rs`'s `format_grep` already uses for the same
+    // pairing (`files_count` there too, not `files_arr.len()`).
+    // docs/issues/archive/2026-09-11-symbols-search-header-pairs-a-result-scoped-total-with-a-page-scoped-file-count.md
+    let files = val["files_count"]
+        .as_u64()
+        .map(|n| n as usize)
+        .unwrap_or(groups.len());
     let noun = if total == 1 { "match" } else { "matches" };
 
     let render_item = |item: &Value| -> String {
