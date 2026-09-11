@@ -144,7 +144,7 @@ test_symbols_overview_auth_service() {
 }
 
 test_symbols_login() {
-    call symbols '{"pattern": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
+    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
     if assert_contains "login" && assert_contains "AuthService"; then
         pass 1 "symbols locates login method"
     else
@@ -153,7 +153,7 @@ test_symbols_login() {
 }
 
 test_symbols_with_body() {
-    call symbols '{"pattern": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
+    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
     if assert_contains "verifyPassword" && assert_contains "generateTokens"; then
         pass 1 "symbols with include_body returns login source"
     else
@@ -162,7 +162,7 @@ test_symbols_with_body() {
 }
 
 test_symbols_sealed_class() {
-    call symbols '{"pattern": "AuthError", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
+    call symbols '{"name": "AuthError", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
     if assert_contains "AuthError" && assert_contains "InvalidCredentials" && assert_contains "sealed class"; then
         pass 1 "symbols finds AuthError sealed class with subclasses"
     else
@@ -262,7 +262,7 @@ test_explore_auth_flow() {
         return
     fi
     # Step 2: Read login method body
-    call symbols '{"pattern": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
+    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
     if assert_contains "verifyPassword" && assert_contains "AuthError"; then
         pass 2 "explore auth: discover login flow (find class → read method)"
     else

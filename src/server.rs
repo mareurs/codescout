@@ -2914,7 +2914,7 @@ mod tests {
     /// real strings rather than re-typing the registry sweep as a second copy of the
     /// loop — which would be an un-annotated fixture, not a control.
     fn description_declares_an_alias(d: &str) -> bool {
-        d.starts_with("Alias for ")
+        d.starts_with("Alias for ") || d.contains("(alias of ")
     }
 
     /// No property may describe itself as an alias, because no property IS one any
@@ -2922,26 +2922,21 @@ mod tests {
     /// exactly one name per concept. Reds if a collapsed alias is reintroduced as a
     /// property, which is the regression this collapse invites.
     ///
-    /// Scoped to the ONE prose form the 26 collapsed properties actually used —
-    /// `description_declares_an_alias` (`d.starts_with("Alias for ")`), verified by
-    /// `git log -p` over the four collapsed-tool files, which show only `"Alias for
-    /// path"` / `"Alias for body"`, never a parenthetical form. `read_file`'s
-    /// `offset`/`limit` say "Native-Read-style alias" and are deliberately NOT matched:
-    /// they are a second calling convention, not a rename, and remain advertised on
-    /// purpose.
+    /// Scoped to the TWO prose forms collapsed alias properties actually used, and no
+    /// wider. `"Alias for path"` / `"Alias for body"` was the form the 26 properties of
+    /// the 2026-09-10 batch carried (verified by `git log -p` over those four files);
+    /// `"(alias of query)"` / `"(alias of symbol)"` was `symbols.rs`'s, collapsed
+    /// 2026-09-11. The parenthetical arm was deliberately NOT matched until then,
+    /// because it would have red against `symbols` — code that batch did not touch —
+    /// rather than against a regression. `read_file`'s `offset`/`limit` say
+    /// "Native-Read-style alias" and are still deliberately not matched: they are a
+    /// second calling convention, not a rename, and remain advertised on purpose. So is
+    /// `librarian.old_root`'s "Preferred alias of root", which carries no open paren.
     ///
-    /// DELIBERATELY NARROWER than the plan draft, which also matched
-    /// `d.contains("(alias of ")`. That second form is real in this tree, but it is
-    /// `symbols.rs`'s `name`/`name_path` — `"(alias of query)"` / `"(alias of
-    /// symbol)"` — which the ADR amendment and Task 6 place OUT OF SCOPE (`symbols`
-    /// carries no top-level `required`, so no false schema claim exists there). Adding
-    /// the parenthetical match here would make this gate fail immediately against
-    /// code no task in this plan touches, not against a regression — verified by
-    /// running it: it failed on `symbols.name`/`symbols.name_path` before any
-    /// mutation was applied. **Uncovered residue, named rather than silently left:**
-    /// a schema-only alias resolved inside `call()` and never declared via
-    /// `param_aliases()` — exactly `symbols.rs`'s shape — reds nothing in this gate or
-    /// anywhere else in this file; no gate in this module checks that case.
+    /// **Uncovered residue, named rather than silently left:** a schema-only alias
+    /// resolved inside `call()` and never declared via `param_aliases()` reds nothing
+    /// in this gate or anywhere else in this file. That was exactly `symbols.rs`'s
+    /// shape and is now gone, but nothing stops the next one.
     #[tokio::test]
     async fn no_schema_property_declares_itself_an_alias() {
         let (_dir, server) = make_server().await;
@@ -2972,20 +2967,28 @@ mod tests {
         assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
     }
 
-    /// Positive/negative control for `description_declares_an_alias`, using two REAL
-    /// strings rather than synthetic ones: the positive is the exact deleted
+    /// Positive/negative control for `description_declares_an_alias`, using REAL
+    /// strings rather than synthetic ones. Positives: the exact deleted
     /// `read_file.output_id` description (`git log -p -S '"output_id"' --
-    /// src/tools/read_file.rs`); the negative is `read_file`'s LIVE `limit`
-    /// description, which contains the word "alias" but is not this prose form — the
+    /// src/tools/read_file.rs`) for the `"Alias for "` arm, and the exact deleted
+    /// `symbols.name` description for the parenthetical arm. Negatives: `read_file`'s
+    /// LIVE `limit` description and `librarian`'s LIVE `old_root` description — both
+    /// contain the word "alias" and neither is this prose form, which is the
     /// discriminating case a blind `contains("alias")` would get wrong.
     #[test]
     fn description_declares_an_alias_matches_only_the_real_alias_prose() {
         assert!(description_declares_an_alias(
                 "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back."
             ));
+        assert!(description_declares_an_alias(
+            "Substring or exact symbol name (alias of query)."
+        ));
         assert!(!description_declares_an_alias(
                 "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted."
             ));
+        assert!(!description_declares_an_alias(
+            "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface."
+        ));
     }
 
     /// Per-tool declared-alias-pair counts, restoring the SHAPE of the deleted
@@ -3010,7 +3013,13 @@ mod tests {
     /// override, a 2-pair array `("query","semantic")`/`("q","semantic")` — `find`'s
     /// search parameter is `semantic`, not `query`, and the mismatch previously
     /// no-op'd silently rather than erroring (verified live: `query="zzz-nonexistent"`
-    /// returned unfiltered results with no warning). 4*3 + 2*5 + 1*5 + 1*4 + 1*2 = 35.
+    /// returned unfiltered results with no warning). `symbols` gained one on 2026-09-11,
+    /// a 2-pair array `("query","name")`/`("name_path","symbol")` — it advertised FOUR
+    /// name-ish properties for two concepts, and the fourth was not merely redundant:
+    /// `call()` read the exact-vs-substring MODE off which keys were PRESENT while the
+    /// pattern came from a separate precedence chain, so a key that lost the race still
+    /// flipped the mode (`symbols(query="Tool|Doc", symbol="x")` returned 0 matches with
+    /// the regex refusal suppressed). 4*3 + 2*5 + 1*5 + 1*4 + 2*2 = 37.
     const EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL: &[(&str, usize)] = &[
         ("edit_file", 3),
         ("call_graph", 3),
@@ -3021,6 +3030,7 @@ mod tests {
         ("create_file", 3),
         ("read_file", 5),
         ("doc", 2),
+        ("symbols", 2),
     ];
 
     /// `doc` is the one entry in the two tables above (and below, in
@@ -3117,7 +3127,7 @@ mod tests {
     /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
     /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
     /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
-    /// counts (35 pairs, 9 tools) — so a live-array mutation and this table now
+    /// counts (37 pairs, 10 tools) — so a live-array mutation and this table now
     /// disagree, which is what makes the check non-vacuous.
     ///
     /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic
@@ -3181,6 +3191,8 @@ mod tests {
         ("read_file", "file_id", "path"),
         ("doc", "query", "semantic"),
         ("doc", "q", "semantic"),
+        ("symbols", "query", "name"),
+        ("symbols", "name_path", "symbol"),
     ];
 
     #[tokio::test]
@@ -4000,8 +4012,30 @@ mod tests {
     /// previously existed only in a runtime response hint (`src/prompts/mod.rs`),
     /// never in the schema a caller actually reads before calling. Report run
     /// 2026-09-11: TOTAL (21 tools) = 55_355, headroom 0.
+    ///
+    /// **Ratcheted DOWN 2026-09-11, 55_355 → 55_093 (−262), by collapsing `symbols`'
+    /// four name-ish properties to two.** `symbols` advertised `name`, `query`,
+    /// `symbol` AND `name_path` for two concepts — substring match and exact
+    /// name-path — with two of the four describing themselves as aliases of the
+    /// other two. `query` and `name_path` are now declared via
+    /// `Tool::param_aliases()` (`("query","name")`, `("name_path","symbol")`) and
+    /// deleted from the schema, which is the same trade the −1_619 entry above made
+    /// for eight other tools. DERIVATION, not arithmetic on a remembered number:
+    /// `symbols` is the only tool whose `description()` or `input_schema()` this
+    /// change touches, so the whole −262 is its row (2_222 → 1_960). −6 of it is the
+    /// literal `query/` leaving the one-line description (114 → 108 chars, counted);
+    /// the other −256 is schema — two deleted property blocks, plus the "(alias of
+    /// query)" / "Alternative to query" clauses the two survivors no longer need,
+    /// plus `kind`'s "Ignored when name_path is given.", which stopped being true:
+    /// `kind` now applies in BOTH modes. The bytes bought nothing a caller could not
+    /// already get from the alias resolving at call time — and they bought something
+    /// worse than nothing, because `call()` read the exact-vs-substring MODE off
+    /// which of the four keys were PRESENT rather than off the one that supplied the
+    /// pattern, so a key that lost the precedence race still flipped the mode and
+    /// silently discarded `kind`. Per the rule above, the freed headroom is removed,
+    /// not banked. Report run 2026-09-11: TOTAL (21 tools) = 55_093, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_355;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_093;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

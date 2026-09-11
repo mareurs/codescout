@@ -76,7 +76,7 @@ is returned:
 
 ```
 // Find a symbol by name substring
-symbols(query="handle_event")
+symbols(name="handle_event")
 
 // Find code matching a pattern across files
 grep(pattern="handle_.*_event")

@@ -294,7 +294,7 @@ and use `OutputGuard::overflow_json()` for serialization.
 ### Anti-Pattern 3: Returning the Same Hint for Every Tool
 
 Each tool should construct hints relevant to **its own parameters**. `symbols` pattern hints mention
-`kind` and `path`; `symbols` overview hints mention `depth` and `symbols(name_path=...)`;
+`kind` and `path`; `symbols` overview hints mention `depth` and `symbols(symbol=...)`;
 `semantic_search` hints mention `path` filtering. Generic hints like "narrow your search" are
 useless.
 

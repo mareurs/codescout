@@ -999,7 +999,7 @@ fn read_full_file(
             {
                 format!(
                     "File has {} lines. For source code, prefer symbols(path) \
-                     + symbols(query=..., include_body=true) to read specific functions. \
+                     + symbols(name=..., include_body=true) to read specific functions. \
                      Or use start_line/end_line to read a specific line range.",
                     total_lines
                 )

@@ -10,7 +10,7 @@ that don't fit in the slice itself.
 
 **Rule:** `symbols` is the default for source — `symbols(path=...)` for a
 file overview, `symbols(name=..., include_body=true)` for one body,
-`symbols(query="...")` to search across the project. But `symbols` is a
+`symbols(name="...")` to search across the project. But `symbols` is a
 *definition projection*: it does NOT return imports / `use` / `package`,
 module re-exports (`mod.rs`, barrel `index.ts`), macro-generated code,
 annotations, or constructs the AST-extractor drops. For those, a **line-range `read_file` is the correct

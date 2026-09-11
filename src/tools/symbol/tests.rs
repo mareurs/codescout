@@ -170,7 +170,7 @@ async fn symbols_project_wide_uses_workspace_symbol() {
 
     // Trigger LSP startup and background indexing via a file-restricted call.
     let _ = Symbols
-        .call(json!({ "query": "main", "path": "src/main.rs" }), &ctx)
+        .call(json!({ "name": "main", "path": "src/main.rs" }), &ctx)
         .await;
 
     // Retry project-wide search (no relative_path → workspace/symbol fast path)
@@ -178,7 +178,7 @@ async fn symbols_project_wide_uses_workspace_symbol() {
     let mut found = false;
     for _ in 0..10 {
         let result = Symbols
-            .call(json!({ "query": "Point" }), &ctx)
+            .call(json!({ "name": "Point" }), &ctx)
             .await
             .unwrap();
         let symbols = result["symbols"].as_array().unwrap();
@@ -534,7 +534,7 @@ async fn symbols_by_name() {
     let result = Symbols
         .call(
             json!({
-                "query": "add",
+                "name": "add",
                 "path": "src/main.rs"
             }),
             &ctx,
@@ -685,7 +685,7 @@ async fn tools_error_without_project() {
         workspace_override: None,
     };
     assert!(Symbols.call(json!({"path": "x"}), &ctx).await.is_err());
-    assert!(Symbols.call(json!({"query": "x"}), &ctx).await.is_err());
+    assert!(Symbols.call(json!({"name": "x"}), &ctx).await.is_err());
     assert!(References
         .call(json!({"symbol": "x", "path": "y"}), &ctx)
         .await
@@ -749,7 +749,7 @@ async fn symbols_project_wide_treesitter_fallback() {
     // Project-wide search (no relative_path) — LSP will fail/return empty,
     // so tree-sitter fallback should find the symbol.
     let result = Symbols
-        .call(json!({ "query": "unique_benchmark_fn" }), &ctx)
+        .call(json!({ "name": "unique_benchmark_fn" }), &ctx)
         .await
         .unwrap();
 
@@ -765,7 +765,7 @@ async fn symbols_project_wide_treesitter_fallback() {
 
     // Also check struct is findable
     let result2 = Symbols
-        .call(json!({ "query": "UniqueTestStruct" }), &ctx)
+        .call(json!({ "name": "UniqueTestStruct" }), &ctx)
         .await
         .unwrap();
     let symbols2 = result2["symbols"].as_array().unwrap();
@@ -1910,7 +1910,7 @@ async fn symbols_directory_relative_path() {
 
     // "src" is a directory — should walk it and find symbols inside
     let result = Symbols
-        .call(json!({ "query": "add", "path": "src" }), &ctx)
+        .call(json!({ "name": "add", "path": "src" }), &ctx)
         .await
         .unwrap();
 
@@ -2040,7 +2040,7 @@ async fn symbols_path_type_file() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     let result = Symbols
-        .call(json!({ "query": "add", "path": "src/main.rs" }), &ctx)
+        .call(json!({ "name": "add", "path": "src/main.rs" }), &ctx)
         .await
         .unwrap();
 
@@ -2057,7 +2057,7 @@ async fn symbols_path_type_directory() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     let result = Symbols
-        .call(json!({ "query": "helper", "path": "src" }), &ctx)
+        .call(json!({ "name": "helper", "path": "src" }), &ctx)
         .await
         .unwrap();
 
@@ -2075,7 +2075,7 @@ async fn symbols_path_type_nested_directory() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     let result = Symbols
-        .call(json!({ "query": "multiply", "path": "src/utils" }), &ctx)
+        .call(json!({ "name": "multiply", "path": "src/utils" }), &ctx)
         .await
         .unwrap();
 
@@ -2093,7 +2093,7 @@ async fn symbols_path_type_glob() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     let result = Symbols
-        .call(json!({ "query": "add", "path": "src/**/*.rs" }), &ctx)
+        .call(json!({ "name": "add", "path": "src/**/*.rs" }), &ctx)
         .await
         .unwrap();
 
@@ -2110,7 +2110,7 @@ async fn symbols_empty_directory_returns_empty() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     let result = Symbols
-        .call(json!({ "query": "anything", "path": "src/empty" }), &ctx)
+        .call(json!({ "name": "anything", "path": "src/empty" }), &ctx)
         .await
         .unwrap();
 
@@ -2124,7 +2124,7 @@ async fn symbols_name_path_pattern_in_directory() {
 
     let result = Symbols
         .call(
-            json!({ "query": "impl Calculator/compute", "path": "src" }),
+            json!({ "name": "impl Calculator/compute", "path": "src" }),
             &ctx,
         )
         .await
@@ -2146,7 +2146,7 @@ async fn symbols_name_path_pattern_project_wide() {
     // tree-sitter merges impl methods under the type name directly
     // (no "impl" prefix), so name_path is "Calculator/compute"
     let result = Symbols
-        .call(json!({ "query": "Calculator/compute" }), &ctx)
+        .call(json!({ "name": "Calculator/compute" }), &ctx)
         .await
         .unwrap();
 
@@ -2433,19 +2433,6 @@ fn make_search_symbols_hint_contains_top_file_and_kind_and_offset() {
     );
 }
 
-#[test]
-fn kind_filter_skipped_when_using_name_path() {
-    // Verify the logic: if name_path is set, kind_filter is None.
-    let input = json!({ "symbol": "Foo", "kind": "function" });
-    let is_name_path = input["symbol"].is_string();
-    let kind_filter: Option<&str> = if is_name_path {
-        None
-    } else {
-        input["kind"].as_str()
-    };
-    assert!(kind_filter.is_none());
-}
-
 // ── symbol_to_json field contract ────────────────────────────────────────
 
 fn make_test_sym(name: &str, detail: Option<&str>) -> crate::lsp::SymbolInfo {
@@ -2604,7 +2591,7 @@ fn symbols_overview_single_file_cap_unit() {
     let total = symbols.len();
     let hint = format!(
         "File has {total} symbols. Use depth=1 for top-level overview, \
-         or symbols(name_path='ClassName/methodName', include_body=true) for a specific symbol."
+         or symbols(symbol='ClassName/methodName', include_body=true) for a specific symbol."
     );
     let g = OutputGuard {
         max_results: SINGLE_FILE_CAP,
@@ -6040,7 +6027,7 @@ async fn symbols_falls_back_to_document_symbols_on_bad_workspace_range() {
     let result = Symbols
         .call(
             json!({
-                "query": "helper",
+                "name": "helper",
                 "include_body": true,
             }),
             &ctx,
@@ -6522,7 +6509,7 @@ async fn symbols_propagates_error_when_fallback_also_fails() {
     let result = Symbols
         .call(
             json!({
-                "query": "helper",
+                "name": "helper",
                 "include_body": true,
             }),
             &ctx,
@@ -7324,7 +7311,7 @@ async fn symbols_search_honors_workspace_override_for_glob_path() {
     ctx.workspace_override = Some(root_a);
 
     let result = Symbols
-        .call(json!({ "query": "Whatever", "path": "*.txt" }), &ctx)
+        .call(json!({ "name": "Whatever", "path": "*.txt" }), &ctx)
         .await;
 
     assert!(
@@ -7669,7 +7656,7 @@ async fn symbols_scope_libraries_searches_library_dirs() {
     let result = tool
         .call(
             json!({
-                "query": "library_unique_symbol_xyz",
+                "name": "library_unique_symbol_xyz",
                 "scope": "libraries"
             }),
             &ctx,
@@ -7719,7 +7706,7 @@ async fn symbols_scope_all_searches_both() {
     let result = tool
         .call(
             json!({
-                "query": "func",
+                "name": "func",
                 "scope": "all"
             }),
             &ctx,
@@ -7768,7 +7755,7 @@ async fn symbols_scope_project_default_excludes_libraries() {
     let result = tool
         .call(
             json!({
-                "query": "my_func",
+                "name": "my_func",
                 "scope": "project"
             }),
             &ctx,
@@ -7826,7 +7813,7 @@ async fn symbols_with_multiple_matches_returns_all() {
     };
 
     let result = Symbols
-        .call(json!({ "query": "process" }), &ctx)
+        .call(json!({ "name": "process" }), &ctx)
         .await
         .unwrap();
 
@@ -7851,7 +7838,7 @@ async fn symbols_rejects_regex_alternation() {
     let ctx = test_ctx_with_agent(agent);
 
     let err = Symbols
-        .call(json!({"query": "foo|bar"}), &ctx)
+        .call(json!({"name": "foo|bar"}), &ctx)
         .await
         .unwrap_err();
 
@@ -7878,7 +7865,7 @@ async fn symbols_rejects_regex_wildcard() {
     let ctx = test_ctx_with_agent(agent);
 
     let err = Symbols
-        .call(json!({"query": "foo.*bar"}), &ctx)
+        .call(json!({"name": "foo.*bar"}), &ctx)
         .await
         .unwrap_err();
 
@@ -7898,7 +7885,7 @@ async fn symbols_allows_plain_pattern() {
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let result = Symbols.call(json!({"query": "my_function"}), &ctx).await;
+    let result = Symbols.call(json!({"name": "my_function"}), &ctx).await;
     assert!(result.is_ok(), "plain pattern should not be rejected");
 }
 
@@ -7915,6 +7902,231 @@ async fn symbols_allows_name_path_with_regex_chars() {
         "name_path should skip regex check, got err: {:?}",
         result.err()
     );
+}
+
+// ── the mode selector: pattern and mode resolve in ONE step ───────────────
+
+/// Fixture project for the four mode-selector regressions below.
+///
+/// FIXTURE — three load-bearing details, none of them cosmetic:
+///   * `Widget` and `Widget_new` SHARE A PREFIX, which is the only reason
+///     substring mode (both) and exact-name-path mode (only `Widget`) return
+///     DIFFERENT answers. Rename either one and every assertion below still
+///     passes while discriminating nothing.
+///   * they are DIFFERENT KINDS — struct vs function — which is what lets
+///     `kind="function"` name exactly one of the two. Make both functions and
+///     the `kind` assertions go vacuous.
+///   * there is deliberately NO `Cargo.toml`, so `workspace/symbol` yields
+///     nothing and the tree-sitter fallback answers. Add one and these tests
+///     start depending on whether rust-analyzer is installed and warm.
+async fn widget_project_ctx() -> (tempfile::TempDir, ToolContext) {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub struct Widget {}\n\npub fn Widget_new() -> Widget { Widget {} }\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+    (dir, ctx)
+}
+
+/// `(name, kind)` pairs from a search response, sorted — the discriminator the
+/// assertions below read. Names ALONE would not separate "the struct came back"
+/// from "the function came back" once a mutation drops the `kind` filter.
+fn name_kind_pairs(result: &Value) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = result["symbols"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|s| {
+                    (
+                        s["name"].as_str().unwrap_or_default().to_string(),
+                        s["kind"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    pairs.sort();
+    pairs
+}
+
+/// Baseline, and the reason the three tests after it are not vacuous: the two
+/// modes must actually disagree on this fixture. Without this, a mutation that
+/// made BOTH modes substring (or both exact) would leave the mode-confusion
+/// tests below green — they assert about ONE mode each, and neither can see
+/// that the other one moved to meet it.
+#[tokio::test]
+async fn the_two_modes_return_different_symbol_sets_on_this_fixture() {
+    let (_dir, ctx) = widget_project_ctx().await;
+
+    let substring = Symbols
+        .call(json!({ "name": "Widget" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        name_kind_pairs(&substring),
+        vec![
+            ("Widget".to_string(), "Struct".to_string()),
+            ("Widget_new".to_string(), "Function".to_string()),
+        ],
+        "name= is a substring search and must return BOTH: {substring:?}"
+    );
+
+    let exact = Symbols
+        .call(json!({ "symbol": "Widget" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        name_kind_pairs(&exact),
+        vec![("Widget".to_string(), "Struct".to_string())],
+        "symbol= is an exact name-path lookup and must return ONLY the struct: {exact:?}"
+    );
+}
+
+/// The defect: the mode used to be read off which keys were PRESENT, while the
+/// pattern came from a separate precedence chain — so a key that lost the race
+/// still flipped the mode. `name` supplies the pattern here, so the call is a
+/// substring search and the regex refusal must fire; the `symbol` key
+/// contributes no value and must therefore contribute no behaviour either.
+///
+/// Before the fix this returned `Ok` with zero matches — a plausible answer,
+/// not an error, which is why nothing downstream noticed.
+#[tokio::test]
+async fn a_losing_symbol_key_cannot_suppress_the_regex_refusal() {
+    let (_dir, ctx) = widget_project_ctx().await;
+
+    let err = Symbols
+        .call(json!({ "name": "Widget|Gadget", "symbol": "x" }), &ctx)
+        .await
+        .expect_err(
+            "`name` supplied the pattern, so this is a substring search and the regex \
+             alternation must be refused; a bare `symbol` key that lost the precedence \
+             race must not flip the mode",
+        );
+
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("should be RecoverableError");
+    assert!(
+        rec.message.contains("regex"),
+        "message should mention regex, got: {}",
+        rec.message
+    );
+}
+
+/// Same defect, second consequence: the losing key used to silently discard the
+/// `kind` filter. Before the fix this returned the STRUCT — `kind="function"`
+/// dropped on the floor and the predicate switched to exact matching — for a
+/// call whose pattern came from `name`.
+#[tokio::test]
+async fn a_losing_symbol_key_cannot_discard_the_kind_filter() {
+    let (_dir, ctx) = widget_project_ctx().await;
+
+    let result = Symbols
+        .call(
+            json!({ "name": "Widget", "kind": "function", "symbol": "zzz-no-such-symbol" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        name_kind_pairs(&result),
+        vec![("Widget_new".to_string(), "Function".to_string())],
+        "`name` supplied the pattern, so this is a substring search with kind=function \
+         applied; a losing `symbol` key must neither flip the mode nor drop `kind`. \
+         Got: {result:?}"
+    );
+}
+
+/// `kind` now applies in BOTH modes. It used to be discarded outright whenever
+/// exact-name-path mode was active, which is what made the mode flip above a
+/// SILENT filter drop rather than a visible one.
+///
+/// Both directions in one test on purpose: the negative alone is monotone under
+/// "the filter rejects everything", and the positive alone is monotone under
+/// "the filter is ignored". Neither fires in the other's direction.
+#[tokio::test]
+async fn kind_filters_an_exact_name_path_lookup_in_both_directions() {
+    let (_dir, ctx) = widget_project_ctx().await;
+
+    let matching_kind = Symbols
+        .call(json!({ "symbol": "Widget", "kind": "struct" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        name_kind_pairs(&matching_kind),
+        vec![("Widget".to_string(), "Struct".to_string())],
+        "a kind that MATCHES must not filter the symbol out: {matching_kind:?}"
+    );
+
+    let wrong_kind = Symbols
+        .call(json!({ "symbol": "Widget", "kind": "function" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        name_kind_pairs(&wrong_kind),
+        Vec::<(String, String)>::new(),
+        "`Widget` is a struct, so kind=function must filter it out rather than being \
+         silently ignored: {wrong_kind:?}"
+    );
+}
+
+/// The alias layer's half of the collapse, seen from `call()`'s side: after
+/// `call_content`'s rewrite the tool can only observe `name`/`symbol`, so a raw
+/// `query`/`name_path` key reaching `call()` directly — which every test that
+/// drives `Symbols.call` does — is NOT a name argument and falls through to the
+/// path OVERVIEW.
+///
+/// The discriminator is deliberately a pattern that matches NOTHING, because the
+/// shape keys do not separate the two: single-file overview and single-file
+/// search both return `file` and `symbols`. What separates them is that a search
+/// FILTERS and an overview does not — which is also precisely the silent failure
+/// mode this pins. A test that forgot the rename would keep passing while
+/// measuring a directory listing, since the overview returns the symbols it was
+/// looking for no matter what it asked for.
+#[tokio::test]
+async fn a_raw_alias_key_reaching_call_directly_is_not_a_name_argument() {
+    let (_dir, ctx) = widget_project_ctx().await;
+
+    // Control: the canonical key filters, so a pattern matching nothing yields
+    // nothing. Without this the assertions below separate nothing.
+    let search = Symbols
+        .call(
+            json!({ "name": "zzz-no-such-symbol", "path": "src/lib.rs" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        name_kind_pairs(&search),
+        Vec::<(String, String)>::new(),
+        "control: `name` is a SEARCH and must filter everything out here: {search:?}"
+    );
+
+    for alias in ["query", "name_path"] {
+        let result = Symbols
+            .call(
+                json!({ alias: "zzz-no-such-symbol", "path": "src/lib.rs" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            name_kind_pairs(&result),
+            vec![
+                ("Widget".to_string(), "Struct".to_string()),
+                ("Widget_new".to_string(), "Function".to_string()),
+            ],
+            "`{alias}` is an alias `call_content` rewrites, not a parameter `call()` \
+             reads; reaching `call()` raw it must dispatch to the unfiltered path \
+             OVERVIEW. Got: {result:?}"
+        );
+    }
 }
 
 #[test]
@@ -8528,7 +8740,7 @@ async fn search_on_a_tree_with_no_source_files_says_so_instead_of_a_bare_zero() 
     };
 
     let result = Symbols
-        .call(json!({ "query": "anything_at_all" }), &ctx)
+        .call(json!({ "name": "anything_at_all" }), &ctx)
         .await
         .unwrap();
     assert_eq!(result["total"].as_u64(), Some(0));
@@ -8562,7 +8774,7 @@ async fn search_on_a_populated_tree_returns_a_bare_zero_for_a_missing_symbol() {
     };
 
     let result = Symbols
-        .call(json!({ "query": "definitely_not_present_xyz" }), &ctx)
+        .call(json!({ "name": "definitely_not_present_xyz" }), &ctx)
         .await
         .unwrap();
     assert_eq!(result["total"].as_u64(), Some(0));
@@ -8573,7 +8785,7 @@ async fn search_on_a_populated_tree_returns_a_bare_zero_for_a_missing_symbol() {
     // Sanity: the same tree really is searchable, so the bare zero above is a
     // statement about the symbol and not about a broken fixture.
     let hit = Symbols
-        .call(json!({ "query": "findme" }), &ctx)
+        .call(json!({ "name": "findme" }), &ctx)
         .await
         .unwrap();
     assert_eq!(hit["total"].as_u64(), Some(1), "fixture must be searchable");
@@ -8619,7 +8831,7 @@ async fn an_unreadable_directory_is_counted_rather_than_silently_dropped() {
     };
 
     let result = Symbols
-        .call(json!({ "query": "definitely_not_present_xyz" }), &ctx)
+        .call(json!({ "name": "definitely_not_present_xyz" }), &ctx)
         .await
         .unwrap();
     assert_eq!(result["total"].as_u64(), Some(0));
@@ -8634,7 +8846,7 @@ async fn an_unreadable_directory_is_counted_rather_than_silently_dropped() {
     // A truncated walk must still search what it could reach — the error is
     // counted, not fatal.
     let hit = Symbols
-        .call(json!({ "query": "findme" }), &ctx)
+        .call(json!({ "name": "findme" }), &ctx)
         .await
         .unwrap();
     assert_eq!(
@@ -8665,7 +8877,7 @@ async fn include_docs_attaches_docs_in_search_mode() {
     let ctx = test_ctx_with_agent(agent);
     let result = Symbols
         .call(
-            json!({ "query": "my_documented_add", "path": "lib.rs", "include_docs": true }),
+            json!({ "name": "my_documented_add", "path": "lib.rs", "include_docs": true }),
             &ctx,
         )
         .await

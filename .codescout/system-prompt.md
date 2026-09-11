@@ -26,7 +26,7 @@
 
 ## Navigation Strategy
 
-1. Know the name → `symbols(name=X)`, then `symbols(name_path=..., include_body=true)` for the body
+1. Know the name → `symbols(name=X)`, then `symbols(symbol="Container/member", include_body=true)` for the body
 2. Know only the concept → `semantic_search(query)`; exact string → `grep(pattern, glob=...)`
 3. Who calls it → `references(symbol, path)`, never `grep`
 4. Before any structural edit → `call_graph(symbol, path, direction="callers")` for blast radius; `direction="callees"` to trace flow

@@ -95,7 +95,7 @@ impl Tool for Symbols {
     }
 
     fn description(&self) -> &str {
-        "Symbol navigation. Path only \u{2192} file/dir overview. name/query/symbol \u{2192} search across project. Both \u{2192} scoped search."
+        "Symbol navigation. Path only \u{2192} file/dir overview. name/symbol \u{2192} search across project. Both \u{2192} scoped search."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -103,14 +103,14 @@ impl Tool for Symbols {
             "## When to use\n\
              \n\
              - Browse a file/directory \u{2192} pass only `path` (overview mode, formerly `list_symbols`).\n\
-             - Know the name \u{2192} pass `name`/`query` (substring match on symbol names).\n\
-             - Pinpoint a specific symbol \u{2192} pass `symbol`/`name_path` (exact name-path).\n\
+             - Know the name \u{2192} pass `name` (substring match on symbol names).\n\
+             - Pinpoint a specific symbol \u{2192} pass `symbol` (exact name-path).\n\
              - Know the concept \u{2192} use `semantic_search` first, then drill into symbols.\n\
              \n\
              ## Key parameters\n\
              \n\
-             - `name` / `query`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
-             - `symbol` / `name_path`: exact name-path (e.g. `\"MyStruct/my_method\"`) — skips substring search, ignores `kind`.\n\
+             - `name`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
+             - `symbol`: exact name-path (e.g. `\"MyStruct/my_method\"`) \u{2014} skips substring search.\n\
              - `kind`: filter to `function`, `struct`, `interface`, `enum`, `module`, `constant`, `type`, `class`.\n\
              - `include_body=true`: returns full source of each match. Even without it, a search resolving to exactly ONE symbol auto-shows its code (a leaf's body, or a large container's direct-member shape).\n\
              - `path`: file, directory, or glob. Without a name argument, returns an overview of that path.\n\
@@ -125,8 +125,7 @@ impl Tool for Symbols {
              \n\
              ## Gotchas\n\
              \n\
-             - Regex patterns are rejected — use plain substrings. Use `grep` for text search.\n\
-             - `kind` is ignored when `symbol`/`name_path` is provided.\n\
+             - Regex patterns are rejected \u{2014} use plain substrings. Use `grep` for text search.\n\
              - LSP must be running for body extraction; tree-sitter fallback gives signatures only.",
         )
     }
@@ -135,14 +134,12 @@ impl Tool for Symbols {
             "type": "object",
             "description": "Path only \u{2192} file/dir overview (formerly list_symbols). Name \u{2192} search (formerly find_symbol). Both \u{2192} scoped search.",
             "properties": {
-                "name": { "type": "string", "description": "Substring or exact symbol name (alias of query)." },
-                "query": { "type": "string", "description": "Symbol name or substring to search for." },
-                "symbol": { "type": "string", "description": "Exact name-path (e.g. 'MyStruct/my_method'). Alternative to query." },
-                "name_path": { "type": "string", "description": "Hierarchical path like 'Class/method' (alias of symbol)." },
+                "name": { "type": "string", "description": "Substring match on symbol names." },
+                "symbol": { "type": "string", "description": "Exact name-path (e.g. 'MyStruct/my_method')." },
                 "path": { "type": "string", "description": "File, directory, or glob. Without a name argument, returns an overview of that path." },
                 "kind": {
                     "type": "string",
-                    "description": "Filter by kind (interface = Rust traits). Ignored when name_path is given.",
+                    "description": "Filter by kind (interface = Rust traits).",
                     "enum": ["function", "class", "struct", "interface", "type", "enum", "module", "constant"]
                 },
                 "include_body": { "type": "boolean", "default": false, "description": "Include full source body for each matched symbol." },
@@ -175,22 +172,44 @@ impl Tool for Symbols {
             }
         })
     }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        // `query` and `name_path` were advertised schema properties until the
+        // four-name surface (`name`/`query`/`symbol`/`name_path`) collapsed to two.
+        // They remain accepted, but as ALIASES: `call_content` rewrites them via
+        // `normalize_params` before `call()` runs, so the mode selector in `call()`
+        // can only ever observe `name` (substring) or `symbol` (exact name-path).
+        // That is what makes resolving pattern-and-mode from those two keys alone
+        // complete rather than a narrowing — see `call()`'s own comment.
+        &[("query", "name"), ("name_path", "symbol")]
+    }
+
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         // Path-only-no-name overview path (formerly list_symbols).
-        // Dispatch to overview when no name argument was provided.
-        let has_name_arg = input["query"].is_string()
-            || input["symbol"].is_string()
-            || input["name"].is_string()
-            || input["name_path"].is_string();
+        // Dispatch to overview when no name argument was provided. Only TWO
+        // name-ish keys can reach `call()`: `query`/`name_path` are declared
+        // aliases (`param_aliases` above) that `call_content` has already
+        // rewritten to `name`/`symbol`.
+        let has_name_arg = input["name"].is_string() || input["symbol"].is_string();
         if !has_name_arg {
             return list_overview(input, ctx).await;
         }
 
-        let pattern = input["query"]
+        // Resolve the pattern AND the matching mode in ONE step, so the mode can
+        // never disagree with the value that produced it. `name` first preserves
+        // the pre-collapse precedence (`query` -> `name` was the first key tried).
+        //
+        // The superseded form read the mode off key PRESENCE
+        // (`input["symbol"].is_string() || input["name_path"].is_string()`) while
+        // the pattern came from a separate precedence chain, so a key that LOST
+        // that race still flipped the mode: `symbols(query="Tool|Doc", symbol="x")`
+        // suppressed the regex refusal and returned 0 matches, and
+        // `symbols(name="X", kind="function", name_path="zzz")` silently dropped
+        // `kind`. Both were plausible answers, not errors.
+        let (pattern, is_name_path) = input["name"]
             .as_str()
-            .or_else(|| input["symbol"].as_str())
-            .or_else(|| input["name"].as_str()) // common LLM alias
-            .or_else(|| input["name_path"].as_str())
+            .map(|p| (p, false))
+            .or_else(|| input["symbol"].as_str().map(|p| (p, true)))
             .ok_or_else(|| {
                 // List the keys the LLM actually sent so it can self-correct.
                 let got_keys: Vec<&str> = input
@@ -199,14 +218,14 @@ impl Tool for Symbols {
                     .unwrap_or_default();
                 RecoverableError::with_hint(
                     format!(
-                        "missing 'query' or 'symbol' parameter (received keys: {})",
+                        "missing 'name' or 'symbol' parameter (received keys: {})",
                         if got_keys.is_empty() {
                             "(none)".to_string()
                         } else {
                             got_keys.join(", ")
                         }
                     ),
-                    "Provide 'query' (substring search) or 'symbol' (exact identifier, e.g. 'MyStruct/my_method')",
+                    "Provide 'name' (substring search) or 'symbol' (exact identifier, e.g. 'MyStruct/my_method')",
                 )
             })?;
         let mut guard = OutputGuard::from_input(&input);
@@ -221,9 +240,6 @@ impl Tool for Symbols {
         // and "showing N of M" hint misreport. Floor at FIND_SYMBOL_MAX_RESULTS
         // (50), grow if caller explicitly asked for more.
         let search_pool_cap = guard.max_results.max(FIND_SYMBOL_MAX_RESULTS);
-
-        // kind filter only applies to pattern-based searches, not exact name_path lookups.
-        let is_name_path = input["symbol"].is_string() || input["name_path"].is_string();
 
         // Reject regex-like patterns early — symbols(name=...) does substring matching,
         // not regex. Point the LLM to grep instead.
@@ -248,11 +264,12 @@ impl Tool for Symbols {
             .into());
         }
 
-        let kind_filter: Option<&str> = if is_name_path {
-            None
-        } else {
-            input["kind"].as_str()
-        };
+        // `kind` applies in BOTH modes. It used to be discarded whenever the
+        // exact-name-path mode was active, which made a key-presence mode flip a
+        // SILENT filter drop; a name-path already pins the symbol, so the filter is
+        // redundant there rather than wrong, and applying it removes both the
+        // special case and the silent discard.
+        let kind_filter: Option<&str> = input["kind"].as_str();
 
         let include_body_explicit = optional_bool_param(&input, "include_body");
         let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
@@ -638,12 +655,18 @@ async fn search_project_symbols(
             continue;
         };
         for sym in symbols {
-            // LSP servers may use fuzzy/prefix matching — enforce substring.
-            // Mirror the predicate above: only consult name_path for '/' patterns.
-            let n = sym.name.to_lowercase();
-            let name_ok = n.contains(pattern_lower)
-                || (pattern_lower.contains('/')
-                    && sym.name_path.to_lowercase().contains(pattern_lower));
+            // LSP servers may use fuzzy/prefix matching — re-filter with the
+            // CALLER'S predicate. This used to be a hand-rolled copy of the
+            // substring branch only ("Mirror the predicate above"), so the
+            // exact-name-path mode never reached this path: verified live before
+            // the fix, `symbols(symbol="Tool")` returned `fetch_tools`,
+            // `MECHANISM_TOOLS` and seven more substring hits from a mode
+            // documented as an EXACT name-path lookup. Calling `name_ok` leaves
+            // the substring branch byte-identical (its two clauses were the same
+            // two, with `consult_name_path == pattern_lower.contains('/')`) and
+            // makes exact mode exact here as it already was on the path-restricted
+            // and tree-sitter branches. One predicate, one site to mutate.
+            let name_matches = name_ok(&sym);
             let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
             // When scope is strictly Project (not All), filter out matches
             // from stdlib/dependency crates whose path lies outside the root.
@@ -655,7 +678,7 @@ async fn search_project_symbols(
             // visible to the agent under Project scope.
             let in_walk = *scope != crate::library::scope::Scope::Project
                 || accepted_files.contains(&sym.file);
-            if name_ok && kind_ok && in_root && in_walk {
+            if name_matches && kind_ok && in_root && in_walk {
                 // When include_body is requested, validate the range. If
                 // workspace/symbol returned a degenerate range, fall back to
                 // document_symbols for the file to get the correct range.

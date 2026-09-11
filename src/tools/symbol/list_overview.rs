@@ -195,7 +195,9 @@ pub(super) fn ast_class_names_for_dir(dir: &Path) -> Vec<String> {
 
 /// Path-only-no-name overview entry point (formerly `ListSymbols::call`).
 ///
-/// Invoked by `Symbols::call` when the input has no `query`/`symbol`/`name`/`name_path`.
+/// Invoked by `Symbols::call` when the input has no `name`/`symbol` (the two
+/// canonical name-ish params; `query`/`name_path` are aliases `call_content`
+/// has already rewritten by then).
 /// Response shape matches the legacy `list_symbols` output.
 pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
     let rel_path = get_path_param(&input, false)?.unwrap_or(".");

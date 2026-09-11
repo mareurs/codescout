@@ -9,11 +9,11 @@ strings, and unrelated identifiers.
 ## Generic patterns (any language)
 
 - **Hierarchical nav** — a method on a class/struct/object, all languages:
-  `symbols(name_path="Container/member", include_body=true)`. Use a bare
+  `symbols(symbol="Container/member", include_body=true)`. Use a bare
   name for top-level functions or types.
 - **Find across the project, then read the body:**
   `symbols(name="edit_code")` to locate it, then
-  `symbols(name_path="ToolName/edit_code", include_body=true)` for the body.
+  `symbols(symbol="ToolName/edit_code", include_body=true)` for the body.
 - **Kind filter + path scope:** `symbols(path="src/tools/", kind="struct")`.
   `kind` values vary by language (see table below). Run `symbols(path)` once on a
   representative file to see which kinds your LSP emits.
@@ -24,18 +24,18 @@ strings, and unrelated identifiers.
   `direction="callees"` traces outbound flow (`max_depth` defaults to 3,
   capped at 10).
 - **Name unknown?** Start with `semantic_search("what it does")`, then drill
-  down with `symbols(name_path=...)`.
+  down with `symbols(symbol=...)`.
 
 ## Per-language quick reference
 
 The generic patterns above already cover finding a method
-(`symbols(name_path="Container/member", include_body=true)`), callers, and
+(`symbols(symbol="Container/member", include_body=true)`), callers, and
 impact analysis (`call_graph(symbol, path, direction="callers")` before any
 structural change) — those are identical across languages. Only three things
-vary per language: the `name_path` form, the `kind` to pass to
+vary per language: the name-path form `symbol` takes, the `kind` to pass to
 `symbols(path=..., kind=...)`, and a per-language gotcha.
 
-| Language | `name_path` form | `kind` for list-by-kind | Gotcha |
+| Language | `symbol` name-path form | `kind` for list-by-kind | Gotcha |
 |---|---|---|---|
 | **Rust** | `Type/method`, `impl Trait for Type/method` | `struct` | rust-analyzer reports traits as `kind="interface"`; trait impls use the `impl Trait for Type/method` form |
 | **Python** | `Class/method`, `module_func` | `class` | decorators aren't part of the symbol — search by the decorated function's name |

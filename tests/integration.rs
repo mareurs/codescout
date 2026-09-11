@@ -277,7 +277,7 @@ async fn workflow_symbols_path_types() {
 
     // 1. File path — baseline
     let r = Symbols
-        .call(json!({ "query": "add", "path": "src/main.rs" }), &ctx)
+        .call(json!({ "name": "add", "path": "src/main.rs" }), &ctx)
         .await
         .unwrap();
     let syms = r["symbols"].as_array().unwrap();
@@ -288,7 +288,7 @@ async fn workflow_symbols_path_types() {
 
     // 2. Directory path — bug #1 regression
     let r = Symbols
-        .call(json!({ "query": "helper", "path": "src" }), &ctx)
+        .call(json!({ "name": "helper", "path": "src" }), &ctx)
         .await
         .unwrap();
     let syms = r["symbols"].as_array().unwrap();
@@ -299,7 +299,7 @@ async fn workflow_symbols_path_types() {
 
     // 3. Nested directory path — bug #1 nested
     let r = Symbols
-        .call(json!({ "query": "multiply", "path": "src/utils" }), &ctx)
+        .call(json!({ "name": "multiply", "path": "src/utils" }), &ctx)
         .await
         .unwrap();
     let syms = r["symbols"].as_array().unwrap();
@@ -310,7 +310,7 @@ async fn workflow_symbols_path_types() {
 
     // 4. Glob path
     let r = Symbols
-        .call(json!({ "query": "add", "path": "src/**/*.rs" }), &ctx)
+        .call(json!({ "name": "add", "path": "src/**/*.rs" }), &ctx)
         .await
         .unwrap();
     let syms = r["symbols"].as_array().unwrap();
@@ -322,7 +322,7 @@ async fn workflow_symbols_path_types() {
     // 5. Name_path pattern project-wide — bug #2 regression
     // tree-sitter uses "Calculator/compute" as name_path (no "impl" prefix)
     let r = Symbols
-        .call(json!({ "query": "Calculator/compute" }), &ctx)
+        .call(json!({ "name": "Calculator/compute" }), &ctx)
         .await
         .unwrap();
     let syms = r["symbols"].as_array().unwrap();

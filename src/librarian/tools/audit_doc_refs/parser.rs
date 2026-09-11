@@ -1356,7 +1356,7 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         }
     }
     /// `Type/method` is codescout's own `name_path` symbol syntax, accepted by
-    /// `symbols(name_path=…)` and `edit_code(symbol=…)`. It is not a path.
+    /// `symbols(symbol=…)` and `edit_code(symbol=…)`. It is not a path.
     #[test]
     fn parser_rejects_name_path_symbol_syntax() {
         for case in [

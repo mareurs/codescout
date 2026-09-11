@@ -233,7 +233,12 @@ async fn run_symbols_overview(ctx: &ToolContext, exp: &LangExpectation) -> Resul
 
 async fn run_symbols(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {
     let symbol = exp.symbol.as_deref().ok_or("Missing 'symbol'")?;
-    let mut params = json!({ "query": symbol });
+    // `Symbols::call` is driven directly here, which bypasses `call_content` and
+    // therefore the `param_aliases()` rewrite — so the CANONICAL key is the only
+    // one that works. Sending the `query` alias would leave `symbols` with no name
+    // argument at all and silently dispatch to the path OVERVIEW, which looks like
+    // a pass to every assertion below that only checks for a symbol name.
+    let mut params = json!({ "name": symbol });
 
     if let Some(path) = &exp.path {
         params["path"] = json!(path);
