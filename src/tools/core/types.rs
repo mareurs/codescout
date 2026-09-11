@@ -1435,16 +1435,37 @@ pub trait Tool: Send + Sync {
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
             }
+            // Carry the tool's OWN `corrections` into the envelope. The envelope is
+            // rebuilt from a fixed key literal above, so anything the tool wrote is
+            // otherwise reachable only through the buffer — and this key reports that
+            // the request was REINTERPRETED, which is a fact about the CALL, not about
+            // the answer. Gating it on the answer's size was the defect
+            // (`50aed1562ca29abc`): the same `doc(action="find", rel_path=…)` either
+            // told a caller their top-level param had been lifted into the filter or
+            // said nothing, decided purely by how many rows came back.
+            //
+            // Verbatim, and deliberately NOT capped — the envelope-contract question
+            // the bug file left open, answered here. The inline path carries this same
+            // value uncapped, so capping it only here would make the advisory's CONTENT
+            // depend on the result size, reintroducing the very coupling this removes in
+            // a quieter form. Its size is bounded by the caller's own REQUEST
+            // (`find.rs` emits one entry per repaired filter leaf), never by the result,
+            // so it cannot grow on an axis the caller could not predict.
+            if let Some(c) = val.get("corrections") {
+                buffered["corrections"] = c.clone();
+            }
             if let Some(c) = &param_corrections {
-                // Same unconditional nesting as the small-output path below
-                // (see the comment there): the advisory lives at
-                // `corrections.param_aliases` in every case, never bare at
-                // `corrections`. This assignment is still a wholesale
-                // overwrite rather than a merge with any `corrections` the
-                // tool itself wrote into the buffered envelope — that gap is
-                // the pre-existing, separately-filed buffered-envelope
-                // finding, out of scope for this change.
-                buffered["corrections"] = serde_json::json!({ "param_aliases": c });
+                if let Some(obj) = buffered.as_object_mut() {
+                    // The SAME `merge_param_corrections` the small-output and error
+                    // paths call — this site is now its third caller, which is what
+                    // makes the advisory's address a property of the mechanism rather
+                    // than of which branch you landed on. It was a wholesale
+                    // `buffered["corrections"] = …` assignment, which silently destroyed
+                    // any tool corrections carried in just above; the merge's three arms
+                    // keep both halves for the object shape (`find.rs`'s
+                    // `{filter, hint}`) and the bare-array shape (`update.rs`) alike.
+                    merge_param_corrections(obj, c);
+                }
             }
             Content::text(
                 serde_json::to_string_pretty(&buffered)

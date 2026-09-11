@@ -2586,7 +2586,14 @@ async fn correction_reaches_the_caller_on_the_buffered_path() {
 /// per-key `insert` (which silently overwrites one `hint` with the other) is
 /// invisible: no other test in this file gives `val` a pre-existing
 /// `corrections` object to merge into.
-struct AliasAndOwnObjectCorrections;
+struct AliasAndOwnObjectCorrections {
+    /// LOAD-BEARING: drives `call()`'s payload past the inline budget so the SAME
+    /// fixture exercises the buffered render path. Without a `big` arm the
+    /// buffered path had no fixture returning its own `corrections` at all, which
+    /// is exactly how the envelope came to drop it unnoticed. Setting this to
+    /// `false` at every call site silently retires the buffered-path guards.
+    big: bool,
+}
 
 #[async_trait::async_trait]
 impl Tool for AliasAndOwnObjectCorrections {
@@ -2607,20 +2614,24 @@ impl Tool for AliasAndOwnObjectCorrections {
         input: serde_json::Value,
         _ctx: &ToolContext,
     ) -> anyhow::Result<serde_json::Value> {
-        Ok(serde_json::json!({
+        let mut out = serde_json::json!({
             "path": input["path"],
             // LOAD-BEARING: the key is `hint`, matching find.rs:1290's own
             // `{filter, hint}` shape byte-for-byte. Renaming it to anything
             // else stops exercising the collision this fixture exists for.
             "corrections": { "filter": [], "hint": "TOOL" },
-        }))
+        });
+        if self.big {
+            out["filler"] = serde_json::json!("x".repeat(15_000));
+        }
+        Ok(out)
     }
 }
 
 #[tokio::test]
 async fn merge_preserves_both_the_tools_own_hint_and_the_framework_alias_hint() {
     let ctx = bare_ctx().await;
-    let out = AliasAndOwnObjectCorrections
+    let out = AliasAndOwnObjectCorrections { big: false }
         .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
         .await
         .unwrap();
@@ -2645,7 +2656,12 @@ async fn merge_preserves_both_the_tools_own_hint_and_the_framework_alias_hint() 
 /// in-tree today because `update.rs` itself never declares `param_aliases()`,
 /// which is exactly why nothing would have caught this arm silently dropping
 /// the framework's advisory.
-struct AliasAndOwnArrayCorrections;
+struct AliasAndOwnArrayCorrections {
+    /// LOAD-BEARING, for the same reason as the sibling fixture's field: it is
+    /// what puts the non-object `corrections` arm under test on the BUFFERED
+    /// path, where nothing exercised it before.
+    big: bool,
+}
 
 #[async_trait::async_trait]
 impl Tool for AliasAndOwnArrayCorrections {
@@ -2666,21 +2682,25 @@ impl Tool for AliasAndOwnArrayCorrections {
         input: serde_json::Value,
         _ctx: &ToolContext,
     ) -> anyhow::Result<serde_json::Value> {
-        Ok(serde_json::json!({
+        let mut out = serde_json::json!({
             "path": input["path"],
             // LOAD-BEARING: a bare array, not an object — this is what routes
             // through the `Some(_)` non-object arm (types.rs) rather than the
             // `Some(object)` arm the fixture above exercises. An object here
             // would silently stop testing item 2 while still passing.
             "corrections": ["lifted: status"],
-        }))
+        });
+        if self.big {
+            out["filler"] = serde_json::json!("x".repeat(15_000));
+        }
+        Ok(out)
     }
 }
 
 #[tokio::test]
 async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory() {
     let ctx = bare_ctx().await;
-    let out = AliasAndOwnArrayCorrections
+    let out = AliasAndOwnArrayCorrections { big: false }
         .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
         .await
         .unwrap();
@@ -2697,6 +2717,115 @@ async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory(
         "item 2: the framework's advisory must reach the caller even when \
          `corrections` already held a non-object shape — this arm used to silently \
          drop it instead: {t}"
+    );
+}
+
+/// THE DEFECT (`50aed1562ca29abc`): the overflow envelope is rebuilt from a fixed
+/// key literal, so a tool's OWN `corrections` stayed inside the buffer while the
+/// framework's alias advisory was explicitly re-attached. Whether a caller learned
+/// their request had been reinterpreted therefore depended on how big the ANSWER
+/// was — a request-side fact gated on a result-side property.
+///
+/// This test drives the shape the bug was observed in, which is NOT the shape the
+/// neighbouring buffered-path test drives. See its control assertion below.
+#[tokio::test]
+async fn the_tools_own_corrections_reaches_the_caller_on_the_buffered_path() {
+    let ctx = bare_ctx().await;
+    // `path`, NOT `file_path`: no alias repair fires, so `param_corrections` is
+    // `None` and the framework's advisory is out of play entirely. That is the
+    // production shape — `doc(action="find", rel_path=…)` lifts a top-level param
+    // into the filter and reports it under its OWN `corrections` without any alias
+    // repair — and it is the half the envelope used to drop.
+    let out = AliasAndOwnObjectCorrections { big: true }
+        .call_content(serde_json::json!({ "path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("buffered envelope must be valid JSON: {e}: {t}"));
+    assert!(
+        v["output_id"].as_str().unwrap_or("").starts_with("@tool_"),
+        "the payload must actually have overflowed, or this test silently \
+         re-checks the inline path that was never broken: {t}"
+    );
+    assert_eq!(
+        v["corrections"]["hint"], "TOOL",
+        "the TOOL's own corrections must ride the overflow envelope. It used to \
+         stay in the buffer, reachable only by spending the second round-trip the \
+         governing ADR exists to remove: {t}"
+    );
+    // THE CONTROL, and it is the whole point of this test rather than a garnish.
+    // TWO unrelated mechanisms write the key `corrections` here: the framework's
+    // param-alias advisory, which always reached this envelope, and the tool's
+    // own, which did not. A test asserting the framework's half passes against
+    // the UNFIXED code — the bug file records that exact substitution nearly
+    // closing it wrongly. Asserting the framework's half is ABSENT means this
+    // test can only be satisfied by the half that was broken.
+    assert!(
+        v["corrections"]["param_aliases"].is_null(),
+        "no alias was used, so the framework advisory must NOT be present — if it \
+         is, this test is measuring the mechanism that was never broken: {t}"
+    );
+}
+
+/// The overwrite twin of the test above. Until this fix the buffered path did
+/// `buffered["corrections"] = {param_aliases: …}` — a wholesale assignment — so on
+/// a call where BOTH halves have something to say, carrying the tool's corrections
+/// without also routing the framework's through the shared merge would trade one
+/// silent drop for the other.
+#[tokio::test]
+async fn the_buffered_envelope_keeps_both_the_tools_own_hint_and_the_framework_alias_hint() {
+    let ctx = bare_ctx().await;
+    let out = AliasAndOwnObjectCorrections { big: true }
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("buffered envelope must be valid JSON: {e}: {t}"));
+    assert!(
+        v["output_id"].as_str().unwrap_or("").starts_with("@tool_"),
+        "the payload must actually have overflowed: {t}"
+    );
+    assert_eq!(
+        v["corrections"]["hint"], "TOOL",
+        "the tool's own corrections.hint must survive the framework's advisory \
+         being attached — a wholesale `corrections = {{param_aliases}}` assignment \
+         destroys it, and that is what this path used to do: {t}"
+    );
+    assert!(
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "and the framework's advisory must still arrive at the address it has on \
+         the other two render paths: {t}"
+    );
+}
+
+/// The non-object arm, on the buffered path. `update.rs:763` writes a bare ARRAY
+/// `corrections`, which routes through `merge_param_corrections`'s promote-to-object
+/// arm rather than its insert arm. Carrying the tool's value into the envelope
+/// without the shared merge would leave this arm dropping the framework's half.
+#[tokio::test]
+async fn a_bare_array_corrections_survives_the_buffered_path_with_the_framework_advisory() {
+    let ctx = bare_ctx().await;
+    let out = AliasAndOwnArrayCorrections { big: true }
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .unwrap();
+    let t = text_of(&out);
+    let v: serde_json::Value = serde_json::from_str(&t)
+        .unwrap_or_else(|e| panic!("buffered envelope must be valid JSON: {e}: {t}"));
+    assert!(
+        v["output_id"].as_str().unwrap_or("").starts_with("@tool_"),
+        "the payload must actually have overflowed: {t}"
+    );
+    assert_eq!(
+        v["corrections"]["tool"][0], "lifted: status",
+        "the tool's own bare-array corrections must reach the caller, promoted \
+         under `tool` so the framework's advisory fits beside it: {t}"
+    );
+    assert!(
+        v["corrections"]["param_aliases"]["hint"].is_string(),
+        "and the framework's advisory must not be dropped by that promotion: {t}"
     );
 }
 
