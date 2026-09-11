@@ -2775,7 +2775,7 @@ mod tests {
         assert!(
             std::sync::Arc::ptr_eq(&adapter.0, &seen_client_embedder),
             "memory_embedder's returned adapter must wrap the SAME embedder Arc the \
-             RetrievalClient it built holds — got two different instances"
+                 RetrievalClient it built holds — got two different instances"
         );
     }
 

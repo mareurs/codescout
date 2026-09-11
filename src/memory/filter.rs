@@ -293,6 +293,7 @@ Python patterns here.
         assert!(r.content.contains(" ### Fake"));
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "precondition")]
     fn filter_sections_empty_sections_is_caller_error() {

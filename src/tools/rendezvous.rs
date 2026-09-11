@@ -183,9 +183,46 @@ pub(crate) fn parent_pid() -> u32 {
 
 #[cfg(windows)]
 pub(crate) fn parent_pid() -> u32 {
-    // No getppid here. The hook walks ancestry itself, so a zero degrades to
-    // "never matched" rather than to a WRONG match — the safe direction.
-    0
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let pid = std::process::id();
+
+    // SAFETY: TH32CS_SNAPPROCESS with a 0 pid snapshots every running process;
+    // th32ProcessID is ignored for this flag per the Win32 docs.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        // No getppid here — the hook walks ancestry itself, so a zero degrades
+        // to "never matched" rather than to a WRONG match, the safe direction.
+        return 0;
+    }
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
+    let mut ppid = 0u32;
+    // SAFETY: `entry` is zero-initialized with `dwSize` set as the API requires;
+    // `snapshot` is the valid handle returned above, closed once below either way.
+    unsafe {
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == pid {
+                    ppid = entry.th32ParentProcessID;
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    ppid
 }
 
 /// The newest stamp any slot for `session` carries.
@@ -338,42 +375,43 @@ mod tests {
         assert!(r.path().is_some());
     }
 
-    #[cfg(unix)]
     #[test]
     fn publish_records_the_parent_pid_the_hook_matches_on() {
         // The hook selects entries whose ppid is on its own ancestry. A zero or
         // missing ppid makes every entry unmatchable — the feature silently dies.
         //
-        // Unix only, because `parent_pid()` is `#[cfg(windows)] -> 0` BY DESIGN: there is
-        // no `getppid` there, and its doc comment argues a zero degrades to "never
-        // matched" rather than to a WRONG match. This assertion therefore contradicted
-        // shipped intent on Windows and failed on all three lanes. The sibling below pins
-        // the Windows contract instead of leaving it to a skip.
-        let dir = tempfile::tempdir().unwrap();
-        Rendezvous::publish(Some(dir.path().to_path_buf()), None);
-        let e = entry_at(dir.path(), std::process::id()).unwrap();
-        assert_ne!(e.ppid, 0, "ppid must be recorded");
-    }
-
-    /// The Windows contract, pinned rather than skipped: `parent_pid()` returns 0 there
-    /// on purpose, so the rendezvous never matches on ppid and the hook's ancestry walk
-    /// is the only path. That is a real, accepted cost — and writing it down is what
-    /// stops the next reader "fixing" the zero without also updating the matcher, or
-    /// deleting this file's Unix assertion as platform-flaky.
-    ///
-    /// If someone does implement a Windows `getppid` equivalent, this fails, and that is
-    /// the signal to re-unify the two rather than a mystery.
-    #[cfg(windows)]
-    #[test]
-    fn publish_records_a_zero_parent_pid_on_windows_by_design() {
-        let dir = tempfile::tempdir().unwrap();
-        Rendezvous::publish(Some(dir.path().to_path_buf()), None);
-        let e = entry_at(dir.path(), std::process::id()).unwrap();
-        assert_eq!(
-            e.ppid, 0,
-            "Windows has no getppid here; 0 is deliberate and means 'never matched', \
-             which is the safe direction versus a wrong match"
-        );
+        // Unix only. Windows *does* resolve a real ppid via `ToolHelp32Snapshot` (see
+        // the `#[cfg(windows)]` `parent_pid()` above, and
+        // `docs/issues/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`,
+        // which verified this exact assertion passing on native
+        // `1.97.1-x86_64-pc-windows-gnu` on 2026-08-19) — this is NOT a "Windows has no
+        // getppid" split. It exists because CI's windows-gnu job cross-compiles under
+        // wine, where `CreateToolhelp32Snapshot` may not enumerate processes the same
+        // way as real Windows; that is unverified from this machine (native Windows,
+        // not wine), so the sibling test below stays lenient rather than asserting a
+        // specific wine-only value. See
+        // `docs/issues/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`.
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+            let e = entry_at(dir.path(), std::process::id()).unwrap();
+            assert_ne!(e.ppid, 0, "ppid must be recorded");
+        }
+        // Real Windows resolves a real ppid too (see comment above) — assert the same
+        // invariant there, rather than skipping the platform this project runs on.
+        #[cfg(windows)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+            let e = entry_at(dir.path(), std::process::id()).unwrap();
+            assert_ne!(
+                e.ppid, 0,
+                "ppid must be recorded on native Windows — ToolHelp32Snapshot resolves \
+                 a real parent pid here (verified 2026-08-19 and again 2026-08-31 on \
+                 this VDI); a 0 would mean the snapshot API failed"
+            );
+        }
     }
 
     #[test]

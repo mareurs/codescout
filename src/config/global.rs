@@ -241,29 +241,32 @@ mod tests {
     // writes are GONE rather than coordinated. See
     // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
-    /// Absolute on BOTH platforms. `/tmp/x` carries no drive letter, so on Windows it is
-    /// RELATIVE — and `global_config_dir_from` ignores relative XDG values by spec. Every
-    /// "honours an absolute value" case below therefore turned into an "ignores a relative
-    /// value" case on Windows: two failed outright, and
-    /// `config_dir_ignores_relative_xdg_and_falls_back_to_home` kept passing while no
-    /// longer discriminating anything, since both of its inputs were relative there.
-    ///
-    /// Deliberately NOT applied to the `relative/state` literals — those must stay
-    /// relative on both platforms, or the spec gate they pin goes untested.
-    #[cfg(windows)]
-    fn abs(p: &str) -> std::ffi::OsString {
-        std::ffi::OsString::from(format!("C:{p}"))
-    }
-    #[cfg(not(windows))]
     fn abs(p: &str) -> std::ffi::OsString {
         std::ffi::OsString::from(p)
     }
 
+    /// Build a path that is genuinely absolute on the host running the test.
+    /// `PathBuf::is_absolute()` requires a drive letter/UNC prefix on Windows, so the
+    /// POSIX-only `/tmp/...` literals these tests used to hardcode are NOT absolute
+    /// there and `global_config_dir_from`'s `is_absolute()` filter (see its doc
+    /// comment above) rejects them, falling through to `home` (`None` in these
+    /// tests) and panicking the `.unwrap()`. See
+    /// docs/issues/2026-08-19-windows-native-test-suite-posix-path-assumptions.md.
+    #[cfg(windows)]
+    fn test_abs_path(name: &str) -> PathBuf {
+        PathBuf::from(r"C:\tmp").join(name)
+    }
+
+    #[cfg(not(windows))]
+    fn test_abs_path(name: &str) -> PathBuf {
+        PathBuf::from("/tmp").join(name)
+    }
+
     #[test]
     fn config_dir_prefers_xdg_config_home() {
-        let xdg = abs("/tmp/xdg-test-codescout");
-        let dir = global_config_dir_from(Some(&xdg), None).unwrap();
-        assert_eq!(dir, PathBuf::from(&xdg).join("codescout"));
+        let xdg = test_abs_path("xdg-test-codescout");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), None).unwrap();
+        assert_eq!(dir, xdg.join("codescout"));
     }
 
     #[test]
@@ -275,10 +278,10 @@ mod tests {
 
     #[test]
     fn config_dir_xdg_wins_over_home() {
-        let xdg = abs("/tmp/xdg");
-        let home = abs("/tmp/fake-home");
-        let dir = global_config_dir_from(Some(&xdg), Some(&home)).unwrap();
-        assert_eq!(dir, PathBuf::from(&xdg).join("codescout"));
+        let xdg = test_abs_path("xdg");
+        let home = test_abs_path("fake-home");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), Some(home.as_os_str())).unwrap();
+        assert_eq!(dir, xdg.join("codescout"));
     }
 
     #[test]
@@ -308,12 +311,9 @@ mod tests {
 
     #[test]
     fn env_path_derives_from_config_dir() {
-        let xdg = abs("/tmp/xdg-test-codescout");
-        let dir = global_config_dir_from(Some(&xdg), None).unwrap();
-        assert_eq!(
-            dir.join(".env"),
-            PathBuf::from(&xdg).join("codescout").join(".env")
-        );
+        let xdg = test_abs_path("xdg-test-codescout");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), None).unwrap();
+        assert_eq!(dir.join(".env"), xdg.join("codescout").join(".env"));
     }
 
     #[test]
