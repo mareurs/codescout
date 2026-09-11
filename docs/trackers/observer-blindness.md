@@ -2644,8 +2644,9 @@ entry with three parties rather than three claims.
 
 **Rests on:** `CLAUDE.md` § *Testing Discipline* — *a test cannot detect what its RECORDING
 filters out*, of which this is the author-side twin; `CLAUDE.md` § *Observer Blindness* position 3;
-`docs/issues/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
-(`ee19d4fb`), the mechanism row for the gap this class leaves open.
+`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
+(`3260ae2de91940e3`), the mechanism row for the gap this class leaves open — fixed 2026-09-11, and
+the mechanism it shipped is the rule-set comparison rather than the one-tag check alone.
 
 **Class:** an author skips a verification step on the strength of a **category judgement about the
 diff** — "docs-only", "comments only", "no behaviour change" — in a repo where that category does

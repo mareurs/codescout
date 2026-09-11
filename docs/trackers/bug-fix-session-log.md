@@ -13210,8 +13210,10 @@ is the property the `BL-66` case lacked.
 `pre-commit` hook **accepted** the commit that red the shared `issue_clusters` gate for
 every session in the checkout, because it implements the stored-count and member-naming
 rules and not the one-tag-per-open-bug rule. Filed as
-`docs/issues/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
-(`ee19d4fb`), tagged `cluster/guard-narrower-than-its-name`. So the hook that saved me
+`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`
+(`3260ae2de91940e3`), tagged `cluster/guard-narrower-than-its-name`. Fixed 2026-09-11 — the hook
+now carries the one-tag rule, and the rule SETS are compared so the next divergence reds rather
+than shipping. So the hook that saved me
 twice let a third defect through in the same sequence — and
 `tests/issue_clusters.rs::the_hook_script_agrees_with_this_gate`, the surface a reader
 consults to rule that out, compares the two implementations' *parse logic* and never their
