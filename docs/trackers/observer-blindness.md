@@ -546,6 +546,15 @@ Blindness* doing exactly what it claims — the mechanism covered the judgement,
 Refusal-to-interpolate is the transferable half: it is not a higher standard of care, it is
 declining to supply a referent the message did not.
 
+**Instance 4's SENDER-side mechanism is `bug-fix-session-log:F-133` and is cited rather than
+restated here**, because it has its own instances behind it and a paraphrase would put one
+lesson in two ledgers. The short of it: the per-member instrument was not missing — it was
+applied to one of three columns and its result extended past its scope. And the asymmetry that
+entry names, which neither *count the LIST, never the corpus* nor *never route by adjacency*
+predicts: because the two membership errors compensated, **the correct aggregate actively
+CORROBORATED the wrong list.** A rule warning that the number and the list are both suspect does
+not anticipate one half vouching for the other.
+
 ### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
 
 Found 2026-08-31, and it is the sharpest thing in `OB-1` because it names a defect the
