@@ -1320,6 +1320,41 @@ another process authored part of it. The party who can is the session whose writ
 once its own writes returned `ok`. That asymmetry is the `OB-N` shape; see
 `docs/trackers/observer-blindness.md`.
 
+## Instance 9 — 2026-09-11, the captured side recovers a citable patch-id by scoping the diff to its own files
+
+`src/agent/build_check.rs` + `src/tools/core/cap_probe.rs` were staged (via `git add <two files>`,
+after a mutation-verified fix) when a concurrent peer committed
+`2e2d6971ca8e1260927ca4a01dc8938a4560968b` — `docs(issues): archive the dashboard-memory bug, file
+the feature-lane class` — and the shared index handed the peer's commit my two staged files along
+with its own. `git diff HEAD -- <the two files>` came back empty afterward: nothing was lost, only
+misattributed — the commit message names none of it.
+
+**Caught by habit, not by a guard.** `git diff --cached --stat` before committing is what surfaced
+it (this file's own § *Three rules the corpus paid for* already prescribes exactly this check); no
+pre-commit hook fired, because the committing session's own paths WERE its own — the entanglement
+is invisible from the committer's side by construction, which is this file's running theme.
+
+**What is new here: recovering a citable identity for a fix bundled inside someone else's commit,
+without re-committing (which would be a no-op — HEAD already has the content byte for byte).**
+`git show <sha> | git patch-id --stable` hashes the WHOLE commit's diff, so it is not a citable id
+for just the entangled fix. Scoped instead, against the commit's own parent:
+
+```
+git diff <sha>^ <sha> -- <path1> <path2> | git patch-id --stable
+```
+
+This is an ordinary content hash over an ordinary diff — `git patch-id` does not require the input
+to have been a real commit — so it survives rebase and cherry-pick exactly like any other patch-id
+citation this repo already relies on, despite never having been its own commit.
+
+**A second-order cost this instance also produced:** the archive move that followed (of the bug
+this fix closed) re-minted the file's catalog id, breaking two INBOUND prose citations in unrelated
+files that named the pre-archive path as a worked example for `docs/issues/2026-09-05-frontmatter-id-mismatch-asserts-a-move-for-worktree-minted-ids.md`
+(id `e82deca98330f72c`). Those citations depend on the OLD path for a `sha256(path) = id` computation
+they quote, so the path could not simply be swapped to the new one without invalidating the math —
+fixed by appending a forward-note there instead of editing the historical values. Ordinary archival
+churn, but a reminder that a capture-and-archive sequence can compound: one event breaks provenance
+in two unrelated places on the same afternoon.
 ## Resume
 
 Decide remedy (1) vs (2) and record it in `docs/RELEASE.md` § git workflow, which today

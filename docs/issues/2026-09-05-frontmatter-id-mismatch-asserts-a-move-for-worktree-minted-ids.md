@@ -78,6 +78,13 @@ declares `id: 637ad14bbbc663da`; the catalog row is `7dc6b51ed6036f02`, which is
 its reader to look for a move. There was none: `git log --follow` returns **one** commit
 (`68d72d67`, 2026-09-09) and no rename.
 
+**Since archived** (2026-09-11, fixed): the file now lives at
+`docs/issues/archive/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md`
+under catalog id `2abd5aae844f4ee2` — a second re-mint of the same file, this time via a real
+`doc(move)`. Noted so a path-existence check does not read this section's `docs/issues/2026-09-09-...`
+mention as broken; it does not disturb anything the math above rests on — both ids quoted are
+`sha256` of the paths named AT THE TIME each was observed, not a claim about where the file lives now.
+
 **The declared id was RESOLVED, not inferred.**
 `sha256("<repo>/.worktrees/result-cap-marker-gate/docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md")`
 `= 637ad14bbbc663da`, exact. Row 2 of the table above, in a worktree since removed — so 8 of 8

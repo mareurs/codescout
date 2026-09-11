@@ -1,10 +1,12 @@
 ---
-id: '637ad14bbbc663da'
+id: 2abd5aae844f4ee2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: build_check renders three of N compile errors and never says N, so a truncated diagnostic list reads as the whole one'
 tags:
 - cluster/capped-result-presented-as-complete
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 ## Summary
@@ -95,24 +97,37 @@ Ten errors in, three lines out, asserted equal to the cap. A mutation that delet
 
 ## Fix
 
-Not fixed. The change is small and has two halves that must land together, per `IC-13`'s own reading: count the suppressed diagnostics, and emit the count as a field distinct from the rendered text (e.g. `showing 3 of 12`), so a mutation deleting the disclosure has something to delete.
+Fixed. `errors_naming` (`src/agent/build_check.rs`) no longer breaks the outer scan once `hits.len()` reaches `MAX_RENDERED` — it keeps counting every matching diagnostic into a `total` while only rendering the first three, so `total > hits.len()` is now a real, computed condition rather than one that can never be observed (the old code's `hits.len()` was, by construction, never more than the cap it would have been compared to). When capped, the returned string gets a distinct trailing line — `"  … showing 3 of 12"` — appended after the rendered hits, not folded into a fourth hit-shaped line. `render_notice` needed no change: it already wraps the string verbatim.
 
-Deliberately **not** fixed in the same pass that found it: this branch's scope is the gate, and a fix whose wording is the load-bearing part deserves its own review rather than riding a rebase.
+`cap_probe.rs`'s `agent_build_check.rendered_diagnostics` row is updated from `Coverage::Deferred` to `Coverage::Probed`, citing `at_most_three_errors_are_rendered`.
 
+**Mutation-verified**: `at_most_three_errors_are_rendered` (the exact test this bug named as blind — "asserts the bound holding, never a disclosure arriving") was strengthened first and observed RED against the pre-fix code, then GREEN after. A new control test, `under_the_cap_no_disclosure_is_added`, confirms the marker is conditional (2 errors, under the cap of 3, produces no "showing" line) so it cannot be glued on unconditionally.
+
+**Citation, and why it needs an explanation this time:** this fix landed *inside* `2e2d6971ca8e1260927ca4a01dc8938a4560968b`, a commit authored by a concurrent peer session archiving an unrelated bug (`docs(issues): archive the dashboard-memory bug, file the feature-lane class`). My two files were staged in the shared index (this checkout has one `.git/index` for every session working it) when the peer committed; `git diff HEAD -- src/agent/build_check.rs src/tools/core/cap_probe.rs` reads empty afterward, confirming nothing was lost — the content is safely in history, just not under a commit message that names it. This is a live recurrence of `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` (id `e421be689a23ae2a`), recorded there as its own instance rather than re-derived here.
+
+Because the commit is entangled, `git show 2e2d6971 | git patch-id --stable` would hash the peer's docs changes too and is not a citable identifier for *this* fix alone. Scoped instead:
+
+```
+git diff 2e2d6971^ 2e2d6971 -- src/agent/build_check.rs src/tools/core/cap_probe.rs | git patch-id --stable
+```
+
+**SHA (entangled, contains this fix plus unrelated peer content):** `2e2d6971ca8e1260927ca4a01dc8938a4560968b`
+**patch-id (scoped to the two files this fix touched):** `0b0e3a325d30dac0821b3dd6ec924d8f37c900ac`
 ## Tests added
 
-None yet — the probe row records the gap instead, as `Coverage::Deferred` in `src/tools/core/cap_probe.rs` under id `agent_build_check.rendered_diagnostics`, with the reason stating that no marker exists to assert. When the fix lands, that row becomes `Probed` with a cited test and the mutation can be run.
+`src/agent/build_check.rs` test module:
 
-Tuning the row until it passed was available and refused: it would have converted a finding into coverage.
+- `at_most_three_errors_are_rendered` (existing test, strengthened) — ten errors in, asserts three hit lines AND a `"showing 3 of 10"` line. This is the exact test the bug's own Evidence section quoted as blind to the defect ("asserts the bound holding... a mutation that deleted a disclosure would not red this test"); it now does.
+- `under_the_cap_no_disclosure_is_added` (new) — two errors, under the cap: no `"showing"` line. Over-match guard proving the marker is conditional on something actually being withheld.
 
+Both observed RED against pre-fix `errors_naming`, GREEN after.
 ## Workarounds
 
 Run `cargo check --all-targets` directly — the author's own build reports every diagnostic. This is why severity is **low** rather than medium: the truncated surface is advisory and a full-fidelity source is one command away, unlike the tool-output members of this cluster where the capped response is the only view the caller gets.
 
 ## Resume
 
-Add a suppressed-count to `errors_naming` (`src/agent/build_check.rs:281-292`): return the total alongside the rendered lines rather than `Option<String>`, and have `render_notice` (`:302-308`) emit `showing N of M` when `M > N`. Then flip the `agent_build_check.rendered_diagnostics` row in `src/tools/core/cap_probe.rs` to `Coverage::Probed`, cite the new test, and drive the mutation (delete the count emission, observe the cited test red, revert).
-
+Done — see § Fix. Nothing left to resume.
 ## References
 
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md` — the class, and the `index_state.skipped_sample` precedent that a marker naming the truncated payload is not a marker.
