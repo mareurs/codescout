@@ -107,6 +107,31 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
 
+  # ITS OWN JOB, same reason as `push-guard-tests` above: `shell-tests` is a known-
+  # flaky lane, and this suite's assertions are verdicts about ATTRIBUTION -- the one
+  # thing on a shared checkout that must not be readable as lane noise.
+  #
+  # Why it is wired at all: scripts/count-with-members.sh is intervention I-10
+  # (docs/trackers/test-escape-hardening.md), routed from bug-fix-session-log:F-133,
+  # where a CORRECT count sat beside a wrong membership list and corroborated it. A
+  # tool built so the reassuring number cannot be produced alone is worth nothing if
+  # nothing runs its discriminators -- the suite's sharpest case is that a commit
+  # whose BODY names another session's id is not attributed to that session, which is
+  # a real false positive measured on this repo (21 reported for 20 owned).
+  #
+  # Needs only git; no Rust toolchain, no python, no sqlite.
+  count-with-members-tests:
+    name: count-with-members discriminators
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify a committer (the suite builds a throwaway git repo)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/count-with-members.sh
+
   # ITS OWN JOB, for the reason spelled out above `push-guard-tests`: `shell-tests`
   # is a known-flaky lane, and a suite whose assertions are meant to be read as
   # verdicts loses that the moment its reds are attributable to lane noise.

@@ -356,24 +356,47 @@ different remedy (*run it on every column*, actionable in the moment) than *go f
 
 **The intervention.** A helper that cannot print a count without printing the members it
 summarises, so the two are never separately derived and the reassuring number cannot be produced
-alone. Shape, not yet built:
+alone. **Shipped** as `scripts/count-with-members.sh`, with `tests/count-with-members.sh`
+(19 cases) wired as its own CI job `count-with-members-tests`:
 
 ```
-scripts/count-with-members.sh <ref-range>     # or a --by <trailer> flag
-  -> 6 b0b9bc40  1a34a131 4ba169bd 295a928e 4d78c48a 7e08645f 8b396343
-     5 b80a27d4  a47ecd84 17fc2e52 73c6a29f 6d55f82f 79d9493c
-     3 59112612  cd8917ca 359d7742 3f1bd5df
+scripts/count-with-members.sh origin/experiments..HEAD
+  -> 3 59112612-...  cd8917ca 3f1bd5df 359d7742
+     8 b0b9bc40-...  8b396343 7e08645f 4d78c48a 295a928e 4ba169bd 1a34a131 014a1c82 1ca0e46e
+     6 b80a27d4-...  79d9493c 6d55f82f 73c6a29f 17fc2e52 a47ecd84 26b34e89
+     total: 17 commit(s) in origin/experiments..HEAD
 ```
+
+That output is the F-133 instance inverted: `cd8917ca` and `79d9493c` are the two commits the
+hand-built list swapped, and here each arrives welded to its count.
+
+**Three design points that are the intervention rather than decoration.** (1) There is no
+count-only mode, and `--count-only` is refused *by name* with the reason, so the absence reads as
+deliberate rather than as a missing feature the next person should add. (2) Grouping uses git's
+trailer parser (`%(trailers:key=…)`), not a grep over `%b` — a grep counts MENTIONS, and on this
+repo returned **21 for a session owning 20** commits in range, because one commit discusses another
+session's id in its body. (3) The script checks its own output: if the members printed do not
+account for every commit in the range it refuses with a non-zero exit rather than emitting a
+plausible partial table, since a partial breakdown is precisely the artifact it exists to prevent.
+
+**Both guards earned their place during implementation, which is the argument for them.** The
+self-check fired on the tool's first run against a real range — `GROUPS` is a bash built-in array
+holding the caller's group ids, so `"$GROUPS"` expanded to `1000` and every group came back empty.
+The count was still right. Without the self-check the script would have printed a clean-looking
+`total: 17` under an empty breakdown. Separately, the suite's own fixture was wrong on first
+execution (`git rev-parse HEAD` on an unborn branch prints the literal string `HEAD` *and* exits
+non-zero, so `|| true` captured it and the range became `HEAD..HEAD`) — an empty range that passes
+as a clean run. Both failures were of the class this ledger tracks: a green-looking result that
+asserted nothing.
+
+**Why it is `cheap-detector` and `mechanical`.** A few lines of shell over `git log --format`,
+needing no new data — every field is already in the trailers. It earns its place by
+§ *Observer Blindness* position 3's preferred shape: **the correct path ends in a safe state**, so
+compliance leaves nothing armed. The alternative is a policy (*remember to resolve every column*),
+which is position 3's explicit fallback and is what F-133 records as its only remedy.
 
 First callers are the two sites that produced both instances: the pre-push range enumeration an
 operator decides over, and file attribution on a shared checkout.
-
-**Why it is `cheap-detector` and `mechanical`.** It is a few lines of shell over
-`git log --format` and needs no new data — every field is already in the trailers. It earns its
-place by § *Observer Blindness* position 3's preferred shape: **the correct path ends in a safe
-state**, so compliance leaves nothing armed. The alternative is a policy (*remember to resolve
-every column*), which is position 3's explicit fallback and is what F-133 currently records as its
-only remedy.
 
 **Not a campaign.** One script, two known callers. It does not propose auditing past enumerations.
 
