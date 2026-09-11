@@ -159,3 +159,20 @@ Fixed. N/A.
 - `src/server.rs:4600` (the failing test)
 - commit `73ccb495` ("feat(prompts): wire the three guides you chose, and route by what the call touched")
 - `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`
+
+## Fix provenance
+
+- **SHA:** `748f34c1` (`experiments`) — *"fix: 6 Windows-only bugs found by the first native
+  test run on this VDI"*; this file's half is `src/librarian/tools/create.rs`.
+- **patch-id:** `1b3039defd67f30ea16137f4e2964fe377bab072`
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash
+of the diff and survives rebase and cherry-pick.
+
+**Recorded 2026-09-11, at archive time rather than at fix time**, by the session that merged
+`origin/experiments` into the shared checkout. The record arrived here already marked
+`status: fixed` with no anchor, which left it in `docs/issues/` — and because
+`every_open_bug_file_declares_one_known_defect_class` selects by PATH rather than by status,
+six such records reddened the shared gate for every session in the checkout until they were
+archived. Verified before archiving rather than trusted: `748f34c1` is on `experiments` and
+touches the file this bug names.

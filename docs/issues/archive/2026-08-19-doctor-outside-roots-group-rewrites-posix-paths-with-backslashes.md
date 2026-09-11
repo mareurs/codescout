@@ -170,3 +170,22 @@ Fixed. N/A.
 - `src/librarian/tools/doctor.rs:2482-2508`, `:2540-2551` (the two failing tests)
 - `c8902da802c0117d` (fixed, archived) — prior instance of the same defect class
 - commit `27309362` ("fix(doctor): make the outside-roots sample stable and its remainder reachable")
+
+## Fix provenance
+
+- **SHA:** `af5d0dab` (`experiments`) — *"fix(doctor): spell paths forward-slash in the
+  entry-validity fixtures and in outside_roots_group"*, 2026-08-26.
+- **patch-id:** `de915596b0fbdaac4c9e06fc471ca0ef662227d1`
+
+**This one was the reason to verify rather than trust the frontmatter.** The merge that
+brought this record into the shared checkout touched no `src/librarian/tools/doctor.rs`, so
+its `status: fixed` had no visible support in the merged range and read as an unchecked
+completion. The fix is real and simply **predates the merge-base** (`1ca0e46e`) — it was
+already shared, which is precisely why no merged commit carried it. Confirmed at the bytes:
+`outside_roots_group` now splits the string rather than round-tripping a `PathBuf`, and its
+own comment names the defect — *"`PathBuf::push` re-joins with the NATIVE separator, so the
+round-trip emitted `\home\u\work\proj` on Windows and this function was producing the very
+spelling `check_backslash` exists to forbid."*
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash
+of the diff and survives rebase and cherry-pick.

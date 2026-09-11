@@ -382,7 +382,7 @@ mod tests {
         //
         // Unix only. Windows *does* resolve a real ppid via `ToolHelp32Snapshot` (see
         // the `#[cfg(windows)]` `parent_pid()` above, and
-        // `docs/issues/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`,
+        // `docs/issues/archive/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`,
         // which verified this exact assertion passing on native
         // `1.97.1-x86_64-pc-windows-gnu` on 2026-08-19) — this is NOT a "Windows has no
         // getppid" split. It exists because CI's windows-gnu job cross-compiles under

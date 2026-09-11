@@ -1,12 +1,16 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/selector-narrower-than-its-population
+- librarian
+- artifact
+- filter
+closed: null
 opened: 2026-08-14
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [librarian, artifact, filter]
-kind: bug
+severity: medium
 ---
 
 # BUG: `artifact(find)` `rel_path` filter matches the stored absolute path, not the repo-relative path the docs promise

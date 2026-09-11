@@ -251,7 +251,7 @@ mod tests {
     /// there and `global_config_dir_from`'s `is_absolute()` filter (see its doc
     /// comment above) rejects them, falling through to `home` (`None` in these
     /// tests) and panicking the `.unwrap()`. See
-    /// docs/issues/2026-08-19-windows-native-test-suite-posix-path-assumptions.md.
+    /// docs/issues/archive/2026-08-19-windows-native-test-suite-posix-path-assumptions.md.
     #[cfg(windows)]
     fn test_abs_path(name: &str) -> PathBuf {
         PathBuf::from(r"C:\tmp").join(name)

@@ -1,12 +1,16 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/unclassified
+- fs
+- windows
+- edit-tools
+closed: null
 opened: 2026-08-14
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [fs, windows, edit-tools]
-kind: bug
+severity: medium
 ---
 
 # BUG: `atomic_write`'s temp-file-then-rename pattern is not detected by dev-server file watchers (uvicorn `--reload` / watchfiles) on Windows

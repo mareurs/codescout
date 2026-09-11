@@ -25,7 +25,7 @@ comment claiming "Windows has no getppid here... 0 is deliberate." That claim
 is false on real Windows: `parent_pid()`'s Windows branch does a real
 `CreateToolhelp32Snapshot` walk and resolves a genuine PPID, as already
 fixed and verified in
-`docs/issues/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`.
+`docs/issues/archive/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`.
 Running the suite natively on this VDI reproduced the contradiction directly:
 the "by design" test failed because the real implementation returned a real
 PID (16516), not 0.
@@ -58,7 +58,7 @@ branch at `aa242912`.
 
 ## Root cause
 
-`docs/issues/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`
+`docs/issues/archive/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`
 fixed the original "Windows PPID is a hardcoded 0 stub" bug by implementing a
 real `CreateToolhelp32Snapshot` + `Process32FirstW`/`Process32NextW` walk
 (`src/tools/rendezvous.rs:185-226`), and its own regression test —
@@ -165,7 +165,7 @@ has no CI access to check. Before considering this fully closed:
 
 ## References
 
-- `docs/issues/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`
+- `docs/issues/archive/2026-08-19-rendezvous-parent-pid-stub-returns-zero-on-windows.md`
   — the original fix this bug's test contradicted.
 - `.github/workflows/ci.yml:260` — the `windows-gnu` (wine) CI job whose
   behavior motivated (as best as can be inferred) the incorrect split.

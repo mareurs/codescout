@@ -164,3 +164,23 @@ Fixed. N/A.
 - `src/tools/rendezvous.rs:153-163` (parent_pid, both platform branches)
 - `src/tools/rendezvous.rs:240-247` (the failing test)
 - commit `87e85bf2` ("feat(rendezvous): publish a pid-keyed slot for the companion to stamp")
+
+## Fix provenance
+
+Two commits, because the first implemented the Windows `parent_pid()` and the second
+corrected a test that had asserted the stub's `0` as intended behaviour:
+
+- **SHA:** `748f34c1` (`experiments`) — the real `CreateToolhelp32Snapshot` walk in
+  `src/tools/rendezvous.rs`.
+  **patch-id:** `1b3039defd67f30ea16137f4e2964fe377bab072`
+- **SHA:** `3a70166c` (`experiments`) — *"fix(windows): correct a stale rendezvous PPID test
+  and a missing cfg arm found on native VDI runs"*.
+  **patch-id:** `7fa93fc9b1010da50ccd012ab3b15438e3b89d51`
+
+Both SHAs are positional and die when `experiments` is rebased; the patch-ids are content
+hashes of the diffs and survive rebase and cherry-pick.
+
+Recorded 2026-09-11 at archive time by the session that merged `origin/experiments`. Not to be
+confused with `docs/issues/2026-08-31-rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design.md`,
+a separate record about the same subsystem which `f50be810` annotated — that commit touched no
+part of this file.

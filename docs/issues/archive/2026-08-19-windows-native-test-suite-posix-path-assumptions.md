@@ -237,3 +237,22 @@ is outstanding.
 - `src/memory/filter.rs:91-94,298-302`
 - `docs/issues/archive/2026-06-09-windows-test-suite-preexisting-failures.md` (prior, already-fixed batch of Windows path issues in the same `path_security.rs` file — same recurring class, different instances)
 - Sibling reports from the same investigation session: rendezvous PPID stub, doctor `outside_roots` separator bug, `artifact(create)` missing `to_forward_slash`, memory-embedder test EnvGuard gap (all filed 2026-08-19)
+
+## Fix provenance
+
+- **SHA:** `748f34c1` (`experiments`) — the bulk of the 9 test-design gaps, across
+  `src/config/global.rs`, `src/util/path_security.rs` and `src/tools/config/tests.rs`.
+  **patch-id:** `1b3039defd67f30ea16137f4e2964fe377bab072`
+- **SHA:** `3a70166c` (`experiments`) — a further `src/config/global.rs` cfg arm found on a
+  later native VDI run.
+  **patch-id:** `7fa93fc9b1010da50ccd012ab3b15438e3b89d51`
+
+Both SHAs are positional and die when `experiments` is rebased; the patch-ids are content
+hashes of the diffs and survive rebase and cherry-pick.
+
+Recorded 2026-09-11 at archive time by the session that merged `origin/experiments`. Worth
+keeping from this record rather than only its fix: every one of the 9 assertions was green on
+every ubuntu and macos lane and red only on native Windows, with **no production defect behind
+any of them** — which is `IC-9` (`assertion-satisfiable-by-accident`) in its own words, the
+green tick being evidence of the platform's path semantics rather than of the property
+asserted.

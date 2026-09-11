@@ -138,3 +138,15 @@ Fixed. N/A.
 - `src/retrieval/client.rs:260-296` (`build_embedder`)
 - `src/config/project.rs:347-349` (`default_embed_model`)
 - `Cargo.toml:175` (default features)
+
+## Fix provenance
+
+- **SHA:** `748f34c1` (`experiments`) — *"fix: 6 Windows-only bugs found by the first native
+  test run on this VDI"*; this file's half is `src/agent/mod.rs`.
+- **patch-id:** `1b3039defd67f30ea16137f4e2964fe377bab072`
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash
+of the diff and survives rebase and cherry-pick.
+
+Recorded 2026-09-11 at archive time by the session that merged `origin/experiments`. Verified
+that `748f34c1` is on `experiments` and touches the file this bug names.
