@@ -554,6 +554,16 @@ impl Tool for Grep {
                 r["overflow"] = json!({
                     "shown": shown_count,
                     "hint": hint,
+                    // Context mode's walk breaks as soon as `total_match_count` reaches
+                    // `max` — it never oversamples the way the non-context branch does,
+                    // because that oversample only ever feeds `cap_grouped`'s
+                    // display-capped file-diversity round-robin (BL-31); context mode has
+                    // no equivalent display cap, so widening the walk here would inflate
+                    // the RETURNED `matches[]` by the same factor, not just the count.
+                    // So `shown_count` is always a floor once `hit_cap` is true — flag
+                    // it, matching the non-context branch's own `total_is_lower_bound`.
+                    // docs/issues/archive/2026-09-07-grep-context-mode-total-is-the-shown-count-and-the-floor-flag-misses-this-site.md
+                    "total_is_lower_bound": true,
                 });
             }
             r
@@ -629,7 +639,23 @@ pub(super) fn format_grep(val: &Value) -> String {
             .unwrap_or(false);
         format_search_simple_mode(&mut out, groups, total, files, total_is_floor);
     } else if let Some(flat) = val["matches"].as_array() {
-        let match_word = if total == 1 { "match" } else { "matches" };
+        // Same flag, same reasoning as the `file_groups` branch above: when the
+        // walk broke early, `total` (== shown block count here) is a floor, not a
+        // fact, and the header is what a reader anchors on — see this function's
+        // own comment on `head_extra` placement, and BL-2's original reasoning.
+        // Both context-mode construction sites (`grep.rs`'s filesystem walk and
+        // `grep_in_buffer`) now set this; this branch previously never read it,
+        // so setting it there alone would have changed nothing here.
+        let total_is_floor = val
+            .get("overflow")
+            .and_then(|o| o.get("total_is_lower_bound"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let match_word = match (total, total_is_floor) {
+            (_, true) => "matches (capped)",
+            (1, false) => "match",
+            (_, false) => "matches",
+        };
         out.push_str(&format!("{total} {match_word}\n"));
         format_search_context_mode(&mut out, flat);
     } else if let Some(files_arr) = val["files"].as_array() {
@@ -1114,6 +1140,15 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                 "hint": format!(
                     "Showing first {shown_count} matches (cap hit). Narrow the pattern."
                 ),
+                // Same gap, same fix, as the filesystem-walk context-mode site above —
+                // this is the SECOND of two context-mode construction sites the parent
+                // bug's own root-cause table (`b75d2660ef37198c`) counted as one: it
+                // enumerated three sites total (non-context, this buffer path's
+                // non-context branch, and the filesystem-walk context mode), and this
+                // buffer-mode CONTEXT branch is a fourth, unnamed there. Found by
+                // re-reading the code rather than trusting the table's count.
+                // docs/issues/archive/2026-09-07-grep-context-mode-total-is-the-shown-count-and-the-floor-flag-misses-this-site.md
+                "total_is_lower_bound": true,
             });
         }
         r
@@ -2002,6 +2037,122 @@ mod tests {
         assert!(
             hint.contains("true total is unknown"),
             "the buffer hint must say the total is unknown, got: {hint}"
+        );
+    }
+
+    /// The CONTEXT-mode twin of `grep_capped_result_spans_files_by_diversity_not_walk_order`'s
+    /// control/row pair above. Context mode has its own overflow-construction site
+    /// (`context_lines > 0` in `Grep::call`) which historically set `shown` and `hint`
+    /// but never `total_is_lower_bound` — so a capped context-mode result and a
+    /// complete one were indistinguishable at the one field every other branch relies
+    /// on. `docs/issues/archive/2026-09-07-grep-context-mode-total-is-the-shown-count-and-the-floor-flag-misses-this-site.md`.
+    #[tokio::test]
+    async fn grep_context_mode_capped_collection_marks_the_total_as_a_floor() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        // 3 files x 3 matches = 9 matching lines, well past a limit of 4.
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(
+                dir.path().join(name),
+                "fn target_1() {}\nfn target_2() {}\nfn target_3() {}\n",
+            )
+            .unwrap();
+        }
+        let ctx = test_ctx().await;
+        let tool = Grep;
+        let path = dir.path().to_str().unwrap();
+
+        let capped = tool
+            .call(
+                json!({ "pattern": "target", "path": path, "limit": 4, "context_lines": 1 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let complete = tool
+            .call(
+                json!({ "pattern": "target", "path": path, "limit": 50, "context_lines": 1 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // --- control row: a complete result hides nothing and says so by omission.
+        assert!(
+            complete.get("overflow").is_none(),
+            "limit=50 over 9 matches must not overflow, got: {complete}"
+        );
+
+        // --- the row under test.
+        let overflow = capped
+            .get("overflow")
+            .expect("limit=4 over 9 context-mode matches must overflow");
+        assert_eq!(
+            overflow
+                .get("total_is_lower_bound")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "a collection-capped CONTEXT-mode result must mark its total as a floor, \
+             got: {overflow}"
+        );
+
+        // --- the cross-row assertion, on the header line a reader anchors on —
+        // same shape as the non-context control/row pair, now covering the branch
+        // that previously never set the flag `format_grep` reads to render it.
+        let capped_text = tool.format_compact(&capped).unwrap();
+        let complete_text = tool.format_compact(&complete).unwrap();
+        assert!(
+            !complete_text.contains("capped"),
+            "a complete context-mode result must carry no incompleteness marker, got:\n{complete_text}"
+        );
+        let header = capped_text.lines().next().unwrap_or_default();
+        assert!(
+            header.contains("capped"),
+            "the capped context-mode result's FIRST line must not read as a plain \
+             count — that is the line a reader anchors on. Got: {header}"
+        );
+    }
+
+    /// Buffer-path twin of the test above — `grep_in_buffer` carries its own
+    /// context-mode overflow-construction site (separate from its non-context one,
+    /// which `grep_buffer_capped_collection_marks_the_total_as_a_floor` already
+    /// covers), and it had the identical gap: a bug filed against the filesystem
+    /// path's context mode (`b75d2660ef37198c`) enumerated three construction sites
+    /// and missed this fourth one, which shares the defect exactly.
+    #[tokio::test]
+    async fn grep_buffer_context_mode_capped_collection_marks_the_total_as_a_floor() {
+        use serde_json::json;
+        let ctx = test_ctx().await;
+        let body: String = (0..20).map(|i| format!("target_{i}\n")).collect();
+        let raw = json!({ "id": "abc", "body": body }).to_string();
+        let buf_id = ctx.output_buffer.store_tool("artifact", raw);
+
+        let tool = Grep;
+        let result = tool
+            .call(
+                json!({ "pattern": "target_", "path": buf_id, "limit": 5, "context_lines": 1 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let overflow = result
+            .get("overflow")
+            .expect("limit=5 over 20 buffer context-mode matches must overflow");
+        assert_eq!(
+            overflow
+                .get("total_is_lower_bound")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "the buffer path's context mode must mark a collection-capped total as a \
+             floor, got: {overflow}"
+        );
+
+        let text = tool.format_compact(&result).unwrap();
+        let header = text.lines().next().unwrap_or_default();
+        assert!(
+            header.contains("capped"),
+            "the buffer context-mode header must carry the floor marker, got: {header}"
         );
     }
 
