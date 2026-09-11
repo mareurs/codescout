@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: investigating
+status: taken
 tags:
 - cluster/doc-contradicted-by-code
 - doc-drift
@@ -115,30 +115,27 @@ enumeration that agreed on all ten.
 
 ## Fix
 
-**Partial.** Re-scouted before editing since the population had shifted since
-filing (line numbers moved; the citation appears with and without a trailing
-line number across sites). Fixed, by naming the property rather than the
-expression (per this file's own prescription) plus the correct current site
-(`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`, using
-`ledger.contains(topic)`):
+**Complete**, in two passes. First pass (previous commit) fixed all 4
+`src/tools/guide_ledger.rs` sites, `src/tools/config/mod.rs`'s 1 site,
+`src/prompts/mod.rs`'s 1 site, and `src/server.rs`'s one *dispatching*
+failure-message text (`:8623-8632` at the time). Second pass, once
+`git status --short -- src/server.rs` came back clean (a shared checkout
+with other live sessions), fixed the remaining 4 `src/server.rs` comment
+sites (now at `:1256`, `:9199`, `:9943`, `:10367` — all had shifted since
+filing).
 
-- All 4 `src/tools/guide_ledger.rs` sites (doc comments + one test comment).
-- `src/tools/config/mod.rs`'s 1 site.
-- `src/prompts/mod.rs`'s 1 site.
-- `src/server.rs:8623-8632`'s failure-message text — the one site this bug
-  calls out as most important ("a stale comment misinforms; a stale
-  remediation dispatches") — fixed once `git status --short -- src/server.rs`
-  came back clean (it was not, at filing time, per this file's own caution).
+All ten fixed the same way: name `engines::emitters::emit_session_opener`
+(`src/engines/emitters.rs`) and the property ("fires when the bootstrap
+topic is absent from the ledger"), not the expression — per this file's own
+prescription, so the citation survives the next refactor of the expression
+itself.
 
-**Not fixed:** the remaining `src/server.rs` sites this bug named (`:1157`
-region and others in the same file, now at shifted line numbers) — left for a
-follow-up pass; `server.rs` sees frequent concurrent activity in this shared
-checkout and the sites are numerous enough to warrant their own careful pass
-rather than a rushed tail-end edit.
+**Deliberately left alone:** `src/engines/coordinator.rs:55`'s citation —
+this is the documentation example this file itself names, quoting the stale
+form on purpose to teach the lesson.
 
-Fix SHA: `98633b380e2802776710fbc1004f6fe1f455f3dd` (experiments)
-Patch-id: `908d2fa7dc5410c3c2c4139239df06808a68f015`
-(covers the partial fix only — this bug stays open until the remaining `src/server.rs` sites are fixed and a follow-up SHA is recorded)
+Fix SHA: *(recorded once committed — see below)*
+Patch-id: *(recorded once committed — see below)*
 ## Tests added
 
 None — doc/comment-only corrections, no behavior change. `cargo check

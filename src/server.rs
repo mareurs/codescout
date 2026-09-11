@@ -1253,9 +1253,10 @@ impl CodeScoutServer {
                         .and_then(crate::prompts::refusal_predicate)
                         .filter(|_| {
                             // `notice_once`, not `insert`: under the opener's
-                            // trigger (the `!emitted.contains(SESSION_OPENING_GUIDE)`
-                            // check in `Tool::call_content`, `src/tools/core/types.rs`)
-                            // a key in `emitted` only risks suppressing the
+                            // trigger (`engines::emitters::emit_session_opener`,
+                            // `src/engines/emitters.rs`: fires when the bootstrap
+                            // topic is absent from the ledger) a key in `emitted`
+                            // only risks suppressing the
                             // opener if it collides with that literal topic
                             // string — which this refusal key does not.
                             // `notice_once` still keeps it in the separate
@@ -9196,8 +9197,9 @@ mod guide_hint_tests {
         // rather than `notice_once` would have silently cost every session
         // that happens to start with a refusal its orientation guide — ANY
         // key landing in `emitted` made it non-empty. As of 2026-08-18 the
-        // trigger is the `!emitted.contains(SESSION_OPENING_GUIDE)` check in
-        // `Tool::call_content` (`src/tools/core/types.rs`), under which a
+        // trigger is `engines::emitters::emit_session_opener`
+        // (`src/engines/emitters.rs`), which fires when the bootstrap topic
+        // is absent from the ledger, under which a
         // refusal key would only matter if it collided with that literal
         // topic string — which it does not. `notice_once` keeps it in the
         // separate `notices` set regardless, since that also protects the
@@ -9939,8 +9941,9 @@ mod guide_hint_tests {
         // Rendezvous gate left at its default (inactive) — no companion hook has
         // ever stamped this server's slot.
         //
-        // Deliberately NOT `SESSION_OPENING_GUIDE`: `call_content`'s opener check
-        // (`!emitted.contains(SESSION_OPENING_GUIDE)`) re-inserts that exact topic
+        // Deliberately NOT `SESSION_OPENING_GUIDE`: the opener
+        // (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`)
+        // re-inserts that exact topic
         // on every response where it's absent, including this one — so it would
         // read back as present after the call REGARDLESS of clear vs. re-arm, and
         // could not distinguish the two paths. `librarian` and
@@ -10363,9 +10366,9 @@ mod guide_hint_tests {
         // end state, which is why moving `self.poll_rendezvous()` below the tool
         // call left all 4050 lib tests green. This assertion reads THIS
         // response instead. A re-armed ledger is empty, and an empty ledger
-        // always lacks `SESSION_OPENING_GUIDE` — the opener's trigger (the
-        // `!emitted.contains(SESSION_OPENING_GUIDE)` check in
-        // `Tool::call_content`, `src/tools/core/types.rs`) — so the opener
+        // always lacks `SESSION_OPENING_GUIDE` — the opener's trigger
+        // (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`:
+        // fires when that topic is absent from the ledger) — so the opener
         // can only ride this very response if the rekey landed first.
         //
         // The off-by-one is not cosmetic: with the poll after the tool ran, the
