@@ -332,6 +332,55 @@ rather than left in their scratchpad because their prose ledgers are id-blocked 
 unpushed commits and this host does not push, so the park had no scheduled end; this
 tracker is a **params** ledger and so is unguarded by that check. The `SKF-22` framing is
 theirs too: *a trigger the model must notice is a policy, not a mechanism.*
+
+### I-10 — Refuse to emit an aggregate without its members (aggregate-corroborates-wrong-list)
+
+**Instance:** `bug-fix-session-log:F-133` — twice in one session an author derived a per-commit
+aggregate with the right instrument and then composed the matching membership list by hand. In the
+second case the per-member instrument had **already been run**, on one of three columns
+(`git log --grep=<own sid>` for the author's own commits), and the other two were freehanded;
+`cd8917ca` and `79d9493c` ended up in each other's columns.
+
+**Why the existing laws do not cover it.** § *Testing Discipline*'s *count the LIST, never the
+corpus* and § *Reaching a Peer Session*'s *never route by adjacency* both describe failures where
+the number and the list are **both** suspect. Here the number was right — derived correctly,
+re-derived immediately before use, self-consistent — because the two membership errors compensated
+(one commit out of a column, one in) and left every count intact. **So the aggregate actively
+corroborated the wrong list.** Neither law predicts one half vouching for the other, which is what
+makes this shape survive a careful reader.
+
+**Nor is it the missing-instrument case.** *An assertion computed over a POPULATION cannot verify a
+claim about a MEMBER* implies you need a per-member check. The check existed and had been run. The
+defect is a valid instrument applied to a **subset** with its result extended past that scope — a
+different remedy (*run it on every column*, actionable in the moment) than *go find a check*.
+
+**The intervention.** A helper that cannot print a count without printing the members it
+summarises, so the two are never separately derived and the reassuring number cannot be produced
+alone. Shape, not yet built:
+
+```
+scripts/count-with-members.sh <ref-range>     # or a --by <trailer> flag
+  -> 6 b0b9bc40  1a34a131 4ba169bd 295a928e 4d78c48a 7e08645f 8b396343
+     5 b80a27d4  a47ecd84 17fc2e52 73c6a29f 6d55f82f 79d9493c
+     3 59112612  cd8917ca 359d7742 3f1bd5df
+```
+
+First callers are the two sites that produced both instances: the pre-push range enumeration an
+operator decides over, and file attribution on a shared checkout.
+
+**Why it is `cheap-detector` and `mechanical`.** It is a few lines of shell over
+`git log --format` and needs no new data — every field is already in the trailers. It earns its
+place by § *Observer Blindness* position 3's preferred shape: **the correct path ends in a safe
+state**, so compliance leaves nothing armed. The alternative is a policy (*remember to resolve
+every column*), which is position 3's explicit fallback and is what F-133 currently records as its
+only remedy.
+
+**Not a campaign.** One script, two known callers. It does not propose auditing past enumerations.
+
+**Routing credit:** sessionId `8bd791df-5ff4-40fe-af30-69cc3fefc2f7` pointed out that an F-N with a
+specified-but-unbuilt mechanism is exactly what this tracker consumes, per CLAUDE.md
+§ *Observer Blindness* — *"a row reading `**Mechanism status:** none yet` is a design worklist item"*.
+Left in the session log it was a lesson; here it is a worklist item.
 ## History
 
 ### 2026-08-16 — I-7 opened and shipped same day (tracker-hygiene sweep → verify-open → fix)
