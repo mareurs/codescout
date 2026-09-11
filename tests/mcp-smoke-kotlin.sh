@@ -115,7 +115,7 @@ test_read_file_allows_yml() {
 
 test_blocked_error_has_hints() {
     call read_file '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if assert_contains "get_symbols_overview" && assert_contains "symbols"; then
+    if assert_contains "symbols(path)" && assert_contains "symbols(name="; then
         pass 1 "blocked error includes symbol tool hints"
     else
         fail 1 "blocked error includes symbol tool hints" "missing tool suggestions"
@@ -135,11 +135,11 @@ echo ""
 echo "=== Symbol Navigation ==="
 
 test_symbols_overview_auth_service() {
-    call get_symbols_overview '{"relative_path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
+    call symbols '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
     if assert_contains "AuthService" && assert_contains "login" && assert_contains "AuthError"; then
-        pass 1 "get_symbols_overview finds symbols in AuthService.kt"
+        pass 1 "symbols overview finds symbols in AuthService.kt"
     else
-        fail 1 "get_symbols_overview finds symbols in AuthService.kt" "missing expected symbols"
+        fail 1 "symbols overview finds symbols in AuthService.kt" "missing expected symbols"
     fi
 }
 
@@ -191,20 +191,20 @@ echo ""
 echo "=== Search ==="
 
 test_search_pattern() {
-    call search_for_pattern '{"pattern": "suspend fun", "max_results": 5}'
+    call grep '{"pattern": "suspend fun", "limit": 5}'
     if assert_contains "suspend fun"; then
-        pass 1 "search_for_pattern finds suspend fun declarations"
+        pass 1 "grep finds suspend fun declarations"
     else
-        fail 1 "search_for_pattern finds suspend fun declarations" "no matches found"
+        fail 1 "grep finds suspend fun declarations" "no matches found"
     fi
 }
 
 test_find_file_services() {
-    call find_file '{"pattern": "**/*Service*.kt"}'
+    call tree '{"glob": "**/*Service*.kt"}'
     if assert_contains "AuthService" && assert_contains "CalendarService"; then
-        pass 1 "find_file locates service files"
+        pass 1 "tree glob locates service files"
     else
-        fail 1 "find_file locates service files" "service files not found"
+        fail 1 "tree glob locates service files" "service files not found"
     fi
 }
 
@@ -256,7 +256,7 @@ echo "=== Multi-step Exploration ==="
 
 test_explore_auth_flow() {
     # Step 1: Find the AuthService class
-    call get_symbols_overview '{"relative_path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
+    call symbols '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
     if ! assert_contains "AuthService" || ! assert_contains "login"; then
         fail 1 "explore auth: find AuthService structure" "class or methods not found"
         return
@@ -272,7 +272,7 @@ test_explore_auth_flow() {
 
 test_explore_service_architecture() {
     # Step 1: Find all service files (need enough results to include both)
-    call find_file '{"pattern": "**/*Service*.kt"}'
+    call tree '{"glob": "**/*Service*.kt"}'
     if ! assert_contains "CalendarService" || ! assert_contains "NotificationService"; then
         fail 1 "explore architecture: find service layer" "service files not found"
         return

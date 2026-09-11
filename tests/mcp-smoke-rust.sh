@@ -163,7 +163,7 @@ test_replace_content_removed() {
 
 test_blocked_error_has_hints() {
     call read_file '{"path": "src/main.rs"}'
-    if assert_contains "get_symbols_overview" && assert_contains "symbols"; then
+    if assert_contains "symbols(path)" && assert_contains "symbols(name="; then
         pass 1 "blocked error includes symbol tool hints"
     else
         fail 1 "blocked error includes symbol tool hints" "missing tool suggestions"
@@ -187,11 +187,11 @@ echo ""
 echo "=== Symbol Navigation ==="
 
 test_symbols_overview() {
-    call get_symbols_overview '{"relative_path": "src/server.rs"}'
+    call symbols '{"path": "src/server.rs"}'
     if assert_contains "CodeScoutServer" && assert_contains "from_parts"; then
-        pass 1 "get_symbols_overview finds symbols in server.rs"
+        pass 1 "symbols overview finds symbols in server.rs"
     else
-        fail 1 "get_symbols_overview finds symbols in server.rs" "missing expected symbols"
+        fail 1 "symbols overview finds symbols in server.rs" "missing expected symbols"
     fi
 }
 
@@ -263,20 +263,20 @@ echo ""
 echo "=== Search ==="
 
 test_search_pattern() {
-    call search_for_pattern '{"pattern": "RecoverableError"}'
+    call grep '{"pattern": "RecoverableError"}'
     if assert_contains "RecoverableError"; then
-        pass 1 "search_for_pattern finds RecoverableError"
+        pass 1 "grep finds RecoverableError"
     else
-        fail 1 "search_for_pattern finds RecoverableError" "no matches found"
+        fail 1 "grep finds RecoverableError" "no matches found"
     fi
 }
 
 test_find_file() {
-    call find_file '{"pattern": "**/transport.rs"}'
+    call tree '{"glob": "**/transport.rs"}'
     if assert_contains "transport.rs"; then
-        pass 1 "find_file locates transport.rs"
+        pass 1 "tree glob locates transport.rs"
     else
-        fail 1 "find_file locates transport.rs" "file not found"
+        fail 1 "tree glob locates transport.rs" "file not found"
     fi
 }
 
@@ -341,7 +341,7 @@ test_explore_error_routing() {
 }
 
 test_explore_tool_architecture() {
-    call get_symbols_overview '{"relative_path": "src/server.rs"}'
+    call symbols '{"path": "src/server.rs"}'
     if assert_contains "from_parts" && assert_contains "call_tool"; then
         pass 1 "explore: discover tool registry structure"
     else
