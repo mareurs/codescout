@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/declared-not-wired
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-11
 owner: marius
@@ -104,37 +106,44 @@ tests.
 
 ## Fix
 
-Not fixed. Two directions, and they differ in behaviour, so this is a decision rather than a
-cleanup:
+Fixed — **delete**, not move. The `ok_or_else` refusal was removed and the resolution chain made
+infallible via `.expect("has_name_arg above guarantees name or symbol resolves to a string")`,
+with a comment at the site deriving why: `has_name_arg` (checked two lines above) and this
+resolution read the identical predicate (`serde_json::Value::is_string` is `self.as_str().is_some()`
+by definition), so if `has_name_arg` is true one of the two `as_str()` calls is provably `Some`.
 
-- **Delete** the `ok_or_else` arm and make the resolution infallible (`expect`-free, e.g. by
-  restructuring the guard to produce the pair). Keeps today's behaviour: no name → overview.
-- **Move** the refusal above the dispatch for the shape that is genuinely a mistake — a call
-  carrying a name-ish key the tool does not read. That would have made the smoke-script defect
-  loud instead of green, which is the argument for it; it also changes a currently-useful
-  behaviour (`symbols(path=…)` alone is the documented overview call) so the predicate has to
-  distinguish "no name key at all" from "a name key that did not resolve".
+**Why delete over move**, weighed explicitly rather than defaulted to: the "move" alternative
+existed to make a caller sending a wrong/stale name-ish key (the smoke-scripts shape) fail loudly
+instead of silently getting an overview. That actual failure mode is now caught by a different,
+more general mechanism already shipped this session —
+`tests/mcp_smoke_scripts_reference_real_tools.rs` (`9406f3c4`), a static cross-check of every
+`call <tool>` invocation against registered tool names/params. Building a NEW heuristic here for
+"a name-ish key that failed to resolve" would mean inventing an unspecified predicate (which keys
+count as "name-ish"?) for a case the corpus no longer has an open, motivating instance of — exactly
+the kind of speculative complexity this repo's own conventions argue against. Delete removes
+unreachable, untested residue and changes nothing observable.
 
-Per CLAUDE.md § Testing Discipline: when adding a guard, name the caller that reaches it and the
-observer who acts on it. The current one has neither.
+**Verified, not assumed:** `cargo build --lib` clean (no unused-import warning for
+`RecoverableError`, still used elsewhere in the file), `cargo clippy --workspace --all-targets
+--features local-embed -- -D warnings` clean, and `cargo test --no-default-features --lib
+tools::symbol::` reports the SAME 344-test pass count before and after — the honest confirmation
+for a deletion, per this bug's own "Tests added: None" reasoning: there is nothing new to assert
+about a branch that no longer exists, so the evidence is behavioral parity, not a new red/green.
 
+**SHA:** `3863055e4e4e3eeebfa8860e848a96770c15dc19`
+**patch-id:** `cd09e2934bb8b723c24cc7d7849e03acdee527fd`
 ## Tests added
 
-None. A regression test for the *deletion* direction is not writable (there is nothing to assert
-about a branch that no longer exists); a test for the *move* direction is the natural artefact of
-choosing it.
-
+None added — matches this bug's own reasoning under § Fix. Confirmed via the full
+`tools::symbol::` suite (344 tests, unchanged pass count) and the full workspace gate
+(fmt-mine, clippy, both test lanes), not a new assertion.
 ## Workarounds
 
 N/A — no caller is blocked. The cost is that a wrong call returns a plausible answer.
 
 ## Resume
 
-Decide delete-vs-move with the smoke-script defect as the motivating case
-(`docs/issues/archive/2026-09-11-mcp-smoke-scripts-call-a-parameter-and-a-tool-that-do-not-exist.md`),
-then re-run the probe from *Reproduction* with its control to confirm the chosen branch is
-reachable or gone.
-
+Done — see § Fix. Nothing left to resume.
 ## References
 
 - `src/tools/symbol/symbols.rs` — `Symbols::call`, `has_name_arg` and the resolution chain
