@@ -61,7 +61,7 @@ Verbatim second cell:
 
 **Why this pairing is the evidence and either cell alone is not.** A single failing cell cannot
 distinguish "the advisory is absent on error" from "this tool never emits one" — and the sibling
-bug `50aed1562ca29abc` is a live alternative explanation for any single absence, since it drops
+bug `1e11cf9357136e0e` is a live alternative explanation for any single absence, since it drops
 advisories by output size. Holding the tool, the alias and the repair fixed while varying only
 `Ok`/`Err` rules both out: the same repair announces itself in cell 1 and is silent in cell 2.
 
@@ -177,9 +177,12 @@ the success path's `merge_param_corrections` call reds 3 success-path tests and 
 error-path tests green. Neither kill implies the other, which is why one mutation would not have
 established the shared helper is load-bearing at both sites.
 
-**A THIRD site exists and is untouched:** the buffered-envelope insert writes `corrections`
+**A THIRD site existed and is now CLOSED:** the buffered-envelope insert wrote `corrections`
 wholesale rather than through the shared helper, and survived both mutations green. That is the
-sibling bug `50aed1562ca29abc`, not this one.
+sibling bug `1e11cf9357136e0e`, not this one — fixed 2026-09-11 in `2183a058` (patch-id
+`f1fa07c4…`), which routes that site through `merge_param_corrections` as well, making it the
+helper's third caller. The wholesale write is gone, so the mutation-survival noted here no longer
+describes the tree.
 
 The fatal-boundary test's absence assertion is monotone under removal and is NOT coverage on its
 own — it is a boundary marker, meaningful only next to the positive test that fails in exactly that

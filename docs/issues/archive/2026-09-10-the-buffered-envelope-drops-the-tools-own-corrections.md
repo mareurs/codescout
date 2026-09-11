@@ -1,7 +1,7 @@
 ---
-id: '50aed1562ca29abc'
+id: 1e11cf9357136e0e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the buffered envelope drops the tool''s own `corrections`, so a caller learns their request was reinterpreted only if the answer was small'
 tags:
 - cluster/hint-composed-without-the-request
@@ -116,18 +116,57 @@ judges the capped-result claim the better fit, that is a retag rather than a sec
 
 ## Fix
 
-Re-attach the tool's own `corrections` into the envelope alongside the framework's, or promote both
-under one key at that site. The design question this needs and does not yet have: the envelope is a
-deliberate progressive-disclosure budget, so adding an unbounded advisory to it needs an
-envelope-contract decision (truncate the hint? name the key only, as the shape listing already
-does?) rather than an unconditional insert. That is why this is filed rather than fixed inline.
+Fixed on `experiments` — SHA `2183a058d14e25589403c666f8166b48e4873a00`, patch-id
+`f1fa07c475e33d75ae5b615539c483f8c090caeb`.
 
+`src/tools/core/types.rs`, `Tool::call_content`'s overflow branch, two changes:
+
+1. The tool's own `corrections` is carried out of `val` into the freshly-built envelope.
+   The envelope is assembled from a fixed four-key literal, so nothing the tool wrote
+   reaches the caller unless it is re-attached there by name.
+2. The framework advisory stopped being a wholesale
+   `buffered["corrections"] = {param_aliases}` assignment and now routes through
+   `merge_param_corrections` — the same function the small-output and error paths call,
+   making this site its THIRD caller. **This was a second defect, not a tidy-up**: with
+   the tool's value carried in at step 1, the old assignment would have overwritten it on
+   every call where an alias ALSO fired. The tests found that; this file had not recorded
+   it, because § *Symptom* was observed on a call where no alias fires.
+
+**The envelope-contract decision this section asked for: carried VERBATIM, no cap.** The
+inline path already carries this same value uncapped, so capping it only on the overflow
+path would make the advisory's CONTENT depend on the RESULT size — the exact coupling
+being removed, in a quieter form. Its size is bounded by the caller's own REQUEST
+(`find.rs` emits one entry per repaired filter leaf, `update.rs` one per lifted top-level
+param), never by the result, so it cannot grow on an axis the caller could not predict.
+
+Both alternatives this section floated were considered and rejected. A byte cap plus a
+pointer into the buffer costs a classified cap constant, a `cap_probe` row and a
+truncation annotation (`every_cap_constant_is_classified`, `truncation_sites`) — and
+reintroduces the coupling. "Name the key only, as the shape listing already does" is what
+the code did before this fix: § *Root cause* records that the shape listing naming
+`corrections` is precisely what makes the omission unreadable.
 ## Tests added
 
-None yet. The guard that would have caught it is a fixture returning its own `corrections` from
-`call()` while producing an over-budget payload; the analogous fixtures for the two inline paths
-were added 2026-09-10 and stop at the inline branch.
+Three, in `src/tools/core/tests.rs`, each observed RED before the fix and green BY NAME in
+both gate lanes — the changed code is not librarian-gated, so the lean lane is real
+coverage here rather than vacuous:
 
+- `the_tools_own_corrections_reaches_the_caller_on_the_buffered_path` — the production
+  shape. Called with the CANONICAL param name so no alias repair fires and
+  `param_corrections` is `None`, which is how `doc(action="find", rel_path=…)` behaves.
+  **It carries the control § *Reproduction* demanded**: it asserts
+  `corrections.param_aliases` is ABSENT, so it cannot be satisfied by the framework half
+  that was never broken. Without that assertion the test passes against unfixed code.
+- `the_buffered_envelope_keeps_both_the_tools_own_hint_and_the_framework_alias_hint` — the
+  overwrite twin, object shape (`find.rs`'s `{filter, hint}`, where both writers use the
+  key `hint`).
+- `a_bare_array_corrections_survives_the_buffered_path_with_the_framework_advisory` — the
+  non-object arm (`update.rs`'s bare array), promoted to `{tool, param_aliases}`.
+
+The two existing fixtures gained a `big` field rather than being duplicated; their
+inline-path tests pass `big: false`. That field is annotated load-bearing ON THE FIXTURE
+LINE, because setting it `false` at every call site retires all three buffered-path guards
+while leaving the suite green — a removal no assertion here can catch.
 ## Resume
 
 Found by an Opus re-review of an unrelated fix round, which ran the tool rather than reading it —

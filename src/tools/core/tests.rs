@@ -2720,7 +2720,7 @@ async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory(
     );
 }
 
-/// THE DEFECT (`50aed1562ca29abc`): the overflow envelope is rebuilt from a fixed
+/// THE DEFECT (`1e11cf9357136e0e`): the overflow envelope is rebuilt from a fixed
 /// key literal, so a tool's OWN `corrections` stayed inside the buffer while the
 /// framework's alias advisory was explicitly re-attached. Whether a caller learned
 /// their request had been reinterpreted therefore depended on how big the ANSWER

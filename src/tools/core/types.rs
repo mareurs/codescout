@@ -1440,7 +1440,7 @@ pub trait Tool: Send + Sync {
             // otherwise reachable only through the buffer — and this key reports that
             // the request was REINTERPRETED, which is a fact about the CALL, not about
             // the answer. Gating it on the answer's size was the defect
-            // (`50aed1562ca29abc`): the same `doc(action="find", rel_path=…)` either
+            // (`1e11cf9357136e0e`): the same `doc(action="find", rel_path=…)` either
             // told a caller their top-level param had been lifted into the filter or
             // said nothing, decided purely by how many rows came back.
             //

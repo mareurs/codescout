@@ -257,7 +257,7 @@ which is the mechanism to expect here rather than an authoring slip to find.
 And the
 buffered envelope, while it does carry the framework's advisory, drops a
 tool's OWN `corrections` entirely — a separate open defect tracked in
-`docs/issues/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
+`docs/issues/archive/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
 
 **Unchanged by this amendment — the DECISION, whose factual claim has since gone
 stale.** The decision stands: **no response is reshaped in order to carry the
