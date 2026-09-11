@@ -1,13 +1,15 @@
 ---
-id: '144891dcdf9bef63'
+id: cb19a7d83a727403
 kind: bug
-status: open
+status: fixed
 title: the MCP smoke scripts call symbols with a parameter it does not have, and a tool that no longer exists
 owners:
 - marius
 tags:
 - cluster/accepted-parameter-silently-dropped
 topic: tool parameter surface
+claimed_at: '2026-09-11T14:40:00Z'
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-11
 owner: marius
@@ -87,22 +89,22 @@ contain.
 
 ## Fix
 
-Partial, 2026-09-11: every `symbols` call in both scripts moved from `pattern` to the
-canonical `name` (or `symbol`, for the name-path case), and `test_symbols_name_path`'s
-dead `src/tools/symbol.rs` path corrected to `src/tools/symbol/symbols.rs`.
+**Complete, 2026-09-11, commit `9406f3c46ca2e84ce54531c8d9d85e7fd43c1784` (patch-id `dcb565e474519f12b7de1d0ed53b452b77e316b9`).** Builds on the earlier partial fix (`pattern` -> `name`/`symbol`, `src/tools/symbol.rs` -> `src/tools/symbol/symbols.rs`) already landed today.
 
-**Not fixed:** the five `get_symbols_overview` calls, and the broader question of whether
-these scripts should exist outside any gate at all. Left deliberately — fixing them
-blind, without a live run against a Kotlin project this checkout does not have, would
-replace a stale script with an unverified one.
+Decided: the scripts are maintained, not retired — someone had already invested in the partial fix, and a mechanized gate (below) makes maintaining them cheap going forward.
 
+Fixed all five `get_symbols_overview` calls (`symbols(path=...)`, no name/symbol argument, which is what triggers the overview branch — confirmed by reading `Symbols::call()` rather than assumed). Also fixed `test_blocked_error_has_hints`'s assertion, which checked for the literal string `"get_symbols_overview"` in a blocked-read hint that no longer contains it (`src/tools/read_file.rs`'s `outline_hint` now says `symbols(path)` / `symbols(name=...)`) — a third stale reference this file's own § Root cause didn't enumerate.
+
+**The mechanized gate this bug's own § Tests added called for immediately found two MORE dead tool names neither this file nor the partial fix had named:** `search_for_pattern` (renamed to `grep` — 5 call sites across both scripts) and `find_file` (folded into `tree`'s `glob` parameter — 3 call sites). Both are exactly the same staleness class as `get_symbols_overview`, just not yet noticed because, like the parameter-rename half, neither errors loudly on a live server (a nonexistent tool name presumably does error — per this file's own Hypothesis 1, untested — but nobody had run these scripts since the rename to find out).
+
+Added `tests/mcp_smoke_scripts_reference_real_tools.rs`: a static, no-live-server gate that cross-references every `call <name>` in both scripts against `fn name(&self) -> &str { "<literal>" }` bodies under `src/tools/`. Mutation-verified the honest way — it was RED (5 real offenders) before this commit's script fixes and GREEN after, rather than a synthetic mutation against a clean state.
 ## Tests added
 
-None, and that is the defect rather than an omission: a shell script outside `cargo test`
-has no gate to add a regression to. The mechanizable shape is a check that every tool
-name and parameter key appearing in `tests/mcp-smoke-*.sh` exists in the live registry —
-the same shape as `prompt_surfaces_reference_only_real_tools`, over a file set that gate
-does not cover.
+`tests/mcp_smoke_scripts_reference_real_tools.rs` — the shape this section originally
+asked for, minus the live registry: cross-references `call <name>` against `src/tools/`'s
+`name()` literals statically instead, since no integration test in this crate constructs
+a live `CodeScoutServer` (that machinery is private to `src/server.rs`'s own `#[cfg(test)]`
+module) and this bug did not need to change that to get real coverage. See § Fix.
 
 ## Workarounds
 
@@ -110,11 +112,7 @@ Read the payload keys against `Symbols::input_schema()` before trusting a smoke 
 
 ## Resume
 
-Decide whether the smoke scripts are maintained or retired. If maintained: fix the five
-`get_symbols_overview` calls in `tests/mcp-smoke-rust.sh` (`:190`, `:344`) and
-`tests/mcp-smoke-kotlin.sh` (`:138`, `:259`), then add a registry-vs-script name check so
-the next rename cannot silently orphan them again.
-
+Done — see § Fix. Nothing left to resume.
 ## References
 
 - `tests/mcp-smoke-rust.sh`
