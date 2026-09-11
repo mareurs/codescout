@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 134
-entry_high_water_W: 124
+entry_high_water_W: 125
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -186,6 +186,7 @@ entry_high_water_W: 124
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-125 | 2026-09-11 | high | **Ran the reproduction the FILE states, and the confirmation identified the binary as a side effect.** Closing `1e11cf9357136e0e` after `2183a058`, I ran the bug file's own stated reproduction (`doc(find, rel_path="docs/issues", limit=200)`) rather than one composed from its title. The envelope now carries the tool's own `corrections`; the same call earlier in the session returned only the four fixed envelope keys. Two properties make that a measurement rather than a reassurance: the OLD build cannot emit that key on this call by construction (fixed four-key literal, and its only `corrections` write was gated on a param alias that does not fire here), so the green is a POSITIVE binary identification and the release-binary mtime never had to be consulted — this repo already has a recon commit titled *"an mtime that proved nothing"*; and the control is an ABSENCE assertion, `param_aliases` must NOT be present, because two unrelated mechanisms write the key `corrections`. Bounded deliberately: establishes the no-alias path only. The both-fire merge arm is unit-tested, not wire-tested, and no production call was found that drives both at once. | `W-124` — filed against this SAME bug by another session — records the title-composed probe returning a clean green against unfixed code, caught only by re-reading the file's § *Summary* before reporting. That lesson was then written into the bug file's own § *Reproduction* as an explicit trap warning, and this session read it there and ran the stated reproduction instead. Without it the natural closing probe is the alias one, which passes either way: the session reports "verified on the wire" on evidence about the mechanism that was never defective, then archives the bug, moving the evidence out with it. This is `W-124` compounding one bug later through the ARTIFACT rather than through a person, which is what entry ids are for. | validated |
 | W-124 | 2026-09-11 | high | **A probe composed from a bug's TITLE confirmed the half that was never broken.** Checking whether `1e11cf9357136e0e` had been fixed by nine alias-collapse commits, I built the probe from its title — an overflowing `grep` with a bad param name — and got a clean structured `corrections.param_aliases` in the envelope. The file's own § *Summary* says the FRAMEWORK advisory "attaches on all three render paths, **including** the buffered overflow envelope": the half I probed was never the defect. The real one is the TOOL's own `corrections`, and the stated reproduction (`doc(find, rel_path=…, limit=200)`) shows it still live at `13859878` — key NAMED in the shape listing, value left in the buffer. Control run on ONE tool in BOTH response shapes, so it is not tool-specific. | A false "fixed" report to my operator and to the bug's author, on a real passing measurement with a plausible mechanism attached — and the step after "fixed" is archiving, which moves the evidence out with the bug. Nothing downstream catches it: the probe genuinely passed. **Generalises:** CLAUDE.md's *run the reproduction* rule is written for the FIXING phase; the CLOSING phase needs it identically and resists it more, because the expected answer is the reassuring one and a passing substituted probe is never interrogated. | validated |
 | W-123 | 2026-09-10 | high | **The live probe named the blast radius a Critical could only hypothesise — and proved the binary BEFORE touching a destructive path.** After `cargo rb` + `/mcp`, one `librarian(action="doctor", fix="reseat_worktree")` call with `confirm` omitted returned `mode: "dry_run"`, empty `reseated` and `would_reseat`, and `scoped_out: {whatsapp-cli: 2}`. Catalog byte-identical either side: 4786 rows, digest `1f8784f932f042bc`. Binary identity was established from COMPILED-IN STRINGS (3 new markers present, both old ones at 0), not from mtime and not from my own tool-list text, which was captured pre-rebuild — that check is what made the probe safe to run at all, since the pre-fix repair took no root. Two gates fired and they are SEPARABLE: `mode` is the `confirm` thread (`ebaae018`), the rows being refused-and-tallied rather than offered is the shared `DoctorScope` (`fe1c41e3`). | Pre-fix that same call would have `artifact::upsert` + `graft::graft_rows`'d TWO NAMED ROWS in an unrelated repository — `whatsapp-cli/docs/issues/2026-08-13-workspace-param-inconsistent-in-worktree.md` and `whatsapp-cli/docs/trackers/session-log.md` — one of them a session log whose entry history lives only in the catalog and never in git, which is the history the reseat feature exists to preserve. Bound, stated rather than glossed: `would_reseat` was empty, so the live call exercised the preview's PRESENCE and the refusal path, never its contents; `reseat_worktree_dry_runs_unless_confirm_is_true` covers that and this entry must not be read as covering it. | validated |
 | W-122 | 2026-09-10 | high | **Second datapoint for `W-116` at 6 sessions / 29 commits — cite that entry, not this one, for the ordering finding.** What is new: all five authors replied and none of the banner's three states described any of them. They enumerate what an AUTHOR can hold, and an operator ack is not an author state — it routes around the question rather than answering it. The remedy is not a fourth line (read too late) but the guard naming the operator route AT REFUSAL, which `:378`'s "THEN" and `:387`'s "IF EVERY" both sequence behind a determination that cannot terminate. Also records where this went further than `W-116` and why that was luck. |
@@ -13641,6 +13642,51 @@ Instance 2 (`1a34a131`). Enumerating a 14-commit push for my operator, I derived
 **Cost avoided:** Implementing the bug's stated preference verbatim would have shipped an unbounded-output regression alongside the fix — silent until a large corpus produced a 4x-oversized context-mode response.
 
 **Resolution:** Took the bug's own second, "cheap and honest" option instead (set `total_is_lower_bound` without touching collection), plus threading that flag into `format_grep`'s context-mode header noun (which the bug's root-cause section didn't separately name: `format_grep`'s `matches[]` branch composes its header directly, not through `format_search_simple_mode`, so it doesn't consult the floor flag at all today — a second, smaller gap next to the one the bug filed).
+
+## W-125 — Ran the reproduction the FILE states, and the confirmation identified the binary as a side effect
+
+**Valid:** dated 2026-09-11
+
+**Observed:** Post-rebuild wire verification of `1e11cf9357136e0e` (the buffered envelope dropping
+the tool's own `corrections`), fixed this session in `2183a058`. I ran **the reproduction the file
+states** — `doc(action="find", rel_path="docs/issues", limit=200)` — rather than one composed from
+its title. The envelope now carries `corrections: {filter: […], hint: "…"}`; the same call earlier
+in the session returned only `output_id` / `summary` / `hint` / `buffered_bytes`.
+
+Two properties made that a measurement rather than a reassurance:
+
+1. **The confirmation doubles as a POSITIVE binary identification.** The old build could not emit
+   that key on this call by construction — its envelope is a fixed four-key literal, and its only
+   `corrections` write was gated on a param alias having fired. No alias fires here. So a stale
+   binary produces a visibly different observable, which is what makes the green discriminating.
+   The release binary's mtime was sitting right there and is the tempting shortcut; this repo
+   already has a recon commit titled *"an mtime that proved nothing"* (`6c31ef0f`).
+2. **The control is an ABSENCE assertion on the neighbouring mechanism.** `param_aliases` must not
+   be present, because two unrelated mechanisms write the key `corrections` and the framework's
+   half was never broken.
+
+**What this establishes, and what it does not.** It establishes that a tool's own `corrections`
+reaches the overflow envelope in the shipped binary on the **no-alias** path. It does **not**
+establish the merge behaviour on the wire when an alias *and* the tool's own `corrections` both
+fire — that arm is covered by unit tests only, and I did not find a production call that drives
+both at once.
+
+**Counterfactual:** `W-124` — immediately above, filed against *this same bug* by another session —
+records the probe composed from the bug's title returning a clean green against unfixed code,
+caught only by re-reading the file's own § *Summary* before reporting. That lesson was written
+into the bug file's § *Reproduction* as an explicit trap warning, and this session read it there
+and ran the stated reproduction instead. Without it the natural closing probe is the alias one,
+which passes either way; the session would have reported "verified on the wire" on evidence about
+the mechanism that was never defective. This is `W-124` compounding one bug later, through the
+artifact rather than through a person — which is the thing entry IDs are for.
+
+**Incidental:** the pass also turned up a doc-vs-code drift and filed it — `ec568decb057b874`:
+`get_guide("progressive-disclosure")` states "`run_command` output is raw shell bytes and is never
+rewritten" while `inject_notice` deliberately prepends the worktree advisory into `stdout`. Noticed
+only because a linked worktree appeared mid-session, so the same call shape returned different
+`stdout` before and after.
+
+**Status:** validated
 
 ## Template for new entries
 
