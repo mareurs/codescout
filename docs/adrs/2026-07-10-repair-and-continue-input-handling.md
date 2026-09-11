@@ -152,6 +152,23 @@ than closed.
   Revisit if a `usage.db` split on those four names shows a retry or error
   asymmetry — an ambiguity cost is measurable, and consistency alone is not a
   change scenario.
+
+  **OVERTAKEN 2026-09-11 by `8b396343`, and this exclusion is kept rather than
+  deleted because a reader would act wrongly without it** — it is the only thing
+  explaining why a decision recorded here looks contradicted by the shipped code.
+  That commit collapsed exactly these four names to two under a separate
+  directive, so the revisit condition above is spent: there is no four-name surface
+  left for a `usage.db` split to measure. It was **not** overturned on the
+  ambiguity-cost argument this paragraph asks for. It was overturned by a finding
+  that argument never contemplated: the four keys fed a precedence chain producing
+  the PATTERN, while the exact-vs-substring MODE came from a separate key-PRESENCE
+  test, so a key that lost the race — contributing no value at all — still flipped
+  the mode, and `symbols(query="Tool|Doc", symbol="x")` returned `0` matches with
+  the regex refusal suppressed. `query` and `name_path` are now declared
+  `param_aliases()`, rewritten before `call()` runs, so `call()` can observe only
+  two keys. **What this leaves for the two exclusions still standing below:** the
+  cost that funds a collapse need not be the cost the exclusion names, so "no
+  measurable ambiguity cost" is not on its own a durable reason to keep a synonym.
 - `librarian`'s `root`/`old_root` — unverified whether `root` means the same
   parameter for `merge_worktree` and `doctor` as it does for `rehome`. Not
   amended on an assumption.
@@ -163,9 +180,37 @@ than closed.
 schema stops making a claim it cannot state honestly; a new synonym lands in one
 list and is announced everywhere. Now harder: `corrections` becomes a
 response-contract field on object-shaped responses, and it must be threaded
-through **all three** of `call_content`'s render paths — the buffered envelope,
-the `OutputForm::Text` compact render, and the pretty-JSON value. The middle one
-already ate this exact bug once
+through **all four** of `call_content`'s render paths. Re-derived 2026-09-11 by
+reading every consumer of `param_corrections` in `src/tools/core/types.rs`, not
+transcribed from this paragraph's earlier form:
+
+1. the **buffered envelope** — `corrections` written wholesale onto the overflow
+   envelope;
+2. the **`OutputForm::Text` compact render** — a `⚠`-prefixed hint STRING and no
+   `corrections` key at all, because a text renderer cannot carry an object;
+3. the **pretty-JSON value** — `merge_param_corrections` into the returned value.
+   ONE site serving TWO emitters (an `OutputForm::Json` tool, and an
+   `OutputForm::Text` tool whose `format_compact` returned `None`), which is why it
+   counts once here and why a reader re-deriving from branch arms instead of from
+   consumption sites gets five;
+4. the **error path** — `attach_param_corrections_to_error` on the `Err` arm of
+   `self.call()`. Added by `295a928e`; it is the one this paragraph, the
+   implementation plan and three task reviews all missed, each having checked that
+   the three they knew about were covered.
+
+Path 4 is not itself flat, and the distinction is what the next reader needs:
+`route_tool_error` (`src/server.rs`) dispatches to **three outcomes** —
+`RecoverableError`, the LSP-transient `-32800`/`-32801` arm, and the fatal `else` —
+which render as **two shapes**: an object body, taking the advisory at
+`corrections.param_aliases`, and plain text, taking a `⚠ {hint}` prefix. Those
+three counts move independently, and only the shape count bounds the advisory's
+addresses. Conflating them produced
+`docs/issues/archive/2026-09-11-the-alias-advisory-is-dropped-on-the-lsp-transient-error-branch.md`,
+where the middle outcome composed its own body and consulted no advisory at all.
+Since that fix the advisory is attached ONCE after arm selection, so a fourth
+outcome cannot be added without carrying it.
+
+Path 2 already ate this exact bug once
 (`docs/issues/2026-09-02-the-worktree-notice-is-injected-then-discarded-by-every-compact-renderer.md`):
 `format_compact` renders only the fields the tool knows about, so a
 framework-added key is dropped unless re-attached at the render site. A
@@ -188,11 +233,28 @@ object-shaped `corrections` gets a `param_aliases` key added; a non-object
 **Two paths this does NOT cover, and both matter more than the sentence above.**
 The `OutputForm::Text` compact render carries the advisory as a `⚠`-prefixed
 hint STRING with **no `corrections` key at all** — a text renderer cannot carry an
-object, so that asymmetry is by design, but it means five of the eight
-alias-declaring tools (`read_file`, `grep`, `references`, `symbol_at`,
-`call_graph` — every alias-declaring tool whose `output_form()` is
-`OutputForm::Text`; only `create_file`, `edit_file` and `edit_code` are
-`OutputForm::Json`) deliver no key on the path they mostly take. And the
+object, so that asymmetry is by design, but it means **six of the ten**
+alias-declaring tools deliver no key on the path they mostly take. Re-derived
+2026-09-11 from the code, both halves:
+
+- **Ten tools override `param_aliases()` with a non-empty map** — `create_file`,
+  `edit_file`, `grep`, `read_file`, `edit_code`, `references`, `symbol_at`,
+  `call_graph`, `symbols`, and `doc` (declared on `LibrarianAdapter`, keyed on the
+  inner tool's name, in `src/librarian/adapter.rs`). Pinned per tool by
+  `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL` (`src/server.rs`): 35 pairs over those ten.
+- **`OutputForm::Json` is the trait default and every `output_form()` override in
+  the tree returns `OutputForm::Text`**, so the split is exactly "does the tool
+  override it". Six of the ten do — `grep`, `read_file`, `references`, `symbol_at`,
+  `call_graph`, `symbols`; four do not — `create_file`, `edit_file`, `edit_code`,
+  `doc`. (`tree`, `library` and `memory` override to `Text` too but declare no
+  aliases, which is why an `output_form()` grep alone over-counts this side.)
+
+The earlier form of this sentence named a smaller population, and the two tools it
+omitted were added by this work stream itself after the sentence was written — the
+document and the code have independent rates of change and nothing couples them,
+which is the mechanism to expect here rather than an authoring slip to find.
+
+And the
 buffered envelope, while it does carry the framework's advisory, drops a
 tool's OWN `corrections` entirely — a separate open defect tracked in
 `docs/issues/2026-09-10-the-buffered-envelope-drops-the-tools-own-corrections.md`.
@@ -215,7 +277,17 @@ that is the clause's live scope.
 
 **Revisit-when (added):** a repaired alias call is observed where the
 `corrections` note did **not** reach the caller — that is a render-path hole, not
-a repair failure, and it means one of the three sites regressed.
+a repair failure.
+
+**Do not read this trigger's own count as the search space.** Both times it has
+fired, the hole was at a site the then-current count did not contain: `295a928e`
+found the error path while the count said three, and `4629a95b` found an outcome
+INSIDE that path while the count said four. The sites today are **four render
+paths, the fourth holding three outcomes across two shapes**, enumerated under
+Consequences above and re-derived 2026-09-11. The first move on a report is to
+re-derive that enumeration — from `src/tools/core/types.rs`'s consumers of
+`param_corrections` and from `src/server.rs`'s `route_tool_error` — rather than to
+check the four you were handed and stop.
 
 ## Confidence
 

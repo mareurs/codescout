@@ -3333,7 +3333,18 @@ mod tests {
     /// `call()` read the exact-vs-substring MODE off which keys were PRESENT while the
     /// pattern came from a separate precedence chain, so a key that lost the race still
     /// flipped the mode (`symbols(query="Tool|Doc", symbol="x")` returned 0 matches with
-    /// the regex refusal suppressed). 4*3 + 2*5 + 1*5 + 1*4 + 2*2 = 37.
+    /// the regex refusal suppressed). 4*3 + 2*5 + 1*5 + 1*4 + 2*2 = 35 — row for row the
+    /// table below, and entry for entry `EXPECTED_ALIAS_PAIRS`' 35.
+    ///
+    /// This sentence read `= 37` until 2026-09-11. `8b396343`'s own commit message
+    /// reported its change as "35 -> 37" when the pre-collapse population was 33 over
+    /// nine tools, and both numbers were transcribed here rather than derived. **Nothing
+    /// caught it because no assertion reads this comment:**
+    /// `every_declared_alias_pair_normalizes_to_its_own_canonical` compares
+    /// `EXPECTED_ALIAS_PAIRS.len()` against the sum of the table below — both derived
+    /// from the arrays — so the prose can hold any integer at all and the gate stays
+    /// green. Pinning it would red on every rewording, which this repo declines; deriving
+    /// it at the point of writing is the whole remedy available here.
     const EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL: &[(&str, usize)] = &[
         ("edit_file", 3),
         ("call_graph", 3),
@@ -3597,7 +3608,7 @@ mod tests {
     /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
     /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
     /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
-    /// counts (37 pairs, 10 tools) — so a live-array mutation and this table now
+    /// counts (35 pairs, 10 tools) — so a live-array mutation and this table now
     /// disagree, which is what makes the check non-vacuous.
     ///
     /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic

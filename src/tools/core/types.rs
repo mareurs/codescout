@@ -301,12 +301,27 @@ fn annotate_write_path(val: &mut Value, path: &str) {
 /// `corrections` produced by a tool with nothing of its own to say.
 ///
 /// `param_aliases` is NOT collision-proof by construction — a key naming a mechanism
-/// is the key another reporter of that mechanism reaches for. Verified zero today,
-/// not assumed zero: ten tools implement `param_aliases()` (`create_file`,
-/// `edit_file`, `grep`, `read_file`, `edit_code`, `references`, `symbol_at`,
-/// `call_graph`, `doc`, `symbols`) and none writes its own `corrections`;
-/// `corrections` is written only by `find.rs` and `update.rs`, both under `doc`.
-/// Re-verify that pairing before trusting it stays empty.
+/// is the key another reporter of that mechanism reaches for. Ten tools implement
+/// `param_aliases()` (`create_file`, `edit_file`, `grep`, `read_file`, `edit_code`,
+/// `references`, `symbol_at`, `call_graph`, `doc`, `symbols`), and **exactly one of
+/// them also writes its own `corrections`: `doc`.** `corrections` is written by
+/// `find.rs` and `update.rs`, both under `doc`, which is also the tenth
+/// alias-declaring tool — so the object arm below has a live production caller and
+/// always has.
+///
+/// Verified on the wire 2026-09-11, one call:
+/// `doc(action="find", kind="tracker", query="alias", rel_path="docs/trackers")`
+/// returns `corrections` holding `find.rs`'s own `filter`/`hint` **and** this
+/// function's `param_aliases` beside them — the `Some(existing) if is_object()` arm,
+/// firing in production. No data is lost; the nesting is exactly what makes it safe.
+///
+/// **Two things that follow, and the second is a live gap.** The predicted collision
+/// has already happened rather than being hypothetical, so re-verify the pairing
+/// whenever a tool gains aliases or starts writing `corrections`. And this arm has no
+/// test: the comment here asserted the opposite until 2026-09-11, so the next reader
+/// was told the object arm was unreached and had no reason to write one. The
+/// non-object arm (`update.rs`'s bare array from a top-level-param lift) stays
+/// genuinely unverified — reaching it needs a catalog write.
 pub(crate) fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) {
     match obj.get_mut("corrections") {
         Some(existing) if existing.is_object() => {
@@ -1454,8 +1469,12 @@ pub trait Tool: Send + Sync {
                     // nested under a dedicated key rather than merged key-by-key,
                     // and why that nesting is unconditional. The `None` arm is the
                     // live one on every ordinary alias-repair call, e.g.
-                    // `read_file(file_path=…)`; the other two have no in-tree
-                    // production caller today.
+                    // `read_file(file_path=…)`. The OBJECT arm is live too: `doc`
+                    // both declares aliases and writes its own `corrections` (via
+                    // `find.rs`), so `doc(action="find", query=…, rel_path=…)` takes
+                    // it — verified on the wire, see `merge_param_corrections`. Only
+                    // the non-object arm (`update.rs`'s bare array) is unverified; it
+                    // needs a catalog write to reach.
                     //
                     // The collider worth naming HERE, because it is the one a grep
                     // mis-answers: the ADR deliberately keeps each tool's own alias
