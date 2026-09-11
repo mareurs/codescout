@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 132
+entry_high_water_F: 133
 entry_high_water_W: 124
 ---
 
@@ -13604,6 +13604,30 @@ next reader probing that file meets the trap before running it, rather than havi
 this entry.
 
 **Status:** validated
+
+## F-133 — A correct aggregate stood in for a membership list, twice — and the per-member instrument had already been run on one column
+
+**Valid:** dated 2026-09-11
+
+**Observed:** twice in one session I derived a per-commit aggregate with the right instrument, then composed the matching membership list by adjacency — and in one of the two I had *already run* the per-member instrument on one of three columns.
+
+Instance 1 (`8b396343`). I told a peer four dirty paths were not mine: `src/librarian/tools/audit_doc_refs/parser.rs`, `docs/PROGRESSIVE_DISCOVERABILITY.md`, `docs/manual/src/tools/api-redesign.md`, `src/tools/read_file.rs`. All four were my own subagent's, each a one-line `symbols(query=…)`→`symbols(name=…)` rename in a doc surface I had not enumerated when briefing it. The list was built by reading `git status --porcelain` and sorting paths by whether they *looked like* the work I had briefed. My positive claims (17 paths) were evidence; the disclaims were inference, and I presented both in one breath.
+
+Instance 2 (`1a34a131`). Enumerating a 14-commit push for my operator, I derived the `6 b0b9bc40 / 5 b80a27d4 / 3 59112612` split by grepping `Session-Id` trailers per commit into `uniq -c` — correct, and correct again when re-derived immediately before sending. I then assigned the two *foreign* columns by hand. `cd8917ca` (59112612) and `79d9493c` (b80a27d4) were swapped.
+
+**Mechanism, and it is one step past the law it looks like.** CLAUDE.md § Testing Discipline already holds *an assertion computed over a POPULATION cannot verify a claim about a MEMBER*, and the compensating errors here — one commit out of a column, one in — left both counts intact, so the aggregate was not merely uninformative but actively reassuring. But that framing implies a missing instrument, and the instrument was not missing: I had resolved my own six positively with `git log --grep=<my sid>` in the same scrollback. **A valid per-member check was run on one column of three and its result extended past its scope**, because a self-consistent aggregate reads as a checked list. The fix is therefore not "get a per-member check" but **"run the one you already ran on every column"** — different defect, different remedy.
+
+**Deliberately n=2, not n=3.** A third candidate — two competing readings I offered for a peer's `38 → 31` metric delta — does not qualify. Those were labelled unverified in the same message that offered them, with the discriminating test handed over rather than performed. A hypothesis correctly marked as one is not a list composed by adjacency, and counting it would inflate the finding with its weakest member. (Graded down by the peer it was addressed to, `b80a27d4`, who could have let it stand.)
+
+**Cleanest single artefact:** `359d7742` had **three different owners asserted across one day** — disclaimed by me as not-mine in a way that implied it was `b80a27d4`'s, corrected by them from its trailer to `59112612`, and finally listed correctly. Every resolution used the same one-command check (`git log -1 --format='%b' <sha> | grep Session-Id`) that nobody ran first.
+
+**Cost, and why it is `med` rather than `high`:** neither instance changed a decision. The operator's push authorisation was formed over a *correct* 6/5/3 split with the foreign share labelled foreign, so authority did not turn on the swap; and the disclaim list never reached a decision because the peer committed by pathspec and staged only their own two files. **That is a mechanism absorbing bad input, not the input being harmless** — had they used my list as the safe-to-touch set it named, they would have committed four files of mine believing them ownerless.
+
+**Status: open — no mechanism, and a policy is the fallback shape.** § *Observer Blindness* position 3 prefers making the correct path end safe; nothing here does that, because the aggregate and the membership list are produced by two different commands and only the first is habitual. The nearest mechanical form would be a helper that refuses to print a count without printing its members, so the two cannot be derived separately. Not built.
+
+**Both halves already have homes, and what this entry adds is the asymmetry between them.** CLAUDE.md § *Testing Discipline* holds *count the LIST, never the corpus* — a headline derived from the tool beside an enumeration derived from the eye, shipped by four sessions in one morning — and § *Reaching a Peer Session* holds *never route by adjacency*. Both are stated as failures in which the number and the list are **both** suspect. What neither states is the property that makes this shape hard to see: **the count stayed correct.** It was derived with the right instrument, re-derived immediately before use, and agreed with itself — so it supplied active corroboration at the exact moment the list was wrong. A rule warning against both halves does not predict that one half will vouch for the other. (Asymmetry named by sessionId `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`, who supplied both citations rather than letting this entry re-derive them.)
+
+**Rests on:** `git log -1 --format='%b' <sha>` output for all 8 foreign commits in `d5a1fea2..1a34a131`, read 2026-09-11; both instances independently confirmed by sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`, who found instance 2 without prompting.
 
 ## Template for new entries
 
