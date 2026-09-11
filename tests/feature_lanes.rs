@@ -50,34 +50,55 @@ const EXEMPT: &[(&str, &str)] = &[
         "retrieval-e2e",
         "needs a live Qdrant + TEI/Ollama stack (docker-compose.yml)",
     ),
+    (
+        "local-embed-dynamic",
+        // The narrow claim, deliberately. NOT "it has no test surface of its own" — that
+        // asserts there is nothing there to test and would stop the next reader looking.
+        // What is true: nothing is gated EXCLUSIVELY on it. Every test it reaches is
+        // `cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))`, and the
+        // two are mutually exclusive (crates/codescout-embed/src/lib.rs `compile_error!`),
+        // so a `cargo test --features local-embed-dynamic` lane would re-run exactly the
+        // assertions the local-embed lane already runs. The dynamic backend IS a different
+        // code path — dlopen at runtime against statically linked — and that path stays
+        // uncovered either way. This exemption buys nothing about the loader; it records
+        // that a test lane would not buy anything about it either.
+        "no test is gated exclusively on it: every one is cfg(any(local-embed, \
+         local-embed-dynamic)) and runs in the local-embed lane, so a test lane here would \
+         re-run those same assertions. The dlopen loader itself stays uncovered — see the \
+         comment above, which is the part this reason does not fix",
+    ),
 ];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every feature named in a `--features <list>` flag anywhere under
-/// `.github/workflows/`.
+/// Every feature named in a `--features <list>` flag in one workflow's text.
 ///
-/// Deliberately scoped to `--features` rather than a substring search of the whole
-/// file: "librarian" appears in a step *name* ("Seed empty librarian workspace"), so a
-/// plain `contains` would mark it covered for a reason that has nothing to do with
-/// building it. A guard that passes by accident is the failure mode this whole test
-/// exists to prevent.
-fn features_named_in_workflows() -> BTreeSet<String> {
-    let dir = repo_root().join(".github/workflows");
+/// `only_cargo_test` restricts the scan to lines that also run `cargo test`. That
+/// distinction is the whole point of this function taking text rather than reading the
+/// directory: it makes the parser fixture-drivable, so
+/// [`the_workflow_scan_distinguishes_check_from_test`] can prove it discriminates against
+/// inputs the live workflows do not contain.
+///
+/// **Scoped to `--features` rather than a substring search.** "librarian" appears in a step
+/// *name* ("Seed empty librarian workspace"), so a plain `contains` would mark it covered
+/// for a reason that has nothing to do with building it. A guard that passes by accident is
+/// the failure mode this whole test exists to prevent.
+///
+/// **Per-line, and that is a stated limitation rather than an oversight.** A command split
+/// across lines with a trailing `\` would put `cargo test` and `--features` on different
+/// lines, and this would read the flag as untested. No workflow here does that; if one
+/// starts, this returns a FALSE NEGATIVE — it under-reports coverage, so the gate refuses a
+/// lane that exists rather than passing one that does not. That is the safe direction, and
+/// the refusal names the file so the author can see why.
+fn features_from_text(text: &str, only_cargo_test: bool) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
-
-    let entries =
-        std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
-
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+    for line in text.lines() {
+        if only_cargo_test && !line.contains("cargo test") {
             continue;
         }
-        let text = std::fs::read_to_string(&path).unwrap();
-        let mut rest = text.as_str();
+        let mut rest = line;
         while let Some(idx) = rest.find("--features") {
             rest = &rest[idx + "--features".len()..];
             // The next whitespace-delimited token is the (possibly comma-separated)
@@ -93,6 +114,53 @@ fn features_named_in_workflows() -> BTreeSet<String> {
         }
     }
     found
+}
+
+/// Fold [`features_from_text`] over every `.yml` under `.github/workflows/`.
+fn scan_workflows(only_cargo_test: bool) -> BTreeSet<String> {
+    let dir = repo_root().join(".github/workflows");
+    let mut found = BTreeSet::new();
+
+    let entries =
+        std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        found.extend(features_from_text(&text, only_cargo_test));
+    }
+    found
+}
+
+/// Every feature any CI lane **builds** — `cargo check` and `cargo test` alike.
+///
+/// This is the right question for [`every_exempt_feature_is_still_compiled_somewhere`],
+/// which asks whether an exempt feature still compiles. It is the WRONG question for
+/// whether a feature's tests run, and conflating the two is the defect below.
+fn features_named_in_workflows() -> BTreeSet<String> {
+    scan_workflows(false)
+}
+
+/// Every feature a CI lane actually **runs tests for**.
+///
+/// Added 2026-09-11. Until then one scan answered both questions, so a `cargo check`
+/// lane satisfied `every_declared_feature_has_a_lane_or_a_reason` — and `dashboard` sat
+/// in exactly that state: built in CI, tests never executed, gate green throughout.
+/// Tests behind such a feature are **green by never running**, which no output
+/// distinguishes from green by passing.
+///
+/// The file already drew this line, in one direction only: `EXEMPT` means "cannot be RUN
+/// on a runner" and [`every_exempt_feature_is_still_compiled_somewhere`] enforces the
+/// compile floor beneath it. Nothing mirrored it to require a non-exempt feature's lane to
+/// run anything, so the concept was present in the file that failed to apply it.
+/// (`docs/issues/archive/2026-09-11-the-feature-lane-gate-counts-a-compile-only-lane-as-coverage.md`;
+/// found by sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`, to whom the asymmetry
+/// framing belongs.)
+fn features_tested_in_workflows() -> BTreeSet<String> {
+    scan_workflows(true)
 }
 
 /// Transitive closure over `[features]`, from an arbitrary starting set.
@@ -149,7 +217,10 @@ fn declared_features() -> toml::Table {
 fn every_declared_feature_has_a_lane_or_a_reason() {
     let features = declared_features();
     let via_default = default_closure(&features);
-    let via_workflow = features_named_in_workflows();
+    // The TEST set, not every `--features` mention. A `cargo check` lane proves the
+    // feature compiles and says nothing about whether its tests run; treating the two
+    // alike is what let `dashboard` carry tests that never executed.
+    let via_workflow = closure_from(&features, features_tested_in_workflows());
     let exempt: BTreeSet<&str> = EXEMPT.iter().map(|(f, _)| *f).collect();
 
     let uncovered: Vec<&String> = features
@@ -161,14 +232,18 @@ fn every_declared_feature_has_a_lane_or_a_reason() {
 
     assert!(
         uncovered.is_empty(),
-        "these features are declared in Cargo.toml but no CI lane builds them, and they \
-         are not exempt: {uncovered:?}\n\n\
+        "these features are declared in Cargo.toml but no CI lane RUNS their tests, and \
+         they are not exempt: {uncovered:?}\n\n\
          Pick one:\n  \
-         - add a lane in .github/workflows/ci.yml (a `cargo check --features <name> \
-         --all-targets` step is enough to catch bit-rot), or\n  \
-         - add the feature to EXEMPT in tests/feature_lanes.rs with the reason it cannot \
-         be built on a runner.\n\n\
-         Silently leaving it unbuilt is the option this test removes: `server-stack` was \
+         - add a `cargo test --features <name>` step in .github/workflows/ci.yml, or\n  \
+         - add the feature to EXEMPT in tests/feature_lanes.rs with the reason its tests \
+         cannot run on a runner.\n\n\
+         A `cargo check` step is NOT enough here and that is deliberate: it compiles a \
+         test target without executing it, so tests behind the feature are green by never \
+         running — indistinguishable from green by passing. A check-only lane still \
+         satisfies `every_exempt_feature_is_still_compiled_somewhere`, which is the \
+         compile question and a different one.\n\n\
+         Silently leaving it untested is the option this test removes: `server-stack` was \
          unbuilt while being the configuration `cargo rb` ships, and the first run of its \
          lane failed on a real defect."
     );
@@ -205,6 +280,77 @@ fn the_guard_is_not_vacuous() {
         !via_workflow.contains("librarian"),
         "`librarian` was matched as a --features argument; the workflow scan has \
          widened and can now mark features covered by accident"
+    );
+}
+
+/// The verb split discriminates, proved against a fixture rather than the live corpus.
+///
+/// A fixture is what makes this real. The live workflows exercise both arms today, but a
+/// scan that silently stopped matching `cargo test` would make every feature look uncovered
+/// — loud, and caught by the gate itself — while a scan that stopped *distinguishing* would
+/// make every check-only lane look tested, which is silent and is the defect this split
+/// exists to close. Only the second needs an input the corpus cannot be trusted to hold.
+#[test]
+fn the_workflow_scan_distinguishes_check_from_test() {
+    const FIXTURE: &str = "\
+      - run: cargo check --features only-checked --all-targets\n\
+      - run: cargo test --features only-tested\n\
+      - run: cargo test --features a,b --workspace\n\
+      - name: mentions only-checked in a step name\n";
+
+    let named = features_from_text(FIXTURE, false);
+    let tested = features_from_text(FIXTURE, true);
+
+    assert!(
+        named.contains("only-checked") && named.contains("only-tested"),
+        "the any-line scan must still see both; it feeds the COMPILE question: {named:?}"
+    );
+    assert!(
+        !tested.contains("only-checked"),
+        "a `cargo check` lane must NOT count as running tests — this is the whole split: \
+         {tested:?}"
+    );
+    assert!(
+        tested.contains("only-tested") && tested.contains("a") && tested.contains("b"),
+        "a `cargo test` lane must count, comma lists included: {tested:?}"
+    );
+    assert!(
+        !tested.contains("mentions"),
+        "a step NAME is not a lane; the scan has widened past --features: {tested:?}"
+    );
+}
+
+/// The split is not inert on the LIVE corpus either.
+///
+/// Separate from the fixture test above on purpose: that one proves the parser can tell the
+/// two apart, this one proves the distinction still finds something to separate here. If
+/// every lane became `cargo test`, the two sets would coincide and the strengthened gate
+/// would be indistinguishable from the old one — passing for a reason that has nothing to
+/// do with it working.
+#[test]
+fn the_verb_split_still_separates_the_live_lanes() {
+    let named = features_named_in_workflows();
+    let tested = features_tested_in_workflows();
+
+    assert!(
+        !tested.is_empty(),
+        "no feature is named on a `cargo test` line — the scan has stopped matching, and \
+         `every_declared_feature_has_a_lane_or_a_reason` would now reject every feature"
+    );
+    assert!(
+        tested.is_subset(&named),
+        "the tested set must be a subset of the named set; it is built from a strictly \
+         narrower filter over the same text. tested={tested:?} named={named:?}"
+    );
+
+    let check_only: BTreeSet<&String> = named.difference(&tested).collect();
+    assert!(
+        !check_only.is_empty(),
+        "every feature named in CI is now on a `cargo test` line, so this split separates \
+         nothing and the gate above cannot be failing for the reason it claims. If that is \
+         a real state of the world rather than a broken scan, this assertion is the one to \
+         delete — deliberately, and with the EXEMPT list re-read, because it is what tells \
+         you the distinction still has work to do."
     );
 }
 
