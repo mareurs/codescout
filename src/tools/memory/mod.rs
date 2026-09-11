@@ -757,39 +757,74 @@ impl Tool for Memory {
 
                 // Write markdown file — route to per-project dir when `project` param given.
                 //
-                // The shrink check runs against the SAME store the write lands
-                // in, inside each branch rather than hoisted above them. The
-                // private and project stores are different directories, so one
-                // check up top would read the wrong file and could clear a
-                // destructive write or block a harmless one.
+                // Both branches go through `memory::guarded::guarded_write`, which the
+                // dashboard's `POST /api/memories/{topic}` also calls. The shrink check
+                // and the anchor re-stamp used to be assembled inline here, and a second
+                // caller was then added with neither — so the composition lives in one
+                // function now rather than in each caller's head.
+                //
+                // The shrink check still runs against the SAME store the write lands in,
+                // because `guarded_write` takes the store: the private and project stores
+                // are different directories, so one check hoisted above the branch would
+                // read the wrong file and could clear a destructive write or block a
+                // harmless one.
+                let mut warnings: Vec<String> = Vec::new();
+
+                // Resolved BEFORE the write, because anchors are seeded inside
+                // `guarded_write` and it needs the root to resolve them against. A
+                // failure here means anchors are skipped, which is what the previous
+                // `if let Ok(root)` around the anchor block already did.
+                let anchor_root = if private {
+                    None
+                } else {
+                    ctx.agent
+                        .require_project_root_for(ctx.workspace_override.as_deref())
+                        .await
+                        .ok()
+                };
+
                 if private {
                     ctx.agent
                         .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                            if !force {
-                                if let Some(r) = p.private_memory.shrink_check(topic, content) {
-                                    return Err(shrink_guard_error(topic, &r).into());
+                            match crate::memory::guarded::guarded_write(
+                                &p.private_memory,
+                                None,
+                                topic,
+                                content,
+                                force,
+                            ) {
+                                Ok(_) => Ok(()),
+                                Err(crate::memory::guarded::GuardedWriteError::Shrink(r)) => {
+                                    Err(shrink_guard_error(topic, &r).into())
                                 }
+                                Err(crate::memory::guarded::GuardedWriteError::Failed(e)) => Err(e),
                             }
-                            p.private_memory.write(topic, content)?;
-                            Ok(())
                         })
                         .await?;
                 } else {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
                     let store = crate::memory::MemoryStore::from_dir(memories_dir)?;
-                    if !force {
-                        if let Some(r) = store.shrink_check(topic, content) {
-                            return Err(shrink_guard_error(topic, &r).into());
+                    match crate::memory::guarded::guarded_write(
+                        &store,
+                        anchor_root.as_deref(),
+                        topic,
+                        content,
+                        force,
+                    ) {
+                        Ok(w) => warnings.extend(w),
+                        Err(crate::memory::guarded::GuardedWriteError::Shrink(r)) => {
+                            return Err(shrink_guard_error(topic, &r).into())
+                        }
+                        Err(crate::memory::guarded::GuardedWriteError::Failed(e)) => {
+                            return Err(e)
                         }
                     }
-                    store.write(topic, content)?;
                 }
 
-                // Collect non-fatal side-effect failures so the caller has a
-                // chance to see them. Cross-embed / anchor indexing are
-                // best-effort but the user explicitly asked for "memory write"
-                // — silent degradation there is data loss from their POV.
-                let mut warnings: Vec<String> = Vec::new();
+                // Remaining side effects are MCP-only (they need `ctx`), so they stay
+                // here. Collected non-fatally so the caller has a chance to see them:
+                // best-effort indexing is still data loss from the POV of someone who
+                // explicitly asked for "memory write".
 
                 // Cross-embed into semantic store (best-effort, non-fatal)
                 if !private {
@@ -799,20 +834,9 @@ impl Tool for Memory {
                     }
                 }
 
-                // Seed/merge path anchors (best-effort, non-fatal)
-                if !private {
-                    if let Ok(root) = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await {
-                        let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(
-                            |_| root.join(".codescout").join("memories"),
-                        );
-                        if let Err(e) = crate::memory::anchors::update_anchors_on_write(
-                            &root, &memories_dir, topic, content,
-                        ) {
-                            tracing::warn!("anchor update failed (non-fatal): {e}");
-                            warnings.push(format!("anchor update failed: {e}"));
-                        }
-                    }
-                }
+                // Path anchors are seeded inside `guarded_write` above, beside the file
+                // it actually wrote. They used to be re-resolved here after the fact,
+                // which is how the store's directory and the sidecar's could disagree.
 
                 // Create semantic anchors (best-effort, non-fatal)
                 if !private {
@@ -939,23 +963,10 @@ impl Tool for Memory {
                         .await?;
                 } else {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    crate::memory::MemoryStore::from_dir(memories_dir.clone())?.delete(topic)?;
-
-                    // Remove the path-anchor sidecar so it does not orphan and
-                    // continue surfacing in staleness scans (review I4,
-                    // docs/reviews/2026-04-24/phase-5-embed-memory-library.md).
-                    let sidecar =
-                        crate::memory::anchors::anchor_path_for_topic(&memories_dir, topic);
-                    match std::fs::remove_file(&sidecar) {
-                        Ok(()) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to remove anchor sidecar {}: {e}",
-                                sidecar.display()
-                            );
-                        }
-                    }
+                    crate::memory::guarded::guarded_delete(
+                        &crate::memory::MemoryStore::from_dir(memories_dir)?,
+                        topic,
+                    )?;
                 }
 
                 // Remove cross-embedded entry (best-effort, non-fatal).

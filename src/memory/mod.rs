@@ -7,6 +7,7 @@
 pub mod anchors;
 pub mod classify;
 pub mod filter;
+pub mod guarded;
 pub mod hash;
 pub mod semantic_store;
 pub mod sqlite_semantic_store;

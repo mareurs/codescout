@@ -334,13 +334,20 @@ jobs:
       - run: cargo clippy --features server-stack --all-targets -- -D warnings
       - run: cargo test --features server-stack
 
-  # Compile-only lanes for the opt-in features nothing else builds.
+  # Build lanes for the opt-in features nothing else builds.
   #
   # `dashboard` and `local-embed-dynamic` are in neither `default` nor any other lane,
   # so until 2026-08-08 they were bit-rot candidates for the same reason `server-stack`
-  # was — nothing compiled them, and nothing said so. A `cargo check` is enough: these
-  # are opt-in build configurations, and the question is whether they still compile, not
-  # whether their behaviour is covered.
+  # was — nothing compiled them, and nothing said so.
+  #
+  # `dashboard` runs `cargo test`, not `cargo check`, and the difference is load-bearing.
+  # The compile-only form was right while the feature carried no tests of its own: the
+  # question really was whether it still built. It gained behavioural tests on 2026-09-11
+  # (`src/dashboard/api/memories.rs`) guarding a defect that shipped — the UI's memory
+  # write bypassed the shrink guard and the anchor update — and a `check` compiles a test
+  # target without ever running it, so those tests would have been green by never
+  # executing. That is the precise shape of the defect they exist to catch, one level up.
+  # `local-embed-dynamic` keeps `check`: it still has no tests of its own.
   #
   # tests/feature_lanes.rs enforces that every feature is either built somewhere,
   # reached through `default`, or explicitly exempt with a reason. Adding a feature
@@ -355,7 +362,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ubuntu-latest-feature-check
-      - run: cargo check --features dashboard --all-targets
+      - run: cargo test --features dashboard --all-targets
       - run: cargo check --features local-embed-dynamic --all-targets
       # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
       # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running
