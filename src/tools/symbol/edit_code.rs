@@ -120,7 +120,17 @@ impl Tool for EditCode {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["symbol", "action"],
+            // `symbol` is MANDATORY and is deliberately NOT named here — it is the
+            // canonical of the declared alias `("name_path", "symbol")`, and a
+            // validating client checks `input_schema` BEFORE the server runs
+            // `normalize_params`. So `edit_code(name_path="Foo/bar", action=…)` — the
+            // exact call the alias exists to repair — would be rejected client-side
+            // for a missing `symbol` key that the server would have supplied itself.
+            // The obligation moved into `symbol`'s own description below, and it is
+            // still ENFORCED at runtime by `require_str_param_or_hint` in call().
+            // Pinned registry-wide by `no_declared_alias_canonicalises_to_a_required_param`
+            // (src/server.rs). `action` stays: nothing aliases to it.
+            "required": ["action"],
             // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
             // and Claude Code drops the whole tool client-side. The path alternation is
             // enforced in call() below, not here. See
@@ -128,7 +138,7 @@ impl Tool for EditCode {
             "properties": {
                 "symbol":   {
                     "type": "string",
-                    "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\"."
+                    "description": "REQUIRED. Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\"."
                 },
                 "path":     { "type": "string", "description": "File path (relative to project root) containing the symbol." },
                 "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"], "description": "Edit to perform." },

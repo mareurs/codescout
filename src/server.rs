@@ -3101,6 +3101,162 @@ mod tests {
         assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
     }
 
+    /// A declared alias's CANONICAL must never appear in that tool's schema
+    /// `required` array.
+    ///
+    /// **Why.** A client validates `input_schema` *before* the server ever runs
+    /// `normalize_params`. So if `X` is in `required` and some alias canonicalises to
+    /// `X`, a caller using the alias sends no `X` key, fails validation client-side,
+    /// and is rejected for a call the server would have repaired perfectly — the
+    /// alias mechanism exists precisely to repair those calls. The two halves of the
+    /// contract point in opposite directions and only this gate holds them together:
+    /// `every_declared_alias_is_absent_from_the_schema` (above) says the alias must
+    /// NOT be a property, which is what makes `required` unable to name the pair as
+    /// a legal alternation without the top-level `anyOf` the Anthropic Messages API
+    /// rejects (`no_tool_schema_declares_a_top_level_combinator`). Given that, the
+    /// only honest resolution is to leave the canonical out of `required` and state
+    /// the obligation in its own `description` — which is what `edit_code.symbol` and
+    /// `grep.pattern` now do.
+    ///
+    /// **The client in front of us does NOT validate, so this is latent here and real
+    /// for any validating client.** Verified on the wire 2026-09-11 against binary
+    /// `7e08645f`: `grep(path="Cargo.toml")` with no `pattern` reached the server and
+    /// came back as a server-side `RecoverableError`, and `symbols(query=…)` still
+    /// arrived after `query` was removed from the schema. So this is a contract
+    /// defect, not a live outage — and it cannot be "verified absent" by observing
+    /// that a call works from here, which it will whether or not the contract holds.
+    ///
+    /// **Two live violations at the time of writing, both fixed by the same commit** —
+    /// `edit_code` (`required: ["symbol", "action"]` against the alias
+    /// `("name_path", "symbol")`) and `grep` (`required: ["pattern"]` against
+    /// `("query", "pattern")` / `("regex", "pattern")`). The second was not in the
+    /// report that prompted this gate; it surfaced from running the rule over the
+    /// whole registry instead of over the one reported instance.
+    ///
+    /// **Deleting the alias is not the alternative fix.** Both tools keep a second,
+    /// redundant resolver inside `call()` (`require_str_param_or_hint` in
+    /// `edit_code`, `require_str_param_or` in `grep`) that accepts the same spellings
+    /// whether or not `param_aliases()` declares them. Dropping the declaration would
+    /// leave the tool still accepting `name_path` / `query`, still advertising the
+    /// canonical as required, and merely make the repair SILENT again — the defect
+    /// hidden rather than fixed.
+    ///
+    /// **What this replaces.** A near-namesake,
+    /// `path_requiring_tools_never_name_path_or_an_alias_in_required`, was deleted
+    /// earlier in this work stream during the alias collapse. That deletion was
+    /// correct — post-collapse a bare `required: ["path"]` is honest for a tool with
+    /// no path alias — but it was the only carrier of the general rule, so the rule
+    /// went with it. This is not that gate restored: it states the rule over every
+    /// alias family rather than the `path` family, and derives its population from
+    /// each tool's live `param_aliases()` rather than a hand-list of tools.
+    ///
+    /// **It also settles an open question from the same work stream: `path` is
+    /// correctly ABSENT from `references`, `call_graph`, `symbol_at` and
+    /// `edit_code`'s `required` arrays.** All four alias `path`, so adding
+    /// `required: ["path"]` to any of them — which reads like tightening an
+    /// under-specified schema — would create four fresh instances of this very
+    /// defect. After this gate that absence is a checked fact rather than an
+    /// accident, and an attempt to "tighten" it reds here.
+    ///
+    /// **Scope, stated because the guard cannot see past it.** It reads
+    /// `Tool::param_aliases()` only. The second-layer per-call resolvers
+    /// (`src/fs/mod.rs`'s `PATH_PARAM_ALIASES`, the inline alias slices passed to
+    /// `require_str_param_or_hint`) are invisible to it, exactly as they are to
+    /// `every_declared_alias_is_absent_from_the_schema`. A tool that accepted an
+    /// alias ONLY at that second layer while naming the canonical in `required`
+    /// would carry this defect and red nothing here.
+    ///
+    /// Tools that declare `required` and no aliases at all — `approve_write`
+    /// (`required: ["path"]`), `run_command` (`["command"]`), `semantic_search`
+    /// (`["query"]`) — must PASS, and are the negative control that this is a
+    /// contract check rather than a ban on `required`.
+    #[tokio::test]
+    async fn no_declared_alias_canonicalises_to_a_required_param() {
+        let (_dir, server) = make_server().await;
+        let mut offenders = Vec::new();
+        // Pairs actually COMPARED against a non-empty `required` array. The whole
+        // gate is a `contains` over that array, so if this reaches zero every
+        // assertion below is satisfied by a loop that never ran.
+        let mut pairs_checked_against_a_nonempty_required = 0usize;
+        // Tools with a non-empty `required` and NO declared aliases — the negative
+        // control. At zero, the gate would be passing a registry in which `required`
+        // had been emptied everywhere, which is not what it asks for.
+        let mut alias_free_required_bearing = 0usize;
+        for t in &server.tools {
+            let schema = t.input_schema();
+            let required: Vec<&str> = schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            let aliases = t.param_aliases();
+            if !required.is_empty() && aliases.is_empty() {
+                alias_free_required_bearing += 1;
+            }
+            if required.is_empty() {
+                continue;
+            }
+            for (received, canonical) in aliases {
+                pairs_checked_against_a_nonempty_required += 1;
+                if required.contains(canonical) {
+                    offenders.push(format!(
+                        "{tool}: {canonical:?} is in `required` AND is the canonical of the \
+                         declared alias {received:?}. A validating client rejects \
+                         {tool}({received}=…) before the server can normalize it — the very \
+                         call the alias exists to repair. Drop {canonical:?} from `required` \
+                         and state the obligation in its own description (see \
+                         edit_code.symbol / grep.pattern); do NOT drop the alias, which only \
+                         makes the repair silent again.",
+                        tool = t.name()
+                    ));
+                }
+            }
+        }
+        assert!(
+            server.tools.len() >= 15,
+            "truncated registry: {} tools",
+            server.tools.len()
+        );
+        // Member-shaped non-vacuity, not a population floor: name the two tools whose
+        // `required` this gate changed and assert the ALIAS half survives. A later
+        // tidy-up deleting `("name_path","symbol")` or the `pattern` pair would make
+        // this gate green for the wrong reason — nothing left to compare — while the
+        // descriptions stayed the only place the obligation lives.
+        let edit_code = server
+            .find_tool("edit_code")
+            .expect("edit_code is registered");
+        assert!(
+            edit_code
+                .param_aliases()
+                .iter()
+                .any(|(r, c)| *r == "name_path" && *c == "symbol"),
+            "edit_code no longer declares (\"name_path\", \"symbol\") — this gate's \
+             motivating pair is gone, so its silence here means nothing"
+        );
+        let grep = server.find_tool("grep").expect("grep is registered");
+        assert!(
+            grep.param_aliases()
+                .iter()
+                .filter(|(_, c)| *c == "pattern")
+                .count()
+                >= 2,
+            "grep no longer declares both aliases canonicalising to \"pattern\" — same \
+             hazard as the edit_code pair above"
+        );
+        assert!(
+            pairs_checked_against_a_nonempty_required > 0,
+            "no declared alias was compared against a non-empty `required` — the gate's \
+             `contains` never ran, so green here is silence rather than evidence"
+        );
+        assert!(
+            alias_free_required_bearing > 0,
+            "no registered tool declares `required` without aliases — the negative \
+             control is missing, so this gate is indistinguishable from a ban on \
+             `required` itself"
+        );
+        assert!(offenders.is_empty(), "{}", offenders.join("\n  "));
+    }
+
     /// Item 1, Opus review of Task 5 (2026-09-10): nothing previously drove
     /// `normalize_params` over any REAL tool's `param_aliases()` map. Every
     /// existing exerciser used a synthetic fixture map instead — `param_alias.rs`'s
@@ -4034,8 +4190,24 @@ mod tests {
     /// pattern, so a key that lost the precedence race still flipped the mode and
     /// silently discarded `kind`. Per the rule above, the freed headroom is removed,
     /// not banked. Report run 2026-09-11: TOTAL (21 tools) = 55_093, headroom 0.
+    ///
+    /// **Ratcheted DOWN 2026-09-11, 55_093 → 55_081 (−12), by removing two aliased
+    /// canonicals from `required`** (`edit_code.symbol`, `grep.pattern` — see
+    /// `no_declared_alias_canonicalises_to_a_required_param` for the contract). Two
+    /// rows move and they move in OPPOSITE directions, which is why this entry
+    /// derives the figure rather than restating it. `edit_code`: schema 2_000 →
+    /// 2_001, i.e. **+1** — `"required":["symbol","action"]` → `"required":["action"]`
+    /// drops the 9 bytes `"symbol",`, and `symbol`'s own description gains the 10
+    /// bytes `REQUIRED. ` that now carry the obligation. `grep`: schema 1_189 →
+    /// 1_176, i.e. **−13** — `pattern` was the only entry, so the whole
+    /// `"required":["pattern"],` key goes (23 bytes) against the same +10 on
+    /// `pattern`'s description. +1 − 13 = −12, which is the observed total delta
+    /// exactly; no third row is involved. The saving is incidental and is removed
+    /// rather than banked per the rule above — the point of the change is the
+    /// contract, not the bytes. Report run 2026-09-11: TOTAL (21 tools) = 55_081,
+    /// headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_093;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_081;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

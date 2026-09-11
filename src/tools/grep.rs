@@ -32,9 +32,16 @@ impl Tool for Grep {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["pattern"],
+            // No `required` array: `pattern` is MANDATORY but is the canonical of two
+            // declared aliases (`query`, `regex` — see param_aliases() below), and a
+            // validating client checks `input_schema` BEFORE the server runs
+            // `normalize_params`. Naming it here would reject `grep(query="foo")`
+            // client-side — the exact call the aliases exist to repair. The obligation
+            // moved into `pattern`'s own description, and it is still ENFORCED at
+            // runtime by `require_str_param_or` in call(). Pinned registry-wide by
+            // `no_declared_alias_canonicalises_to_a_required_param` (src/server.rs).
             "properties": {
-                "pattern": { "type": "string", "description": "Regex pattern" },
+                "pattern": { "type": "string", "description": "REQUIRED. Regex pattern" },
                 "path": { "type": "string", "description": "File or directory (default: project root)" },
                 "limit": { "type": "integer", "default": 50, "description": "Max matching lines" },
                 "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." },
