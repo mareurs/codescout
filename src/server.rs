@@ -1685,7 +1685,7 @@ async fn build_resource_registry(
 /// The two response SHAPES `route_tool_error` can produce, chosen by
 /// [`select_error_render`] and finished by [`route_tool_error`].
 ///
-/// **This type is the mechanism, and it is why the fix for `696f3be9902ebf17` was not a
+/// **This type is the mechanism, and it is why the fix for `85856feb201949bc` was not a
 /// second `downcast_ref` inside the arm that was missing one.** That arm was the second
 /// of three outcomes to be added and the second to be written without the advisory;
 /// closing it in place would have made the count three and left outcome four — whenever
@@ -1741,7 +1741,7 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
         // `e.to_string()` is the INNER error's text when `e` is an `AdvisedError`, whose
         // Display delegates by design — which is precisely how a wrapped LSP failure
         // reaches this arm rather than the fatal one, and why the advisory could not be
-        // left to a downcast that lived only down there (`696f3be9902ebf17`).
+        // left to a downcast that lived only down there (`85856feb201949bc`).
         let code = if e.to_string().contains("code -32801") {
             "-32801"
         } else {
@@ -7161,7 +7161,7 @@ mod tests {
     // ── route_tool_error × the parameter-alias advisory, ONE GATE PER ARM ───
     //
     // `route_tool_error` dispatches to three outcomes and the advisory has to reach
-    // all three. It reached two: bug `696f3be9902ebf17` — the LSP-transient arm
+    // all three. It reached two: bug `85856feb201949bc` — the LSP-transient arm
     // composed its own body and consulted no advisory, so an aliased call to any of
     // the five LSP-backed alias-declaring tools lost it during a cold-index window,
     // while that arm's own `hint` ("Wait and retry") routed the caller straight back
@@ -7200,7 +7200,7 @@ mod tests {
     /// `corrections.param_aliases`.
     ///
     /// POSITIVE CONTROL. This arm already carried the advisory when
-    /// `696f3be9902ebf17` was filed, so a red here says the harness or the carrier
+    /// `85856feb201949bc` was filed, so a red here says the harness or the carrier
     /// broke, not that the arm regressed — and without it a red in
     /// `..._lsp_transient_arm...` below could not be distinguished from
     /// "`attach_param_corrections_to_error` stopped attaching anything at all".
@@ -7233,7 +7233,7 @@ mod tests {
     }
 
     /// ARM 2 — the LSP-transient `-32800` / `-32801` branch. THE BUG
-    /// (`696f3be9902ebf17`): this arm builds `{"error", "hint"}` from scratch and,
+    /// (`85856feb201949bc`): this arm builds `{"error", "hint"}` from scratch and,
     /// before the fix, never consulted `AdvisedError`.
     ///
     /// `AdvisedError`'s `Display` delegates to its inner error by design (so the tool's
@@ -7284,7 +7284,7 @@ mod tests {
                 .unwrap_or_else(|| {
                     panic!(
                         "{raw}: corrections.param_aliases.hint missing on the LSP-transient \
-                         arm — this is bug 696f3be9902ebf17: {body}"
+                         arm — this is bug 85856feb201949bc: {body}"
                     )
                 });
             assert!(

@@ -351,7 +351,7 @@ pub(crate) fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, 
 /// `docs/issues/archive/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
 ///
 /// **Two carriers here is a fact about THIS function, never a scope for the dispatch
-/// it feeds — and publishing it as one is what produced `696f3be9902ebf17`.** The
+/// it feeds — and publishing it as one is what produced `85856feb201949bc`.** The
 /// sentence that used to open this paragraph said "both error types", which is true
 /// and was read as coverage; `route_tool_error` had *three* outcomes, and the middle
 /// one consulted neither carrier. Derive the count at the surface you actually mean.
