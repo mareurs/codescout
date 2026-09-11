@@ -1,7 +1,7 @@
 ---
-id: b75d2660ef37198c
+id: 860023f8bf00006c
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s context-mode overflow publishes the shown count as `total` and omits `total_is_lower_bound`, so two calls differing only in `context_lines` answer 39 and 58'
 owners:
 - marius
@@ -11,6 +11,8 @@ tags:
 - measurement
 - grep
 topic: a cap-marking fix applied at two of three sibling construction sites
+claimed_at: '2026-09-11T13:30:00Z'
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 ---
 
 ## Summary
@@ -74,7 +76,10 @@ the header rendering is part of the evidence rather than the JSON alone.
 |---|---|---|
 | `:486` | non-context, grouped | **yes** |
 | `:1067` | buffer (`grep_in_buffer`) | **yes** |
-| `:529` | **context mode** | **no** |
+| `:529` | **context mode** (filesystem walk) | **no** |
+| `grep_in_buffer`, context branch | buffer path's own context-mode construction | **no** |
+
+**Correction, 2026-09-11:** this table under-counted by one when filed. `grep_in_buffer` carries its OWN context-mode overflow-construction site, separate from the grouped/non-context buffer branch the row above already covers — same gap, same shape, not enumerated here because the review that produced this table checked the buffer path's non-context branch and stopped. Found by re-reading the code before implementing rather than trusting this table's count (`bug-fix-session-log:F-134` records the parallel case: this bug's own "prefer oversample" recommendation also didn't survive contact with the code). Four sites, not three; both `no` rows are fixed below.
 
 The `else` arm at `:497` is commented *"Context mode: keep flat matches[], preserve legacy shape
 for format_grep"* — the legacy shape is the defect, and the comment is the record of a deliberate
@@ -138,30 +143,24 @@ is not contradicted anywhere; it is simply not enumerated.
 
 ## Fix
 
-Not applied. Two candidate shapes, and the choice is a decision rather than a detail:
+**Applied, 2026-09-11, commit `89518fdb2748f94d9fa0de10d18aa253419123b9` (patch-id `a4f8972e1512a1bfb518596bb537556f29edc3fa`).**
 
-- **Oversample in context mode too**, matching the non-context branch, so `total` is exact and the
-  flag is unnecessary. Costs the extra walk that `COLLECTION_OVERSAMPLE` already buys elsewhere;
-  gives the caller the number they wanted.
-- **Set `total_is_lower_bound` at `:529`** and let the existing header path render
-  `39 matches (capped)`. Cheap and honest, and still refuses the caller a total this tool can
-  compute.
+**Not the recommended shape.** This file's own text preferred oversampling context mode's collection like simple mode does, "on the ground that ... it is recoverable by a sibling code path in the same file." Reading `src/tools/grep.rs:121` before implementing surfaced why that ground doesn't hold: simple mode's oversample exists **only** to feed `cap_grouped`'s display-capped file-diversity round-robin (BL-31) — the extra collected matches are thrown away before rendering, never returned. Context mode has no equivalent display-cap step; it returns `matches[]` flat, exactly as collected. Oversampling context mode's WALK the same way would therefore oversample its OUTPUT by the same factor (`COLLECTION_OVERSAMPLE`, 4x by default) — a real regression shipped alongside the fix, not a detail. Recorded as `bug-fix-session-log:F-134` before implementing.
 
-Prefer the first, on the ground that `IC-20`'s remedy is a rename only when the value is
-unrecoverable, and here it is recoverable by a sibling code path in the same file.
+**Took the second, "cheap and honest" option instead**, at all four construction sites (see the corrected Root-cause table above — two were already fixed, two were not):
 
+- Set `overflow["total_is_lower_bound"] = true` at both previously-unflagged sites (filesystem-walk context mode, `grep_in_buffer`'s context mode) whenever `hit_cap` is true. Collection behavior is completely unchanged — `shown_count` (block count) is still exactly what it was.
+- `format_grep`'s `matches[]` header branch previously never read `total_is_lower_bound` at all (a gap this bug's own root-cause section didn't separately name — it only diagnosed the flag's absence, not that the header path never consulted it): it composed `"{total} {match_word}\n"` directly rather than going through `format_search_simple_mode`'s floor-aware noun logic. Threaded the same `(total, total_is_floor) => noun` match arms in, so a capped context-mode result's header now reads `"N matches (capped)"`, matching simple mode's established pattern and the project's own stated principle that "the header is what a reader anchors on."
+
+**What this does NOT do:** it does not recover the true total (58 in this bug's own reproduction) for context mode — `overflow` still carries no numeric `total` field, so `format_overflow`'s "showing X of Y" sentence still falls back to "showing first N" for context-mode results. A caller now correctly learns the number is a floor; it does not learn what the true count is. This is exactly the tradeoff the bug's own § Fix named as the cheaper alternative, taken deliberately rather than by default.
 ## Tests added
 
-None yet. The specification is the part worth getting right, and the direction to guard is **not**
-"a marker appears":
+Two, both in `src/tools/grep.rs`'s test module, mutation-verified red-without-the-fix (confirmed by temporarily reverting the three production hunks and re-running each test individually — both failed with the expected `left: None, right: Some(true)` message — then restoring):
 
-- Parameterise the existing floor-flag test over `context_lines` in `{0, 1}` — one site's pass
-  must not stand in for the other's.
-- Assert the two calls agree: for a corpus of known size N with `limit < N`, the `total` reported
-  with `context_lines=1` must equal the `total` reported without it. **This is the assertion that
-  reds on the defect as observed**, and a marker-only assertion does not: a `(capped)` header on
-  `39` satisfies "it marked itself" while still answering 39 to a question whose answer is 58.
+- `grep_context_mode_capped_collection_marks_the_total_as_a_floor` — filesystem-walk context mode. Asserts a capped call's `overflow.total_is_lower_bound == Some(true)`, a complete call carries no `overflow` at all, and — the cross-row assertion, on the header line a reader anchors on — the capped result's `format_compact()` first line contains "capped" while the complete one does not.
+- `grep_buffer_context_mode_capped_collection_marks_the_total_as_a_floor` — the `grep_in_buffer` twin, same assertions, over a `@tool_*`-style buffer input.
 
+Deliberately does not add the test this bug originally specified ("the `total` reported with `context_lines=1` must equal the `total` reported without it") — that assertion is only meaningful under the oversample fix, which was not the shape shipped. See § Fix for why.
 ## Workarounds
 
 For any count, drop `context_lines` — or use `mode="files"`, which walks to completion and reports
@@ -185,4 +184,3 @@ For any count, drop `context_lines` — or use `mode="files"`, which walks to co
 - Found by sessionId `ba061586-6581-4656-b0c5-acad83474de5`, who published the `39` into a commit
   message and then supplied the reproduction. Root-caused and filed by sessionId
   `cda3afe5-17b8-4863-9f4c-9fe4eadbc17b`.
-

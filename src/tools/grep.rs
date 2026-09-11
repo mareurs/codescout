@@ -1142,7 +1142,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                 ),
                 // Same gap, same fix, as the filesystem-walk context-mode site above —
                 // this is the SECOND of two context-mode construction sites the parent
-                // bug's own root-cause table (`b75d2660ef37198c`) counted as one: it
+                // bug's own root-cause table (`860023f8bf00006c`) counted as one: it
                 // enumerated three sites total (non-context, this buffer path's
                 // non-context branch, and the filesystem-walk context mode), and this
                 // buffer-mode CONTEXT branch is a fourth, unnamed there. Found by
@@ -2117,7 +2117,7 @@ mod tests {
     /// context-mode overflow-construction site (separate from its non-context one,
     /// which `grep_buffer_capped_collection_marks_the_total_as_a_floor` already
     /// covers), and it had the identical gap: a bug filed against the filesystem
-    /// path's context mode (`b75d2660ef37198c`) enumerated three construction sites
+    /// path's context mode (`860023f8bf00006c`) enumerated three construction sites
     /// and missed this fourth one, which shares the defect exactly.
     #[tokio::test]
     async fn grep_buffer_context_mode_capped_collection_marks_the_total_as_a_floor() {
