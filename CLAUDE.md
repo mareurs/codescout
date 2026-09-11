@@ -256,10 +256,19 @@ Two rules here carry data-loss consequences and are the reason this section is n
 > then `doc(action="move", …)`, never a bare `status:` edit plus `git mv`. `id =
 > sha256(abs_path)`, so a hand-move orphans the catalog row's events and augmentation.
 
-> ⚠ **Never hand-build a params array.** `doc(action="augment", id=…, merge=true, augment={params:{observations:
+> ⚠ **Never hand-build a params array — except for the one repair named below.**
+> `doc(action="augment", id=…, merge=true, augment={params:{observations:
 > [...everything...]}})` **replaces** the collection rather than merging into it, and the catalog is
 > not in git. That call took the T-N queue from 19 entries to 1 on 2026-08-16. `append_entry` /
-> `update_entry` exist so it is never needed.
+> `update_entry` exist so it is almost never needed.
+>
+> **The exception is `doctor`'s `params_behind_body`, where the wholesale write is the only surface
+> that can perform the repair** — the body anchors an id `params` holds no row for, and neither
+> alternative reaches it: `append_entry` overwrites the id you pass and allocates
+> `params_next.max(body_max + 1)`, minting a *new* row rather than the missing one, while
+> `update_entry` patches only a row that already exists. Read the whole collection back first, write
+> every row, then check the count — a partial array drops the rest, which is the 2026-08-16 loss
+> exactly.
 
 **Cross-project scope.** An `[[umbrella]]` groups several repos so `scope="umbrella"` queries reach
 across them; membership resolves by path-prefix. **Umbrella ≠ workspace** — a repo's

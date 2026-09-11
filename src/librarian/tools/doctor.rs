@@ -5100,7 +5100,10 @@ fn scan_params_behind_body(
                      whole collection instead — `doc(action=\"augment\", id=…, merge=true, \
                      augment={{params: {{\"{coll}\": [ …every row… ]}}}})`, or the CLI's \
                      `--params @<file>` past the inline budget — and note a params patch \
-                     REPLACES the array, so a partial one drops the rest. Do NOT re-render the \
+                     REPLACES the array, so a partial one drops the rest. `CLAUDE.md` \
+                     § Session Intelligence Trackers forbids this wholesale write in general \
+                     and names THIS finding as its one exception — so read the collection back \
+                     first and check the row count after writing. Do NOT re-render the \
                      body from `params`: that is `snapshot_drift`'s remedy and here it would \
                      delete the newer record.",
                 n = unrowed.len(),
@@ -13425,6 +13428,18 @@ mod tests {
         assert!(
             !detail.contains("re-render the snapshot section from params"),
             "that is `snapshot_drift`'s remedy and it destroys the newer record: {detail}"
+        );
+        // And it must point at the rule it is an exception TO. `CLAUDE.md` forbids this
+        // wholesale write in general, so a detail that names the call without naming the
+        // carve-out sends the reader into a prohibition with no way out — measured: the
+        // two surfaces were hard-wired in opposite directions for three weeks, and neither
+        // was drifting. Shape, not wording: this reds when the cross-reference is deleted
+        // and survives any rewrite that keeps it.
+        assert!(
+            detail.contains("CLAUDE.md"),
+            "the remedy names a call `CLAUDE.md` forbids in general; it must also name \
+                 `CLAUDE.md` as the rule carrying the exception, or a reader who obeys both \
+                 surfaces has no legal action: {detail}"
         );
     }
 

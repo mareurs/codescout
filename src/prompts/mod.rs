@@ -1997,6 +1997,53 @@ mod tests {
             );
         }
     }
+    /// The `params` ⚠ in `CLAUDE.md` must keep naming its one exception.
+    ///
+    /// The rule reads *"never hand-build a params array"*, and its original justification —
+    /// that `append_entry` / `update_entry` cover every case — is false for `doctor`'s
+    /// `params_behind_body`, where the wholesale write is the only surface that can create a
+    /// row at a GIVEN id. Left absolute, the rule makes that finding unrepairable: a session
+    /// obeying both surfaces has no legal action at all.
+    /// docs/issues/archive/2026-09-11-the-never-hand-build-params-rule-rests-on-a-premise-its-own-repair-path-refutes.md
+    ///
+    /// **Shape, not wording.** This asserts the exception is NAMED, never how it is phrased.
+    /// Pinning the sentence would red on every legitimate rewrite — the failure mode
+    /// § *Testing Discipline* calls out for remedy text — whereas this reds on the one
+    /// regression that is actually plausible: someone tidying the ⚠ back to its absolute
+    /// form, which is how it read for three weeks.
+    ///
+    /// The search is scoped to the blockquote by `>` continuation rather than run over the
+    /// whole file. Today that scoping is **redundant** — `params_behind_body` occurs exactly
+    /// once in `CLAUDE.md`, inside the carve-out itself (verified 2026-09-11) — so a
+    /// file-wide `contains` would be equally strict right now. It is written this way
+    /// because the redundancy is the part that decays: the day anything else in the file
+    /// mentions the check, a file-wide assertion silently starts passing with the carve-out
+    /// deleted, and no failure would report that it had stopped discriminating.
+    #[test]
+    fn claude_md_params_array_rule_names_its_one_exception() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
+        let claude_md =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+        let anchor = "Never hand-build a params array";
+        let at = claude_md
+            .find(anchor)
+            .unwrap_or_else(|| panic!("CLAUDE.md no longer states the params-array rule at all"));
+        let line_start = claude_md[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let block: String = claude_md[line_start..]
+            .lines()
+            .take_while(|l| l.starts_with('>'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            block.contains("params_behind_body"),
+            "the params-array warning must name the one finding whose repair REQUIRES the \
+             wholesale write. Without the carve-out the rule is absolute, and \
+             `params_behind_body` — whose remedy text is itself pinned to name that very call \
+             by `params_behind_body_names_a_remedy_that_can_actually_repair_it` — has no legal \
+             remedy at all. Block was:\n{block}"
+        );
+    }
+
     /// Retired tool names must not survive as CALL FORMS in the reader-facing docs.
     ///
     /// **This gate exists because the sweep that created it was unfalsifiable.** Task 10 of the
