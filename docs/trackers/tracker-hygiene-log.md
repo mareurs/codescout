@@ -2255,15 +2255,16 @@ and `:F-3` (`doctor` detail text asserting a false cause). That ledger was the r
 work stream is the session-backed `taken` status this sweep exercised in anger for the first
 time.
 
-**Two further recon entries from the same session are BLOCKED and parked, not dropped.**
+**Further recon entries from the same session were BLOCKED, parked, and have since landed.**
 `append_entry` refuses while the target ledger has unpushed commits — and the blocking commit
 was this sweep's own, so a session following the documented workflow blocks itself on its
-second append. That is a live instance of `cd808780d9ea2db9`. The drafts live in
-`docs/trackers/pending-ledger-entries.md` (`330f7d7f01f4ec23`), which carries its own exit
-condition and is to be **deleted** when they land. Parked in the repo rather than a session
-scratchpad deliberately: the refusal's own fallback (*"note the entry somewhere
+second append. That is a live instance of `cd808780d9ea2db9`. Parked in the repo rather than a
+session scratchpad deliberately: the refusal's own fallback (*"note the entry somewhere
 worktree-local"*) converts a blocked write into an **untracked** one, and nothing would have
-noticed if they were never folded in.
+noticed if they were never folded in. **The deferral held** — the holding file grew from two
+drafts to five as the session continued, and all five folded in once the ledger's commits
+reached `origin`: `bug-claim-liveness-session-log:F-4`, `:F-5`, `:F-6`, `:F-7` and `:W-2`. The
+holding file was deleted in the same commit, as its own exit condition required.
 
 ### Peer coordination
 
