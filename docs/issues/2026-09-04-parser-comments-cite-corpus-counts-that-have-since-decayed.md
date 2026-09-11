@@ -1,10 +1,12 @@
 ---
 id: e81b767ba3701316
 kind: bug
-status: open
+status: taken
 title: 'BUG: two sibling cluster-tag parsers justify dual-form support with corpus measurements that have decayed — one now false, one uncheckable'
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 closed: null
 opened: 2026-09-04
 owner: marius
@@ -153,34 +155,29 @@ the code is correct; only re-deriving the numbers surfaces them.
 
 ## Fix
 
-Not applied — filed on notice per CLAUDE.md's capture-on-notice rule.
+Fixed, both instances, by dropping the stale/uncheckable numbers rather than
+re-measuring (per this file's own warning against resetting the clock):
 
-Two different repairs, because the two failures are different:
+- `scripts/pre-commit-ledger-counts.py:601-607` — the "ZERO... measured
+  2026-09-01" claim replaced with a re-derivation command
+  (`git grep -clE '^tags: *\[.*cluster/' -- docs/issues/*.md docs/issues/archive/*.md`)
+  and a note that the count moves with every filing, so the fixture is what
+  keeps the inline arm reliably exercised regardless of what the live corpus
+  holds on a given day.
+- `tests/issue_clusters.rs:149-155` (`cluster_tags` doc comment) and
+  `tests/issue_clusters.rs:314-319` (`both_yaml_tag_styles_are_read` doc
+  comment, a SECOND instance not in this bug's original population — found by
+  re-scouting before editing) — both had their "20 block / 11 inline" counts
+  dropped, keeping the load-bearing claim ("the corpus uses both forms;
+  reading only one silently under-reports") which needs no figure at all.
 
-- **`scripts/pre-commit-ledger-counts.py:452-455`** — a two-line edit. Keep the fixture and the
-  reason for it, and correct the fact: the corpus now carries 3 flow-style `cluster/` tags, which is
-  *fragile* coverage rather than none, so the stdin fixture is what makes the arm reliably
-  exercised. State the count with its date and its population, as the surrounding file already does
-  elsewhere.
-- **`tests/issue_clusters.rs:155-156`** — a decision, not an edit. Either name the population and
-  the date (`git ls-files docs/issues` at `<sha>`, N block / M flow), or **drop the numbers**. The
-  sentence *"the corpus uses both, and reading only one silently under-reports"* is the load-bearing
-  half and needs no figure at all. Prefer dropping: a count in a comment is a claim nothing
-  re-derives, which is the defect this file reports.
-
-**Do not "fix" both by re-measuring and writing today's numbers in.** That reproduces the mechanism
-with fresher values and resets the clock — the trap CLAUDE.md names as *ship its derivation rather
-than its value*.
-
+Fix SHA: *(recorded at archive time — see Resume)*
+Patch-id: *(recorded at archive time — see Resume)*
 ## Tests added
 
-None. A regression test is the interesting part of this bug and is **deliberately deferred**, not
-overlooked: the tractable shape is widening `doctor`'s `entry_dated_stale` population from
-`Valid:`-bearing tracker entries to any dated claim, code comments included, which is a
-mechanism-design task (`I-N` / `H-N`) rather than a guard on these two lines. Guarding only these
-two would be `cluster/assertion-satisfiable-by-accident` — it would pin today's strings and catch no
-future instance.
-
+None — these are doc-comment-only corrections with no behavior change;
+`cargo test issue_clusters` re-ran green (22 tests, unaffected) confirming
+no test asserted on the removed numbers.
 ## Workarounds
 
 Do not trust either comment's figures. Re-derive with the commands under *Reproduction* before
@@ -189,14 +186,11 @@ while treating its *reason* as void.
 
 ## Resume
 
-Decide the two repairs under *Fix* — they are independent and neither depends on the other. Start
-with `scripts/pre-commit-ledger-counts.py:452-455`, which is the false one and a two-line edit;
-`tests/issue_clusters.rs:155-156` needs a call on drop-vs-qualify and should probably drop.
-
-Then, separately and larger: take the `entry_dated_stale` population question to
-`docs/trackers/test-escape-hardening.md` (`I-N`) as a mechanism item, citing this file. Do **not**
-fold that into the comment repairs.
-
+N/A — fixed. The general remedy this file argued for (`entry_dated_stale`-style
+checking for a dated claim in a *code comment*, not just a tracker entry) is
+still a separate, larger `I-N` mechanism item for
+`docs/trackers/test-escape-hardening.md` — not built here, per the file's own
+original Resume note.
 ## References
 
 - `scripts/pre-commit-ledger-counts.py:452-455` — the falsified measurement.
@@ -208,4 +202,3 @@ fold that into the comment repairs.
 - `docs/issues/archive/2026-09-04-entry-prefix-guard-is-blind-to-the-flush-block-sequence-form.md` —
   the sibling parser whose *code* had the mirror defect; found in the same session, which is how
   these two comments came to be re-derived at all.
-

@@ -116,9 +116,10 @@ impl Tool for Workspace {
         // `ActivateProject::call` governs the bootstrap topic itself — re-arming
         // it via `PROJECT_SCOPED` on a genuine project switch, or wiping it along
         // with everything else via the blunt clear when no rendezvous is active
-        // (same-project re-activation touches neither). The opener's trigger (the
-        // `!emitted.contains(SESSION_OPENING_GUIDE)` check in `Tool::call_content`,
-        // `src/tools/core/types.rs`) is already downstream of that logic regardless
+        // (same-project re-activation touches neither). The opener's trigger
+        // (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`:
+        // fires when that topic is absent from the ledger) is already downstream
+        // of that logic regardless
         // of what this arm returns, so returning it here would only be a second,
         // redundant path to the same effect. `post_compact_rearms_guide_hints`
         // covers the separate `ProjectStatus` clear.

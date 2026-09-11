@@ -11725,7 +11725,7 @@ mod guide_hint_tests {
             !crate::prompts::guide_index::GUIDE_INDEX
                 .declares(crate::prompts::SESSION_OPENING_GUIDE),
             "SESSION_OPENING_GUIDE ('{}') now declares sections, but the opener branch \
-             in `call_content` still keys it as a bare topic and reports \
+             in `engines::emitters::emit_session_opener` still keys it as a bare topic and reports \
              GuideDeliveryShape::Whole unconditionally — it will double-deliver \
              against `guide_blocks_for`'s `topic#heading` keys. Update the opener \
              branch to route through `guide_blocks_for` (or an equivalent \

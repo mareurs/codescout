@@ -148,8 +148,11 @@ fn frontmatter(content: &str) -> Option<&str> {
 
 /// Every `cluster/` tag declared in a frontmatter block.
 ///
-/// Reads both YAML forms, because the corpus uses both: 20 files write a block sequence
-/// under `tags:` and 11 write an inline flow list. Reading only one silently under-reports.
+/// Reads both YAML forms, because the corpus uses both — a block sequence under
+/// `tags:` and an inline flow list. Reading only one silently under-reports. The
+/// split between the two forms moves with every filing, so do not restate a
+/// snapshot count in this comment — a prior version cited one, and neither the
+/// live nor the archived corpus reproduced it days later.
 fn cluster_tags(fm: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_block = false;
@@ -311,10 +314,12 @@ fn the_cluster_scan_discriminates() {
     assert_eq!(verdict("# just a body\n", &valid), Verdict::Missing);
 }
 
-/// Both YAML tag styles must be read: the corpus uses both, 20 block and 11 inline.
+/// Both YAML tag styles must be read: the corpus uses both, in a split that moves
+/// with every filing (see `cluster_tags`'s doc comment — do not restate a count here).
 ///
-/// Reading only the block form would report 11 files as untagged; reading only the
-/// inline form would report 20. Either way the gate fires on files that are fine.
+/// Reading only the block form would report every flow-style file as untagged;
+/// reading only the inline form would report every block-style file as untagged.
+/// Either way the gate fires on files that are fine.
 #[test]
 fn both_yaml_tag_styles_are_read() {
     let valid: BTreeSet<String> = ["alpha"].iter().map(|s| s.to_string()).collect();

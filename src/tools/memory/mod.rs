@@ -708,7 +708,7 @@ impl Tool for Memory {
                 "action": {
                     "type": "string",
                     "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"],
-                    "description": "Operation to perform; refresh_anchors re-derives anchor topics."
+                    "description": "Operation to perform; refresh_anchors re-hashes anchors only."
                 },
                 "topic": {
                     "type": "string",

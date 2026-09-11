@@ -54,8 +54,9 @@ pub struct GuideLedger {
     ///
     /// Deliberately a SEPARATE set from `emitted`, and not persisted:
     ///
-    /// - the opener's trigger — the `!emitted.contains(SESSION_OPENING_GUIDE)`
-    ///   check in `Tool::call_content` (`src/tools/core/types.rs`) — only
+    /// - the opener's trigger — `engines::emitters::emit_session_opener`
+    ///   (`src/engines/emitters.rs`), which fires whenever the bootstrap topic
+    ///   specifically is absent from the ledger — only
     ///   cares whether that one literal topic string is present. A
     ///   sentinel key stashed in `emitted` therefore only risks suppressing
     ///   the opener if it collides with that exact string — the same
@@ -162,9 +163,9 @@ impl GuideLedger {
     /// True at session start and again after [`clear`](Self::clear) (workspace
     /// activate / post-compact re-arm). An empty ledger always lacks
     /// `SESSION_OPENING_GUIDE`, so this used to double as the session-opening
-    /// guide's firing condition. As of 2026-08-18 the opener fires on the
-    /// strictly weaker `!emitted.contains(SESSION_OPENING_GUIDE)` check in
-    /// `Tool::call_content` (`src/tools/core/types.rs`), so a non-empty
+    /// guide's firing condition. As of 2026-08-18 the opener
+    /// (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`)
+    /// fires on the strictly weaker condition of that topic being absent, so a non-empty
     /// ledger that merely lacks the bootstrap topic — e.g. after a surgical
     /// `re_arm` — also fires it. `is_empty` is no longer that condition.
     ///
@@ -354,9 +355,9 @@ impl GuideLedger {
     /// for that to matter, and an MCP reconnect is kill-then-spawn, not overlap.
     ///
     /// Deleting on empty is load-bearing beyond tidiness: an empty ledger
-    /// always lacks `SESSION_OPENING_GUIDE`, so the opener's trigger — the
-    /// `!emitted.contains(SESSION_OPENING_GUIDE)` check in `Tool::call_content`
-    /// (`src/tools/core/types.rs`) — holds again once loaded, so a ledger
+    /// always lacks `SESSION_OPENING_GUIDE`, so the opener's trigger
+    /// (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`:
+    /// fires when that topic is absent from the ledger) — holds again once loaded, so a ledger
     /// emptied by `expire_idle` re-opens the session on its next load. That
     /// is intended for a client idle past its TTL — spec §7. Writing `{}`
     /// here instead would suppress the opener permanently.
@@ -1042,9 +1043,9 @@ mod tests {
     fn expiring_the_last_topic_deletes_the_file_so_the_session_opener_re_fires() {
         // DECISION, not an accident (spec §7, confirmed 2026-08-18): a fully
         // expired ledger re-opens the session. An empty ledger always lacks
-        // `SESSION_OPENING_GUIDE`, so the opener's trigger — the
-        // `!emitted.contains(SESSION_OPENING_GUIDE)` check in
-        // `Tool::call_content` (`src/tools/core/types.rs`) — holds again
+        // `SESSION_OPENING_GUIDE`, so the opener's trigger
+        // (`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`:
+        // fires when that topic is absent from the ledger) — holds again
         // once loaded; persist deletes the file when the map empties, so a
         // reload comes back empty and the opener fires. Pinned because both
         // halves look like reasonable refactors: making persist write `{}`

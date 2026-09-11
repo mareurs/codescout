@@ -660,6 +660,30 @@ fn count_disk_md(abs_root: &std::path::Path, ignore: &globset::GlobSet) -> usize
         .count()
 }
 
+/// Text for `unresolved_hint` when a semantic query's ANN neighbourhood contains
+/// vector ids the store could not resolve to a chunk row. `unresolved` is a
+/// PER-QUERY count -- the size of that one query's candidate set that fell out,
+/// not a store total -- so the wording must not imply it trends or compares
+/// across queries. It must also not prescribe `reembed=true`: that call requeues
+/// EXISTING chunk rows for re-embedding and prunes nothing, so it cannot reach a
+/// stale or orphaned vector id. See `docs/trackers/observer-blindness.md`'s IC-11
+/// entry ("FIFTH SHAPE, 2026-09-11") for why this is a known limitation rather
+/// than a transient one, and its sibling fix in `reindex.rs`'s `vectorless_note`
+/// for the same correction applied to a different surface.
+fn unresolved_hint_text(unresolved: usize) -> String {
+    format!(
+        "{unresolved} of this query's candidate vector(s) resolved to no chunk \
+         row and were discarded before ranking. This count is per query, not a \
+         store total -- it will not trend across queries, and two readings \
+         should not be compared. Retrying will not change this: the vectors are \
+         stale, or the store holds ids at a grain this reader cannot resolve. No \
+         reindex clears this today: reembed=true only requeues existing chunk \
+         rows for embedding and prunes nothing stale, so running it will not \
+         change this population. This is a known limitation, not a transient \
+         condition -- see docs/trackers/observer-blindness.md's IC-11 entry."
+    )
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args)?;
     // Repair-and-continue: fix the deterministic inverted-leaf filter mistake
@@ -1171,13 +1195,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 h.insert("unresolved".into(), json!(unresolved));
                 h.insert(
                     "unresolved_hint".into(),
-                    json!(format!(
-                        "{unresolved} vector(s) the store returned resolved to no chunk row and \
-                         were discarded before ranking. Retrying will not change this: the \
-                         vectors are stale, or the store holds ids at a grain this reader \
-                         cannot resolve. Re-index to refresh them -- \
-                         librarian(action=\"reindex\", reembed=true)."
-                    )),
+                    json!(unresolved_hint_text(unresolved)),
                 );
             }
             Value::Object(h)
@@ -1439,6 +1457,23 @@ mod tests {
                 .contains("\"status\": \"taken\""),
             "the hint must carry the literal claim call: {:#?}",
             hint["call"]
+        );
+    }
+
+    #[test]
+    fn unresolved_hint_does_not_prescribe_a_reembed_that_cannot_reach_it() {
+        let text = super::unresolved_hint_text(31);
+        assert!(
+            !text.contains("librarian(action=\"reindex\""),
+            "the hint must not tell the caller to run reindex/reembed=true as an \
+             escape -- that call requeues existing chunk rows and cannot reach a \
+             stale or orphaned vector id, so following it is a no-op that holds \
+             the shared write lock for nothing: {text}"
+        );
+        assert!(
+            text.contains("per query"),
+            "the count is per-query, not a store total, and must say so or a \
+             reader will (wrongly) trend it across queries: {text}"
         );
     }
 

@@ -599,9 +599,12 @@ def main() -> int:
             return 0
         elif arg == "--fixture-tags":
             # Pure over stdin, so `the_hook_script_agrees_on_both_yaml_tag_styles` can feed
-            # both YAML forms directly. The live corpus cannot exercise the inline arm:
-            # measured 2026-09-01, ZERO bug files carry a `cluster/` tag in flow style, so a
-            # corpus-driven agreement check leaves that branch untested however green it is.
+            # both YAML forms directly. The live corpus cannot be trusted to exercise the
+            # inline arm: it does carry flow-style `cluster/` tags today (re-derive with
+            # `git grep -clE '^tags: *\[.*cluster/' -- docs/issues/*.md docs/issues/archive/*.md`,
+            # never a bare count — this file is IC-11's own instance of citing one that decays),
+            # but the count moves with every filing, so this fixture is what keeps the inline
+            # arm reliably exercised regardless of what the live corpus holds on a given day.
             print(json.dumps(cluster_tags(frontmatter(sys.stdin.read()) or "")))
             return 0
     if source not in ("index", "worktree", "head"):

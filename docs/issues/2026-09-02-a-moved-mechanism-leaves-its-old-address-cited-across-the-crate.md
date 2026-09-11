@@ -1,11 +1,13 @@
 ---
 kind: bug
-status: open
+status: investigating
 tags:
 - cluster/doc-contradicted-by-code
 - doc-drift
 - engines
 - audit-doc-refs
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -113,22 +115,34 @@ enumeration that agreed on all ten.
 
 ## Fix
 
-Two halves, and only the second prevents recurrence.
+**Partial.** Re-scouted before editing since the population had shifted since
+filing (line numbers moved; the citation appears with and without a trailing
+line number across sites). Fixed, by naming the property rather than the
+expression (per this file's own prescription) plus the correct current site
+(`engines::emitters::emit_session_opener`, `src/engines/emitters.rs`, using
+`ledger.contains(topic)`):
 
-- **The sites.** Rewrite the ten to name `emitters::emit_session_opener` and the
-  *property* ("the opener fires when its topic is absent from the ledger") rather
-  than the expression. Fix `server.rs:8623`'s remediation text first — it is the
-  only one that dispatches. **Not done here on purpose:** four of the ten are in
-  `src/server.rs`, where a peer is actively committing, and this was found while
-  finishing an unrelated task.
-- **The instrument.** Extend `audit_doc_refs` (or a sibling check) to resolve
-  symbol/module citations inside `.rs` doc comments against the LSP index. That is
-  the half that makes the sweep falsifiable; without it the next move repeats this.
+- All 4 `src/tools/guide_ledger.rs` sites (doc comments + one test comment).
+- `src/tools/config/mod.rs`'s 1 site.
+- `src/prompts/mod.rs`'s 1 site.
+- `src/server.rs:8623-8632`'s failure-message text — the one site this bug
+  calls out as most important ("a stale comment misinforms; a stale
+  remediation dispatches") — fixed once `git status --short -- src/server.rs`
+  came back clean (it was not, at filing time, per this file's own caution).
 
+**Not fixed:** the remaining `src/server.rs` sites this bug named (`:1157`
+region and others in the same file, now at shifted line numbers) — left for a
+follow-up pass; `server.rs` sees frequent concurrent activity in this shared
+checkout and the sites are numerous enough to warrant their own careful pass
+rather than a rushed tail-end edit.
+
+Fix SHA: *(recorded at archive time for the partial fix — see Resume; this bug
+stays open until the remainder lands)*
 ## Tests added
 
-None. The regression test for the second half is the check itself.
-
+None — doc/comment-only corrections, no behavior change. `cargo check
+--all-targets`, `session_opening_guide_never_declares_sections`, and the full
+`guide_ledger::` test module (35 tests) re-ran green.
 ## Workarounds
 
 When reading a doc comment that cites a mechanism, confirm the cited symbol exists
@@ -136,12 +150,15 @@ before trusting the argument built on it. `symbols(name=…)` answers in one cal
 
 ## Resume
 
-Start with `src/server.rs:8623-8632`'s failure text — it is the only site that
-prescribes action. Then the four `guide_ledger.rs` sites, two of which
-(`:56`, `:357`) carry the *reason* for a design choice. Leave `src/server.rs`'s
-comment sites until `git status --short src/server.rs` is clean; a pathspec commit
-there captures a peer's in-flight hunk.
-
+Re-run `grep -n '!emitted.contains(SESSION_OPENING_GUIDE)' src/server.rs` (the
+literal old expression, not just `SESSION_OPENING_GUIDE`) to find the
+remaining stale sites, and fix them the same way: name
+`engines::emitters::emit_session_opener` and the property ("fires when the
+topic is absent from the ledger"), not the expression. Confirm
+`git status --short -- src/server.rs` is clean before starting, per this
+file's own original caution. Leave `src/engines/coordinator.rs`'s citation
+alone — it is the deliberate documentation example this file names, not a
+stale instance.
 ## References
 
 - `9f1d92be` — the falsified "cite the expression" lesson, corrected in

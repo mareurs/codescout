@@ -1,4 +1,4 @@
-//! Doctor — catalog drift scanner.
+//! Doctor — catalog-drift, statement-validity, bug-record and augmentation checks.
 //!
 //! Read-only invariant checks against the librarian catalog. Surfaces drift
 //! the moment it lands instead of when it cascades into downstream query
@@ -3719,7 +3719,12 @@ fn entry_indegree(
 /// SAME token: `EntrySection::level` plus `heading_line`/`end_line` bound the
 /// nest with no new data. A genuine cross-host merge does not produce this
 /// shape — both clones allocate from the ledger's existing entries and so land
-/// at the SAME heading level (`outcome.heading_level`, `append_entry.rs:203`)
+/// at the SAME heading level (`body_entry_heading_level`,
+/// `src/librarian/catalog/augmentation.rs` — the mode of the existing
+/// `PREFIX-N` heading levels, cited by symbol name rather than line: the prior
+/// citation, `append_entry.rs:203`, was displaced by the same commit that wrote
+/// it, and named the wrong site even before that shifted; cited by symbol
+/// name here for exactly that reason)
 /// — so the case this check exists to catch survives the filter untouched.
 fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
     use crate::librarian::tools::link_scan::extract::entry_sections;
@@ -18345,7 +18350,7 @@ root = "work/elsewhere/ghost"
     /// however close their lines are, so the filter added for the test above must
     /// not swallow this — the shape a real cross-host merge actually produces,
     /// since both clones allocate from the ledger's existing heading level
-    /// (`outcome.heading_level`, `append_entry.rs`).
+    /// (`body_entry_heading_level`, `src/librarian/catalog/augmentation.rs`).
     ///
     /// LOAD-BEARING, AND WEAKER THAN IT LOOKS — annotated so nobody credits it with
     /// coverage it does not provide. The fixture is three headings: `##` at line 3, a

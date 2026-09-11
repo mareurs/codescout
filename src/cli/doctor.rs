@@ -1,4 +1,5 @@
-//! `cargo run -- doctor` — invoke the librarian catalog drift scanner.
+//! `cargo run -- doctor` — invoke the librarian's catalog-drift, statement-validity,
+//! bug-record and augmentation checks.
 //!
 //! Thin CLI wrapper over `crate::librarian::tools::doctor::call`. Shared discovery surface
 //! (project override, --json, --no-color) plus the scanner's own params, marshalled by

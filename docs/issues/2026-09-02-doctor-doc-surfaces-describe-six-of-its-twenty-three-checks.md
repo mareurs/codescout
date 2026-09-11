@@ -1,13 +1,15 @@
 ---
 id: '88c3f36937d83ed6'
 kind: bug
-status: open
+status: taken
 title: 'BUG: every doc surface describes `doctor` as a catalog-drift scanner, hiding ~17 of its 23 checks'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
 topic: doctor check discoverability
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 closed: ''
 opened: 2026-09-02
 owner: marius
@@ -231,26 +233,39 @@ project already depends on capabilities its own instrument index does not list.
 
 ## Fix
 
-Not started. The shape is a decision, not a transcription, so it wants a ruling first:
+Applied Option B (describe by family) as this file recommended, across all
+five named sites. Re-scouted the check count before writing: it had already
+drifted from 23 (filing time) to 26 `scan_*` functions — living proof, inside
+this very fix, that Option A (enumerate) would have rotted immediately and
+Option B was the only defensible choice.
 
-- **Option A — enumerate.** List all 23 on all three surfaces. Accurate on the day it
-  lands; re-rots on check 24, since nothing gates it.
-- **Option B — describe by family.** Replace "catalog drift" with the four families
-  (catalog drift, statement validity, bug records, augmentation) and let the JSON report
-  carry the per-check detail. Survives new checks within a family.
-- **Option C — generate.** Emit the check list from the registration site so the surfaces
-  cannot drift. Highest cost; the only option that closes the class rather than the
-  instance.
+- `docs/PROBES.md` — already partially updated since filing (mentioned
+  bug-record + statement-validity); added the missing augmentation family.
+- `src/prompts/guides/librarian.md` — already partially updated (mentioned
+  `claim_liveness`); rewritten to name all four families explicitly, then
+  trimmed to fit the guide's 2500 B declared-section cap (first attempt
+  overflowed it by 164 B — caught by `declared_sections_are_within_the_size_cap`).
+- `src/librarian/tools/librarian.rs` (the `Librarian` tool description) —
+  rewritten to name all four families, funded within
+  `TOOL_SURFACE_CHAR_BUDGET` (zero headroom at fix time) by trimming
+  "JSON violation-count report. Opt-in repairs, each detailed under the `fix`
+  param." to "JSON report; repairs are opt-in via `fix`."
+- `src/librarian/tools/doctor.rs:1` and `src/cli/doctor.rs:1` (module rustdoc
+  headers) — both changed from "catalog drift scanner" to name all four
+  families.
 
-**Recommendation: B now, C when a fourth surface appears.** B is the only one that is
-correct *and* stable under the commonest change (a new check in an existing family).
+NOT touched: the much larger `//! Checks (MVP)` numbered list further down in
+`doctor.rs`'s module doc, which is its own, separate staleness (documents ~8
+of 26 checks) — out of scope for the five sites this bug named.
 
+Fix SHA: *(recorded at archive time — see Resume)*
+Patch-id: *(recorded at archive time — see Resume)*
 ## Tests added
 
-None yet. A gate is possible and belongs with option C: assert that every
-`scan_*` registered at `doctor.rs:414` appears by name in `docs/PROBES.md`. Cheap, and it
-fails loudly on the exact event that caused this.
-
+None new — doc/description-only correction. Re-ran green: `tool_surface_under_budget`,
+`declared_sections_are_within_the_size_cap` (initially failed at 2506 B, fixed by
+further trimming), `prompt_surfaces_reference_only_real_tools`, `doc_tool_refs`
+(3 tests).
 ## Workarounds
 
 Read `doctor`'s check list from the code, not the docs:
@@ -264,18 +279,10 @@ the report is accurate; only the descriptions are not.
 
 ## Resume
 
-Pick between options A/B/C in § *Fix*, then edit all five sites listed in § *Symptom*:
-`docs/PROBES.md:173`, `src/librarian/tools/librarian.rs:30`,
-`src/prompts/guides/librarian.md:286`, `src/librarian/tools/doctor.rs:1`,
-`src/cli/doctor.rs:1`. Check `src/prompts/README.md` for whether the guide edit crosses a
-slice cap. Note #2 lives inside the `Librarian/description` symbol — reach it with
-`edit_code`, not `edit_file`.
-
-**Re-derive the population with the PHRASE, not the check names.** A name-based sweep is
-structurally blind here — a surface that mischaracterises `doctor` names no check at all —
-and it returns a confident short answer rather than an error. That is how this file was
-first filed claiming three surfaces when there are five.
-
+The `//! Checks (MVP)` numbered list in `doctor.rs` (currently documents ~8 of
+26 checks) is a related but separate staleness, worth its own bug file if
+someone wants to take it — not filed here since it wasn't in this bug's named
+scope. Otherwise N/A — fixed.
 ## References
 
 - `docs/trackers/bug-claim-liveness-session-log.md` — `F-1`, the scout that found this

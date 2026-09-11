@@ -1,12 +1,14 @@
 ---
 id: '43f3e527cda1f9af'
 kind: bug
-status: open
+status: taken
 title: 'BUG: the unresolved-vector hint prescribes a reembed that does not clear it, and reports a per-query count as a store total'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 ---
 
 # BUG: the unresolved-vector hint prescribes a reembed that does not clear it, and reports a per-query count as a store total
@@ -123,27 +125,39 @@ anyone who checks.
    total. The orthogonality claim may still hold at the row level; the count cannot test it.
 
 ## Fix
-*Not fixed here.* Two separable changes, and the second is cheap:
 
-**The hint must not prescribe `reembed=true`.** It is the same correction `45eac50e` applied to
-`reindex.rs`'s `vectorless_note`, at the surface that fix did not reach. Until a pruning path
-exists, the honest text names the condition and says no remedy is available — a documented
-limitation costs a reader far less than a nine-minute no-op that takes the shared write lock.
+Applied the "cheap, honest" repair this file recommended (not the deeper
+vector-store prune path, which remains undesigned):
 
-**The count needs its unit.** *"N vectors the store returned"* → *"N of this query's candidate
-vectors"*, so nobody trends it or reads a rise as regression.
+- `src/librarian/tools/find.rs` — the `unresolved_hint` text no longer
+  prescribes `librarian(action="reindex", reembed=true)`. It now states
+  plainly that no reindex clears this today (reembed=true requeues existing
+  chunk rows and prunes nothing, so it cannot reach a stale or orphaned vector
+  id), and names this a known limitation rather than a transient one.
+- The count's unit is fixed: "N vector(s) the store returned" → "N of this
+  query's candidate vector(s)", with an explicit "per query, not a store
+  total" so a reader does not trend it across queries.
+- Swept for sibling sites (`grep reembed=true` across `src/`): the only other
+  prescriptive site was `reindex.rs`'s `vectorless_note`, already fixed at
+  `45eac50e` for a different population (vectorless artifacts, not orphaned
+  vectors) with an explicit test that it must NOT say `reembed=true`. No other
+  broken sibling found.
 
-**And sweep for siblings rather than fixing this one site.** Two surfaces have now carried this
-prescription and one was fixed in isolation. `grep` for `reembed=true` across hint and note
-strings is the whole check — CLAUDE.md § *Testing Discipline*: mutate once per guarded SITE, not
-once per feature, and a remedy string is a site.
+The hint-building logic was extracted from an inline `format!` into a
+standalone `unresolved_hint_text(unresolved: usize) -> String` function in
+`find.rs` specifically so it is unit-testable without standing up the full
+ANN/vector-store pipeline.
 
+Fix SHA: *(recorded at archive time — see Resume)*
+Patch-id: *(recorded at archive time — see Resume)*
 ## Tests added
-None — nothing is fixed yet. The test worth having with the fix is a shape assertion in both
-directions, exactly as `45eac50e` built for its sibling: that the hint does **not** contain
-`reembed`, and that it does name whatever the real escape turns out to be. Either assertion
-alone is satisfiable by the wrong text.
 
+`librarian::tools::find::tests::unresolved_hint_does_not_prescribe_a_reembed_that_cannot_reach_it`
+(`src/librarian/tools/find.rs`) — asserts the hint text does not contain
+`librarian(action="reindex"` (the dead-end prescription) and does contain
+"per query" (the unit fix). Regression-only for the *text*; the underlying
+"why doesn't reembed clear it" mechanism is unchanged and undesigned, per
+Root cause.
 ## Workarounds
 None that clear it. **Do not run `reindex(reembed=true)` for this hint** — it costs ~9 minutes,
 takes the shared catalog write lock, and blocks every peer's `edit_code`/`edit_file`.
@@ -152,11 +166,12 @@ Read the hint as "semantic recall on this query is a floor" and proceed. Ranking
 for the vectors that do resolve; the discarded ones only cost recall.
 
 ## Resume
-Decide between correcting the hint text alone (cheap, honest, leaves recall degraded) and adding
-a vector-store prune path (the actual repair). Then sweep every `reembed=true` occurrence in
-user-facing strings — this is the second such surface found, so the population is at least 2 and
-was never enumerated.
 
+The root architectural question — whether to build a vector-store prune path
+(the actual repair) — is still open; this fix only stops the hint from sending
+readers to a nine-minute no-op that holds the shared write lock. See
+`docs/trackers/observer-blindness.md`'s IC-11 "FIFTH SHAPE" entry for the
+fuller analysis this bug is cross-referenced from.
 ## References
 - `docs/issues/archive/2026-09-07-vectorless-note-prescribes-a-reembed-that-cannot-reach-it.md`
   — the sibling, fixed `45eac50e` / patch-id `0f70f33bbc19f0a95ecb08a1966592e63a9b05d0`; same

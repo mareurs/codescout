@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 closed: null
 opened: 2026-09-08
 owner: marius
@@ -82,17 +84,22 @@ The wrong one is the one a client renders inline next to the parameter.
 
 ## Fix
 
-Not started. One-line change to the schema string at `src/tools/memory/mod.rs:711` to
-match `long_docs`. Note the tool-surface budget: the surface is currently at its ceiling
-(`TOOL_SURFACE_CHAR_BUDGET`, `src/server.rs:3571`), so a longer replacement needs to pay
-for itself from within the same description.
+Fixed. `src/tools/memory/mod.rs:711` schema description changed from
+"refresh_anchors re-derives anchor topics." to "refresh_anchors re-hashes
+anchors only." — under budget (`TOOL_SURFACE_CHAR_BUDGET` had zero headroom at
+fix time; the replacement is 2 chars shorter than the original, not longer, so
+no other description needed trimming).
 
+Fix SHA: *(recorded at archive time — see Resume)*
+Patch-id: *(recorded at archive time — see Resume)*
 ## Tests added
 
-None yet. There is no test asserting that a tool's schema description and its
-`long_docs` agree about an action's semantics, which is why this survived — a gate for
-that class would cover more than this one line.
-
+None added — this is a one-line schema-string correction with no behavior
+change, so no new assertion was warranted. `server::tests::tool_surface_under_budget`
+(already existing) re-ran green after the edit, confirming the surface stayed
+under budget. There is still no test asserting a tool's schema description and
+its `long_docs` say the same thing about an action's semantics — noted in
+Resume as a possible class, not built here (n=1).
 ## Workarounds
 
 Use `memory(action="write", content=<full document>)` when the anchor SET needs to
@@ -101,11 +108,8 @@ already correct.
 
 ## Resume
 
-Change `src/tools/memory/mod.rs:711` to say re-hashes rather than re-derives, paying the
-character cost from the same description. Then consider whether a gate comparing
-`input_schema` action descriptions against `long_docs` is affordable — this is one
-instance and a class may not exist yet.
-
+N/A — fixed. If a second instance of schema/long_docs disagreement is found
+elsewhere, that is when a gate comparing the two becomes worth building.
 ## References
 
 - `src/tools/memory/mod.rs:711` (wrong), `:678` (right), `:1126`, `:1144`

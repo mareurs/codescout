@@ -28,12 +28,12 @@ impl Tool for Librarian {
              link_scan: derive rel=\"cites\" edges from prose citations (entry \
              tokens, ids, md links); default reports, write=true \
              materializes/prunes them. \
-             doctor: catalog drift scanner (read-only by default): abs_path form, \
-             ADS colons, '..' segments, missing files; commits.git_root form; \
-             worktree-scoped rows; frontmatter id vs catalog id; and \
-             `claim_liveness` — a `status: taken` bug whose claiming session is \
-             dead or unresolvable here. JSON violation-count report. Opt-in \
-             repairs, each detailed under the `fix` param. \
+             doctor: catalog/statement/bug-record/augmentation checks (read-only \
+             by default): abs_path form, ADS colons, '..' segments, missing \
+             files; commits.git_root form; worktree-scoped rows; frontmatter id \
+             vs catalog id; and `claim_liveness` — a `status: taken` bug whose \
+             claiming session is dead or unresolvable here. JSON report; \
+             repairs are opt-in via `fix`. \
              merge_worktree: fold a worktree's shadow rows onto their main twins \
              (delta-only, never duplicates base entries); reseats worktree-born \
              rows. root=<worktree_root>; dry_run=true previews only; abandon=true \

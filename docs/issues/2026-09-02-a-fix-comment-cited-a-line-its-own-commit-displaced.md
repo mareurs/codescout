@@ -1,10 +1,12 @@
 ---
 id: fe2ff2436150990d
 kind: bug
-status: open
+status: taken
 title: A fix comment cited a line its own commit displaced, and the site was wrong before it moved
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-11
+claimed_by: ec98641c-d5ba-456d-8e4a-10e24d52da16
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -83,22 +85,24 @@ claim".
 
 ## Fix
 
-Not fixed — parked deliberately at merge time. The whole-branch process allows exactly one fix wave
-after a final review, and this arrived in the re-review of that wave, classified Low and outside
-production logic.
+Fixed, and re-scouted before editing since the file had grown further since
+filing (the doc comment is now at `doctor.rs:3722`, not `:2783` — this bug's
+own lesson applying to itself). Repointed the citation from the dead line
+number to the symbol name `body_entry_heading_level`
+(`src/librarian/catalog/augmentation.rs`), with a one-line note on why (a
+line-number citation self-displaces; a symbol name survives insertion above
+it). Also corrected a second, adjacent instance of the same stale citation in
+a test doc comment (`doctor.rs`, in
+`duplicate_definitions_is_silent_on_a_nested_sub_heading_of_the_same_token`'s
+sibling test) that cited `append_entry.rs` generically — not wrong, but
+inconsistent with the corrected site.
 
-The fix is one line: drop the line number and cite `body_entry_heading_level`
-(`src/librarian/catalog/augmentation.rs:1425-1436`) instead — a symbol name survives insertion above
-it, and it is the site that makes the claim true.
-
+Fix SHA: *(recorded at archive time — see Resume)*
+Patch-id: *(recorded at archive time — see Resume)*
 ## Tests added
 
-None. Worth stating the shape rather than leaving it blank: the check that would catch this is
-`librarian(action="audit_doc_refs")`, which already resolves `path:line` citations against the
-filesystem. It is **manual** — CLAUDE.md says to run it before a doc-heavy merge — and this was a
-code-comment citation on a code-heavy merge, so nothing triggered it. Whether `audit_doc_refs`
-should reach `///` comments in `src/**` is a scope question, not a bug in it.
-
+None — doc-comment-only correction, no behavior change. `cargo check
+--all-targets` and the full workspace test suite re-ran green.
 ## Workarounds
 
 None needed — the claim the citation supports was independently verified true. The cost is entirely
@@ -106,10 +110,9 @@ to the next reader.
 
 ## Resume
 
-Repoint `src/librarian/tools/doctor.rs:2783-2784` to `body_entry_heading_level` by symbol name, with
-no line number. Then decide separately whether `audit_doc_refs` should scan `src/**` doc comments —
-that is a design question with its own cost, not a follow-up to this file.
-
+N/A — fixed. Whether `audit_doc_refs` should scan `src/**` doc comments for
+symbol/module citations (not just paths) remains a separate, larger design
+question — not decided here, per the file's own original Resume note.
 ## References
 
 - Site: `src/librarian/tools/doctor.rs:2783-2784`
