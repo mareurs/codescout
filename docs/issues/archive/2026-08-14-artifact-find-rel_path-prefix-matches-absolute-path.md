@@ -1,11 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
 - librarian
 - artifact
 - filter
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-08-14
 owner: marius
@@ -85,15 +87,20 @@ cited here for cross-reference only — not re-quoted verbatim).
    **Evidence link:** Mercury BOM Evidence section above.
 
 ## Fix
-Not yet planned. Two candidate directions: (a) store/also-index a true
-repo-relative column and match `rel_path` filters against that, or (b) if the
-absolute-path match is intentional, fix the guide text (`get_guide("librarian")`
-Filter Syntax example) to stop advertising a repo-relative `prefix` example
-that doesn't work.
 
+Fixed by duplicate. This bug (filed 2026-08-14 against the then-current `artifact(find)` tool name) and `docs/issues/archive/2026-09-04-rel-path-filter-is-an-alias-onto-an-absolute-column.md` (id `d0a4d6e530048d6a`, filed 2026-09-04) describe the identical defect — `compile_leaf` (`src/librarian/filter.rs`) remapped the `rel_path` field NAME to the `abs_path` column but left the bound VALUE alone, so a repo-relative argument was compared against an absolute stored path. The later filing was never cross-referenced against this one, fixed and archived on its own, and this one went zombie-open.
+
+No code work remains: `5253297a4583d77fb254dcae26808d924741ccb0` anchors every op (`contains`/`prefix`/`eq`/`ne`/`in`/`nin`) at a `/` boundary against `abs_path` and refuses `gt`/`lt`/`gte`/`lte` outright as not meaningful on an aliased column. Mutation discipline already applied there per its own commit message ("Watched RED first: left [] right [t1, t2]"), with a real-query, real-rows regression test per op — re-deriving that here would be redundant, not confirmatory.
+
+**Live-reverified on this checkout, 2026-09-11**, rather than taken on the strength of the commit message alone: `doc(action="find", filter={"rel_path":{"prefix":"docs"}})` now returns real matches under `docs/` (50, capped), where the bug's own reproduction recorded `count: 0`.
+
+**SHA:** `5253297a4583d77fb254dcae26808d924741ccb0`
+**patch-id:** `66b4bcda49601dfee601c6a458d438f5d4891159`
+
+Worth naming as its own small lesson: a keyword search before filing (`doc(find, semantic=...)` or a title-fragment `contains` filter) would have surfaced this bug already open and let the later session fix the SAME file instead of a sibling one — the tracker verify-open cadence catches a fix that outlives its own tracker entry, but nothing currently catches two open entries for one defect at file time.
 ## Tests added
-N/A — not yet fixed.
 
+None added here — see `docs/issues/archive/2026-09-04-rel-path-filter-is-an-alias-onto-an-absolute-column.md` for the regression suite that covers this defect (all six affected ops, real queries against real rows, both directions).
 ## Workarounds
 Use `contains` with a distinctive fragment of the path (e.g.
 `{"rel_path": {"contains": "docs/issues"}}`) instead of `prefix` with a
@@ -101,13 +108,8 @@ repo-relative fragment. Never trust a `count: 0` from a `rel_path` `prefix`
 filter as proof nothing is catalogued under that directory.
 
 ## Resume
-Locate the SQL/filter-compilation code for `rel_path` (`src/librarian/filter.rs`
-per the `catalog-sql-hazards` memory's LIKE-escaping precedent) and confirm
-whether the column backing `rel_path` filters is the stored absolute path or a
-derived relative one. If absolute, either add a relative column + index, or
-fix the two conflicting doc surfaces (`get_guide("librarian")` Filter Syntax
-section and this file) to match runtime behavior.
 
+Done — see § Fix. Closed as fixed-by-duplicate; nothing left to resume.
 ## References
 - Sibling-repo finding: `Mercury BOM` `docs/trackers/conversations-tracker-session-log.md` F-1 (2026-06-09)
 - `get_guide("librarian")` § Filter Syntax (the doc example this contradicts)
