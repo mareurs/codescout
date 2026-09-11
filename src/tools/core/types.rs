@@ -275,6 +275,117 @@ fn annotate_write_path(val: &mut Value, path: &str) {
     }
 }
 
+/// Nest the parameter-alias advisory under `corrections.param_aliases` in `obj`,
+/// preserving whatever already lives at `corrections`.
+///
+/// ONE function, called from BOTH of `call_content`'s object-shaped render paths —
+/// the small-output success path and the error path — so the advisory's address is
+/// a property of the mechanism rather than of which branch you landed on. It was
+/// inline in the success path until the error path needed the same three arms; a
+/// second copy of them is exactly the drift this file's own comments warn about.
+///
+/// **Why nested under a dedicated key rather than merged key-by-key.** `c` is shaped
+/// `{params, hint}` (Ruling 9 of
+/// `docs/adrs/2026-07-10-repair-and-continue-input-handling.md`), deliberately
+/// mirroring `find.rs`'s `{filter, hint}` — one field name, one concept. That shared
+/// shape is why a flat per-key insert is wrong: `hint` collides with every in-tree
+/// writer of `corrections` (`find.rs`, and any future one following the convention),
+/// so a flat merge would silently overwrite the tool's own teaching text with ours.
+///
+/// **And UNCONDITIONALLY nested, including when nothing else wrote `corrections`.**
+/// An earlier round kept that arm flat to protect pinned assertions, which gave the
+/// advisory two addresses depending on a fact the caller cannot see. Per this file's
+/// model for [`Guidance`], "the field name itself carries the register — agents scan
+/// JSON responses and react to the key, not the prose": an agent that learned
+/// `corrections.param_aliases` must not get a false negative from a flat
+/// `corrections` produced by a tool with nothing of its own to say.
+///
+/// `param_aliases` is NOT collision-proof by construction — a key naming a mechanism
+/// is the key another reporter of that mechanism reaches for. Verified zero today,
+/// not assumed zero: ten tools implement `param_aliases()` (`create_file`,
+/// `edit_file`, `grep`, `read_file`, `edit_code`, `references`, `symbol_at`,
+/// `call_graph`, `doc`, `symbols`) and none writes its own `corrections`;
+/// `corrections` is written only by `find.rs` and `update.rs`, both under `doc`.
+/// Re-verify that pairing before trusting it stays empty.
+fn merge_param_corrections(obj: &mut serde_json::Map<String, Value>, c: &Value) {
+    match obj.get_mut("corrections") {
+        Some(existing) if existing.is_object() => {
+            if let Some(existing_obj) = existing.as_object_mut() {
+                existing_obj.insert("param_aliases".to_string(), c.clone());
+            }
+        }
+        Some(existing) => {
+            // Already holds a non-object shape (e.g. `update.rs`'s bare array from a
+            // top-level-param lift). Leaving it alone reads as "don't clobber the
+            // tool's value" but actually drops the framework's own advisory entirely
+            // — nothing else re-attaches it. Promote `corrections` into an object
+            // that keeps the tool's original value under `tool` and adds ours under
+            // `param_aliases`, so both reach the caller.
+            let tool_value = existing.take();
+            *existing = serde_json::json!({
+                "tool": tool_value,
+                "param_aliases": c.clone(),
+            });
+        }
+        None => {
+            obj.insert(
+                "corrections".to_string(),
+                serde_json::json!({ "param_aliases": c.clone() }),
+            );
+        }
+    }
+}
+
+/// Attach the parameter-alias advisory to an error on its way out of `call_content`.
+///
+/// **The defect this closes.** `call_content` repairs aliases at its first statement,
+/// then renders the advisory at three sites — all of them below the `?` on
+/// `self.call(input, ctx).await`. Any `Err` early-returned past every one of them, so
+/// a caller whose parameter name had just been silently rewritten learned nothing
+/// about it on exactly the calls it pays most attention to. Wire-confirmed 2026-09-11
+/// against binary `7e08645f` as a two-cell experiment on one tool, one alias, varying
+/// only Ok/Err: `symbols(query="OutputGuard")` returned the advisory;
+/// `symbols(query="Tool|Doc", symbol="x")` returned the regex refusal with no mention
+/// of `query` — and that refusal's own remedy ("fix the pattern, resend") routes the
+/// caller straight back through the alias it was not told about.
+/// `docs/issues/archive/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
+///
+/// **Scope — deliberately `RecoverableError` only, and this is the design choice, not
+/// an oversight.** That class is `isError: false`, "bad input, self-correct and
+/// retry", which is the only class where "the name you sent is not a parameter"
+/// changes the next call; and `route_tool_error` splices its `extra` map into the
+/// response body at the top level, so the advisory lands at
+/// `corrections.param_aliases` — the same address the success path uses, so a caller
+/// parses one shape rather than two. A plain `anyhow` error (`isError: true`, "stop
+/// and surface to the user") is left untouched on purpose: `route_tool_error`
+/// deliberately sends only the outermost message on that branch and logs the context
+/// chain server-side, because an error oracle over the HTTP transport can leak
+/// filesystem layout to an authenticated-but-untrusted client. Widening the message
+/// there would either overwrite the original error text (`anyhow::Context` prepends)
+/// or drop the `.source()` chain the log depends on. If that gap ever needs closing,
+/// it needs a wrapper error type that re-exports `source()`, not a `format!`.
+///
+/// The alternative carrier considered and rejected: joining `RecoverableError`'s
+/// existing [`Guidance`] (`hint` / `warning` / `must_follow`). A `RecoverableError`
+/// carries at most one `Guidance`, so joining would have meant either overwriting the
+/// tool's own recovery text — the bug file's whole point is that both facts must
+/// arrive together — or concatenating two registers into one field.
+///
+/// **Also out of scope, and not a hole:** `call_content`'s ambiguous-write refusal
+/// returns before `param_corrections` is ever built. It needs no advisory, because its
+/// message already names both alias keys and both discarded values.
+fn attach_param_corrections_to_error(e: anyhow::Error, c: Option<&Value>) -> anyhow::Error {
+    let Some(c) = c else { return e };
+    match e.downcast::<RecoverableError>() {
+        Ok(mut rec) => {
+            merge_param_corrections(&mut rec.extra, c);
+            rec.into()
+        }
+        // Not a `RecoverableError` — see the scope paragraph above.
+        Err(e) => e,
+    }
+}
+
 /// MCP client identity resolved from the `initialize` handshake's `clientInfo`.
 /// This is the protocol-proper, agent-agnostic source — every MCP client sends
 /// it. Verified live for Claude Code: name="claude-code", version="2.1.177"
@@ -1086,7 +1197,20 @@ pub trait Tool: Send + Sync {
             } else {
                 None
             };
-        let mut val = self.call(input, ctx).await?;
+        // NOT `?`. Every render site for `param_corrections` below sits under this
+        // call, so a bare `?` returned past all of them and the advisory was lost on
+        // exactly the calls a caller reads hardest — the ones that failed. See
+        // `attach_param_corrections_to_error` for the wire-confirmed reproduction, the
+        // shape chosen, and why the fatal-error branch is deliberately untouched.
+        let mut val = match self.call(input, ctx).await {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(attach_param_corrections_to_error(
+                    e,
+                    param_corrections.as_ref(),
+                ))
+            }
+        };
 
         // Field-aware project-root stripping. Runs HERE, on the typed Value,
         // and therefore BEFORE `exceeds_inline_limit`, the `@tool_*` buffer
@@ -1242,116 +1366,32 @@ pub trait Tool: Send + Sync {
             }
             if let Some(c) = &param_corrections {
                 if let Some(obj) = val.as_object_mut() {
-                    // Merge into an existing `corrections` key rather than
-                    // overwriting it wholesale: `find.rs`/`update.rs` already
-                    // populate `corrections` via this same default
-                    // `call_content` path (`{filter, hint}` / a bare array),
-                    // and a future tool combining `param_aliases()` with one
-                    // of those shapes must not have this framework write
-                    // silently clobber the tool's own. The two merge arms
-                    // below (`Some(object)` / `Some(non-object)`) have no
-                    // live production caller today — no in-tree tool both
-                    // declares `param_aliases()` and writes its own
-                    // `corrections` — but the `None` arm below is live on
-                    // every ordinary alias-repair call, e.g.
-                    // `read_file(file_path=…)`.
+                    // Merge rather than overwrite, via the shared
+                    // `merge_param_corrections` — the SAME function the error path
+                    // calls, so the advisory's address is a property of the
+                    // mechanism and not of which branch you landed on. Its doc
+                    // comment holds the three arms' rationale: why the advisory is
+                    // nested under a dedicated key rather than merged key-by-key,
+                    // and why that nesting is unconditional. The `None` arm is the
+                    // live one on every ordinary alias-repair call, e.g.
+                    // `read_file(file_path=…)`; the other two have no in-tree
+                    // production caller today.
                     //
-                    // Item 1 (2026-09 re-review, round 3): `c` is shaped
-                    // `{params, hint}` (Ruling 9), DELIBERATELY mirroring
-                    // `find.rs`'s `{filter, hint}` — one field name, one
-                    // concept, per the ADR. That shared shape is exactly why a
-                    // flat per-key `insert` is wrong: `hint` collides with
-                    // every in-tree writer of `corrections` (find.rs, and any
-                    // future one following the same convention), so a flat
-                    // merge would silently overwrite the tool's own teaching
-                    // text with ours. Nesting our own advisory under the
-                    // dedicated key `param_aliases` — rather than merging
-                    // key-by-key — avoids that specific collision.
-                    //
-                    // The advisory now lives at `corrections.param_aliases`
-                    // UNCONDITIONALLY — including the `None` arm just below
-                    // and Site A's buffered-envelope insert — never bare at
-                    // `corrections`. Round 2 kept the `None` arm flat
-                    // specifically to protect existing pinned assertions;
-                    // that gave the advisory two addresses depending on
-                    // whether the tool itself wrote to `corrections`, which
-                    // contradicts this file's own model for `Guidance`
-                    // (~:376-378): "the field name itself carries the
-                    // register — agents scan JSON responses and react to the
-                    // key, not the prose." An agent that learned
-                    // `corrections.params` would get a false negative reading
-                    // a flat `corrections` produced by a tool with nothing of
-                    // its own to say — silent, plausible, and it keeps
-                    // sending the alias forever.
-                    //
-                    // `param_aliases` is NOT collision-proof by construction
-                    // — a key naming a mechanism is exactly the key another
-                    // reporter of that same mechanism reaches for, the
-                    // stronger (not weaker) version of the `hint` collision
-                    // this nesting fixes. The collider is one layer down in
-                    // this same subsystem: the ADR deliberately keeps each
-                    // tool's own alias fallback as "a redundant second layer"
-                    // (`src/fs/mod.rs`'s `get_path_param`/`require_path_param`,
+                    // The collider worth naming HERE, because it is the one a grep
+                    // mis-answers: the ADR deliberately keeps each tool's own alias
+                    // fallback as "a redundant second layer" (`src/fs/mod.rs`'s
+                    // `get_path_param`/`require_path_param`,
                     // `src/tools/core/params.rs`'s `require_str_param_or_hint`),
-                    // which share the alias SET rather than this trait method:
-                    // they read `PATH_PARAM_ALIASES` (`src/fs/mod.rs`) directly,
-                    // and `Tool::param_aliases()`'s only caller is
-                    // `call_content` — so do NOT re-verify by grepping that
-                    // method's callers, which would find only this file and
-                    // wrongly suggest the second layer is unreachable. What
-                    // makes it a collider is the shared WORD: a tool surfacing
-                    // its own fallback repair would name it `param_aliases`
-                    // because that is what the concept is called here, and the
-                    // unconditional insert below would silently destroy it.
-                    // Verified zero today, not
-                    // assumed zero: `param_aliases()` is now implemented by
-                    // eight tools — `CreateFile`, `EditFile`, `Grep`,
-                    // `ReadFile`, `EditCode`, `References`, `SymbolAt`,
-                    // `CallGraph` (the last four added after this comment was
-                    // first written, and re-checked here) — and none of the
-                    // eight writes its own `corrections`; `corrections` is
-                    // written only by `find.rs:1290` and `update.rs:763`, both
-                    // under `doc`, which declares no aliases. Re-verify this
-                    // pairing before trusting it stays empty — a false
-                    // "impossible" claim here is worse than none, per
-                    // CLAUDE.md's Testing Discipline: it is what stops the
-                    // next reader from checking.
-                    match obj.get_mut("corrections") {
-                        Some(existing) if existing.is_object() => {
-                            if let Some(existing_obj) = existing.as_object_mut() {
-                                existing_obj.insert("param_aliases".to_string(), c.clone());
-                            }
-                        }
-                        Some(existing) => {
-                            // Item 2: already holds a non-object shape (e.g.
-                            // update.rs's bare array from a top-level-param
-                            // lift). This USED TO leave it alone — which reads
-                            // as "don't clobber the tool's value" but actually
-                            // means the framework's own advisory is dropped
-                            // entirely, not deferred: nothing else re-attaches
-                            // it. Promote `corrections` into an object that
-                            // keeps the tool's original value under `tool`
-                            // and adds ours under `param_aliases`, so both
-                            // reach the caller instead of one silently
-                            // replacing the other.
-                            let tool_value = existing.take();
-                            *existing = serde_json::json!({
-                                "tool": tool_value,
-                                "param_aliases": c.clone(),
-                            });
-                        }
-                        None => {
-                            // Unconditional nesting (item 1): the advisory
-                            // lives at `corrections.param_aliases` even when
-                            // the tool wrote nothing of its own, so the
-                            // address never depends on a fact the caller
-                            // cannot see.
-                            obj.insert(
-                                "corrections".to_string(),
-                                serde_json::json!({ "param_aliases": c }),
-                            );
-                        }
-                    }
+                    // which share the alias SET rather than this trait method: they
+                    // read `PATH_PARAM_ALIASES` (`src/fs/mod.rs`) directly, and
+                    // `Tool::param_aliases()`'s only caller is `call_content` — so
+                    // do NOT re-verify by grepping that method's callers, which
+                    // would find only this file and wrongly suggest the second
+                    // layer is unreachable. What makes it a collider is the shared
+                    // WORD: a tool surfacing its own fallback repair would name it
+                    // `param_aliases` because that is what the concept is called
+                    // here, and the insert would silently destroy it.
+                    merge_param_corrections(obj, c);
                 }
             }
             if form == OutputForm::Text {

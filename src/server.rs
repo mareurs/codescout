@@ -3475,22 +3475,25 @@ mod tests {
     /// end-to-end through a live `call()` — which still needs the LSP-fixture harness this
     /// module does not have. That narrower gap is real and is not closed here.
     ///
-    /// **AND A FOURTH RENDER PATH IS UNCOVERED FOR EVERY TOOL, including the four above:
-    /// the ERROR path.** `call_content` consumes the advisory at three sites and all three
-    /// sit below the `?` on `self.call(input, ctx).await`, so any `Err` from `call()`
-    /// returns before the advisory is attached and `route_tool_error` composes the whole
-    /// response from the error value alone. Every case below deliberately asserts
-    /// `is_error != Some(true)` — i.e. this gate covers the SUCCESS path only, by
-    /// construction. A caller sending `read_file(file_path=…)` with a bad path is repaired,
-    /// fails on the path, and never learns `file_path` is not a parameter. KNOWN, tracked
-    /// in `docs/issues/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
+    /// **THE FOURTH RENDER PATH — the ERROR path — IS COVERED BY A SIBLING GATE, NOT BY
+    /// THIS ONE.** Every case below deliberately asserts `is_error != Some(true)`, so
+    /// this gate is the SUCCESS path by construction. `call_content` used to consume the
+    /// advisory at three sites all sitting below the `?` on `self.call(input, ctx).await`,
+    /// so any `Err` returned before the advisory was attached and `route_tool_error`
+    /// composed the whole response from the error value alone — a caller sending
+    /// `read_file(file_path=…)` with a bad path was repaired, failed on the path, and
+    /// never learned `file_path` is not a parameter. Fixed; the error path now carries the
+    /// advisory at the same `corrections.param_aliases` address, and
+    /// `the_dispatch_boundary_announces_the_repair_when_call_errs` (directly below) is its
+    /// gate. Do not add error cases here — the two gates differ in the fact they hold
+    /// fixed, and merging them would lose the Ok/Err contrast that is the whole design.
     ///
-    /// This paragraph exists because the count itself was the blind spot last time: the
-    /// design spec said three render paths, the governing ADR's Consequences said "all
-    /// three", and three separate reviews confirmed all three were covered — two of them
-    /// tracing the paths deliberately. Nobody asked whether three was the right number. A
-    /// count published as a scope is not a scope that was verified, so this gate states its
-    /// own scope rather than leaving a reader to infer it from the cases present.
+    /// This paragraph exists because the count itself was the blind spot: the design spec
+    /// said three render paths, the governing ADR's Consequences said "all three", and
+    /// three separate reviews confirmed all three were covered — two of them tracing the
+    /// paths deliberately. Nobody asked whether three was the right number. A count
+    /// published as a scope is not a scope that was verified, so this gate states its own
+    /// scope rather than leaving a reader to infer it from the cases present.
     #[tokio::test]
     async fn the_dispatch_boundary_normalizes_and_announces_for_real_tool_calls() {
         assert!(
@@ -3618,6 +3621,162 @@ mod tests {
         assert!(
             hint.contains("file_path") && hint.contains("edit_file"),
             "edit_file: {hint}"
+        );
+    }
+
+    /// The ERROR twin of the gate above, and the fourth render path that spec, ADR and
+    /// three reviews all enumerated as three.
+    ///
+    /// `call_content` repairs aliases at its first statement and renders the advisory
+    /// below `self.call(input, ctx).await`. That call used to carry a bare `?`, so an
+    /// `Err` early-returned past every render site and `route_tool_error` composed the
+    /// response from the error value alone — the caller was told what was wrong with the
+    /// *value* it sent and never that the *key* it sent is not a parameter of the tool.
+    /// Wire-confirmed 2026-09-11 against binary `7e08645f`:
+    /// `symbols(query="OutputGuard")` announced the repair,
+    /// `symbols(query="Tool|Doc", symbol="x")` returned the regex refusal with no mention
+    /// of `query` — and that refusal's own remedy ("fix the pattern, resend") routes the
+    /// caller straight back through the alias it was not told about.
+    /// `docs/issues/archive/2026-09-10-a-repaired-alias-is-never-announced-on-the-error-path.md`.
+    ///
+    /// **Why a separate gate rather than more cases in the one above.** The two hold
+    /// opposite things fixed. That gate varies the RENDER PATH (compact text / buffered
+    /// envelope / pretty JSON) with `Ok` constant; this one varies `Ok`/`Err` with the
+    /// tool and the alias constant, which is the same two-cell design the bug file's wire
+    /// reproduction used and the only shape that rules out "this tool never announces
+    /// anything". Merging them would lose the contrast.
+    ///
+    /// **One shape, not two, and that is a decision.** On the error path there is no
+    /// compact-text render at all — `route_tool_error` always emits pretty JSON — so the
+    /// `⚠`-prefixed string form the success path gives `OutputForm::Text` tools has
+    /// nowhere to live here. Rather than invent a second carrier, the advisory lands at
+    /// `corrections.param_aliases` for EVERY tool, with the same human notice inside its
+    /// `hint`. The two cases below are deliberately one tool of each `output_form()`
+    /// (`read_file` is `Text`, `create_file` is `Json`) asserting the IDENTICAL address —
+    /// that agreement is the claim, not an accident of picking similar tools.
+    ///
+    /// **Scope, stated rather than left to be inferred from the cases present.** Only
+    /// `RecoverableError` (`isError: false`) carries the advisory; a plain `anyhow` error
+    /// (`isError: true`) deliberately does not, and `attach_param_corrections_to_error`
+    /// (`src/tools/core/types.rs`) holds the reasoning. The fixture-level twin of this
+    /// gate, including the fatal-error boundary and the merge arms, is
+    /// `src/tools/core/tests.rs`'s `*_on_the_error_path` block.
+    #[tokio::test]
+    async fn the_dispatch_boundary_announces_the_repair_when_call_errs() {
+        let (dir, server) = make_server().await;
+
+        // Same harness as the success gate above — `call_tool_inner`, the real MCP entry
+        // point — but asserting the RecoverableError envelope rather than a result.
+        macro_rules! call_expecting_recoverable_error {
+            ($tool:expr, $input:tt) => {{
+                let req = CallToolRequestParams::new($tool)
+                    .with_arguments(serde_json::from_value(serde_json::json!($input)).unwrap());
+                let result = server
+                    .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                    .await
+                    .unwrap();
+                // `RecoverableError` routes to `isError: false` so sibling parallel calls
+                // survive. A `Some(true)` here means the tool bailed instead, and this
+                // case is no longer exercising the branch it claims to.
+                assert_ne!(
+                    result.is_error,
+                    Some(true),
+                    "{}: expected a RecoverableError envelope (isError: false), got a fatal \
+                     error — this case no longer drives the branch under test: {result:?}",
+                    $tool
+                );
+                let text = result
+                    .content
+                    .iter()
+                    .find_map(|c| c.as_text().map(|t| t.text.clone()))
+                    .unwrap_or_default();
+                let val: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
+                    panic!("{}: error envelope was not JSON: {e}\n{text}", $tool)
+                });
+                assert_eq!(
+                    val["ok"], false,
+                    "{}: expected the error envelope's `ok: false`: {val}",
+                    $tool
+                );
+                val
+            }};
+        }
+
+        // --- read_file: OutputForm::Text, call() errs on a path that does not exist ---
+        let val = call_expecting_recoverable_error!("read_file", { "file_path": "no-such.rs" });
+        // The ORIGINAL error text must survive: the advisory is ADDITIVE. The bug file's
+        // own analysis is that the current output routes the caller past the second defect
+        // in their call, so both facts have to arrive together — asserting only the
+        // advisory would be green for an implementation that replaced the error with it.
+        let err = val["error"].as_str().unwrap_or_default();
+        assert!(
+            err.contains("no-such.rs"),
+            "read_file: the original error text must survive the advisory: {val}"
+        );
+        let hint = val["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("read_file: corrections.param_aliases.hint missing on the ERROR path — this is the 2026-09-10 bug: {val}")
+            });
+        assert!(
+            hint.contains("file_path") && hint.contains("read_file") && hint.contains("'path'"),
+            "read_file: the advisory must name the alias sent, the tool, and the canonical \
+             it was rewritten to: {hint}"
+        );
+        assert_eq!(
+            val["corrections"]["param_aliases"]["params"][0]["received"], "file_path",
+            "read_file: the structured half must be the Ruling-9 {{params, hint}} object, \
+             not a bare string: {val}"
+        );
+        assert_eq!(
+            val["corrections"]["param_aliases"]["params"][0]["canonical"], "path",
+            "read_file: params[0].canonical must name the key the alias was rewritten to: {val}"
+        );
+
+        // --- create_file: OutputForm::Json, call() errs refusing to overwrite ---
+        // The file must EXIST for the refusal to fire; if this write is removed the call
+        // succeeds and the case silently stops testing the error path.
+        std::fs::write(dir.path().join("occupied.txt"), "already here\n").unwrap();
+        let val = call_expecting_recoverable_error!(
+            "create_file",
+            { "file_path": "occupied.txt", "content": "hello" }
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("occupied.txt")).unwrap(),
+            "already here\n",
+            "create_file: the refusal must not have written — otherwise this case is on \
+             the success path"
+        );
+        let err = val["error"].as_str().unwrap_or_default();
+        assert!(
+            err.contains("occupied.txt") || err.contains("exists"),
+            "create_file: the original refusal text must survive the advisory: {val}"
+        );
+        let hint = val["corrections"]["param_aliases"]["hint"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "create_file: corrections.param_aliases.hint missing on the ERROR path: {val}"
+                )
+            });
+        assert!(
+            hint.contains("file_path") && hint.contains("create_file"),
+            "create_file: {hint}"
+        );
+
+        // Non-vacuity for the ONE-SHAPE claim above: both tools reached the identical
+        // address, and they sit on opposite sides of `output_form()`. Asserting the two
+        // addresses agree is the claim; asserting each separately is not.
+        assert_eq!(
+            server.find_tool("read_file").unwrap().output_form(),
+            crate::tools::OutputForm::Text,
+            "read_file is this gate's OutputForm::Text half; if it changed, the \
+             one-shape claim is no longer being tested across both forms"
+        );
+        assert_eq!(
+            server.find_tool("create_file").unwrap().output_form(),
+            crate::tools::OutputForm::Json,
+            "create_file is this gate's OutputForm::Json half; same hazard as above"
         );
     }
 

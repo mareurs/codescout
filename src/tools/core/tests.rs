@@ -2700,6 +2700,194 @@ async fn a_bare_array_corrections_does_not_silently_drop_the_framework_advisory(
     );
 }
 
+// ---- The ERROR path (2026-09-10 bug `950440ec3d9a256e`). Every fixture above
+// returns `Ok`, so every render site exercised above sits below the `?` that used
+// to swallow the advisory whole. These are the fixture-level twin of
+// `src/server.rs`'s `the_dispatch_boundary_announces_the_repair_when_call_errs`:
+// that gate proves the wire shape through real registered tools and
+// `route_tool_error`; these pin the branch's own boundaries — the fatal-error
+// carve-out, the preservation of the error's existing guidance, and the merge arm
+// when the error already carries a `corrections` key of its own — none of which a
+// real tool produces today.
+
+/// A tool that declares the same alias as `AliasEcho` and whose `call()` FAILS.
+/// Deliberately a sibling rather than a flag on `AliasEcho`: the two fixtures are
+/// the two cells of one experiment, identical in tool name and alias so that Ok/Err
+/// is the only variable — the same design the bug file's wire reproduction used,
+/// and the only shape that rules out "this fixture never announces anything".
+///
+/// FIXTURE NOTE, load-bearing: `form` exists so both `OutputForm`s can be driven
+/// even though the error path has no compact-text render — the CLAIM is that the
+/// advisory's address does not depend on `output_form()`, and a fixture pinned to
+/// one form cannot express it. `own_corrections` seeds `RecoverableError::extra`
+/// with a `corrections` key; drop it and the merge arm in
+/// `merge_param_corrections` reached from the error path loses its only exerciser.
+struct AliasErr {
+    form: OutputForm,
+    fatal: bool,
+    own_corrections: bool,
+}
+
+#[async_trait::async_trait]
+impl Tool for AliasErr {
+    fn name(&self) -> &str {
+        "alias_err"
+    }
+    fn description(&self) -> &str {
+        "d"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{"path":{"type":"string","description":"p"}}})
+    }
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        &[("file_path", "path")]
+    }
+    fn output_form(&self) -> OutputForm {
+        self.form
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        if self.fatal {
+            anyhow::bail!("LSP crashed unexpectedly");
+        }
+        let mut e = crate::tools::RecoverableError::with_hint(
+            "pattern looks like a regex (found '|')",
+            "Use grep(pattern=\"...\") for regex text search",
+        );
+        if self.own_corrections {
+            e = e.with_extra(
+                "corrections",
+                serde_json::json!({ "filter": [], "hint": "TOOL" }),
+            );
+        }
+        Err(e.into())
+    }
+}
+
+/// Downcast helper: the advisory rides `RecoverableError::extra`, which
+/// `route_tool_error` splices into the response body at the top level. Asserting
+/// here rather than through `route_tool_error` keeps these tests in the module that
+/// owns the mechanism; the end-to-end wire shape is pinned in `src/server.rs`.
+fn recoverable_extra(e: anyhow::Error) -> serde_json::Value {
+    let rec = e
+        .downcast::<crate::tools::RecoverableError>()
+        .unwrap_or_else(|e| panic!("expected a RecoverableError, got: {e}"));
+    serde_json::Value::Object((*rec.extra).clone())
+}
+
+#[tokio::test]
+async fn the_advisory_reaches_the_caller_on_the_error_path_for_both_output_forms() {
+    let ctx = bare_ctx().await;
+    // Both forms assert the IDENTICAL address. That agreement is the claim: the
+    // error path has no compact-text render (`route_tool_error` always emits JSON),
+    // so a second carrier for `OutputForm::Text` tools would give one mechanism two
+    // addresses depending on a fact the caller cannot see.
+    for form in [OutputForm::Json, OutputForm::Text] {
+        let tool = AliasErr {
+            form,
+            fatal: false,
+            own_corrections: false,
+        };
+        let err = tool
+            .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+            .await
+            .expect_err("the fixture's call() must fail — otherwise this is the success path");
+        // The ORIGINAL error text and its guidance must both survive: the advisory
+        // is ADDITIVE. Asserting only the advisory would stay green for an
+        // implementation that replaced the refusal with it, which is the opposite
+        // of the bug's own finding (the refusal's remedy routes the caller straight
+        // back through the un-announced alias, so both facts must arrive together).
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pattern looks like a regex"),
+            "{form:?}: the original error message must survive: {msg}"
+        );
+        assert!(
+            msg.contains("Use grep(pattern="),
+            "{form:?}: the error's own Guidance must survive: {msg}"
+        );
+        let extra = recoverable_extra(err);
+        assert_eq!(
+            extra["corrections"]["param_aliases"]["params"][0]["received"], "file_path",
+            "{form:?}: the error path dropped the advisory — this is the 2026-09-10 bug: {extra}"
+        );
+        assert_eq!(
+            extra["corrections"]["param_aliases"]["params"][0]["canonical"], "path",
+            "{form:?}: params[0].canonical must name the key the alias was rewritten to: {extra}"
+        );
+        assert!(
+            extra["corrections"]["param_aliases"]["hint"].is_string(),
+            "{form:?}: the Ruling-9 shape is {{params, hint}} — never a bare string: {extra}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_error_paths_advisory_does_not_clobber_the_errors_own_corrections() {
+    // The `Some(object)` arm of `merge_param_corrections`, reached from the ERROR
+    // path. No in-tree tool produces this today — it is the same latent collision
+    // the success-path fixtures guard, and the shared helper is what makes one
+    // guard cover both call sites rather than two copies drifting apart.
+    let ctx = bare_ctx().await;
+    let tool = AliasErr {
+        form: OutputForm::Json,
+        fatal: false,
+        own_corrections: true,
+    };
+    let err = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .expect_err("the fixture's call() must fail");
+    let extra = recoverable_extra(err);
+    assert_eq!(
+        extra["corrections"]["hint"], "TOOL",
+        "the error's OWN corrections.hint must survive — a flat per-key merge \
+         overwrites it with the framework's: {extra}"
+    );
+    assert!(
+        extra["corrections"]["param_aliases"]["hint"].is_string(),
+        "and the framework's advisory must still arrive alongside it: {extra}"
+    );
+}
+
+#[tokio::test]
+async fn a_fatal_error_is_left_untouched_and_that_is_the_documented_boundary() {
+    // POSITIVE half first: the fatal error's text is unchanged, which is what
+    // `route_tool_error` sends over the wire on that branch (it deliberately emits
+    // only the outermost message and logs the `.source()` chain server-side,
+    // because an error oracle over HTTP can leak filesystem layout).
+    //
+    // The absence half below is monotone under removal — it would also pass if the
+    // whole advisory mechanism died — so it is NOT coverage on its own. It is here
+    // as a boundary marker, and it is only meaningful next to
+    // `the_advisory_reaches_the_caller_on_the_error_path_for_both_output_forms`
+    // above, which fails in exactly that direction. Read the pair, never this alone.
+    let ctx = bare_ctx().await;
+    let tool = AliasErr {
+        form: OutputForm::Json,
+        fatal: true,
+        own_corrections: false,
+    };
+    let err = tool
+        .call_content(serde_json::json!({ "file_path": "src/x.rs" }), &ctx)
+        .await
+        .expect_err("the fixture's call() must fail");
+    assert_eq!(
+        err.to_string(),
+        "LSP crashed unexpectedly",
+        "a fatal error's message must reach `route_tool_error` byte-identical"
+    );
+    assert!(
+        err.downcast_ref::<crate::tools::RecoverableError>()
+            .is_none(),
+        "the fatal error must not have been converted into a RecoverableError to \
+         carry the advisory — that would flip isError and stop aborting siblings"
+    );
+}
+
 #[tokio::test]
 async fn no_alias_means_no_notice_anywhere() {
     let ctx = bare_ctx().await;
