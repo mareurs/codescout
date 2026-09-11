@@ -13715,6 +13715,51 @@ only because a linked worktree appeared mid-session, so the same call shape retu
 
 **Valid:** dated 2026-09-11
 
+**ADDENDUM, same day — the binary already answers this, and my remedy was one call too expensive.**
+
+This entry prescribes *"name the file your claim depends on and establish that file's state"*. That
+is still correct and still the fallback, but there is a cheaper first move I did not know existed
+when I wrote it:
+
+```
+./target/release/codescout version
+  -> {"version":"0.15.0","git_sha":"78e89c80",
+      "git_sha_full":"78e89c80ef7173aa6b5fa68911220c3d10193d74","git_dirty":true}
+```
+
+`build.rs` bakes `CODESCOUT_GIT_SHA`, `CODESCOUT_GIT_SHA_FULL` and `CODESCOUT_GIT_DIRTY` into every
+build, and the `version` subcommand reports all three. So **the binary states whether its own sha
+describes it**, in one call, with no mtime and no file-by-file reasoning. Run it FIRST; fall back to
+naming the file only when `git_dirty` is true and you need to know which part of the tree mattered.
+
+That `git_dirty: true` is also the empirical confirmation of this entry's headline: the binary is
+**self-reportedly** not `78e89c80`, which is what I had inferred from mtimes and peer provenance.
+The inference was right; it was just three instruments deep on a question the subject answers
+directly.
+
+**And the reason to write this up rather than quietly amend:** I reached for provenance, mtimes and
+a behaviour probe — three indirect instruments — without asking whether the artifact reports on
+itself. `docs/PROBES.md` exists in this repo specifically so *"an instrument may already exist"* is
+checked before a number is derived, and I did not open it. The generalisable form is narrower than
+"read PROBES.md": **when the question is about an artifact's identity, ask the artifact before
+measuring around it.**
+
+**Downstream, and the reason this addendum is not merely a correction:** applying the sharper
+question to a peer's retraction found a live defect. `codescout-75` (sessionId b0b9bc40…) retracted
+half of a published sentence — a probe that could not distinguish pre- from post-refactor — and
+**kept** the other half because it rested on `reading_binary_sha`. That second half does not survive
+either: `reading_binary_sha` is `env!("CODESCOUT_GIT_SHA")` with no dirty companion, and the binary
+it names reports `git_dirty: true`. Filed as `bfdfeebd4e5ca130` —
+`src/tools/semantic/index.rs:767-777` gates its "a different build wrote this" report on `w.git_sha
+!= env!("CODESCOUT_GIT_SHA")`, so two different dirty builds at one commit compare EQUAL and the
+warning is suppressed in exactly the configuration this repo runs. `w.git_dirty` is read on the next
+line, display-only, inside the branch the comparison gates.
+
+So the law in this entry has a second, code-level instance one subsystem over from where it was
+found, and it is the archived `0cd1fe818951b232` (*"usage.db records a sha that need not describe
+the built code"*) recurring at a site its fix did not reach — *mutate once per guarded SITE, not
+once per feature*, holding in the defect direction.
+
 **Observed:** Second post-rebuild recon of the session. `cargo rb` had relinked
 `target/release/codescout` at **20:50:14**, and HEAD carried **zero** code commits since the
 previous build — so the natural reading is "nothing new to verify". `git status` then showed three
