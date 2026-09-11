@@ -919,7 +919,7 @@ mod tests {
     /// expressions and `json_object()` over bound parameters (`audit/mod.rs`), so only
     /// hand-written fixtures could reach this.
     ///
-    /// See `docs/issues/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md`.
+    /// See `docs/issues/archive/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md`.
     fn delete_payload(abs_path: &str) -> String {
         serde_json::json!({ "abs_path": abs_path }).to_string()
     }

@@ -2173,6 +2173,19 @@ they are *reproduction* work: `CLAUDE.md` § *Bug Tracking* requires running the
 before reading the fix plan, because the plan is a hypothesis about the reproduction. Triage
 them from a bug-fix session, not a hygiene sweep.
 
+**Update, same day — one of the two is closed, and the check was right about it.**
+`2026-09-02-a-test-fixture-interpolates-a-path-into-json.md` was worked from its reproduction
+and archived on 2026-09-11 (now `docs/issues/archive/…`, id `29ad7fe92aa61e79`, was
+`2fbf7181f0621794`). The fix had landed **nine days earlier** — `52cb0930` and `0dd22d9f`, both
+on `experiments` — with CI verification and a mutation-checked regression test already written
+into the record; all that was missing was `status: fixed`, a `closed:` date and a structured
+`## Fix provenance` carrying the patch-ids. That is precisely the state
+`open_bug_cited_from_source` exists to name, and it is a **throughput** failure rather than a
+knowledge one: nobody had to discover anything. `2026-08-31-peer-commit-captures-another-sessions-working-tree.md`
+remains open and is a different shape entirely — a recurring-instance log with 7+ instances and
+a `## Candidate remedies` section, so it has no single fix to verify and must not be triaged
+the same way.
+
 **Rests on:** `librarian(action="doctor")` at HEAD `1a34a131`; `bug-claim-liveness-session-log:W-1`;
 `HY-27`.
 

@@ -350,7 +350,7 @@ fn make_walk_fixture(root: &Path) {
 /// That is `IC-9`: an assertion whose haystack embeds environment-controlled text — here
 /// the platform's separator — satisfied by coincidence. The remedy is not to remember the
 /// `.replace`, it is to leave one place where it can be written.
-/// See `docs/issues/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md` for the
+/// See `docs/issues/archive/2026-09-02-a-test-fixture-interpolates-a-path-into-json.md` for the
 /// sibling instance found the same night, in another module, by another hand.
 fn rel_slash(root: &Path, found: &[PathBuf]) -> Vec<String> {
     found

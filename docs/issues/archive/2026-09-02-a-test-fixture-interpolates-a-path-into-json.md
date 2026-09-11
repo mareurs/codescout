@@ -1,12 +1,12 @@
 ---
-id: '2fbf7181f0621794'
+id: 29ad7fe92aa61e79
 kind: bug
-status: open
+status: fixed
 title: A test fixture interpolates a tempdir path into JSON, so its validity depends on the path's alphabet
 tags:
 - cluster/assertion-satisfiable-by-accident
 topic: cross-platform test fixtures
-closed: null
+closed: 2026-09-11
 opened: 2026-09-02
 owner: marius
 related: []
@@ -155,3 +155,34 @@ These two were also the pair the **wine** lane failed in the very first run
 other 19. So that sample was not merely small: it was drawn from the minority failure
 mode and described a defect that was never causing the majority. Both are now identified
 and separately fixed.
+
+
+## Fix provenance
+
+Both halves landed **2026-09-02** on `experiments`. The record then stayed `open` for nine
+days and was found on 2026-09-11 by `doctor`'s `open_bug_cited_from_source` — whose whole
+premise is that code naming a bug file is usually code written *because* of it, which is
+exactly what had happened.
+
+- **SHA:** `52cb0930` (`experiments`) — the audit-shard fixtures; `delete_payload` builds the
+  payload with `serde_json::json!` over a bound parameter instead of `format!`.
+  **patch-id:** `90dbb3a654800974cd420bd3dbfd70a66ef8ba47`
+- **SHA:** `0dd22d9f` (`experiments`) — the third instance in `tests/config_propagation.rs`;
+  a shared `rel_slash()` helper, so there is one place the `.replace` can be written.
+  **patch-id:** `bbf21957ac68b6c258f0b8d4a7a2aa6dcf8f9bda`
+
+The SHAs are positional and die when `experiments` is rebased; the patch-ids are content
+hashes of the diffs and survive both rebase and cherry-pick.
+
+**Re-verified 2026-09-11 before archiving**, because the original evidence has aged and the
+local gate cannot discriminate here:
+
+- `a_backslash_path_survives_the_delete_payload_round_trip` passes at HEAD
+  (`src/librarian/catalog/audit/shard.rs:939`). It **states** a Windows-shaped path rather
+  than taking one from the environment — so, unlike the two fixtures it replaced, it is not
+  monotone under the platform, which is the only reason running it on Linux is evidence at
+  all. A Linux run of the *original* fixtures passed whether the bug was present or not.
+- All three `windows-latest` lanes green on run `34577640274`. The recurring red on
+  `experiments` is `Windows-gnu cross (MinGW + wine)` — a separate open bug
+  (`docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`), not a residual of
+  this one.
