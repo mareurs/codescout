@@ -357,17 +357,31 @@ mode that is not in this file, and it afflicts the operator's own decision:
 
 The operator authorised a set described to them **in prose** (25 commits, 3 mine, 22 across three
 peer sessions). Nothing binds that prose to a commit range: the authorisation is as unrecorded as
-the authorship state this file is about, and it decays faster. The remedy is to re-derive the
-range, compare it against what was actually decided, and **push the decided set by sha** —
-done here as `git push origin 6c31ef0f:experiments`, with the ack sids derived independently
-from that range before reading the guard's list (they matched).
+the authorship state this file is about, and it decays faster. **The remedy for this half already
+exists and is published** — `docs/RELEASE.md` § *Concurrent-Work Rules*, under *Publishing a
+stack several sessions wrote*, says *"Re-derive the range, compare it to what was decided, then
+send the decided set by sha"* (`:441`), alongside *"Never bare-`git push` on a shared checkout —
+name the refspec"* (`:376`). That is the section the guard's own banner points at. Done here as
+`git push origin 6c31ef0f:experiments`, with the ack sids derived independently from that range
+before reading the guard's list (they matched).
 
-**Why this matters for `## Resume`, which is currently under-scoped.** The proposed convention
-— *a session that cannot publish must not commit* — addresses the **author** side and does
-nothing for this one. A pusher's authorisation can go stale between the sentence and the push
-even when every author below them is perfectly disciplined about committing. Whatever is decided
-about the convention, the pusher-side half needs its own answer, and *"push by sha, never by
-branch name"* is a candidate that is already enforced in the guard and documented nowhere else.
+**Correction, 2026-09-11, same session.** An earlier draft of this instance and of § *Resume*
+asserted the by-sha rule was *"enforced in the guard and documented nowhere else"*. False, and
+unchecked before writing — `grep -niE 'by sha|refspec' docs/RELEASE.md` returns nine hits, three
+of them prescriptive. Retracted rather than narrowed: the pusher-side failure mode is real, is
+**not** covered by the author-side convention below, and **already has a documented remedy**.
+What survives is only that the two halves are separate questions with separate answers — not
+that either is unanswered. This is the third time in one session that a confident causal claim of
+mine went out unchecked (`bug-claim-liveness-session-log:F-4`, `:F-7`,
+`provenance-probe-session-log:F-15`), and the one that caught it each time was running the
+one-line check rather than looking harder.
+
+**Why this matters for `## Resume`.** The proposed convention — *a session that cannot publish
+must not commit* — addresses the **author** side and does nothing for this one. A pusher's
+authorisation can go stale between the sentence and the push even when every author below them
+is perfectly disciplined about committing. So whatever is decided about the convention, it
+should not be recorded as having disposed of the pusher-side half — which is a *separate*
+question, and one `docs/RELEASE.md` § *Concurrent-Work Rules* has already answered.
 
 **Not a harm report.** All 25 commits were covered by the operator's authorisation and no
 author was withholding, so nothing was published against anyone's intent. This is an
@@ -543,14 +557,14 @@ Then decide whether it earns a mechanism or stays a policy. A convention nobody 
 be reminded of at the moment it matters is a policy, and this ledger's own standing
 position is that a trigger the model must notice is a policy rather than a mechanism.
 
-**Third, and added 2026-09-11 because the two decisions above do not reach it: the
-PUSHER-side half.** Everything above concerns the author's state. The guard has since
-named a second failure mode that survives a perfectly disciplined author — *an
-authorisation names a SET; a branch push sends a PREFIX*, with a measured ninety-second
-window between the operator's sentence and the push. The operator's decision is itself
-unrecorded prose, and `git push origin <branch>` honours it to the letter while sending
-whatever landed since. *Push the decided set by sha, never by branch name* is the
-candidate answer; it is already enforced inside
-`scripts/pre-push-foreign-session-guard.sh` and documented on no read surface a session
-consults before pushing. Deciding the author-side convention does **not** dispose of
-this — see § *Evidence*, instance 2026-09-11.
+**Third, added 2026-09-11: the PUSHER-side half is a SEPARATE question, and it is already
+answered.** Everything above concerns the author's state. The guard names a second failure mode
+that survives a perfectly disciplined author — *an authorisation names a SET; a branch push sends
+a PREFIX*, with a measured ninety-second window between the operator's sentence and the push. The
+operator's decision is itself unrecorded prose, and `git push origin <branch>` honours it to the
+letter while sending whatever landed since. **This needs no decision here**: `docs/RELEASE.md`
+§ *Concurrent-Work Rules* already prescribes the remedy — re-derive the range, compare it to what
+was decided, send the decided set by sha — and the guard cites that section. It is recorded in
+this file only so the author-side convention under decision above is not mistaken for covering
+it. (An earlier version of this paragraph claimed the by-sha rule was undocumented; that was
+wrong and is corrected in § *Evidence*, instance 2026-09-11.)
