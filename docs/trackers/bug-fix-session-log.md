@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 134
+entry_high_water_F: 135
 entry_high_water_W: 125
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 125
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-135 | 2026-09-11 | med | verification/shared-checkout | open | **A shared-checkout rebuild maps to no commit, and POSITIVE BINARY IDENTIFICATION identifies the CHANGE, never the BUILD.** `cargo rb` relinked at 20:50:14 with zero code commits on HEAD since the previous build, while three peer-owned source files sat dirty. I read that as "their work is compiled in" and the mtimes refuted it — all three were written 1m33s to 2m51s AFTER the link, so the binary holds an intermediate state of them that is in no commit and no longer on disk. Both natural inferences are wrong in opposite directions. Puts a ceiling on `W-125`: its remedy answers *"does this binary contain my fix?"* and says nothing about what else is in there, and on a solo checkout those two questions coincide, which is why the gap is invisible from inside the practice. The specific wire claim survives because `src/tools/core/types.rs` is unmodified since 17:17:40, before the link — a property of that verification, not of the method. See `F-135` below. |
 | F-134 | 2026-09-11 | med | design/scope | open | **A bug's own stated fix preference can conflict with a design invariant its author didn't check against the actual code.** `b75d2660ef37198c` recommended oversampling grep's context mode the way simple mode does; the actual code (`grep.rs:121`) documents that simple mode's oversample is display-capped by `cap_grouped` and context mode has no equivalent cap, so following the recommendation verbatim would have shipped a 4x output-size regression alongside the fix. Took the bug's own second, more conservative option instead. See `F-134` below. |
 | F-132 | 2026-09-10 | med | process/attribution | open | **Novelty of the discovery ROUTE is not novelty of the DEFECT, and the two are indistinguishable from the inside.** Filed a duplicate of a bug already in the 96-row list I had read six hours earlier (`7e0968e2ddfcbc07`), title truncated past the discriminating token. A dedup query was run two hours before, for a bug found by *reading*; skipped for this one, found by *measurement* — a surprise does not present as a rediscovery. Recurred in mild form within 24 hours. A check gated on suspicion is not reached by the case that needs it. |
 | F-131 | 2026-09-09 | med | tooling/ambient-state | open | **A subagent restoring the home project retargets its parent's reads, and the symptom is a plausible zero.** My brief told the implementer not to re-activate the worktree, since codescout activation is process-wide. They complied — then restored the HOME project when finished, which is ordinary hygiene and what the tool's own hint advises. My next `grep` returned **0 matches, twice**, for a file that exists only on the feature branch. **Politeness and the hazard are the same act, separated only by timing**, and neither side can see the conflict: the subagent does not know the parent is still reading, the parent observes no activation event. Near-miss: I was verifying that a review item had *removed* `#[allow(dead_code)]`, so a zero for `dead_code` was the success signal — only a second pattern in the same call, whose zero is impossible if the fix is right, made it suspicious, and that was luck in phrasing rather than method. `read_file` held the discriminating datum: it printed the absolute path it searched plus a hint naming this exact scenario. Workaround: pass `workspace=` on every call and use `git -C` for verification — both already mandatory for writes, so extending to reads costs nothing. **Reusable half:** `grep`'s warning correctly says the zero describes the search, not the pattern, but then guesses a *cause* it cannot know (fd exhaustion), which bought a wasted re-run; naming the **scope it resolved** is knowable and would have diagnosed this in one call |
@@ -13647,6 +13648,28 @@ Instance 2 (`1a34a131`). Enumerating a 14-commit push for my operator, I derived
 
 **Valid:** dated 2026-09-11
 
+**ADDENDUM 2026-09-11, later the same day — the gap named above is now CLOSED, and the ceiling on this entry is `F-135`.**
+
+The both-fire arm *does* have a production call, and this entry was wrong that it could not be
+found: `doc` declares `param_aliases` at `src/librarian/adapter.rs:253` — `("query", "semantic")`
+and `("q", "semantic")` — while `find.rs` writes its own `corrections`. So
+`doc(action="find", q=…, rel_path=…, limit=200)` fires the framework advisory, the tool's own lift
+advisory, and the overflow, on one call. Run on the wire, the envelope carried BOTH halves nested
+without collision: the tool's `filter` + `hint`, and `param_aliases` holding the framework's own
+`hint` beside it. That single call discriminates both of the fix's defects — pre-fix it returns no
+`corrections` at all when no alias fires, and `{param_aliases}` alone when one does, the tool's
+half destroyed by the wholesale assignment.
+
+So the "what this establishes" paragraph above is superseded: the merge is now wire-verified, not
+unit-tested only. **Kept rather than rewritten**, because the thing worth reading is that the
+entry's own boundary statement was the part that turned out to be soft — *"I did not find a
+production call"* is a claim about a search, and it was recorded with the same confidence as the
+measurements around it.
+
+**And read `F-135` against this entry's headline claim.** Positive binary identification is still
+the right instrument, and it identifies the ONE CHANGE probed, never the BUILD — a distinction this
+entry does not draw and that only matters on a shared checkout.
+
 **Observed:** Post-rebuild wire verification of `1e11cf9357136e0e` (the buffered envelope dropping
 the tool's own `corrections`), fixed this session in `2183a058`. I ran **the reproduction the file
 states** — `doc(action="find", rel_path="docs/issues", limit=200)` — rather than one composed from
@@ -13687,6 +13710,59 @@ only because a linked worktree appeared mid-session, so the same call shape retu
 `stdout` before and after.
 
 **Status:** validated
+
+## F-135 — A shared-checkout rebuild maps to no commit, and positive binary identification identifies the CHANGE, never the BUILD
+
+**Valid:** dated 2026-09-11
+
+**Observed:** Second post-rebuild recon of the session. `cargo rb` had relinked
+`target/release/codescout` at **20:50:14**, and HEAD carried **zero** code commits since the
+previous build — so the natural reading is "nothing new to verify". `git status` then showed three
+dirty source files, all peer-owned: `src/server.rs` and `src/tools/core/tests.rs` (`codescout-75`,
+sessionId b0b9bc40…), `src/tools/symbol/symbols.rs` (`attach-alias-advisory-anyhow`, sessionId
+f3c594ce…), both LIVE and busy.
+
+**I read that as "two peers' uncommitted work is compiled into the binary" and started writing it
+up. The mtimes refute it:**
+
+```
+20:50:14  target/release/codescout      <- linked
+20:51:47  src/tools/core/tests.rs       <- +1m33s
+20:52:20  src/server.rs                 <- +2m06s
+20:53:05  src/tools/symbol/symbols.rs   <- +2m51s
+```
+
+Every one was written **after** the link. So the binary does not hold their current content — and
+it does not hold HEAD's either, since provenance shows those files under continuous peer edit from
+~17:11 onward. It holds some **intermediate** state that exists in no commit and no longer exists
+on disk. Both natural inferences are wrong: you cannot conclude the binary has a peer's work, and
+you cannot conclude it does not.
+
+**The ceiling this puts on `W-125`, which is the reason to write it down rather than just correct
+myself.** `W-125` (mine, earlier today) offers POSITIVE BINARY IDENTIFICATION — confirm the build
+from a behaviour only it can emit — as the remedy for the `6c31ef0f` recon's *"an mtime that proved
+nothing"*. The remedy is right, and it has a ceiling nobody had stated: **it identifies the ONE
+CHANGE you probed, never the BUILD.** It answers *"does this binary contain my fix?"* and says
+nothing about what else is in there. On a solo checkout those two questions coincide, which is
+exactly why the gap is invisible from inside the practice.
+
+**What rescues the specific claim, and it is checkable rather than assumed:** the code under test,
+`src/tools/core/types.rs`, has an mtime of **17:17:40** — before the 20:50 link, unmodified since.
+So the binary's `call_content` is byte-identical to HEAD's and the wire result stands. That is a
+property of *this* verification, established by naming the file the claim rests on and reading that
+file's state. It is not a property of the method, and `W-125` does not say so.
+
+**Do not read this as "use mtimes after all."** The mtime does narrow work here — ordering one file
+against one link event — and this repo already files that a tracked-and-dirty file's mtime measures
+other sessions' git operations rather than its author's edits. It can order events; it cannot
+attribute them. The durable form: **name the file your claim depends on and establish that file's
+state, instead of characterising "the binary".**
+
+**Severity:** med — it produced no wrong result, only a wrong write-up, caught before it landed.
+The cost avoided is a durable ledger entry asserting that two named live sessions' code shipped in
+a binary, on evidence that says the opposite.
+
+**Status:** open
 
 ## Template for new entries
 
