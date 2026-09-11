@@ -167,6 +167,127 @@ for new guards: **a refusal on a shared tree must name the author, not just the 
 **Rests on:** the three refusal texts as emitted 2026-09-11 between 09:30 and 12:30, HEADs
 `15cbe5e6` → `1fe07709`; `scripts/file-provenance.py` output for (2) and (3).
 
+## Draft 4 — append with `id_prefix="F"`
+
+**Title:** a merge kills the RELEASE.md ladder, and the ladder's own precheck returns the green
+answer for a rung that can never be pushed
+
+**Body:**
+
+**Valid:** invariant
+
+**Category:** process
+
+**Severity:** high
+
+**Status:** open
+
+**Observed.** `docs/RELEASE.md` § *Publishing a stack several sessions wrote* prescribes the
+ladder: each author pushes their own commit by refspec, bottom-up, so *"no operator is ever
+asked to authorise someone else's work"*. Its stated precheck is
+`git rev-list --count origin/<branch>..<your-sha>` must be `1`, *"checked BEFORE the push"*.
+
+After reconciling a 5-vs-9 divergence by merge, measured 2026-09-11 at HEAD `e4262c97`:
+
+```
+rev-list --count origin/experiments..15cbe5e6          = 1     <- precheck PASSES
+merge-base --is-ancestor origin/experiments 15cbe5e6   = false <- cannot fast-forward
+
+lowest fast-forwardable ref is the MERGE COMMIT 8c795a92, carrying 10 commits
+across four sessions.
+```
+
+**Two separate defects, and the second is the one that bites.**
+
+1. **The precheck is necessary and not sufficient**, and fails in the direction that reads as
+   clearance. It counts *how many of mine are unpublished* and is silent on *whether the
+   remote is still an ancestor*. A session that reads the ladder literally, gets `1`, and
+   concludes it may push has verified a proposition that does not entail the one it needs.
+   Remedy is one line beside the existing check: `git merge-base --is-ancestor
+   origin/<branch> <your-sha>`.
+2. **A merge collapses the ladder entirely, and merging is what you must do to push at all.**
+   The ladder presumes a LINEAR stack: rung N becomes pushable once rung N-1 lands. A merge
+   commit makes every commit beneath it unreachable as a fast-forward target, so the smallest
+   publishable unit becomes the merge itself — all sessions' work, at once. Reconciling the
+   divergence, which was the prerequisite for anyone publishing anything, is precisely the act
+   that destroyed the mechanism designed so nobody publishes anyone else's work.
+
+**Why this is not merely a documentation gap.** The ladder exists to keep an operator from
+being asked to authorise another session's commits — RELEASE.md is explicit that the question
+should never reach them. After a merge that question is unavoidable and returns in a *worse*
+form than before: pre-merge it was 7 commits across 3 sessions, post-merge it is 10 across 4
+and cannot be decomposed. **The remedy that unblocks the branch and the mechanism that makes
+the branch publishable safely are in direct opposition**, and nothing in RELEASE.md says so.
+
+**What a fix would have to decide** (not proposed here, because it is a real design question):
+whether the ladder is abandoned once a branch diverges — in which case RELEASE.md should say
+that a divergence escalates to a single operator authorisation by construction — or whether
+reconciliation should be a REBASE after all, which preserves linearity at the cost of
+re-keying peers' commits, the thing § *Concurrent-Work Rules* forbids for its own good
+reasons. Both horns are real; this entry claims only that the corpus currently documents
+neither.
+
+**Rests on:** the four `merge-base --is-ancestor` probes above, run 2026-09-11 at HEAD
+`e4262c97` against `origin/experiments = f50be810`; `docs/RELEASE.md` § *Publishing a stack
+several sessions wrote — the ladder*. The insufficiency half (1) was raised to the session
+implementing the pre-push divergent-push guard before this instance existed, as a predicted
+gap; this is its first measured occurrence.
+
+## Draft 5 — append with `id_prefix="F"`
+
+**Title:** the gate selects by PATH and the task framing assumed STATUS, so "classify them
+properly" would have put defect classes on six closed bugs
+
+**Body:**
+
+**Valid:** invariant
+
+**Category:** self-friction
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Observed.** A merge landed 8 bug files under `docs/issues/` with no `cluster/` tag, reddening
+`every_open_bug_file_declares_one_known_defect_class`. Three sessions independently described
+the population as *"8 untagged open bugs"*, and the operator, given that framing, chose to
+classify them properly. Reading the test rather than its failure message:
+
+```rust
+// tracked_open_bug_files()
+p.strip_prefix("docs/issues/").is_some_and(|rest| {
+    !rest.contains('/') && rest.ends_with(".md") && rest != "_TEMPLATE.md"
+})
+```
+
+It selects by **path** — anything directly under `docs/issues/`, never reading `status:`. Six
+of the eight were `status: fixed`, closed 2026-08-19, and simply never archived. Only two were
+open.
+
+**The cost of acting on the framing.** Tagging all eight would have assigned defect classes to
+six closed bugs, inflating the counts that class promotion reads — the precise outcome the
+test's own failure message warns against, reached by following an instruction that said
+*properly*. The correct action for those six was ARCHIVING, which removes them from the gate's
+population entirely and needs no class at all.
+
+**The generalisable shape.** A gate's failure message names the members it rejected and not
+the predicate that selected them. *"open bug files with a bad defect-class declaration"* is
+prose; `tracked_open_bug_files()` is the definition, and the word `open` in the message means
+something different from the word `open` in the frontmatter of the files it lists. Everyone
+downstream — three sessions and one operator — inherited the message's vocabulary and none
+checked the selector.
+
+**What actually caught it** was not suspicion of the framing: it was that the ids would not
+resolve for a catalog write, which forced reading the frontmatter, which showed `status:
+fixed`. An accident of the write path, one step before six wrong tags.
+
+**Cheap general remedy, offered not claimed:** when a gate names a population in prose, read
+its selector before acting on the population — the same move § *Observer Blindness* already
+prescribes for a coverage ratio, applied to a membership predicate instead of a count.
+
+**Rests on:** `tests/issue_clusters.rs` `tracked_open_bug_files()`; the eight files'
+frontmatter as merged; `e4262c97`.
+
 ## Addendum — fold into Draft 2, or drop
 
 **Three registry names for one sessionId inside one day, observed live.** sessionId
