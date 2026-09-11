@@ -103,7 +103,7 @@ Three things this sweep does **not** establish, named here so nobody credits it 
    **Verdict:** rejected, and the probe was the defect. The file writes `` `doc` with `action=find` ``;
    the pattern had been reconstructed from memory rather than read off the file. A positive control
    against the source killed it. (`R-3`: a search that finds nothing is evidence about the search.)
-2. **Hypothesis:** this is a rediscovery of `4e4762b735deb392` (same regex, filed open).
+2. **Hypothesis:** this is a rediscovery of `463b1cb984c715b0` (same regex, filed open).
    **Verdict:** rejected. That file is about tokens written **without** backticks — its Summary
    frames the population as *"tool names the author happened to backtick"*. This token **is**
    backticked and escapes anyway, so that sentence is incomplete rather than merely narrow. The two
@@ -116,7 +116,7 @@ Add a **call-form** pass to `prompt_surfaces_reference_only_real_tools`: extract
 `([a-z][a-z_0-9]{2,})\(` across each surface and require every hit to resolve to a registered tool.
 
 Why this one is cheap to keep green, where dropping the backtick anchor is not (the objection
-`4e4762b735deb392` correctly raises): **`(` is self-anchoring.** Ordinary English prose does not put
+`463b1cb984c715b0` correctly raises): **`(` is self-anchoring.** Ordinary English prose does not put
 an open paren flush against a snake_case word, so the false-positive rate is near zero — the sweep
 above found exactly three non-tool hits across four files, all Rust function names, all in a surface
 the gate does not read. No allowlist growth is needed for the surfaces it does read.
@@ -188,13 +188,13 @@ grep -rn '<tool>(' src/prompts/ .codescout/ tests/fixtures/prompt_surfaces/
 ## Resume
 
 Wire the call-form pass, observe the RED, fix `source.md:352`, regenerate the fixture, re-run the
-gate. Then re-read `4e4762b735deb392` § Summary — its population sentence needs the correction in
+gate. Then re-read `463b1cb984c715b0` § Summary — its population sentence needs the correction in
 § Hypotheses above, and its § Evidence table can take a fourth row.
 
 ## References
 
-- Sibling escape through the same regex, opposite direction: `4e4762b735deb392`
-  (`docs/issues/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`).
+- Sibling escape through the same regex, opposite direction: `463b1cb984c715b0`
+  (`docs/issues/archive/2026-09-02-the-prompt-surface-gate-is-backtick-scoped-so-the-iron-laws-are-invisible-to-it.md`).
   That id was **not citable when this bug was filed**: the file's own frontmatter declared
   `6ccfcc15423f2ae5`, which matched no catalog row — one of 8 `frontmatter_id_mismatch` rows
   `doctor` reported, every one dated 2026-09-02.

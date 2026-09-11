@@ -119,7 +119,7 @@ Not asserted here as a defect; noted so the next reader does not have to re-deri
 
 - **Already filed?** `doc(action="find", kind="bug", semantic=...)` over the fourth-surface
   gating question returned 50 rows; the near hits are
-  `4e4762b735deb392` (*the prompt-surface gate is backtick-scoped, so the Iron Laws are invisible
+  `463b1cb984c715b0` (*the prompt-surface gate is backtick-scoped, so the Iron Laws are invisible
   to it* — a **scoping** defect inside the gate, over surfaces it does cover) and
   `44afbc18878be5d8` (*onboarding writes the system prompt to the memories dir* — a write-path
   defect, archived). Neither claims the fourth surface is ungated.

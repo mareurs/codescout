@@ -63,7 +63,7 @@ prompting a widened regex:
 `docs/issues/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`.
 
 The reason widening is unattractive is the same one that makes
-`prompt_surfaces_reference_only_real_tools` backtick-scoped (`4e4762b735deb392`): an unanchored scan
+`prompt_surfaces_reference_only_real_tools` backtick-scoped (`463b1cb984c715b0`): an unanchored scan
 for tool-shaped tokens over prose matches ordinary words, and a gate nobody can keep green gets
 deleted. Recording the instance is the cheaper correct move; **what is owed is the repair, not a new
 gate.**
