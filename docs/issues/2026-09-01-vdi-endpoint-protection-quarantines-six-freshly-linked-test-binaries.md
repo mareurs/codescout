@@ -8,6 +8,7 @@ tags:
 - tests
 - cluster/repro-env-diverges-from-gate-env
 closed: 2026-09-01
+no_fix_commit: Not applicable, and the bug file's own Fix section says so — VDI-local endpoint protection quarantining freshly-linked test binaries, not a codescout code defect. No code change exists and none can. The mitigation is --no-fail-fast plus an IT allow-list of the build output directory, documented in the Workarounds section; GitHub Actions CI is unaffected. The prose hash 4c8a210d is the commit the bug was OBSERVED at, not a fix. Declared 2026-09-11 during a doctor terminal_status_without_fix_anchor sweep.
 opened: 2026-09-01
 owner: marius
 related: []

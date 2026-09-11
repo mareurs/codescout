@@ -171,3 +171,36 @@ has no CI access to check. Before considering this fully closed:
   behavior motivated (as best as can be inferred) the incorrect split.
 - `docs/issues/2026-08-31-vdi-msvc-build-tools-missing-link-exe-shadowed-by-git-coreutils.md`
   — why this VDI is on the gnu toolchain, which is what let this run at all.
+
+
+## Fix provenance
+
+- **SHA:** `3a70166c` (`3a70166cf0ca29c4f416e4ac0327bd0614b87d03`, on `origin/experiments`) —
+  positional; does not survive a rebase of `experiments`. **This one already did not.**
+- **patch-id:** `7fa93fc9b1010da50ccd012ab3b15438e3b89d51` — content hash of the diff; survives
+  rebase and cherry-pick.
+
+**The SHA here was RECOVERED from the patch-id on 2026-09-11, and that is worth recording
+because it is this corpus's rule paying off rather than predicting.** § *Fix* above declared
+`db1c038e41ab8b79ca36bf81c4dd411651d827c2`, which no longer resolves — `git cat-file -e` fails
+on it, orphaned by a rebase of `experiments` exactly as `CLAUDE.md` § *Bug Tracking* warns. The
+patch-id beside it did not decay, and recovery took one pass over 6044 indexed patch-ids:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 7fa93fc9b1010da5 /tmp/patch-ids.txt
+```
+
+Redirects, not pipes — Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer.
+
+**Verified, not merely resolved.** `3a70166c` is *fix(windows): correct a stale rendezvous PPID
+test and a missing cfg arm found on native VDI runs*, and its diff removes
+`publish_records_a_zero_parent_pid_on_windows_by_design` — which is precisely what § *Fix*
+claims was done. The same commit also filed this bug file and its two VDI siblings, which is why
+those two carry `no_fix_commit:` rather than a SHA.
+
+**The prose hash `aa242912` is not a fix anchor and does not resolve either** — doctor's
+`terminal_status_without_fix_anchor` flagged this file partly because that hash *reads* as
+provenance to anyone scanning for one. It is left in place where it sits; this section is the
+anchor.

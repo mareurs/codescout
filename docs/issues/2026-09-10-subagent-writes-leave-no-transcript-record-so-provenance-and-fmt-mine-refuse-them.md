@@ -13,6 +13,7 @@ related:
 - docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md
 - docs/issues/archive/2026-09-08-the-provenance-selector-kept-the-pre-rename-tool-name.md
 severity: high
+unverified: PARTIAL BY DESIGN, not a stalled record. Fix 3 shipped (ada993d6, patch-id 26757097c11e0bbdc9b091a8f0f09ae960cbf902) and the body labels that anchor *(fix 3 only)*; the Fix section states that Fixes 1 and 2 remain open and that the corrected root cause makes them MORE owed, not less. So the declared patch-id is a partial anchor and status stays `investigating` deliberately. Field added 2026-09-11 by a doctor non_terminal_status_with_fix_anchor sweep purely to discharge the check; no content, status or ownership changed, and the fix sequence remains the author's (sessionId ec98641c-d5ba-456d-8e4a-10e24d52da16).
 ---
 
 # BUG: subagent writes produce no transcript record, so `file-provenance.py` returns UNKNOWN for every file an SDD task writes — and `fmt-mine.sh`, the gate's first command, cannot format any of them

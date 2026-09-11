@@ -258,3 +258,21 @@ guardable at all. That is a behaviour change, not a patch, and belongs with whoe
 - `src/tools/symbol/edit_code.rs` (the unwired one)
 - `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md` (cluster membership; the
   axis-omission sub-shape, and the set-difference mechanism this instance wants)
+
+
+## Fix provenance
+
+- **SHA:** `35d1618c` (on `origin/experiments`) — positional; does not survive a rebase of
+  `experiments`.
+- **patch-id:** `369f19d6ba9d6312db9ff8eb02e2ac3b8f086ed9` — content hash of the diff; survives
+  rebase and cherry-pick.
+
+Both re-verified 2026-09-11: the commit resolves, the patch-id recomputes identically from
+`git show 35d1618c | git patch-id --stable`, and it is published.
+
+**This section restates § *Fix*, which already declared the pair — nothing new was derived.** It
+exists because `doctor`'s `terminal_status_without_fix_anchor` scans for this heading, so a
+record with correct provenance in the wrong place is indistinguishable to it from one with
+none. The status stays `mitigated` deliberately — `edit_code(action="replace")` warns and does
+not refuse — and `unverified:` in frontmatter carries that, so this anchor marks *what shipped*,
+not *that the question is closed*.

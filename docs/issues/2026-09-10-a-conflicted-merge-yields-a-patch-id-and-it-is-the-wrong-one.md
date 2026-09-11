@@ -165,3 +165,28 @@ returns a plausible value"* turns up, that is the class — not either of the ab
   <first-parent>..<merge>` warning that gets it almost right)
 - `docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`
   § *Fix* — where the measurement was first recorded, in the archive commit that needed it
+
+
+## Fix provenance
+
+- **SHA:** `aeab4ee2` (`aeab4ee22a6ea6dde9584188e7bc8dfd4b5e078e`, on `origin/experiments`) —
+  positional; does not survive a rebase of `experiments`.
+- **patch-id:** `a383c873c73a6012482076d50ab381c68e39d23f` — content hash of the diff; survives
+  rebase and cherry-pick.
+
+Derived 2026-09-11, not recorded at fix time. `git log -S'8cf67de0' -- CLAUDE.md` identifies it
+uniquely, and the commit touches exactly the three surfaces § *Fix* names — `CLAUDE.md`,
+`docs/RELEASE.md`, `src/prompts/guides/tracker-conventions.md` — plus this bug file.
+
+**Read the patch-id with one caveat: `aeab4ee2` carries TWO fixes.** Its subject is *fix(gates):
+git ls-files counts index stages; and a merge patch-id that is not empty*, and the diff also
+changes `tests/result_caps.rs` and a second bug file for the unrelated `ls-files` index-stage
+defect. A patch-id is a content hash of the **whole** diff, so this one identifies the combined
+commit and not this bug's half of it. It recovers the commit, which is what the anchor is for;
+it is not evidence about which half shipped, and a future reader comparing it against a
+cherry-pick of only one half will not match.
+
+That is not a defect in the anchor — it is the ordinary consequence of citing a
+multiple-purpose commit, and it is recorded here rather than left for someone to rediscover
+when the hash fails to match. The alternative, splitting the citation, is unavailable after the
+fact.

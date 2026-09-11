@@ -8,6 +8,7 @@ tags:
 - build
 - cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-31
+no_fix_commit: Not applicable, and the bug file's own Fix section says so — a missing third-party install on the VDI (MSVC Build Tools, with link.exe shadowed by Git coreutils), not a codescout code path. No code change exists and none can. The mitigation is a GNU-hosted toolchain invocation, documented in the Workarounds section, and it deliberately does not cover the local-embed feature. Declared 2026-09-11 during a doctor terminal_status_without_fix_anchor sweep.
 opened: 2026-08-31
 owner: marius
 related: []
