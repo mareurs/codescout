@@ -127,6 +127,11 @@ to escape.
 still does not refuse, so the loss remains possible for a caller who ignores the warning. Status is
 `mitigated` deliberately, to keep the refusal question in the open-bug queries.
 
+**Shipped on `experiments` at `35d1618c`**, patch-id
+`369f19d6ba9d6312db9ff8eb02e2ac3b8f086ed9`. The pair is recorded together because they fail
+differently: the SHA is positional and dies when `experiments` is rebased, the patch-id is a content
+hash of the diff and survives both rebase and cherry-pick.
+
 What shipped:
 
 - `src/tools/symbol/edit_code.rs` computes
