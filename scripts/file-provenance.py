@@ -37,7 +37,11 @@ call whose INPUT names the path as a write TARGET counts.
 And `UNKNOWN` is never rendered as "not mine". A Bash write this tool's heuristics miss
 is indistinguishable from no write at all, so absence is a statement about coverage,
 not about ownership — the precise substitution that produced the evening's three wrong
-answers.
+answers. **A SUBAGENT write is the second such blind spot, and it is total rather than
+heuristic:** Claude Code 2.1.x records no subagent activity in any transcript, so every
+file an `Agent` task wrote attributes to nobody however carefully this tool parses.
+Measured 2026-09-11 — zero sidechain records across 41 versions and 1,928 dispatches,
+against 732 transcript files carrying them under 2.0.x, which dispatched via `Task`.
 
 USAGE
     ./scripts/file-provenance.py <path> [<path>...]
@@ -447,9 +451,26 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                     content = msg.get("content")
                     if not isinstance(content, list):
                         continue
-                    # The record's own sessionId beats the filename: a sidechain
-                    # (subagent) record carries the PARENT's id, which is the session a
-                    # human can actually be asked about.
+                    # `sessionId` over the filename. The record shape this used to
+                    # describe is GONE, and saying so is the point: until 2026-09-11 this
+                    # comment claimed a sidechain (subagent) record carries the parent's
+                    # id, which made the gap below invisible to anyone auditing this file
+                    # for subagent coverage — they found a comment saying it was handled.
+                    #
+                    # Measured 2026-09-11 across five profiles. Claude Code 2.0.x
+                    # dispatched via `Task` and emitted subagent records: 732 transcript
+                    # files carry `isSidechain: true`. Claude Code 2.1.x dispatches via
+                    # `Agent` and emits NONE — zero across 41 distinct versions
+                    # (2.1.220 to 2.1.268) and 1,928 dispatches, with `isSidechain`
+                    # written on every record and never true. So a subagent's writes reach
+                    # no transcript this loop can read, and no parsing change recovers
+                    # them.
+                    #
+                    # The earlier reading of this — "the substrate carries no subagent
+                    # records" — was wrong in the direction that matters: it treated a
+                    # VERSION boundary as a permanent property, and was reached by two
+                    # counts that agreed because both were taken over 2.1.x profiles.
+                    # docs/issues/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
                     who = rec.get("sessionId") or rec.get("session_id") or sid
                     when = rec.get("timestamp")
                     for b in content:
@@ -540,6 +561,13 @@ def main(argv: list[str]) -> int:
             print("          no record of any session writing this path in the window. "
                   "That is a statement about coverage, NOT about ownership — Bash writes "
                   "this tool's heuristics miss look identical. Do not read it as 'not mine'.")
+            print("          Two known blind spots, so an owner may not exist to ask: a "
+                  "Bash write, and ANY write made by a SUBAGENT. Claude Code 2.1.x "
+                  "records no subagent activity at all (measured 2026-09-11: zero "
+                  "sidechain records across 41 versions and 1,928 dispatches), so a file "
+                  "an Agent wrote attributes to nobody by construction. If this path came "
+                  "out of a subagent task, stop looking for the owner — there is none "
+                  "recorded — and decide from what you know about the task instead.")
             if records:
                 print(f"          ({len(records)} write(s) exist but predate the window; "
                       f"re-run with --all to see them)")
