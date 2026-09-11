@@ -188,7 +188,7 @@ lane, and CI ran `cargo check --features dashboard` — which compiles a test ta
 it. The lane is now `cargo test --features dashboard --all-targets`. That gap is a class in its own
 right: `every_declared_feature_has_a_lane_or_a_reason` cannot tell `cargo check --features X` from
 `cargo test --features X`, filed as
-`docs/issues/2026-09-11-the-feature-lane-gate-counts-a-compile-only-lane-as-coverage.md`.
+`docs/issues/archive/2026-09-11-the-feature-lane-gate-counts-a-compile-only-lane-as-coverage.md`.
 ## Workarounds
 
 Use `memory(action="write")` rather than the dashboard editor. If a memory has already
@@ -204,8 +204,10 @@ shared caller-side layer), and `delete_memory` **did** have a matching gap, now 
 change.
 
 One thread continues elsewhere:
-`docs/issues/2026-09-11-the-feature-lane-gate-counts-a-compile-only-lane-as-coverage.md` — the
+`docs/issues/archive/2026-09-11-the-feature-lane-gate-counts-a-compile-only-lane-as-coverage.md` — the
 reason these tests would have been green by never running, and the gate that let that state exist.
+Fixed 2026-09-11 in `8f620f85`: the lane gate now requires a `cargo test` lane, and a `cargo check`
+one no longer satisfies it.
 
 Worth knowing for anything else in this area: a tool-scoped shrink-guard gate exists
 (`every_content_bearing_tool_is_shrink_guarded_or_has_a_reason`, `src/server.rs`) and it would
