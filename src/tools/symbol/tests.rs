@@ -5088,6 +5088,70 @@ fn symbols_with_overflow() {
     assert!(result.contains("foo"), "got:\n{result}");
 }
 
+/// `by_file_overflow` (BY_FILE_CAP = 15 in `build_by_file`) is computed and JSON-embedded
+/// at `$.overflow.by_file_overflow`, but until this test's fix no text renderer read it
+/// back — the file-distribution hint above is built from a capped top-15 breakdown and
+/// nothing said so. `symbols_with_overflow` above already covers `by_file` present with
+/// no overflow (must stay silent, asserted by its absence there); this covers the count
+/// crossing the cap.
+/// docs/issues/archive/2026-09-03-symbols-by-file-overflow-is-an-unrecorded-ic-13-member.md
+#[test]
+fn symbols_with_overflow_names_the_capped_file_breakdown() {
+    let val = serde_json::json!({
+        "symbols": [
+            {
+                "name": "foo", "symbol": "foo",
+                "kind": "Function", "file": "src/a.rs",
+                "start_line": 10, "end_line": 10
+            }
+        ],
+        "total": 100,
+        "overflow": {
+            "shown": 20, "total": 100,
+            "hint": "narrow with path=",
+            "by_file": [["src/a.rs", 50], ["src/b.rs", 30]],
+            "by_file_overflow": 4
+        }
+    });
+    let result = format_search_symbols(&val);
+    assert!(
+        result.contains('4'),
+        "the omitted-file count must be named, got:\n{result}"
+    );
+    assert!(
+        result.contains("breakdown"),
+        "must name what was capped, not just a bare number, got:\n{result}"
+    );
+}
+
+/// Over-match guard for the test above: `by_file` with NO overflow (the common case,
+/// already covered by `symbols_with_overflow`) must not gain a spurious note. Confirms
+/// the marker is conditional on `by_file_overflow > 0`, not glued on whenever `by_file`
+/// is present.
+#[test]
+fn symbols_with_overflow_stays_silent_when_the_file_breakdown_is_not_capped() {
+    let val = serde_json::json!({
+        "symbols": [
+            {
+                "name": "foo", "symbol": "foo",
+                "kind": "Function", "file": "src/a.rs",
+                "start_line": 10, "end_line": 10
+            }
+        ],
+        "total": 100,
+        "overflow": {
+            "shown": 20, "total": 100,
+            "hint": "narrow with path=",
+            "by_file": [["src/a.rs", 50], ["src/b.rs", 30]]
+        }
+    });
+    let result = format_search_symbols(&val);
+    assert!(
+        !result.contains("breakdown capped"),
+        "no by_file_overflow key means no note, got:\n{result}"
+    );
+}
+
 #[test]
 fn symbols_empty() {
     let val = serde_json::json!({

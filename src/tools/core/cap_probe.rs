@@ -297,21 +297,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // pinned by `symbols_declares_output_form_text`): the primary block is TEXT, so a
         // `JsonPath` marker is unreachable regardless of nesting — and the nesting was
         // also wrong (`by_file_overflow` lives at `$.overflow.by_file_overflow`, not
-        // `$.by_file_overflow`; see `OutputGuard::overflow_json`). Worse, no compact-text
-        // renderer reads it back: `format_search_symbols` groups the CAPPED matches by
-        // file for the "N matches in M files" header, and `overflow_head`/`format_overflow`
-        // only echo `shown`/`total`/`hint` — neither touches `by_file` or
-        // `by_file_overflow`. The only existing tests (`build_by_file_sorts_desc_and_caps_at_15`,
-        // `build_by_file_no_overflow_under_cap`) call the pure `build_by_file` function
-        // directly, not through Symbols's real call surface, so they say nothing about
-        // what a caller actually sees. No marker is reachable today.
+        // `$.by_file_overflow`; see `OutputGuard::overflow_json`). `format_search_symbols`
+        // (`src/tools/symbol/display.rs`) now reads it back and names the count in the
+        // rendered text — closing
+        // docs/issues/archive/2026-09-03-symbols-by-file-overflow-is-an-unrecorded-ic-13-member.md.
+        // Mutation-verified: the marker was observed absent before the fix (RED) and
+        // present after (GREEN) against the same fixture.
         id: "symbols.by_file",
-        coverage: Coverage::Deferred(
-            "BY_FILE_CAP's overflow count is computed and JSON-embedded at \
-             $.overflow.by_file_overflow, but Symbols renders via OutputForm::Text and no \
-             compact-text renderer surfaces by_file or by_file_overflow; the only tests \
-             drive build_by_file directly, not the tool's real call surface",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("breakdown"),
+            mutation: Mutation::Killed,
+            cited_test: "symbols_with_overflow_names_the_capped_file_breakdown",
+        },
     },
     ProbeRow {
         id: "symbols.per_lang_budget",

@@ -226,6 +226,21 @@ pub fn format_search_symbols(val: &Value) -> String {
     // of these were the first casualties on any result long enough to overflow — the
     // exact results that need them. See `format::overflow_head`.
     let mut head_extra = overflow_head(val);
+    // `by_file_overflow` (BY_FILE_CAP = 15, `build_by_file` in symbols.rs) is computed and
+    // JSON-embedded at `$.overflow.by_file_overflow`, but no text renderer read it back —
+    // the hint line above is built from a capped top-15 file breakdown and nothing said
+    // so. Scoped to this renderer, not the shared `format_overflow`/`overflow_head`: no
+    // other caller of those sets this key, and "file breakdown" is a symbols-specific
+    // concept those helpers should not need to know about.
+    // docs/issues/archive/2026-09-03-symbols-by-file-overflow-is-an-unrecorded-ic-13-member.md
+    if let Some(n) = val["overflow"]["by_file_overflow"]
+        .as_u64()
+        .filter(|&n| n > 0)
+    {
+        head_extra.push_str(&format!(
+            "  … file breakdown capped at 15 — {n} more file(s) with matches not counted in the hint above\n"
+        ));
+    }
     if let Some(w) = warning {
         head_extra.push_str(&format!("warning: {w}\n"));
     }
