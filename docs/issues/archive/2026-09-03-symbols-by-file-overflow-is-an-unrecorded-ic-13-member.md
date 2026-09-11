@@ -1,12 +1,14 @@
 ---
-id: '59e63262b127aaae'
+id: e505940afe971741
 kind: bug
-status: open
+status: fixed
 title: symbols.by_file overflow is capped and reported, but no text renderer ever shows the marker
 owners:
 - marius
 tags:
 - cluster/capped-result-presented-as-complete
+claimed_at: 2026-09-11
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 opened: 2026-09-03
 severity: medium
 ---
@@ -36,7 +38,7 @@ Main checkout, branch `experiments`, `src/tools/symbol/symbols.rs` / `src/tools/
 
 `finalize_search_results` (`src/tools/symbol/symbols.rs:824-836`) computes `(by_file_entries, by_file_overflow_count)` via `build_by_file(&matches)` and writes `ov.by_file_overflow = by_file_overflow_count`. `OutputGuard::overflow_json` (`src/tools/output.rs:182-183`) is the *only* site that reads `by_file_overflow` and embeds it — `if info.by_file_overflow > 0 { obj["by_file_overflow"] = json!(info.by_file_overflow); }` — and it writes into a JSON object. No text-rendering function in `src/tools/output.rs` or `src/tools/symbol/symbols.rs` was found (2026-09-02 grep of the crate) to read `by_file_overflow` and interpolate a note into a plain-text summary the way `overflow.truncated` / `overflow.hint` are surfaced elsewhere in this codebase's text renderers.
 
-*Inferred from `src/tools/symbol/symbols.rs:824-836` and `src/tools/output.rs:182-183` — not measured against a live text-form MCP response since the 2026-09-02 pass; re-verify before fixing (see Resume).*
+*Re-verified against current HEAD (`finalize_search_results` now at `src/tools/symbol/symbols.rs:863-951`, `OutputGuard::overflow_json` unchanged at `src/tools/output.rs:167-187`): the inference held — `format_search_symbols` (`src/tools/symbol/display.rs`) groups the already-CAPPED `symbols` array for its "N matches in M files" header, and neither it nor `format_overflow`/`overflow_head` (`src/tools/format.rs`) touched `by_file` or `by_file_overflow` before this fix.*
 
 ## Evidence
 
@@ -57,26 +59,29 @@ No corresponding text-path reference found in the same grep sweep (64 total matc
 
 ## Fix
 
-Not designed. Two directions, either of which resolves it: (a) have the text renderer read `by_file_overflow` and append a note (`"… +N more files"`) the way sibling overflow fields already do elsewhere in this codebase's text output, or (b) if `symbols`' text form is provably unreachable/vestigial, remove the asymmetry by documenting that `by_file_overflow` is JSON-only and is not an `IC-13` gap for tools declaring `OutputForm::Json` — `Marker::TextContains` in the `result-cap-marker-gate` branch's probe table is valid evidence "even for a JSON-shaped tool response", so this would need the caller to confirm which form is actually reachable before closing.
+Fixed. `format_search_symbols` (`src/tools/symbol/display.rs`) now reads `$.overflow.by_file_overflow` and, when it is nonzero, appends a line naming the count — `"  … file breakdown capped at 15 — N more file(s) with matches not counted in the hint above\n"` — right after `overflow_head`'s own shown/total line, so it survives `truncate_compact`'s tail cut the same way.
 
+Scoped to `format_search_symbols` itself rather than the shared `format_overflow`/`overflow_head` (`src/tools/format.rs`): no other of their nine call sites sets `by_file_overflow`, and "file breakdown" is a symbols-specific concept those two shared helpers should not need to know about.
+
+`cap_probe.rs`'s `symbols.by_file` `ProbeRow` is updated from `Coverage::Deferred` to `Coverage::Probed { marker: Marker::TextContains("breakdown"), mutation: Mutation::Killed, cited_test: "symbols_with_overflow_names_the_capped_file_breakdown" }` — the class gate this bug's own `result-cap-marker-gate` branch built now reports it correctly.
+
+**SHA:** `94aedcd9c2189e8e9054aff59c7ae63f4ee70a79`
+**patch-id:** `f8477cb10d9720d5d940aa0e44e2faa6ffa78360`
 ## Tests added
 
-None yet — this is the initial filing, not a fix.
+`src/tools/symbol/tests.rs`, next to the existing `symbols_with_overflow` fixture:
 
+- `symbols_with_overflow_names_the_capped_file_breakdown` — `overflow.by_file_overflow: 4` must produce a rendered line naming `4` and the word "breakdown". Observed RED against pre-fix `format_search_symbols` (no marker in output), GREEN after.
+- `symbols_with_overflow_stays_silent_when_the_file_breakdown_is_not_capped` — over-match guard: `by_file` present with no `by_file_overflow` key (the common case, already covered by `symbols_with_overflow`) must not gain a spurious note. Passed both before and after — confirms the marker is conditional, not glued on whenever `by_file` is present.
 ## Workarounds
 
 None known; a caller wanting the true file count can inspect `overflow.total_files_matched` (or equivalent) alongside the `by_file` array length if such a field exists, rather than trusting the 15-entry list as complete.
 
 ## Resume
 
-1. Confirm what `symbols`' declared `OutputForm` is (`src/tools/core/types.rs`) and whether a text-rendered response for a >15-file match set is reachable by any current MCP client path.
-2. If reachable: add the text-path marker and a regression test exercising `finalize_search_results` with >15 files through the real text-rendering call, not a JSON assertion.
-3. If unreachable: downgrade this from a bug to a documented non-issue and close `wontfix` with the reasoning above.
-4. Consider whether this belongs as a new `Coverage::Probed`/`Deferred` row in `src/tools/core/cap_probe.rs`'s `RESULT_CAP` table (the `result-cap-marker-gate` gate) once the branch merges — it is not currently annotated with `cap-class:`.
-
+Done — see § Fix. Nothing left to resume.
 ## References
 
 - `src/tools/symbol/symbols.rs:824-836`, `src/tools/output.rs:182-183`
 - Surfaced during `result-cap-marker-gate` branch, Task 5b (worktree `.worktrees/result-cap-marker-gate`, session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`, Ruling R8)
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md` (artifact `8a9dd5a27cd03480`)
-
