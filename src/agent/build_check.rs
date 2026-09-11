@@ -245,6 +245,12 @@ pub(crate) fn errors_naming(
 ) -> Option<String> {
     let edited: HashSet<PathBuf> = edited.iter().map(|p| canonical(p)).collect();
     let mut hits: Vec<String> = Vec::new();
+    // Counts every matching diagnostic, not just the rendered ones — the loop below no
+    // longer stops at MAX_RENDERED, because a total computed only over the SURVIVING
+    // rows is exactly the failure this counts against: `hits.len()` after truncation can
+    // never exceed the cap it is being compared to, so a comparison against it can never
+    // detect that anything was withheld.
+    let mut total = 0usize;
 
     for line in cargo_json.lines() {
         let line = line.trim();
@@ -279,20 +285,30 @@ pub(crate) fn errors_naming(
             if !edited.contains(&abs) {
                 continue;
             }
-            let line_no = span.get("line_start").and_then(|n| n.as_u64()).unwrap_or(0);
-            let text = msg
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("compile error");
-            hits.push(format!("  {file}:{line_no}  {text}"));
-            break;
-        }
-        if hits.len() >= MAX_RENDERED {
+            total += 1;
+            if hits.len() < MAX_RENDERED {
+                let line_no = span.get("line_start").and_then(|n| n.as_u64()).unwrap_or(0);
+                let text = msg
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("compile error");
+                hits.push(format!("  {file}:{line_no}  {text}"));
+            }
             break;
         }
     }
 
-    (!hits.is_empty()).then(|| hits.join("\n"))
+    if hits.is_empty() {
+        return None;
+    }
+    let mut out = hits.join("\n");
+    // Distinct from a hit line, not a fourth one of the same shape — a reader scanning
+    // for file:line rows must not mistake this for an eleventh diagnostic.
+    // docs/issues/archive/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md
+    if total > hits.len() {
+        out.push_str(&format!("\n  … showing {} of {total}", hits.len()));
+    }
+    Some(out)
 }
 
 /// The notice. **Informational, never a request.**
@@ -705,7 +721,34 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let got = errors_naming(&edited(&["src/mine.rs"]), &json, &root()).expect("reported");
-        assert_eq!(got.lines().count(), MAX_RENDERED, "{got}");
+        let hit_lines = got.lines().filter(|l| l.contains("boom")).count();
+        assert_eq!(hit_lines, MAX_RENDERED, "{got}");
+        // The bound holding is not the same claim as a disclosure arriving — this is
+        // the exact gap docs/issues/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md
+        // filed: ten errors in, three shown, and nothing said how many were withheld.
+        assert!(
+            got.contains("showing 3 of 10"),
+            "a truncated list must say how many were withheld, not just how many are \
+             shown: {got}"
+        );
+    }
+
+    /// Over-match guard for the test above: when nothing was withheld, no marker should
+    /// appear — an unconditional disclosure would carry no information and the test
+    /// above would pass for the wrong reason.
+    #[test]
+    fn under_the_cap_no_disclosure_is_added() {
+        let json = format!(
+            "{}\n{}",
+            cargo_error("src/mine.rs", 1, "boom"),
+            cargo_error("src/mine.rs", 2, "boom")
+        );
+        let got = errors_naming(&edited(&["src/mine.rs"]), &json, &root()).expect("reported");
+        assert!(
+            !got.contains("showing"),
+            "nothing was withheld, so no disclosure should appear: {got}"
+        );
+        assert_eq!(got.lines().count(), 2, "{got}");
     }
 
     // ---- render_notice ----

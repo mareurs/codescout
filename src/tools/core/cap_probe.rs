@@ -1022,17 +1022,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/agent/build_check.rs --
     ProbeRow {
+        // `errors_naming` no longer breaks the outer scan at MAX_RENDERED — it now counts
+        // every matching diagnostic while only rendering the first three, so `total` can
+        // exceed `hits.len()` and the gap has something to disclose. `render_notice`
+        // needed no change: the disclosure is appended to the same string it already
+        // wraps verbatim.
+        // docs/issues/archive/2026-09-09-build-check-renders-three-of-n-compile-errors-with-no-count.md
         id: "agent_build_check.rendered_diagnostics",
-        coverage: Coverage::Deferred(
-            "no marker exists to assert. `errors_naming` breaks at MAX_RENDERED and \
-             returns `hits.join(\"\\n\")`, and `render_notice` wraps that with no total, \
-             so an author with 12 compile errors is shown 3 and told nothing about the \
-             other 9. The existing `at_most_three_errors_are_rendered` asserts the CAP \
-             (`got.lines().count() == MAX_RENDERED`), which is the bound holding, not a \
-             disclosure arriving. This is therefore a new IC-13 member rather than a \
-             coverage gap: the row cannot become Probed until production emits a count, \
-             and tuning the row until it passed would hide the finding",
-        ),
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("showing"),
+            mutation: Mutation::Killed,
+            cited_test: "at_most_three_errors_are_rendered",
+        },
     },
     // -- src/librarian/tools/doctor.rs --
     ProbeRow {
