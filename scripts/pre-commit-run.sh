@@ -14,7 +14,7 @@
 #     [INFO] Restored changes from  …
 #
 # (The real lines carry an absolute path. It is written `~` here because
-# `no_committed_script_hardcodes_a_personal_home_path` scans committed scripts for
+# `no_tracked_script_hardcodes_a_personal_home_path` scans tracked scripts for
 # machine-specific homes and does not exempt comments — correctly, since a hardcoded home
 # in a comment is copied into code as readily as one in a command.)
 #
