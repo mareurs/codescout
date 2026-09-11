@@ -199,3 +199,72 @@ not a design decision.
   — the founding case, which predicted this
 - `docs/trackers/tool-usage-patterns.md`, `docs/trackers/system-retrospective-improvements.md`
 - `docs/TAXONOMY.md` — indexes `T-N` as a single-owner prefix
+
+
+## The rename is BLOCKED for an augmented ledger, and the fix section does not say so
+
+Scoped 2026-09-11 to execute § *The fix is a rename*. Its two stated blockers had both cleared —
+the worktree was quiet, and every original author of `system-retrospective-improvements.md` has
+exited (socket enumeration at 17:49Z; the only live session that has ever committed to it is the
+one writing this). **A third blocker, not named in this file, stops it anyway.**
+
+`system-retrospective-improvements.md` is **augmented**: `entry_collection: tasks`, 17 rows keyed
+`T-1` … `T-17`, under `params_schema` pattern `^T-\d+$`. A rename therefore has to move two
+keyspaces, and the second one is deliberately immutable:
+
+- **Headings** — movable. `link_scan` binds a citable token to `## PREFIX-N — <title>` and to
+  nothing else, so renaming the headings is what actually fixes the ambiguity.
+- **Params ids** — **not movable through any sanctioned surface.** `update_entry` rejects `id` by
+  design (`src/librarian/catalog/augmentation.rs:273`, `:309`): *"Entry ids key `entry_cite` rows
+  (`<slug>:<local>`), so re-keying one would strand its citations."* There is no `rename_entry`
+  or `rekey_entry` action.
+
+**And renaming only the headings is worse than doing nothing**: the 17 params rows would then
+anchor ids the body no longer defines, which is `doctor`'s `entry_without_definition` — trading
+one finding for seventeen. The only surface that moves both is the wholesale
+`doc(action="augment", params={tasks: […]})` write, which `CLAUDE.md` § *Session Intelligence
+Trackers* forbids outside its single `params_behind_body` carve-out — and that collection's
+`notes` carry verified SHA + patch-id provenance (`T-14`, `T-16`), so a partial write is exactly
+the 2026-08-16 loss shape.
+
+**Not performed.** A session that reads § *The fix is a rename* and starts work will reach this
+point after the scoping and not before, so it is recorded here.
+
+### What the citation surface actually measures
+
+`link_scan` at HEAD `37e1ba78`, 2026-09-11 — read from the instrument, not counted by eye:
+
+| token | definers | citing sources | citing mentions |
+|---|---:|---:|---:|
+| `T-14` | 2 | 15 | 34 |
+| `T-15` | 2 | 3 | 5 |
+| `T-16` | 2 | 4 | 6 |
+| `T-17` | 2 | 6 | 19 |
+
+**But the repointing surface is far smaller than those 64 mentions, and it is smaller than this
+file's own § *The fix is a rename* estimate of 17.** Classifying every LIVE mention of the four
+colliding tokens — 25 of them, after excluding `docs/**/archive/**` (historical snapshots the
+convention says not to rewrite) and this file plus its founding predecessor (where the tokens are
+the SUBJECT, not citations):
+
+- **Zero cite `system-retrospective-improvements`.** Every one resolves elsewhere: `tool-usage-patterns`
+  verdicts (`legitimate` / `wrong-tool` is *that* ledger's schema), ids only it defines (`T-18`…`T-24`),
+  meta-mentions describing this very collision, or `docs/superpowers/plans/2026-05-17-i1-refactor.md`'s
+  own May task numbering — a **third** namespace, which is the founding bug's *three ledgers* still
+  standing.
+- **Every live citation of this ledger sits in `T-1`…`T-13`**, which does **not** collide —
+  `tool-usage-patterns` spells that range zero-padded. They are concentrated in the
+  catalog-audit-trail stream (session log, two plan titles, a design spec) and include two already
+  **qualified** citations and one executable `update_entry(entry_id="T-1")` snippet.
+
+**So the collision is real and currently costs nothing in resolved citations** — it is a
+future-ambiguity hazard, not present breakage, and the rename's cost falls entirely on correct,
+working citations in the non-colliding range. That does not argue against fixing it; it argues
+that `severity: high` is carried by the *unresolvable* half (`defined_by=2` makes all 64 mentions
+resolve to nothing) rather than by any wrong resolution observed today.
+
+**What a fix would need, offered not claimed:** either an entry-id rename path that moves
+`entry_cite` rows with the id — the reason the current refusal exists, so the refusal is a
+missing feature rather than a wrong rule — or a decision that this ledger drops its augmentation
+before renaming, which discards the `notes` provenance and is worse. The first is a real design
+question and is not this file's to settle.
