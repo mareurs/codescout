@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/doc-contradicted-by-code
-closed: null
+closed: 2026-09-11
 opened: 2026-09-11
 owner: marius
 related: []
@@ -131,30 +131,58 @@ not amended.
 
 ## Fix
 
-Not fixed. Six text edits, no code:
+**Applied, 2026-09-11, commit `6d5dba0f709298c8ffdc8717001b1e4549b8a290` (patch-id
+`1d17d3cc62c07985ee5a4b2e9a0e2c35b2f24f82`).** All six text edits, no behaviour change. Every
+number was re-derived from the tree rather than copied out of this file — and two of the five
+claims needed a shape, not a replacement digit:
 
-- ADR Consequences: three → four render paths, naming the error path.
-- ADR Revisit-when: same.
-- ADR Round-3 note: 5-of-8 → 6-of-10, adding `symbols` to the Text list and `doc` to the Json
-  list.
-- ADR amendment-2 scope: record that `symbols` was collapsed by `8b396343` under a separate
-  directive, so the exclusion no longer holds and its revisit condition is spent.
-- `src/server.rs`: `= 37.` → `= 35.` in `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, and
-  `(37 pairs, 10 tools)` → `(35 pairs, 10 tools)` in `EXPECTED_ALIAS_PAIRS`.
-- `src/tools/core/types.rs`: state that `doc` is the one tool that both declares aliases and
-  writes its own `corrections`, so the object arm has a live production caller; and correct
-  `call_content`'s small-output comment, which claims the opposite. The array arm (`update.rs`'s
-  bare list) stays unverified — reaching it needs a catalog write.
+- **ADR Consequences** — three → **four** render paths, and now ENUMERATED (buffered envelope,
+  `OutputForm::Text` compact render, pretty-JSON value, error path) rather than totalled, with the
+  derivation named: every consumer of `param_corrections` in `src/tools/core/types.rs`. The
+  pretty-JSON entry says explicitly that it is ONE site serving TWO emitters, because that is where
+  a reader re-deriving from branch arms gets five instead of four. Plus the shape the flat count
+  hid: path 4 holds **three outcomes across two shapes**, and only the shape count bounds the
+  advisory's addresses.
+- **ADR Revisit-when** — the load-bearing one. Not "three → four": a fixed list is exactly what
+  misled twice. It now opens *"do not read this trigger's own count as the search space"*, cites
+  both times the trigger fired at a site the then-current count did not contain (`295a928e` at
+  three, `4629a95b` at four), and instructs re-derivation from two named surfaces first.
+- **ADR Round-3 note** — five-of-eight → **six of ten**, with both halves derived in place: the ten
+  `param_aliases()` overrides, and the rule that `OutputForm::Json` is the trait default while every
+  `output_form()` override in the tree returns `Text`, so the split is exactly "does it override".
+  Names `tree`/`library`/`memory` as the three Text overrides that declare no aliases, since an
+  `output_form()` grep alone over-counts that side.
+- **ADR amendment-2 scope** — dated `OVERTAKEN 2026-09-11 by 8b396343` and kept, per the brief and
+  per CLAUDE.md's test: a reader would act wrongly without it, because it is the only thing
+  explaining why a decision recorded there looks contradicted by shipped code. It also records that
+  the collapse was funded by a finding the exclusion's own ambiguity-cost argument never
+  contemplated — the transferable lesson for the two exclusions still standing.
+- **`src/server.rs`** — `= 37.` → `= 35.`, `(37 pairs, 10 tools)` → `(35 pairs, 10 tools)`. Origin
+  found: `8b396343`'s own commit message reported its change as *"35 -> 37"* when the pre-collapse
+  population was **33 over nine tools**, and both numbers were transcribed. The comment now states
+  why it survived — `every_declared_alias_pair_normalizes_to_its_own_canonical` compares the two
+  ARRAYS and never the prose, so the sentence can hold any integer and the gate stays green.
+- **`src/tools/core/types.rs`** — `merge_param_corrections`' self-contradicting sentence replaced
+  with the derived fact (`doc` is the one tool that both declares aliases and writes its own
+  `corrections`, so the object arm always had a live production caller), and `call_content`'s
+  small-output comment, which told the next reader the opposite, corrected. That comment now names
+  the consequence as a **live gap**: the object arm has no test because the false claim left nobody
+  a reason to write one.
 
-Per CLAUDE.md § Parsers Over a Namespace, make the text current and delete the past rather than
-adding a "formerly three" note — `git log` already holds it.
-
+**On history:** the superseded counts are deleted, not annotated — `git log` holds them. The one
+exception is the `8b396343` exclusion, dated and kept for the reason above.
 ## Tests added
 
-None. A gate that pins a number written in prose reds on every rewording, which this repo
-deliberately avoids. The affordable half already exists for `EXPECTED_ALIAS_PAIRS` (the length
-assertion against the per-tool table); it simply does not read the comment.
+None, and the reason is unchanged: a gate pinning a number written in prose reds on every
+rewording, which this repo deliberately avoids. The affordable half already exists for
+`EXPECTED_ALIAS_PAIRS` (its length asserted against the per-tool table) and simply does not read
+the comment — which the comment now says out loud, so the next reader is not left to infer that
+the prose is covered.
 
+One gap this investigation surfaced and did NOT close, recorded so it is not lost:
+`merge_param_corrections`' **object arm** has no test, despite firing in production on every
+`doc(action="find")` call that carries both an alias and a lifted top-level param. It was believed
+unreached because of claim 5, which is why no one wrote one. Named at the site.
 ## Workarounds
 
 Derive any of these counts from the code before citing it. The commands are in *Reproduction*.
