@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: investigating
 tags:
 - cluster/guard-narrower-than-its-name
 - provenance
@@ -13,7 +13,6 @@ related:
 - docs/issues/archive/2026-09-07-file-provenance-reads-bash-but-not-codescouts-own-shell.md
 - docs/issues/archive/2026-09-08-the-provenance-selector-kept-the-pre-rename-tool-name.md
 severity: high
-unverified: the transcript-boundary cause is inferred from the refusal text plus the direct-write/subagent-write discriminator; the parser in scripts/file-provenance.py has not been read against the subagent transcript path to confirm which files it globs
 ---
 
 # BUG: subagent writes produce no transcript record, so `file-provenance.py` returns UNKNOWN for every file an SDD task writes — and `fmt-mine.sh`, the gate's first command, cannot format any of them
@@ -85,41 +84,56 @@ Seven Claude sessions share this checkout; `subagent-driven-development` is in a
 
 ## Root cause
 
-**The substrate carries no subagent records.** Measured 2026-09-10 over this profile's
-transcripts for this project:
+> **Corrected 2026-09-11.** The cause recorded here until now — *"the substrate carries no
+> subagent records"* — was **false**, and the correction changes what the fix has to be. The
+> boundary is a **Claude Code version**, not the substrate. The original reading and how it was
+> reached are kept below, because a reader who saw only the correction would repeat the inference.
 
-```
-transcript lines:  111,968
-"isSidechain":true      0
-"isSidechain":false   88,044
-```
+**Measured 2026-09-11 across five profiles, counted by transcript file:**
 
-The field is present on 88,044 records and **never true**. An independent count over all
-profiles (579,518 lines) by a second reader returned the same zero — two different scopes,
-same result, so this is the substrate rather than one profile's quirk.
+| Claude Code | dispatch tool | files carrying `isSidechain: true` |
+|---|---|---|
+| 2.0.26 – 2.0.32 | `Task` (284 calls) | **732** |
+| 2.1.220 – 2.1.268 (41 versions) | `Agent` (1,928 calls) | **0** |
 
-`file-provenance.py` attributes by walking `message.content[].tool_use` blocks and matching the
-tool name against `CS_WRITE_TOOLS` / `NATIVE_WRITE_TOOLS` (`:58-69`), reading the write target
-from the call's path keys (`:384-387`). With no subagent records in the file, that loop never
-sees a subagent's `create_file` — so the attribution is not wrong, it is **absent**.
+No profile spans the boundary, so version and profile stay confounded in this corpus, and the
+claim is stated at the strength the data supports: **across 41 distinct 2.1.x versions and 1,928
+dispatches there is not one subagent record.** That is not a transient defect in one build.
+`isSidechain` is written on every 2.1.x record and is never true.
 
-**And the script documents handling for the records that do not exist.** `:450-452`:
+**Why two counts agreed and were both wrong.** The original pair — one profile, then all profiles
+— read as independent scopes. Every profile in the codescout set runs 2.1.x, so widening the
+profile set never crossed the only boundary that mattered: one blind spot counted twice, which at
+the point of use is indistinguishable from corroboration (`CLAUDE.md` § *Observer Blindness*,
+*check independence, not agreement*).
+
+**The confirming half, published as a denominator rather than absorbed as a catch.** This
+profile/project now reads **0 of 240,108** records against the filed 0 of 88,044 — a 2.7× larger
+denominator, same zero. Within 2.1.x the original measurement reproduces exactly. It was the
+inference from it that failed, not the count.
+
+**`extra.unverified` is resolved.** The parser was read against the subagent path: the attribution
+loop globs `d.glob("*.jsonl")` over `transcript_roots(root)` and walks `message.content[]`
+`tool_use` blocks, matching names against `CS_WRITE_TOOLS` / `NATIVE_WRITE_TOOLS` and reading the
+write target from the call's path keys. There is no second location it fails to glob — a 2.1.x
+session that dispatched 3 `Agent` subagents holds exactly **one** `sessionId` (its own) across
+13,563 records, carrying only the parent's write calls. So the attribution is **absent rather than
+mis-parsed**, and no parsing change recovers it.
+
+**And the script documented handling for records that do not exist.** Its comment read:
 
 > *"The record's own sessionId beats the filename: a sidechain (subagent) record carries the
 > PARENT's id, which is the session a human can actually be asked about."*
 
-That is a correct-sounding rule for a record shape the transcripts never contain. The branch is
-unreachable, and its presence is what makes the gap invisible on a read: anyone auditing the
-script for subagent coverage finds a comment saying it is handled.
+A correct-sounding rule for a record shape 2.1.x never emits. The branch was unreachable, and its
+presence is what made the gap invisible on a read: anyone auditing the script for subagent
+coverage found a comment saying it was handled. Replaced in `ada993d6`.
 
 **A false diagnosis this defect invites, recorded because it was made here.** The Task 1
 implementer reported the cause as *"the provenance heuristic can't see writes made through
-codescout's MCP tools"*, and the controller relayed it. That is false — `:58-65` lists
+codescout's MCP tools"*, and the controller relayed it. That is false — `CS_WRITE_TOOLS` lists
 `mcp__codescout__create_file`, `edit_file` and `edit_code` explicitly. The MCP tools are covered;
 the *subagent* is not. Both stories predict the same observed `UNKNOWN`, and only one is true.
-
-Measured 2026-09-10 by the counts above; predicate read at `285064ad`.
-
 ## Second instance, with the refusal text and a clean discriminator (2026-09-10)
 
 An SDD fix round wrote `src/tools/core/types.rs` and `src/tools/core/tests.rs`, then ran the gate:
@@ -224,25 +238,35 @@ plus the post-`cargo fmt` diff, neither of which reads a transcript.
 
 ## Fix
 
-Not implemented. The attribution cannot be recovered from a substrate that holds no record, so
-every option below changes *what is read* rather than how it is parsed.
+**Fix 3 is shipped** — `ada993d6`, patch-id `26757097c11e0bbdc9b091a8f0f09ae960cbf902`. The dead
+sidechain comment is replaced by the measurement above, and the `UNKNOWN` refusal now names
+subagent writes beside Bash writes with the consequence a reader actually needs: for an
+`Agent`-written file **there is no owner recorded to ask**, so stop looking for one. Verified by
+rendering it against a real `UNKNOWN` path rather than read back from the source. The module
+header carries the same, marked *total* rather than heuristic — the two blind spots differ in kind,
+and listing them flat would misprice the subagent one.
+
+**Fixes 1 and 2 remain open, and the correction makes them MORE owed, not less.** § Resume set an
+escape condition — *"if a harness update ever begins emitting subagent records, parts 1 and 2
+become unnecessary"*. The update ran the other way: 2.1.x **stopped**. The condition that would
+have retired them is not merely unmet, it has moved further out of reach, so waiting on a harness
+fix is not a plan.
 
 **1 — Have the controller record its dispatches.** The controller knows the sessionId it
 dispatched under and the plan/task it dispatched for. Writing a small provenance sidecar per SDD
 task (git-ignored, under the plan's `.superpowers/sdd/<plan>/` workspace) gives
-`file-provenance.py` a second source it can read, keyed by path. Cheapest of the three and needs
-no harness change.
+`file-provenance.py` a second source it can read, keyed by path. Needs no harness change.
 
 **2 — Attribute uncommitted state from the working tree instead.** `git status --porcelain` plus
 mtime cannot name a session, but it can answer the question `fmt-mine.sh` actually needs: *is any
-file dirty that this session did not touch?* That is a narrower question than authorship and is
-answerable without transcripts.
+file dirty that this session did not touch?* A narrower question than authorship, and answerable
+without transcripts.
 
-**3 — Delete the unreachable sidechain branch and say so at the refusal site.** Independent of 1
-and 2, and owed regardless: the comment at `:450-452` asserts coverage that does not exist, and
-the refusal text should name subagent-written files as a known blind spot so the reader stops
-looking for an owner who was never recorded.
+Alternatives, not stages. The choice is a design decision rather than a measurement, which is why
+this file stays open with fix 3 landed rather than being closed.
 
+Fix SHA: ada993d6 *(fix 3 only — 1 and 2 not yet fixed)*
+Patch-id: 26757097c11e0bbdc9b091a8f0f09ae960cbf902 *(fix 3 only)*
 ## Tests added
 
 None — not fixed. A regression test for part 3 is cheap and worth stating: assert the refusal
@@ -258,11 +282,27 @@ dirty, then run `cargo fmt` directly — the documented fallback. Do **not** cit
 
 ## Resume
 
-Decide between fix 1 (controller sidecar) and fix 2 (working-tree question) — they are
-alternatives, not stages. Ship fix 3 either way. Before starting, re-run the `isSidechain` count:
-if a harness update ever begins emitting subagent records, parts 1 and 2 become unnecessary and
-only the stale comment needs removing.
+Fix 3 is done and the root cause is corrected. **Do not re-run the `isSidechain` count as this
+section previously instructed** — it has been run at a wider scope than that instruction intended
+(five profiles, grouped by version) and the answer is in § Root cause. Re-running it per-profile
+returns the same zero for the same reason, and reads as confirmation of the claim it actually
+falsified.
 
+What is left is one decision: **fix 1 (controller sidecar) or fix 2 (working-tree question)**.
+Fix 2 is the smaller claim — it answers `fmt-mine.sh`'s real question (*is anything dirty that I
+did not touch?*) without attributing authorship at all — and is worth pricing first for exactly
+that reason, since authorship is the part the substrate cannot give back.
+
+**Re-check one thing before building either:** whether 2.1.x records subagent activity anywhere
+*outside* `$CLAUDE_CONFIG_DIR/projects/*/*.jsonl`. What was checked is that no second `sessionId`
+appears inside the parent's own file; what was **not** checked is whether the harness introduced a
+separate directory alongside the `Task` → `Agent` move. If such a location exists, both fixes
+collapse to a glob change.
+
+**This is the third provenance defect on a version or rename boundary** — the other two are in
+`extra.related`. All three sit in provenance/gate tooling, so the class does not yet meet the
+≥ 2-subsystem half of the promotion bar. Named here so the fourth is recognised rather than
+re-diagnosed.
 ## References
 
 - `scripts/file-provenance.py:58-69` — the selector, which is correct.
