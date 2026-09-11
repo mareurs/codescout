@@ -6,7 +6,7 @@ title: peer idle-timeout test is the third load-sensitive step in a class fixed 
 tags:
 - cluster/repro-env-diverges-from-gate-env
 closed: 2026-09-09
-last_observed: 2026-09-08
+last_observed: 2026-09-11
 opened: 2026-09-01
 owner: marius
 related:
@@ -724,6 +724,40 @@ also the run in which three byte-budget tests reddened for an unrelated reason (
 edits), so the machine was carrying a heavier-than-usual load *and* the run was not clean. That
 makes it a weaker datapoint than the tenth or eleventh observations, which pin no-byte-difference
 and within-run pairs respectively. Recorded at that strength, not above it.
+
+
+### Fifteenth observation, 2026-09-11 — the OTHER ARM of the fourteenth's test, which is the class's own thesis at the smallest possible scale
+
+**The member.** `tools::run_command::tests::a_red_attaches_wip_authors_on_the_buffer_only_arm`
+failed inside `cargo test --workspace`. **5/5 green in isolation at ~0.25s each**, immediately
+after, with no skips. Its pre-check control passed — `wip_author_diagnostic` returned `Some`, so
+the engine answered — and then the buffer-only arm, reaching the same engine through
+`handle_successful_output`, got no field. Identical reading to the fourteenth.
+
+**Why it is worth a row given the fourteenth exists.** It is the *sibling arm of the same test*,
+fourteen lines away in one file. The fourteenth is the **main** arm; this is the **buffer-only**
+arm, reached only when combined output exceeds `4 * MAX_INLINE_TOKENS`, and the test's own comment
+says the padding is load-bearing precisely because shrinking it *"silently re-tests the main arm"*.
+So the two are distinct guarded sites by their author's explicit design — and the class produced
+the second one anyway, nine days after the first. This file's § *Why this is a class instance*
+argues that fix-per-observed-instance keeps yielding a new step; the step this time was not a new
+subsystem or a new test but **the adjacent arm of a test already on the list**, which is the
+tightest version of that claim the corpus has. `CLAUDE.md` § *Testing Discipline*: *"Mutate once
+per guarded SITE, not once per feature."*
+
+**What this observation does NOT claim.** It does not name load, and the temptation to was strong:
+the machine was carrying my own four-command gate plus at least two peers building. But the
+frontmatter's `unverified:` field already records that both prior load claims were retracted — one
+by its own reporter the same day — and that the twelfth observation caught a *loaded run that
+passed*. Five isolated passes have no power against this base rate, and reading them as a factor
+would repeat this file's documented mistake with less data than the sessions that made it. Recorded
+as a **denominator**: one more member of the population, no movement on cause.
+
+**Rests on:** the failing run is the four-command gate at HEAD `e9c6553c`'s parent, whose two reds
+were both pre-existing and neither reachable from that session's markdown-only diff; the five
+isolation runs immediately following, `cargo test -p codescout --lib
+tools::run_command::tests::a_red_attaches_wip_authors_on_the_buffer_only_arm -- --exact`. Reported
+by sessionId `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`.
 ### Option 2 — the enumeration, done 2026-09-08 by `ad379a7c`
 
 **The count this file asked for is 14**, not three — the *"different conversation"* branch the
