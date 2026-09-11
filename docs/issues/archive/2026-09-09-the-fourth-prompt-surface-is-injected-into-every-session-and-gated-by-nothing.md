@@ -1,7 +1,7 @@
 ---
-id: '791e8e020a191839'
+id: 0305461d34bc8b34
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the fourth prompt surface is injected into every session and covered by no gate — the other three have a mechanism, it has a sentence'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - cluster/guard-narrower-than-its-name
 - prompts
 - gates
+closed: 2026-09-11
 ---
 
 ## Summary
@@ -128,20 +129,73 @@ Not asserted here as a defect; noted so the next reader does not have to re-deri
 
 ## Fix
 
-Not applied. Two shapes, in preference order:
+> **FIXED 2026-09-11 on `experiments`** — `3f1bd5df`, patch-id
+> `86ca07a38f7904c4339c0b3f99219374ef5db3dc`. Shape **1**: the file is now the fourth entry in
+> `prompt_surfaces_reference_only_real_tools`. Shape 2 (derive the list) is still what `IC-14`
+> asks for and is still the larger job; this closes the instance.
+
+### The reproduction falsified two claims in the plan below, which is why it is run first
+
+**(1) "It needs a read from disk rather than a constant" — offered as the reason this was never
+added. Two sibling gates already read disk files.**
+`companion_surfaces_reference_only_real_tools` reaches `../claude-plugins/…` through
+`CARGO_MANIFEST_DIR`, and `claude_md_contains_no_deprecated_tool_names` reads `CLAUDE.md` and
+panics when it cannot. The machinery existed, three functions away; only the entry was missing.
+
+**(2) "the case where the file is absent — a fresh clone before `onboarding` has run". The file
+is TRACKED.** `git ls-files --error-unmatch .codescout/system-prompt.md` resolves, so a fresh
+clone *has* it and absence means a broken checkout instead. The plan's instinct — *absent must
+not be silently green* — was right and its **reason** was wrong, and the reason is what picks the
+remedy: not a skip-with-warning for a legitimately-empty state, but a `panic!`, same shape as
+`claude_md_contains_no_deprecated_tool_names`.
+
+**Runtime read, not `include_str!`.** A compile-time include bakes the bytes into the test binary,
+so verifying this gate's own red would cost a full rebuild. The runtime read made the mutation
+below observable in seconds — on a shared checkout that is the difference between a blink and a
+window other sessions build through.
+
+### Wiring it in produced six findings, and the split is the interesting half
+
+Two are non-tool nouns in **bare** form and went to the shared allowlist, where the two-way
+tripwire tracks them: `onboarding_prompt` (a prompt *slice*) and `experiments` (the branch).
+
+Four are **Rust methods in call form** — `call(`, `call_content(`, `with_project(`,
+`call_tool_inner(`. The call-form pass shipped with **no allowlist**, on a measurement taken over
+`source.md`: *"`(` is self-anchoring — English prose does not put an open paren flush against a
+snake_case word"*. True of a **prose** surface; false of one whose whole purpose is documenting
+**code entry points**. That is this bug's own class — `guard-narrower-than-its-name` — recurring
+one level down, and reachable only by widening the population.
+
+They are kept in a **separate** list, load-bearing rather than tidy: the tripwire counts bare-form
+hits only, and the call-form pass sits behind `cfg!(feature = "librarian")`. An entry appearing
+*only* in call form would score zero hits in **both** lanes and be reported as an unused allowlist
+entry — redding the lean lane on a token that is present and correct. The original comment
+predicted precisely this (*"if one ever does … the tripwire still reports it unused"*); this was
+that day. The cost — a second list cannot decay-detect — is stated at the site.
+
+### Observed red, two-sided, by mutating the production file
+
+| mutation appended to `.codescout/system-prompt.md` | result |
+|---|---|
+| bare `` `read_markdown` `` (a retired name) | exit 101 — *"looks like a tool name but is not registered"* |
+| call form `` `frobnicate(path)` `` | exit 101 — *"is written as a tool CALL but names no registered tool"* |
+
+Both passes reach the new surface, so neither is inert. File restored and **verified restored**:
+sha256 before == after, `git diff` clean. The gate passes in **both** lanes (1 and 1).
+
+---
+
+Original plan, preserved because shape 2 is still open:
+
+Two shapes, in preference order:
 
 1. **Add the file to the gate's `surfaces` list.** Cheapest, and directly expresses the claim the
-   gate's name already makes. It needs a read from disk rather than a constant, and a decision
-   about the case where the file is absent — a fresh clone before `onboarding` has run. **Absent
-   must not be silently green**: that is the monotone direction, and it is the state most
-   repositories are in.
+   gate's name already makes.
 2. **Generalise to "every committed prompt surface"**, deriving the list rather than enumerating
    it, so a fifth surface is covered on arrival.
 
 Shape 2 is what `IC-14`'s row asks for (*the mechanizable sub-shape is a name-to-predicate
 comparison*) but is the larger job; shape 1 closes this instance.
-
-
 ## Tests added
 
 None — nothing is fixed. The regression test must be **two-sided**, because an assertion that the
@@ -173,3 +227,31 @@ and write the two-sided test. Demand an observed red by mutating the production 
 - `CLAUDE.md` § *Docs* — names the fourth surface and prescribes the sweep-by-hand policy
 - `docs/trackers/skill-frictions.md` SKF-22 — a trigger the model must notice is a policy
 - `docs/trackers/issue-clusters.md` IC-14 — `guard-narrower-than-its-name`
+
+## Fix provenance
+
+- **SHA:** `3f1bd5df` (on `experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `86ca07a38f7904c4339c0b3f99219374ef5db3dc` — content hash of the diff; survives rebase and cherry-pick.
+
+**Staged by filtered patch, not `git add`.** `src/server.rs` also held another session's
+uncommitted alias work (7 hunks, lines 2914–3191). `git add -- <path>` is path-granular and
+hunk-blind, so it staged all 13; the capture was caught by reading `git diff --cached` *before*
+committing, the index restored with `git restore --staged` (index only, working tree untouched),
+and the 6 owned hunks staged via `git apply --cached` of a filtered patch. Those bytes were never
+written by this session. The split was verified rather than assumed — the staged blob is
+rustfmt-clean, which a mangled apply would not be, and the owned hunks reference none of the
+identifiers the other's introduce.
+
+**Whose they are is deliberately not named.** `scripts/file-provenance.py` reported this file
+`MINE` with no peer listed, both before and after those hunks were in the tree — `MINE` fires on
+`not peers`, i.e. *no peer detected* (`:550`), and the coverage caveat is attached only to the
+`UNKNOWN` branch. The obvious candidate was eliminated positively (all 8 of their commits checked
+with `git diff-tree ... -- src/server.rs`, eight blanks, and they hold nothing uncommitted), which
+narrows the population without identifying anyone. Naming the session running the alias-collapse
+plan would be routing by adjacency, which this repo treats as anti-evidence.
+
+**The red test that accompanied this work is absent at `HEAD`.**
+`tools::symbol::tests::a_raw_alias_key_reaching_call_directly_is_not_a_name_argument` exists only
+in the worktree, so `HEAD` is not red for it and there is no regression to bisect — the red is
+somebody's in-flight state. Stated against `HEAD` rather than the worktree because on this
+checkout the two disagree exactly while a sweep is in flight.

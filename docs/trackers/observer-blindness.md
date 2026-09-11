@@ -2657,10 +2657,12 @@ shape recurs with a different category ("test-only", "config-only", "generated f
 make the class about **imported categories** rather than about docs. **A candidate was tested and
 deliberately NOT counted:** `.codescout/system-prompt.md` is generated, committed, injected into
 every session and gated by nothing
-(`docs/issues/2026-09-09-the-fourth-prompt-surface-is-injected-into-every-session-and-gated-by-nothing.md`),
+(`docs/issues/archive/2026-09-09-the-fourth-prompt-surface-is-injected-into-every-session-and-gated-by-nothing.md`),
 which is the *generated files* category exactly — but the file is clean, so no author has skipped
 verification behind it. Confirming a place to watch and logging an instance are different claims,
-and only the second promotes.
+and only the second promotes. *(Gated 2026-09-11 at `3f1bd5df`; the candidate stays uncounted for
+the same reason, and the watch is now discharged by a mechanism rather than by the file happening
+to be clean.)*
 
 ## Template for new entries
 
