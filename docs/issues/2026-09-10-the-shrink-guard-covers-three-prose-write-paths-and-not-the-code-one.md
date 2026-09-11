@@ -7,7 +7,7 @@ owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
-unverified: 'Advisory only — edit_code(action="replace") WARNS and does not refuse, so a caller who ignores the warning still loses the code. The class-closing set-difference test the Fix section prescribed is NOT shipped (see ''What is still owed''), and src/tools/create_file.rs (overwrite: true) is an unexamined fifth destructive-write surface.'
+unverified: 'Advisory only - edit_code(action=replace) WARNS and does not refuse, so a caller who ignores the warning still loses the code. src/tools/create_file.rs (overwrite: true) remains unguarded, now recorded in the class gate''s EXEMPT list with its reason rather than silently. The class gate proves each surface''s module CONTAINS a guard call, not that the call runs on the right operands.'
 ---
 
 # BUG: the shrink guard covers three prose write paths and not the code one
@@ -156,25 +156,25 @@ prescribed is therefore not shipped either; there is nothing to escape.
 
 ### What is still owed
 
-**The class-closing set-difference test is NOT shipped**, and the reason is worth recording because
-the obvious derivation fails in both directions.
+**Shipped at `638b1e02`** as three tests in `src/server.rs`'s test module: `every_content_bearing_tool_is_shrink_guarded_or_has_a_reason`, `every_guarded_call_site_still_holds_its_guard`, and `the_content_bearing_population_is_not_vacuous`. They live in `src/server.rs` rather than `tests/` because `CodeScoutServer::tools` is private, so no integration test can enumerate the registry.
 
-The prescribed shape was *"every entry point to a guarded operation appears in
-`references(shrink_guard::check)`"*. That needs a population. Measured 2026-09-11, deriving it as
-*"source files that read existing content and then write over it"* (`read_to_string` ∧
-{`atomic_write`, `fs::write`, `write_lines`}) yields **70 files under `src/`, of which 66 would need
-an exemption** — a list nobody reads, which would register as coverage while checking nothing. A
-coverage ratio that is neither ~0% nor ~100% is a boundary drawn by the predicate, not drift in the
-code.
+The population is derived from the **tool registry**, not from a grep over write primitives, and the difference is why the first attempt was abandoned. Deriving it as *"source files that read existing content and then write over it"* selected **70 files under `src/`, 66 needing an exemption** (a list nobody reads, registering as coverage while checking nothing) and it **missed `create_file`**, which overwrites without reading and so matched neither half of the conjunction. Schema-derived (`body` / `content` / `new_string` at the top level of a tool's input schema) it selects **5 of 21 tools**, with the known answer intact: `doc`, `edit_file`, `memory` and `edit_code` guarded, `create_file` exempt with its reason.
 
-And the same derivation **misses a real fifth surface**: `src/tools/create_file.rs` documents that
-*"`overwrite: true` replaces an existing file"*, writes caller-supplied content over it, and never
-appears in that 70-file scan — because it does not read the file it overwrites, so it cannot compute
-a shrink report without an extra read it does not currently perform.
+Each test was driven to an observed RED, one of them by mutating the **production** path rather than the test's own lists:
 
-So the honest population is *"writes caller-supplied content over existing user content"*, which is
-not expressible as a grep over read/write primitives. Designing it is its own pass. Until then this
-instance is closed and the class is not.
+- delete the guard call in `edit_code.rs` -> `every_guarded_call_site_still_holds_its_guard` RED
+- drop `edit_code` from `GUARDED` -> `every_content_bearing_tool_is_shrink_guarded_or_has_a_reason` RED
+- typo `CONTENT_PROPS` -> `the_content_bearing_population_is_not_vacuous` RED
+
+The third is the one worth keeping. With the predicate typo'd the population is empty and **both other gates pass**: *"every content-bearing tool is guarded"* is trivially true of zero tools, and the call-site check never consults the population. One typo in one const silently disarms the whole gate while showing green.
+
+**What the class gate does NOT prove**, stated because a reader would otherwise credit it with more: it establishes that each surface's module *contains* a guard call, not that the call runs on the right operands or is reachable. A guard handed the whole file instead of the replaced range satisfies it. That property is per-surface and belongs to the surface's own tests.
+
+### Still genuinely owed
+
+`src/tools/create_file.rs` under `overwrite: true` remains unguarded, but now explicitly rather than invisibly: it sits in the gate's `EXEMPT` list with its reason, so it is a recorded decision instead of a gap. It cannot compute a shrink report without a read it does not currently perform, which is a behaviour change rather than a wiring fix.
+
+And `edit_code` still **warns** rather than refusing, so the loss remains possible for a caller who ignores the warning. That is the operator's decision of 2026-09-11, not an oversight.
 ## Tests added
 
 `tests/symbol_lsp.rs`:
