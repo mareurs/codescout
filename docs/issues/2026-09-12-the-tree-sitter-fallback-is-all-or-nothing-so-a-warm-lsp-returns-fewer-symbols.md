@@ -239,6 +239,50 @@ The `in_walk` filter directly above is the tell that the two populations were al
 known to differ: it exists to drop LSP hits the walk did *not* accept (gitignored build
 output). Nothing does the converse — admit walk-visible files the LSP did not return.
 
+
+**The third mechanism, measured at the PROTOCOL on 2026-09-12 — and it is not a codescout
+defect.**
+
+Every earlier reading was confounded: a query the LSP answers with nothing falls through to
+the tree-sitter arm, and the two arms' output is not distinguishable from outside. So this
+was taken by driving rust-analyzer over stdio directly, with no codescout in the path
+(`scripts/probe-ra-ws-symbol.py`, 90s index wait, toolchain `1.97.1`).
+
+```
+workspace/symbol "parse"     ->  11 symbols,   6 in-tree,  0 named exactly `parse`
+                                 kinds: Package(4) x5, Enum(10) x1, Struct(23) x5
+                                 NO functions at all
+workspace/symbol "classify"  ->  73 symbols,  73 in-tree,  6 named exactly `classify`
+                                 kinds: Module(2) x3, Function(12) x70
+workspace/symbol "parse#"    -> 128 symbols, 128 in-tree,  all Function(12)
+```
+
+**rust-analyzer genuinely does not return the eight `parse` functions for a bare `parse`
+query.** It returns six in-tree symbols, all of them types. The eight exist, are `pub fn`,
+and are in the workspace. `classify` proves this is not a blanket "types only" rule —
+that query returns functions, including the six named exactly `classify`. What separates
+the two queries is not established here and is a rust-analyzer question, not a codescout
+one.
+
+**So the finding reframes the bug rather than extending it.** The tree-sitter pass is not
+a fallback for files the LSP cannot index. It is **load-bearing for correctness on queries
+the LSP answers INCOMPLETELY** — and `matches.is_empty()` suppresses it precisely when the
+LSP returned *something*, which is exactly the case where that something may be a subset.
+The predicate is not merely too coarse; it is anti-correlated with the need.
+
+**This partially rehabilitates the rejected per-file union (§ Fix option 1).** It was
+rejected because `lsp_seen` is query-scoped and so cannot decide coverage. That objection
+stands. What has changed is the requirement: if an LSP answer can be an arbitrary subset of
+the true answer, then **no** coverage predicate computed from the response can be correct,
+and the only sound shape is to run tree-sitter over the accepted files regardless and
+deduplicate against the LSP's results. That is the expensive option, and it is now the only
+one not known to be wrong. Pricing it is the open work.
+
+**Do NOT prescribe the `#` suffix as the fix without more work.** The `parse#` run returned
+exactly `128` symbols — a cap — whose names do not contain the query at all
+(`a_backslash_path_survives_the_delete_payload_round_trip`, `a_blank_imperative_is_refused`,
+…). Whatever `#` does there, it is not "the same query, including functions", and shipping
+it would trade a silent subset for a different silent subset.
 ## Evidence
 
 - `src/tools/symbol/symbols.rs`, `search_project_symbols` — `if matches.is_empty()` gating
