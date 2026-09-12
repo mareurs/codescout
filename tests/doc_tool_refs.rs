@@ -313,10 +313,129 @@ struct Cite {
     text: String,
 }
 
+/// One call found on one line: what it names, what it claims, and whether the scanner could
+/// read it at all.
+#[derive(Debug)]
+struct LineCall {
+    tool: String,
+    params: Vec<String>,
+    /// The argument span closed its `(` with a `{` or `[` still open. The call is malformed
+    /// — or the scanner has met a shape it reads wrongly — and either way its `params` are a
+    /// guess. See [`a_documented_call_closes_its_own_literals`].
+    ///
+    /// **Both halves of the condition are load-bearing, and the corpus is what taught it.**
+    /// Flagging `nest > 0` alone fired on 8 correct documents, every one a call whose
+    /// arguments WRAP across lines: the scan is per-line, so such a line ends with its `(`
+    /// still open and its literal still open, which is indistinguishable from malformed by
+    /// depth alone. Requiring the parenthesis to have CLOSED separates them — a wrapped call
+    /// never reaches `)`, a malformed one does. Wrapped calls are a silent-miss shape, not a
+    /// false-RED one, and belong to the scanner's own bug file rather than to this gate.
+    unclosed: bool,
+}
+
+/// The per-line core of [`anchored_cites`], extracted so that the inputs this scanner reads
+/// WRONG can be written as tests at all.
+///
+/// The extraction is part of the fix, not tidying around it. This defect is `IC-6` — a legal
+/// syntax the scanner cannot represent — and that class's signature is *"no test can be
+/// written, because the case cannot be expressed"*. Here that was true in a second, concrete
+/// way: the only entry point walked the filesystem, so a fixture had nowhere to live except
+/// the corpus this gate scans, and planting one there makes the gate's own input a fixture.
+/// A pure function over one line gives the case somewhere to exist.
+fn calls_on_line(line: &str) -> Vec<LineCall> {
+    // Compiled once, not per line. The first cut of this extraction built all three inside
+    // the function, so they were rebuilt for every LINE of every surface, taking this suite
+    // from 0.32s to 133s. Invisible to every assertion here — all four tests still passed,
+    // because a 400x slowdown is not a wrong answer. Recorded rather than quietly fixed: a
+    // pure per-line function is the right shape for testability and the wrong shape for regex
+    // construction, and the two are reconciled here rather than by giving up either.
+    static OPEN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static ARG: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static QUOTED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let open = OPEN.get_or_init(|| regex::Regex::new(CALL_OPEN).unwrap());
+    let arg = ARG.get_or_init(|| regex::Regex::new(NAMED_ARG).unwrap());
+    let quoted = QUOTED.get_or_init(|| regex::Regex::new(r#""[^"]*"|'[^']*'"#).unwrap());
+
+    let mut out = Vec::new();
+    for c in open.captures_iter(line) {
+        let tool = c[1].to_string();
+        let after = c.get(0).unwrap().end();
+        // The argument list, bounded by BALANCED delimiters and taken at this call's own
+        // depth only. Every clause below is load-bearing.
+        //
+        // Running to the last `)` on the line billed a neighbouring call's arguments to this
+        // one — `artifact_augment(merge=…)` sitting after `artifact(…)` produced a phantom
+        // `artifact(merge=`, and the report was 20 violations of which 14 were that. Taking
+        // nested PAREN depth would bill an inner call's arguments to the outer one.
+        //
+        // `{}` and `[]` count alongside `()` because a `key=value` inside an object or array
+        // literal is an argument of NOTHING — it is a field of that literal. Counting parens
+        // alone billed it to the enclosing call and produced a false RED naming a real tool
+        // and a real-looking parameter, with nothing pointing at the nesting as the cause.
+        // The corpus dodged it by writing `:` inside `{}`, which is the house style anyway —
+        // so a parser limitation silently dictated a prose convention.
+        //
+        // Delimiters inside a double-quoted string are not counted, because `json_path=
+        // "$.rows[*].id"` would otherwise open a literal that the rest of the span never
+        // closes, dropping every argument after it. Single quotes are deliberately NOT
+        // tracked: an apostrophe in prose ("the tool's `doc(action=…)`") is far commoner
+        // here than a single-quoted argument, and treating one as a string opener would
+        // swallow real calls. `quoted` below still blanks both for the `=` scan, where a
+        // stray apostrophe costs nothing.
+        let mut paren = 1usize;
+        let mut nest = 0usize;
+        let mut in_str = false;
+        let mut closed = false;
+        let mut span = String::new();
+        for ch in line[after..].chars() {
+            if ch == '"' {
+                in_str = !in_str;
+            } else if !in_str {
+                match ch {
+                    '(' => paren += 1,
+                    ')' => {
+                        paren -= 1;
+                        if paren == 0 {
+                            closed = true;
+                            break;
+                        }
+                    }
+                    '{' | '[' => nest += 1,
+                    '}' | ']' => nest = nest.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            if paren == 1 && nest == 0 {
+                span.push(ch);
+            }
+        }
+        // Blanked so an `=` inside a string literal (`grep(pattern="a=b")`) cannot be read as
+        // a named argument.
+        let span = quoted.replace_all(&span, "");
+        out.push(LineCall {
+            tool,
+            params: arg.captures_iter(&span).map(|a| a[1].to_string()).collect(),
+            unclosed: closed && nest > 0,
+        });
+    }
+    out
+}
+
+/// Flat `(tool, param)` view of [`calls_on_line`], for tests that do not care about
+/// malformedness.
+fn named_args_on_line(line: &str) -> Vec<(String, String)> {
+    calls_on_line(line)
+        .into_iter()
+        .flat_map(|c| {
+            c.params
+                .into_iter()
+                .map(move |p| (c.tool.clone(), p))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 fn anchored_cites() -> Vec<Cite> {
-    let open = regex::Regex::new(CALL_OPEN).unwrap();
-    let arg = regex::Regex::new(NAMED_ARG).unwrap();
-    let quoted = regex::Regex::new(r#""[^"]*"|'[^']*'"#).unwrap();
     let root = repo_root();
     let mut out = Vec::new();
     for path in present_tense_surfaces() {
@@ -329,41 +448,13 @@ fn anchored_cites() -> Vec<Cite> {
             .display()
             .to_string();
         for (i, line) in text.lines().enumerate() {
-            for c in open.captures_iter(line) {
-                let tool = c[1].to_string();
-                let after = c.get(0).unwrap().end();
-                // The argument list, bounded by BALANCED parens and taken at depth 1 only.
-                //
-                // Both halves are load-bearing. Running to the last `)` on the line billed a
-                // neighbouring call's arguments to this one — `artifact_augment(merge=…)` sitting
-                // after `artifact(…)` produced a phantom `artifact(merge=`, and the report was
-                // 20 violations of which 14 were that. Taking nested depth would bill an inner
-                // call's arguments too. Quoted spans are blanked first, so an `=` inside a string
-                // literal (`grep(pattern="a=b")`) cannot be read as a named argument.
-                let mut depth = 1usize;
-                let mut span = String::new();
-                for ch in line[after..].chars() {
-                    match ch {
-                        '(' => depth += 1,
-                        ')' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    if depth == 1 {
-                        span.push(ch);
-                    }
-                }
-                let span = quoted.replace_all(&span, "");
-                for a in arg.captures_iter(&span) {
+            for call in calls_on_line(line) {
+                for param in call.params {
                     out.push(Cite {
                         file: rel.clone(),
                         line: i + 1,
-                        tool: tool.clone(),
-                        param: a[1].to_string(),
+                        tool: call.tool.clone(),
+                        param,
                         text: line.trim().chars().take(110).collect(),
                     });
                 }
@@ -406,8 +497,23 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
     assert!(
         bad.is_empty(),
         "{} present-tense document(s) name a tool parameter that does not exist.\n\n{}\n\n\
-         Fix the document, or — if the parameter is proposed rather than shipped — move the \
-         claim to a spec or plan, which this scan deliberately does not read.",
+             Fix the document, or — if the parameter is proposed rather than shipped — move the \
+             claim to a spec or plan, which this scan deliberately does not read.\n\n\
+             IF THE PARAMETER LOOKS CORRECT, suspect the scanner before the document — and it \
+             will not volunteer this, so it is written here. It reads one LINE at a time and \
+             counts `()`, `{{}}` and `[]` outside double-quoted strings to find a call's own \
+             arguments. Two shapes it gets wrong:\n  \
+             - a `key=value` inside an object or array literal belongs to that literal, not to \
+             the call. That is fixed and pinned, but a THIRD nesting form would land here \
+             looking exactly like a real violation.\n  \
+             - single quotes are not tracked as strings (an apostrophe in prose is commoner \
+             here than a single-quoted argument), so `'a=b'` inside a call still reads as a \
+             named argument.\n  \
+             There is no escape at the citation site: a fenced block is not exempt and the \
+             scanner cannot be told to skip a line. Rewrite the example, and add the shape to \
+             the scanner's bug file rather than working around it silently — the last time a \
+             limitation here was worked around, it silently dictated a prose convention and \
+             nothing recorded that it had.",
         bad.len(),
         bad.join("\n\n")
     );
@@ -484,8 +590,11 @@ fn the_scan_is_not_reading_an_empty_corpus() {
     let cites = anchored_cites();
     assert!(
         cites.len() > 200,
-        "only {} anchored citations found across {} files — measured 313 on 2026-09-01, so a \
-             collapse to double digits means the regex or the walk is broken",
+        "only {} anchored citations found across {} files — measured 313 on 2026-09-01 and 713 \
+             on 2026-09-12, so this population GROWS with the corpus and a reading far above \
+             either is expected, not a defect. The floor is deliberately far below both: it \
+             exists to catch a collapse to double digits, which means the regex or the walk is \
+             broken, and it is not a ratchet.",
         cites.len(),
         surfaces.len()
     );
@@ -509,5 +618,170 @@ fn the_scan_is_not_reading_an_empty_corpus() {
     assert!(
         params.contains("action"),
         "doc's extracted schema has no `action` key — got {params:?}"
+    );
+}
+
+/// The reproduction from
+/// `docs/issues/2026-09-02-anchored-cites-tracks-parens-but-not-braces-so-nested-object-args-misattribute.md`,
+/// and the first test this scanner was ever able to have. Before `calls_on_line` was
+/// extracted, the only entry point walked the corpus, so expressing this case meant planting
+/// it in a document the gate scans — which is why an `IC-6` member sat filed-but-untested for
+/// ten days.
+///
+/// `prompt`, `params` and `inner` are fields of an object literal, so they are arguments of
+/// NOTHING. Billed to `doc`, each is a false RED naming a real tool and a plausible parameter.
+#[test]
+fn a_named_argument_inside_a_nested_object_is_not_billed_to_the_outer_call() {
+    let got = named_args_on_line(
+        r#"doc(action="augment", id="x", augment={prompt=1, params={inner=2}})"#,
+    );
+    let params: Vec<&str> = got.iter().map(|(_, p)| p.as_str()).collect();
+    assert_eq!(
+        params,
+        vec!["action", "id", "augment"],
+        "expected only `doc`'s own three arguments. Extra names mean literal nesting is being \
+         billed to the enclosing call (the filed defect); MISSING names mean the walker now \
+         over-suppresses and real citations are being dropped, which turns this whole gate \
+         green for the wrong reason. Both directions are failures and this assertion is \
+         deliberately an equality, not a `contains`."
+    );
+}
+
+/// Over-match guard for the fix above, and not a hypothetical one: `read_file(path,
+/// headings=[...])` is the exact shape of a live violation that `CALL_OPEN`'s own doc comment
+/// records this gate catching in the manual's *Recommended Workflow* table. A depth-aware
+/// walker that suppressed a `key=` merely for sitting NEAR a literal would lose it and look
+/// like a clean fix.
+#[test]
+fn a_key_whose_value_is_a_literal_is_still_billed_to_the_call() {
+    let got = named_args_on_line("read_file(path, headings=[...])");
+    assert!(
+        got.contains(&("read_file".into(), "headings".into())),
+        "`headings=` is the call's own argument — only its VALUE is nested. Suppressing it \
+         would silence a violation this gate is documented as having caught: {got:?}"
+    );
+}
+
+/// The second latent case named in the same bug: a delimiter inside a string literal was
+/// counted as real, because quoted spans are blanked only after the walk. An unbalanced one
+/// opened a literal the span never closed, dropping every argument after it — a SILENT loss,
+/// the opposite failure direction from the false RED above and the more dangerous one.
+///
+/// Fixed by making the walk quote-aware rather than by blanking the line first: blanking
+/// first would let a prose apostrophe (`the tool's ...`) swallow a real call.
+#[test]
+fn an_unbalanced_delimiter_inside_a_string_does_not_swallow_the_rest_of_the_span() {
+    let got = named_args_on_line(r#"grep(pattern="a[b", glob="x")"#);
+    let params: Vec<&str> = got.iter().map(|(_, p)| p.as_str()).collect();
+    assert_eq!(
+        params,
+        vec!["pattern", "glob"],
+        "the `[` lives inside a string literal and opens nothing. Losing `glob` means the \
+         walker counted it: every argument after an unbalanced delimiter in a string goes \
+         unscanned, and the gate reports green over them."
+    );
+}
+
+/// Pins the two behaviours the walker already had, so the depth change above cannot quietly
+/// cost either. The neighbouring-call case was measured: running to the last `)` on the line
+/// produced 20 reported violations of which 14 were phantoms billed across calls.
+#[test]
+fn the_walker_still_separates_neighbouring_calls_and_ignores_quoted_equals() {
+    let neighbours = named_args_on_line("artifact(id=1) and artifact_augment(merge=true)");
+    assert_eq!(
+        neighbours,
+        vec![
+            ("artifact".to_string(), "id".to_string()),
+            ("artifact_augment".to_string(), "merge".to_string()),
+        ],
+        "a neighbouring call's arguments must not be billed to this one: {neighbours:?}"
+    );
+
+    let quoted = named_args_on_line(r#"grep(pattern="a=b")"#);
+    assert_eq!(
+        quoted,
+        vec![("grep".to_string(), "pattern".to_string())],
+        "`a=b` is inside a string literal and names no parameter: {quoted:?}"
+    );
+}
+
+/// **The catch the depth fix would otherwise have SILENTLY removed, converted into a louder
+/// one.** `present_tense_surfaces`' own doc comment records this gate catching
+/// `augment={prompt: ..., params=...)` — a malformed call whose unclosed brace made the
+/// paren-only walker read `params=` as a top-level argument of `doc`. Counting braces makes
+/// that field fall at depth 1, so the malformed document would now pass unremarked.
+///
+/// Rather than accept that trade, the walker records `unclosed` and this reports it. The
+/// class's standing remedy is to say so at the refusal site: a scanner that cannot read a
+/// line should name it, not guess and not shrug.
+#[test]
+fn a_documented_call_closes_its_own_literals() {
+    let root = repo_root();
+    let mut bad: Vec<String> = Vec::new();
+    for path in present_tense_surfaces() {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (i, line) in text.lines().enumerate() {
+            for call in calls_on_line(line) {
+                if call.unclosed {
+                    bad.push(format!(
+                        "  {}:{}\n      `{}(` closes its parenthesis with a `{{` or `[` still \
+                         open\n      line: {}",
+                        rel,
+                        i + 1,
+                        call.tool,
+                        line.trim().chars().take(110).collect::<String>()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} documented call(s) close a parenthesis with an object or array literal still \
+         open.\n\n{}\n\n\
+         The document is almost certainly missing a `}}` or `]` \u{2014} that is the shape this \
+         caught when it was still doing so by accident, via a paren-only walker that billed \
+         the orphaned field to the enclosing call. A call whose arguments merely WRAP across \
+         lines is not this and is not reported here: its paren never closes on the line, so \
+         the two are distinguishable. If the call really is well-formed, the scanner has met \
+         a third shape — record it on its bug file rather than working around it silently.",
+        bad.len(),
+        bad.join("\n\n")
+    );
+}
+
+/// Non-vacuity for the gate above, in both directions. An `unclosed` flag that never fires is
+/// exactly the silence a correct corpus produces, so the passing side proves nothing on its
+/// own; and a flag that fires on everything would make the gate unreadable rather than wrong.
+#[test]
+fn the_unclosed_flag_fires_on_the_malformed_form_and_not_the_correct_one() {
+    let malformed = calls_on_line(r#"doc(action="augment", augment={prompt: 1, params=2)"#);
+    assert!(
+        malformed.iter().any(|c| c.tool == "doc" && c.unclosed),
+        "the historical malformed line must be flagged: {malformed:?}"
+    );
+    let correct = calls_on_line(r#"doc(action="augment", augment={prompt: 1, params: 2})"#);
+    assert!(
+        correct.iter().all(|c| !c.unclosed),
+        "the corrected form differs only by the closing brace and must NOT be flagged, or the \
+         gate reds on every well-formed nested call: {correct:?}"
+    );
+    // The arm the corpus added. Flagging `nest > 0` alone fired on 8 correct documents, all
+    // of this shape — a call whose arguments wrap, whose first line therefore ends with both
+    // its paren and its literal open. Requiring the paren to have CLOSED is what separates
+    // malformed from merely wrapped, and without this arm that distinction can be deleted
+    // with the two assertions above still green.
+    let wrapped = calls_on_line(r#"doc(update, id=X, patch={body_edits: [{"#);
+    assert!(
+        wrapped.iter().all(|c| !c.unclosed),
+        "a call whose arguments wrap across lines is not malformed \u{2014} its paren never closes on \
+         this line. Flagging it makes this gate red on correct documentation: {wrapped:?}"
     );
 }
