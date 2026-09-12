@@ -106,7 +106,7 @@ pub(super) fn format_hover(val: &Value) -> String {
 }
 
 pub fn format_search_symbols(val: &Value) -> String {
-    use crate::tools::file_group::{group_by_file, render_grouped};
+    use crate::tools::file_group::{group_by_file_ranked, render_grouped};
 
     let symbols = match val["symbols"].as_array() {
         Some(arr) => arr,
@@ -150,7 +150,12 @@ pub fn format_search_symbols(val: &Value) -> String {
         })
         .collect();
 
-    let groups = group_by_file(&normalized);
+    // RANKED, not size-ordered: `normalized` preserves the relevance order
+    // `finalize_search_results` established (exact name matches first), and
+    // `group_by_file`'s count-desc ordering discarded it at the last step — a file
+    // with two incidental hits outranked a file with one exact hit, so the ranking
+    // was invisible in exactly the view an agent reads. See `group_by_file_ranked`.
+    let groups = group_by_file_ranked(&normalized);
     // The header's file count must match `total`'s SCOPE — the full match set, not the
     // served page. `groups.len()` only ever counts distinct files among `val["symbols"]`
     // (the page), so it silently narrows once anything pages. `files_count`, when the

@@ -8945,6 +8945,64 @@ fn format_search_symbols_groups_by_file() {
     assert!(out.contains("baz"));
 }
 
+/// The compact renderer must honour the relevance order `finalize_search_results`
+/// establishes, not re-impose group size. This is the render path the exact-match
+/// ranking did NOT reach until 2026-09-12: the array, the cap and the body budget
+/// all respected it while the text an agent actually reads did not.
+#[test]
+fn an_exact_match_lifts_its_file_above_a_larger_substring_only_group() {
+    use crate::tools::symbol::display::format_search_symbols;
+
+    // `zzz.rs` holds the one exact hit and is rigged to lose on BOTH of
+    // `group_by_file`'s keys — smallest group (1 vs 2) and last alphabetically. It
+    // can therefore only lead if the renderer follows the input order. Weakening
+    // either rigging (renaming it `aaa.rs`, or giving it a second symbol) makes this
+    // test pass under the old ordering too, and it stops discriminating.
+    let ranked = json!({
+        "symbols": [
+            { "kind": "Interface", "file": "zzz.rs", "start_line": 1, "end_line": 3,
+              "name": "Tool", "symbol": "Tool" },
+            { "kind": "Struct", "file": "aaa.rs", "start_line": 1, "end_line": 2,
+              "name": "AlwaysTool", "symbol": "AlwaysTool" },
+            { "kind": "Struct", "file": "aaa.rs", "start_line": 9, "end_line": 10,
+              "name": "ToolBox", "symbol": "ToolBox" },
+        ],
+        "total": 3,
+    });
+    let out = format_search_symbols(&ranked);
+    let zzz = out.find("zzz.rs").expect("zzz.rs must render");
+    let aaa = out.find("aaa.rs").expect("aaa.rs must render");
+    assert!(
+        zzz < aaa,
+        "the file holding the exact match must lead, even though its group is \
+         smaller and its path sorts last; got:\n{out}"
+    );
+
+    // CONTROL, and the reason this test is not satisfied by "small groups first":
+    // the same three symbols with the exact hit LAST must render aaa.rs first. A
+    // renderer that always favoured the smaller group would fail here, and one that
+    // ignored order entirely would pass both — only following the input passes both.
+    let reversed = json!({
+        "symbols": [
+            { "kind": "Struct", "file": "aaa.rs", "start_line": 1, "end_line": 2,
+              "name": "AlwaysTool", "symbol": "AlwaysTool" },
+            { "kind": "Struct", "file": "aaa.rs", "start_line": 9, "end_line": 10,
+              "name": "ToolBox", "symbol": "ToolBox" },
+            { "kind": "Interface", "file": "zzz.rs", "start_line": 1, "end_line": 3,
+              "name": "Tool", "symbol": "Tool" },
+        ],
+        "total": 3,
+    });
+    let out2 = format_search_symbols(&reversed);
+    let zzz2 = out2.find("zzz.rs").expect("zzz.rs must render");
+    let aaa2 = out2.find("aaa.rs").expect("aaa.rs must render");
+    assert!(
+        aaa2 < zzz2,
+        "with the exact hit last, the renderer must follow that too — otherwise it \
+         is favouring small groups rather than honouring relevance; got:\n{out2}"
+    );
+}
+
 #[test]
 fn format_search_symbols_single_file_no_global_header() {
     use crate::tools::symbol::display::format_search_symbols;

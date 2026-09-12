@@ -39,6 +39,49 @@ pub fn group_by_file(items: &[Value]) -> Vec<FileGroup<'_>> {
     groups
 }
 
+/// Group items by their `file` field, ordering groups by their BEST member —
+/// the earliest position any of the group's items holds in `items`.
+///
+/// Use this only when the caller has already sorted `items` by relevance: the
+/// ordering is meaningful exactly to the degree the input order is. `group_by_file`
+/// above orders by group SIZE, which stays the right default for a caller whose
+/// items carry no relevance signal — `grep` yields matches in file-walk order and
+/// `references` in LSP order, so "best member" there would silently mean "first
+/// walked", replacing a useful heuristic with an arbitrary one.
+///
+/// Why this exists: `symbols` sorts exact name matches ahead of substring hits, and
+/// that ranking reached the JSON array, the result cap and the body budget but NOT
+/// the compact text — size-ordering put a file holding two incidental hits above a
+/// file holding one exact hit. Measured on the live wire 2026-09-12:
+/// `symbols(name="Tool")` rendered `AlwaysTool`, `CompactEchoTool` and four Python
+/// loop variables above the two actual `Tool` traits. The ranking was implemented,
+/// tested and green throughout — the tests assert on the array, and the text is a
+/// different render path that no assertion covered.
+pub fn group_by_file_ranked(items: &[Value]) -> Vec<FileGroup<'_>> {
+    use std::collections::BTreeMap;
+    // Value is (best index, items). `or_insert` evaluates only on first insert, so
+    // `best` is the EARLIEST position this file appears at — not the latest, and not
+    // a running minimum a later low-relevance item could disturb.
+    let mut by_file: BTreeMap<&str, (usize, Vec<&Value>)> = BTreeMap::new();
+    for (idx, item) in items.iter().enumerate() {
+        if let Some(file) = item.get("file").and_then(|v| v.as_str()) {
+            by_file
+                .entry(file)
+                .or_insert((idx, Vec::new()))
+                .1
+                .push(item);
+        }
+    }
+    let mut groups: Vec<(usize, FileGroup<'_>)> = by_file
+        .into_iter()
+        .map(|(file, (best, items))| (best, FileGroup { file, items }))
+        .collect();
+    // No tie-break needed: two groups cannot share a best index, because the index
+    // that opened a group belongs to that group alone.
+    groups.sort_by_key(|(best, _)| *best);
+    groups.into_iter().map(|(_, g)| g).collect()
+}
+
 /// Truncate a flat item list to fit `budget`, preserving file diversity.
 ///
 /// Policy: Round-robin across files, prioritizing hotter (more frequent) files.
