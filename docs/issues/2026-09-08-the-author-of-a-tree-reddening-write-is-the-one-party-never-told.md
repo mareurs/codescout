@@ -53,6 +53,44 @@ and the ordinary outcome of an instance is that it leaves no artifact in any led
 the instances a peer chose to report exist at all. That is the recording-filter law, where
 widening the sample changes nothing.
 
+
+### 2026-09-12 — the warner produced one himself, and the report named the wrong author
+
+One morning, one shared checkout, reported here only because three parties each chose to
+say something. Times are mine where I measured them and theirs where I did not.
+
+- Earlier that morning, `b0b9bc40` flagged a mid-edit window in `src/lsp/client.rs` to
+  `f3c594ce` — their report, not my observation.
+- At `09:45` I read a tree where `group_by_file_ranked` was defined in
+  `src/tools/file_group.rs` and the import in `src/tools/symbol/display.rs` was not yet
+  switched, so `display.rs:158` did not build. Two other sessions were reading that
+  directory at the time. `b0b9bc40` resolved it at `09:54` in `48d39f53`. By their own
+  account that is roughly four hours after they flagged the same shape to someone else.
+- `f3c594ce` reported the red — **to the wrong author.** I was editing `symbols.rs` in
+  the same directory in the same minute, so adjacency named me.
+  `scripts/file-provenance.py` named `b0b9bc40`, corroborated independently when
+  `fmt-mine.sh` refused `f3c594ce` that same file and named the same session.
+
+**Their statement of the asymmetry is sharper than this file's** and is worth keeping in
+their words: *"a mid-edit window is invisible from inside it — the writer sees a sequence
+of intentional steps, everyone else sees a tree that does not build."*
+
+Two things this adds to § Root cause above.
+
+**It is the § *Observer Blindness* signature stated plainly: knowing the class prevented
+nothing.** The author had spent that morning telling other sessions about this exact
+failure mode, and produced one anyway, in a file two sessions were reading. That is the
+same shape CLAUDE.md records for its four-in-one-evening measurement, and it is the
+argument against any remedy shaped like *be more careful before you step away*.
+
+**A red can have more than one author, and "the author" singular is the wrong noun.**
+That same build carried an unwired `fallback_gap` from `b80a27d4` — a dead-code warning,
+not the `E0425`, but enough to appear in the same output. A report naming one author is
+half right in exactly the way that stalls the repair: the party told may fix their half,
+see the tree still red, and reasonably conclude the diagnosis was wrong. Splitting the
+red by author before reporting is what made this one resolve in nine minutes, and no
+mechanism does that today — `wip_authors` lists every uncommitted file the failure names
+without saying which line belongs to which session.
 ## Reproduction
 
 Two sessions, one checkout, shared `target/`. A saves uncommitted Rust that does not
