@@ -1734,6 +1734,37 @@ survived; the one that did not was the one whose prose was most alarming. The fa
 precise: a deliberate design decision, written up honestly by its author as a limitation, is
 indistinguishable from an outstanding defect at the level of the sentence.
 
+**RESIDUALS DISPOSED 2026-09-12 — every one now has a verdict, and only one was ever mine to
+fix.** Each of the three survivors was taken to its own `## Resume`, and two name a blocker rather
+than a task:
+
+- **Activation guard — BLOCKED, and the workarounds are forbidden in writing.** Its Resume reads
+  *"Do not tune the 5s window or add a `ReturnToHome` exemption — both trade one wrong answer for
+  another. This unblocks when `IC-17` gets its owner field."* The defect is that a warning rides
+  the response of the call that *performed* the switch, so it reaches the switcher and not the
+  party harmed; delivering it correctly needs an owner to deliver it to, which is `IC-17`'s field.
+  Nothing to do here that is not explicitly ruled out.
+- **Write-lock progress — BLOCKED ON THE CLIENT, and the mechanism already ships.** Bullet 2 asks
+  for progress on long-running writes. `2026-09-05-librarian-tools-cannot-emit-progress-…`
+  measured the ceiling: **Claude Code sends no `_meta` on `CallToolRequest`, so there is no
+  `progressToken` and `ctx.progress` is always `None` for this client.** The code is correct and a
+  client that requests progress gets it; implementing bullet 2 here would emit nothing. This is
+  worth stating precisely because *"not shipped"* and *"ships and is inert"* read identically in a
+  caveat.
+- **`append_entry` two-call window — ACTIONABLE, and scouting it surfaced a second defect.**
+  Direction (3) — *let `append_entry` write the section and the row in one file write* — already
+  shipped, **for the prose path only**. On the params path the same five fields
+  (`title`/`body`/`anchor_heading`/`index_row`/`index_after_line`) are declared, parsed and never
+  read, because the section is built inside the `entry_collection.is_none()` branch. Filed as
+  `docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`
+  (`IC-15`), which carries the refuse-vs-honour decision. **That is the whole remaining work of
+  this row**, and it is a code change to a shared write path rather than a tracker edit.
+
+**So "fix the residuals" resolved to one fix, two blockers and one new bug** — and the two
+blockers only became visible by reading each record's `## Resume` rather than its caveat. A caveat
+says what is unproven; the Resume says whether anyone can act, and those are different sentences
+written at different times.
+
 ### BL-76 — `unverified:` has no discharged form the scan can read
 
 **SCOUTED 2026-09-12, not implemented — and the scout is the deliverable, because this was
