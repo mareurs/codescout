@@ -117,6 +117,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
 | BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes. Live records and archived records triaged. Finding: `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker — five authors invented an in-band one. Nothing cleared, deliberately | — |
+| BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **scouted, recommend NOT doing** 2026-09-12 — already declined once as `CAP-7` open decision 2. Its premise ("no such marker convention exists") is now false and its objection is defused by making absence mean today's behaviour — but the check gates nothing, and the convention spans four served surfaces. Awaiting a call | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1698,6 +1699,50 @@ confirmation that was requested, so it stays.
 **Follow-up worth its own row, not done here:** give the field a discharged form the scan can read
 — a leading token, or a sibling key — so a settled doubt keeps its text and stops firing. That is
 the only change that makes this count mean what readers already assume it means.
+
+### BL-76 — `unverified:` has no discharged form the scan can read
+
+**SCOUTED 2026-09-12, not implemented — and the scout is the deliverable, because this was
+already decided once.** `scan_terminal_status_with_caveat`'s doc comment records the same proposal
+being declined on 2026-08-19, as `CAP-7`'s open decision 2, and declined *explicitly* rather than
+by omission:
+
+> Reports every caveat, with no severity split — `CAP-7`'s open decision 2 asked whether to
+> distinguish blocking from informational caveats via a leading marker. **Not done, and not
+> deferred silently: no such marker convention exists**, so introducing one now would leave every
+> caveat written before today unmarked and force them all into whichever bucket the default picks.
+> That is a worse report than an undifferentiated one.
+
+`CAP-7` itself reads **COMPLETE**, *"there is nothing left to design"*, so this is a settled
+decision and not an unfinished one. Two things about it have changed, and both are worth recording
+whether or not the decision is revisited.
+
+**Its premise is now false.** *"No such marker convention exists"* was true when written. It is not
+true today: `BL-75` pass 2 found **five** records whose `unverified:` opens with an in-band marker
+— `CLEARED <date>`, `REFUTED <date>`, `Resolved by measurement`, and one escalation — written
+independently by different authors with no convention to follow. A de facto grammar emerged in the
+field precisely because the field has two machine states and its writers need three.
+
+**Its objection is defused by construction, and cheaply.** The stated cost was that every
+pre-existing caveat would be forced into whichever bucket the default picks. That only holds if the
+default changes. Make **absence of a marker mean exactly today's behaviour — reported** — and no
+existing caveat moves bucket, by definition. The change becomes strictly additive: a record that
+wants to say *settled* gains a way to, and every record that says nothing keeps its current
+reading.
+
+**Recommendation: do NOT implement, and the reason is value rather than difficulty.** The check is
+report-only and gates nothing — its own comment says the cost of an over-broad list is *"a line in
+a scan nobody is gated on"*. Against that, a marker convention has to land on four served surfaces
+that must not disagree (`CLAUDE.md`, `docs/TAXONOMY.md`, `docs/issues/_TEMPLATE.md`,
+`src/prompts/guides/tracker-conventions.md`) plus the scan and its tests. Spending a
+four-surface convention change to correct a number nobody is gated on is poor value, and
+**`BL-75` already banked most of the benefit** by recording that the count partly measures the
+missing state — a reader who knows that will not misread the number, which is what the marker
+would have bought.
+
+**What would change the recommendation:** the check becoming gating, or the in-band markers
+spreading far enough that `doctor`'s output is mostly settled doubts. Both are observable, and the
+second is the one to watch — re-derive it, do not assume it has held.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
