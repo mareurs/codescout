@@ -13,6 +13,7 @@ owner: marius
 related:
 - docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 severity: high
+unverified: 'Directions 2 and 3 of the Fix are STILL OPEN - stated in this file''s own Fix section and invisible to every query, because this record is both status=fixed and archived. Only direction 1 shipped. Direction 3 (let a response declare the build it came from) re-measured 2026-09-12: 14 of 21 live codescout servers on this host execute deleted inodes, and no response field distinguishes them.'
 ---
 
 # BUG: server processes on deleted binaries write their stale config into the live project sidecar
@@ -364,6 +365,29 @@ me. Same mechanism on a different variable, with a retraction worth reading — 
 line that compared a variable's NAME across the divergence instead of its VALUE:
 `docs/issues/archive/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md`
 § Root cause, and memory `gotchas`, same section title.
+
+### Measured 2026-09-12 07:55 — direction 3 is still load-bearing, and the string-identity workaround cannot cover a deletion
+
+A count, because § *Fix* leaves directions 2 and 3 open and nothing since has re-measured whether they matter. Enumerated by comparing each server's executing inode against the on-disk binary, rather than by reading `(deleted)` off `readlink`:
+
+| | |
+|---|---|
+| codescout server processes live on this host | **21** |
+| executing a **deleted** inode (stale binary) | **14** |
+| executing the current on-disk inode | **7** |
+
+So two thirds of the sessions on this machine are being answered by code that is not the code on disk, and **nothing in any response distinguishes them** — which is direction 3, unshipped, stated as a live cost rather than a design preference.
+
+**The workaround sessions actually use has a ceiling worth recording, because it fails silently.** The practical way to check *"am I on the rebuilt binary"* has been to grep the binary for a string the new code introduces. That verifies **additions only**. This build's sole behavioural change was `3863055e`, a *deletion* of an unreachable branch — so there is no new string to grep for, the method returns nothing, and it cannot signal that it returned nothing. Identity is what works, because it does not depend on what changed:
+
+```
+stat -c  %i target/release/codescout   ->  188755070
+stat -Lc %i /proc/<server-pid>/exe     ->  188755070    same inode => current
+```
+
+Paired with the server's start time (07:55:05, 101 seconds after the 07:53:24 build) that settles it. `readlink` alone is weaker: the absence of a `(deleted)` suffix is necessary, but the inode comparison is what is sufficient.
+
+**Why the inode-reuse objection does not reach this comparison, stated because it reaches a neighbouring method and a reader will transfer it.** Recording an inode as a *durable build identity* is unsafe: between builds the inode is freed and its number can be reused, so a later build inherits a dead build's identity — a population of zombie servers is exactly the condition that makes that likely, and the shortcut is rejected on those grounds elsewhere. This comparison is a different operation. It reads two live references **at one instant**, and the stale inode is pinned open by the very process being interrogated — a deleted inode with an executing process is never freed, so its number cannot be reused while that process lives. Measured on the same 2026-09-12 population as a check rather than an assumption: across the 14 stale processes, spanning 9 distinct inodes (three of them shared by 2–3 processes each), **collisions with the current inode: 0**.
 
 ## Hypotheses tried
 
