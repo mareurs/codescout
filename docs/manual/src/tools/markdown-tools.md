@@ -6,7 +6,7 @@ the need to read raw line ranges or construct fragile string replacements
 against unstructured text.
 
 > `edit_markdown` was a standalone tool through v0.11+; it was folded into
-> `edit_file` (Task 8) — `heading`/`action`/`content`/`frontmatter` on
+> `edit_file` (Task 8) — `heading`/`action`/`body`/`frontmatter` on
 > `edit_file` now trigger the same heading-addressed logic that
 > `edit_markdown` used to. Plain `old_string`/`new_string` text edits on
 > `.md` files go through `edit_file`'s ordinary text-edit path, exactly as
@@ -71,7 +71,7 @@ item is present in the call.
 | `path` | string | Markdown file path |
 | `heading` | string | Target section heading (fuzzy matched) |
 | `action` | string | One of the actions above |
-| `content` | string | New body for `replace`/`insert_*` (heading not included) |
+| `body` | string | New body for `replace`/`insert_*` (heading not included). `content` is accepted as an alias. Named `body` because this tool also takes `frontmatter`; inside `edits[]` the item key stays `content`, an item having no such sibling. |
 | `old_string` | string | For `edit`: exact text to find |
 | `new_string` | string | For `edit`: replacement text |
 | `replace_all` | bool | For `edit`: replace all occurrences (default: false) |
@@ -84,7 +84,7 @@ item is present in the call.
 edit_file("docs/guide.md",
   heading="## Configuration",
   action="replace",
-  content="See project.toml for all options.\n")
+  body="See project.toml for all options.\n")
 
 // Surgical fix inside a section
 edit_file("docs/guide.md",
@@ -128,14 +128,14 @@ sub-section). Pass `at` to disambiguate:
 edit_file("docs/guide.md",
   heading="## Configuration",
   action="insert_after",
-  content="\n### Environment Variables\n\n...\n",
+  body="\n### Environment Variables\n\n...\n",
   at="end-of-section")
 
 // Add a top-of-page note right under a wrapping H1
 edit_file("docs/guide.md",
   heading="# Guide",
   action="insert_after",
-  content="\n> Note: requires v0.5+.\n",
+  body="\n> Note: requires v0.5+.\n",
   at="after-heading-line")
 ```
 

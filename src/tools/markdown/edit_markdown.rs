@@ -149,7 +149,7 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
     match action {
         "replace" => {
             let new = new_content
-                .ok_or_else(|| anyhow::anyhow!("content is required for the 'replace' action (it overwrites the whole section body); for a scoped text swap pass action='edit' with old_string + new_string"))?;
+                .ok_or_else(|| anyhow::anyhow!("the section body is required for the 'replace' action — `body` at the top level, `content` inside edits[] (it overwrites the whole section body); for a scoped text swap pass action='edit' with old_string + new_string"))?;
 
             // F-7: surface-marker-preservation gate.
             // The section's body may contain `<!-- @surface NAME -->` or
@@ -269,7 +269,7 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
 
         "insert_before" => {
             let new = new_content.ok_or_else(|| {
-                anyhow::anyhow!("content is required for the insert_before action")
+                anyhow::anyhow!("the section body is required for the insert_before action — `body` at the top level, `content` inside edits[]")
             })?;
             let span = off.line_start(heading_idx)..off.line_start(heading_idx);
             Ok(vec![PlannedEdit {
@@ -282,7 +282,7 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
 
         "insert_after" => {
             let new = new_content.ok_or_else(|| {
-                anyhow::anyhow!("content is required for the insert_after action")
+                anyhow::anyhow!("the section body is required for the insert_after action — `body` at the top level, `content` inside edits[]")
             })?;
             let insert_idx = match at.unwrap_or("end-of-section") {
                 "end-of-section" => end_idx,
@@ -480,35 +480,54 @@ fn subsection_guard_error(
 /// `prefix` locates the entry for batch callers (`"edits[3]: "`,
 /// `"body_edits[0]: "`) and is empty for the single-edit path.
 ///
+/// `body_key` is the name of the whole-section text key AT THIS LEVEL, and it is
+/// a parameter rather than a constant because the two levels genuinely differ:
+/// `edit_file`'s top-level parameter is `body` (it has a contrasting
+/// `frontmatter` sibling), while an `edits[]` / `body_edits[]` ITEM has no
+/// frontmatter sibling and keeps `content`. Checking both spellings everywhere
+/// was the alternative and was rejected: each level would carry one branch no
+/// caller can reach, and the remedy text below would have to name a key the
+/// caller cannot pass — the shape this repo records as untested residue that
+/// reads as coverage.
+///
 /// See `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
-pub(crate) fn require_new_string<'a>(edit: &'a Value, prefix: &str) -> Result<&'a str> {
-    let has_content = edit.get("content").is_some();
+pub(crate) fn require_new_string<'a>(
+    edit: &'a Value,
+    prefix: &str,
+    body_key: &str,
+) -> Result<&'a str> {
+    let has_body = edit.get(body_key).is_some();
 
     if let Some(s) = edit.get("new_string").and_then(|v| v.as_str()) {
         // Both keys present: the caller is describing two different actions at
         // once. Ignoring one silently is how the original defect stayed invisible.
-        if has_content {
+        if has_body {
             return Err(RecoverableError::with_hint(
                 format!(
-                    "{prefix}action=\"edit\" was given both new_string and content, \
-                     and content is not read by this action"
+                    "{prefix}action=\"edit\" was given both new_string and {body_key}, \
+                     and {body_key} is not read by this action"
                 ),
-                "content belongs to 'replace' / 'insert_before' / 'insert_after'. \
-                 Drop content to keep the scoped swap, or change the action.",
+                format!(
+                    "{body_key} belongs to 'replace' / 'insert_before' / 'insert_after'. \
+                     Drop {body_key} to keep the scoped swap, or change the action."
+                ),
             )
             .into());
         }
         return Ok(s);
     }
 
-    let hint = if has_content {
-        "Rename content to new_string — 'edit' performs a scoped old_string -> \
-         new_string swap and never reads content (that key belongs to 'replace' / \
-         'insert_before' / 'insert_after'). To DELETE the matched text, pass \
-         new_string=\"\" explicitly."
+    let hint = if has_body {
+        format!(
+            "Rename {body_key} to new_string — 'edit' performs a scoped old_string -> \
+             new_string swap and never reads {body_key} (that key belongs to 'replace' / \
+             'insert_before' / 'insert_after'). To DELETE the matched text, pass \
+             new_string=\"\" explicitly."
+        )
     } else {
         "Pass the replacement for old_string, e.g. new_string=\"let x = 2;\". \
          To DELETE the matched text, pass new_string=\"\" explicitly."
+            .to_string()
     };
     Err(RecoverableError::with_hint(
         format!("{prefix}new_string is required for action=\"edit\""),
@@ -728,7 +747,7 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
                 anyhow::anyhow!("edits[{}]: old_string is required for action='edit'", i)
             })?;
-            let new_string = require_new_string(edit, &format!("edits[{i}]: "))?;
+            let new_string = require_new_string(edit, &format!("edits[{i}]: "), "content")?;
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             plan_scoped_edit(
                 snapshot,
@@ -1339,7 +1358,7 @@ pub(crate) const LONG_DOCS: &str =
      |------|------|---------|\n\
      | 1 | `read_file(path)` | Get heading map — see all sections |\n\
      | 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
-     | 3a | `edit_file(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
+     | 3a | `edit_file(path, heading, action, body)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
      | 3b | `edit_file(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
      | 3c | `edit_file(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
      | 3d | `edit_file(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |\n\n\
@@ -1359,7 +1378,7 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
         &input,
         "path",
         crate::fs::PATH_PARAM_ALIASES,
-        "edit_file(path=\"docs/x.md\", heading=\"## Section\", action=\"replace\", content=\"...\"). path is required on every call.",
+        "edit_file(path=\"docs/x.md\", heading=\"## Section\", action=\"replace\", body=\"...\"). path is required on every call.",
     )?;
 
     let resolved =
@@ -1456,7 +1475,7 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
             "action",
             &[],
             &format!(
-                "Set action to one of: {}. E.g. action=\"replace\", content=\"...\".",
+                "Set action to one of: {}. E.g. action=\"replace\", body=\"...\".",
                 SECTION_EDIT_ACTIONS.join(" | ")
             ),
         )?;
@@ -1464,12 +1483,12 @@ pub(crate) async fn edit(input: Value, ctx: &ToolContext) -> Result<Value> {
 
         new_content = if action == "edit" {
             let old_string = crate::tools::require_str_param(&input, "old_string")?;
-            let new_string = require_new_string(&input, "")?;
+            let new_string = require_new_string(&input, "", "body")?;
             let replace_all_val = parse_bool_param(&input["replace_all"]);
             perform_scoped_edit(&new_content, query, old_string, new_string, replace_all_val)
                 .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
         } else {
-            let content = input["content"].as_str();
+            let content = input["body"].as_str();
             if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
                 if let Ok(victims) = find_consumed_subsections(&new_content, query) {
                     if !victims.is_empty() {

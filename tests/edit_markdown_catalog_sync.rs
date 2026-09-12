@@ -122,7 +122,7 @@ async fn edit_markdown_syncs_the_catalog_on_a_frontmatter_write_and_not_on_a_bod
                 "path": "notes.md",
                 "heading": "## Summary",
                 "action": "replace",
-                "content": "new body\n"
+                "body": "new body\n"
             }),
             &ctx,
         )

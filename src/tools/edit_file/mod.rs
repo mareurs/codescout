@@ -404,7 +404,7 @@ impl Tool for EditFile {
                     "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
                     "description": "Markdown only: operation to perform on the heading-addressed section. 'replace' OVERWRITES the entire body (heading preserved) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before'/'insert_after' add a sibling section (target body preserved). 'remove' deletes the target section. 'edit' performs scoped text replacement within the target section."
                 },
-                "content": { "type": "string", "description": "Markdown only: new content for replace/insert actions (body only — heading preserved on replace)." },
+                "body": { "type": "string", "description": "Markdown only: the section's new body text for replace/insert actions (heading preserved on replace). `body` not `content`: a text parameter is `body` when the tool also takes a contrasting sibling — here `frontmatter`. `content` is accepted as an alias." },
                 "at": {
                     "type": "string",
                     "enum": ["end-of-section", "after-heading-line"],
@@ -439,7 +439,7 @@ impl Tool for EditFile {
                             "heading": { "type": "string", "description": "Markdown grammar: target section heading, or \"^\" for the PREAMBLE (action=\"edit\" only)." },
                             "occurrence": { "type": "integer", "minimum": 1 },
                             "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"] },
-                            "content": { "type": "string" },
+                            "content": { "type": "string", "description": "Markdown grammar: this entry's new section body. Stays `content`, not `body` — an item has no `frontmatter` sibling, so the tool-level rule does not reach it." },
                             "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
                             "include_subsections": { "type": "boolean" }
                         },
@@ -453,7 +453,28 @@ impl Tool for EditFile {
     }
 
     fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
-        crate::fs::PATH_PARAM_ALIAS_MAP
+        // The shared 3-pair path family plus `("content", "body")`, so this is a
+        // hand-written array rather than `crate::fs::PATH_PARAM_ALIAS_MAP` —
+        // same shape `edit_code` already carries, and for the same reason.
+        //
+        // The rule the rename applies, stated here because it is DERIVABLE and
+        // not a vocabulary to memorise: a tool's text parameter is `body` when
+        // the tool also takes a contrasting sibling (`frontmatter` here,
+        // `attributes` on `edit_code`), and `content` otherwise. `create_file`
+        // and `memory` have no such sibling and correctly keep `content`.
+        // `edit_file` was the one tool on the wrong side of it, and its own
+        // schema already admitted so — the old description read "new content
+        // ... (body only — heading preserved on replace)".
+        //
+        // `edits[]` ITEMS keep `content`: an item has no `frontmatter` sibling,
+        // so the rule does not reach it, and `normalize_params` rewrites
+        // top-level keys only and would not repair it if it did.
+        &[
+            ("file_path", "path"),
+            ("relative_path", "path"),
+            ("file", "path"),
+            ("content", "body"),
+        ]
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {

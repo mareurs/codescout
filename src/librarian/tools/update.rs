@@ -283,6 +283,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             let new_string = crate::tools::markdown::edit_markdown::require_new_string(
                 edit,
                 &format!("body_edits[{i}]: "),
+                "content",
             )?;
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             crate::tools::markdown::edit_markdown::perform_scoped_edit(

@@ -131,7 +131,7 @@ async fn edit_markdown_outside_project_returns_pending_ack() {
             "path": "/var/outside_ce_md/notes.md",
             "heading": "## Notes",
             "action": "replace",
-            "content": "new body"
+            "body": "new body"
         }),
         &ctx,
     )
@@ -141,7 +141,7 @@ async fn edit_markdown_outside_project_returns_pending_ack() {
     assert!(handle.starts_with("@ack_"), "got: {result}");
     let stored = ctx.output_buffer.get_pending_write(handle).unwrap();
     assert_eq!(stored.tool_name, "edit_file");
-    assert_eq!(stored.input["content"], json!("new body"));
+    assert_eq!(stored.input["body"], json!("new body"));
 }
 
 #[tokio::test]
@@ -168,7 +168,7 @@ async fn edit_markdown_accepts_file_path_alias() {
             "file_path": file.to_str().unwrap(),
             "heading": "# Title",
             "action": "replace",
-            "content": "new body"
+            "body": "new body"
         }),
         &ctx,
     )
@@ -184,6 +184,109 @@ async fn edit_markdown_accepts_file_path_alias() {
     );
 }
 
+/// The `content` -> `body` rename, driven through the REAL dispatch boundary so
+/// the alias rewrite is exercised rather than assumed. `Tool::call()` is the
+/// wrong level for this: `normalize_params` runs in `call_content`, so a direct
+/// `call()` with `content` would simply drop it, which is the same observable a
+/// broken alias produces.
+///
+/// Both directions are asserted. The canonical key alone is monotone under "the
+/// alias was never declared", and the alias alone is monotone under "nothing was
+/// renamed at all" — a build that still read `content` natively passes the
+/// second and fails the first.
+#[tokio::test]
+async fn edit_file_takes_body_and_still_accepts_content_as_an_alias() {
+    let (dir, ctx) = project_ctx().await;
+
+    for (key, marker) in [("body", "via body"), ("content", "via content")] {
+        let file = dir.path().join(format!("doc-{key}.md"));
+        std::fs::write(&file, "# Title\n\nold body\n").unwrap();
+
+        let out = crate::tools::edit_file::EditFile
+            .call_content(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "heading": "# Title",
+                    "action": "replace",
+                    key: marker,
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("edit_file via {key}: {e}"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            written.contains(marker),
+            "{key} must reach the markdown section writer; file is: {written}"
+        );
+
+        let rendered = format!("{out:?}");
+        assert_eq!(
+            rendered.contains("not a parameter of edit_file"),
+            key == "content",
+            "the alias route must announce the rewrite and the canonical route \
+             must stay silent — got {rendered} for key {key}"
+        );
+    }
+}
+
+/// The deliberate ASYMMETRY, pinned so nobody "fixes" it into consistency
+/// without meeting the argument. `edits[]` ITEMS keep `content` while the
+/// tool's own parameter is `body`, because the rule being applied is about a
+/// contrasting sibling (`frontmatter`) that an item does not have — and
+/// because `normalize_params` rewrites top-level keys only, so a renamed item
+/// key would have no alias to repair it.
+///
+/// The `body` on the same call is not decoration: it is what makes this a test
+/// of the asymmetry rather than of batch mode, and it fails if a future change
+/// unifies the two spellings in either direction.
+#[tokio::test]
+async fn a_batch_item_keeps_content_while_the_tool_parameter_is_body() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("batch.md");
+    std::fs::write(&file, "# A\n\nold a\n\n# B\n\nold b\n").unwrap();
+
+    super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "edits": [
+                { "heading": "# A", "action": "replace", "content": "new a" },
+            ],
+        }),
+        &ctx,
+    )
+    .await
+    .expect("an edits[] item must still be spelled `content`");
+
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert!(after.contains("new a"), "item content must apply: {after}");
+    assert!(
+        after.contains("old b"),
+        "untargeted section intact: {after}"
+    );
+
+    // And the top-level key on the SAME tool is `body`, not `content` — the
+    // control that makes the assertion above an asymmetry rather than a
+    // statement that nothing was renamed.
+    super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "# B",
+            "action": "replace",
+            "body": "new b",
+        }),
+        &ctx,
+    )
+    .await
+    .expect("the top-level key must be `body`");
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        after.contains("new b"),
+        "top-level body must apply: {after}"
+    );
+}
+
 /// `action="edit"` + `content` is the mistake this whole guard exists for: `content`
 /// is the right key for `replace` / `insert_*`, is declared in the same schema, and
 /// was simply unread here — so `new_string` defaulted to `""` and the call DELETED
@@ -192,6 +295,11 @@ async fn edit_markdown_accepts_file_path_alias() {
 ///
 /// The load-bearing assertion is the second one: refusing is good, but leaving the
 /// file untouched is the property that was actually violated.
+///
+/// The key is spelled `body` at the top level since 2026-09-12 (`content` remains a
+/// declared alias). The NAME of this test still says `content` on purpose: the
+/// archived bug file below cites it by name in its regression-test table, and a
+/// rename would silently invalidate that citation.
 /// See `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
 #[tokio::test]
 async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_nothing() {
@@ -206,7 +314,7 @@ async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_n
             "heading": "# Title",
             "action": "edit",
             "old_string": "keep this sentence",
-            "content": "replaced sentence",
+            "body": "replaced sentence",
         }),
         &ctx,
     )
@@ -218,9 +326,10 @@ async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_n
         "must refuse rather than silently delete; got: {msg}"
     );
     assert!(
-        msg.contains("content"),
-        "the error must name the key the caller actually passed, or it reads as \
-         a missing-param error and the caller re-sends `content`; got: {msg}"
+        msg.contains("body"),
+        "the error must name the key the caller actually passed AT THIS LEVEL — \
+         `body` at the top level, `content` inside edits[] — or it reads as a \
+         missing-param error and the caller re-sends the same key; got: {msg}"
     );
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -307,6 +416,9 @@ async fn edit_action_with_explicit_empty_new_string_still_deletes() {
 
 /// Both keys present means the caller is describing two different actions at once.
 /// Picking one silently is what let the original defect hide, so it is refused.
+///
+/// The whole-section key is `body` at this level since 2026-09-12; the test NAME
+/// still says `content` because the archived bug file cites it by name.
 #[tokio::test]
 async fn edit_action_rejects_both_new_string_and_content() {
     let (dir, ctx) = project_ctx().await;
@@ -321,7 +433,7 @@ async fn edit_action_rejects_both_new_string_and_content() {
             "action": "edit",
             "old_string": "alpha",
             "new_string": "beta",
-            "content": "gamma",
+            "body": "gamma",
         }),
         &ctx,
     )
@@ -329,8 +441,9 @@ async fn edit_action_rejects_both_new_string_and_content() {
 
     let msg = format!("{result:?}");
     assert!(
-        msg.contains("both new_string and content"),
-        "an ambiguous pair must be refused, not silently resolved; got: {msg}"
+        msg.contains("both new_string and body"),
+        "an ambiguous pair must be refused, not silently resolved, and the refusal \
+         must name this level's key (`body`), not the nested one; got: {msg}"
     );
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -372,7 +485,7 @@ async fn shrink_guard_blocks_a_line_truncation_that_keeps_the_bytes() {
             "path": file.to_str().unwrap(),
             "heading": "# Title",
             "action": "replace",
-            "content": truncated,
+            "body": truncated,
         }),
         &ctx,
     )
@@ -413,7 +526,7 @@ async fn shrink_guard_line_arm_yields_to_force() {
             "path": file.to_str().unwrap(),
             "heading": "# Title",
             "action": "replace",
-            "content": fat.join("\n"),
+            "body": fat.join("\n"),
             "force": true,
         }),
         &ctx,
@@ -3725,7 +3838,7 @@ async fn single_edit_invalid_action_names_the_edit_action_it_dispatches() {
             "path": file.to_str().unwrap(),
             "heading": "# Title",
             "action": "probe_invalid",
-            "content": "x",
+            "body": "x",
         }),
         &ctx,
     )

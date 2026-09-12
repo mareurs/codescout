@@ -662,7 +662,7 @@ even more
                 "path": "plan.md",
                 "heading": "## File Map",
                 "action": "replace",
-                "content": "new short map body\n"
+                "body": "new short map body\n"
             }),
             &ctx,
         )
@@ -704,7 +704,7 @@ work
                 "path": "plan.md",
                 "heading": "## File Map",
                 "action": "replace",
-                "content": "new body\n",
+                "body": "new body\n",
                 "include_subsections": true
             }),
             &ctx,

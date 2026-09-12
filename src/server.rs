@@ -3335,8 +3335,13 @@ mod tests {
     /// still selected the matching ALGORITHM (exact name-path vs substring), which is the
     /// shape `8b396343` removed for `is_name_path`. The mode now comes from the VALUE
     /// (`/` present) with a boolean `exact` as the two-way override. 4*3 + 2*5 + 1*5 +
-    /// 1*4 + 1*2 + 1*3 = 36 — row for row the table below, and entry for entry
-    /// `EXPECTED_ALIAS_PAIRS`' 36.
+    /// 1*4 + 1*2 + 1*3 = 36 until `edit_file` gained `("content", "body")` on 2026-09-12,
+    /// which is the same rename `edit_code` already carries and makes the count 37 —
+    /// row for row the table below, and entry for entry `EXPECTED_ALIAS_PAIRS`' 37.
+    /// The rule is derivable rather than a vocabulary: a tool's text parameter is
+    /// `body` when the tool also takes a contrasting sibling (`frontmatter` on
+    /// `edit_file` and `doc`, `attributes` on `edit_code`), `content` otherwise
+    /// (`create_file`, `memory`). `edit_file` was the one tool on the wrong side.
     ///
     /// This sentence read `= 37` until 2026-09-11, then `= 35`. `8b396343`'s own commit
     /// message reported its change as "35 -> 37" when the pre-collapse population was 33 over
@@ -3348,7 +3353,7 @@ mod tests {
     /// green. Pinning it would red on every rewording, which this repo declines; deriving
     /// it at the point of writing is the whole remedy available here.
     const EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL: &[(&str, usize)] = &[
-        ("edit_file", 3),
+        ("edit_file", 4),
         ("call_graph", 3),
         ("references", 3),
         ("symbol_at", 4),
@@ -3610,7 +3615,7 @@ mod tests {
     /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
     /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
     /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
-    /// counts (36 pairs, 10 tools) — so a live-array mutation and this table now
+    /// counts (37 pairs, 10 tools) — so a live-array mutation and this table now
     /// disagree, which is what makes the check non-vacuous.
     ///
     /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic
@@ -3644,6 +3649,7 @@ mod tests {
         ("edit_file", "file_path", "path"),
         ("edit_file", "relative_path", "path"),
         ("edit_file", "file", "path"),
+        ("edit_file", "content", "body"),
         ("call_graph", "file_path", "path"),
         ("call_graph", "relative_path", "path"),
         ("call_graph", "file", "path"),
@@ -4174,7 +4180,7 @@ mod tests {
     /// copies against each other and cannot see this one. A narrowing of the COUNT (e.g.
     /// collapsing this 5-pair array down to the shared 3-pair `PATH_PARAM_ALIAS_MAP`) is
     /// now caught above, by `every_declared_alias_is_absent_from_the_schema`'s per-tool
-    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 36 — derived from each
+    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 37 — derived from each
     /// tool's `param_aliases()` body, not transcribed): `read_file` is asserted to declare
     /// exactly 5 pairs, so dropping either extra pair reds it directly. What a COUNT
     /// cannot catch is a same-count KEY-IDENTITY substitution — e.g. `("output_id",
@@ -4784,8 +4790,35 @@ mod tests {
     /// legitimately contains `/` (`exact=false`). One boolean covers both
     /// directions, so nothing is left to document as a cost at the refusal site.
     /// Report run 2026-09-12: TOTAL (21 tools) = 55_382, headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-12, 55_382 → 55_711 (+329), by renaming `edit_file`'s
+    /// `content` to `body` and saying at both read surfaces which is which.** The
+    /// rule is derivable rather than a vocabulary: a tool's text parameter is `body`
+    /// when the tool also takes a contrasting sibling, `content` otherwise.
+    /// `edit_file` has `frontmatter`, `edit_code` has `attributes` and `doc` has
+    /// frontmatter — all three are `body`; `create_file` and `memory` have no such
+    /// sibling and correctly keep `content`. `edit_file` was the one tool on the
+    /// wrong side, and its own schema already admitted so: the deleted description
+    /// read *"new content … (body only — heading preserved on replace)"*.
+    ///
+    /// DERIVATION. `edit_file` is the only row that moves (4_184 → 4_513), its
+    /// `description()` is untouched, and both property blocks were measured as
+    /// serialized JSON: top-level `content` 142 → `body` 296 (**+154**), and the
+    /// `edits[]` ITEM's `content` 28 → 203 (**+175**). 154 + 175 = 329, the observed
+    /// total delta exactly.
+    ///
+    /// **The +175 buys a non-rename, and that is the point.** `edits[]` items keep
+    /// `content` — an item carries no `frontmatter` sibling, so the rule does not
+    /// reach it, and `normalize_params` rewrites top-level keys only and could not
+    /// repair a renamed item key anyway. Undocumented, that asymmetry reads as drift
+    /// to the next reader and invites a "consistency" fix that would break every
+    /// batch caller silently. Both descriptions were cut once after the first
+    /// measurement (+529 → +329) to drop implementation detail a CALLER cannot act
+    /// on; what remains is the rule and the exception, which is what a caller needs
+    /// to predict the surface. Report run 2026-09-12: TOTAL (21 tools) = 55_711,
+    /// headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_382;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_711;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

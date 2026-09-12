@@ -164,10 +164,13 @@ second tool call to discover which one applies.
 ## Iron Law 5: markdown section edits → `edit_file`'s heading grammar
 
 **Rule:** for whole-section or heading-scoped markdown edits, pass
-`heading`/`action`/`content` to `edit_file` — do not try to fake
+`heading`/`action`/`body` to `edit_file` — do not try to fake
 section addressing with `old_string`/`new_string` line hunting. Use
 `edit_file(path, action="replace|insert_before|insert_after|remove|
-edit", heading="...", content="...")`.
+edit", heading="...", body="...")`. (`body`, not `content`: the tool
+also takes `frontmatter`, and a text parameter is `body` wherever the
+tool has a contrasting sibling like that. Inside `edits[]` the item key
+stays `content` — an item has no such sibling.)
 
 **Gate fires when** `heading`, `action`, `frontmatter`, or a
 heading-addressed `edits[]` item is passed on a non-`.md`/`.markdown`
