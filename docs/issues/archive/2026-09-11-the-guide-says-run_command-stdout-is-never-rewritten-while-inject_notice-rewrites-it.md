@@ -1,7 +1,7 @@
 ---
-id: ec568decb057b874
+id: 2995a0a648a4c4db
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the progressive-disclosure guide says run_command stdout is never rewritten, in the section a reader consults to decide whether to trust it'
 tags:
 - cluster/doc-contradicted-by-code
@@ -91,24 +91,61 @@ advisory being conspicuous to a human reader and by the notice being gated on a 
 
 ## Fix
 
-Not attempted — filed on notice, per the capture-on-notice rule.
+Fixed on `experiments` — SHA `0787ca8107845232711dd97ddc5b2be2cd3dc456`, patch-id
+`deb8947f5f74904bcc5b43f5b55d6f080dfcb2f8`.
 
-Smallest correct change is at the guide source, `src/prompts/guides/progressive-disclosure.md`
-§ *Path-relative annotation*: name relativization as the sentence's scope, and name the one
-mechanism that does rewrite `stdout` — rather than deleting the sentence. Its useful content is
-that relativization will not corrupt a path literal in shell output, which is the archived
-`be25f85bdc3777a3` regression it was written to close. A reader needs both facts, not neither.
+`src/prompts/guides/progressive-disclosure.md` § *Path-relative annotation*. The sentence is
+**scoped rather than deleted**, because its content closes the archived `be25f85bdc3777a3`
+regression (relativization will not corrupt a path literal in shell output) and a reader needs both
+facts, not neither:
 
-Check `src/prompts/README.md` before editing: this is a prompt surface, and the 1900-character
-slice cap may apply.
+- *"Relativization never rewrites `run_command` output"* — the true half, now carrying its scope.
+- *"That is a claim about relativization, not a property of the channel"* — the missing qualifier.
+- `inject_notice` named as the one mechanism that does write there, with the consequence spelled
+  out: `stdout` is the command's own bytes, optionally preceded by a `⚠ …` advisory and a blank
+  line, so do not hash, diff or positionally parse it without allowing for that.
 
+**Deliberately NOT a change to `inject_notice`.** The prepend is correct, and `b3c0fe6ee49d9b57`
+cites it approvingly as the precedent whose general case was never carried across; "fixing" it
+would re-open `2026-08-17-worktree-reads-resolve-against-the-old-project`.
+
+**Surface budget checked, not assumed.** `MAX_DECLARED_SECTION_BYTES` binds only `serves:`-declaring
+sections, and `grep serves: src/prompts/guides/*.md` returns 13 matches, **all in `librarian.md`**.
+This section declares none, so the cap does not reach it.
 ## Tests added
 
-None. The gate that would catch this is not a unit test — no assertion compares guide prose
-against runtime behaviour, and `prompt_surfaces_reference_only_real_tools` checks tool NAMES, not
-claims. Worth stating rather than inventing: a test pinning this sentence would red on every
-rewording, which this repo rejects for prose.
+None, and the reason is unchanged from the filing: no assertion compares guide prose against runtime
+behaviour, and a test pinning this sentence would red on every rewording — which this repo rejects
+for prose. What stands in for it is verification **against the shipped artifact** rather than the
+source, which for a compiled-in guide is the stronger check:
 
+```
+grep -c 'Relativization never rewrites'  target/release/codescout   -> 1
+grep -c 'raw shell bytes and is'         target/release/codescout   -> 0
+```
+
+**Gate green — but on an ISOLATED WORKTREE, and that distinction is load-bearing.** `cargo test
+--workspace` on the shared checkout could not be made green: four consecutive attempts hit four
+DIFFERENT blockers from three sessions' uncommitted work (a bare count in a cluster ledger; a 5-arg
+refactor with stale call sites; that refactor's own new test failing; a missing `#[derive(Debug)]`
+in a third session's test file). None was this change and none was mine to repair. Retrying was not
+converging — with several sessions editing Rust concurrently a clean whole-suite window narrows
+rather than arrives.
+
+So the lane ran on `git worktree add --detach … 9e09c3bc`, holding HEAD's committed state plus this
+fix and, by construction, nobody's dirty files — with its own target dir, so the shared `target/`
+was neither thrashed nor left holding a librarian-less binary. **Result: 5815 passed, 0 failed,
+exit 0.** Read by NAME rather than by total:
+`a_p50_session_stays_under_the_committed_emission_byte_ceiling` and
+`declared_sections_are_within_the_size_cap` both ran — the two byte budgets this edit could trip,
+and the two `src/prompts/README.md` notes print nothing on success — plus 103 `prompts::` tests.
+
+**The control that makes the isolation a measurement rather than a dodge:**
+`a_language_whose_server_never_answered_is_covered_wholesale`, the test that was red on the shared
+tree, returns **0** occurrences in this lane. That zero is not a coverage gap; it is proof the
+worktree excluded exactly the in-flight work it was meant to exclude. Earlier lanes on the shared
+tree also passed for this change — clippy `--all-targets --features local-embed` clean, lean lane
+3792 — but each was taken while peers held the tree dirty, so the worktree run is the citable one.
 ## Resume
 
 Found during a post-rebuild reconnaissance whose actual subject was a different fix

@@ -13705,7 +13705,8 @@ which passes either way; the session would have reported "verified on the wire" 
 the mechanism that was never defective. This is `W-124` compounding one bug later, through the
 artifact rather than through a person — which is the thing entry IDs are for.
 
-**Incidental:** the pass also turned up a doc-vs-code drift and filed it — `ec568decb057b874`:
+**Incidental:** the pass also turned up a doc-vs-code drift and filed it — `2995a0a648a4c4db`
+(fixed 2026-09-12 in `0787ca81`, archived):
 `get_guide("progressive-disclosure")` states "`run_command` output is raw shell bytes and is never
 rewritten" while `inject_notice` deliberately prepends the worktree advisory into `stdout`. Noticed
 only because a linked worktree appeared mid-session, so the same call shape returned different
