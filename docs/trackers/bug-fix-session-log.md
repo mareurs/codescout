@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 135
-entry_high_water_W: 128
+entry_high_water_W: 129
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -187,6 +187,7 @@ entry_high_water_W: 128
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-129 | 2026-09-12 | high | **The control fired, and what it caught was that the guard I was narrowing was load-bearing for a reason nobody had written down.** Fixing `d4db8a2d93bdced9` (fmt-mine refusing this session's own files on a mixed scan), I paired the positive assertion with *"THEIR file must be byte-untouched"*. It fired on the first draft: **`rustfmt <file>` is not per-file** — it descends into every `mod` the file declares, so formatting `$MINE` rewrote a peer's child module. Verified at the bytes on rustfmt 1.9.0-stable; `--skip-children` is nightly-only. | `ce3a628db5fa1168` — the defect the script exists to close — re-admitted **through the regression test written to close a different bug in the same script**, with every other assertion green: exit code, refusal text, peer socket, narrow command. The positive assertion passed *because* the formatter had run over everything. Second-order, and the half worth carrying: the wholesale refusal read as over-caution but was the only thing closing that door, since a peer's child can only be damaged if it too needs formatting and such a file is by construction a row in the same scan. **Before narrowing a guard that looks broader than its stated reason, ask what else its breadth is covering** — it will not be in the code, because anyone who knew would have written it. | validated |
 | W-128 | 2026-09-12 | med | **Verified a rebuild by PROCESS, not by file — and the verification expired eleven minutes later.** Identified my own server by `ppid` (PID 968351, inode `190428843`, shared with 3 peer servers), read its baked provenance (`git_sha=ad243cb7`, `git_dirty=true`), confirmed ancestry, then probed the wire: the `$VAR` source-gate refusal now names cause AND a performable remedy, and a 400-row `doc(find)` overflowed to a buffer whose envelope still carried the tool's own `corrections` with **no** `param_aliases` — the absence control, since two unrelated mechanisms write that key. At 19:33:11 a peer had relinked: on-disk inode `190441132`, and all four of those servers — mine included — now hold a deleted exe. | "The gate was green when I committed" is evidence about a suite, not the process answering my calls. Framed as *"the build on disk has my fix"* the same evidence goes false in 11 minutes with nothing marking the transition; framed as *"the process serving me"* it survives, because a running process keeps its mapped inode. **Also carries its own falsified count:** the entry first said "20 of 26" — `pgrep -f codescout` matches the `cargo`/`rustc`/`sccache` processes *building* it, so that counted pgrep's list rather than codescout servers. Re-derived: 19 of 21 on a dead inode, and the 2 on the current one are worker children of a peer's server, not session servers. | validated |
 | W-127 | 2026-09-12 | high | **Nearly filed a phantom bug against `grep` — the corpus moved mid-read, and the check was two commands.** Two reads of ONE line disagreed a minute apart: substring grep saw `{group_by_file, render_grouped}` at `display.rs:109`, a whole-word grep matched nothing there, and `read_file` saw `{group_by_file_ranked, …}`. My first hypothesis was that `grep` had mis-rendered the line. `git status` + `stat` showed the file DIRTY with an mtime **2 seconds** before my check — a peer wrote it while I was reading. Settled against both trees: HEAD has bare `group_by_file` (2 occurrences, 0 ranked), the worktree has the ranked variant, uncommitted. The instrument was right at each instant. | A bug filed against a core tool for returning content not in the file — **unreproducible by construction**, because the worktree had already moved past the state that produced it. It would have sat open as a phantom, and the next session re-running the grep would get the new answer and be unable to tell fixed from flaky from never-real. `CLAUDE.md` names the tell (line drift means the corpus MOVED, not that the reader ERRED) and records 3 of 4 sessions reaching for *"they made a mistake"*; I reached for *"the TOOL made a mistake"*, which is the same move aimed at an instrument — worse, because a person can correct the record and a tool accusation just accumulates. Also **corrects `codescout-75`'s self-criticism in their favour** — **⚠ RETRACTED 06:56Z, see the entry's correction block: the worktree/HEAD divergence postdated their claim, created by their own step-4 edit (now `48d39f53`), so their retraction stands whole. What the exchange actually found is their class — a claim can become TRUE after it is withdrawn, when the withdrawer edits toward it — and a ceiling on this row's own remedy: naming the TREE resolves two CONCURRENT readings and does nothing for two SEQUENTIAL states.** Operational half, cheaper than the habit it replaces: name the TREE, not just the instant — `git show HEAD:<path>` is one command and removes the ambiguity a timestamp only dates. | validated |
 | W-126 | 2026-09-12 | med | **Scouted the caller's INPUT, not its signature, and it inverted the implementation.** Fixing `447d98db54393338` meant giving `edit_file`'s keyword scan literal-awareness by reusing `src/util/text.rs`'s scanner rather than writing a second copy of the literal rules. Its existing caller threads `Scan` state line to line — correct for `literal_continuation_mask`, which walks real blocks. Reading the NEW caller's input showed `find_def_keyword` receives `lines_only_in(old, new)` joined: the lines an edit CHANGED, which are never contiguous source. So `blank_non_code` resets to `Scan::Code` per line, and the choice is annotated where it is made rather than left to look like an oversight. | Carried state would blank real code lying between two unrelated quotes — a **false negative**, which the module's stated asymmetry at `:45-49` calls the direction that corrupts rather than annoys, so it surfaces as no complaint from anyone. It would also have passed the entire suite: every existing scanner test feeds a real contiguous block, where carrying state is correct, so no fixture in the repo can express the failure. The guard that now reds on it, `blank_non_code_does_not_carry_literal_state_between_lines`, was written from the scout and not from an observed red — the one shape this ledger keeps finding that a test run cannot hand you. | validated |
@@ -14072,6 +14073,45 @@ positive observations of *behaviour*, which is why they survive that caveat; an 
 check alone would not.
 
 **Status:** validated
+## W-129 — the control fired, and the guard I was narrowing turned out to be load-bearing for an unwritten reason
+
+**Valid:** dated 2026-09-12
+
+**Observed:** fixing `d4db8a2d93bdced9` — `scripts/fmt-mine.sh` refusing this session's own
+files whenever a peer's also needed formatting. The bug names the positive assertion you
+reach for: *my file should get formatted*. Writing the new case I added the negative one
+beside it — *their file must be byte-untouched* — with an inline note saying why: an
+assertion that only checks my file is satisfied by a fix that simply drops the guard and
+formats everything.
+
+It fired on the first draft, and the reason was not a slip. **`rustfmt <file>` is not
+per-file** — it parses the file and descends into every `mod` it declares. Verified at the
+bytes on rustfmt 1.9.0-stable: `rustfmt --edition 2021 src/lib.rs` rewrote `src/peer.rs`
+through a `pub mod peer;` line, and `--skip-children` is nightly-only. So formatting `$MINE`
+took a peer's file with it, from a command whose entire purpose is to be the narrow
+alternative to `cargo fmt`.
+
+**Counterfactual:** `ce3a628db5fa1168` — *the* defect this script exists to close, peers'
+uncommitted Rust being rewritten — re-admitted **through the regression test written to
+close a different bug in the same script**. Every other assertion was green: exit code
+right, refusal message right, the peer's socket named, the narrow command offered. The
+positive assertion was green *because* the formatter had run over everything. A reviewer
+reading the diff would have seen a guard being loosened deliberately, with a passing suite.
+
+**The second-order finding is the one worth carrying.** The wholesale refusal that this bug
+was filed against was **load-bearing and nothing said so**. A peer's child module can only
+be *damaged* if it too needs formatting, and a file needing formatting is by construction a
+row in the same scan — so refusing every mixed scan was accidentally sufficient. The bug
+file called the disposition an open design question; it was a guard whose reason had never
+been written down, which reads identically to over-caution. **Before narrowing a guard that
+looks broader than its stated reason, ask what ELSE its breadth is currently covering** —
+the answer is not in the code, because if anyone had known it they would have written it.
+
+**Rests on:** one mutation, one site. The control was exercised against the first draft
+only; a later refactor of the reach check is not covered by having killed it once.
+
+**Status:** validated
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
