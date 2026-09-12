@@ -1537,6 +1537,20 @@ pub trait Tool: Send + Sync {
                     // so `param_corrections` (the OBJECT) has nowhere to land on this path
                     // — a text renderer cannot carry a JSON object, which is why both
                     // `param_notice` and `param_corrections` were built above.
+                    //
+                    // The tool's OWN `corrections` has no carrier here either, and for the
+                    // same reason — `format_compact` never selected it. That is safe today
+                    // by POPULATION, not by construction: the writers are exactly
+                    // `find.rs`'s filter repair and `update.rs`'s top-level lift, both `doc`
+                    // actions, and nothing under `src/librarian/` overrides `output_form`,
+                    // so every one of them is `OutputForm::Json` and never reaches this
+                    // branch. Re-derive the bound rather than trusting this sentence:
+                    // `grep -rn '"corrections"' src/librarian/tools/` for the writers,
+                    // `grep -rn 'fn output_form' src/librarian/` for the form. The first
+                    // Text-form tool to write its own `corrections` gets it dropped
+                    // silently, and no test here would red — the fix shape is this prefix,
+                    // which `param_notice` already demonstrates. The buffered-path twin of
+                    // exactly this drop was `1e11cf9357136e0e`.
                     Content::text({
                         let mut prefix = String::new();
                         if let Some(notice) = &workspace_notice {
