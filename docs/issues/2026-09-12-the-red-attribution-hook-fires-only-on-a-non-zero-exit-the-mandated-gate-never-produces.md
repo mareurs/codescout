@@ -22,8 +22,14 @@ the same file mandates:
 
 - a trailing `; echo "... $?"` makes the shell's exit status the `echo`'s, so a failing
   command reports `exit_code: 0` and the hook never runs;
-- the `run_in_background` form returns a handle before the process exits, so there is no
-  exit status to hook on at return time.
+- the explicit `run_in_background: true` form returns a handle before the process exits,
+  so there is no exit status to hook on, at return or afterwards.
+
+**A command's DURATION is not one of them, and saying so is load-bearing** — the obvious
+inference is that a gate which always exceeds 120s is auto-backgrounded and therefore
+beyond the hook's reach, which would make this defect far larger than it is. It is false:
+the auto-backgrounded path carries `exit_code` and a full `wip_authors` through to the
+completion notification (§ Evidence, row 2). The trailing `echo` is the whole defect.
 
 The four-command gate in § *Development Commands* is written as
 `cargo test … ; echo "LEAN exit=$?" ; cargo test … ; echo "DEFAULT exit=$?"` — it **ends
@@ -110,13 +116,26 @@ status exists yet to trigger on.
 
 ## Evidence
 
-### Three invocation forms, all through `run_command`
+### Four invocation forms, all through `run_command`
 
 | form | exit_code seen | `wip_authors` | mechanism |
 |---|---|---|---|
 | bare failing command | 101 | **present** | trigger works |
+| auto-backgrounded past 120s | 101 (on completion) | **present** | notification carries the exit |
 | `<cmd> ; echo "… $?"` | 0 | **absent** | `echo` is the last statement |
-| `run_in_background: true` | *(none at return)* | **absent** | returns before the exit exists |
+| explicit `run_in_background: true` | *(none, ever)* | **absent** | returns before an exit exists |
+
+**Row 2 is the one that changes how this bug reads, and it was nearly filed the other
+way.** The natural inference is that a gate always exceeding 120s can never produce a
+hook-visible exit, which would make the defect far larger than it is. It is false:
+auto-backgrounding preserves both the status and the attribution end to end. **Duration is
+not a cause; the trailing `echo` is the whole defect.** Measured 2026-09-12 by sessionId
+`b80a27d4`, who reports reasoning to the opposite conclusion and checking before sending
+it. Row 1 was corroborated independently by sessionId `8bd791df` on a bare
+`cargo test --workspace`.
+
+Rows 3 and 4 are silent for **different** reasons and only one is fixable by changing the
+trigger: row 3 has an exit status that is the wrong one, row 4 has none at all.
 
 ### The live incident this class produced, earlier the same day
 
@@ -132,6 +151,28 @@ That is the shape worth keeping: the instruction *"read the line the failure car
 is correct, and silently inapplicable, and the failure mode is a **confident** wrong
 answer rather than a missing one.
 
+### A second live incident, same day, through the trailing `echo` alone
+
+Reported by sessionId `b80a27d4` about twenty minutes after helping measure the table
+above: `cargo test --workspace` in the mandated form, auto-backgrounded. `LEAN exit=0`,
+`DEFAULT exit=101` sitting in stdout as text, a genuine red
+(`no_class_field_states_a_bare_n`, over a bolded `n=` in an uncommitted `IC-5` edit), and
+**no `wip_authors`**. Attribution was recovered by hand — `file-provenance.py` on the path
+out of the failure text — reaching sessionId `8bd791df`, who fixed it in minutes.
+
+Two things this instance carries that the first does not:
+
+- **The red was in a file with no relationship to anything the reporter had touched.** They
+  were working in `src/tools/symbol/symbols.rs`; the failure was in a tracker ledger. This
+  is the case where adjacency yields *nothing* rather than a wrong name, and the cost is
+  not only misattribution: a session with less context would reasonably conclude its own
+  change caused the red and start bisecting its own work.
+- **It fired through the trailing `echo` alone.** The reporter had assumed the `echo` and
+  the backgrounding compounded. They do not — one of those paths is silent and the other is
+  loud, which is why the two must not be described as one "background" ceiling.
+
+Attribution recorded as the parties asked: the incident and the four-form measurement are
+`b80a27d4`'s, the bare-foreground corroboration of row 1 is `8bd791df`'s.
 ### The extractor itself is not implicated
 
 `named_paths` is deliberately conservative — it requires a cargo-shaped span, a panic site,
@@ -160,14 +201,15 @@ Not started. The trigger is one line; the decision is which signal replaces it.
 
 - **Trigger on the OUTPUT, not the status** — run the hook when the combined output
   contains a `DIAGNOSTIC_PATH` match whose file is dirty, regardless of exit code. Covers
-  all three forms including background. The extractor is already conservative enough to
+  every form including the two silent ones. The extractor is already conservative enough to
   make false positives unlikely, and a spurious `wip_authors` is cheap next to a silent
   one. Cost: the hook runs on some successful commands that merely printed a diagnostic.
 - **Trigger on status OR output** — narrower version of the above, keeping today's
   behaviour and adding the output path only when `exit_code == 0`.
-- **Attach on background completion** — separate change, needed for the third form
-  whichever of the above lands: run the hook when the detached process exits and attach to
-  the buffer.
+- **Attach on background completion** — separate change, and **narrower than this file
+  first stated**: needed only for the explicit `run_in_background: true` form. The
+  auto-backgrounded path already attaches on completion, so this buys the one remaining
+  silent form rather than "background" as a category.
 - **Name the ceilings in CLAUDE.md** — the minimum, and it does not fix the silence. If
   only this ships, § *Reaching a Peer Session* must stop saying the standing instruction
   *replaces* going looking, because for the gate it does not.
@@ -188,16 +230,16 @@ manual route: `scripts/file-provenance.py` intersected with the socket enumerati
 
 ## Resume
 
-Pick a trigger from § Fix. Before implementing, re-derive the three-form table above
+Pick a trigger from § Fix. Before implementing, re-derive the four-form table above
 against a **currently** dirty path — the precondition decays, and a stale path yields a
 correct silence that reads as the bug.
 
-One sub-claim is deliberately **not** established and should not be inherited: for the
-background form I measured only that the immediate return carries no `exit_code` and no
-`wip_authors`, and that reading the buffer afterwards reports the *reading* command's exit.
-Whether a completion notification for a genuinely failing background job could carry
-`wip_authors` was not observed — the one backgrounded gate run seen this session had a real
-exit of 0 (trailing `echo`), so it discriminates nothing.
+The sub-claim this file originally marked **not established** now is, and it **narrows**
+the bug rather than widening it: measured 2026-09-12 by sessionId `b80a27d4`, a completion
+notification for an auto-backgrounded failing job carries `exit_code: 101` and a full
+`wip_authors`. Only the explicit `run_in_background: true` form is silent. The form that
+looks most like the real gate is the loud one — so re-derive with four arms, not three, and
+do not treat "it was backgrounded" as an explanation for a missing attribution.
 
 ## References
 
