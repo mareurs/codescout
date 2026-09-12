@@ -571,6 +571,15 @@ pub struct AppendOutcome {
     /// can cite it. Distinct from `snapshot_missing`, which an index row satisfies;
     /// see `undefined_in_body_note`.
     pub undefined_in_body: Option<String>,
+    /// Whether a [`PendingSection`] was supplied and written in the same call.
+    ///
+    /// The mirror of [`AllocateOutcome::section_written`], and load-bearing for the same
+    /// reason: `false` means the entry is the caller's to write and the hint must say so,
+    /// `true` means it is already on disk with a `def_re`-conformant heading and the caller
+    /// must NOT write it again. Before the params path could take a section, this was
+    /// unconditionally the second case's opposite — the caller was told to write a section
+    /// whether or not they had asked the server to.
+    pub section_written: bool,
 }
 
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
@@ -584,6 +593,7 @@ pub fn append_entry(
     id_prefix: &str,
     mut entry: Value,
     cites: &[String],
+    section: Option<&PendingSection>,
 ) -> Result<AppendOutcome> {
     let tx = cat
         .conn
@@ -636,7 +646,12 @@ pub fn append_entry(
             |r| r.get(0),
         )
         .optional()?;
-    let body_text = abs_path.and_then(|p| std::fs::read_to_string(p).ok());
+    // `as_deref` rather than a move: `abs_path` is needed again below to write the
+    // section, and consuming it here is what made a section write impossible to add
+    // without restructuring.
+    let body_text = abs_path
+        .as_deref()
+        .and_then(|p| std::fs::read_to_string(p).ok());
     // One read, both directions. The set answers the id-allocation question
     // (its max) AND the durability question (what the body is missing); reading
     // only the max is what left the second one unanswerable for a month.
@@ -756,6 +771,53 @@ pub fn append_entry(
             )?;
         }
     }
+    // The section and its index row, written BEFORE the commit and in that order for the
+    // reason `allocate_entry_id` writes before committing: if the splice fails, the
+    // transaction rolls back, the id is not consumed, and the refusal's "nothing was
+    // written" is true. This is deliberately the ONE body read on this path that may fail
+    // the call — `undefined_in_body_note` below still may not, because it runs after a
+    // write that already succeeded, and the two are different obligations.
+    //
+    // Before this existed the five section fields were accepted here and never read: the
+    // code that honours them lived inside the prose branch that excluded this one
+    // (`docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
+    let mut snapshot_missing = snapshot_missing;
+    let section_written = match section {
+        None => false,
+        Some(s) => {
+            let path = abs_path.as_deref().ok_or_else(|| {
+                RecoverableError::new(format!(
+                    "append_entry: artifact `{artifact_id}` has no file on disk, so the \
+                     section cannot be written — no id was allocated"
+                ))
+            })?;
+            let doc = std::fs::read_to_string(path).map_err(|e| {
+                RecoverableError::new(format!(
+                    "append_entry: cannot read `{path}` to write the section: {e} — no id was \
+                     allocated and nothing was written"
+                ))
+            })?;
+            // Same observation rule as the prose path: the ledger's own heading level when
+            // it has one, `2` only as a declared default.
+            let level = body_entry_heading_level(&doc, id_prefix).unwrap_or(2);
+            let updated = splice_pending_section(&doc, &new_id, level, s, "append_entry")?;
+            std::fs::write(path, &updated).map_err(|e| {
+                RecoverableError::new(format!(
+                    "append_entry: cannot write the section into `{path}`: {e} — no id was \
+                     allocated"
+                ))
+            })?;
+            // `snapshot_missing` was derived from a body read taken BEFORE this write, so
+            // it still lists the id whose row was just added. Reporting it would ask the
+            // caller to do by hand the exact thing this call just did — the defect this
+            // change exists to remove, re-introduced one field over.
+            if s.index_row.is_some() {
+                snapshot_missing.retain(|m| m != &new_id);
+            }
+            true
+        }
+    };
+
     tx.commit()?;
     // After the commit, deliberately: this reads the body off disk and must never be
     // able to fail a write that already succeeded.
@@ -765,6 +827,7 @@ pub fn append_entry(
         warning,
         snapshot_missing,
         undefined_in_body,
+        section_written,
     })
 }
 
@@ -1119,100 +1182,7 @@ pub fn allocate_entry_id(
     let id = format!("{id_prefix}-{next}");
     let updated = match section {
         None => updated,
-        Some(s) => {
-            let heading = "#".repeat(level);
-            let prose = s.body.trim_end();
-            // Every section the server writes is born with a declared decay class, the
-            // same way it is born with a def_re-conformant heading: by construction, not
-            // by convention. A caller that already declared one is left alone —
-            // double-stamping would make the parser's first-match rule pick between the
-            // caller's class and this one arbitrarily. A malformed declaration (e.g. an
-            // unparsable date) propagates the parser's own error via `?` — before any
-            // write happens — rather than being joined by a second `**Valid:**` line,
-            // which would make the malformed one authoritative under first-wins and
-            // leave the entry permanently unparseable. Repair only when exactly one
-            // interpretation is correct
-            // (docs/adrs/2026-07-10-repair-and-continue-input-handling.md); a malformed
-            // date has none.
-            let stamped = match crate::librarian::statements::parse_validity(prose)? {
-                Some(_) => prose.to_string(),
-                None => format!("**Valid:** dated {}\n\n{prose}", today_iso()),
-            };
-            // Trailing blank line so the anchor heading that follows is not glued to
-            // this section's last prose line. Caught by reading a mutation test's
-            // failure output, which printed `the prose\n## Template for new entries`.
-            let section_text = format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title);
-            let with_section = crate::tools::markdown::edit_markdown::perform_section_edit_ext(
-                &updated,
-                &s.anchor_heading,
-                "insert_before",
-                Some(&section_text),
-                None,
-                false,
-            )
-            .map_err(|e| {
-                // The document is in memory right here, so the recovery can be
-                // CONCRETE instead of a referral. Naming the last top-level headings
-                // specifically, because a ledger's append anchor is conventionally its
-                // final stanza and `doc(action="get")`'s heading window fills from
-                // the top — which is exactly why the surface this hint used to name
-                // could not answer on a long ledger.
-                // docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
-                let tail: Vec<String> = crate::librarian::preview::headings::parse(&updated)
-                    .into_iter()
-                    .filter(|h| h.level <= 2)
-                    .rev()
-                    .take(3)
-                    .map(|h| format!("`{} {}`", "#".repeat(h.level as usize), h.text))
-                    .collect();
-                let tail_hint = if tail.is_empty() {
-                    "This ledger has no top-level heading to anchor against, so the \
-                     section must be added by hand."
-                        .to_string()
-                } else {
-                    format!(
-                        "Its last top-level headings, closest to the end first, are: {}. \
-                         A ledger's append anchor is conventionally the final one.",
-                        tail.join(", ")
-                    )
-                };
-                RecoverableError::with_hint(
-                    format!(
-                        "allocate_entry_id: cannot place {id} before `{}`: {e} — no id was \
-                         allocated and nothing was written",
-                        s.anchor_heading
-                    ),
-                    format!(
-                        "`anchor_heading` must name a heading that exists in the ledger \
-                         verbatim, including its `#` prefix. {tail_hint}"
-                    ),
-                )
-            })?;
-            // The row goes into the SAME string the section and the high-water mark
-            // went into, so one `fs::write` carries all three. Writing it as a second
-            // call is exactly the window this closes: the row cannot be written FIRST
-            // (the allocator counts a row as a claimed id, so it would consume the
-            // number it names), so a caller doing two calls always leaves the entry
-            // row-less for the interval between them, and no discipline available to
-            // them shortens it.
-            match &s.index_row {
-                None => with_section,
-                Some(r) => {
-                    let row = r.row.replace("{id}", &id);
-                    insert_index_row(&with_section, &r.after_line, &row).map_err(|e| {
-                        RecoverableError::with_hint(
-                            format!(
-                                "allocate_entry_id: cannot place the index row for {id}: {e} — \
-                                 no id was allocated and nothing was written"
-                            ),
-                            "`index_row.after_line` must name a line that exists in the ledger, \
-                             compared with surrounding whitespace trimmed. For a newest-first \
-                             table that is the separator row, e.g. `|----|-------|`.",
-                        )
-                    })?
-                }
-            }
-        }
+        Some(s) => splice_pending_section(&updated, &id, level, s, "allocate_entry_id")?,
     };
     std::fs::write(&abs_path, &updated).map_err(|e| {
         RecoverableError::new(format!(
@@ -1263,6 +1233,114 @@ fn insert_index_row(doc: &str, after_line: &str, row: &str) -> std::result::Resu
         Ok(out)
     } else {
         Err(format!("no line matching `{after_line}`"))
+    }
+}
+
+/// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
+/// whole document so the caller writes it in ONE `fs::write`.
+///
+/// **Extracted so the params path can reach it, and shared rather than copied for the
+/// reason this module keeps paying for.** It was inline in [`allocate_entry_id`], which
+/// is why `append_entry` accepted `title`/`body`/`anchor_heading`/`index_row` and silently
+/// dropped all four: the code that honours them lived inside the branch that excluded it
+/// (`docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
+/// A second copy would have reproduced that the moment either drifted.
+///
+/// `caller` names the function in the refusal text. Both callers abort BEFORE any write,
+/// so both can honestly say nothing was written — see each call site for the ordering that
+/// makes that true.
+fn splice_pending_section(
+    doc: &str,
+    id: &str,
+    level: usize,
+    s: &PendingSection,
+    caller: &str,
+) -> Result<String> {
+    let heading = "#".repeat(level);
+    let prose = s.body.trim_end();
+    // Every section the server writes is born with a declared decay class, the same way it
+    // is born with a def_re-conformant heading: by construction, not by convention. A
+    // caller that already declared one is left alone — double-stamping would make the
+    // parser's first-match rule pick between the caller's class and this one arbitrarily. A
+    // malformed declaration propagates the parser's own error via `?` — before any write —
+    // rather than being joined by a second `**Valid:**` line, which would make the
+    // malformed one authoritative under first-wins and leave the entry permanently
+    // unparseable. Repair only when exactly one interpretation is correct
+    // (docs/adrs/2026-07-10-repair-and-continue-input-handling.md); a malformed date has
+    // none.
+    let stamped = match crate::librarian::statements::parse_validity(prose)? {
+        Some(_) => prose.to_string(),
+        None => format!("**Valid:** dated {}\n\n{prose}", today_iso()),
+    };
+    // The heading is formatted here and nowhere else: `<level> <ID> — <title>` is exactly
+    // `link_scan`'s `def_re`, so an entry written through this path cannot be born
+    // undefined. Trailing blank line so the anchor heading that follows is not glued to
+    // this section's last prose line.
+    let section_text = format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title);
+    let with_section = crate::tools::markdown::edit_markdown::perform_section_edit_ext(
+        doc,
+        &s.anchor_heading,
+        "insert_before",
+        Some(&section_text),
+        None,
+        false,
+    )
+    .map_err(|e| {
+        // The document is in memory right here, so the recovery can be CONCRETE instead of
+        // a referral. Naming the last top-level headings specifically, because a ledger's
+        // append anchor is conventionally its final stanza and `doc(action="get")`'s
+        // heading window fills from the top.
+        let tail: Vec<String> = crate::librarian::preview::headings::parse(doc)
+            .into_iter()
+            .filter(|h| h.level <= 2)
+            .rev()
+            .take(3)
+            .map(|h| format!("`{} {}`", "#".repeat(h.level as usize), h.text))
+            .collect();
+        let tail_hint = if tail.is_empty() {
+            "This ledger has no top-level heading to anchor against, so the section must be \
+             added by hand."
+                .to_string()
+        } else {
+            format!(
+                "Its last top-level headings, closest to the end first, are: {}. A ledger's \
+                 append anchor is conventionally the final one.",
+                tail.join(", ")
+            )
+        };
+        RecoverableError::with_hint(
+            format!(
+                "{caller}: cannot place {id} before `{}`: {e} — no id was allocated and \
+                 nothing was written",
+                s.anchor_heading
+            ),
+            format!(
+                "`anchor_heading` must name a heading that exists in the ledger verbatim, \
+                 including its `#` prefix. {tail_hint}"
+            ),
+        )
+    })?;
+    // The row goes into the SAME string the section went into, so one `fs::write` carries
+    // both. Writing it as a second call is exactly the window this closes: the row cannot
+    // be written FIRST (the allocator counts a row as a claimed id, so it would consume the
+    // number it names), so a caller doing two calls always leaves the entry row-less for
+    // the interval between them, and no discipline available to them shortens it.
+    match &s.index_row {
+        None => Ok(with_section),
+        Some(r) => {
+            let row = r.row.replace("{id}", id);
+            insert_index_row(&with_section, &r.after_line, &row).map_err(|e| {
+                RecoverableError::with_hint(
+                    format!(
+                        "{caller}: cannot place the index row for {id}: {e} — no id was \
+                         allocated and nothing was written"
+                    ),
+                    "`index_row.after_line` must name a line that exists in the ledger, \
+                     compared with surrounding whitespace trimmed. For a newest-first table \
+                     that is the separator row, e.g. `|----|-------|`.",
+                )
+            })
+        }
     }
 }
 
@@ -2256,6 +2334,7 @@ mod tests {
             "F",
             json!({"status": "fail"}),
             &[],
+            None,
         )
         .unwrap()
         .id;
@@ -2276,7 +2355,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-3"},{"id":"F-9"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None)
             .unwrap()
             .id;
         assert_eq!(id, "F-10");
@@ -2305,7 +2384,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-32"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None)
             .unwrap()
             .id;
         assert_eq!(id, "F-34");
@@ -2343,7 +2422,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-2"},{"id":"F-3"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
+        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None).unwrap();
 
         assert_eq!(out.id, "F-4");
         assert!(
@@ -2381,7 +2460,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-2"},{"id":"F-3"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
+        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None).unwrap();
 
         assert_eq!(out.id, "F-4");
         assert_eq!(
@@ -2600,7 +2679,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-9"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None)
             .unwrap()
             .id;
         assert_eq!(id, "F-10");
@@ -2617,7 +2696,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-4"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None)
             .unwrap()
             .id;
         assert_eq!(id, "F-5");
@@ -2632,7 +2711,7 @@ mod tests {
         a.params = r#"{"failures":[]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let err = append_entry(&mut cat, "art1", "bugs", "B", json!({}), &[]).unwrap_err();
+        let err = append_entry(&mut cat, "art1", "bugs", "B", json!({}), &[], None).unwrap_err();
         assert!(err.to_string().contains("failures"));
     }
 
@@ -2641,7 +2720,8 @@ mod tests {
         let mut cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("art1")).unwrap();
 
-        let err = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap_err();
+        let err =
+            append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None).unwrap_err();
         assert!(err.to_string().contains("no augmentation"));
     }
 
@@ -2679,6 +2759,7 @@ mod tests {
             "F",
             json!({"status": "bogus"}),
             &[],
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("params_schema"));
@@ -2705,6 +2786,7 @@ mod tests {
             "C",
             json!({"paths": ["[invalid"], "rule": "R", "status": "active"}),
             &[],
+            None,
         )
         .unwrap_err();
         assert!(
@@ -2734,6 +2816,7 @@ mod tests {
             "C",
             json!({"paths": ["src/**/*.rs"], "rule": "R", "status": "active"}),
             &[],
+            None,
         )
         .unwrap()
         .id;
@@ -2758,6 +2841,7 @@ mod tests {
             "F",
             json!({"paths": ["[invalid"], "status": "fail"}),
             &[],
+            None,
         )
         .unwrap()
         .id;
@@ -2810,6 +2894,7 @@ mod tests {
                 "F",
                 json!({"who": "one"}),
                 &[],
+                None,
             )
             .unwrap()
         });
@@ -2822,6 +2907,7 @@ mod tests {
                 "F",
                 json!({"who": "two"}),
                 &[],
+                None,
             )
             .unwrap()
         });

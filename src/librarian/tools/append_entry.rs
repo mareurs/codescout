@@ -348,6 +348,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &a.id_prefix,
         a.entry,
         &a.cites,
+        // WIRING INCOMPLETE — the params path does not yet pass its section.
+        // `augmentation::append_entry` now accepts one and writes it before committing;
+        // what remains is hoisting the `index_row` + `PendingSection` construction out of
+        // the prose branch above so both branches build it from the same code. Passing it
+        // from a second, copied construction is the thing this change exists to avoid.
+        None,
     )?;
     let mut out = json!({"id": outcome.id, "artifact_id": target});
     if let Some(w) = outcome.warning {
