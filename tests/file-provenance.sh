@@ -671,6 +671,73 @@ print('\n'.join(str(p) for p in m.transcript_roots(Path('/x/y'))))")"
 has "transcripts discover the same way"          "$disco_t" "/.claude-brandnew/projects/-x-y"
 hasnt "and skip profiles without this project"   "$disco_t" ".claude-sdd/projects"
 
+echo "== a SUBAGENT write is authorship, and its record lives one directory DOWN =="
+# Claude Code 2.1.x dispatches via `Agent` and writes the subagent's records to
+#     <project-dir>/<PARENT-session-id>/subagents/agent-<id>.jsonl
+# and NOT into the parent's own <session-id>.jsonl. `scan()` globbed "*.jsonl"
+# NON-RECURSIVELY, so every one of those files sat outside its window.
+#
+# Why this went two corrections without being found: the "zero isSidechain records"
+# measurement that concluded first the substrate and then the 2.1.x VERSION could not
+# supply subagent records was itself taken through that same non-recursive glob, so it
+# could only ever return zero. A windowed instrument's zero is scoped to its window.
+# Re-derived 2026-09-12 OUTSIDE the window, on this machine, for this checkout across 3
+# profiles: 756 subagent transcript files, 755 carrying isSidechain:true, 192,797 such
+# records -- the newest written that same day by Claude Code 2.1.267, which is INSIDE the
+# exact version range the old comment cited as emitting none.
+sub_tool_use() { # sub_tool_use <file> <tool> <input-json> [parent-sid] -- omit sid to drop the field
+    python3 - "$1" "$2" "$3" "${4:-}" <<'PY'
+import json, sys
+f, name, inp, sid = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+# Mirrors a real 2.1.x subagent record, field for field, as measured on disk.
+rec = {"parentUuid": None, "isSidechain": True, "agentId": "a0123456789abcdef",
+       "type": "assistant", "timestamp": "2026-09-12T08:37:12.000Z",
+       "message": {"content": [
+           {"type": "tool_use", "name": name, "input": json.loads(inp)}]}}
+if sid:
+    rec["sessionId"] = sid
+open(f, "a").write(json.dumps(rec) + "\n")
+PY
+}
+
+SUBA="$T/profileA/projects/-repo/$ME/subagents/agent-a0123456789abcdef.jsonl"
+mkdir -p "$(dirname "$SUBA")"
+sub_tool_use "$SUBA" mcp__codescout__create_file '{"path":"src/by_subagent.rs","content":"x"}' "$ME"
+out=$(run src/by_subagent.rs)
+has   "a subagent write attributes to its PARENT session" "$out" "MINE"
+hasnt "and is no longer the coverage verdict"             "$out" "UNKNOWN"
+
+# CONTROL. Without it, "glob recursively and take the credit" passes the assertion above:
+# a fix that attributed every subagent record to the running session would be green there
+# and would hand this session write authority over a peer's files -- which is what
+# fmt-mine.sh then acts on.
+SUBB="$T/profileB/projects/-repo/$PEER/subagents/agent-b0123456789abcdef.jsonl"
+mkdir -p "$(dirname "$SUBB")"
+sub_tool_use "$SUBB" mcp__codescout__create_file '{"path":"src/by_peer_subagent.rs","content":"x"}' "$PEER"
+out=$(run src/by_peer_subagent.rs)
+has   "a PEER's subagent write attributes to the PEER" "$out" "PEER"
+hasnt "and never to this session"                      "$out" "MINE"
+
+# CONTROL, the other direction. `scan()` falls back to the FILENAME when a record carries
+# no sessionId -- and a subagent file's stem is `agent-<id>`, which is not a session id and
+# addresses nobody. The fallback for these files has to be the PARENT DIRECTORY. A refusal
+# naming `agent-a0123456789abcdef` as the owner is worse than UNKNOWN: UNKNOWN says "cannot
+# tell", this would say "ask a session that does not exist".
+SUBC="$T/profileA/projects/-repo/$ME/subagents/agent-anosessionid00000.jsonl"
+sub_tool_use "$SUBC" mcp__codescout__create_file '{"path":"src/no_sid.rs","content":"x"}'
+out=$(run src/no_sid.rs)
+has   "a subagent record with no sessionId falls back to the PARENT DIR" "$out" "MINE"
+hasnt "and never to the agent- filename, which addresses nobody"         "$out" "agent-a"
+
+# The UNKNOWN message is the surface a reader ACTS on, and it is the half no assertion
+# covered -- the bug file proposed one and it was never written, which is how the message
+# went on telling readers "stop looking for the owner" of a subagent write. This is a
+# SHAPE test, not a prose pin: it reds on the sentence coming back, and survives rewording.
+unk=$(run src/never_written_by_anyone.rs)
+has   "UNKNOWN still names Bash as the real blind spot" "$unk" "Bash write"
+hasnt "and no longer tells the reader to stop looking"  "$unk" "stop looking for the owner"
+hasnt "nor repeats the falsified zero-records count"    "$unk" "no subagent activity"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

@@ -37,11 +37,21 @@ call whose INPUT names the path as a write TARGET counts.
 And `UNKNOWN` is never rendered as "not mine". A Bash write this tool's heuristics miss
 is indistinguishable from no write at all, so absence is a statement about coverage,
 not about ownership — the precise substitution that produced the evening's three wrong
-answers. **A SUBAGENT write is the second such blind spot, and it is total rather than
-heuristic:** Claude Code 2.1.x records no subagent activity in any transcript, so every
-file an `Agent` task wrote attributes to nobody however carefully this tool parses.
-Measured 2026-09-11 — zero sidechain records across 41 versions and 1,928 dispatches,
-against 732 transcript files carrying them under 2.0.x, which dispatched via `Task`.
+answers. **A SUBAGENT write is NOT a second such blind spot, though this file said it
+was until 2026-09-12.** Claude Code 2.1.x does record subagent activity: it writes it to
+`<project-dir>/<parent-session-id>/subagents/agent-<id>.jsonl`, one directory below the
+parent's own transcript, and each record carries `isSidechain: true`, a timestamp, and
+the PARENT's `sessionId`. `scan()` now globs that location, so an `Agent`-written file
+attributes to the session that dispatched it.
+
+The superseded claim — *"zero sidechain records across 41 versions and 1,928
+dispatches"* — was a true count of a window, not of the disk: every reading of it was
+taken through a non-recursive `*.jsonl` glob that could not reach those files, so the
+zero reproduced on demand and read as corroboration. It was corrected twice before being
+found (substrate → version → neither). Re-derived 2026-09-12 outside the window, one
+checkout, three profiles: 756 subagent transcript files, 755 carrying the flag, 192,797
+records, newest same-day under 2.1.267 — a version the superseded claim named as
+emitting none. **Bash remains the one real blind spot.**
 
 USAGE
     ./scripts/file-provenance.py <path> [<path>...]
@@ -433,8 +443,28 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
     for d in transcript_roots(root):
         if not d.is_dir():
             continue
-        for f in sorted(d.glob("*.jsonl")):
-            sid = f.stem
+        for f in sorted(
+            list(d.glob("*.jsonl")) + list(d.glob("*/subagents/*.jsonl"))
+        ):
+            # `<project-dir>/*.jsonl` is a session's OWN transcript. Claude Code 2.1.x
+            # puts a SUBAGENT's records in `<project-dir>/<parent-session-id>/subagents/
+            # agent-<id>.jsonl` — one directory down, which the non-recursive glob this
+            # replaces never reached.
+            #
+            # That omission is why three successive readings of "are there subagent
+            # records?" all returned zero: every one was taken through this same glob, so
+            # each described the WINDOW rather than the disk, and each agreed with the
+            # last. Re-derived 2026-09-12 outside it, for one checkout across 3 profiles:
+            # 756 subagent transcript files, 755 carrying `isSidechain: true`, 192,797
+            # such records — the newest written that day by 2.1.267, a version the
+            # superseded comment named as emitting none.
+            #
+            # For a subagent file the stem is `agent-<id>`, which addresses no session and
+            # no human. The directory two levels up IS the parent session id — a party who
+            # can actually be asked — so the fallback comes from the path, not the
+            # filename. `who` below still prefers the record's own `sessionId`, which real
+            # subagent records carry and which holds that same parent id.
+            sid = f.parent.parent.name if f.parent.name == "subagents" else f.stem
             try:
                 fh = open(f, errors="replace")
             except OSError:
@@ -451,25 +481,21 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                     content = msg.get("content")
                     if not isinstance(content, list):
                         continue
-                    # `sessionId` over the filename. The record shape this used to
-                    # describe is GONE, and saying so is the point: until 2026-09-11 this
-                    # comment claimed a sidechain (subagent) record carries the parent's
-                    # id, which made the gap below invisible to anyone auditing this file
-                    # for subagent coverage — they found a comment saying it was handled.
+                    # `sessionId` over the filename, and for a SUBAGENT record that field
+                    # holds the PARENT's id — the session a human can actually be asked
+                    # about. The glob above now reaches those records; see its comment for
+                    # where they live and how three readings missed them.
                     #
-                    # Measured 2026-09-11 across five profiles. Claude Code 2.0.x
-                    # dispatched via `Task` and emitted subagent records: 732 transcript
-                    # files carry `isSidechain: true`. Claude Code 2.1.x dispatches via
-                    # `Agent` and emits NONE — zero across 41 distinct versions
-                    # (2.1.220 to 2.1.268) and 1,928 dispatches, with `isSidechain`
-                    # written on every record and never true. So a subagent's writes reach
-                    # no transcript this loop can read, and no parsing change recovers
-                    # them.
-                    #
-                    # The earlier reading of this — "the substrate carries no subagent
-                    # records" — was wrong in the direction that matters: it treated a
-                    # VERSION boundary as a permanent property, and was reached by two
-                    # counts that agreed because both were taken over 2.1.x profiles.
+                    # This comment has been wrong twice, in the same direction both times,
+                    # and the shape is worth more than either claim was. It said the
+                    # substrate carried no subagent records; corrected, it said Claude Code
+                    # 2.1.x emitted none. Each correction narrowed the blame — substrate,
+                    # then version — and neither questioned the instrument, because every
+                    # re-derivation ran through the same non-recursive glob and returned
+                    # the same zero. Two agreeing counts over one blind spot is one blind
+                    # spot counted twice, which at the point of use is indistinguishable
+                    # from corroboration. The records were one directory down the whole
+                    # time.
                     # docs/issues/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
                     who = rec.get("sessionId") or rec.get("session_id") or sid
                     when = rec.get("timestamp")
@@ -561,13 +587,14 @@ def main(argv: list[str]) -> int:
             print("          no record of any session writing this path in the window. "
                   "That is a statement about coverage, NOT about ownership — Bash writes "
                   "this tool's heuristics miss look identical. Do not read it as 'not mine'.")
-            print("          Two known blind spots, so an owner may not exist to ask: a "
-                  "Bash write, and ANY write made by a SUBAGENT. Claude Code 2.1.x "
-                  "records no subagent activity at all (measured 2026-09-11: zero "
-                  "sidechain records across 41 versions and 1,928 dispatches), so a file "
-                  "an Agent wrote attributes to nobody by construction. If this path came "
-                  "out of a subagent task, stop looking for the owner — there is none "
-                  "recorded — and decide from what you know about the task instead.")
+            print("          The one blind spot is a Bash write: this tool's heuristics "
+                  "can miss one, so an owner may exist and not be recorded. A SUBAGENT "
+                  "write is NOT one — since 2026-09-12 this tool reads "
+                  "<project-dir>/<session-id>/subagents/*.jsonl and attributes an "
+                  "Agent's writes to the session that dispatched it, which is a party "
+                  "you can reach. An older copy of this message said to stop looking "
+                  "for a subagent's owner; that rested on a count taken through a glob "
+                  "which could not reach those files.")
             if records:
                 print(f"          ({len(records)} write(s) exist but predate the window; "
                       f"re-run with --all to see them)")
