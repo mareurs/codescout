@@ -1,10 +1,12 @@
 ---
 id: ec568decb057b874
 kind: bug
-status: open
+status: taken
 title: 'BUG: the progressive-disclosure guide says run_command stdout is never rewritten, in the section a reader consults to decide whether to trust it'
 tags:
 - cluster/doc-contradicted-by-code
+claimed_at: 2026-09-12
+claimed_by: 05841db2-4ba0-4cb2-a22f-c0bc2f771e20
 ---
 
 ## Summary
