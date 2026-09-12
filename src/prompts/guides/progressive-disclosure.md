@@ -87,8 +87,15 @@ not a change to what's on disk.
 
 To check a path against catalog state, read the value straight from the
 response — an allowlisted path field is relative, a root field absolute,
-and content is verbatim. `run_command` output is raw shell bytes and is
-never rewritten.
+and content is verbatim. **Relativization never rewrites `run_command`
+output**, so a path literal in shell output survives byte for byte.
+
+That is a claim about relativization, not a property of the channel. One
+other mechanism does write there: when a workspace notice is live,
+`inject_notice` prepends it into `stdout`, so the warning sits in the
+field that is actually read. `stdout` is therefore the command's own
+bytes, optionally preceded by a `⚠ …` advisory and a blank line — so do
+not hash, diff, or positionally parse it without allowing for that.
 
 ## Anti-patterns
 
