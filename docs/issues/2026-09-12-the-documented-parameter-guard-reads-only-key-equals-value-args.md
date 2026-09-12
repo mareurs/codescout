@@ -74,6 +74,38 @@ session had them.** A wrong parameter is dropped and the call still runs; an unr
 name cannot dispatch. 7 sites across 4 files, and they are invisible to this guard for the
 second reason in § Summary — `CALL_OPEN` never matches a JSON payload.
 
+**And that second reason is a SUPPRESSOR, not just a miss — the sharpest thing in this file.**
+An unresolvable tool name stops anything from checking the ARGUMENTS inside it. Measured by
+`b0b9bc40` on the second census pass: `{"tool": "workspace(action: status)", "arguments":
+{"threshold": 0.3}}` concealed a second, independent defect behind the first — no tool has a
+`threshold` parameter and no per-file drift score exists anywhere in codescout. So the 7
+unresolvable-name sites were hiding an unknown number of argument defects, and **both** census
+runs reported each as a single finding. A guard blind to JSON payloads is therefore not missing
+7 things; it is missing 7 things plus everything they contain, with no way to bound the second
+number from outside.
+
+### The census corrected ITSELF, and the correction is the reusable part
+
+`b0b9bc40` re-ran after widening the instrument, and the final figure is **75 claims → 36**, all
+36 in the classified-out set, with **39 real sites fixed across 11 files** — nearly double the
+first pass. What v1 could not see: it read only fenced ` ```json ` blocks carrying a `"tool"`
+key, so every parameter TABLE and every bare argument example on a tool's own page was
+invisible — the manual's most authoritative surface. **v1 reported "38 findings, 0 errors" and
+nothing in that output suggested it had not looked.** Three kinds surfaced only after the widen:
+
+- `symbols(project)` — `symbol-navigation.md` carried an entire `### Workspace project scoping`
+  section teaching a parameter `symbols` has never had; the activation banner says so in as many
+  words. The project selector belongs to `semantic_search` and `memory`, and is `project_id`.
+- `index(path=…)` — `library-navigation.md` taught building a library index by pointing `index`
+  at a root. `index` has no `path`: register with `library(action="register", path=…)`, then
+  build with `scope: "lib:<name>"`.
+- `tree`/`grep` `max_results` — real key is `limit` on both, confirmed on the wire.
+
+The widen happened because a single unverified report (`tree(pattern)`, § below) was run instead
+of dropped. That is the whole argument for this file's own method: **an instrument that returns
+a clean number is the failure mode, because a zero-error report is what both a complete scan and
+a half-blind one produce.**
+
 **Also classified OUT, and that half is load-bearing:** `symbols(main)`, `grep(old_name)` and
 `get_guide(librarian)` are argument VALUES, not parameter names. A widened predicate that reds
 on them is worse than the gap.
