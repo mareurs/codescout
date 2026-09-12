@@ -63,6 +63,100 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "append_entry: `entry` must be a JSON object",
         ));
     }
+    // SECTION CONSTRUCTION, HOISTED ABOVE THE BRANCH — and the hoist is the fix, not a
+    // tidy-up. These three steps used to live INSIDE the prose branch, which is this
+    // defect stated as code: the routine that honours `title`/`body`/`anchor_heading`/
+    // `index_row` sat inside the arm that excluded the params path, so a params caller
+    // passing them got `Ok`, no section, no row and no diagnostic
+    // (docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md).
+    //
+    // ALL THREE move together, not just the construction. The two refusals are what keep
+    // the params path from gaining a way to write a row whose id nothing defines — the
+    // dangling-citation shape the second refusal exists to prevent, arriving through the
+    // branch that was supposed to be getting safer.
+    //
+    // Built ONCE and shared rather than constructed per-branch: a second copy reproduces
+    // the original defect the moment either drifts.
+    //
+    // Built BEFORE `a.entry` is moved into `augmentation::append_entry` below, so the
+    // params call can pass `section.as_ref()` without restructuring for the borrow.
+    //
+    // Both-or-neither, refused at the boundary rather than half-applied. Named
+    // separately from the section triple because the missing half must be NAMED:
+    // `Args` has no `deny_unknown_fields`, so before this existed a caller passing
+    // `index_row` alone got `Ok` with no row and no error — a silent drop.
+    let index_row = match (&a.index_row, &a.index_after_line) {
+        (None, None) => None,
+        (Some(row), Some(after)) => Some(augmentation::PendingIndexRow {
+            row: row.clone(),
+            after_line: after.clone(),
+        }),
+        _ => {
+            let missing = if a.index_row.is_none() {
+                "index_row"
+            } else {
+                "index_after_line"
+            };
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "doc(action=\"append_entry\"): `index_row` and `index_after_line` are \
+                     both-or-neither — missing: {missing}"
+                ),
+                "Pass both: `index_row` is the row text with `{id}` for the allocated id, \
+                 `index_after_line` is an existing line to insert it after (for a \
+                 newest-first table, the separator).",
+            ));
+        }
+    };
+    // All three or none. A partial trio is an incomplete intent, and the two
+    // halves fail differently: without `anchor_heading` the server would have to
+    // GUESS placement, and this project's input-handling law is that a write
+    // accepts an explicit target and never infers one — a wrong guess on a write
+    // needs manual repair (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
+    // Without `title` there is no `— <title>` to format, which is the entire
+    // reason this path exists.
+    let section = match (&a.title, &a.body, &a.anchor_heading) {
+        (None, None, None) if index_row.is_some() => {
+            return Err(RecoverableError::with_hint(
+                "doc(action=\"append_entry\"): `index_row` needs a section — pass \
+                 `title` + `body` + `anchor_heading` too"
+                    .to_string(),
+                "A row on its own would cite an id whose entry nothing defines, which is \
+                 the dangling-citation shape this path exists to prevent."
+                    .to_string(),
+            ));
+        }
+        (None, None, None) => None,
+        (Some(title), Some(body), Some(anchor)) => Some(augmentation::PendingSection {
+            title: title.clone(),
+            body: body.clone(),
+            anchor_heading: anchor.clone(),
+            index_row,
+        }),
+        _ => {
+            let missing: Vec<&str> = [
+                ("title", a.title.is_none()),
+                ("body", a.body.is_none()),
+                ("anchor_heading", a.anchor_heading.is_none()),
+            ]
+            .into_iter()
+            .filter(|(_, absent)| *absent)
+            .map(|(name, _)| name)
+            .collect();
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "append_entry: writing a prose entry needs `title`, `body` and \
+                     `anchor_heading` together — missing: {}",
+                    missing.join(", ")
+                ),
+                "Pass all three to have the server write the section (heading formatted \
+                 as `<ID> — <title>`, so it cannot be born undefined), or pass none of \
+                 them to reserve an id only and write the section yourself."
+                    .to_string(),
+            ));
+        }
+    };
+
     // PROSE-LEDGER PATH. Nine of the ten numeric prefixes in `docs/TAXONOMY.md`
     // keep entries as `## PREFIX-N` body sections, not params rows, and so could
     // not reach the allocator at all — which is why they were allocated by hand,
@@ -162,74 +256,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // needs manual repair (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
         // Without `title` there is no `— <title>` to format, which is the entire
         // reason this path exists.
-        // Both-or-neither, refused at the boundary rather than half-applied. Named
-        // separately from the section triple because the missing half must be NAMED:
-        // `Args` has no `deny_unknown_fields`, so before this existed a caller passing
-        // `index_row` alone got `Ok` with no row and no error — a silent drop.
-        let index_row = match (&a.index_row, &a.index_after_line) {
-            (None, None) => None,
-            (Some(row), Some(after)) => Some(augmentation::PendingIndexRow {
-                row: row.clone(),
-                after_line: after.clone(),
-            }),
-            _ => {
-                let missing = if a.index_row.is_none() {
-                    "index_row"
-                } else {
-                    "index_after_line"
-                };
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "doc(action=\"append_entry\"): `index_row` and `index_after_line` are \
-                         both-or-neither — missing: {missing}"
-                    ),
-                    "Pass both: `index_row` is the row text with `{id}` for the allocated id, \
-                     `index_after_line` is an existing line to insert it after (for a \
-                     newest-first table, the separator).",
-                ));
-            }
-        };
-        let section = match (&a.title, &a.body, &a.anchor_heading) {
-            (None, None, None) if index_row.is_some() => {
-                return Err(RecoverableError::with_hint(
-                    "doc(action=\"append_entry\"): `index_row` needs a section — pass \
-                     `title` + `body` + `anchor_heading` too"
-                        .to_string(),
-                    "A row on its own would cite an id whose entry nothing defines, which is \
-                     the dangling-citation shape this path exists to prevent."
-                        .to_string(),
-                ));
-            }
-            (None, None, None) => None,
-            (Some(title), Some(body), Some(anchor)) => Some(augmentation::PendingSection {
-                title: title.clone(),
-                body: body.clone(),
-                anchor_heading: anchor.clone(),
-                index_row,
-            }),
-            _ => {
-                let missing: Vec<&str> = [
-                    ("title", a.title.is_none()),
-                    ("body", a.body.is_none()),
-                    ("anchor_heading", a.anchor_heading.is_none()),
-                ]
-                .into_iter()
-                .filter(|(_, absent)| *absent)
-                .map(|(name, _)| name)
-                .collect();
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "append_entry: writing a prose entry needs `title`, `body` and \
-                         `anchor_heading` together — missing: {}",
-                        missing.join(", ")
-                    ),
-                    "Pass all three to have the server write the section (heading formatted \
-                     as `<ID> — <title>`, so it cannot be born undefined), or pass none of \
-                     them to reserve an id only and write the section yourself."
-                        .to_string(),
-                ));
-            }
-        };
         let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
         let outcome =
             augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix, section.as_ref())?;
@@ -348,14 +374,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &a.id_prefix,
         a.entry,
         &a.cites,
-        // WIRING INCOMPLETE — the params path does not yet pass its section.
-        // `augmentation::append_entry` now accepts one and writes it before committing;
-        // what remains is hoisting the `index_row` + `PendingSection` construction out of
-        // the prose branch above so both branches build it from the same code. Passing it
-        // from a second, copied construction is the thing this change exists to avoid.
-        None,
+        // The wiring this hoist existed for. `section` is built once above the branch,
+        // so the params path honours the same five fields the prose path does and a
+        // params caller no longer gets `Ok` with nothing written.
+        section.as_ref(),
     )?;
-    let mut out = json!({"id": outcome.id, "artifact_id": target});
+    // `section_written` mirrors the prose path's field, and it is what tells a caller the
+    // server already wrote the heading. Without it the fix is invisible to exactly the
+    // caller it serves: the two hints below tell you to write a section and a row, and a
+    // caller who did ask for them has no way to know the request was honoured rather than
+    // dropped — which is the shape of the bug this wiring closes.
+    let mut out = json!({
+        "id": outcome.id,
+        "artifact_id": target,
+        "section_written": outcome.section_written,
+    });
     if let Some(w) = outcome.warning {
         out["warning"] = json!(w);
     }
@@ -1464,6 +1497,69 @@ mod tests {
             "the row must land in the SAME call — this is the whole feature: {text}"
         );
         let _ = tmp;
+    }
+
+    /// The PARAMS-path twin of `the_tool_writes_the_index_row_in_the_same_call`, and the
+    /// discriminating test for
+    /// `docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`.
+    ///
+    /// **Asserts against the FILE, never against the response.** The response carries an
+    /// allocated id whether or not anything was written — that IS the defect being fixed:
+    /// the call returned `Ok` with an id, no section, no row and no diagnostic. A test that
+    /// asserts on `result["id"]` passes under the mutation it exists to catch while feeling
+    /// like a test of the write, which is the shape that let this ship.
+    ///
+    /// The `snapshot_missing` assertion is the second half and is not decoration. That list
+    /// is derived from a body read taken BEFORE the write, so left alone it names the id
+    /// whose row this very call just added — asking the caller to do by hand the exact
+    /// thing that was just done for them. That is this bug re-appearing one field over.
+    #[tokio::test]
+    async fn a_params_append_writes_its_section_and_index_row_in_the_same_call() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID |\n|----|\n| F-1 |\n\n## Template\n",
+            &["F-1"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b",
+                   "index_row": "| {id} |", "index_after_line": "|----|"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["id"], "F-2");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("## F-2 — t"),
+            "the section must land on the PARAMS path too — an id with no heading defines \
+             no citable token: {text}"
+        );
+        assert!(
+            text.contains("| F-2 |"),
+            "the index row must land in the SAME call; a second call is the capture window \
+             this closes: {text}"
+        );
+        assert_eq!(
+            result["section_written"], true,
+            "the caller must be told the server wrote the section, or the hint sends them \
+             to write it again: {result}"
+        );
+        let missing: Vec<String> =
+            serde_json::from_value(result["snapshot_missing"].clone()).unwrap_or_default();
+        assert!(
+            !missing.contains(&"F-2".to_string()),
+            "`snapshot_missing` is derived from a body read taken BEFORE the write, so it \
+             must not ask for the row this call just added: {missing:?}"
+        );
     }
 
     /// Both or neither, refused at the boundary rather than half-applied. Mirrors the
