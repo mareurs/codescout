@@ -200,6 +200,11 @@ spend time reconciling two records.
 Not fixed, and this is a design decision rather than a cleanup, which is why it is filed
 rather than patched in passing:
 
+**— SHIPPED 2026-09-12 as option 4 below.** Fix SHA: `920eb443`. Patch-id:
+`11c0cd7f4926900d18e7e18f3a0273f0439224d4`. The options are kept as written, including
+the rejected one, because a reader who meets only the outcome would reasonably retry the
+per-file union — it is the obvious shape and its defect is not visible from the code.
+
 - **Per-file union** — ~~run the tree-sitter walk over `accepted_files` the LSP did not
   return symbols *for*~~. **REJECTED 2026-09-12, at the bytes.**
   `LspClient::workspace_symbols(&self, query: &str)` (`src/lsp/client.rs:1024`) is
@@ -258,8 +263,37 @@ being silent.
 
 ## Tests added
 
-None — this is the initial filing.
+Six, all in `src/tools/symbol/symbols.rs`'s `fallback_gap_tests`, over
+`files_needing_fallback` and `is_project_manifest`.
 
+- `everything_is_covered_when_the_lsp_produced_nothing` — the pre-fix arm, which must
+  keep behaving identically. A fix that narrowed this case would turn a working cold
+  path into a broken one.
+- `only_nested_roots_are_covered_when_the_lsp_answered` — the fix itself. `nested_roots`
+  being non-empty is the load-bearing detail: pass `&[]` and it silently becomes a test
+  that the warm arm returns nothing, which a deleted fallback also satisfies.
+- `a_file_the_lsp_already_answered_for_is_not_reparsed` — the duplicate guard for a
+  partially covered root.
+- `lsp_seen_does_not_shrink_the_cold_arm` — the pair that makes the cold branch a real
+  branch rather than an unreachable one.
+- `the_gap_is_sorted_so_a_capped_search_is_deterministic` — asserted against an
+  independently sorted expectation, not `is_sorted()`, which a one-element result and a
+  luckily-ordered `HashSet` both satisfy.
+- `manifests_are_recognised_and_source_files_are_not` — carries its own negative half,
+  without which `fn is_project_manifest(_) -> bool { true }` passes and every directory
+  becomes a nested root.
+
+**Mutation-tested at three SITES rather than once for the feature**, per § *Testing
+Discipline*. Each killed only its own test, which is what makes them three measurements
+rather than one: removing `.sort()` killed the determinism test alone (and printed a
+genuinely scrambled `HashSet` order, so it is not passing by luck); removing the
+`lsp_seen` filter killed the reparse test alone; disabling the cold arm killed the three
+tests that depend on it.
+
+**Not yet done, and it is the measurement this file turns on:** re-running § Reproduction
+probe B against a binary containing the fix, to confirm cold `13` / warm `1` becomes
+`13` / `13`. That needs `cargo rb` + `/mcp`; until then the fix is verified by unit test
+and not on the wire.
 ## Workarounds
 
 Scope the call to the file or directory (`symbols(path=...)`), which takes the
