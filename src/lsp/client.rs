@@ -2190,8 +2190,9 @@ struct Point {
             return;
         }
         // INERT for BOTH deliberate kill paths — do not credit this test with
-        // covering either. Measured 2026-09-08 by mutation + strace
-        // (docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md):
+        // covering either. Measured 2026-09-08 by mutation + strace, and
+        // RE-CONFIRMED 2026-09-12 alongside the fix
+        // (docs/issues/archive/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md):
         // removing `terminate_process` from `Drop`, removing `.kill_on_drop(true)`,
         // and removing BOTH TOGETHER each leave this test green in <0.1s, because a
         // third path nobody wrote reaches the child first — dropping the client
@@ -2201,6 +2202,12 @@ struct Point {
         // asserts is that *something* reaps the child, which is true of any LSP
         // server that dies when its client goes away. Adding an assertion here does
         // not fix that; the child has to be one that survives SIGPIPE.
+        //
+        // KEPT rather than deleted, because "the real server does get reaped" is a
+        // claim worth holding and this is the only test that makes it against a
+        // real rust-analyzer. The discrimination it cannot do now lives in
+        // `drop_sends_sigterm_and_nothing_else_can_reach_the_child` directly below,
+        // which reds under the `terminate_process` mutation this one survives.
         let dir = tempdir().unwrap();
         create_test_cargo_project(dir.path());
         let config = LspServerConfig {
@@ -2247,6 +2254,128 @@ struct Point {
         assert!(
             !crate::platform::process_alive(pid),
             "child should be dead after drop"
+        );
+    }
+
+    /// The discriminating twin of `drop_kills_child_process` above, which is inert
+    /// for both deliberate kill paths.
+    ///
+    /// **The child is the fix, not the assertion.** `rust-analyzer` dies of SIGPIPE
+    /// the moment its stdio closes, so with it as the child *no* assertion about
+    /// liveness can attribute the death to `Drop`. This test removes the other two
+    /// mechanisms **by construction** rather than defending against them:
+    ///
+    /// - **SIGPIPE (path 3) is impossible**: the child is spawned on `Stdio::null()`,
+    ///   so there is no pipe whose closure could signal it. Not "survives SIGPIPE" —
+    ///   cannot receive it.
+    /// - **`kill_on_drop`'s SIGKILL (path 2) is impossible**: the child is spawned
+    ///   with `std::process::Command`, so no tokio `Child` exists to carry
+    ///   `kill_on_drop`, and no reader task owns it.
+    /// - **`Drop`'s `terminate_process` (path 1) is therefore the only mechanism
+    ///   left**, which is what makes `WTERMSIG == SIGTERM` attributable rather than
+    ///   merely true.
+    ///
+    /// Built by direct struct construction instead of `LspClient::start`: `start`
+    /// performs a real `initialize` handshake, and no child that is immune to the
+    /// other two paths also speaks LSP. `reader_handle` is `None` so `Drop`'s abort
+    /// is a no-op, leaving exactly one statement under test.
+    ///
+    /// MUTATIONS, both measured 2026-09-12 against this test AND its inert sibling,
+    /// because a kill is only attributable if the two disagree:
+    ///
+    /// | mutation | this test | `drop_kills_child_process` |
+    /// |---|---|---|
+    /// | `terminate_process` removed from `Drop` | **RED** (10s timeout) | green, 0.05s |
+    /// | `.kill_on_drop(true)` -> `(false)` | green | green, 0.05s |
+    ///
+    /// Row 1 is the coverage this bug was filed for. **Row 2 is the honest half:
+    /// neither test covers `kill_on_drop`, and this one cannot by construction** —
+    /// it spawns through `std::process::Command`, so there is no tokio `Child` for
+    /// that flag to live on. That site's only non-redundant role is the WIN-5
+    /// spawn-timeout path (`LspClient::start`), where no `LspClient` is ever built
+    /// and `Drop` therefore never runs; it still has no test, and this file does
+    /// not pretend otherwise.
+    /// docs/issues/archive/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn drop_sends_sigterm_and_nothing_else_can_reach_the_child() {
+        use std::os::unix::process::ExitStatusExt;
+
+        // `sleep` never writes to stdout, and `Stdio::null()` means it has no pipe
+        // to write to in any case — the two independent reasons path 3 cannot fire.
+        let mut child = std::process::Command::new("sleep")
+            .arg("300")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn `sleep` as a stand-in child");
+        let pid = child.id();
+
+        let client = LspClient {
+            writer: Arc::new(Mutex::new(
+                Box::new(tokio::io::sink()) as Box<dyn AsyncWrite + Unpin + Send>
+            )),
+            next_id: AtomicI64::new(1),
+            pending: Arc::new(StdMutex::new(HashMap::new())),
+            alive: Arc::new(AtomicBool::new(true)),
+            reader_handle: StdMutex::new(None),
+            workspace_root: std::path::PathBuf::from("/"),
+            capabilities: StdMutex::new(lsp_types::ServerCapabilities::default()),
+            transport: LspTransport::Process {
+                child_pid: Some(pid),
+            },
+            init_timeout: std::time::Duration::from_secs(30),
+            open_files: StdMutex::new(HashMap::new()),
+            synced_sigs: SyncedSignatures::default(),
+            stderr_lines: Arc::new(StdMutex::new(Vec::new())),
+            started_at: std::time::Instant::now(),
+            init_completed_at: std::sync::OnceLock::new(),
+        };
+
+        assert!(
+            crate::platform::process_alive(pid),
+            "child should be alive before drop"
+        );
+
+        drop(client);
+
+        // Poll rather than sleep a fixed span, for the reason the sibling test
+        // gives: a fixed sleep asserts "enough time has passed" and reds under
+        // parallel-suite load. Nothing here is reaped by tokio, so `try_wait` is
+        // ours alone and the status cannot be stolen by the runtime's orphan
+        // reaper — which is exactly why this test can read a signal and
+        // `drop_kills_child_process` cannot.
+        let mut status = None;
+        for _ in 0..500 {
+            match child.try_wait() {
+                Ok(Some(s)) => {
+                    status = Some(s);
+                    break;
+                }
+                Ok(None) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("try_wait on the stand-in child failed: {e}"),
+            }
+        }
+        let status = status.unwrap_or_else(|| {
+            // Leave no stray `sleep` behind when the assertion is about to fail.
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "child survived 10s after drop — `Drop for LspClient` did not signal \
+                     it. With no pipes and no tokio `Child`, `terminate_process` is the \
+                     only mechanism that could have, so this is that call going missing."
+            )
+        });
+
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGTERM),
+            "the child must die of SIGTERM, sent by `Drop`'s `terminate_process`. \
+                 A normal exit or a different signal means the death came from \
+                 somewhere this test deliberately made unreachable. status: {status:?}"
         );
     }
 
