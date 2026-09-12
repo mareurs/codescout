@@ -54,7 +54,7 @@ costs a re-derivation to tell apart.
 Both instances are from 2026-09-10, roughly forty minutes apart, by two sessions who had each read
 the guide text naming the obligation:
 
-1. sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac` hand-repointed `04aa6207d31a861f`'s citation of
+1. sessionId `59112612-5fc8-4b31-8c8c-e19220d99eac` hand-repointed `029afe44343f8c53`'s citation of
    a re-keyed id (`2b1c3aaa9b09534d` → `d81efeef5252bfcc`). **A near-miss with a documentation
    backstop, not a catch by the tool** — their own sharpening, and it matters: they swept for the
    old path *and* the old id because `get_guide("tracker-conventions")` says to sweep both. A

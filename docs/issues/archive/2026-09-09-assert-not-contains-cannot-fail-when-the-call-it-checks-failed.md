@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/assertion-that-cannot-fail
+claimed_at: 2026-09-12
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-09
 owner: marius
@@ -148,18 +150,58 @@ corpus look self-correcting.
 
 ## Fix
 
-**Not attempted, deliberately.** The obvious repair — guard the helper on a non-empty
-`RESULT`, or make `call()` exit rather than blank the variable — cannot be given an
-observed RED here: running these scripts needs the `mcp` CLI and a live server, and
-asserting against a re-implementation of the helper in a harness is the second-level
-antipattern § *Testing Discipline* names. A blind fix to a script nothing runs would buy
-a green tick and no evidence. Left open for a session that has the server up.
+Fixed, taking § Resume's option (1) — `assert_not_contains` is **deleted** from both
+scripts — plus the mechanized half this file said it could not have.
 
+**The premise was re-derived at HEAD, not cited.** This file's "zero call sites" was
+measured at tree `2438a645`; both scripts were edited since (`9406f3c4`, same session as
+this fix). Re-checked before deleting: still exactly one definition per script
+(`mcp-smoke-rust.sh:25`, `mcp-smoke-kotlin.sh:31`), still zero calls.
+
+In each script's place is a comment stating why there is no such helper, what makes
+`assert_contains` safe under the same fallback when this one is not, and what to do
+instead (`assert RESULT is non-empty FIRST`).
+
+**§ Fix's blocker was real for `call()` and does not apply to a static gate — that is the
+substantive correction this fix makes to the file.** The reasoning for filing unfixed was
+sound: repairing `call()` needs the `mcp` CLI and a live server, no CI lane carries these
+scripts, and asserting against a re-implementation of the helper in a harness is the
+second-level antipattern. All true. But the *shape* can be forbidden statically with no
+server at all, and that assertion can be driven RED — which is the evidence § Fix
+correctly refused to ship without.
+
+`no_smoke_script_asserts_absence_over_a_blankable_result`
+(`tests/mcp_smoke_scripts_reference_real_tools.rs`) matches a negated grep over `$RESULT`.
+**Both branches driven, 2026-09-12:**
+
+| probe | result |
+|---|---|
+| the deleted helper re-added as CODE | **RED**, naming `tests/mcp-smoke-rust.sh:38` and printing the remedy |
+| the byte-identical line appended as a `#` COMMENT | green — the comment skip is real, not decorative |
+
+The second row is the one worth keeping: documenting a banned shape is the likeliest way
+the next person writes it, so without the skip the gate would red on its own explanation.
+It is a distinct branch of the predicate and was mutated separately, per CLAUDE.md's
+"mutate once per guarded SITE".
+
+**Ceilings, stated rather than left to be inferred.** The gate matches the SHAPE, not the
+former helper NAME, so renaming it back buys no pass — but it does not reach a negative
+check written some third way, and it does nothing about the root cause `§ Root cause`
+names: `2>/dev/null` plus `|| RESULT=""` still discards the refutation for every other
+assertion. Those remain § Resume option (2), still needing a live server.
+
+**SHA:** `107bbd23045b473441647a1e4fa8519048b898a0`
+**patch-id:** `77cb386d12ff05d1fa20bb9b9e85d422b604dc43`
 ## Tests added
 
-None. See § Fix — the environment to demand a RED in is not available here, and the
-script is not in a CI lane that could carry one.
+`tests/mcp_smoke_scripts_reference_real_tools.rs` —
+`no_smoke_script_asserts_absence_over_a_blankable_result`, a static gate needing no
+server, with a non-vacuity assertion (>100 lines scanned) so a mistyped path cannot
+report clean by finding nothing. Both of its branches were observed RED/green as tabulated
+in § Fix.
 
+No test was added for `call()`'s own fallback — that still needs the live server § Fix
+describes, and is deliberately left to § Resume option (2).
 ## Workarounds
 
 Do not use `assert_not_contains` in these scripts. If a negative check is genuinely
@@ -168,13 +210,14 @@ variable, unused.
 
 ## Resume
 
-Two options for whoever has a live server, in preference order. (1) Delete
-`assert_not_contains` from both scripts: it has no callers, and a helper that is unsafe
-in its only possible use is worth less than its absence. (2) If it is wanted, make
-`call()` fail loudly — drop `2>/dev/null`, and on a non-zero exit print the error and
-`exit 1` rather than blanking `RESULT`. Demand an observed RED by pointing the alias at a
-dead server and confirming the script reds instead of passing.
+Option (1) is **done** — the helper is deleted from both scripts and the shape is now
+statically refused.
 
+Option (2) remains open and still needs a live server: drop `2>/dev/null` from `call()`
+and make a non-zero `mcp call` print the error and `exit 1` rather than blanking `RESULT`.
+That is the root fix — it restores the refutation every OTHER assertion in these scripts
+is currently missing, not just the deleted one. Demand an observed RED by pointing the
+alias at a dead server and confirming the script reds instead of passing.
 ## References
 
 - `tests/mcp-smoke-rust.sh`, `tests/mcp-smoke-kotlin.sh`

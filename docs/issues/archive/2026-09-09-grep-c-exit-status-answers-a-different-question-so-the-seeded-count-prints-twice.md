@@ -78,7 +78,7 @@ Measured 2026-09-09 by the two-command transcript above; not inferred from the s
 
 At ~06:2xZ on 2026-09-09, sessionId `ad379a7c-a0cf-4c61-bcdb-f0696fea8c30` swept
 `scripts/**` and `tests/*.sh` for `2>/dev/null` + `||` fallbacks — 31 sites, 14 files —
-while filing `04aa6207d31a861f`. This line came up as a candidate, they opened it, and they
+while filing `029afe44343f8c53`. This line came up as a candidate, they opened it, and they
 published it as **correct**:
 
 > `grep -c` exits **1** on an empty file while printing `0`, so the fallback normalizes an
@@ -220,7 +220,7 @@ Forcing the nearest tag would add a non-member to a class's promotion count, whi
 *"a wrong confirmation is a foreclosure"* failure this file's own § *Evidence* records, applied
 to taxonomy instead of to a clearing.
 
-**A neighbouring class may be real, and is NOT claimed here.** `04aa6207d31a861f` records
+**A neighbouring class may be real, and is NOT claimed here.** `029afe44343f8c53` records
 `|| RESULT=""` supplying *a plausible value rather than a status*; this file records `|| echo 0`
 doing the same. That is n=2 in one subsystem — short of both the count bar (≥3) and the spread
 bar (≥2 subsystems). It is an observation for whoever meets the third instance, not a class.
