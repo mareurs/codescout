@@ -1,12 +1,10 @@
 ---
 id: '447d98db54393338'
 kind: bug
-status: taken
+status: investigating
 title: 'BUG: edit_file reads a definition keyword in a COMMENT as a symbol definition, with no escape'
 tags:
 - cluster/addressing-without-an-escape-hatch
-claimed_at: 2026-09-11
-claimed_by: b80a27d4-9729-40ef-8c28-ad8982df6d13
 ---
 
 ## Summary
@@ -132,23 +130,39 @@ surface every refused caller reads.
 ## Fix
 
 Not chosen. The three sketches below are the original author's; each now carries what the
-2026-09-11 measurement says about it, because two of the three were priced against a mechanism that
-turned out to be wrong.
+2026-09-11 measurement says about it, because two were priced against a mechanism that turned out
+to be wrong — and the first is now **rejected outright**.
 
 1. **Require the keyword to begin a line** (after indentation) before treating it as a definition.
-   **Still viable, and now precisely targeted** — it is exactly the trailing-comment case in
-   § Reproduction probe 2, since a trailing comment's keyword never begins its line. Note the
-   original claim that it *"would have accepted both refused edits here"* rests on the superseded
-   reproduction; re-derive it against probe 2 before quoting it.
-2. **Skip comment and string spans when scanning, per language.** **Cheaper than this file
-   assumed — half of it already ships.** Line-leading comments are already skipped for `//`, `/*`,
-   `*` and `#` (`:80-96`). What remains is trailing comments and string literals, and the module
-   already names `crate::util::text::scan_line` as the existing literal-aware lever it declined to
-   reach for (`:51-58`). So this is a smaller change than "needs the same comment-span logic on
-   every language".
-3. **Give the caller an escape.** Still owed by `IC-6`, but note one exists and is narrower than
+   **REJECTED — it would ship a false negative in the dangerous direction.** Rust's keyword list is
+   `["fn ", "async fn ", "struct ", "impl ", "trait ", "enum "]` (`:17`) and none of them accounts
+   for a visibility modifier. Under this rule `pub fn smuggled_in()` begins with `pub `, not `fn `,
+   and would no longer match — so would `pub struct`, `pub async fn`, and most public Rust
+   definitions. Measured 2026-09-11: the guard catches exactly that case today (probe 4 below), and
+   `BUG-050` is the reason it must — a new `fn` splicing into an unrelated function body is the
+   failure this arm exists to prevent. The premise *"a definition always begins its line, prose
+   almost never"* holds for Python's `class ` and fails for Rust the moment anything is `pub`.
+2. **Skip comment and string spans when scanning, per language.** **The remaining candidate, and
+   cheaper than this file assumed** — half of it already ships: line-leading comments are skipped
+   for `//`, `/*`, `*` and `#` (`:80-96`). What remains is trailing comments and string literals,
+   and the module already names `crate::util::text::scan_line` as the existing literal-aware lever
+   it declined to reach for (`:51-58`). It also narrows in the SAFE direction — it removes matches
+   that are provably not code, rather than removing matches that merely look unlike a definition.
+3. **Give the caller an escape.** Still owed by `IC-6`, but one exists and is narrower than
    "none": single-line edits are exempt (`:331`, `:335`) and the refusal hint says so. The accurate
    complaint is that it does not scale to a multi-line prose edit.
+
+**Probe 4 — why shape 1 is rejected. Run 2026-09-11 against `dffb89c2`.**
+
+```
+edit_file(path=".worktrees/il2-probe2/subject.rs",
+          old_string="pub fn existing() -> usize {\n    1\n}",
+          new_string="pub fn existing() -> usize {\n    1\n}\n\npub fn smuggled_in() -> usize {\n    2\n}")
+→ error: edit contains a symbol definition ("fn ") — use symbol tools for structural changes
+```
+
+Caught today because `fn ` sits at a word start preceded by `pub `. Shape 1 tests a different
+thing — line start — and this line starts with `pub`.
 
 **Whichever shape is chosen, the guard's advertised scope needs correcting with it.** The condition
 text on every refusal claims *"Imports, string literals, comments and config are allowed"* — false
@@ -156,8 +170,8 @@ for trailing comments (probe 2) and false for string literals (a documented resi
 believes it will not suspect the guard.
 
 Preserve the error asymmetry the module states at `:45-49`: a false positive costs one rejected
-edit, a false negative risks the LSP range corruption this guard exists to prevent (BUG-027). That
-argues for routing through `scan_line` rather than loosening the keyword match.
+edit, a false negative risks LSP range corruption. That asymmetry is exactly what disqualifies
+shape 1 and recommends shape 2.
 
 Fix SHA: *(not yet fixed)*
 Patch-id: *(not yet fixed)*
@@ -172,20 +186,24 @@ None yet.
 
 ## Resume
 
-**The question this section used to ask is answered, so do not re-derive it.** It asked whether
-the guard reads `new_string` only or both strings, noting shape 1's cost depends on it.
+**Two questions this section used to ask are answered. Do not re-derive them.**
 
-**Both**, and each is diff-scoped. `guard_structural_rewrite` computes `old_changed =
-lines_only_in(old_string, new_string)` and `new_changed = lines_only_in(new_string, old_string)`
-(`src/tools/edit_file/mod.rs:328-329`), tests each for a keyword only when that string is
-multi-line (`:331`, `:335`), and refuses on `old_kw.or(new_kw)` (`:339`). So an unchanged anchor
-line carrying a definition never trips it — verified in § Reproduction probe 2, where `pub fn
-alpha` sits in `old_string` and is correctly ignored.
+*Does the guard read `new_string` only or both strings?* **Both**, each diff-scoped.
+`guard_structural_rewrite` computes `old_changed = lines_only_in(old_string, new_string)` and
+`new_changed = lines_only_in(new_string, old_string)` (`src/tools/edit_file/mod.rs:328-329`), tests
+each only when that string is multi-line (`:331`, `:335`), and refuses on `old_kw.or(new_kw)`
+(`:339`). An unchanged anchor line carrying a definition never trips it — verified in
+§ Reproduction probe 2.
 
-Next action: pick between shapes 1 and 2 in § Fix, both re-priced against the measured mechanism,
-and correct the refusal's condition text in the same change. Run § Reproduction probes 2 and 3 as
-the before/after pair — probe 3 is the control that keeps a fix from passing by disabling the
-keyword test altogether.
+*Which fix shape?* Shape 1 is rejected on measurement (§ Fix, probe 4) — it would miss `pub fn`
+and every other modifier-prefixed definition, which is the direction that corrupts rather than
+annoys. **Shape 2 via `crate::util::text::scan_line` is the remaining candidate.**
+
+Next action for whoever takes this: implement shape 2, and correct the refusal's condition text in
+the same change. The before/after pair is § Reproduction probes 2 and 3 — probe 3 is the control
+that stops a fix passing by disabling the keyword test altogether — and § Fix probe 4 is the
+regression floor that stops it passing by going blind to `pub fn`. A fix needs all three: probe 2
+flips to pass, probe 3 stays passing, probe 4 stays refusing.
 ## References
 
 - Hit 2026-09-11 while fixing
