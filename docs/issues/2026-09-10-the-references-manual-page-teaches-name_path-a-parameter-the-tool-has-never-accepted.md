@@ -1,7 +1,7 @@
 ---
 id: '57ecbac8f925d7b8'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the `references` manual page teaches `name_path`, a parameter the tool has never accepted'
 owners:
 - marius
@@ -129,21 +129,60 @@ fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
 
 ## Fix
 
-*Plan first, implementation second.* Replace `name_path` with `symbol` in
-`docs/manual/src/tools/symbol-navigation.md`'s `## references` section: the parameter table row
-(line ~236), both JSON call examples (lines ~249-250, ~289-290), and the "Tips" prose (lines ~296-298,
-which explains `name_path` semantics and should be retitled to `symbol`). Leave `relative_path` in
-this same section for whichever session executes the parameter-alias-collapse plan's Task 6 to
-replace with `path` — that is a separate, in-flight change on `experiments` as of this filing.
+Fixed on `experiments` — SHA `8b5084749bf637065b904afa3e2789bfa209094c`, patch-id
+`7f1c3570357d4702c8c01fbfdb474428d5e1838c`.
 
-Not yet fixed. No commit exists for this bug at filing time.
+**The plan above was right about the row and wrong about the population, both directions.**
+Running the reproduction first is what surfaced it.
 
+1. **Three files, not one.** The manual names this parameter in prose and tables
+   (`references(name_path, path)`) as well as in JSON payloads, so the same defect sat in
+   `docs/manual/src/concepts/tool-selection.md` (:32, :39, :155) and
+   `docs/manual/src/tools/tool-workflows.md` (:43, :84). Fixing only the `## references`
+   section would have left five siblings teaching a key the tool rejects.
+
+2. **The RESULT field was wrong too, which the plan does not mention.** The `symbols` output
+   examples (:157, :189) showed a `"name_path"` field and the tip at :220 described it. The
+   wire returns `{"name": …, "symbol": …}`: `src/symbol/query.rs:118-119` inserts the struct's
+   `sym.name_path` under the key `"symbol"`, so the Rust field name never reaches a caller.
+   The references tips depended on that claim in the same sentence, so it could not be left.
+
+3. **The `relative_path` deferral is moot.** The plan parked it for "whichever session executes
+   the parameter-alias-collapse plan's Task 6" — that landed, and `relative_path` no longer
+   appears anywhere under `docs/manual`.
+
+Also repaired: the tip reading "must match the `name_path` value from `symbols` or `symbols`
+output", a leftover of the `find_symbol` + `list_symbols` merge that named the merged tool twice.
+
+Deliberately out of scope, to keep two unrelated renames in separate commits: `symbols(pattern)`
+across six manual files. Different parameter, and a worse failure — `pattern` is not accepted and
+not aliased, so it is dropped and the call falls through to the overview path, returning a
+whole-project listing with no signal. Being filed separately by
+`f3c594ce-c424-40d3-a603-9693cfef3f63`.
+
+Left correct and untouched: `api-redesign.md`'s rename mapping table (documents old → new; not a
+claim that the old name works), and `name_path` as an internal Rust struct field in
+`adding-languages.md`.
 ## Tests added
 
-N/A — documentation-only fix; no test asserts on manual prose content. Nothing in
-`tests/cli_doc.rs` or elsewhere currently checks that `symbol-navigation.md`'s parameter tables
-match each tool's live `input_schema()`.
+**None, and the reason is a second bug rather than an accepted gap.**
 
+This file's § *Resume* asked whether a schema-vs-manual checker should exist. It already did:
+`tests/doc_tool_refs.rs`, whose module header is *"a present-tense document naming a tool
+parameter that does not exist"*, and whose `present_tense_surfaces()` walks `docs/manual/**`.
+It was green over all six instances for this bug's entire open life — measured this session at
+`exit=0`, 5830 passed / 0 failed / 37 binaries, on a tree that still contained them.
+
+Why it cannot see them is filed as `13a1fbde684b4370` (`cluster/guard-narrower-than-its-name`):
+`calls_on_line` bills parameters only from `NAMED_ARG` matches, which require an `=`. The
+signature form `references(name_path, path)` parses cleanly and yields an EMPTY parameter list;
+the JSON payload form never matches `CALL_OPEN` at all.
+
+**A hazard for whoever widens that predicate:** this fix removed all six instances from the
+corpus that guard scans, so a widened guard run against `experiments` today goes green and proves
+nothing. Recover fixtures from `8b508474^`, or write the case against `calls_on_line`, which is
+already extracted as a pure per-line function precisely so nothing has to be planted in the
+scanned corpus.
 ## Workarounds
 
 Callers of `references` should send `symbol` (not `name_path`) and `path` (not `relative_path`)
