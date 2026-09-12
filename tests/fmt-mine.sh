@@ -103,7 +103,7 @@ MINE_STUB=$(mkstub mine MINE "          written by THIS session")
 # verdict for every file it is handed, so no case built from them can produce a scan that
 # is MINE *and* not-mine at once. That is the only shape in which "$MINE is computed and
 # then never read on the refusal path" is observable — which is why the defect at
-# `docs/issues/2026-09-12-fmt-mine-refuses-this-sessions-own-files-when-a-peer-file-also-needs-formatting.md`
+# `docs/issues/archive/2026-09-12-fmt-mine-refuses-this-sessions-own-files-when-a-peer-file-also-needs-formatting.md`
 # survived a suite that covers all four verdicts individually. A fifth homogeneous stub
 # would not have helped; the missing axis is per-path, not per-verdict.
 mkmixed() { # mkmixed -> stub answering PEER for */peer.rs and MINE for everything else
