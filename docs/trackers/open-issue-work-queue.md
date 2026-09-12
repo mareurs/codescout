@@ -115,8 +115,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | **done** 2026-09-01, both halves. The 14 `cited_prefix_with_no_definer` are 8 non-citations and the top four by volume are all noise — filed as `9b67295c125cfcb6`, tagged IC-2, and **now FIXED** at `d44a4409` (patch-id `f37ae73ffe72846ca0cceae19b9649f8c24b6a08`) by gating on DISPERSION rather than volume — 13 findings → 7, six noise prefixes suppressed, zero real ones lost. Two of its original four options were circular (`prefix_is_known` is false for exactly this check's population, so reusing it would zero the check), so the shipped remedy was a fifth. The 13 `entry_cited_from_outside_but_undeclared` → 0 at `40c53197`: 4 invariant, 7 dated, 2 conditional, every date read from the record; BL-58 needed only relocating a mid-line declaration | `9b67295c125cfcb6` |
 | BL-72 | 1 | Raise `max_per_artifact` 1→2 (the "page limit 5→10" half is WITHDRAWN — see below) | **done** 2026-09-04 `998f64d3` — measured **+2/12** at harness `limit=5` (4/12 → 6/12, MRR 0.2708 → 0.3194). The class breakdown is the evidence, not the scalar: `preamble` 3→1 and `hit` 4→6 while `wrong_file` and `file-hits@5` held EXACTLY constant — the same files were always being found and the cap was showing the wrong chunk of them. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page. **The blocker — `find.rs`'s two artifact-keyed side maps — is resolved** by `PageItem`, one record per HIT, guarded by `two_chunks_of_one_artifact_keep_their_own_matched_span` (observed RED first). **WITHDRAWN:** "page limit 5→10" named no product setting — `default_limit()` is 50 and the 5 is the benchmark harness's `--limit`; see `F-115` | — |
 | BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
-| BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | open — blocked on intent, not on work | — |
-| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | not started — 120 of doctor's 155 findings, never swept | — |
+| BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
+| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **partial** 2026-09-12 — pass 1: the 14 LIVE records triaged (4 still live, 6 correctly parked, 4 unverified diagnosis). The 106 archived not started. Finding: the count must NOT be driven to zero | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1197,11 +1197,28 @@ commit's? Option 3 is spent; do not re-raise it.
 
 ### BL-29 — append_entry writes catalog-only state, so the committed snapshot drifts
 
-**Valid:** conditional — until the snapshot gate reaches majority coverage
+**Valid:** conditional — `append_entry` writes the body snapshot itself, rather than reporting that it is stale
 
-Its own status line names the condition: drift is now reported at write time and by
-`doctor`, and 0 trackers are adrift, but the gate still needs majority coverage. When that
-lands the entry is spent, not merely older. Declared 2026-09-01.
+***The previous condition was a transcription artifact, withdrawn 2026-09-12.*** It read *"until the
+snapshot gate reaches majority coverage"* — an event that had already happened before the sentence
+it was copied from was written. The chain is short and entirely in the record: `0dbfd0ee`
+(2026-08-16) made the gate require majority coverage, its subject being *"snapshot drift needs
+MAJORITY coverage, not one anchored id"*, and `af2508b4` the same day recorded that fix while
+correcting this entry's own false positive on `provenance-subsystem`. Two days later `0d101eb8`
+wrote the status line below — *"the gate still needs majority coverage"* — describing what the gate
+now **requires**. On 2026-09-01 `40c53197` declared decay classes for thirteen undeclared entries
+and transcribed that clause as a conditional, noting *"its own status line names it"*. **The
+transcription inverted the verb:** a present-tense description of what the gate demands became a
+future event this entry was waiting on, which is why no reader could check it. That commit invited
+precisely this correction — *"the reasoning is written at the declaration so a later reader can
+overrule it rather than inherit it as settled"*.
+
+The re-declaration names what is actually still owed. `append_entry` and `update_entry` **report**
+staleness — they return `snapshot_missing` and `snapshot_stale`, telling the caller the committed
+table now disagrees with the catalog — and the caller writes the body by hand afterwards. Until
+that write is done for them, params remain canonical in a machine-local, git-ignored database and
+the committed snapshot goes stale on every unaccompanied append, which is this entry's claim
+verbatim. Declared 2026-09-01, re-declared 2026-09-12.
 **open** — partial: drift is now reported at write time and by `doctor`, and 0 trackers are adrift; the gate still needs majority coverage.
 
 ### BL-30 — FRICTION: adding one tracker entry costs four bookkeeping sub-tasks
@@ -1543,11 +1560,33 @@ gate still needs majority coverage"*. Since the discriminator already existed at
 the sentence was written — which leaves no reading a reader can test.
 
 So the entry re-fires `doctor`'s `entry_conditional_past_due` on every run and will forever,
-regardless of what the code does. **Deliberately not re-declared unilaterally on 2026-09-12:**
-replacing an unclear condition with a confidently wrong one is worse than leaving it visible, and
-the author's intent is not recoverable from the entry, which cites no SHA. Establish the intent
-first, then re-declare on something checkable — `snapshot_drift` reads 0 today, so whatever the
-successor is, it is not that.
+regardless of what the code does.
+
+**RESOLVED 2026-09-12 — done. The intent WAS recoverable, from the commit record rather than from
+the entry, and the condition turns out to be a TRANSCRIPTION ARTIFACT.** Four commits, in order:
+`0dbfd0ee` (2026-08-16) made the gate require majority coverage — subject *"snapshot drift needs
+MAJORITY coverage, not one anchored id"*; `af2508b4` the same day recorded the fix while correcting
+`BL-29`'s own false positive on `provenance-subsystem`; `0d101eb8` (2026-08-18) wrote `BL-29`'s
+status line *"the gate still needs majority coverage"*, describing what the gate now **requires**;
+and `40c53197` (2026-09-01) transcribed that clause into a conditional while declaring decay
+classes for thirteen undeclared entries, noting *"its own status line names it"*.
+
+**The transcription inverted the verb.** *Needs* — present tense, what the gate demands of a body
+before it will report drift — became *until … reaches*, a future event the entry was waiting on.
+That is why no reading could be checked: the event had already happened two days before the
+sentence it was copied from was written.
+
+**Re-declared on what is actually owed:** `append_entry` writing the body snapshot itself rather
+than reporting it stale. Both write paths currently return `snapshot_missing` / `snapshot_stale`
+and leave the body edit to the caller — a warning this very task triggered while closing itself,
+which is `BL-29`'s claim demonstrating itself.
+
+**The lesson is about bulk declaration passes, and `40c53197` anticipated it**: it wrote *"the
+reasoning is written at the declaration so a later reader can overrule it rather than inherit it as
+settled"*. Thirteen entries were declared in one sweep by reading each entry's own prose, which is
+the right method and is exactly what carried this one's verb across unexamined. A transcription is
+not a judgement, and only the transcriptions are worth re-reading.
+
 
 ### BL-75 — `terminal_status_with_caveat` is 77% of the doctor report and has never been swept
 
@@ -1568,6 +1607,47 @@ the field, or leave both, in which case the record stays honest and findable. So
 sweep-to-zero: some fraction of the 120 is correctly parked, and a pass that drives the number down
 is the wrong shape. The deliverable is a triage that separates *discharged*, *still live*, and
 *correctly parked*, with the last two staying exactly as they are.
+
+**PASS 1 DONE 2026-09-12 — the 14 LIVE records triaged; the 106 archived are not started.** The
+population re-derived to the same figure across two runs, and splits **106 archived / 14 live**.
+The live ones are the sharp end: a record that is terminal, caveated **and** still in `docs/issues/`
+reads as closed to the triage query while sitting in the directory reserved for open work.
+
+**Still live — residual work the caveat names and no query can reach (4).** These are the finding's
+real cost, and none is a documentation problem:
+
+- `docs/issues/2026-09-10-the-shrink-guard-covers-three-prose-write-paths-and-misses-the-two-that-lose-code.md`
+  — *"Advisory only — `edit_code(action=replace)` WARNS and does not refuse, so a caller who ignores
+  the warning still loses the code."* Data-loss shaped, and the loudest of the four.
+- `docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md` —
+  *"Only the FALSE-POSITIVE half is fixed"*, with the root-cause section naming a second and worse
+  consequence of the same gap.
+- `docs/issues/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md` — the
+  window is closed only for callers who pass the new parameters, and they are opt-in.
+- `docs/issues/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md` — two of three
+  prescribed remedies shipped at `d1b6146d`; the third did not.
+
+**Correctly parked (6).** Each names a gap its author reasoned about and declined, mostly *"no
+regression test"* where `scripts/` has no harness to hang one on, plus two that are explicitly
+unclosable — one whose residual *"is NOT closed and cannot be"* because nothing binds an ack's sid
+list to what the operator was told, and one whose bisect *"remains INFEASIBLE: the rate is too low
+to separate signal from noise"*. **These must stay exactly as they are.** The check's own finding
+text endorses it: *"leave both: the record stays honest AND findable, which is the whole point of
+the field."*
+
+**Unverified diagnosis (4).** The fix works and the root cause is inferred rather than confirmed —
+a wine job's `ppid==0` requirement never re-verified against CI, a VDI's missing VC++ install
+inferred from `vswhere` alone, a CrowdStrike rule name unobtainable without console access, and a
+pathspec non-scoping measured by target enumeration rather than by observing a real cross-session
+rewrite. Cheap to discharge only where the instrument is reachable, which for three of the four it
+is not.
+
+**So the number must not be driven down, and that is the finding.** Of 14, six are correctly parked
+by their own reasoning and three more are blocked on instruments this machine does not have. A pass
+that closes `terminal_status_with_caveat` to zero would be deleting honest caveats to satisfy a
+check built to surface them — the check counts *records carrying an unproven claim*, which is a
+healthy number to have, not a backlog. What it cannot do is distinguish the four above from the
+ten, and that separation is the only deliverable here.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
