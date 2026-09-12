@@ -301,7 +301,12 @@ fn next_monotonic_id() -> String {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("doc(action=\"event_create\") requires 'id', 'event.kind' and 'event.payload': {e}"), "e.g. doc(action=\"event_create\", id=\"<16-hex>\", event={kind: \"note\", payload: {\"text\": \"...\"}}). Required payload keys depend on kind: note->text, status_change->to, field_patch->field+to, verdict->outcome.")
+        super::deser_error(
+            e,
+            "event_create",
+            "doc(action=\"event_create\") requires 'id', 'event.kind' and 'event.payload'",
+            "e.g. doc(action=\"event_create\", id=\"<16-hex>\", event={kind: \"note\", payload: {\"text\": \"...\"}}). Required payload keys depend on kind: note->text, status_change->to, field_patch->field+to, verdict->outcome.",
+        )
     })?;
 
     if !ALLOWED_KINDS.contains(&a.kind.as_str()) {

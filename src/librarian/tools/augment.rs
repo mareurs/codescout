@@ -257,8 +257,10 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
 /// and carries `id`/`merge` into it — so this function still reads a flat `Args`.
 pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(
-            format!("doc(action=\"augment\") requires 'id': {e}"),
+        super::deser_error(
+            e,
+            "augment",
+            "doc(action=\"augment\") requires 'id'",
             "e.g. doc(action=\"augment\", id=\"<16-hex>\", augment={prompt: \"...\"}). Get an id from doc(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
         )
     })?;

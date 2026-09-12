@@ -347,6 +347,58 @@ pub(crate) fn containing_root<'a>(
     })
 }
 
+/// Route a `serde_json::from_value` failure for a `doc` sub-action's `Args`.
+///
+/// **Why this is a shared branch and not `RecoverableError::with_hint(…)` at each site.**
+/// `event_create::Args`, `event_create::SourceArg` and `augment::Args` carry
+/// `#[serde(deny_unknown_fields)]`, so a caller TYPO now reaches the same `map_err` arm a
+/// missing required field does. Those sites' messages were written for the missing-field case
+/// — `"requires 'id', 'event.kind' and 'event.payload'"` — and on a typo that sends the reader
+/// to audit three keys that are all correct, while the real answer sits in the tail where
+/// serde put it.
+///
+/// That is `CLAUDE.md` § *Testing Discipline*'s remedy-text failure exactly: the predicate is
+/// right, the refusal arrives at the right party, and the next action it produces is useless.
+/// Measured at the live tool surface 2026-09-12, immediately after `deny_unknown_fields`
+/// landed and made this arm reachable at all.
+///
+/// Shared rather than copied into both call sites because a remedy text duplicated across
+/// sites is `observer-blindness:OB-20`'s fifth shape — the copies drift and only one gets
+/// fixed.
+/// **The type here is `crate::tools::RecoverableError`, not the librarian's own, and the
+/// qualification is load-bearing.** Two identically-named, identically-`Display`ing types
+/// exist — `crate::librarian::tools::RecoverableError` `{message, hint}` (this module, line
+/// 45) and `crate::tools::RecoverableError` `{message, guidance, extra}`. Both reach the wire
+/// correctly, because `adapter.rs`'s `bridge_recoverable_error` converts the former to the
+/// latter at the boundary. So the choice is invisible at runtime and visible only to a test
+/// that downcasts, and the two call sites this replaces both built the HOST type. Writing
+/// bare `RecoverableError` inside this module silently picks the librarian one and reds
+/// `every_required_param_failure_names_its_action_and_routes` with a message about serde.
+pub(crate) fn deser_error(
+    e: serde_json::Error,
+    action: &str,
+    required_message: &str,
+    required_hint: &str,
+) -> anyhow::Error {
+    let msg = e.to_string();
+    if msg.starts_with("unknown field") {
+        crate::tools::RecoverableError::with_hint(
+            format!("doc(action=\"{action}\"): {msg}"),
+            "this object declares additionalProperties:false, so an unrecognised key is \
+             refused rather than silently dropped. The accepted set named above belongs to \
+             the object the bad key sits IN — for a key inside `event.source` those are \
+             source's own fields (uri/kind/payload), not the event's.",
+        )
+        .into()
+    } else {
+        crate::tools::RecoverableError::with_hint(
+            format!("{required_message}: {msg}"),
+            required_hint,
+        )
+        .into()
+    }
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
@@ -596,7 +648,17 @@ mod required_param_routing_tests {
 
         for (name, e) in cases {
             let r = e.downcast_ref::<RecoverableError>().unwrap_or_else(|| {
-                panic!("{name}: a required-param miss must be recoverable, not a bare serde error — got: {e}")
+                panic!(
+                    "{name}: a required-param miss must arrive as `crate::tools::RecoverableError` \
+                     (this module imports that one, shadowing `super::*`). TWO causes produce this \
+                     panic and the message used to name only the first:\n  \
+                     (a) a bare serde error escaped un-wrapped, or\n  \
+                     (b) the site built `crate::librarian::tools::RecoverableError` instead — the \
+                     OTHER type of the same name, defined at the top of this file. Both reach the \
+                     wire correctly via adapter.rs's `bridge_recoverable_error`, so (b) is \
+                     invisible outside this assertion and is the likelier cause when the text \
+                     below already looks right.\n  got: {e}"
+                )
             });
             let msg = r.to_string();
             assert!(

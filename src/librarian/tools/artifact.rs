@@ -1183,6 +1183,19 @@ mod tests {
                 "`{promise}` refused the call but the message never names `{typo}`, so the \
                  caller cannot tell which key was wrong: {err}"
             );
+            // Naming the key is still not enough. Before `deser_error`, this arm was shared
+            // with the missing-required-field case and led with "requires 'id', 'event.kind'
+            // and 'event.payload'" — a prescription to go audit three keys that are all
+            // present and correct, with serde's real answer in the tail. The predicate was
+            // right, the refusal reached the right party, and the next action it produced was
+            // useless. Asserted as SHAPE, not prose: any rewording survives, deleting the
+            // branch does not.
+            assert!(
+                !err.contains("requires '"),
+                "`{promise}` refused correctly but routed the caller to a missing-required-key \
+                 check. On an unknown-field failure that sends them to audit keys that are all \
+                 correct — see `deser_error` (src/librarian/tools/mod.rs): {err}"
+            );
         }
     }
 
