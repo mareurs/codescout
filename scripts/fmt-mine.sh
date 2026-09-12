@@ -147,11 +147,27 @@ MINE=$(printf '%s\n' "$PROV" | awk '$1=="MINE"{ $1=""; sub(/^ +/,""); print }')
 NOT_MINE=$(printf '%s\n' "$PROV" \
     | awk '$1=="SHARED"||$1=="PEER"||$1=="UNKNOWN"{ $1=""; sub(/^ +/,""); print }')
 
-if [ -n "$NOT_MINE" ]; then
+# The not-mine rows WITH their continuation lines, verdict column intact — unlike
+# $NOT_MINE above, which is a bare path list for feeding a command. A continuation line
+# never matches a verdict in $1, so it inherits the disposition of the row above it.
+NOT_MINE_ROWS=$(printf '%s\n' "$PROV" | awk '
+    $1=="MINE" { drop=1; next }
+    $1=="SHARED"||$1=="PEER"||$1=="UNKNOWN" { drop=0 }
+    !drop')
+
+# Called AFTER this session's own files have been dealt with, never instead of them.
+# CLAUDE.md states this script's contract as "formats what scripts/file-provenance.py
+# attributes to you AND refuses the rest" — two actions in one run, not a choice between
+# them. Refusing wholesale on a mixed scan meant one peer holding one unformatted file
+# blocked the gate's mandated step 1 for every other session in the checkout.
+refuse_not_mine() {
     echo "fmt-mine: REFUSED — these need formatting and are not this session's to write:" >&2
-    # The whole scan verbatim rather than a filtered slice: it carries the `uds:` socket
-    # and the [LIVE] / not-live marker, which are what make the remedy below performable.
-    printf '%s\n' "$PROV" >&2
+    # The not-mine rows verbatim: they carry the `uds:` socket and the [LIVE] / not-live
+    # marker, which are what make the remedy below performable. MINE rows are filtered OUT
+    # rather than printed and then contradicted — listing a file as `MINE` directly beneath
+    # a header calling it "not this session's to write" was the second half of this
+    # script's own bug file.
+    printf '%s\n' "$NOT_MINE_ROWS" >&2
     cat >&2 <<'EOF'
 
   `cargo fmt` would rewrite them. On a shared checkout that is another session's
@@ -177,18 +193,84 @@ if [ -n "$NOT_MINE" ]; then
   `cargo fmt` yourself — that is the same act, minus the false assurance that a
   guard sanctioned it.
 EOF
+    # Interpolated after the heredoc — which is quoted, so it cannot carry a variable — so
+    # the reader gets a command to paste rather than a shape to derive. `cargo fmt` stays
+    # named above because it is what CLAUDE.md prescribes and it remains available; but it
+    # takes no pathspec and rewrites EVERY `.rs` in the workspace, including files no scan
+    # here has looked at. This form touches only the rows printed above, and the script
+    # already uses exactly it thirty lines below — offering the wide command while the
+    # narrow one was in the file was the third half of this script's own bug file.
+    # shellcheck disable=SC2086
+    printf '\n  The narrow form, which touches only the files listed above:\n\n    rustfmt --edition 2021 %s\n' \
+        "$(printf '%s ' $NOT_MINE)" >&2
+}
+
+if [ -z "$MINE" ]; then
+    if [ -n "$NOT_MINE" ]; then
+        refuse_not_mine
+    else
+        # Both partitions empty against a non-empty $WOULD_CHANGE means the scan returned a
+        # verdict this partition does not name. That is a coverage gap, not a clean tree,
+        # and it gets its own message rather than falling through into the formatter.
+        echo "fmt-mine: nothing attributable to this session needs formatting." >&2
+    fi
     exit 1
 fi
 
-if [ -z "$MINE" ]; then
-    echo "fmt-mine: nothing attributable to this session needs formatting." >&2
-    exit 1
+# `rustfmt <file>` is NOT per-file. It parses the file and descends into every `mod` the
+# file declares, so formatting a module root rewrites its children too. Verified at the
+# bytes on rustfmt 1.9.0-stable: `rustfmt --edition 2021 src/lib.rs` rewrote `src/peer.rs`
+# through a `pub mod peer;` line, and `--skip-children` is not available outside nightly.
+#
+# This was invisible while the guard refused every mixed scan, and the reason is worth
+# stating because it makes the old wholesale refusal look arbitrary when it was not: a
+# peer's child module can only be DAMAGED if it also needs formatting, and a file needing
+# formatting is by construction a row in this same scan — so refusing every scan that had
+# any not-mine row was accidentally sufficient. Doing only this session's half is safe only
+# after asking what this session's half would REACH.
+if [ -n "$NOT_MINE" ]; then
+    set +e
+    # shellcheck disable=SC2086
+    REACH_OUT=$(rustfmt --check --edition 2021 $MINE 2>&1)
+    REACH_RC=$?
+    set -e
+    if [ "$REACH_RC" -gt 1 ]; then
+        # Same discipline as the provenance scan above: 0 and 1 are verdicts, >1 is the
+        # tool failing. Cannot tell what it would reach means cannot write.
+        echo "fmt-mine: could not determine what formatting this session's files would reach" >&2
+        echo "  (\`rustfmt --check\` exited $REACH_RC). Refusing rather than guess; nothing written." >&2
+        printf '%s\n' "$REACH_OUT" >&2
+        exit 2
+    fi
+    REACH=$(printf '%s\n' "$REACH_OUT" \
+        | sed -n 's@^Diff in \(.*\):[0-9][0-9]*:$@\1@p' \
+        | sed "s@^$ROOT/@@" \
+        | sort -u)
+    # `-F -x` so a path is matched whole and literally — a substring or regex match here
+    # would silently pair `src/a.rs` with `src/ab.rs`.
+    COLLATERAL=$(printf '%s\n' "$REACH" \
+        | grep -Fx -f <(printf '%s\n' "$NOT_MINE") || true)
+    if [ -n "$COLLATERAL" ]; then
+        echo "fmt-mine: REFUSED — formatting this session's own files would rewrite files it" >&2
+        echo "  does not own, because \`rustfmt\` descends into every \`mod\` a file declares:" >&2
+        printf '    %s\n' $COLLATERAL >&2
+        echo >&2
+        echo "  Nothing was written, this session's files included — there is no way to format" >&2
+        echo "  a module root without its children. Ask the owner below to format theirs first," >&2
+        echo "  then re-run; this session's half will go through on its own." >&2
+        echo >&2
+        refuse_not_mine
+        exit 1
+    fi
 fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
-    echo "fmt-mine: would format (all attributed to this session):"
+    # No longer "all attributed to this session" — on a mixed scan it is some of them.
+    echo "fmt-mine: would format (attributed to this session):"
     printf '  %s\n' $MINE
-    exit 0
+    [ -n "$NOT_MINE" ] || exit 0
+    refuse_not_mine
+    exit 1
 fi
 
 # `rustfmt` directly rather than `cargo fmt`, because cargo has no per-file mode
@@ -197,3 +279,12 @@ fi
 # shellcheck disable=SC2086
 rustfmt --edition 2021 $MINE
 echo "fmt-mine: formatted $(printf '%s\n' "$MINE" | wc -l) file(s) written by this session."
+
+# The refusal comes AFTER the write, not instead of it. Exit stays 1: this session's half
+# is done, the gate is still blocked, and the reader's remaining action is the one named
+# above — ask the owner. Reporting 0 here would let a caller chaining on success proceed
+# past unformatted files it does not own.
+if [ -n "$NOT_MINE" ]; then
+    refuse_not_mine
+    exit 1
+fi

@@ -99,6 +99,36 @@ UNKNOWN_STUB=$(mkstub unknown UNKNOWN "          no record of any session writin
 SHARED_STUB=$(mkstub shared SHARED "          written by THIS session and 5399543d")
 MINE_STUB=$(mkstub mine MINE "          written by THIS session")
 
+# A per-PATH verdict, which `mkstub` cannot express: every stub above answers the SAME
+# verdict for every file it is handed, so no case built from them can produce a scan that
+# is MINE *and* not-mine at once. That is the only shape in which "$MINE is computed and
+# then never read on the refusal path" is observable — which is why the defect at
+# `docs/issues/2026-09-12-fmt-mine-refuses-this-sessions-own-files-when-a-peer-file-also-needs-formatting.md`
+# survived a suite that covers all four verdicts individually. A fifth homogeneous stub
+# would not have helped; the missing axis is per-path, not per-verdict.
+mkmixed() { # mkmixed -> stub answering PEER for */peer.rs and MINE for everything else
+    local f="$WORK/prov-mixed.sh"
+    cat > "$f" <<'STUB'
+#!/usr/bin/env bash
+[ -n "${FMT_MINE_TEST_MARKER:-}" ] && : > "$FMT_MINE_TEST_MARKER"
+for f in "$@"; do
+  case "$f" in
+    *peer.rs)
+      printf "%-9s %s\n" "PEER" "$f"
+      printf "%s\n" "          written by 5399543d-22d6-4ed9-9ebb-876be459989f  [LIVE]"
+      printf "%s\n" '            ask it: SendMessage to="uds:/run/user/1000/cc-socks/1849060.sock"' ;;
+    *)
+      printf "%-9s %s\n" "MINE" "$f"
+      printf "%s\n" "          written by THIS session" ;;
+  esac
+done
+exit 0
+STUB
+    chmod +x "$f"
+    echo "$f"
+}
+MIXED_STUB=$(mkmixed)
+
 # A project per case: `cargo fmt` rewrites in place, so cases must not share a tree.
 newproj() {
     local d="$WORK/p$RANDOM$RANDOM"
@@ -195,6 +225,56 @@ eq "no sid wrote nothing" "$(grep -c 'pub fn f(  )' "$P/src/lib.rs")" "1"
 has "no sid says the referent is missing" "$OUT" "has no referent"
 has "no sid names the fallback for a solo checkout" "$OUT" "cargo fmt"
 hasnt "no sid never reached the scan" "$(consulted)" "yes"
+
+echo "== 8. MIXED scan, DISJOINT trees: mine get written, theirs do not, refusal names only theirs =="
+# The case the four stubs above cannot express. What it pins is the contract CLAUDE.md
+# states for this script -- "formats what scripts/file-provenance.py attributes to you and
+# REFUSES THE REST" -- which the code did not implement: $MINE was computed and then never
+# read on the refusal path, so one peer holding one unformatted file blocked the gate's
+# mandated step 1 for every other session in the checkout.
+#
+# LOAD-BEARING FIXTURE DETAIL: the peer's file is under tests/, NOT src/, and the two must
+# stay in different module trees. `cargo fmt` covers tests/ (verified), so it is still one
+# scan -- but `rustfmt src/lib.rs` cannot reach tests/peer.rs, which is what makes partial
+# success legal here. Move it to src/ with a `mod` line and this case becomes case 9.
+# It also mirrors the real observation: src/tools/symbol/symbols.rs against
+# tests/doc_tool_refs.rs, two targets that share no module root.
+P=$(newproj)
+printf 'pub fn mine(  ) -> u32     {\n    1\n}\n' > "$P/src/lib.rs"
+mkdir -p "$P/tests"
+printf 'pub fn theirs(  ) -> u32     {\n    2\n}\n' > "$P/tests/peer.rs"
+run "$P" "$MIXED_STUB"
+eq "8 mixed still exits 1 -- the peer's file keeps the gate red" "$RC" "1"
+eq "8 MY file was formatted" "$(grep -c 'pub fn mine() -> u32 {' "$P/src/lib.rs")" "1"
+# The control. Without it, a "fix" that simply dropped the guard and ran the formatter over
+# everything satisfies the assertion above -- and that is `ce3a628db5fa1168`, the defect
+# this whole script exists to close, re-admitted by its own regression test.
+eq "8 THEIR file was left byte-untouched" "$(grep -c 'pub fn theirs(  )' "$P/tests/peer.rs")" "1"
+hasnt "8 the refusal does not list a file it just formatted" "$OUT" "src/lib.rs"
+has "8 the refusal still names who to ask" "$OUT" "uds:/run/user"
+has "8 and offers the narrow per-file command, not only cargo fmt" "$OUT" "rustfmt --edition"
+
+echo "== 9. MIXED scan whose module tree REACHES the peer's file: refuses wholesale, says why =="
+# `rustfmt <file>` is not per-file -- it descends into every `mod` the file declares -- so
+# case 8's partial success is illegal exactly when this session's file is the module ROOT
+# of a peer's file. This is not hypothetical: the first draft of the case-8 fix had no such
+# check, and THIS fixture is what caught it. src/lib.rs was formatted and src/peer.rs went
+# with it, which is `ce3a628db5fa1168` re-admitted through the regression test written to
+# close a different bug.
+#
+# LOAD-BEARING FIXTURE DETAIL: the `pub mod peer;` line IS the test. Delete it and this
+# case silently degenerates into a copy of case 8 -- still passing, no longer discriminating.
+P=$(newproj)
+printf 'pub mod peer;\npub fn mine(  ) -> u32     {\n    1\n}\n' > "$P/src/lib.rs"
+printf 'pub fn theirs(  ) -> u32     {\n    2\n}\n' > "$P/src/peer.rs"
+run "$P" "$MIXED_STUB"
+eq "9 reaching scan exits 1" "$RC" "1"
+eq "9 THEIR file was left byte-untouched" "$(grep -c 'pub fn theirs(  )' "$P/src/peer.rs")" "1"
+# Mine is refused TOO, and that asymmetry with case 8 is the point: there is no way to
+# format half a module tree, so the safe action is the whole refusal it used to give always.
+eq "9 MINE was left unwritten too" "$(grep -c 'pub fn mine(  )' "$P/src/lib.rs")" "1"
+has "9 names mod-descent as the reason, not just the refusal" "$OUT" "descends into every"
+has "9 names the file it would have collaterally rewritten" "$OUT" "src/peer.rs"
 
 echo
 echo "fmt-mine: $PASS passed, $FAIL failed"
