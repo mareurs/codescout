@@ -18,11 +18,28 @@ fn source_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
             "kind": {"type": "string"},
             "payload": {}
         },
-        "required": ["uri", "kind"]
+        "required": ["uri", "kind"],
+        "additionalProperties": false
     })
 }
 
+/// **`deny_unknown_fields` is safe HERE while being unavailable on the shared `doc`
+/// schema — the difference is what reaches this type.** `crate::tools::param_probe`'s
+/// module doc records the attribute being tried once and breaking every `doc(update)`
+/// call, because that dispatcher passes the shared argument blob straight down, so
+/// `action` and every sibling action's key arrive as unknown fields. `flatten_event_args`
+/// (`crate::librarian::tools::artifact`) does not: it builds a fresh map from the `event`
+/// object's own keys plus `artifact_id`, so a sibling's key can never reach here.
+/// `augment::Args` is reached the same way, through `flatten_augment_args`, and has
+/// carried the attribute all along — this closes the asymmetry, it does not open a
+/// new one.
+///
+/// Without it the `"additionalProperties": false` that `event` declares in that schema is
+/// a promise serde never reads: `event={kind, payload, athor: "me"}` recorded the event
+/// and discarded the typo, against a schema that told the caller it would be refused
+/// (`IC-15`, accepted-parameter-silently-dropped).
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Args {
     pub artifact_id: String,
     pub kind: String,
@@ -45,7 +62,20 @@ pub struct Args {
     pub author: Option<String>,
 }
 
+/// Carries the attribute for the same reason as [`Args`], and is a SECOND guarded site
+/// rather than a consequence of that one: `source` deserialises through this type's own
+/// impl, which ignores unknown keys however strict its parent is.
+///
+/// The LIVE schema for this object is the hand-written `event.source` block in
+/// `artifact.rs`, which says `"additionalProperties": false` to match — and
+/// `every_schema_object_promising_to_refuse_unknown_keys_actually_refuses` pins that pair
+/// together, in both directions. `source_schema` above is the schemars mirror feeding
+/// `Args`'s derived `JsonSchema`, and is **INERT**: no `schema_for` call site exists in
+/// this crate, so nothing materialises it, no test covers it, and it is kept in step by
+/// hand. Do not read its agreement as coverage — do read it as the copy to update if that
+/// derive is ever wired to a published surface.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SourceArg {
     pub uri: String,
     pub kind: String,

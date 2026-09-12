@@ -4817,8 +4817,30 @@ mod tests {
     /// on; what remains is the rule and the exception, which is what a caller needs
     /// to predict the surface. Report run 2026-09-12: TOTAL (21 tools) = 55_711,
     /// headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-12, 55_711 → 55_740 (+29), by declaring
+    /// `"additionalProperties": false` on `doc`'s `event.source` object** — the
+    /// caller-facing half of a fix that added `#[serde(deny_unknown_fields)]` to
+    /// `event_create::SourceArg`. The attribute alone would have refused a call the
+    /// published schema still permitted, which is the same schema/code contradiction
+    /// the fix closes, pointing the other way; the pair must ship together.
+    ///
+    /// DERIVATION. Both ends measured on this tree, because the previous entry
+    /// records the constant and the tree drifting apart once. Baseline report run =
+    /// 55_711 — equal to the constant, so unlike that entry there is no unbanked
+    /// headroom to net out and gross equals net. `doc` is the only row that moves
+    /// (18_552 → 18_581), all of it schema (17_130 → 17_159); `desc` is unchanged at
+    /// 1_422. The +29 is the serialized JSON `,"additionalProperties":false` and
+    /// nothing else.
+    ///
+    /// **29 chars is what the promise costs to keep, and the alternative was not
+    /// cheaper.** `event` already declared the same key and did not enforce it for
+    /// months; `event.source` deserialises through its own type, so its parent's
+    /// strictness does not reach it. Dropping this line would have left that second
+    /// site silently discarding a caller's typo — the defect being fixed, one level
+    /// down. Report run 2026-09-12: TOTAL (21 tools) = 55_740, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_711;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_740;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

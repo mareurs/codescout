@@ -336,7 +336,8 @@ impl Tool for Artifact {
                             "type": "object",
                             "description": "external signal source",
                             "properties": { "uri": { "type": "string" }, "kind": { "type": "string" }, "payload": {} },
-                            "required": ["uri", "kind"]
+                            "required": ["uri", "kind"],
+                            "additionalProperties": false
                         }
                     }
                 },
@@ -1126,5 +1127,194 @@ mod tests {
             schema["properties"]["event"]["properties"]["payload"]["type"], "object",
             "payload must declare type=object so clients send an object, not a JSON string"
         );
+    }
+
+    /// Every object in `doc`'s schema that declares `"additionalProperties": false` has
+    /// told the caller, in writing, that a typo is refused. **Nothing in serde reads that
+    /// declaration.** The promise is kept only where the type the object deserialises into
+    /// carries `#[serde(deny_unknown_fields)]` — a separate edit, in a different file, with
+    /// no compiler relationship to the schema at all. `event` made the promise and broke it
+    /// (`docs/issues/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`)
+    /// while `augment`, folded into its `Args` the identical way, kept it.
+    ///
+    /// **Direction, named because the neighbouring guard is monotone the other way.**
+    /// `every_action_labelled_schema_key_is_honored_by_that_action` asks whether a
+    /// DECLARED key is accepted and has an effect — a surface that accepts *everything*
+    /// satisfies it, which is exactly why it ran green over this defect. This asks whether
+    /// an UNDECLARED key is refused, and a surface that accepts *nothing* satisfies it.
+    /// That is what `every_schema_object_promising_refusal_still_accepts_its_declared_keys`
+    /// below is for; neither direction alone is coverage.
+    ///
+    /// The population is DERIVED from the schema rather than listed, so a sub-object that
+    /// starts making the promise arrives as an unhandled match arm instead of as silence.
+    /// **The root object is excluded deliberately, and that is not an oversight:** `doc`'s
+    /// dispatcher passes the shared argument blob down with `action` and every sibling
+    /// action's keys aboard, so the root type cannot carry `deny_unknown_fields` — tried
+    /// once, broke every `doc(update)` call, recorded on `crate::tools::param_probe`.
+    #[tokio::test]
+    async fn every_schema_object_promising_to_refuse_unknown_keys_actually_refuses() {
+        let promises = schema_objects_promising_refusal(&Artifact.input_schema());
+        assert_eq!(
+            promises,
+            vec!["augment", "event", "event.source"],
+            "the set of schema objects promising to refuse unknown keys has moved.\n\
+             ADDED: give it an arm in `refusal_probe` AND `#[serde(deny_unknown_fields)]` on \
+             the type it deserialises into — the schema line alone is inert decoration.\n\
+             REMOVED: a published contract was silently loosened; say why in the commit."
+        );
+
+        for promise in &promises {
+            let (args, typo) = refusal_probe(promise);
+            let ctx = mk_ctx();
+            seed_row(&ctx, PROBE_ID);
+            let err = Artifact
+                .call(&ctx, args)
+                .await
+                .expect_err(&format!(
+                    "`{promise}` declares additionalProperties:false, so the unknown key \
+                     `{typo}` must be refused — it was accepted and silently dropped"
+                ))
+                .to_string();
+            // Arrival is not enough: a refusal that does not name the offending key sends
+            // the reader to audit every key they sent, which on this surface is the whole
+            // call. serde names it; the wrapping message must not bury it.
+            assert!(
+                err.contains(typo),
+                "`{promise}` refused the call but the message never names `{typo}`, so the \
+                 caller cannot tell which key was wrong: {err}"
+            );
+        }
+    }
+
+    /// The opposite-direction partner of the gate above, and the reason its green means
+    /// anything: `deny_unknown_fields` is one typo away from refusing a *declared* key too
+    /// — misspell a field name in the struct and the schema's own documented key starts
+    /// failing, with the gate above still perfectly green, because refusing MORE is
+    /// monotone under its assertion.
+    ///
+    /// So this sends each guarded object its FULL declared key set, not a minimal one: a
+    /// minimal call exercises the required keys and says nothing about the optional ones,
+    /// which is where a rename actually lands.
+    #[tokio::test]
+    async fn every_schema_object_promising_refusal_still_accepts_its_declared_keys() {
+        let ctx = mk_ctx();
+        seed_row(&ctx, PROBE_ID);
+
+        // `event`, with every optional key the schema declares, plus a fully populated
+        // nested `source` — which is also `event.source`'s positive case.
+        Artifact
+            .call(
+                &ctx,
+                json!({"action": "event_create", "id": PROBE_ID, "event": {
+                    "kind": "external_signal",
+                    "payload": {"source_id": "s1", "summary": "a summary"},
+                    "author": "test",
+                    "anchor_commit": "0123456789abcdef0123456789abcdef01234567",
+                    "head_commit": "89abcdef0123456789abcdef0123456789abcdef",
+                    "also_mutates": [],
+                    // `source.kind` is a closed set at the DB layer (CHECK constraint on
+                    // the event_source table), NOT in the schema, which says only
+                    // `{"type": "string"}`. A value outside it fails at insert with a
+                    // constraint error — which is a different failure from the unknown-key
+                    // refusal this pair is about, and would read as one here.
+                    "source": {"uri": "https://example.invalid/x", "kind": "manual",
+                               "payload": {"raw": 1}}
+                }}),
+            )
+            .await
+            .expect(
+                "every declared `event` key, and every declared `event.source` key, must \
+                 still be accepted — a typo in a struct field name reds here and nowhere else",
+            );
+
+        // `augment`, same question. `params_path` is omitted on purpose: it is declared
+        // mutually exclusive with `params`, so sending both is refused for a reason that
+        // has nothing to do with unknown fields.
+        Artifact
+            .call(
+                &ctx,
+                json!({"action": "augment", "id": PROBE_ID, "merge": false, "augment": {
+                    "prompt": "p",
+                    "params": {"k": 1},
+                    "render_template": "{{ k }}",
+                    "params_schema": {"type": "object"},
+                    "append_mode": false,
+                    "history_cap": 3,
+                    "entry_collection": "rows"
+                }}),
+            )
+            .await
+            .expect("every declared `augment` key must still be accepted");
+    }
+
+    /// One seeded artifact id, shared by the two gates above so a probe's args can be
+    /// built without a `ToolContext` in hand.
+    const PROBE_ID: &str = "bbbbbbbbbbbbbbbb";
+
+    /// Walk the schema and return the dotted path of every object declaring
+    /// `"additionalProperties": false`, root excluded. Recursive rather than one-level
+    /// because the defect this gate exists for lives one level down: `event.source`
+    /// deserialises through its own type, whose unknown-key behaviour is independent of
+    /// its parent's however strict that parent is.
+    fn schema_objects_promising_refusal(schema: &Value) -> Vec<String> {
+        fn walk(node: &Value, path: &str, out: &mut Vec<String>) {
+            if !path.is_empty() && node["additionalProperties"] == json!(false) {
+                out.push(path.to_string());
+            }
+            if let Some(props) = node["properties"].as_object() {
+                for (k, v) in props {
+                    let child = if path.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{path}.{k}")
+                    };
+                    walk(v, &child, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(schema, "", &mut out);
+        out.sort();
+        out
+    }
+
+    /// A call that is valid at `path` except for one unknown key, plus that key's name.
+    /// Every arm is otherwise well-formed: the call must fail for the unknown field and
+    /// not for a missing required one, or the gate proves nothing.
+    fn refusal_probe(path: &str) -> (Value, &'static str) {
+        match path {
+            "augment" => (
+                json!({"action": "augment", "id": PROBE_ID,
+                       "augment": {"prompt": "p", "promt": "typo"}}),
+                "promt",
+            ),
+            "event" => (
+                json!({"action": "event_create", "id": PROBE_ID,
+                       "event": {"kind": "note", "payload": {"text": "x"},
+                                 "athor": "typo"}}),
+                "athor",
+            ),
+            "event.source" => (
+                json!({"action": "event_create", "id": PROBE_ID,
+                       "event": {"kind": "external_signal",
+                                 "payload": {"source_id": "s1", "summary": "y"},
+                                 // `kind` must be a value the event_source CHECK
+                                 // constraint admits, and `uri` a plausible one: with an
+                                 // invalid `kind` here the call still fails without
+                                 // `deny_unknown_fields` — on the constraint — so a bare
+                                 // `expect_err` would pass the mutation this gate exists
+                                 // to catch. Measured, not reasoned: that is what the
+                                 // first run of this arm actually did.
+                                 "source": {"uri": "https://example.invalid/x",
+                                            "kind": "manual",
+                                            "payloadd": {"a": 1}}}}),
+                "payloadd",
+            ),
+            other => panic!(
+                "`{other}` declares additionalProperties:false and has no probe. Add an arm \
+                 here sending a call that is valid except for one unknown key, and confirm \
+                 the type it deserialises into carries #[serde(deny_unknown_fields)]."
+            ),
+        }
     }
 }
