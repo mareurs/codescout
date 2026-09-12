@@ -153,6 +153,29 @@ The correct report for row 3 is *"cannot establish sameness"*, never *"different
 builds are unidentifiable rather than provably distinct, and a message claiming the latter is this
 same defect inverted.
 
+**⚠ `git_dirty` IS A POOR INPUT TO THIS PREDICATE, ON TWO COUNTS MEASURED 2026-09-12.** Row 3 above
+treats it as "the code may differ from the commit". It does not mean that.
+
+*Scope — demonstrated live.* `build.rs:44-45` computes the flag from a bare `git status --porcelain`
+with **no pathspec**, so any dirty file anywhere sets it. Observed this morning: the running binary
+reports `{"git_sha":"dffb89c2","git_dirty":true}` while `git status --porcelain -- src/ crates/
+tests/ build.rs` is **empty** — the only dirt is markdown and an audit log. The compiled code IS
+`dffb89c2`'s. So a doc edit puts an honest build into row 3 and any dirty-triggered warning is a
+false positive, compounding the over-firing that killed the first prescription above.
+
+*Freshness — named, not measured, and the mechanism is specific.* `build.rs:55-57` declares its
+rerun triggers as `.git/HEAD`, `.git/index` and `.git/refs/heads/`. **None covers the working
+tree**, so editing a source file does not by itself re-run `build.rs`; the stamped bit reflects
+whenever it last ran. Git rewrites `.git/index` opportunistically when refreshing stat info, so in
+practice the bit is *incidentally* fresh rather than reliably — which is worse than plainly stale,
+because it is sometimes right. This is the concrete form of the staleness `0cd1fe818951b232` named
+in the abstract. Someone should measure it before relying on the flag for anything load-bearing.
+
+**Both counts strengthen the runtime-hash proposal below rather than weakening it**: a hash of the
+running binary's own bytes has neither problem — no pathspec to scope wrongly, no trigger list to
+go stale. It is also why `reading_binary_dirty` (the "smaller half" at the end of this section) is
+worth emitting for *diagnosis* while being the wrong thing to *branch* on.
+
 **REJECTED — my first prescription: compare `(sha, dirty)` and treat `dirty` on either side as
 "cannot establish sameness".** Refuted by `codescout-75` (sessionId b0b9bc40…): a dirty build
 reading **its own** sidecar lands in row 3, so that rule warns on every ordinary single-session run
@@ -169,11 +192,45 @@ build"* (same live pid) and yields no sound negative. It converts a guaranteed f
 an occasional one.
 
 **What would actually close it is a content-derived BUILD identity** — something that varies with
-uncommitted content, which `git_sha` by construction does not. A `build.rs`-baked build id is the
-obvious shape and `build.rs` already computes the dirty bit in the same function. **Flagged, not
-prescribed:** the archived `0cd1fe818951b232` records that the `build.rs` stamp *"can be stale"*
-because its rerun triggers are declared rather than universal, so a build id minted there inherits
-exactly the staleness it is meant to detect. That needs measuring before anyone builds it.
+uncommitted content, which `git_sha` by construction does not.
+
+**Proposed by `codescout-75` (sessionId b0b9bc40…), and it survives the objection that killed the
+build.rs route: hash the ARTIFACT at runtime, not the source at build time.** Read the running
+executable's own bytes, hash them, cache in a `OnceLock`. A value *derived from* the artifact has no
+declared-input list to go stale and no rebuild to miss, so `0cd1fe818951b232`'s rerun-trigger
+problem cannot reach it. Two builds from one dirty commit differ iff their bytes differ — exactly
+the predicate `written_by` wants, true by construction rather than by a correctly-maintained trigger
+list. It identifies the BINARY, not the source: two byte-identical builds from different dirty trees
+hash the same, which is correct for the question this check asks and wrong for any provenance
+question.
+
+**MEASURED REFINEMENT — do NOT reach it through `std::env::current_exe()`, and this is the whole of
+why.** On Linux `current_exe()` resolves via `/proc/self/exe`'s **readlink string**, which for an
+unlinked binary comes back carrying a literal `" (deleted)"` suffix — a path that does not exist, so
+the read fails. Measured 2026-09-11 on a copied `sleep` binary unlinked while running:
+
+```
+readlink /proc/<pid>/exe  ->  /tmp/…/sleepy (deleted)
+read via the current_exe() path : FAIL
+read via /proc/<pid>/exe        : OK      (sha256 9625c74169aa6585…)
+```
+
+So the obvious spelling records `None` **exactly in the zombie-server case** — the case this whole
+mechanism was built for (`2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state`,
+and the reason `exe_deleted` exists at all). Reading the **inode** instead — `fs::read("/proc/self/exe")`
+— succeeds on the deleted binary and yields a usable hash. Linux-only, which is where the zombie case
+was measured; elsewhere `None`-and-stay-silent remains the honest fallback. The proposal's own cost
+note said this failure mode "is one the struct is shaped for": right about the shape, backwards about
+the consequence, and avoidable.
+
+**Priced with the real number rather than an order of magnitude:** `target/release/codescout` is
+**64,980,672 bytes** (62 MiB), so this is tens of milliseconds of hashing, once per process, and must
+be lazy — computed on first sidecar write or comparison, never at startup.
+
+**Not attempted, and not prescribed as settled.** Two things want measuring first: whether two
+consecutive `cargo rb` runs over identical source produce byte-identical binaries here (if not, the
+hash reports "different build" on a harmless relink — arguably correct, certainly noisy), and the
+non-Linux route. Recorded as a shape with a named failure surface, not a smaller one.
 
 **The smaller half is worth doing regardless and is independent of all the above:** emit
 `reading_binary_dirty` beside `reading_binary_sha` at `:774`. The writer's record carries
