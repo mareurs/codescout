@@ -154,7 +154,7 @@ their source body.
   "symbols": [
     {
       "name": "authenticate_user",
-      "name_path": "AuthService/authenticate_user",
+      "symbol": "AuthService/authenticate_user",
       "kind": "Function",
       "file": "src/auth/service.rs",
       "start_line": 44,
@@ -186,7 +186,7 @@ their source body.
   "symbols": [
     {
       "name": "authenticate_user",
-      "name_path": "AuthService/authenticate_user",
+      "symbol": "AuthService/authenticate_user",
       "kind": "Function",
       "file": "src/auth/service.rs",
       "start_line": 44,
@@ -217,7 +217,7 @@ their source body.
 - Without `path`, uses `workspace/symbol` (one LSP request per
   language), which is fast. With `path`, uses per-file document
   symbols, which is slower but scoped.
-- `name_path` in the result uses `/` as a separator for nested symbols, e.g.
+- `symbol` in the result uses `/` as a separator for nested symbols, e.g.
   `AuthService/authenticate_user`. You need this value for
   `references`, `edit_code`, and related editing tools.
 - Use `include_body: true` in the same call to avoid a separate read step when
@@ -234,7 +234,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
+| `symbol` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
 | `path` | string | yes | — | File that contains the symbol definition |
 | `detail_level` | string | no | exploring | `"full"` for pagination |
 | `offset` | integer | no | 0 | Skip this many results |
@@ -246,7 +246,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 {
   "tool": "references",
   "arguments": {
-    "name_path": "AuthService/authenticate_user",
+    "symbol": "AuthService/authenticate_user",
     "path": "src/auth/service.rs"
   }
 }
@@ -286,7 +286,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 {
   "tool": "references",
   "arguments": {
-    "name_path": "Logger/log",
+    "symbol": "Logger/log",
     "path": "src/logging.rs",
     "detail_level": "full",
     "offset": 0,
@@ -297,12 +297,11 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 **Tips:**
 
-- Both `name_path` and `path` are required. The LSP needs to locate
+- Both `symbol` and `path` are required. The LSP needs to locate
   the symbol's definition position before it can find references.
-- `name_path` must match the `name_path` value from `symbols` or
-  `symbols` output, not just the bare name. For a top-level function, the
-  name_path is just the function name (e.g. `"validate_token"`). For a method,
-  it is `"StructName/method_name"`.
+- `symbol` must match the `symbol` value from a `symbols` result, not just the
+  bare name. For a top-level function that is the function name itself (e.g.
+  `"validate_token"`); for a method it is `"StructName/method_name"`.
 - Each reference includes a `context` line showing the source at that location,
   so you can often determine the call pattern without reading the file.
 - For symbols with many references (e.g. utility functions, common types),

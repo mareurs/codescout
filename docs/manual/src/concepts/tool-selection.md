@@ -29,14 +29,14 @@ before deciding which symbol to read.
 { "tool": "symbols", "arguments": { "path": "src/services/auth.rs" } }
 ```
 
-**`references(name_path, path)`** — find every location
+**`references(symbol, path)`** — find every location
 that references a specific symbol. Use this when you know the symbol and want
 to trace all its callers or usages.
 
 ```json
 {
   "tool": "references",
-  "arguments": { "name_path": "AuthService/verify_token", "path": "src/services/auth.rs" }
+  "arguments": { "symbol": "AuthService/verify_token", "path": "src/services/auth.rs" }
 }
 ```
 
@@ -152,7 +152,7 @@ tracing usages of a known symbol.
 |-------------|------------|
 | File path | `symbols(path)` |
 | Function/class name | `symbols(pattern)` |
-| Who calls a function | `references(name_path, path)` |
+| Who calls a function | `references(symbol, path)` |
 | A concept or behaviour | `semantic_search(query)` |
 | Nothing (unfamiliar area) | `tree` → `symbols` → `semantic_search` |
 | Exact string or import | `grep(regex)` |

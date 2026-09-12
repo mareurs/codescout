@@ -40,7 +40,7 @@ output feeds the next.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `symbols(name, include_body=true)` | Read the current implementation |
-| 2 | `references(name_path, path)` | Find all callers and dependents |
+| 2 | `references(symbol, path)` | Find all callers and dependents |
 | 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
 | 4 | Edit with full knowledge of impact | |
 
@@ -81,7 +81,7 @@ but can't follow indirection.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `references(name_path, path)` | Map all usages before renaming |
+| 1 | `references(symbol, path)` | Map all usages before renaming |
 | 2 | `edit_code(symbol, path, action="rename", new_name)` | LSP-powered rename across files |
 | 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
