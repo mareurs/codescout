@@ -1,7 +1,7 @@
 ---
-id: '8ace06843584dd1e'
+id: 7d948fcfc42989a0
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the tree-sitter fallback is gated on matches.is_empty(), so a warm LSP returns strictly fewer symbols than a cold one'
 tags:
 - cluster/selector-narrower-than-its-population
@@ -452,47 +452,40 @@ project-wide `symbols` count over a multi-cargo-project tree as complete.
 `open`, never claimed, filed-and-parked deliberately. Asked rather than inferred from the
 fact that they moved to another bug.
 
-**Unblocked 2026-09-12.** `b0b9bc40`'s `group_by_file_ranked` refactor landed cleanly —
-`cargo build --release --bin codescout --features local-embed` succeeds. Verified by
-building, not by asking.
+**FIXED 2026-09-12.** Priced the always-run-and-dedupe option (measured cost:
+~1-2s added per project-scope call on this repo's ~500 accepted files, via a
+fully-warm-LSP query engineered to return zero matches so `matches.is_empty()`
+forced the full walk — the closest live proxy available to the always-run path
+before it existed), then implemented it: `files_needing_fallback` now returns
+every accepted file unconditionally; `nested_roots`/`uncovered_langs`/
+`is_project_manifest` are deleted, not merely unused; `merge_deduped` drops a
+tree-sitter candidate whose `(file, symbol, start_line)` key the LSP already
+pushed, via a `pushed_keys` set grown by the LSP loop.
 
-**Probe B re-run against the rebuilt binary (release build 19:26, pid 1000730, exe
-inode confirmed live, no `(deleted)` marker), same tree, same query:**
+**Probe B, re-run against the rebuilt binary post-fix (pid 1614040, exe
+confirmed live via `/proc/<pid>/exe`, no `(deleted)` marker):**
 
 ```
 symbols(name="parse", exact=true)
 
-  COLD  -> 13 matches / 12 files   (unchanged from the original probe B)
-  WARM  -> 5 matches / 4 files    (the currently-landed fix: was 1/1 before it)
+  COLD  -> 13 matches / 12 files
+  WARM  -> 13 matches / 12 files   (IDENTICAL to cold — the target)
 ```
 
-**This is the currently-open fix's own measurement, not a new bug.** The 5 that
-survive warm are exactly the four fixture files under `tests/fixtures/*-eval-rust/`
-— nested roots outside the LSP's own cargo workspace, which `files_needing_fallback`
-correctly re-parses. The 8 that are still missing are exactly the `src/` hits from
-the cold list, including `frontmatter.rs:80`'s `parse` — the function this very probe
-just warmed via `symbol_at` moments earlier, and it still does not come back from
-`workspace/symbol`. Those files ARE inside the LSP's own workspace, so the
-manifest-based coverage predicate correctly calls them "covered" and skips
-re-parsing them — and that predicate cannot be patched to fix this, because the gap
-isn't coverage, it's rust-analyzer's own `workspace/symbol` answer being incomplete
-for queries like a bare `parse` (the third mechanism, measured at the protocol
-earlier). Coverage-based fallback structurally cannot reach this remainder.
+Same 12 files, same per-file counts, as cold — `frontmatter.rs`'s own `parse()`
+is present exactly once, not duplicated. This is the fourth and final probe B
+reading: 13/1 (original bug) → 13/5 (nested-roots-only fix) → 13/13 (this fix).
 
-**Next action, revised by this measurement.** Option 4 (structural coverage +
-mechanical dedupe) is confirmed correct for what it targets and confirmed
-insufficient alone — it cannot close the `src/` gap because that gap is inside its
-own definition of "covered." Closing it needs the root-cause shape already on
-record: run tree-sitter over the accepted files regardless of LSP coverage and
-dedupe against whatever the LSP returned, rather than deciding not to run it. Pricing
-that — the always-run-and-dedupe cost, not the nested-roots-only fix already
-landed — is the open work, and it changes the scope of this bug from "the fallback
-under-triggers" to "the fallback's own trigger condition cannot see the failure
-mode it exists for."
+Gate green in the mandated order (fmt-mine, clippy, lean test 3807 passed,
+default test 5832 passed). Mutation-tested `merge_deduped`'s guard: gutting it
+to always-push killed exactly the two tests built to catch that and nothing
+else.
+
+**Fix:** `602230d8`, patch-id `c4aa2a2eab43696843a87698a1ebf4631d550d2b`.
 
 One thing NOT owed any more: the inversion is now an observed measurement rather than an
-inference — § Reproduction probe B, both arms, reproduced twice (2026-09-12 pre-fix,
-2026-09-12 post-fix).
+inference — § Reproduction probe B, all three states (broken / partial fix / full fix),
+each reproduced on the wire.
 ## References
 
 - `src/tools/symbol/symbols.rs` — `search_project_symbols`
