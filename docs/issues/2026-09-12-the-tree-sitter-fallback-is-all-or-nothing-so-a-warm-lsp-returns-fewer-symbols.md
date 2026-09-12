@@ -452,20 +452,47 @@ project-wide `symbols` count over a multi-cargo-project tree as complete.
 `open`, never claimed, filed-and-parked deliberately. Asked rather than inferred from the
 fact that they moved to another bug.
 
-**Blocked on the shared tree compiling.** `b0b9bc40` has a half-landed
-`group_by_file_ranked` refactor across `src/tools/symbol/display.rs`,
-`src/tools/file_group.rs` and `src/tools/symbol/tests.rs`; `display.rs:158` does not
-build, so no candidate here can be verified and no gate run is interpretable. They have
-been told directly, with the provenance that names them rather than an inference from
-who was nearby.
+**Unblocked 2026-09-12.** `b0b9bc40`'s `group_by_file_ranked` refactor landed cleanly —
+`cargo build --release --bin codescout --features local-embed` succeeds. Verified by
+building, not by asking.
 
-**Next action.** Price option 4 against option 2, implement the winner intersected with
-the LSP-seen set, and ship option 3's scope declaration alongside it rather than instead
-of it — the two are independent, and § Fix is explicit that a scope declaration must not
-be read as a fix.
+**Probe B re-run against the rebuilt binary (release build 19:26, pid 1000730, exe
+inode confirmed live, no `(deleted)` marker), same tree, same query:**
+
+```
+symbols(name="parse", exact=true)
+
+  COLD  -> 13 matches / 12 files   (unchanged from the original probe B)
+  WARM  -> 5 matches / 4 files    (the currently-landed fix: was 1/1 before it)
+```
+
+**This is the currently-open fix's own measurement, not a new bug.** The 5 that
+survive warm are exactly the four fixture files under `tests/fixtures/*-eval-rust/`
+— nested roots outside the LSP's own cargo workspace, which `files_needing_fallback`
+correctly re-parses. The 8 that are still missing are exactly the `src/` hits from
+the cold list, including `frontmatter.rs:80`'s `parse` — the function this very probe
+just warmed via `symbol_at` moments earlier, and it still does not come back from
+`workspace/symbol`. Those files ARE inside the LSP's own workspace, so the
+manifest-based coverage predicate correctly calls them "covered" and skips
+re-parsing them — and that predicate cannot be patched to fix this, because the gap
+isn't coverage, it's rust-analyzer's own `workspace/symbol` answer being incomplete
+for queries like a bare `parse` (the third mechanism, measured at the protocol
+earlier). Coverage-based fallback structurally cannot reach this remainder.
+
+**Next action, revised by this measurement.** Option 4 (structural coverage +
+mechanical dedupe) is confirmed correct for what it targets and confirmed
+insufficient alone — it cannot close the `src/` gap because that gap is inside its
+own definition of "covered." Closing it needs the root-cause shape already on
+record: run tree-sitter over the accepted files regardless of LSP coverage and
+dedupe against whatever the LSP returned, rather than deciding not to run it. Pricing
+that — the always-run-and-dedupe cost, not the nested-roots-only fix already
+landed — is the open work, and it changes the scope of this bug from "the fallback
+under-triggers" to "the fallback's own trigger condition cannot see the failure
+mode it exists for."
 
 One thing NOT owed any more: the inversion is now an observed measurement rather than an
-inference — § Reproduction probe B, both arms, reproduced.
+inference — § Reproduction probe B, both arms, reproduced twice (2026-09-12 pre-fix,
+2026-09-12 post-fix).
 ## References
 
 - `src/tools/symbol/symbols.rs` — `search_project_symbols`
