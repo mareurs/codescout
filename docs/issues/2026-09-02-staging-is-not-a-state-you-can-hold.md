@@ -219,6 +219,59 @@ inference — which is the class claim (*"enumerating the peer does not help"*) 
 second door: the peers were fully enumerated and positively identified all evening, and the index
 still could not say who wrote it.
 
+### The remedy above is now REFUSED by a guard that mandates its opposite
+
+Observed live 2026-09-12 21:34 by sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63`, at
+`67891d98`. Not reconstructed — caught between two reads:
+
+```
+21:3x  git diff --cached --name-only   -> 3 paths   (all mine)
+21:3x  git diff --cached --stat        -> 5 paths   (+ scripts/file-provenance.py,
+                                                       tests/file-provenance.sh)
+```
+
+Nothing I did changed the index between those two commands. A peer staged into it, and
+committed at 21:34:45 — the same second as my own commit. Both guards held and nothing was
+captured, so this is a clean observation of the window rather than another incident.
+
+**What is new is that the window is now MANDATORY.** § *The red window, and what closed it*
+resolved this by collapsing the operation into one shell invocation:
+
+```
+git add "$P1" ... && git commit -F <msg> -- "$P1" ...
+```
+
+The `refuse a pathspec commit carrying unstaged content` pre-commit hook now refuses that, in
+as many words: *"FOUR SEPARATE calls. Not one batched command"*, because *"a read step placed
+in the same command as the write it gates is not a read step"* — batched, the diff reaches you
+only after the commit has run. That reasoning is correct, it cites its own measurement
+(`21258b4b`, four files captured), and it **directly contradicts the remedy this file landed at
+`62d7fa4b`**.
+
+The two are not reconcilable as written, because they are remedies for the two halves § *The
+remedy solves one of two problems* already separated — and the table there predicts this
+exactly:
+
+| | closed by | reopened by |
+|---|---|---|
+| **losing** staged paths to a peer | one invocation, no window | the guard's mandated separation |
+| **capturing** a peer's edits | a read that actually gates | the collapsed invocation |
+
+So the guard traded a capture risk for a loss risk, deliberately and with a measurement, and
+nobody wrote down that it had. A session following the guard correctly, today, reopens the
+window this file exists to document. **That is not an argument for reverting the guard** —
+capture is the worse failure, since it mislabels authorship irreversibly while a lost stage is
+recoverable (§ *The bypassed version is orphaned*). It is an argument that § *Fix* and
+§ *Workarounds* are stale and currently prescribe a form the tree refuses.
+
+One thing the guard genuinely adds, worth keeping when this is reconciled: it made the race
+**visible**. The collapsed form would have committed silently, with the losing-the-stage case
+indistinguishable from *"I must not have staged it"* — the silence this file already calls the
+real harm. Two reads disagreeing is a loud signal, and it is the reason this entry exists.
+
+Also, minor and the class again: every commit in that window is authored `Marius Ailinca`,
+shared by every session on this machine. Git identity carried zero attribution signal; only the
+`Session-Id` trailer did.
 ## Hypotheses tried
 
 1. **Hypothesis:** the pre-commit stash (`docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`)
