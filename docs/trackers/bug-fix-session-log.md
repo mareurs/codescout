@@ -13728,8 +13728,27 @@ verification actually exercises. The two diverge constantly here, and not margin
 14  ino=… (deleted)          several stale inodes SHARED across processes
 ```
 
-Measured 2026-09-12, independently reproducing their morning figure of 14 of 21. **The instrument
-for server identity is an inode comparison**, not a version string:
+Measured 2026-09-12. **⚠ I first wrote "independently reproducing their morning figure of 14 of 21"
+and that is wrong — corrected by sessionId `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who ran it a
+third time and refused the credit.** Three runs returned `14/21`; all three walk `/proc` and match on
+exe readlink. **That is one method reproducing, not three instruments agreeing**, and this repo's own
+rule is *check INDEPENDENCE, not agreement* — same scope, same blind spots, counted three times. The
+shared ones are real: processes visible to this uid only, alive at that instant only. A fourth run
+would move the number without any of them being wrong. The law is stated in `CLAUDE.md` and I broke
+it inside the entry that exists to catch this shape of error.
+
+**And the instrument has a weakness we had already rejected elsewhere — except here it does not
+bite, which is the part worth knowing.** Inode comparison is vulnerable in principle to the same
+inode REUSE that killed the `fstat` shortcut for `bfdfeebd4e5ca130` (a freed inode number is handed
+to a later file, so a dead build's identity is inherited). It cannot bite here, and the reason is
+exact: **a live process pins its inode.** The number is not freed while any process holds the file
+open, so a running server's inode can never be reused by a later build, and `same inode` between a
+LIVE process and the current disk file really does mean same file. The rejected `fstat` case differs
+because the recorded value **outlives the process that wrote it** — by the time it is compared, the
+holder may be gone and the number reissued. Same comparison, opposite validity, decided entirely by
+whether the holder is still alive. Do not generalise either verdict to the other.
+
+**The instrument for server identity is an inode comparison**, not a version string:
 
 ```
 stat -c  %i target/release/codescout   ->  188755070
