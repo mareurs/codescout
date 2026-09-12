@@ -116,7 +116,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-72 | 1 | Raise `max_per_artifact` 1→2 (the "page limit 5→10" half is WITHDRAWN — see below) | **done** 2026-09-04 `998f64d3` — measured **+2/12** at harness `limit=5` (4/12 → 6/12, MRR 0.2708 → 0.3194). The class breakdown is the evidence, not the scalar: `preamble` 3→1 and `hit` 4→6 while `wrong_file` and `file-hits@5` held EXACTLY constant — the same files were always being found and the cap was showing the wrong chunk of them. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page. **The blocker — `find.rs`'s two artifact-keyed side maps — is resolved** by `PageItem`, one record per HIT, guarded by `two_chunks_of_one_artifact_keep_their_own_matched_span` (observed RED first). **WITHDRAWN:** "page limit 5→10" named no product setting — `default_limit()` is 50 and the 5 is the benchmark harness's `--limit`; see `F-115` | — |
 | BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
-| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **partial** 2026-09-12 — pass 1: the 14 LIVE records triaged (4 still live, 6 correctly parked, 4 unverified diagnosis). The 106 archived not started. Finding: the count must NOT be driven to zero | — |
+| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes. Live records and archived records triaged. Finding: `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker — five authors invented an in-band one. Nothing cleared, deliberately | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1648,6 +1648,56 @@ that closes `terminal_status_with_caveat` to zero would be deleting honest cavea
 check built to surface them — the check counts *records carrying an unproven claim*, which is a
 healthy number to have, not a backlog. What it cannot do is distinguish the four above from the
 ten, and that separation is the only deliverable here.
+
+**PASS 2 DONE 2026-09-12 — the archived records triaged, and the finding is a missing STATE, not a
+backlog.** Population re-derived and stable across three runs at the split recorded in pass 1.
+Classified by what each caveat claims about itself, reading the full `unverified:` frontmatter
+rather than `doctor`'s `detail`, which truncates — and truncation is exactly where a residual-work
+clause hides.
+
+| bucket | disposition |
+|---|---|
+| parked-deliberate | largest bucket — the author declined it in writing; leave |
+| unverified-here | fix works, verification blocked on an instrument this host lacks |
+| no-regression-test | `scripts/` has no harness, so nothing can gate several of these |
+| still-live | residual work with no disposition marker — the actionable set |
+| discharged-or-refuted | the caveat's own text reports the question answered |
+
+**Read those as a NARROWING, not a verdict.** The classifier is regex over prose and left roughly
+one in five unbucketed; the residue was read by eye and contained actionable records the rules
+missed, which is the honest measure of the instrument. Re-derive rather than citing these bands.
+The first attempt was worse — it left more than half unclassified because it lacked the rule that
+decides most of them: **a disposition marker outranks a residual-work marker.** *"Two residues,
+both deliberate: Fix step 3 is still ABSENT"* describes outstanding work that its author declined,
+and bucketing it as live would manufacture a task nobody owes.
+
+**The structural finding: `unverified:` has two machine-readable states and its authors need
+three.** A doubt can be open, or settled, or never raised — and the field can only be present or
+absent. `terminal_status_with_caveat` keys on presence, so a settled doubt keeps firing, and the
+only way to silence it is to delete the sentence recording what was doubted and how it was
+resolved. **Five records show authors refusing that trade and inventing an in-band marker instead**,
+each independently: caveats that open `CLEARED <date>`, `REFUTED <date>, both by measurement`,
+`Resolved by measurement, not by a fix from this session`, and one — `MEASURED <date> AND WORSE
+THAN THIS RECORD FIRST STATED` — that is an *escalation* rather than a discharge. The field is
+being used as a mutable log of the doubt's life; the check reads only whether it exists.
+
+That is `IC-6`: a namespace with no way to say *answered* except by destroying the evidence. It
+also means the headline count is **partly an artifact of the missing state** rather than a measure
+of unproven claims, so tracking the number over time measures the wrong thing until a discharged
+marker exists.
+
+**Nothing was discharged here, and that is a decision rather than an omission.** The check's own
+remedy text sanctions both options — *"Either discharge it and clear the field, or leave both: the
+record stays honest AND findable"* — and the authors who wrote `CLEARED` into the field chose the
+second deliberately. Clearing it for them would delete the record to satisfy a check built to
+surface it, which is pass 1's finding applied to the cases that look most clearable. One candidate
+was rejected on its own terms: a caveat asking a reader to *"confirm the real check also reports 1
+rather than 5"* now reads **0**, because the corpus moved — consistent with the fix and not the
+confirmation that was requested, so it stays.
+
+**Follow-up worth its own row, not done here:** give the field a discharged form the scan can read
+— a leading token, or a sibling key — so a settled doubt keeps its text and stops firing. That is
+the only change that makes this count mean what readers already assume it means.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
