@@ -583,6 +583,51 @@ fn is_project_manifest(path: &std::path::Path) -> bool {
         .is_some_and(|n| MANIFESTS.contains(&n))
 }
 
+/// Map one language's `workspace/symbol` attempt onto whether that language is COVERED.
+///
+/// `None` means the server did not answer — failed to start, errored, or blew the budget
+/// — so every file of that language needs the tree-sitter pass. `Some` means the server
+/// answered, and an empty vec inside it is a REAL ANSWER: indexed fine, no match for this
+/// pattern.
+///
+/// Extracted from the spawn block for one reason: the collapse is three inputs into two
+/// outputs, and that is a per-site claim about a mapping rather than something to reason
+/// about. The arm that must not move is `Ok(Ok(vec![]))`. Map a genuine empty answer to
+/// `None` and every query with no hit in some language tree-sitters that whole language —
+/// the cost failure that disqualified the per-file union in this bug's § Fix, arriving one
+/// axis over.
+///
+/// What this replaced was `Ok(r) => r, Err(_) => Ok(Vec::new())`: a timeout rendered as a
+/// successful empty answer, byte-identical to the legitimate one. The distinction was
+/// destroyed at the point it was created, so no care downstream could recover it — which
+/// is why the fix has to be here and not in the caller.
+fn lang_outcome(
+    attempt: Result<anyhow::Result<Vec<crate::lsp::SymbolInfo>>, tokio::time::error::Elapsed>,
+    lang: &str,
+    budget: std::time::Duration,
+) -> Option<Vec<crate::lsp::SymbolInfo>> {
+    match attempt {
+        Ok(Ok(symbols)) => Some(symbols),
+        Ok(Err(e)) => {
+            tracing::warn!(
+                language = lang,
+                error = %e,
+                "workspace/symbol failed; this language falls back to tree-sitter"
+            );
+            None
+        }
+        Err(_) => {
+            tracing::warn!(
+                language = lang,
+                budget_ms = budget.as_millis() as u64,
+                "workspace/symbol per-language budget exceeded; \
+                 falling back to tree-sitter for this language"
+            );
+            None
+        }
+    }
+}
+
 /// Which accepted files the tree-sitter pass must still cover.
 ///
 /// Replaces a whole-call `matches.is_empty()` gate that asked *"did we find anything?"*
@@ -618,12 +663,21 @@ fn files_needing_fallback(
     accepted: &std::collections::HashSet<PathBuf>,
     nested_roots: &[PathBuf],
     lsp_seen: &std::collections::HashSet<PathBuf>,
+    uncovered_langs: &std::collections::HashSet<&str>,
     lsp_produced_nothing: bool,
 ) -> Vec<PathBuf> {
     let mut gap: Vec<PathBuf> = accepted
         .iter()
         .filter(|f| {
             if lsp_produced_nothing {
+                return true;
+            }
+            // A language whose server never answered is uncovered WHOLESALE — every file
+            // of it, not only the ones under a nested root. This is the half measured on
+            // 2026-09-12 and not fixed by `nested_roots`: one Python hit made `matches`
+            // non-empty, so Rust files outside every nested root were left to a
+            // rust-analyzer that returned nothing, and `13` cold became `5` warm.
+            if ast::detect_language(f).is_some_and(|l| uncovered_langs.contains(l)) {
                 return true;
             }
             nested_roots.iter().any(|r| f.starts_with(r)) && !lsp_seen.contains(*f)
@@ -709,6 +763,13 @@ async fn search_project_symbols(
     // Files the LSP returned at least one symbol for. See `files_needing_fallback` for
     // why this may only ever REMOVE work, never decide coverage.
     let mut lsp_seen_files = std::collections::HashSet::<PathBuf>::new();
+    // Languages whose server never answered — failed to start, errored, or blew the
+    // per-language budget. Deliberately NOT the same as a server that answered with no
+    // matches: that one is covering its files and simply had no hit for this pattern.
+    // Every file of an uncovered language needs the tree-sitter pass, which is the half
+    // `nested_roots` cannot reach — it is about which projects the LSP BUILDS, not about
+    // whether its server is answering at all.
+    let mut uncovered_langs = std::collections::HashSet::<&str>::new();
     let mut join_set = tokio::task::JoinSet::new();
     for lang in languages {
         let lsp = ctx.lsp.clone();
@@ -719,27 +780,39 @@ async fn search_project_symbols(
             .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
             .await;
         join_set.spawn(async move {
-            match tokio::time::timeout(PER_LANG_BUDGET, async {
-                let client = lsp.get_or_start(lang, &root, mux_override).await?;
-                client.workspace_symbols(&pattern).await
-            })
-            .await
-            {
-                Ok(r) => r,
-                Err(_) => {
-                    tracing::warn!(
-                        language = lang,
-                        budget_ms = PER_LANG_BUDGET.as_millis() as u64,
-                        "workspace/symbol per-language budget exceeded; \
-                         falling back to tree-sitter for this language"
-                    );
-                    Ok(Vec::new())
-                }
-            }
+            // The mapping lives in `lang_outcome` so its three-into-two collapse is
+            // testable; what remains HERE is wiring that only a live LSP reaches.
+            let outcome = lang_outcome(
+                tokio::time::timeout(PER_LANG_BUDGET, async {
+                    let client = lsp.get_or_start(lang, &root, mux_override).await?;
+                    client.workspace_symbols(&pattern).await
+                })
+                .await,
+                lang,
+                PER_LANG_BUDGET,
+            );
+            (lang, outcome)
         });
     }
     while let Some(task_result) = join_set.join_next().await {
-        let Ok(Ok(symbols)) = task_result else {
+        // NOT REACHED BY ANY UNIT TEST — covered only by a live-LSP probe.
+        //
+        // `lang_outcome` is tested directly on all three arms, and `files_needing_fallback`
+        // on its inputs, but the join between them — `None` becoming membership in
+        // `uncovered_langs` — runs only inside this async loop behind a real server. Do not
+        // credit those two suites with reaching it: a mutation swapping the two branches
+        // below leaves both green. The sibling case is this file's own
+        // `a_red_attaches_wip_authors_on_the_main_arm` comment, where every other test
+        // called the helper directly and the attachment site was unguarded for months.
+        //
+        // A `JoinError` (the task itself panicked) loses the language with it, so that
+        // language is silently treated as covered. Pre-existing and unchanged — the old
+        // code swallowed the same case at the same place.
+        let Ok((lang, outcome)) = task_result else {
+            continue;
+        };
+        let Some(symbols) = outcome else {
+            uncovered_langs.insert(lang);
             continue;
         };
         for sym in symbols {
@@ -824,6 +897,7 @@ async fn search_project_symbols(
         &accepted_files,
         &nested_roots,
         &lsp_seen_files,
+        &uncovered_langs,
         matches.is_empty(),
     ) {
         let path = path.as_path();
@@ -1470,18 +1544,24 @@ mod fallback_gap_tests {
         paths.iter().map(PathBuf::from).collect()
     }
 
+    /// Every language's server answered. Named rather than inlined as `HashSet::new()`
+    /// because "no uncovered languages" is a claim these tests make, not an absence.
+    fn all_covered() -> HashSet<&'static str> {
+        HashSet::new()
+    }
+
     /// A dead or still-indexing LSP must still get whole-tree coverage. This is the arm
     /// that existed before the fix, and it has to keep behaving identically — a fix that
     /// narrowed THIS case would turn a working cold path into a broken one.
     #[test]
     fn everything_is_covered_when_the_lsp_produced_nothing() {
         let accepted = set(&["src/a.rs", "src/b.rs", "fixtures/x/c.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), true);
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), true);
         assert_eq!(got.len(), accepted.len(), "cold LSP must cover every file");
     }
 
-    /// The fix itself. With the LSP alive, only files under a nested project root need
-    /// covering — `src/` belongs to the outer project and the LSP is expected to hold it.
+    /// With the LSP alive and answering for every language, only files under a nested
+    /// project root need covering — `src/` belongs to the outer project.
     ///
     /// `nested_roots` being non-empty is the load-bearing detail: pass `&[]` and this
     /// silently becomes a test that the warm arm returns nothing, which is satisfied by a
@@ -1490,7 +1570,8 @@ mod fallback_gap_tests {
     fn only_nested_roots_are_covered_when_the_lsp_answered() {
         let accepted = set(&["src/a.rs", "fixtures/x/c.rs", "fixtures/x/d.rs"]);
         let nested = vec![PathBuf::from("fixtures/x")];
-        let got = files_needing_fallback(&accepted, &nested, &HashSet::new(), false);
+        let got =
+            files_needing_fallback(&accepted, &nested, &HashSet::new(), &all_covered(), false);
         assert_eq!(
             got,
             vec![
@@ -1498,6 +1579,41 @@ mod fallback_gap_tests {
                 PathBuf::from("fixtures/x/d.rs")
             ],
             "a file outside every nested root is the LSP's to answer for"
+        );
+    }
+
+    /// The half `nested_roots` cannot reach, measured 2026-09-12: one Python hit made
+    /// `matches` non-empty, so Rust files OUTSIDE every nested root were left to a
+    /// rust-analyzer that returned nothing, and cold `13` became warm `5`.
+    ///
+    /// `src/a.rs` is under no nested root, so only the language rule can put it in the
+    /// gap. That is the whole assertion.
+    #[test]
+    fn a_language_whose_server_never_answered_is_covered_wholesale() {
+        let accepted = set(&["src/a.rs", "scripts/t.py"]);
+        let mut uncovered = HashSet::new();
+        uncovered.insert("rust");
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &uncovered, false);
+        assert_eq!(
+            got,
+            vec![PathBuf::from("src/a.rs")],
+            "every file of an unanswered language needs the fallback, nested or not"
+        );
+    }
+
+    /// The discriminating twin of the test above, and the conflation the fix removes:
+    /// before it, a timed-out server returned `Ok(Vec::new())` and was byte-identical to
+    /// one that answered with no matches. Same inputs, same file, opposite verdict — and
+    /// the ONLY difference is whether `rust` is named uncovered.
+    ///
+    /// Without this half, `uncovered_langs.contains(_) -> true` passes the test above.
+    #[test]
+    fn a_language_that_answered_with_no_matches_is_not_reparsed() {
+        let accepted = set(&["src/a.rs", "scripts/t.py"]);
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), false);
+        assert!(
+            got.is_empty(),
+            "a server that answered and simply had no hit is still covering its files: {got:?}"
         );
     }
 
@@ -1510,7 +1626,7 @@ mod fallback_gap_tests {
         let accepted = set(&["fixtures/x/c.rs", "fixtures/x/d.rs"]);
         let nested = vec![PathBuf::from("fixtures/x")];
         let seen = set(&["fixtures/x/c.rs"]);
-        let got = files_needing_fallback(&accepted, &nested, &seen, false);
+        let got = files_needing_fallback(&accepted, &nested, &seen, &all_covered(), false);
         assert_eq!(
             got,
             vec![PathBuf::from("fixtures/x/d.rs")],
@@ -1526,7 +1642,7 @@ mod fallback_gap_tests {
     fn lsp_seen_does_not_shrink_the_cold_arm() {
         let accepted = set(&["src/a.rs", "src/b.rs"]);
         let seen = set(&["src/a.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &seen, true);
+        let got = files_needing_fallback(&accepted, &[], &seen, &all_covered(), true);
         assert_eq!(got.len(), 2, "the cold arm covers everything regardless");
     }
 
@@ -1540,7 +1656,7 @@ mod fallback_gap_tests {
     #[test]
     fn the_gap_is_sorted_so_a_capped_search_is_deterministic() {
         let accepted = set(&["z/9.rs", "a/1.rs", "m/5.rs", "b/2.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), true);
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), true);
         let mut want: Vec<PathBuf> = accepted.iter().cloned().collect();
         want.sort();
         assert_eq!(got, want);
@@ -1570,5 +1686,82 @@ mod fallback_gap_tests {
                 "{name} must NOT be recognised as a project manifest"
             );
         }
+    }
+}
+
+/// The three-into-two collapse in `lang_outcome`, asserted per ARM.
+///
+/// Requested by `f3c594ce` against my "I believe it's contained" — which is the thing I
+/// had refused from them an hour earlier, so it is here rather than in a message.
+#[cfg(test)]
+mod lang_outcome_tests {
+    use super::lang_outcome;
+    use std::time::Duration;
+
+    /// A genuine `Elapsed`, obtained by letting a real timeout expire. The type is opaque
+    /// and cannot be constructed, and substituting a stand-in would make this a test of
+    /// my own re-implementation rather than of the mapping that ships.
+    async fn real_elapsed() -> tokio::time::error::Elapsed {
+        tokio::time::timeout(Duration::from_millis(1), async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await
+        .expect_err("a 1ms budget over a 30s sleep must elapse")
+    }
+
+    /// The arm that must NOT move. An empty answer from a live server is a real answer —
+    /// indexed, no match — and mapping it to `None` would tree-sitter that language's
+    /// whole corpus on every query with no hit in it.
+    #[tokio::test]
+    async fn an_empty_but_successful_answer_leaves_the_language_covered() {
+        let got = lang_outcome(Ok(Ok(Vec::new())), "rust", Duration::from_secs(8));
+        assert!(
+            got.is_some(),
+            "an indexed server with no match is COVERED; None here is the cost failure \
+             that disqualified the per-file union"
+        );
+        assert!(
+            got.expect("covered").is_empty(),
+            "and it carries no symbols"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_errored_server_leaves_the_language_uncovered() {
+        let got = lang_outcome(
+            Ok(Err(anyhow::anyhow!("spawn failed: no such binary"))),
+            "kotlin",
+            Duration::from_secs(8),
+        );
+        assert!(
+            got.is_none(),
+            "a server that could not answer is not covering its files"
+        );
+    }
+
+    /// The arm the old code destroyed: it returned `Ok(Vec::new())` here, making a
+    /// timeout byte-identical to the case above it. This assertion and
+    /// `an_empty_but_successful_answer_leaves_the_language_covered` must disagree, and
+    /// under the old mapping they could not.
+    #[tokio::test]
+    async fn a_timed_out_server_leaves_the_language_uncovered() {
+        let got = lang_outcome(Err(real_elapsed().await), "rust", Duration::from_secs(8));
+        assert!(
+            got.is_none(),
+            "a budget-exceeded language must be uncovered, not silently empty"
+        );
+    }
+
+    /// The pair above, stated as the one property that matters, so a reader does not have
+    /// to infer it from three separate tests: same empty result set, opposite verdict.
+    #[tokio::test]
+    async fn the_timeout_and_the_empty_answer_are_distinguishable() {
+        let timed_out = lang_outcome(Err(real_elapsed().await), "rust", Duration::from_secs(8));
+        let answered_empty = lang_outcome(Ok(Ok(Vec::new())), "rust", Duration::from_secs(8));
+        assert_ne!(
+            timed_out.is_some(),
+            answered_empty.is_some(),
+            "these two produced the same empty symbol list and MUST NOT be the same value"
+        );
     }
 }
