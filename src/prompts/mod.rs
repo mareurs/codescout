@@ -640,9 +640,11 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
         }
         "il2_structural_edit" => {
             "IL-2 gate condition: `edit_file` is refused when the edit spans a symbol DEFINITION \
-             in a source file. Imports, string literals, comments and config are allowed. \
-             Structural changes go through `edit_code` \
-             (action=replace|insert|remove|rename)."
+             in a source file. Imports and config are allowed, and so is a keyword inside a \
+             string literal or a line comment — those spans are blanked before the scan. A \
+             BLOCK comment is not: `/* … */` is only skipped when it starts the line, so a \
+             keyword inside one mid-line still refuses. Structural changes go through \
+             `edit_code` (action=replace|insert|remove|rename)."
         }
         "il3_pipe_to_trimmer" => {
             "IL-3 gate condition: the check reads the LEFT side of the pipe. Unbounded producers \

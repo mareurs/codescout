@@ -3761,6 +3761,46 @@ fn find_def_keyword_still_catches_real_definitions() {
     );
 }
 
+/// Probe 2 of `docs/issues/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`.
+/// The keyword sits in a TRAILING comment, so the line-leading filter in
+/// `find_def_keyword` never reaches it and the word-boundary rule reads prose as code.
+///
+/// The comment marker's POSITION is the load-bearing detail on every line below: move
+/// `//` or `#` to the start of the line and each of these becomes a duplicate of
+/// `find_def_keyword_ignores_class_in_comment`, still green, testing nothing new.
+#[test]
+fn find_def_keyword_ignores_a_keyword_in_a_trailing_comment() {
+    assert_eq!(
+        find_def_keyword(
+            "    1 // this trailing comment mentions a fn but defines nothing",
+            "rust"
+        ),
+        None,
+        "a keyword after `//` is prose, not a definition"
+    );
+    assert_eq!(
+        find_def_keyword("    x = 1  # rename the class later", "python"),
+        None,
+        "python's line comment is `#`, and `//` is not one"
+    );
+}
+
+/// The second residual `contains_def_keyword_at_word_start` documents and declines to
+/// fix: a keyword inside a string literal matches because the preceding `"` is not a
+/// word character.
+///
+/// The quotes are the load-bearing detail — strip them and this is a real definition
+/// that MUST still be caught, which `find_def_keyword_still_catches_real_definitions`
+/// asserts directly above.
+#[test]
+fn find_def_keyword_ignores_a_keyword_inside_a_string_literal() {
+    assert_eq!(
+        find_def_keyword("    assert!(s.contains(\"fn \"));", "rust"),
+        None,
+        "a keyword inside a string literal defines nothing"
+    );
+}
+
 #[test]
 fn guard_allows_blank_line_before_unchanged_fn() {
     // spec 2026-06-16: inserting a blank line before an existing fn (ktlint).
@@ -3783,6 +3823,40 @@ fn guard_allows_comment_added_before_unchanged_fn() {
     let old = "let x = 1;\nfn foo() {}";
     let new = "let x = 1;\n// helper\nfn foo() {}";
     assert!(guard_structural_rewrite("x.rs", old, new).is_ok());
+}
+
+/// Probes 2 and 4 of
+/// `docs/issues/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`,
+/// asserted at the GUARD rather than at `find_def_keyword`, because that is the site
+/// the reported defect was observed at and a unit kill says nothing about the caller.
+///
+/// The two halves must move in opposite directions, and that is the whole point of
+/// pairing them here: a "fix" that simply stopped looking for keywords would satisfy
+/// the first assertion and fail the second. `smuggled_in` reaches the keyword test
+/// only because `fn ` sits behind `pub `, so it is also the regression floor that
+/// rejected the line-leading fix sketch.
+#[test]
+fn guard_reads_a_trailing_comment_as_prose_but_still_catches_a_smuggled_definition() {
+    use super::guard_structural_rewrite;
+
+    // The `//` is load-bearing: move it to the start of the line and the pre-existing
+    // line-leading filter handles the case, and this asserts nothing new.
+    let unchanged = "pub fn alpha() -> usize {\n    1\n}";
+    let commented =
+        "pub fn alpha() -> usize {\n    1 // this trailing comment mentions a fn but defines nothing\n}";
+    assert!(
+        guard_structural_rewrite("subject.rs", unchanged, commented).is_ok(),
+        "a keyword in a trailing comment is prose — the edit must be allowed"
+    );
+
+    // Same guard, opposite direction: an added definition behind a `pub ` modifier.
+    let smuggled =
+        "pub fn existing() -> usize {\n    1\n}\n\npub fn smuggled_in() -> usize {\n    2\n}";
+    let existing = "pub fn existing() -> usize {\n    1\n}";
+    assert!(
+        guard_structural_rewrite("subject.rs", existing, smuggled).is_err(),
+        "BUG-050: a new definition spliced into new_string must still refuse"
+    );
 }
 
 #[test]

@@ -106,7 +106,43 @@ fn spanning_opener(rest: &str) -> Option<(usize, Scan)> {
 }
 
 /// Advance the scanner across one line and report the state it ends in.
+///
+/// A thin wrapper over [`scan_line_into`] that discards the mask. `["//"]` is the
+/// line-comment set its reindent callers have always assumed.
 fn scan_line(line: &str, entry: Scan) -> Scan {
+    scan_line_into(line, entry, &["//"], None)
+}
+
+/// The scanner body, shared by [`scan_line`] and [`blank_non_code`] so the two can
+/// never disagree about where a literal begins or ends.
+///
+/// When `out` is `Some`, every byte is written to it as it is consumed: verbatim
+/// when the scanner classifies it as code, and as a space otherwise — string-literal
+/// delimiters and contents, and everything from a line-comment opener to end of line.
+/// Spaces rather than removal, so byte length and column positions survive and a
+/// caller can index the mask exactly as it would index `line`.
+///
+/// `line_comment` is a parameter rather than the hardcoded `//` it used to be:
+/// comment syntax is per-language and this scanner runs on fragments in every
+/// language `edit_code` supports. A caller that does not care passes `["//"]`.
+fn scan_line_into(
+    line: &str,
+    entry: Scan,
+    line_comment: &[&str],
+    mut out: Option<&mut String>,
+) -> Scan {
+    /// Spaces, not deletion — see the byte-offset guarantee above.
+    fn push(out: &mut Option<&mut String>, seg: &str, code: bool) {
+        let Some(buf) = out.as_mut() else { return };
+        if code {
+            buf.push_str(seg);
+        } else {
+            for _ in 0..seg.len() {
+                buf.push(' ');
+            }
+        }
+    }
+
     let mut state = entry;
     let mut i = 0;
     while i < line.len() {
@@ -116,51 +152,64 @@ fn scan_line(line: &str, entry: Scan) -> Scan {
         // backslash when it ends the line. Lazy because `rest[1..]` is only a valid
         // boundary once the leading byte is known to be the one-byte `\`.
         let escape = || 1 + rest[1..].chars().next().map_or(0, char::len_utf8);
-        match &state {
+        // Every arm computes the byte width it consumes, hands exactly that slice to
+        // `push` with its classification, and then advances by the same number. The
+        // single `i += n` at the bottom is what keeps mask and scanner in step: an arm
+        // cannot advance without having classified what it advanced over.
+        let n = match &state {
             Scan::Spanning { close, escapes } => {
                 let escapes = *escapes;
                 let consumed = rest
                     .strip_prefix(close.as_str())
                     .map(|after| rest.len() - after.len());
-                match consumed {
+                let n = match consumed {
                     Some(n) => {
-                        i += n;
                         state = Scan::Code;
+                        n
                     }
-                    None if escapes && rest.starts_with('\\') => i += escape(),
-                    None => i += one_char,
-                }
+                    None if escapes && rest.starts_with('\\') => escape(),
+                    None => one_char,
+                };
+                push(&mut out, &rest[..n], false);
+                n
             }
             Scan::Quoted(quote) => {
                 let quote = *quote;
-                if rest.starts_with('\\') {
+                let n = if rest.starts_with('\\') {
                     // Skip the escape and what it escapes, so `\"` does not close.
-                    i += escape();
+                    escape()
                 } else {
                     if rest.starts_with(quote) {
                         state = Scan::Code;
                     }
-                    i += one_char;
-                }
+                    one_char
+                };
+                push(&mut out, &rest[..n], false);
+                n
             }
             Scan::Code => {
-                if rest.starts_with("//") {
+                if line_comment.iter().any(|t| rest.starts_with(t)) {
                     // Nothing in a line comment can open a literal. Bailing here is
                     // what keeps markdown backticks in a doc comment from opening a
                     // phantom line-spanning literal.
+                    push(&mut out, rest, false);
                     break;
                 }
                 if let Some((consumed, opened)) = spanning_opener(rest) {
-                    i += consumed;
                     state = opened;
+                    push(&mut out, &rest[..consumed], false);
+                    consumed
                 } else if rest.starts_with('"') || rest.starts_with('\'') {
                     state = Scan::Quoted(rest.chars().next().unwrap_or('"'));
-                    i += one_char;
+                    push(&mut out, &rest[..one_char], false);
+                    one_char
                 } else {
-                    i += one_char;
+                    push(&mut out, &rest[..one_char], true);
+                    one_char
                 }
             }
-        }
+        };
+        i += n;
     }
     match state {
         // A `"` still open at end of line has reached the next line one of two ways:
@@ -178,6 +227,34 @@ fn scan_line(line: &str, entry: Scan) -> Scan {
         Scan::Quoted(_) => Scan::Code,
         other => other,
     }
+}
+
+/// Blank the non-code spans of every line in `block`: string-literal delimiters and
+/// contents, and everything from a line-comment opener to end of line. Code bytes
+/// survive verbatim, every other byte becomes a space, so each line keeps its byte
+/// length and its column positions.
+///
+/// Each line is scanned INDEPENDENTLY, starting in code. That is deliberate, and it
+/// is what makes the function correct for its caller rather than merely cheaper:
+/// `find_def_keyword` passes the lines an edit CHANGED, which are not contiguous
+/// source. A quote on one changed line and a quote three changed lines later never
+/// opened a literal in the file, and carrying scanner state between them would blank
+/// the real code lying between two unrelated quotes — a false negative, which for
+/// that caller is the strictly worse direction.
+///
+/// Block comments (`/* … */`) are NOT recognised: a keyword inside one, on a line
+/// that does not itself begin with `/*` or `*`, still reads as code. Callers that
+/// care handle the line-leading shapes themselves; the residual is named at
+/// `edit_file`'s refusal site rather than silently narrowed here.
+pub fn blank_non_code(block: &str, line_comment: &[&str]) -> String {
+    let mut out = String::with_capacity(block.len());
+    for (n, line) in block.lines().enumerate() {
+        if n > 0 {
+            out.push('\n');
+        }
+        scan_line_into(line, Scan::Code, line_comment, Some(&mut out));
+    }
+    out
 }
 
 /// Which lines of `block` begin inside a string literal opened on an earlier
@@ -601,6 +678,66 @@ mod tests {
         assert_eq!(
             literal_continuation_mask("// see `a` and `b\n    body()"),
             vec![false, false]
+        );
+    }
+
+    #[test]
+    fn blank_non_code_keeps_code_and_blanks_comments_and_literals() {
+        use super::blank_non_code;
+
+        // Byte length per line is the contract callers index against, so assert it
+        // directly rather than trusting the shapes below to imply it.
+        let line = "    1 // mentions a fn";
+        let masked = blank_non_code(line, &["//"]);
+        assert_eq!(masked.len(), line.len(), "mask must preserve byte length");
+        assert_eq!(masked, "    1                 ");
+
+        // The literal's delimiters go too — otherwise `"fn ` still reads as a word start.
+        assert_eq!(
+            blank_non_code(r#"assert!(s.contains("fn "));"#, &["//"]),
+            r#"assert!(s.contains(     ));"#
+        );
+
+        // Code survives verbatim, including a keyword that really is one.
+        assert_eq!(
+            blank_non_code("pub fn real() {", &["//"]),
+            "pub fn real() {"
+        );
+
+        // The token set is a parameter: `#` is a comment in Python and an attribute in
+        // Rust, and passing the wrong set silently blanks real code. Expectations are
+        // built with `repeat` rather than written as space literals — hand-counted
+        // padding is a fixture detail that goes wrong silently and reads as a bug here.
+        let py = "x = 1  # class later";
+        assert_eq!(
+            blank_non_code(py, &["#"]),
+            format!("x = 1  {}", " ".repeat("# class later".len())),
+            "`#` opens a comment in python"
+        );
+        assert_eq!(
+            blank_non_code(py, &["//"]),
+            py,
+            "`#` is NOT a comment when the token set says `//` — nothing is blanked"
+        );
+    }
+
+    /// Lines are scanned independently, and this is the test that would red if someone
+    /// "optimised" `blank_non_code` by threading scanner state across them — which reads
+    /// like a correctness improvement and is the one change that breaks its caller.
+    ///
+    /// The two lines are NON-ADJACENT in the file they came from: `find_def_keyword`
+    /// receives the lines an edit changed, joined. Carried state would treat the first
+    /// quote as opening a literal that the second closes, blanking `fn genuine` in
+    /// between — a definition silently admitted.
+    #[test]
+    fn blank_non_code_does_not_carry_literal_state_between_lines() {
+        use super::blank_non_code;
+
+        let changed_lines = "let a = \"open;\nfn genuine() {}\nlet b = \"close;";
+        let masked = blank_non_code(changed_lines, &["//"]);
+        assert!(
+            masked.contains("fn genuine"),
+            "a code line between two unrelated quotes must survive: {masked:?}"
         );
     }
 

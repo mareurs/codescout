@@ -48,14 +48,17 @@ fn def_keywords_for_lang(lang: &str) -> &'static [&'static str] {
 /// unambiguous — a preceding `[A-Za-z0-9_]` means the keyword is part of a longer
 /// identifier and cannot be introducing a definition.
 ///
-/// Two known residuals, both left over-blocking on purpose:
-/// - A keyword inside a **string literal** (`assert!(s.contains("fn "))`) still
-///   matches: the preceding `"` is not a word character. Narrowing that needs
-///   literal-awareness (`crate::util::text::scan_line` has it) and is a wider
-///   change than this guard warrants.
-/// - A preceding **non-ASCII** character reads as a non-word boundary, so a
-///   unicode identifier ending in a keyword still matches. Rust permits those;
-///   they are vanishingly rare next to the cost of getting the common case wrong.
+/// **This function still matches a keyword inside a string literal or a comment**,
+/// and deliberately so: the preceding `"` or `/` is not a word character, which is
+/// the correct answer to the question *this* function asks. Those spans no longer
+/// reach it — [`find_def_keyword`] blanks them first via
+/// [`crate::util::text::blank_non_code`]. Kept as a boundary test rather than
+/// taught about literals, because a matcher that also parses is two things.
+///
+/// One residual remains here: a preceding **non-ASCII** character reads as a
+/// non-word boundary, so a unicode identifier ending in a keyword still matches.
+/// Rust permits those; they are vanishingly rare next to the cost of getting the
+/// common case wrong.
 fn contains_def_keyword_at_word_start(line: &str, needle: &str) -> bool {
     let bytes = line.as_bytes();
     let mut from = 0usize;
@@ -75,11 +78,25 @@ fn contains_def_keyword_at_word_start(line: &str, needle: &str) -> bool {
 }
 
 /// Returns the matched definition keyword for error reporting, if any.
-/// Comment lines (// /* * #) are skipped so a keyword inside a comment
-/// does not falsely trip the structural-rewrite guard.
+///
+/// Scans only the CODE spans of each line. Comments and string literals are blanked
+/// first ([`crate::util::text::blank_non_code`]), because a keyword in prose defines
+/// nothing — `1 // mentions a fn` and `s.contains("fn ")` both used to refuse, with
+/// no way to express the edit at all once it spanned more than one line.
+///
+/// The line-leading filter below is kept on top of the mask rather than replaced by
+/// it. Blanking already subsumes the `//` and `#` cases, but `/*` and `*` are block
+/// comments the scanner does not model, so dropping the filter would newly admit
+/// them — a false negative, and § the module header's asymmetry says that is the
+/// direction that corrupts.
 fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
     let keywords = def_keywords_for_lang(lang);
-    s.lines()
+    if keywords.is_empty() {
+        return None;
+    }
+    let masked = crate::util::text::blank_non_code(s, line_comment_tokens(lang));
+    masked
+        .lines()
         .filter(|line| {
             let t = line.trim_start();
             !t.starts_with("//")
@@ -93,6 +110,20 @@ fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
                 .find(|kw| contains_def_keyword_at_word_start(line, kw))
                 .copied()
         })
+}
+
+/// The line-comment opener(s) for a language, for masking trailing comments.
+///
+/// Covers exactly the languages [`def_keywords_for_lang`] answers for — anything
+/// else returns no keywords and never reaches here. `//` is the default rather than
+/// the empty set because an unknown C-family dialect is likelier than one with no
+/// line comment at all, and over-blanking a comment only costs a missed refusal on
+/// text that was already prose.
+fn line_comment_tokens(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "python" | "ruby" => &["#"],
+        _ => &["//"],
+    }
 }
 
 /// Lines present in `from` but not (byte-identical) in `to`. Restricts the
