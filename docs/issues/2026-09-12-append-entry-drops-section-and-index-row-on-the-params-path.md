@@ -1,9 +1,11 @@
 ---
 kind: bug
-status: open
+status: investigating
 tags:
 - cluster/accepted-parameter-silently-dropped
 closed: null
+groundwork: 063681ed
+handed_to: 8bd791df
 opened: 2026-09-12
 owner: marius
 related: []
@@ -101,20 +103,34 @@ as a params row, then given a body section and a table row by a separate `doc(ac
 
 ## Fix
 
-Not applied. Two shapes, and the choice is a design decision rather than a detail:
+**DECIDED 2026-09-12 — honour, not refuse.** Refusing is not a smaller version of honouring: it
+would make every params-backed ledger's maintenance louder without making it correct, closing the
+silence while leaving the two-call window that motivated finding it.
 
-- **Refuse.** On the params path, reject any of the five with a message naming the branch. Cheap,
-  closes the silence, and leaves the two-call window open — so it fixes this bug and not the one
-  that motivated the scout.
-- **Honour.** Let the params path take a `PendingSection` and write the params row, the section
-  and the index row in one file write. Closes both. This is *direction (3)* of
-  `2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`, whose own Resume
-  recommends it for the prose path and whose measurement — 21 of 49 ledgers keep entry rows — is
-  the same population.
+**Groundwork landed at `063681ed`** (sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63`), and it is
+behaviour-preserving today:
 
-**Refusing first is not a smaller version of honouring** — it would make every params-backed
-ledger's maintenance louder without making it correct, so prefer honouring if both are on the
-table.
+- `splice_pending_section` extracted from `allocate_entry_id`. It was inline there, **which is this
+  bug's root cause stated as code**: the routine that honours `title`/`body`/`anchor_heading`/
+  `index_row` lived inside the branch that excluded the params path. Shared rather than copied,
+  because a second copy reproduces the defect the moment either drifts. All 81 augmentation tests
+  pass against the extraction, which is what makes it behaviour-preserving rather than plausible.
+- `augmentation::append_entry` gains a `section` slot and writes it **before** `tx.commit()`,
+  mirroring `allocate_entry_id` — a failed splice rolls back, the id is not consumed, and the
+  refusal's *"nothing was written"* stays true.
+- `AppendOutcome` gains `section_written`, so the hint can stop telling a caller to write a section
+  the server already wrote.
+
+**What remains is the tool-layer wiring**, and the call site says so in place rather than leaving a
+reader to infer it from a parameter that is always `None`: hoist the `index_row` + `PendingSection`
+construction out of the prose branch so both branches build it from **one** place. A second,
+copied construction is the thing this change exists to avoid.
+
+**One detail that would be a silent defect when the wiring lands, recorded because only the
+restructuring author sees it:** `snapshot_missing` is derived from a body read taken BEFORE the
+write, so it must drop the new id when that id's index row was just written — otherwise the
+response asks the caller to do by hand the exact thing the call just did. That is **this bug, one
+field over**.
 
 ## Tests added
 
@@ -133,10 +149,50 @@ That is the two-call protocol, and it is what every params-backed ledger does to
 
 ## Resume
 
-Decide refuse-vs-honour. If honouring, the change is to `augmentation::append_entry`'s signature
-and the params call site in `src/librarian/tools/append_entry.rs`; the section-writing and
-row-splicing helpers (`PendingSection`, `PendingIndexRow`, `insert_index_row`) already exist and
-are exercised by the prose path.
+**Decided: HONOUR.** Groundwork landed in `063681ed`; the tool-layer wiring is handed to
+sessionId `8bd791df`, who filed this. Status is `investigating` rather than `taken` because
+the session that did the groundwork stopped — worked, no live owner.
+
+Done in `063681ed`, all behaviour-preserving:
+
+- `splice_pending_section` extracted from `allocate_entry_id` and shared. It was inline
+  there, which is *why* this bug exists — the code that honours the five fields lived inside
+  the branch that excludes them. 81 augmentation tests pass against the extraction.
+- `augmentation::append_entry` takes `section: Option<&PendingSection>` and writes it BEFORE
+  `tx.commit()`, mirroring `allocate_entry_id`: a failed splice rolls the transaction back,
+  so the id is not consumed and "nothing was written" is true. This deliberately inverts
+  part of that function's existing contract — the body read it already does must never fail
+  the call, and this one must.
+- `AppendOutcome::section_written`, the mirror of `AllocateOutcome`'s.
+- `abs_path` read by reference (consuming it is what made a section write impossible to add
+  without restructuring), and `snapshot_missing` drops the new id when its row was just
+  written — that list is derived from a body read taken BEFORE the write, so leaving it
+  alone re-introduces this bug one field over.
+
+**Still owed, and the traps in it:**
+
+1. Hoist the `index_row` + `PendingSection` construction out of the prose branch so both
+   build it from one place. **Carry the two REFUSALS with it** — the both-or-neither check
+   on `index_row`/`index_after_line`, and the refusal of `index_row` without a section
+   triple. Hoisting only the construction gives the params path a way to write a row whose
+   id nothing defines, which is the dangling-citation shape that refusal exists to prevent.
+2. Pass `section.as_ref()` at the params call site — build it BEFORE `a.entry` is moved.
+3. Surface `section_written` in the response, and reconcile it with the two existing hints:
+   `undefined_in_body` self-corrects (it re-reads after commit), `snapshot_missing` does
+   not. They look interchangeable and are derived at different times.
+4. Discriminating test: params append with `index_row` + the section triple, asserting the
+   BODY carries both afterwards. Mutation that must red: revert the call site to `None`. If
+   it still passes, the test is reading the params row rather than the file.
+
+**Do not run § Reproduction as written** — it appends to a live ledger and allocates a real
+`BL-N` that can never be reused. The four first-hand instances below already establish the
+behaviour; use a fixture.
+
+The original signature note stands: the helpers already exist and are exercised by the prose
+path. What the filing could not know is that `allocate_entry_id` already had both the
+`Option<&PendingSection>` signature and the write-then-commit ordering — so honour is the
+**symmetric** change against exercised code, not the expensive one, which inverts the cost
+comparison § Fix had to guess at.
 
 ## References
 
