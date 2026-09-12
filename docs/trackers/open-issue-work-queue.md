@@ -114,6 +114,9 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | **done** 2026-09-01 — three, not six (the rest are in the whatsapp / eduplanner-ui repos). One was a NO-ACTION by the finding's own instruction: provenance-subsystem's missing headings are the compaction ladder's supported end state, and adding one would make the token ambiguous. I-8's params row written by whole-array rewrite (8/8 survive, catalog-only so it does not travel in git); claim-decay DC-2's body Status corrected to `check-shipped` | — |
 | BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | **done** 2026-09-01, both halves. The 14 `cited_prefix_with_no_definer` are 8 non-citations and the top four by volume are all noise — filed as `9b67295c125cfcb6`, tagged IC-2, and **now FIXED** at `d44a4409` (patch-id `f37ae73ffe72846ca0cceae19b9649f8c24b6a08`) by gating on DISPERSION rather than volume — 13 findings → 7, six noise prefixes suppressed, zero real ones lost. Two of its original four options were circular (`prefix_is_known` is false for exactly this check's population, so reusing it would zero the check), so the shipped remedy was a fifth. The 13 `entry_cited_from_outside_but_undeclared` → 0 at `40c53197`: 4 invariant, 7 dated, 2 conditional, every date read from the record; BL-58 needed only relocating a mid-line declaration | `9b67295c125cfcb6` |
 | BL-72 | 1 | Raise `max_per_artifact` 1→2 (the "page limit 5→10" half is WITHDRAWN — see below) | **done** 2026-09-04 `998f64d3` — measured **+2/12** at harness `limit=5` (4/12 → 6/12, MRR 0.2708 → 0.3194). The class breakdown is the evidence, not the scalar: `preamble` 3→1 and `hit` 4→6 while `wrong_file` and `file-hits@5` held EXACTLY constant — the same files were always being found and the cap was showing the wrong chunk of them. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page. **The blocker — `find.rs`'s two artifact-keyed side maps — is resolved** by `PageItem`, one record per HIT, guarded by `two_chunks_of_one_artifact_keep_their_own_matched_span` (observed RED first). **WITHDRAWN:** "page limit 5→10" named no product setting — `default_limit()` is 50 and the 5 is the benchmark harness's `--limit`; see `F-115` | — |
+| BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
+| BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | open — blocked on intent, not on work | — |
+| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | not started — 120 of doctor's 155 findings, never swept | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1482,6 +1485,89 @@ symbol beside each axis, because a table's column header is exactly where the
 distinction is invisible and exactly where a reader forms the intent to change
 something.
 
+
+### BL-73 — IC-5: rule whether the class promotes, now that the blocker it named is gone
+
+`IC-5` (`docs/trackers/issue-clusters/IC-5-repro-env-diverges-from-gate-env.md`) is deliberately
+held un-promoted, and its `**Promotes to:**` field states the reason is a **ruling**, not a count:
+whether a mechanism covering the local-vs-lane half **and not the in-lane half** clears this
+ledger's bar for a rule.
+
+**That premise was falsified on 2026-09-12** and the entry now records it. The in-lane half shipped
+on 2026-09-02 in two commits naming the entry in their own subjects — `58d85263` pinned the wine
+lane to the local loop's version via the WineHQ apt repo, `c06ecc28` dropped nine of the fifteen
+group-6 skips and re-measured. The sentence calling that work owed was written at 20:56 the same
+day, **16.5 hours after both passes landed**, so it was wrong at authoring time rather than decayed.
+
+Two further findings bear on the ruling. Two of the class's other axes have since grown guards of
+their own, each with an explicit anti-vacuity test — `tests/feature_lanes.rs` for the feature-flag
+members and `tests/embedder_env_isolation.rs` for the ambient-env ones. And the membership is
+materially larger than the text claims; derive it with `python3 scripts/probe-cluster-census.py`
+rather than reading a stored figure.
+
+**RULED 2026-09-12 — done.** The question could not be answered as posed: both premises were false.
+The in-lane half had shipped, and the class was not waiting to promote — **it had already promoted
+twice, into `CLAUDE.md` § *Development Commands*, unrecorded.** The lean-lane vacuity bullet and the
+`server-stack` bullet each state this class's claim for one axis; the latter is not an inference,
+since that member's own Fix section says it was fixed *by adding a bullet to `CLAUDE.md`*.
+
+The `H` pointer was **drift** — `docs/trackers/codescout-usage-hookify.md` holds `H-N`
+entries citing `IC-6` and `IC-18` and none from this class, so the promotion adjudicated 2026-08-31
+never landed where it said. Repointed to `CLAUDE.md` § *Development Commands*.
+
+**The class-level sentence is deliberately not written**, and that is the substantive half. Each
+axis needs a differently-worded warning at the surface it is read from — the entry's own text
+observes that one vacuity is announced by a flag that IS present and the other by one that is
+ABSENT, and that a reader who has internalised the first still misses the second. A single general
+sentence covering both is the *"rule without a mechanism produces advice"* shape this ledger
+refuses.
+
+Full reasoning, with every citation, is in `IC-5`'s `**Promotes to:**` field. Overturnable by
+showing any cited file, tag or commit wrong.
+
+**What this does not settle:** `IC-5` still re-fires `entry_conditional_past_due` — that check is a
+standing worklist with no discharge state, by design, so a re-declaration never silences it.
+
+
+### BL-74 — BL-29's validity condition names an event no reader can check
+
+`BL-29` declares `**Valid:** conditional — until the snapshot gate reaches majority coverage`, and
+that event has no observable.
+
+The discriminator landed at `0dbfd0ee` (2026-08-16), whose subject is *"snapshot drift needs
+MAJORITY coverage, not one anchored id"* — `body_keeps_snapshot` in
+`src/librarian/catalog/augmentation.rs`, which gates the drift note on the body line-anchoring a
+majority of claimed ids. `BL-29` was declared **2026-09-01**, sixteen days later, and says *"the
+gate still needs majority coverage"*. Since the discriminator already existed at declaration,
+*"reaches majority coverage"* cannot mean *"adopts majority coverage"* — that was already true when
+the sentence was written — which leaves no reading a reader can test.
+
+So the entry re-fires `doctor`'s `entry_conditional_past_due` on every run and will forever,
+regardless of what the code does. **Deliberately not re-declared unilaterally on 2026-09-12:**
+replacing an unclear condition with a confidently wrong one is worse than leaving it visible, and
+the author's intent is not recoverable from the entry, which cites no SHA. Establish the intent
+first, then re-declare on something checkable — `snapshot_drift` reads 0 today, so whatever the
+successor is, it is not that.
+
+### BL-75 — `terminal_status_with_caveat` is 77% of the doctor report and has never been swept
+
+Measured 2026-09-12: `librarian(action="doctor")` returns 155 violations, of which **120** are
+`terminal_status_with_caveat` — every other check combined accounts for 35. **Re-derive that split
+rather than citing it**; it is a count of a moving population and two of this session's numbers
+already drifted between readings.
+
+The check fires on a bug record whose `status` is terminal (`fixed` / `mitigated` / `wontfix`) while
+an `unverified:` field is still set. Its own finding text states the cost: such a record *"cannot be
+reached by the canonical triage query"*, so whatever the caveat says is still unproven sits in a
+file that reads as closed to every query this project runs. Two sampled instances carry real
+residual work — one records *"Directions 2 and 3 of the Fix are STILL OPEN"*, invisible because the
+record is both `fixed` and archived.
+
+**The check offers two discharges and the finding text names both** — discharge the caveat and clear
+the field, or leave both, in which case the record stays honest and findable. So this is not a
+sweep-to-zero: some fraction of the 120 is correctly parked, and a pass that drives the number down
+is the wrong shape. The deliverable is a triage that separates *discharged*, *still live*, and
+*correctly parked*, with the last two staying exactly as they are.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;

@@ -51,7 +51,7 @@ previous world.
 
 ## CTX-1 — entry-anchor packing — the corpus that chose the 1000-byte neighbour cap
 
-**Valid:** conditional — a `link_scan write=true` materially changes the entry graph, or mean neighbourhood size exceeds ~8
+**Valid:** conditional — the fully-served share at the 1000 B cap falls below ~90%
 
 **Status:** applied
 
@@ -96,6 +96,68 @@ heading, its `Kind/Sweep/Status` line including `promoted 2026-08-20` and its co
 opening of the claim. That is what a neighbour is for — *what rests on this and how widely* is
 a shape question. The anchor is the thing you came to read.
 
+### Re-measured 2026-09-12 — the corpus moved, the constant did not
+
+**The condition fired on its first clause** and the entry is re-declared above. The two-clause
+trigger is replaced by the single metric that actually governs the design: *mean* neighbourhood
+was the weaker half and would **not** have tripped — it moved 3.0 → 3.69 while the served share
+fell four points, so an aggregate that stayed comfortable was silent about the tail it governs.
+That is this entry's own *Optimization points NOT taken* lesson holding about its own `**Valid:**`
+line.
+
+**Method validated before it was trusted, and the cross-check is why the numbers below are not
+off by one.** The sweep is a re-implementation of the two-pass packer in
+`src/librarian/tools/context.rs`, checked against the shipped one on two anchors spanning both
+branches: `reconnaissance-patterns:R-3` (49 candidates / 12 included / 37 omitted, `excerpted`)
+and `open-issue-work-queue-bl-n:BL-42` (14 / 14 / 0, `excerpted`). Both exact. The **first**
+attempt predicted 13 included for `R-3` against the real 12 — a 150-byte per-neighbour overhead
+estimate against a measured **258 B** (render header plus `EXCERPT_MARKER`, and whole neighbours
+carry no marker so the two modes need different constants). A simulation agreeing with itself
+would have shipped that.
+
+| | 2026-08-21 | 2026-09-12 |
+|---|---:|---:|
+| entry sections | 1598 | 1749 |
+| ledgers | 88 | 122 |
+| mean section | 2656 B | 2983 B |
+| sections >8 KB | 2.5% | 4% |
+| `entry_cite` scan rows | 1513 | 2893 |
+| anchors with ≥1 edge | 931 | 1329 |
+| **mean neighbours** | **3.0** | **3.69** |
+| neighbourhood ≥17 | 6 | **22** |
+| max neighbourhood | 22 (`R-3`) | 48 (`R-3`) |
+
+**Scope the scan-row count or it overstates by a factor.** Whole-catalog that row reads **5340**;
+the 1513 it is compared against was project-scoped, and pairing the two reports 3.5× growth where
+the truth is 1.9×. The catalog spans every indexed repo on the machine; this ledger's numbers do
+not.
+
+| policy | 2026-08-21 | 2026-09-12 |
+|---|---:|---:|
+| as shipped (dupes kept, neighbours whole) | 74% | — |
+| whole only (no cap) | 76% | **61%** |
+| dedup + 300 B | — | 98% |
+| dedup + 500 B | — | 97% |
+| dedup + 750 B | — | 96% |
+| **dedup + 1000 B (shipped)** | **98%** | **94%** |
+| dedup + 1500 B | 94% | 88% |
+| dedup + 2000 B | 90% | 84% |
+| dedup + 3000 B | 85% | 75% |
+| dedup + 4000 B | 82% | 70% |
+
+**The cap is KEPT at 1000 B: the four-point loss is corpus drift, not mis-tuning.** The sub-1000
+rows are new — the original sweep only ran *upward*, so it could not say what restoring 98% would
+cost. It costs the excerpt. 98% needs a **300 B** cap, at which a neighbour yields its heading and
+essentially nothing else, failing the usefulness test this entry applied when it chose 1000 B in
+the first place (heading, status line, opening of the claim). **500 B is the only alternative
+worth a look** at 97%, and it is deliberately not taken here: the test for it is *reading one*,
+which is a judgement, not a share this sweep can compute.
+
+**The two-pass design is more load-bearing than when it was justified, not less.** Whole packing
+fell 76% → 61%, so **39%** of anchors now need excerpting against 24% then — the *"excerpting
+unconditionally would degrade three anchors in four for nothing"* figure is now closer to two in
+three. The measurement that argued for two passes has strengthened while the constant it chose
+has weakened, which is why re-running the sweep changed one number and no decisions.
 ### Why the cap is in BYTES
 
 Copying the file-grain packer's **30-line** preview would have been the obvious move and is
