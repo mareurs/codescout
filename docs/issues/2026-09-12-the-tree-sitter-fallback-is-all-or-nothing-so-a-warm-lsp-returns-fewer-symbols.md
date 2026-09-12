@@ -108,6 +108,50 @@ a cost one.
 manifest are `f3c594ce`'s, who filed this; the nested-root population, the controlled
 inversion above and its cross-language scope are `b80a27d4`'s.*
 
+
+**Probe B re-run against the fix — 2026-09-12, `920eb443` in the binary. The inversion is
+NOT closed, and the fix is partial by a mechanism its own design did not anticipate.**
+
+Binary identity confirmed before the run: pid `2194140`, executing inode equal to on-disk
+(`189466740`), no `(deleted)` marker, built 10:46:06 and started 10:46:28, with
+`920eb443` an ancestor of HEAD.
+
+```
+symbols(name="parse", exact=true)
+                     BEFORE 920eb443      AFTER 920eb443
+  COLD                 13 / 12 files       13 / 12 files     <- preserved exactly
+  WARM                  1 /  1 file         5 /  4 files     <- improved, not fixed
+```
+
+The four recovered warm are exactly the nested-root fixture hits the fix targets:
+`edit-eval-rust/replace_generic.rs`, `nav-eval-rust/generics.rs` (x2),
+`nav-eval-rust/shadowing.rs`. So the mechanism shipped does what it was built to do.
+
+**What it does not do, and this is the finding.** The eight `src/` hits cold mode returns
+are still absent warm. They are not under any nested root, so they are not in the gap set
+— the fix cannot reach them by construction. Stable across a second run `45` seconds
+later, so it is not indexing lag.
+
+**The design premise is false in practice.** § Fix option 4 rests on *"a directory
+carrying its own manifest is the one the outer project does not build, therefore the
+LSP's coverage is everything else"*. The converse does not hold: rust-analyzer was
+**alive** during the warm run — it answered `symbol_at` on `src/librarian/frontmatter.rs`
+with both a definition and a hover — and still returned nothing matching for these eight
+from `workspace/symbol`. So LSP-covered is strictly SMALLER than not-in-a-nested-root,
+and `nested_roots` is a lower bound on the gap rather than the gap itself.
+
+Control, so this is not read as *"`src/` is unreachable"*:
+`symbols(name="ArtifactBackend")` and `symbols(name="files_needing_fallback")` both return
+their `src/` definitions. Those names match nothing else, so the LSP produced nothing at
+all, `matches.is_empty()` held, and the cold arm covered the tree. **`src/` is reachable
+exactly when no other language happens to match** — which is the original defect surviving
+in a narrower form.
+
+**Consequence for status: the bug stays open.** What shipped is the nested-root half. The
+per-language half named in § Root cause 3 is untouched, and is now measured rather than
+predicted — one Python hit still suppresses whole-tree coverage for Rust. A fix that
+closes it has to make emptiness a **per-language** question, because `matches.is_empty()`
+is computed across every language at once.
 ## Environment
 
 Linux, branch `experiments`, rust-analyzer 1.97.1. Not feature-gated.
@@ -200,10 +244,14 @@ spend time reconciling two records.
 Not fixed, and this is a design decision rather than a cleanup, which is why it is filed
 rather than patched in passing:
 
-**— SHIPPED 2026-09-12 as option 4 below.** Fix SHA: `920eb443`. Patch-id:
-`11c0cd7f4926900d18e7e18f3a0273f0439224d4`. The options are kept as written, including
-the rejected one, because a reader who meets only the outcome would reasonably retry the
-per-file union — it is the obvious shape and its defect is not visible from the code.
+**— PARTIALLY SHIPPED 2026-09-12 as option 4 below.** Fix SHA: `920eb443`. Patch-id:
+`11c0cd7f4926900d18e7e18f3a0273f0439224d4`. **It does not close the inversion** — the
+post-fix re-run of § Reproduction probe B measures cold `13` against warm `5`, up from
+warm `1`. Read that section before building on this one: option 4's premise (LSP coverage
+is everything outside a nested root) is measured FALSE, so what shipped is a lower bound
+on the gap. The options are kept as written, including the rejected one, because a reader
+who meets only the outcome would reasonably retry the per-file union — it is the obvious
+shape and its defect is not visible from the code.
 
 - **Per-file union** — ~~run the tree-sitter walk over `accepted_files` the LSP did not
   return symbols *for*~~. **REJECTED 2026-09-12, at the bytes.**
