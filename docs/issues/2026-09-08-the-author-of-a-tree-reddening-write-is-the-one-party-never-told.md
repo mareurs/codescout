@@ -88,9 +88,41 @@ That same build carried an unwired `fallback_gap` from `b80a27d4` — a dead-cod
 not the `E0425`, but enough to appear in the same output. A report naming one author is
 half right in exactly the way that stalls the repair: the party told may fix their half,
 see the tree still red, and reasonably conclude the diagnosis was wrong. Splitting the
-red by author before reporting is what made this one resolve in nine minutes, and no
+red by author before reporting is what made this one resolve in nine minutes.
+
+**Corrected 2026-09-12, the same day, by measurement.** This paragraph first claimed *"no
 mechanism does that today — `wip_authors` lists every uncommitted file the failure names
-without saying which line belongs to which session.
+without saying which line belongs to which session."* **That is false, and it was written
+from reading rather than running.** `b0b9bc40` read
+`src/tools/run_command/attribution.rs:193-232` and refused it; the discriminating run
+settles it. Fed a synthetic red naming two uncommitted files with two different authors,
+`scripts/attribute-red.py` returns both, each with its own author, liveness and socket:
+
+```
+  tests/mcp_smoke_scripts_reference_real_tools.rs
+      written by f3c594ce-…  [LIVE]  attach-alias-advisory-anyhow — pid 703051
+  docs/superpowers/plans/2026-09-10-parameter-alias-collapse.md
+      written by b0b9bc40-…  [LIVE]  codescout-75 — pid 1456596
+```
+
+One entry per file, per-file authorship, already correct. **So the defect is not in the
+diagnostic — it is that the diagnostic's output does not survive the hop to the party who
+needs it**, which has a different remedy and is therefore its own file rather than a § Fix
+constraint here. Two candidate causes, not yet separated:
+
+- **A relayed red loses the attribution.** `wip_authors` is computed over the text
+  `run_command` saw, never over what a session then quotes at a peer. The reporting
+  session did see all three error lines spanning both files, and still addressed one
+  owner.
+- **Native `Bash` bypasses `run_command` entirely**, so the diagnostic never runs at all.
+  CLAUDE.md already states this — *"on a `Bash` gate the silence means nothing"* — and
+  sessions here have been running gates through `Bash` all day.
+
+The instance above cannot separate them without knowing which shell the reporting session
+used, and this file does not guess.
+
+*Mechanism read by `b0b9bc40`, who refused the unmeasured claim rather than inheriting it;
+the two-author run by `b80a27d4`, who had made it.*
 ## Reproduction
 
 Two sessions, one checkout, shared `target/`. A saves uncommitted Rust that does not
