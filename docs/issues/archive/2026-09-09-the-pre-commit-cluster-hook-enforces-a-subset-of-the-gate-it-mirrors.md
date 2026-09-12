@@ -185,9 +185,10 @@ Fixed and archived. Two threads continue elsewhere:
 - `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md` — the
   three rules the new declaration exposed. Read it with this file: closing this one without that
   one would read as the divergence being gone rather than merely visible.
-- `docs/issues/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md` — filed
+- `docs/issues/archive/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md` — filed
   while writing the hook's new check, whose comment could not be written through `edit_file`
-  because the prose contains the word `class`.
+  because the prose contains the word `class`. Fixed 2026-09-12 in `c9c03a74`; archived, hence
+  the path above.
 
 The author-side lesson below is unchanged by the fix and is the reason the mechanism was worth
 building rather than the note being worth writing.

@@ -3761,7 +3761,7 @@ fn find_def_keyword_still_catches_real_definitions() {
     );
 }
 
-/// Probe 2 of `docs/issues/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`.
+/// Probe 2 of `docs/issues/archive/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`.
 /// The keyword sits in a TRAILING comment, so the line-leading filter in
 /// `find_def_keyword` never reaches it and the word-boundary rule reads prose as code.
 ///
@@ -3826,7 +3826,7 @@ fn guard_allows_comment_added_before_unchanged_fn() {
 }
 
 /// Probes 2 and 4 of
-/// `docs/issues/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`,
+/// `docs/issues/archive/2026-09-11-edit-file-reads-a-keyword-in-prose-as-a-symbol-definition.md`,
 /// asserted at the GUARD rather than at `find_def_keyword`, because that is the site
 /// the reported defect was observed at and a unit kill says nothing about the caller.
 ///

@@ -1,10 +1,13 @@
 ---
-id: '447d98db54393338'
+id: 0947b2a32cb86e00
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: edit_file reads a definition keyword in a COMMENT as a symbol definition, with no escape'
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-12
+opened: 2026-09-11
+severity: medium
 ---
 
 ## Summary
@@ -129,9 +132,9 @@ believes that sentence will not suspect the guard, which is doc-contradicted-by-
 surface every refused caller reads.
 ## Fix
 
-Not chosen. The three sketches below are the original author's; each now carries what the
-2026-09-11 measurement says about it, because two were priced against a mechanism that turned out
-to be wrong — and the first is now **rejected outright**.
+**Shape 2, shipped 2026-09-12 in `c9c03a74`.** The three sketches below are the original
+author's; each carries what the 2026-09-11 measurement said about it, because two were priced
+against a mechanism that turned out to be wrong — and the first was **rejected outright**.
 
 1. **Require the keyword to begin a line** (after indentation) before treating it as a definition.
    **REJECTED — it would ship a false negative in the dangerous direction.** Rust's keyword list is
@@ -173,8 +176,31 @@ Preserve the error asymmetry the module states at `:45-49`: a false positive cos
 edit, a false negative risks LSP range corruption. That asymmetry is exactly what disqualifies
 shape 1 and recommends shape 2.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+**What shipped.** `src/util/text.rs`'s literal scanner was private and reported only its end
+state, so `scan_line` now delegates to `scan_line_into`, which additionally writes a mask; the
+public entry point is `blank_non_code(block, line_comment)`. One implementation with two outputs
+rather than a second copy of the literal rules, which is the shape that drifts.
+`find_def_keyword` blanks before scanning, and `line_comment_tokens` supplies `#` for
+Python/Ruby and `//` elsewhere.
+
+Two decisions worth keeping, both annotated at their site:
+
+- **Lines are scanned independently.** `find_def_keyword` receives the lines an edit CHANGED,
+  which are not contiguous source. Carrying literal state between them would blank real code
+  lying between two unrelated quotes — a false negative, the direction § Root cause's asymmetry
+  forbids. `blank_non_code_does_not_carry_literal_state_between_lines` is the regression guard,
+  and it reds on the "optimisation" that looks like a correctness improvement.
+- **The line-leading filter is kept ON TOP of the mask, not replaced by it.** Blanking subsumes
+  `//` and `#`; `/*` and `*` are block comments the scanner does not model, so dropping the
+  filter would newly admit them.
+
+**Residual, named at the refusal site rather than narrowed silently:** a keyword inside a
+**mid-line block comment** (`1 /* mentions fn */ + 2`) still refuses. The IL-2 condition text in
+`src/prompts/mod.rs` now says so, along with dropping the false claim that string literals and
+comments were already allowed.
+
+Fix SHA: `c9c03a74`
+Patch-id: `25a355c556921889c22bc2c4b3c10198746f0831`
 ## Workarounds
 
 Native `Edit`, which has no such guard — used for the refused edit in this task. Rephrasing the
@@ -182,28 +208,40 @@ prose also works and is worse: it lets a tool defect edit the documentation's wo
 
 ## Tests added
 
-None yet.
+Five, at two sites — `find_def_keyword` is a unit and `guard_structural_rewrite` is where the
+defect was observed, and a kill at one says nothing about the other.
 
+`src/tools/edit_file/tests.rs`
+
+- `find_def_keyword_ignores_a_keyword_in_a_trailing_comment` — probe 2, plus the Python `#`
+  form. Observed RED before the fix: `left: Some("fn ")`.
+- `find_def_keyword_ignores_a_keyword_inside_a_string_literal` — the second residual. Observed
+  RED before the fix: `left: Some("fn ")`.
+- `guard_reads_a_trailing_comment_as_prose_but_still_catches_a_smuggled_definition` — probes 2
+  and 4 **paired in one test**, deliberately. The halves must move in opposite directions, so a
+  fix that simply stopped looking for keywords satisfies the first assertion and fails the
+  second. This is the acceptance floor § Resume asked for.
+
+`src/util/text.rs`
+
+- `blank_non_code_keeps_code_and_blanks_comments_and_literals` — asserts byte length directly
+  rather than letting the shapes imply it, and asserts the token set is honoured in **both**
+  directions (`#` blanks under `["#"]`, does not under `["//"]`).
+- `blank_non_code_does_not_carry_literal_state_between_lines` — the guard described above.
+
+The pre-existing floor stayed green throughout and was checked at each step, not only at the
+end: `find_def_keyword_ignores_class_in_comment`,
+`find_def_keyword_still_catches_real_definitions`,
+`find_def_keyword_ignores_a_keyword_inside_an_identifier`, and the `guard_blocks_*` family.
 ## Resume
 
-**Two questions this section used to ask are answered. Do not re-derive them.**
+**Nothing to resume — fixed and verified on `experiments` at `c9c03a74`.** The floor § Fix set
+was met as specified: probe 2 flipped to pass, probe 3 stayed passing, probe 4 stayed refusing.
 
-*Does the guard read `new_string` only or both strings?* **Both**, each diff-scoped.
-`guard_structural_rewrite` computes `old_changed = lines_only_in(old_string, new_string)` and
-`new_changed = lines_only_in(new_string, old_string)` (`src/tools/edit_file/mod.rs:328-329`), tests
-each only when that string is multi-line (`:331`, `:335`), and refuses on `old_kw.or(new_kw)`
-(`:339`). An unchanged anchor line carrying a definition never trips it — verified in
-§ Reproduction probe 2.
-
-*Which fix shape?* Shape 1 is rejected on measurement (§ Fix, probe 4) — it would miss `pub fn`
-and every other modifier-prefixed definition, which is the direction that corrupts rather than
-annoys. **Shape 2 via `crate::util::text::scan_line` is the remaining candidate.**
-
-Next action for whoever takes this: implement shape 2, and correct the refusal's condition text in
-the same change. The before/after pair is § Reproduction probes 2 and 3 — probe 3 is the control
-that stops a fix passing by disabling the keyword test altogether — and § Fix probe 4 is the
-regression floor that stops it passing by going blind to `pub fn`. A fix needs all three: probe 2
-flips to pass, probe 3 stays passing, probe 4 stays refusing.
+One honest caveat about the verification, since it is the kind that goes unrecorded: the gate
+ran over a working tree that also held a peer's uncommitted `src/memory/anchors.rs`. Both lanes
+were green (`LEAN exit=0`, `DEFAULT exit=0`), and the commit is a strict subset of that tree —
+but the green is evidence about the tree as it stood, not about this commit in isolation.
 ## References
 
 - Hit 2026-09-11 while fixing
