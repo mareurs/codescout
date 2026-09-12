@@ -840,10 +840,11 @@ and that difference is the finding:
   passing-looking state. Hazard checked at the source first: `active_languages()` reads `clients`
   and never touches `last_used`, so polling cannot refresh the idle timer it waits on.
 - `drop_kills_child_process` — **no mutation reds it**, and that is now its own bug file,
-  `docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
-  (`cluster/assertion-that-cannot-fail`). Three redundant mechanisms reap the child; removing any
-  one, or both deliberate ones together, leaves it green. The flake is fixed; the vacuity is not,
-  and the test now carries an inert annotation saying so.
+  `docs/issues/archive/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
+  (`cluster/assertion-that-cannot-fail`), **fixed 2026-09-12 (`23bb33d3`)**. Three redundant mechanisms reap the child; removing any
+  one, or both deliberate ones together, leaves THIS test green, so it keeps its inert annotation.
+  The discrimination now lives in a sibling, `drop_sends_sigterm_and_nothing_else_can_reach_the_child`,
+  which reaps a child no other mechanism can reach and reds under the `terminate_process` mutation.
 
 **So the honest count for whoever takes this file next is 2 handed on, not 10** — the four retry
 loops and three stdout barriers need nothing, and `claim_mux_lock_...` was already fixed.
@@ -962,9 +963,10 @@ on.
 `drop_kills_child_process` (`src/lsp/client.rs`) — **no test added, deliberately**, and an INERT
 annotation added instead so nobody credits it with coverage. No mutation reds it; three redundant
 mechanisms reap the child and removing any two leaves it green. Filed separately as
-`docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
-(`cluster/assertion-that-cannot-fail`). No assertion fixes that — the child has to be one that
-survives SIGPIPE.
+`docs/issues/archive/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
+(`cluster/assertion-that-cannot-fail`), and **fixed there on 2026-09-12 (`23bb33d3`)** along the
+line this file predicted: no assertion fixed it, the CHILD had to change. The sibling test spawns
+one no other mechanism can reach (`Stdio::null()`, non-tokio spawn) and asserts on the signal.
 
 The prior file's *"the regression signal is the existing suite staying green"* is still the thing
 a low-rate flake defeats; what changed is that one of the two sites no longer asserts about the

@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/assertion-that-cannot-fail
+claimed_at: 2026-09-12
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-08
 owner: marius
@@ -151,31 +153,76 @@ hypothesis 4 was falsified by a control that was itself wrong.
 
 ## Fix
 
-Not fixed. The test is annotated as inert at `src/lsp/client.rs` (the `INERT for BOTH
-deliberate kill paths` block at the head of the test body) so nobody credits it with
-coverage it does not provide — `CLAUDE.md` § *Testing Discipline*, "annotate an inert
-fixture as inert".
+Fixed by adding a discriminating test, not by changing production code — the production
+code reaps correctly by three routes, which was never in doubt; the coverage was the
+defect.
 
-Sketch for whoever takes it: the child has to be one that **survives SIGPIPE**, or the
-assertion has to name the signal rather than the liveness. Two shapes, neither costed:
+**The child is the fix, not the assertion.** `drop_sends_sigterm_and_nothing_else_can_reach_the_child`
+(`src/lsp/client.rs`) spawns `sleep` on `Stdio::null()` through `std::process::Command`
+and builds an `LspClient` around that pid by **direct struct construction**. That removes
+the other two mechanisms *by construction* rather than defending against them:
 
-- Spawn a child that ignores `SIGPIPE` and does not exit on EOF (`sh -c 'trap "" PIPE;
-  while :; do sleep 1; done'`) and assert on it. Needs `LspClient::start` to tolerate a
-  non-LSP child, which it may not.
-- Assert on the **signal**, not on liveness: reap the child in the test and check
-  `WTERMSIG == SIGTERM`. This discriminates path 1 from path 3 directly, and would red on
-  MUTATION-1. It cannot separate path 1 from path 2 (both would be a signal), so
-  `kill_on_drop` still needs its own site — `CLAUDE.md`, "mutate once per guarded SITE".
+- **SIGPIPE (path 3) cannot be delivered** — there is no pipe. Stronger than "survives
+  SIGPIPE", which is what the § Fix sketch originally called for.
+- **`kill_on_drop`'s SIGKILL (path 2) cannot fire** — no tokio `Child` exists to carry the
+  flag, and no reader task owns the process.
+- **`Drop`'s `terminate_process` (path 1) is therefore the only mechanism left**, which is
+  what makes `WTERMSIG == SIGTERM` *attributable* rather than merely true.
 
-Note that path 2 is **not** dead code: `.kill_on_drop(true)` is the only mechanism in the
-WIN-5 spawn-timeout path (`src/lsp/client.rs:468-472`), where no `LspClient` is ever
-constructed and so `Drop` never runs. That path has no test at all.
+Direct construction because `LspClient::start` performs a real `initialize` handshake and
+no child immune to the other two paths speaks LSP — the § Fix sketch flagged this as the
+open question ("needs `LspClient::start` to tolerate a non-LSP child, which it may not").
+It does not; the test module is in-file, so the private fields are reachable and the
+handshake can be bypassed entirely. `reader_handle: None` makes `Drop`'s abort a no-op,
+leaving exactly one statement under test.
 
+**MUTATIONS, run against BOTH tests** — a kill is only attributable if the two disagree:
+
+| mutation | new test | `drop_kills_child_process` |
+|---|---|---|
+| `terminate_process` removed from `Drop` | **RED** (10s timeout) | green, 0.05s |
+| `.kill_on_drop(true)` -> `(false)` | green | green, 0.05s |
+
+Row 1 is the coverage this bug was filed for, and the old test's green beside it is the
+denominator that makes the red mean something. **Row 2 is the honest half: neither test
+covers `kill_on_drop`, and the new one cannot by construction.** That site's only
+non-redundant role remains the WIN-5 spawn-timeout path, where no `LspClient` is built and
+`Drop` never runs — still untested, still recorded, not papered over.
+
+**A verification hazard worth recording, because the mutation looked applied and was
+not.** `grep -c 'kill_on_drop(true)' src/lsp/client.rs` returns **3** on this file, of
+which only **1** is a call site — the other two are prose mentions inside comments
+(including this bug's own quoted text). The reproduction's `expect 0` check therefore
+reads as a failed mutation when the mutation is fine. Verify against the call site, not
+the token count. This is § *Parsers Over a Namespace* holding about the verification step
+of a bug about verification.
+
+**An approach that does NOT work, named because it is the obvious one.** Capturing the
+exit status in the reader task's own `child.wait()` and asserting on `.signal()` from
+there fails: `Drop` calls `handle.abort()` on the reader task **before** sending SIGTERM,
+so that `wait()` never runs and the status is never recorded. Built, observed as a
+failing assertion (`reader task must have reaped and recorded an exit status by now`),
+and reverted — the tokio orphan reaper collects the child and discards the status, so no
+second waiter can see it either. This is why the new test reaps its own child rather than
+reading one the runtime owns.
+
+The old test is **kept, not deleted**: "the real server does get reaped" is a claim worth
+holding and it is the only test making it against a real `rust-analyzer`. Its `INERT`
+annotation now points at the discriminating twin instead of ending at the complaint.
+
+**SHA:** `23bb33d3b80fe246ae13bb33d1838c13eb658ee9`
+**patch-id:** `da3b62e80be51847d2785a3d1cd6f27c141088f0`
 ## Tests added
 
-None — this file records the absence. Adding an assertion to the existing test does not
-fix it; the child is the problem, not the assertion count.
+`src/lsp/client.rs`:
 
+- `drop_sends_sigterm_and_nothing_else_can_reach_the_child` (new, `#[cfg(unix)]`) —
+  asserts `WTERMSIG == SIGTERM` against a child no other mechanism can reach. Observed RED
+  under the `terminate_process` mutation, GREEN restored.
+- `drop_kills_child_process` (existing, unchanged assertions) — annotation updated to
+  point at the twin above and to record the 2026-09-12 re-confirmation.
+
+The full `lsp::client::tests::` module is green (27 passed, 2 pre-existing ignored).
 ## Workarounds
 
 N/A — no user-visible defect. The production code reaps correctly by three independent
@@ -184,13 +231,10 @@ without any test reddening.
 
 ## Resume
 
-Decide between the two Fix shapes above. Start by checking whether `LspClient::start`
-completes against a non-LSP child (`sh -c ...`) — if it requires a real `initialize`
-response, the signal-assertion shape is the only option. Run
-`cargo test --lib lsp::client::tests::drop_kills_child_process -- --exact` to anchor, then
-apply MUTATION-1 from Reproduction and require an observed RED before crediting any new
-assertion.
-
+Done — see § Fix. One thing deliberately left open and recorded rather than closed:
+`kill_on_drop` still has no test, and its only non-redundant caller is the WIN-5
+spawn-timeout path in `LspClient::start`, where no `LspClient` is constructed. Reaching it
+needs a simulated spawn hang, which is a different piece of work.
 ## References
 
 - `src/lsp/client.rs` — the test, `Drop for LspClient`, and the spawn site

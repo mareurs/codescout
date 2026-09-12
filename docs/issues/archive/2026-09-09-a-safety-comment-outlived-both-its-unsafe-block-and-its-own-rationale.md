@@ -265,7 +265,7 @@ bug fix as a drive-by.
 - `src/lsp/client.rs`, `src/platform/unix.rs`, `tests/safety_comments.rs`
 - `docs/issues/archive/2026-09-05-process-alive-reports-a-nonexistent-process-as-alive.md`
   — the adjacent bug whose fix rejected the cast this comment defended
-- `docs/issues/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
+- `docs/issues/archive/2026-09-08-drop-kills-child-process-passes-with-both-kill-paths-removed.md`
   — the same `Drop` impl, measured the day before; source of the SIGTERM-lands-first finding
 - `docs/trackers/issue-clusters/IC-11-doc-contradicted-by-code.md`
 - Commits: `3d462282` (wrote it), `bedeb7c0` (moved the `unsafe` out), `01b185d6`
