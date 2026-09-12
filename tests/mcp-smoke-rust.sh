@@ -22,9 +22,17 @@ assert_contains() {
     echo "$RESULT" | grep -q "$1"
 }
 
-assert_not_contains() {
-    ! echo "$RESULT" | grep -q "$1"
-}
+# There is deliberately NO `assert_not_contains` here. `call()` blanks RESULT on a
+# failed `mcp call` (see `|| RESULT=""` above), and an absence assertion over an empty
+# string is satisfied by construction — so such a helper passes precisely when the
+# server is unreachable, which is the one case a smoke test exists to catch.
+# `assert_contains` is safe under the same fallback only because it fails loudly on an
+# empty RESULT; the two are blind in opposite directions and are not a symmetric pair.
+# If you need a negative check, assert RESULT is non-empty FIRST — the discriminator is
+# already in the variable, unused. Re-adding a negated grep over $RESULT reds
+# `no_smoke_script_asserts_absence_over_a_blankable_result`
+# (tests/mcp_smoke_scripts_reference_real_tools.rs).
+# docs/issues/archive/2026-09-09-assert-not-contains-cannot-fail-when-the-call-it-checks-failed.md
 
 assert_json_has() {
     echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$1' in d" 2>/dev/null
