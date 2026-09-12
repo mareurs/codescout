@@ -72,7 +72,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | **done, archived** | `5d8584d109d876ea` |
 | BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | **done, archived** | `d082f963f57bd76b` |
 | BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | **done, archived** | `ba6ab341eab97416` |
-| BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | partial (`99aaf83f` + `6ff00eee` + `0dbfd0ee`): drift reported at write time and by `doctor`; hamsa reconciled; gate now needs majority coverage; **0 trackers adrift** | `879b1b18243f20b2` |
+| BL-29 | 1 | append_entry writes catalog-only state, so a tracker's committed rendered snapshot silently drifts from its live rows — tool says success, git says clean, row is in neither | **partial** (`99aaf83f` + `6ff00eee` + `0dbfd0ee`): drift reported at write time and by `doctor`; hamsa reconciled; gate discriminates by **majority coverage** (`body_keeps_snapshot`); **0 trackers adrift**. `a1ca3baa` made the row-splice path reachable on params-backed ledgers at all; option 2 (re-render) now measured **unsafe** — 42 of 76 rows would lose 6,878 characters of hand-written status prose | `879b1b18243f20b2` |
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | done | `c3f08f7cb8b386fe` |
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | **done, archived** | `2a9fd7654cf82013` |
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | done | `a0251c34af7aa012` |
@@ -118,6 +118,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
 | BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes plus a verification pass over the actionable bucket. Live and archived records triaged; `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker. Verifying the still-live bucket against CODE flipped one of four — the loudest — to correctly-parked: a deliberate design decision reads exactly like an unfixed gap in its author's own words | — |
 | BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **done** 2026-09-12 — shipped as an ADDITIVE marker: a leading uppercase `CLEARED`/`REFUTED`/`RESOLVED`/`WITHDRAWN` silences the record and keeps its text; an unmarked caveat behaves exactly as before, which is what defuses the 2026-08-19 objection. `MEASURED` is deliberately excluded — the one record using it is an ESCALATION. Verified live: 2 silenced, 3 negative controls still reporting; both test halves observed RED under mutation | — |
+| BL-77 | 2 | `body_snapshot_row_indices` counts a pipe-anchored `PREFIX-N` row from ANY table as a snapshot row — the 2026-08-28 headings-vs-rows narrowing holding one level over, so a real lag can be masked by rows outside the snapshot block | **open** — latent, not active: 87 row-anchored lines vs 76 distinct ids on this queue, coverage 100% either way, nothing misreported today. The reachable harm is a **false negative** — `claimed.difference(in_body)` unions every table, so rows outside the snapshot block fill holes it leaves. Blocks BL-29's third option (auto `index_after_line`) | `e9bea0ed3ff9927a` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1220,7 +1221,35 @@ table now disagrees with the catalog — and the caller writes the body by hand 
 that write is done for them, params remain canonical in a machine-local, git-ignored database and
 the committed snapshot goes stale on every unaccompanied append, which is this entry's claim
 verbatim. Declared 2026-09-01, re-declared 2026-09-12.
-**open** — partial: drift is now reported at write time and by `doctor`, and 0 trackers are adrift; the gate still needs majority coverage.
+**open** — partial: drift is reported at write time and by `doctor`, and no tracker on this machine is adrift.
+
+**The gate HAS majority coverage.** `body_keeps_snapshot` (`src/librarian/catalog/augmentation.rs`) implements it — `claimed.intersection(in_body).count() * 2 > claimed.len()` — shipped in `0dbfd0ee` (2026-08-16), with its input narrowed from `body_claimed_indices` to `body_snapshot_row_indices` on 2026-08-28. The previous wording of this line, *"the gate still needs majority coverage"*, described what the gate **requires** and reads as an outstanding requirement. It is the exact sentence `40c53197` transcribed into the conditional BL-74 withdrew, so it is **replaced rather than re-worded**: leaving it in place leaves the generator, and the next reader re-transcribes it identically.
+
+#### What `a1ca3baa` discharged, and what is still owed
+
+Measured 2026-09-12 against tree `408709ea`. Params figures are from the catalog (machine-local); body figures from the committed file. Re-derive by rendering `augmentation.render_template` against `params.tasks` and diffing the Status cell against the snapshot block (lines 43–120 of this file).
+
+**Discharged — the row-splice path is reachable at all.** Before `a1ca3baa`, a params-backed ledger could not have the server write its snapshot row *under any arguments*: `index_row` / `index_after_line` were parsed, accepted and dropped on the params branch, returning `Ok` with an allocated id and no diagnostic. This entry's own remedy was therefore unreachable on exactly the tracker class this entry is about, and nothing said so. The append that added BL-73…BL-76 took that path; the rows were hand-written afterwards, which this file already records as *"BL-29 demonstrated, not a lapse"*. `append_entry` now writes the params row, the `### BL-N` section and the index row in one transaction, and drops the just-written id from `snapshot_missing`.
+
+**Still owed — the unaccompanied append.** An append omitting those five fields still leaves the snapshot behind, and nothing obliges a caller to pass them. That is this entry's claim, unchanged.
+
+**Option 2 ("re-render on write") is NOT safe today, and the measurement inverts its premise.** The augmentation carries a whole-table `render_template` (`{% for t in tasks %}`), so the operation it names is a **block replacement**, not a row splice — a different shape from what `a1ca3baa` wired. Rendering it against today's params:
+
+| quantity | value |
+|---|---|
+| rows in `params.tasks` | 76 rows |
+| rows carrying a `status_note` field | 28 rows |
+| rows whose Status cell a re-render would change | **42 rows** |
+| of those, rows that would lose text | **42 rows** |
+| hand-written status prose destroyed | **6,878 characters** |
+
+The Task column diverges as well but costs far less — 39 of 76 rows differ, 303 characters lost — so the damage is concentrated in Status, where **48 rows carry no `status_note` field at all** for the body's text to live in. This row's own cells were reconciled on 2026-09-12 as a worked demonstration: `update_entry` set `status_note`, which returned `snapshot_stale` naming this very row, and the body was then brought to match.
+
+Worst single row is BL-44 at 2,038 → 7 characters (`dropped`); BL-29's own row goes from four clauses and three commit citations to `partial`. **So for the Status column the canonical store is currently the BODY, and params is 6,878 characters behind — the drift runs opposite to this entry's claim.** Re-rendering today would execute the BL-42 data-loss class (body-only content with no params field to hold it) deliberately, on 42 rows.
+
+**Sequencing that follows.** Option 2 needs a backfill first — every rendered cell into `status_note`, verified by a render-and-diff reaching zero differing rows — before any re-render is wired. That backfill is precisely the wholesale-params-write hazard `CLAUDE.md` names, so it goes through `update_entry` per row, never a rebuilt array.
+
+**A third option the fix surfaced, and the cheapest.** The server already holds everything an unaccompanied append needs: `render_template` for the row shape, `body_snapshot_row_indices` for where the rows are, and the new params row itself. Defaulting `index_after_line` to the last snapshot row would let the server write the row with **no caller cooperation** — closing the unaccompanied case without a whole-block re-render and without the backfill. It is blocked on a defect found while measuring this: `body_snapshot_row_indices` cannot tell which table a row belongs to (`docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`), so *"the last snapshot row"* is not currently computable.
 
 ### BL-30 — FRICTION: adding one tracker entry costs four bookkeeping sub-tasks
 **open** — the hand-allocation root cause behind BL-32.
@@ -1840,6 +1869,18 @@ per-record check is the sound one.
 **Both test halves were observed RED under mutation** (`caveat_is_discharged` forced to `true`),
 not merely written: the absence assertion is monotone under a matcher that accepts everything, so
 its control — an ordinary caveat that must *still* report — is what makes it worth anything.
+### BL-77 — `body_snapshot_row_indices` cannot tell which table a row belongs to
+
+**Valid:** conditional — `body_snapshot_row_indices` can tell a snapshot row from a row in an unrelated table
+
+Found while measuring BL-29's option 2, not by a failing check — which is the point of recording it. `body_snapshot_row_indices` runs `(?m)^\|[ \t]*[\`*\[]*{prefix}-(\d+)\b` over the **whole body**, so every pipe-anchored id counts regardless of which table it sits in. Markdown gives a table no name, and the augmentation records no snapshot-block boundary, so two tables sharing one row grammar are mutually indistinguishable.
+
+**Latent today, and the entry says so rather than claiming a catch.** On this queue: 87 row-anchored lines, 76 distinct ids, coverage 100% either way. The 11 extras (BL-1, BL-2, BL-20, BL-21, BL-22, BL-26, BL-27, BL-31, BL-33, BL-42, BL-43) sit at lines 2020–2279 in two-column prose tables. Nothing is currently misreported.
+
+**The reachable harm is the false negative.** `snapshot_missing` is `claimed.difference(in_body)` over the union of every matching row, so rows outside the snapshot block **fill holes the block leaves**. That is verbatim the `prompt-hamsa-audit-log` failure the 2026-08-28 narrowing was written to eliminate — *"the headings filled the holes the rows left. A real lag reported as health"* — reachable again through a different door, because the input was narrowed from *headings and rows* to *rows* and never to *rows of the snapshot table*.
+
+Blocks BL-29's third option: defaulting `index_after_line` to the last snapshot row needs to know which rows are snapshot rows. The two wants share one primitive — a recorded block boundary — which is why they are sequenced together rather than fixed apart.
+
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
