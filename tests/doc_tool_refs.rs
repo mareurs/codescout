@@ -622,7 +622,7 @@ fn the_scan_is_not_reading_an_empty_corpus() {
 }
 
 /// The reproduction from
-/// `docs/issues/2026-09-02-anchored-cites-tracks-parens-but-not-braces-so-nested-object-args-misattribute.md`,
+/// `docs/issues/archive/2026-09-02-anchored-cites-tracks-parens-but-not-braces-so-nested-object-args-misattribute.md`,
 /// and the first test this scanner was ever able to have. Before `calls_on_line` was
 /// extracted, the only entry point walked the corpus, so expressing this case meant planting
 /// it in a document the gate scans — which is why an `IC-6` member sat filed-but-untested for
