@@ -560,6 +560,80 @@ impl WalkAudit {
     }
 }
 
+/// Does this file declare a project root for some language?
+///
+/// Name-only, deliberately: parsing each candidate to confirm it declares a package
+/// would make this language-aware in a second way and buys nothing the caller needs.
+/// A false positive here costs a few extra tree-sitter parses of files that were
+/// reachable anyway; a false negative costs a silently unreachable symbol, which is
+/// the failure this whole path exists to prevent.
+fn is_project_manifest(path: &std::path::Path) -> bool {
+    const MANIFESTS: &[&str] = &[
+        "Cargo.toml",
+        "package.json",
+        "go.mod",
+        "pyproject.toml",
+        "setup.py",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+    ];
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| MANIFESTS.contains(&n))
+}
+
+/// Which accepted files the tree-sitter pass must still cover.
+///
+/// Replaces a whole-call `matches.is_empty()` gate that asked *"did we find anything?"*
+/// and never *"did we search everywhere?"*, so one hit suppressed the only mechanism
+/// covering everything the LSP does not index — making a **cold** LSP return strictly
+/// more than a warm one. Measured at `13` against `1` on one unchanged tree; the single
+/// warm survivor was a *Python* symbol, because `matches` is not per-language and one
+/// hit in any language suppressed the fallback for all of them
+/// (`docs/issues/2026-09-12-the-tree-sitter-fallback-is-all-or-nothing-so-a-warm-lsp-returns-fewer-symbols.md`).
+///
+/// Two inputs decide the gap, and **which job each one does is the whole design**:
+///
+/// - `nested_roots` decides COVERAGE, and is structural — a directory under the search
+///   root carrying its own manifest is one the outer project does not build, so its
+///   files are the ones `workspace/symbol` cannot be expected to hold. Structural
+///   because it must not depend on the query.
+/// - `lsp_seen` only ever REMOVES work, and is query-scoped. `workspace_symbols` takes a
+///   pattern, so this set can establish that a file IS covered and never that it is not
+///   — an earlier draft used it for coverage and would have re-parsed the corpus on
+///   every selective search. Used solely to drop files the LSP demonstrably answered
+///   for, it cannot cause a miss: the worst case is re-parsing a covered file, and it is
+///   also what keeps a partially-covered root from emitting a symbol twice.
+///
+/// `lsp_produced_nothing` preserves today's behaviour exactly for a dead or still-indexing
+/// LSP: cover everything, because nothing has been established about any file.
+///
+/// **Sorted, and that is not cosmetic.** The caller stops at `search_pool_cap`, so
+/// iteration order decides which matches survive truncation, and `accepted` is a
+/// `HashSet` whose order varies between runs. Returning it unsorted would make a capped
+/// search answer the same query differently each time — the flake shape `WalkAudit`
+/// already exists to make visible.
+fn files_needing_fallback(
+    accepted: &std::collections::HashSet<PathBuf>,
+    nested_roots: &[PathBuf],
+    lsp_seen: &std::collections::HashSet<PathBuf>,
+    lsp_produced_nothing: bool,
+) -> Vec<PathBuf> {
+    let mut gap: Vec<PathBuf> = accepted
+        .iter()
+        .filter(|f| {
+            if lsp_produced_nothing {
+                return true;
+            }
+            nested_roots.iter().any(|r| f.starts_with(r)) && !lsp_seen.contains(*f)
+        })
+        .cloned()
+        .collect();
+    gap.sort();
+    gap
+}
+
 /// Project-scope search (branch B of `Symbols::call`): one `workspace/symbol`
 /// request per language (per-language timeout), falling back to a tree-sitter
 /// walk when LSP yields nothing. Body is the old `scope.includes_project()` block.
@@ -581,6 +655,10 @@ async fn search_project_symbols(
     // one textDocument/documentSymbol request per file.
     let mut languages = std::collections::HashSet::new();
     let mut accepted_files = std::collections::HashSet::<PathBuf>::new();
+    // Directories under `root` that carry their own manifest. Collected in THIS walk
+    // rather than a second one: the walk already visits every non-ignored file, and a
+    // separate pass would be a second population that can drift from this one.
+    let mut nested_roots = Vec::<PathBuf>::new();
     let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
@@ -599,6 +677,15 @@ async fn search_project_symbols(
         };
         if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             let path = entry.path().to_path_buf();
+            // A manifest in `root` itself describes the project being searched, so it is
+            // not nested and its files are the LSP's own population.
+            if is_project_manifest(&path) {
+                if let Some(dir) = path.parent() {
+                    if dir != root {
+                        nested_roots.push(dir.to_path_buf());
+                    }
+                }
+            }
             if let Some(lang) = ast::detect_language(&path) {
                 languages.insert(lang);
                 accepted_files.insert(path);
@@ -619,6 +706,9 @@ async fn search_project_symbols(
     // cap-class: RESULT_CAP symbols.per_lang_budget — probed
     const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
     let languages: Vec<&str> = languages.into_iter().collect();
+    // Files the LSP returned at least one symbol for. See `files_needing_fallback` for
+    // why this may only ever REMOVE work, never decide coverage.
+    let mut lsp_seen_files = std::collections::HashSet::<PathBuf>::new();
     let mut join_set = tokio::task::JoinSet::new();
     for lang in languages {
         let lsp = ctx.lsp.clone();
@@ -676,6 +766,15 @@ async fn search_project_symbols(
             // visible to the agent under Project scope.
             let in_walk = *scope != crate::library::scope::Scope::Project
                 || accepted_files.contains(&sym.file);
+            // Recorded BEFORE the name and kind filters, and only for files the walk
+            // accepted. This set is what lets the fallback skip a file the LSP has
+            // demonstrably answered for — including in a root that is only partially
+            // covered, which is where a duplicate symbol would otherwise come from.
+            // It can never be read as evidence that a file is NOT covered: the LSP was
+            // asked for one pattern, so absence here is a fact about the query.
+            if in_root && in_walk {
+                lsp_seen_files.insert(sym.file.clone());
+            }
             if name_matches && kind_ok && in_root && in_walk {
                 // When include_body is requested, validate the range. If
                 // workspace/symbol returned a degenerate range, fall back to
@@ -713,56 +812,43 @@ async fn search_project_symbols(
         }
     }
 
-    // Tree-sitter fallback: if workspace/symbol returned nothing (LSP
-    // not running, still indexing, or doesn't support workspace/symbol),
-    // walk source files and extract symbols with tree-sitter.
-    if matches.is_empty() {
-        let walker = ignore::WalkBuilder::new(root)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
-        for entry in walker {
-            // Same reasoning as the accepted-files walk above: this is the last
-            // path that can still find the symbol, so an unreadable entry here is
-            // exactly what turns a real symbol into "0 matches".
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    audit.errors += 1;
-                    tracing::warn!(error = %e, "symbols: fallback walk entry unreadable");
-                    continue;
-                }
+    // Tree-sitter pass over the files the LSP cannot be covering. This used to run only
+    // when the LSP produced nothing at all, which made a warm LSP return strictly fewer
+    // symbols than a cold one — see `files_needing_fallback`.
+    //
+    // It no longer re-walks the tree. `accepted_files` was built above with the same
+    // `WalkBuilder` settings and the same `detect_language` test, so the second walk was
+    // a byte-identical population computed twice — and two populations that must agree
+    // are one that eventually will not.
+    for path in files_needing_fallback(
+        &accepted_files,
+        &nested_roots,
+        &lsp_seen_files,
+        matches.is_empty(),
+    ) {
+        let path = path.as_path();
+        if let Ok(symbols) = crate::ast::extract_symbols(path) {
+            let source = if include_body {
+                std::fs::read_to_string(path).ok()
+            } else {
+                None
             };
-            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let path = entry.path();
-            if ast::detect_language(path).is_none() {
-                continue;
-            }
-            if let Ok(symbols) = crate::ast::extract_symbols(path) {
-                let source = if include_body {
-                    std::fs::read_to_string(path).ok()
-                } else {
-                    None
-                };
-                collect_matching(
-                    &symbols,
-                    name_ok,
-                    include_body,
-                    source.as_deref(),
-                    depth,
-                    true,
-                    matches,
-                    kind_filter,
-                );
-            }
-            // Early cap to avoid scanning entire huge projects.
-            // Uses the decoupled search-pool ceiling, not guard.max_results,
-            // so a small user-supplied limit doesn't shrink the pool.
-            if matches.len() > search_pool_cap {
-                break;
-            }
+            collect_matching(
+                &symbols,
+                name_ok,
+                include_body,
+                source.as_deref(),
+                depth,
+                true,
+                matches,
+                kind_filter,
+            );
+        }
+        // Early cap to avoid scanning entire huge projects.
+        // Uses the decoupled search-pool ceiling, not guard.max_results,
+        // so a small user-supplied limit doesn't shrink the pool.
+        if matches.len() > search_pool_cap {
+            break;
         }
     }
     Ok(())
@@ -1371,5 +1457,118 @@ mod walk_audit_tests {
             !w.contains("0 source files"),
             "must not also claim the root is wrong: {w}"
         );
+    }
+}
+
+#[cfg(test)]
+mod fallback_gap_tests {
+    use super::{files_needing_fallback, is_project_manifest};
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    fn set(paths: &[&str]) -> HashSet<PathBuf> {
+        paths.iter().map(PathBuf::from).collect()
+    }
+
+    /// A dead or still-indexing LSP must still get whole-tree coverage. This is the arm
+    /// that existed before the fix, and it has to keep behaving identically — a fix that
+    /// narrowed THIS case would turn a working cold path into a broken one.
+    #[test]
+    fn everything_is_covered_when_the_lsp_produced_nothing() {
+        let accepted = set(&["src/a.rs", "src/b.rs", "fixtures/x/c.rs"]);
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), true);
+        assert_eq!(got.len(), accepted.len(), "cold LSP must cover every file");
+    }
+
+    /// The fix itself. With the LSP alive, only files under a nested project root need
+    /// covering — `src/` belongs to the outer project and the LSP is expected to hold it.
+    ///
+    /// `nested_roots` being non-empty is the load-bearing detail: pass `&[]` and this
+    /// silently becomes a test that the warm arm returns nothing, which is satisfied by a
+    /// fallback that was deleted outright.
+    #[test]
+    fn only_nested_roots_are_covered_when_the_lsp_answered() {
+        let accepted = set(&["src/a.rs", "fixtures/x/c.rs", "fixtures/x/d.rs"]);
+        let nested = vec![PathBuf::from("fixtures/x")];
+        let got = files_needing_fallback(&accepted, &nested, &HashSet::new(), false);
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("fixtures/x/c.rs"),
+                PathBuf::from("fixtures/x/d.rs")
+            ],
+            "a file outside every nested root is the LSP's to answer for"
+        );
+    }
+
+    /// `lsp_seen` may only ever REMOVE work. Here the LSP answered for one file inside a
+    /// nested root — a partially covered root — so re-parsing it would emit that symbol
+    /// twice. `matches` is a flat push with no dedupe, so this is a correctness guard,
+    /// not an optimisation.
+    #[test]
+    fn a_file_the_lsp_already_answered_for_is_not_reparsed() {
+        let accepted = set(&["fixtures/x/c.rs", "fixtures/x/d.rs"]);
+        let nested = vec![PathBuf::from("fixtures/x")];
+        let seen = set(&["fixtures/x/c.rs"]);
+        let got = files_needing_fallback(&accepted, &nested, &seen, false);
+        assert_eq!(
+            got,
+            vec![PathBuf::from("fixtures/x/d.rs")],
+            "a file the LSP answered for must not be parsed again"
+        );
+    }
+
+    /// `lsp_seen` must NOT suppress the cold arm. A stale or partial `lsp_seen` from a
+    /// language that answered while another died cannot be allowed to shrink whole-tree
+    /// coverage — and this is the pair that makes the `lsp_produced_nothing` branch a
+    /// real branch rather than an unreachable one.
+    #[test]
+    fn lsp_seen_does_not_shrink_the_cold_arm() {
+        let accepted = set(&["src/a.rs", "src/b.rs"]);
+        let seen = set(&["src/a.rs"]);
+        let got = files_needing_fallback(&accepted, &[], &seen, true);
+        assert_eq!(got.len(), 2, "the cold arm covers everything regardless");
+    }
+
+    /// The caller truncates at `search_pool_cap`, so iteration order decides which
+    /// symbols survive. `accepted` is a `HashSet`, whose order varies between runs, so an
+    /// unsorted return makes one query answer differently on successive calls.
+    ///
+    /// Asserted against a SORTED expectation built independently, not against
+    /// `got.is_sorted()` — the latter is satisfied by a one-element result and by a
+    /// HashSet that happened to iterate in order this run.
+    #[test]
+    fn the_gap_is_sorted_so_a_capped_search_is_deterministic() {
+        let accepted = set(&["z/9.rs", "a/1.rs", "m/5.rs", "b/2.rs"]);
+        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), true);
+        let mut want: Vec<PathBuf> = accepted.iter().cloned().collect();
+        want.sort();
+        assert_eq!(got, want);
+        assert_eq!(got.first(), Some(&PathBuf::from("a/1.rs")));
+        assert_eq!(got.last(), Some(&PathBuf::from("z/9.rs")));
+    }
+
+    #[test]
+    fn manifests_are_recognised_and_source_files_are_not() {
+        for name in [
+            "Cargo.toml",
+            "package.json",
+            "go.mod",
+            "pyproject.toml",
+            "build.gradle.kts",
+        ] {
+            assert!(
+                is_project_manifest(&PathBuf::from("some/dir").join(name)),
+                "{name} must be recognised as a project manifest"
+            );
+        }
+        // The negative half: without it, `fn is_project_manifest(_) -> bool { true }`
+        // passes the loop above and makes every directory a nested root.
+        for name in ["main.rs", "Cargo.lock", "README.md", "cargo.toml"] {
+            assert!(
+                !is_project_manifest(&PathBuf::from("some/dir").join(name)),
+                "{name} must NOT be recognised as a project manifest"
+            );
+        }
     }
 }
