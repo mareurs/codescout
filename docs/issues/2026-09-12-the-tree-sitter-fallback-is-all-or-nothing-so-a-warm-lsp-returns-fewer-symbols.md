@@ -152,6 +152,60 @@ per-language half named in § Root cause 3 is untouched, and is now measured rat
 predicted — one Python hit still suppresses whole-tree coverage for Rust. A fix that
 closes it has to make emptiness a **per-language** question, because `matches.is_empty()`
 is computed across every language at once.
+
+**Probe B re-run against BOTH fixes — 2026-09-12, `e14e5609`. Warm did not move, and the
+reason is a third mechanism neither fix addresses.**
+
+Binary identity: pid `4031602`, executing inode equal to on-disk (`190112719`), no
+`(deleted)` marker, built 16:35:45, started 16:36:04, `e14e5609` an ancestor of HEAD.
+**Coldness established by process absence** — `pgrep -c rust-analyzer` returned `0` before
+the cold run — not inferred from the output.
+
+```
+symbols(name="parse", exact=true)
+              pre-fix    after 920eb443    after e14e5609
+  COLD          13            13                13        <- preserved throughout
+  WARM           1             5                 5        <- unchanged by the second fix
+```
+
+Indexing lag is excluded: the warm figure was re-read with rust-analyzer at `4:40`
+uptime and was still `5`.
+
+**What the second fix NOT moving the number tells us**, which is worth more than the
+number. `e14e5609` adds every file of an *unanswered* language to the gap. Warm stayed at
+`5`, so Rust was classified **covered** — `lang_outcome` returned `Some`, meaning
+rust-analyzer answered inside the budget and did not error. The per-language conflation
+was real and is fixed, and it is **not** what loses these eight symbols.
+
+**The measurement that locates the third mechanism.** The same query *without* `exact`
+returns `25` matches over `16` files, and among them are `src/` **type** symbols that only
+the LSP can have supplied — `Parsed` (`src/bin/sync_project.rs`), `ParseWarning`
+(`src/librarian/tools/audit_doc_refs/mod.rs`), `SparseEntry` and `SparseVector`
+(`src/retrieval/embedder.rs`). None of the eight `src/` items named exactly `parse` appears,
+and **every one of those eight is a function**.
+
+The split is therefore by SYMBOL KIND — not by file, not by directory, not by server
+liveness — which is precisely why neither shipped fix reaches it.
+
+**Hypothesis, explicitly NOT measured here.** rust-analyzer's `workspace/symbol` is
+documented to search *types* for a bare query and to need a `#` suffix before it returns
+functions; `client.workspace_symbols(&pattern)` passes `pattern_lower` raw. If that is the
+mechanism, Rust **function** search has been served by the tree-sitter fallback all along,
+and is therefore silently degraded on every query where any other language matches. That
+is a larger claim than this file has evidence for, and confirming it needs the actual
+`workspace/symbol` response, which no probe here reads. Recorded as a direction, not a
+finding.
+
+**A method correction, because it cost two earlier readings.** Several intermediate probes
+today were interpreted with a "range format" tell — `Function 91-132` read as tree-sitter,
+bare `Function 91` as LSP. **That tell is confounded by MATCH COUNT, not by arm:** a result
+set small enough for the focus / auto-inline path renders without a range, a larger one
+renders with it. It never identified the serving arm. The endpoint measurements above are
+unaffected because coldness came from `pgrep`, but nobody re-deriving this should reach for
+the format.
+
+**Status stays open.** Two of three mechanisms are fixed and measured; the third is located
+and unexplained.
 ## Environment
 
 Linux, branch `experiments`, rust-analyzer 1.97.1. Not feature-gated.
