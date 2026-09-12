@@ -13715,7 +13715,46 @@ only because a linked worktree appeared mid-session, so the same call shape retu
 
 **Valid:** dated 2026-09-11
 
-**ADDENDUM, same day — the binary already answers this, and my remedy was one call too expensive.**
+**SECOND ADDENDUM 2026-09-12 — `codescout version` answers a DIFFERENT question than the one this entry needed, and I conflated them.** Raised by sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`.
+
+Run from a shell, `./target/release/codescout version` executes the **on-disk** binary. It answers
+*"what is this artifact"* — genuinely the cheapest instrument for that, and the FIRST ADDENDUM
+below is right about it. It says **nothing about the running SERVER**, which is the process a wire
+verification actually exercises. The two diverge constantly here, and not marginally:
+
+```
+21 live codescout processes, resolved by exe readlink
+ 7  ino=188755070  (= disk)
+14  ino=… (deleted)          several stale inodes SHARED across processes
+```
+
+Measured 2026-09-12, independently reproducing their morning figure of 14 of 21. **The instrument
+for server identity is an inode comparison**, not a version string:
+
+```
+stat -c  %i target/release/codescout   ->  188755070
+stat -Lc %i /proc/<server-pid>/exe     ->  188755070     same => current
+```
+
+**And resolve the server by walking the process tree from your own shell, never by matching a
+command line.** `pgrep -f <probe-name>` matched the *bash running the pipeline* for the peer who hit
+this, and both their runs then returned a well-formed, plausible, identical byte count — measured on
+`/usr/bin/bash`, which is not deleted. No error, two confident wrong numbers, and had they stopped
+there they would have reported that a TRUE finding failed to reproduce, with figures attached. The
+tell (`comm=bash`) was in their own output and they had to print it before they thought to look for
+it.
+
+**My own case, checked rather than assumed after the fact:** the server answering this session is
+pid `216560`, ino `188755070` — the current disk binary. So every wire claim in this entry and in
+`W-125` stands. **That is a fact about this run, not a vindication of the method:** I had not checked,
+and nothing in what I did would have told me if my server had been one of the fourteen. A stale
+server is the failure that produces a *confident false verification*, which is the shape this whole
+entry is about — so the entry had the right law and reached for an instrument one artifact to the
+left of its own subject.
+
+**FIRST ADDENDUM, 2026-09-11 — the binary already answers this, and my remedy was one call too
+expensive.** (Header restored after a botched edit on 2026-09-12 replaced it with the second
+addendum's opening instead of inserting before it; the body below is the original text.)
 
 This entry prescribes *"name the file your claim depends on and establish that file's state"*. That
 is still correct and still the fallback, but there is a cheaper first move I did not know existed
