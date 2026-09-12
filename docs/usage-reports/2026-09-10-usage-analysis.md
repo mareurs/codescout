@@ -38,7 +38,7 @@ the law has not moved the *rate*: it converts errors into repairs, it does not r
 1. **[codescout] The IL-3 source-file gate is the single largest friction: 75 calls.** Three
    distinct hint variants (`grep`, `read_file`/`symbols`, `symbols(name=…)`). One of those 75 was
    a false positive with a filed cause —
-   `docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md`.
+   `docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md`.
 2. **[codescout] `append_entry` unpushed-commits refusal: 19 calls.** Filed high severity
    (`24691692`); the remedy it names is a push, which no session may perform unasked.
 3. **[codescout] `missing 'path' parameter`: 21 calls** (`read_file` 12, `edit_code` 5,
@@ -160,7 +160,7 @@ the escape is not reaching the caller at the moment of refusal.
 ## Improvement candidates, ranked by measured cost
 
 1. **IL-3 source gate (75/3d)** — fix the unexpanded-`$VAR` false positive
-   (`docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md`),
+   (`docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md`),
    then re-measure before touching the heuristic itself. A false-positive fix is safe; loosening
    the heuristic is not.
 2. **`append_entry` push refusal (19/3d)** — move the check to push-time

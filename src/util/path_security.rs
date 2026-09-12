@@ -1803,7 +1803,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // failure `segment_reads_project_source` was added to prevent (25 of 111 measured
     // refusals named an out-of-project path). Reuses the predicate that produced the
     // verdict, so the message cannot drift from it.
-    // BUG docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
+    // BUG docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
     let unresolved_note = if shell_tokens(blocked.as_str())
         .iter()
         .any(|t| has_unexpanded_expansion(t))
@@ -1975,7 +1975,7 @@ fn path_is_within_project(tok: &str, project_root: &Path, cwd: &Cwd) -> bool {
     // rather than falling through and computing
     // `project_root.join("$SP/x.sh").starts_with(project_root) == true`: the right
     // answer for a reason the code never had, which the refusal text then repeated.
-    // BUG docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
+    // BUG docs/issues/archive/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
     if has_unexpanded_expansion(tok) {
         return true;
     }
@@ -3197,7 +3197,7 @@ mod tests {
         );
     }
 
-    /// THE DEFECT (`34fd7440896f529e`): `cat $SP/x.sh` is refused as in-project
+    /// THE DEFECT (`bcf2c5b5507ca143`): `cat $SP/x.sh` is refused as in-project
     /// source access even when `$SP` points outside the project.
     ///
     /// `shell_tokens` does not expand, so `path_is_within_project` joins the literal

@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
 - run-command
@@ -105,25 +105,64 @@ which is why this survived it.
 
 ## Fix
 
-Not attempted. The shape consistent with the sibling's fix is to classify a token
-containing an unexpanded expansion (`$`, `${`, backtick, `$(`) as unresolvable and
-`return true` **on the conservative branch**, so the blocking verdict is reached for the
-stated reason rather than by a false join. That leaves behaviour unchanged and makes the
-predicate honest, which is the cheap half.
+Fixed on `experiments` — SHA `41d5a1e30f93c8f25ebc682bd1628a20572cf7ab`, patch-id
+`b16161c458d3fd1219418309946b027ccbfc47c5`.
 
-Making such a path *allowed* is the expensive half and probably wrong: resolving `$SP`
-would make the gate's verdict depend on the environment, which the sibling's fix rejected
-explicitly for `cd ~` on hermeticity grounds (`src/util/path_security.rs` has no
-`EnvGuard` and reads `HOME` directly). The affordable remedy is a clearer refusal, not a
-resolution.
+**⚠ THE FRAMING BELOW WAS TOO NARROW, and the correction changed what got built.** This section
+read *"the value is that the predicate stops computing a confident wrong reason"* — a no-behaviour-
+change tidy-up. Reading `segment_reads_project_source`'s own doc comment while fixing it shows the
+stakes are higher: that function was added 2026-08-16 **specifically** to stop refusing
+out-of-project paths with a remedy that *"could not be followed"*, measuring **25 of 111**
+`il3_shell_on_source` refusals that named a path outside the project, and calling that *"a worse
+failure than a strict gate"*. **This bug is that fix's residual** — the same unfollowable refusal,
+reappearing through a token the resolver cannot read. So the REMEDY TEXT is the load-bearing half,
+not the predicate.
 
+Two changes, sharing **one** predicate:
+
+1. `path_is_within_project` reaches its conservative branch explicitly when the token carries
+   `$VAR` / `${VAR}` / `$(cmd)` / a backtick, instead of falling through to
+   `project_root.join("$SP/x.sh").starts_with(project_root)` — the right answer for a reason the
+   code never had.
+2. `check_source_file_access` says so in the refusal **and names the action that works**: write the
+   path out literally. Probe B above proves that is checked and allowed, so the caller is sent
+   somewhere they can actually go.
+
+`has_unexpanded_expansion` is shared by both on purpose: a second copy of the test would be free to
+disagree with the verdict it describes. It is deliberately crude (`$` or backtick anywhere)
+because both callers use it only to reach the BLOCKING verdict they would have reached anyway — it
+must never be used to open the gate.
+
+**Still not permissive, and that part of the original plan stands.** Resolving `$SP` would make the
+verdict depend on the environment, which the sibling `cd`-target fix rejected on hermeticity
+grounds (this module reads `HOME` directly and has no `EnvGuard`).
 ## Tests added
 
-None — not fixed. A regression test would assert
-`path_is_within_project("$SP/x.sh", root, &Cwd::At(root))` reaches the conservative branch
-rather than the join, which is a claim about the *reason* and so needs the branch to be
-observable.
+Three, in `src/util/path_security.rs`. The filing said a regression test *"needs the branch to be
+observable"* — it is now, because the fix makes the refusal TEXT differ, so the reason is
+assertable without exposing the branch itself.
 
+- `an_unexpanded_expansion_says_the_path_was_never_resolved` — **observed RED before the fix**, and
+  its panic printed the defect verbatim: `cat $SP/probe.sh` answered *"use read_file(path,
+  start_line, end_line) or symbols(path)…"*, neither of which can serve a path outside the project.
+- `a_resolved_in_project_read_carries_no_unresolved_caveat` — **THE CONTROL, and the reason the
+  first test discriminates.** A note emitted unconditionally would satisfy that assertion while
+  saying nothing, so an ordinary RESOLVED read is pinned to carry no caveat.
+- `an_unexpanded_expansion_still_blocks` — the verdict must not move, on all three expansion forms
+  (`$VAR`, `${VAR}`, backtick). This fix makes the gate honest, not more permissive.
+
+`source_file_access_allows_a_source_read_outside_the_project` — the 2026-08-16 carve-out this fix
+builds on — was checked green by name too, so the thing being extended is not regressed.
+
+**GATE GREEN ON AN ISOLATED WORKTREE, stated rather than implied.** The shared checkout could not be
+made green: this was the fifth in-flight blocker of the session, a `RecoverableError`/`anyhow`
+mismatch in a peer's uncommitted `src/librarian/tools/mod.rs`. Verified on `git worktree add
+--detach … HEAD` with only this diff applied — `cargo fmt --check` clean, clippy `--workspace
+--all-targets --features local-embed` clean, lean lane **3807**, default lane **5830**, default
+last. All four tests above read green BY NAME rather than by total.
+
+The control that the isolation did not simply skip the broken area: **1155** `librarian::tools`
+tests ran in that lane. The peer's breakage lived only in their uncommitted copy.
 ## Workarounds
 
 Write the path literally (probe B), or pass `acknowledge_risk: true`. For files inside the
