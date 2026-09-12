@@ -257,9 +257,25 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
                 .collect();
             let total_anchored = anchor_file.anchors.len();
             let total_stale = report.stale_files.len();
+            // Name the class, not just the count. `total_stale` spans two kinds and a
+            // reader acts on them differently: a CHANGED anchor means "re-read this and
+            // check the claim", a DELETED one means "this may describe something that no
+            // longer exists". Publishing the total under either class's name is wrong for
+            // the other, so the mixed case names both while the pure cases stay exactly as
+            // short as before. The arrays below already carry this split; this keeps a
+            // reader who stops at the sentence from planning the wrong work.
+            // docs/issues/archive/2026-09-08-staleness-reason-says-changed-but-the-count-includes-deleted.md
+            let reason = match (changed.len(), deleted.len()) {
+                (_, 0) => format!("{total_stale} of {total_anchored} anchored files changed"),
+                (0, _) => format!("{total_stale} of {total_anchored} anchored files deleted"),
+                (c, d) => format!(
+                    "{total_stale} of {total_anchored} anchored files stale \
+                     ({c} changed, {d} deleted)"
+                ),
+            };
             let mut entry = json!({
                 "topic": topic,
-                "reason": format!("{} of {} anchored files changed", total_stale, total_anchored),
+                "reason": reason,
             });
             if !changed.is_empty() {
                 entry["changed_files"] = json!(changed);
@@ -586,6 +602,103 @@ mod tests {
 
         assert!(result["fresh"].as_array().unwrap().is_empty());
         assert!(result["untracked"].as_array().unwrap().is_empty());
+    }
+
+    /// The `reason` string must not call a DELETED anchor "changed". The two say
+    /// different things to the reader: a changed anchor means "re-read this and check
+    /// the claim"; a deleted one means "this memory may describe something that no
+    /// longer exists", which is usually the more urgent and is acted on differently.
+    ///
+    /// Load-bearing fixture detail: the memory anchors TWO files, of which exactly one
+    /// is mutated and exactly one is deleted. Collapse it to a single anchor of either
+    /// kind and the test stops discriminating — a one-deleted fixture would also pass
+    /// against a string that hardcodes "deleted", and a one-changed fixture passes
+    /// against today's buggy "changed" — so the mixed case is the only shape that
+    /// separates a correct summary from either hardcoding.
+    ///
+    /// Asserts on the NAME of each failure state rather than on a count, per
+    /// CLAUDE.md § Testing Discipline: the discriminator is already in the output.
+    /// docs/issues/archive/2026-09-08-staleness-reason-says-changed-but-the-count-includes-deleted.md
+    #[test]
+    fn check_all_memories_stale_reason_does_not_call_a_deleted_anchor_changed() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
+        std::fs::write(root.join("src/kept.rs"), "version 1").unwrap();
+        std::fs::write(root.join("src/gone.rs"), "doomed").unwrap();
+        let content = "References `src/kept.rs` and `src/gone.rs`.";
+        let anchors = seed_anchors(root, content).unwrap();
+        assert_eq!(
+            anchors.anchors.len(),
+            2,
+            "fixture must anchor both files, or the mixed case is not exercised"
+        );
+
+        std::fs::write(memories_dir.join("overview.md"), content).unwrap();
+        let sidecar_path = anchor_path_for_topic(&memories_dir, "overview");
+        write_anchor_file(&sidecar_path, &anchors).unwrap();
+
+        // One changes, one disappears.
+        std::fs::write(root.join("src/kept.rs"), "version 2").unwrap();
+        std::fs::remove_file(root.join("src/gone.rs")).unwrap();
+
+        let result = check_all_memories(root, &memories_dir).unwrap();
+        let stale = result["stale"].as_array().unwrap();
+        assert_eq!(stale.len(), 1);
+        let reason = stale[0]["reason"].as_str().unwrap();
+
+        // The decomposition the response already carries, restated in the summary.
+        assert_eq!(stale[0]["changed_files"].as_array().unwrap().len(), 1);
+        assert_eq!(stale[0]["deleted_files"].as_array().unwrap().len(), 1);
+
+        assert!(
+            reason.contains("deleted"),
+            "a deleted anchor must be named as deleted, not folded into a \
+             changed-count: {reason}"
+        );
+        assert!(
+            !reason.contains("2 of 2 anchored files changed"),
+            "the total stale count must not be published under the name of one of its \
+             two classes: {reason}"
+        );
+    }
+
+    /// Over-match guard for the test above: when every stale anchor really did change,
+    /// the summary must still say so plainly and must NOT volunteer "deleted". Without
+    /// this, a fix that unconditionally names both classes — or renames everything to
+    /// the vaguer "stale" — would satisfy the mixed-case test while making the common
+    /// single-class case less precise than it is today.
+    #[test]
+    fn check_all_memories_stale_reason_says_changed_when_nothing_was_deleted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
+        std::fs::write(root.join("src/lib.rs"), "version 1").unwrap();
+        let content = "References `src/lib.rs`.";
+        let anchors = seed_anchors(root, content).unwrap();
+
+        std::fs::write(memories_dir.join("overview.md"), content).unwrap();
+        let sidecar_path = anchor_path_for_topic(&memories_dir, "overview");
+        write_anchor_file(&sidecar_path, &anchors).unwrap();
+
+        std::fs::write(root.join("src/lib.rs"), "version 2").unwrap();
+
+        let result = check_all_memories(root, &memories_dir).unwrap();
+        let reason = result["stale"][0]["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("changed"),
+            "an all-changed staleness must still be named as changed: {reason}"
+        );
+        assert!(
+            !reason.contains("deleted"),
+            "nothing was deleted, so the summary must not say so: {reason}"
+        );
     }
 
     /// A nested topic (subdir/topic.md) with no sidecar → appears in
