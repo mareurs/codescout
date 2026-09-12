@@ -1796,6 +1796,26 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             .to_string(),
     };
 
+    // An unexpanded expansion in the blocked clause means `path_is_within_project` took
+    // its conservative branch: the gate never resolved where the path points. Say so,
+    // because the remedy above is UNFOLLOWABLE when the path is outside the project —
+    // `read_file`/`symbols` resolve against the ACTIVE PROJECT, which is the exact
+    // failure `segment_reads_project_source` was added to prevent (25 of 111 measured
+    // refusals named an out-of-project path). Reuses the predicate that produced the
+    // verdict, so the message cannot drift from it.
+    // BUG docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
+    let unresolved_note = if shell_tokens(blocked.as_str())
+        .iter()
+        .any(|t| has_unexpanded_expansion(t))
+    {
+        "NOTE: this clause contains an unexpanded shell expansion, so the gate could not \
+         resolve where the path points and blocked conservatively. If it resolves OUTSIDE \
+         the project, re-run with the path written out literally — an absolute path outside \
+         the root is checked and allowed. "
+    } else {
+        ""
+    };
+
     // Name the offending clause, mirroring `detect_il3_violation`'s pattern: a compound
     // command still refuses in full (running the permitted clauses anyway is a worse
     // contract -- the caller could not tell which side effects happened), but the caller
@@ -1819,7 +1839,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
         String::new()
     };
 
-    Some(format!("{clause_note}{remedy}"))
+    Some(format!("{clause_note}{unresolved_note}{remedy}"))
 }
 
 /// The shell's working directory for a segment, as far as the gate can tell.
@@ -1917,6 +1937,23 @@ fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, 
     })
 }
 
+/// Whether `tok` carries a shell expansion this gate cannot resolve — `$VAR`,
+/// `${VAR}`, `$(cmd)`, or a backtick substitution.
+///
+/// ONE predicate with TWO callers, deliberately: [`path_is_within_project`] uses it to
+/// reach its conservative branch for a stated reason instead of joining the literal
+/// token onto the project root, and [`check_source_file_access`] uses it to say so in
+/// the refusal. Sharing it is what stops the message drifting from the verdict that
+/// produced it — a second copy of this test would be free to disagree.
+///
+/// Deliberately crude. A filename may legally contain `$` on Unix, so this
+/// over-matches; that costs nothing, because both callers use it only to reach the
+/// BLOCKING verdict they would have reached anyway. It must never be used to open the
+/// gate.
+fn has_unexpanded_expansion(tok: &str) -> bool {
+    tok.contains('$') || tok.contains('`')
+}
+
 /// Whether a path token resolves inside `project_root`, given the shell's
 /// effective working directory for the segment.
 ///
@@ -1932,6 +1969,16 @@ fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, 
 ///
 /// BUG docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
 fn path_is_within_project(tok: &str, project_root: &Path, cwd: &Cwd) -> bool {
+    // Nothing in this gate expands, so a token carrying `$VAR` / `${VAR}` / `$(cmd)`
+    // / a backtick names a path we have not seen. Refuse to guess, in the same
+    // direction as every other unresolvable case — but SAY SO by taking this branch,
+    // rather than falling through and computing
+    // `project_root.join("$SP/x.sh").starts_with(project_root) == true`: the right
+    // answer for a reason the code never had, which the refusal text then repeated.
+    // BUG docs/issues/2026-09-10-source-gate-joins-an-unexpanded-var-path-onto-the-project-root.md
+    if has_unexpanded_expansion(tok) {
+        return true;
+    }
     let expanded: PathBuf = match tok.strip_prefix("~/") {
         Some(rest) => match std::env::var_os("HOME") {
             Some(home) => PathBuf::from(home).join(rest),
@@ -3147,6 +3194,73 @@ mod tests {
         assert!(
             check_source_file_access("cat /home/u/work/otherrepo/src/main.rs", root).is_none(),
             "a sibling repo is not the active project"
+        );
+    }
+
+    /// THE DEFECT (`34fd7440896f529e`): `cat $SP/x.sh` is refused as in-project
+    /// source access even when `$SP` points outside the project.
+    ///
+    /// `shell_tokens` does not expand, so `path_is_within_project` joins the literal
+    /// token `$SP/x.sh` onto the project root, finds no `..` component, and computes
+    /// `starts_with(project_root) == true` — a confident verdict about a path it never
+    /// resolved. The answer coincides with the conservative one, so the wrong reason is
+    /// invisible in the outcome.
+    ///
+    /// **Blocking is defensible; the REMEDY is not.** The gate cannot know where the
+    /// token points, so refusing is the right verdict. But the hint routes to
+    /// `read_file`/`symbols`, which resolve against the ACTIVE PROJECT and cannot serve
+    /// a path outside it — which is exactly the failure
+    /// `segment_reads_project_source` was added to stop on 2026-08-16 (25 of 111
+    /// measured refusals named an out-of-project path), reappearing through a token the
+    /// resolver cannot read.
+    #[test]
+    fn an_unexpanded_expansion_says_the_path_was_never_resolved() {
+        let hint = check_source_file_access_at_root("cat $SP/probe.sh")
+            .expect("an unexpanded token with a source extension still blocks");
+        assert!(
+            hint.contains("unexpanded shell expansion"),
+            "the refusal must say the path was never RESOLVED, because the remedy it \
+             offers is unfollowable when the path is outside the project: {hint}"
+        );
+        assert!(
+            hint.contains("literally"),
+            "and it must name the action that actually works — writing the path out, \
+             which IS checked and allowed by \
+             `source_file_access_allows_a_source_read_outside_the_project`: {hint}"
+        );
+    }
+
+    /// THE CONTROL, and it is the whole reason the test above discriminates. A note
+    /// emitted unconditionally would satisfy that assertion while saying nothing, so
+    /// pin that an ordinary RESOLVED read does not carry the caveat.
+    #[test]
+    fn a_resolved_in_project_read_carries_no_unresolved_caveat() {
+        let hint = check_source_file_access_at_root("cat src/main.rs")
+            .expect("an in-project source read still blocks");
+        assert!(
+            !hint.contains("unexpanded shell expansion"),
+            "this path WAS resolved — claiming otherwise makes the caveat noise and \
+             stops it marking the case it exists for: {hint}"
+        );
+    }
+
+    /// The verdict itself must not move. This fix makes the gate honest about WHY it
+    /// blocked, not more permissive: resolving `$SP` would make the verdict depend on
+    /// the environment, which the sibling `cd`-target fix rejected on hermeticity
+    /// grounds (this module reads `HOME` directly and has no `EnvGuard`).
+    #[test]
+    fn an_unexpanded_expansion_still_blocks() {
+        assert!(
+            check_source_file_access_at_root("cat $SP/probe.sh").is_some(),
+            "behaviour is unchanged — conservative in the blocking direction"
+        );
+        assert!(
+            check_source_file_access_at_root("cat ${SP}/probe.sh").is_some(),
+            "the braced form is the same unresolvable token"
+        );
+        assert!(
+            check_source_file_access_at_root("cat `pwd`/probe.sh").is_some(),
+            "so is a backtick substitution"
         );
     }
 
