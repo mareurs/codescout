@@ -241,10 +241,10 @@ At startup and whenever `workspace(action: activate)` is called, codescout:
 2. If found, parses it. Any section that is missing falls back to its defaults.
 3. If not found, constructs a default config using the directory name as the project name.
 
-The effective configuration is always visible via the `workspace(action: status)` tool:
+The effective configuration is always visible via the `workspace(action="status")` tool:
 
 ```json
-{ "name": "workspace(action: status)", "arguments": {} }
+{ "name": "workspace", "arguments": { "action": "status" } }
 ```
 
 Changes to `project.toml` take effect the next time the project is activated — either by

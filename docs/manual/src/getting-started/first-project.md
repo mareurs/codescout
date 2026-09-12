@@ -131,7 +131,7 @@ src/server.rs
 Locate every definition of a symbol across the entire project:
 
 ```json
-{ "name": "symbols", "arguments": { "pattern": "main" } }
+{ "name": "symbols", "arguments": { "name": "main" } }
 ```
 
 To see the full function body alongside the location, add `include_body`:
@@ -139,7 +139,7 @@ To see the full function body alongside the location, add `include_body`:
 ```json
 {
   "name": "symbols",
-  "arguments": { "pattern": "main", "include_body": true }
+  "arguments": { "name": "main", "include_body": true }
 }
 ```
 

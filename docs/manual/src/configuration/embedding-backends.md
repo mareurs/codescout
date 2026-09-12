@@ -267,7 +267,7 @@ in `project.toml`, you must rebuild the index with the `force` flag to avoid mix
 from different models:
 
 ```json
-{ "name": "index(action: build)", "arguments": { "force": true } }
+{ "name": "index", "arguments": { "action": "build", "force": true } }
 ```
 
 codescout will warn if it detects a mismatch between the configured model and the model

@@ -25,7 +25,7 @@ Seven features built on a shared heading-parsing foundation:
 |------|------|---------|
 | 1 | `read_file(path)` | Get heading map — see all sections |
 | 2 | `read_file(path, headings=[...])` | Read target sections (one call) |
-| 3a | `edit_file(path, heading, action, content)` | Whole-section: replace, insert, remove |
+| 3a | `edit_file(path, heading, action, body)` | Whole-section: replace, insert, remove |
 | 3b | `edit_file(path, action="edit", heading, old_string, new_string)` | Surgical: scoped string replacement |
 | 3c | `edit_file(path, edits=[...])` | Batch: multiple edits, atomic |
 
@@ -39,7 +39,7 @@ numbers.
 
 > This grammar shipped as the standalone `edit_section` tool, was renamed to
 > `edit_markdown` in v0.11, and was folded into `edit_file` (Task 8) —
-> `heading`/`action`/`content` on `edit_file` now triggers the same logic that
+> `heading`/`action`/`body` on `edit_file` now triggers the same logic that
 > `edit_markdown` used to. `read_markdown` was separately folded into
 > `read_file` (heading-addressed by default on markdown paths). Behavior is
 > unchanged across both folds; only the callable tool name is.
@@ -51,7 +51,7 @@ numbers.
 | `path` | string | yes | File path relative to project root |
 | `heading` | string | yes | Section heading to target (e.g. `## Auth`) |
 | `action` | string | yes | `replace`, `insert_before`, `insert_after`, or `remove` |
-| `content` | string | for replace/insert | New content |
+| `body` | string | for replace/insert | New section body. `content` is accepted as an alias; nested `edits[]` items still use `content`. |
 
 **Actions:**
 
@@ -69,7 +69,7 @@ numbers.
   "path": "docs/ROADMAP.md",
   "heading": "## What's Next",
   "action": "replace",
-  "content": "- Feature A\n- Feature B\n- Feature C\n"
+  "body": "- Feature A\n- Feature B\n- Feature C\n"
 }
 ```
 
@@ -80,7 +80,7 @@ numbers.
   "path": "docs/ROADMAP.md",
   "heading": "## What's Built",
   "action": "insert_after",
-  "content": "## What's In Progress\n\n- Working on X\n- Prototyping Y\n"
+  "body": "## What's In Progress\n\n- Working on X\n- Prototyping Y\n"
 }
 ```
 

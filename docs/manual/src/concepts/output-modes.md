@@ -76,7 +76,7 @@ Pass `detail_level: "full"` to any tool that supports it:
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "verify_token",
+    "name": "verify_token",
     "path": "src/services/auth.rs",
     "include_body": true,
     "detail_level": "full"
@@ -191,9 +191,9 @@ When `next_offset` is absent (or `null`), you are on the last page.
 **Paginating through results:**
 
 ```json
-{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 0,  "limit": 50 } }
-{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 50, "limit": 50 } }
-{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 100, "limit": 50 } }
+{ "tool": "symbols", "arguments": { "name": "Error", "detail_level": "full", "offset": 0,  "limit": 50 } }
+{ "tool": "symbols", "arguments": { "name": "Error", "detail_level": "full", "offset": 50, "limit": 50 } }
+{ "tool": "symbols", "arguments": { "name": "Error", "detail_level": "full", "offset": 100, "limit": 50 } }
 ```
 
 ## Tools That Support Both Modes

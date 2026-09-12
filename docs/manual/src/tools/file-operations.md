@@ -153,7 +153,7 @@ Hidden files and paths matched by `.gitignore` are excluded automatically.
 |------|------|----------|---------|-------------|
 | `pattern` | string | yes | — | Regular expression to search for |
 | `path` | string | no | project root | Directory to restrict the search to |
-| `max_results` | integer | no | `50` | Maximum number of matching lines to return |
+| `limit` | integer | no | `50` | Maximum number of matching lines to return |
 
 **Example:**
 
@@ -161,7 +161,7 @@ Hidden files and paths matched by `.gitignore` are excluded automatically.
 {
   "pattern": "fn\\s+validate_\\w+",
   "path": "src",
-  "max_results": 20
+  "limit": 20
 }
 ```
 
@@ -204,15 +204,15 @@ The search walks the directory tree using the same `.gitignore`-aware walker as 
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `pattern` | string | yes | — | Glob pattern (e.g. `**/*.rs`, `src/**/mod.rs`) |
+| `glob` | string | yes | — | Glob pattern (e.g. `**/*.rs`, `src/**/mod.rs`) |
 | `path` | string | no | project root | Directory to search within |
-| `max_results` | integer | no | `100` | Maximum number of file paths to return |
+| `limit` | integer | no | `100` | Maximum number of file paths to return |
 
 **Example:**
 
 ```json
 {
-  "pattern": "**/*.toml",
+  "glob": "**/*.toml",
   "path": "."
 }
 ```
@@ -233,7 +233,7 @@ The search walks the directory tree using the same `.gitignore`-aware walker as 
 
 ```json
 {
-  "pattern": "**/test_*.py",
+  "glob": "**/test_*.py",
   "path": "tests"
 }
 ```
@@ -242,7 +242,7 @@ The glob is matched against the path relative to the search directory, so `**/*.
 
 **Tips:**
 
-- Prefer `tree` (with glob) over `tree` when you are looking for files by name — the glob match is more expressive than scanning a directory tree manually.
+- Prefer `tree` with a `glob` over a bare `tree` walk when you are looking for files by name — the glob match is more expressive than scanning a directory tree manually.
 - Use `grep` when you need to find files by their contents rather than their names.
 - The `**` wildcard matches across directory boundaries. Use it for language-wide searches like `**/*.rs` or to locate files with a specific name anywhere in the tree: `**/Makefile`.
 

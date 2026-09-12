@@ -40,10 +40,15 @@ code at a glance.
 ## Building a Library Index
 
 Semantic search over library code requires an embedding index, just like project
-code. Build one with `index(action: build)` pointed at the library's root path:
+code. `index` has no `path` parameter — register the library first, then build its
+index by naming it with `scope`:
 
 ```json
-{ "tool": "index(action: build)", "arguments": { "path": "/path/to/tokio-1.35.1/" } }
+{ "tool": "library", "arguments": { "action": "register", "path": "/path/to/tokio-1.35.1/" } }
+```
+
+```json
+{ "tool": "index", "arguments": { "action": "build", "scope": "lib:tokio" } }
 ```
 
 This is a one-time cost per library. The index persists in
@@ -95,7 +100,7 @@ manual steps required.
 To build or rebuild a library's index:
 
 ```json
-{ "tool": "index(action: build)", "arguments": { "scope": "lib:tokio" } }
+{ "tool": "index", "arguments": { "action": "build", "scope": "lib:tokio" } }
 ```
 
 ## Version Tracking and Staleness Hints

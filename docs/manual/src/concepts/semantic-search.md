@@ -58,9 +58,9 @@ scores across different embedding models; they are not on the same scale.
 
 | You know...                    | Use                                              |
 |--------------------------------|--------------------------------------------------|
-| The exact name                 | `symbols(pattern)`                           |
+| The exact name                 | `symbols(name)`                           |
 | The file it's in               | `symbols(path)`                             |
-| A text fragment                | `grep(regex)`                          |
+| A text fragment                | `grep(pattern)`                          |
 | The concept, not the name      | `semantic_search(query)`                         |
 | The concept, inside a library  | `semantic_search(query, scope: "lib:<name>")`    |
 
@@ -72,24 +72,25 @@ and scans all stored vectors). Prefer symbol tools when you know the name.
 Build the index once before first use:
 
 ```json
-{ "tool": "index(action: build)", "arguments": {} }
+{ "tool": "index", "arguments": { "action": "build" } }
 ```
 
 Check its health:
 
 ```json
-{ "tool": "workspace(action: status)", "arguments": {} }
+{ "tool": "index", "arguments": { "action": "status" } }
 ```
 
 The index is stored in `.codescout/embeddings.db` and excluded from version
 control by default. Each team member builds their own local copy.
 
-**Drift detection:** `workspace(action: status)` can report per-file drift scores — a measure
-of how much file content has changed since it was last indexed. Pass `threshold`
-to surface files with high drift:
+**Coverage:** `index(action="status")` reports what the store HOLDS — file and
+chunk counts, `integrity`, and a `git_sync` block naming how many commits the
+index is behind HEAD. That is not proof it holds everything eligible, so for
+coverage against the indexer's own walk use `index(action="verify")`:
 
 ```json
-{ "tool": "workspace(action: status)", "arguments": { "threshold": 0.3 } }
+{ "tool": "index", "arguments": { "action": "verify" } }
 ```
 
 Switching embedding models invalidates the entire index — all chunks must be

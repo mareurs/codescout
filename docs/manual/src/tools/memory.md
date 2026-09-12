@@ -127,10 +127,10 @@ In [workspaces](../concepts/multi-project-workspace.md), scope memory to a
 specific project:
 
 ```json
-{ "tool": "memory", "arguments": { "action": "read", "project": "backend", "topic": "architecture" } }
+{ "tool": "memory", "arguments": { "action": "read", "project_id": "backend", "topic": "architecture" } }
 ```
 
-Omitting `project` reads/writes workspace-level memory.
+Omitting `project_id` reads/writes workspace-level memory.
 
 ---
 
@@ -204,7 +204,6 @@ Search semantic memories by meaning.
 | `query` | string | **yes** | — | Natural language query |
 | `limit` | integer | no | `5` | Max results |
 | `bucket` | string | no | — | Filter to a specific bucket |
-| `detail_level` | string | no | compact | Pass `"full"` to include complete memory content instead of a truncated preview |
 
 **Example:**
 

@@ -11,8 +11,8 @@ Without guardrails, code intelligence tools can produce enormous output:
 
 | Tool | Worst case |
 |------|------------|
-| `symbols(dir)` | Walks the entire project, dumps every symbol in every file |
-| `symbols(pattern)` | Project-wide search with thousands of matches |
+| `symbols(path)` | Walks the entire project, dumps every symbol in every file |
+| `symbols(name)` | Project-wide search with thousands of matches |
 | `references` | Popular symbols referenced in hundreds of files |
 | `tree(recursive=true)` | Full directory tree of a large monorepo |
 | `run_command("git blame file")` (no line range) | Every line in a long file |
@@ -149,7 +149,7 @@ consumed: a few dozen tokens.
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "verify_token",
+    "name": "verify_token",
     "path": "src/services/auth.rs",
     "include_body": true,
     "detail_level": "full"

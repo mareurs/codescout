@@ -10,14 +10,14 @@ keeps context usage low.
 You have a file path, function name, class name, or method name. Use the
 structure-aware tools that navigate by name directly.
 
-**`symbols(pattern)`** — locate a symbol by name substring across the
+**`symbols(name)`** — locate a symbol by name substring across the
 project or within a specific file. Fast because it goes through the language
 server index.
 
 ```json
 {
   "tool": "symbols",
-  "arguments": { "pattern": "AuthService", "path": "src/services/auth.rs" }
+  "arguments": { "name": "AuthService", "path": "src/services/auth.rs" }
 }
 ```
 
@@ -47,7 +47,7 @@ body:
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "verify_token",
+    "name": "verify_token",
     "path": "src/services/auth.rs",
     "include_body": true,
     "detail_level": "full"
@@ -151,11 +151,11 @@ tracing usages of a known symbol.
 | You know... | Start with |
 |-------------|------------|
 | File path | `symbols(path)` |
-| Function/class name | `symbols(pattern)` |
+| Function/class name | `symbols(name)` |
 | Who calls a function | `references(symbol, path)` |
 | A concept or behaviour | `semantic_search(query)` |
 | Nothing (unfamiliar area) | `tree` → `symbols` → `semantic_search` |
-| Exact string or import | `grep(regex)` |
+| Exact string or import | `grep(pattern)` |
 
 ## Further Reading
 

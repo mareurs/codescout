@@ -11,20 +11,30 @@ All symbol navigation tools require an LSP server for the target language. If
 the LSP server is not running or is still indexing, some tools fall back to
 tree-sitter for basic results.
 
-**Scope parameter:** `symbols`, `symbols`, and `references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
+**Scope parameter:** `symbols` and `references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
 
 ### Workspace project scoping
 
-In a [multi-project workspace](../concepts/multi-project-workspace.md), pass
-`project` to scope operations to a specific project:
+In a [multi-project workspace](../concepts/multi-project-workspace.md), the symbol
+tools have **no `project` parameter**. Scope them with `path`, which resolves
+against the active project:
 
 ```json
-{ "tool": "symbols", "arguments": { "pattern": "UserService", "project": "backend" } }
+{ "tool": "symbols", "arguments": { "name": "UserService", "path": "backend/src" } }
 ```
 
-`scope` and `project` are independent axes: `scope` selects project vs library
-code, `project` selects which project in the workspace. Omitting `project`
-uses the workspace-level context.
+To resolve a single call against a different workspace root entirely, pass
+`workspace` with an absolute path — that pins one call without changing the
+server's active project, which `workspace(action="activate")` does process-wide:
+
+```json
+{ "tool": "symbols", "arguments": { "name": "UserService", "workspace": "/abs/path/to/backend" } }
+```
+
+`scope` is a different axis and is not a project selector: it chooses project vs
+library code (`project` | `libraries` | `all` | `lib:<name>`). The tools that do
+take a project selector are `semantic_search` and `memory`, and the parameter
+there is `project_id`.
 
 > **See also:** [Tool Selection](../concepts/tool-selection.md) — when to reach
 > for symbol tools vs semantic search vs text search. [Progressive Disclosure](../concepts/progressive-disclosure.md) — how `detail_level` controls output volume for these tools.
@@ -128,7 +138,7 @@ their source body.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `pattern` | string | yes | — | Symbol name or substring (case-insensitive) |
+| `name` | string | yes | — | Symbol name or substring (case-insensitive) |
 | `path` | string | no | — | Restrict to this file or glob pattern |
 | `include_body` | boolean | no | false | Include source body in results |
 | `depth` | integer | no | 0 | Depth of children to include |
@@ -142,7 +152,7 @@ their source body.
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "authenticate_user"
+    "name": "authenticate_user"
   }
 }
 ```
@@ -171,7 +181,7 @@ their source body.
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "authenticate_user",
+    "name": "authenticate_user",
     "path": "src/auth/service.rs",
     "include_body": true,
     "detail_level": "full"
@@ -204,7 +214,7 @@ their source body.
 {
   "tool": "symbols",
   "arguments": {
-    "pattern": "test_",
+    "name": "test_",
     "path": "tests/**/*.rs"
   }
 }
