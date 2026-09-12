@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 135
-entry_high_water_W: 126
+entry_high_water_W: 127
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -187,6 +187,7 @@ entry_high_water_W: 126
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-127 | 2026-09-12 | high | **Nearly filed a phantom bug against `grep` — the corpus moved mid-read, and the check was two commands.** Two reads of ONE line disagreed a minute apart: substring grep saw `{group_by_file, render_grouped}` at `display.rs:109`, a whole-word grep matched nothing there, and `read_file` saw `{group_by_file_ranked, …}`. My first hypothesis was that `grep` had mis-rendered the line. `git status` + `stat` showed the file DIRTY with an mtime **2 seconds** before my check — a peer wrote it while I was reading. Settled against both trees: HEAD has bare `group_by_file` (2 occurrences, 0 ranked), the worktree has the ranked variant, uncommitted. The instrument was right at each instant. | A bug filed against a core tool for returning content not in the file — **unreproducible by construction**, because the worktree had already moved past the state that produced it. It would have sat open as a phantom, and the next session re-running the grep would get the new answer and be unable to tell fixed from flaky from never-real. `CLAUDE.md` names the tell (line drift means the corpus MOVED, not that the reader ERRED) and records 3 of 4 sessions reaching for *"they made a mistake"*; I reached for *"the TOOL made a mistake"*, which is the same move aimed at an instrument — worse, because a person can correct the record and a tool accusation just accumulates. Also **corrects `codescout-75`'s self-criticism in their favour**: their withdrawn claim is true of the worktree and false of HEAD, so both they and the agent contradicting them were right about different trees; only their wrong-file grep was an error. Operational half, cheaper than the habit it replaces: name the TREE, not just the instant — `git show HEAD:<path>` is one command and removes the ambiguity a timestamp only dates. | validated |
 | W-126 | 2026-09-12 | med | **Scouted the caller's INPUT, not its signature, and it inverted the implementation.** Fixing `447d98db54393338` meant giving `edit_file`'s keyword scan literal-awareness by reusing `src/util/text.rs`'s scanner rather than writing a second copy of the literal rules. Its existing caller threads `Scan` state line to line — correct for `literal_continuation_mask`, which walks real blocks. Reading the NEW caller's input showed `find_def_keyword` receives `lines_only_in(old, new)` joined: the lines an edit CHANGED, which are never contiguous source. So `blank_non_code` resets to `Scan::Code` per line, and the choice is annotated where it is made rather than left to look like an oversight. | Carried state would blank real code lying between two unrelated quotes — a **false negative**, which the module's stated asymmetry at `:45-49` calls the direction that corrupts rather than annoys, so it surfaces as no complaint from anyone. It would also have passed the entire suite: every existing scanner test feeds a real contiguous block, where carrying state is correct, so no fixture in the repo can express the failure. The guard that now reds on it, `blank_non_code_does_not_carry_literal_state_between_lines`, was written from the scout and not from an observed red — the one shape this ledger keeps finding that a test run cannot hand you. | validated |
 | W-125 | 2026-09-11 | high | **Ran the reproduction the FILE states, and the confirmation identified the binary as a side effect.** Closing `1e11cf9357136e0e` after `2183a058`, I ran the bug file's own stated reproduction (`doc(find, rel_path="docs/issues", limit=200)`) rather than one composed from its title. The envelope now carries the tool's own `corrections`; the same call earlier in the session returned only the four fixed envelope keys. Two properties make that a measurement rather than a reassurance: the OLD build cannot emit that key on this call by construction (fixed four-key literal, and its only `corrections` write was gated on a param alias that does not fire here), so the green is a POSITIVE binary identification and the release-binary mtime never had to be consulted — this repo already has a recon commit titled *"an mtime that proved nothing"*; and the control is an ABSENCE assertion, `param_aliases` must NOT be present, because two unrelated mechanisms write the key `corrections`. Bounded deliberately: establishes the no-alias path only. The both-fire merge arm is unit-tested, not wire-tested, and no production call was found that drives both at once. | `W-124` — filed against this SAME bug by another session — records the title-composed probe returning a clean green against unfixed code, caught only by re-reading the file's § *Summary* before reporting. That lesson was then written into the bug file's own § *Reproduction* as an explicit trap warning, and this session read it there and ran the stated reproduction instead. Without it the natural closing probe is the alias one, which passes either way: the session reports "verified on the wire" on evidence about the mechanism that was never defective, then archives the bug, moving the evidence out with it. This is `W-124` compounding one bug later through the ARTIFACT rather than through a person, which is what entry ids are for. | validated |
 | W-124 | 2026-09-11 | high | **A probe composed from a bug's TITLE confirmed the half that was never broken.** Checking whether `1e11cf9357136e0e` had been fixed by nine alias-collapse commits, I built the probe from its title — an overflowing `grep` with a bad param name — and got a clean structured `corrections.param_aliases` in the envelope. The file's own § *Summary* says the FRAMEWORK advisory "attaches on all three render paths, **including** the buffered overflow envelope": the half I probed was never the defect. The real one is the TOOL's own `corrections`, and the stated reproduction (`doc(find, rel_path=…, limit=200)`) shows it still live at `13859878` — key NAMED in the shape listing, value left in the buffer. Control run on ONE tool in BOTH response shapes, so it is not tool-specific. | A false "fixed" report to my operator and to the bug's author, on a real passing measurement with a plausible mechanism attached — and the step after "fixed" is archiving, which moves the evidence out with the bug. Nothing downstream catches it: the probe genuinely passed. **Generalises:** CLAUDE.md's *run the reproduction* rule is written for the FIXING phase; the CLOSING phase needs it identically and resists it more, because the expected answer is the reassuring one and a passing substituted probe is never interrogated. | validated |
@@ -13921,6 +13922,60 @@ and the contract that broke lives in **what the new caller passes**, which no si
 `scan_line(line, entry)` cannot tell you that one of its future callers holds lines that were never
 adjacent. Reading `lines_only_in` at the call site — three lines of scouting — is what produced the
 `Scan::Code` reset and the test that pins it.
+
+**Status:** validated
+
+## W-127 — Nearly filed a phantom bug against grep — the corpus moved mid-read, and the check was two commands
+
+**Valid:** dated 2026-09-12
+
+**Observed:** Chasing a peer's self-criticism, two reads of ONE line disagreed a minute apart:
+
+```
+grep(group_by_file)            display.rs:109  use …::{group_by_file, render_grouped};
+grep(group_by_file, whole_word) display.rs:109  NO MATCH
+read_file(display.rs, 106-160)  display.rs:109  use …::{group_by_file_ranked, render_grouped};
+```
+
+**My first reading was that `grep` had mis-rendered the line** — a serious accusation against a core
+tool, and the only hypothesis I had. I checked instead, and it took two commands:
+
+```
+git status --short -- src/tools/symbol/display.rs   ->   M   (dirty)
+stat -c %y  src/tools/symbol/display.rs             ->   06:47:13Z
+date                                                ->   06:47:15Z   <- 2 seconds later
+```
+
+A peer wrote the file **while I was reading it**. Settled against both trees:
+
+|  | `:109` | bare `group_by_file` | `_ranked` |
+|---|---|---|---|
+| HEAD | `{group_by_file, render_grouped}` | 2 | 0 |
+| worktree | `{group_by_file_ranked, …}` | 0 (comment only) | present, uncommitted |
+
+The instrument was right at each instant; the corpus moved between them.
+
+**This corrects the peer's self-criticism, in their favour.** `codescout-75` told their operator
+*"symbols does not use the shared `group_by_file`"*, then retracted it as a hypothesis-scoped grep
+after another agent contradicted them. **Both parties were right, about different trees.** The claim
+is TRUE of the worktree (uncommitted, seconds old) and FALSE of HEAD. Only the wrong-file half of
+their self-criticism stands — they grepped `symbols.rs` when the renderer is in `display.rs`. They
+withdrew a correct claim because they assumed the disagreement had to be someone's error.
+
+**Counterfactual:** a bug filed against `grep` for returning content that is not in the file. It
+would have been **unreproducible by construction** — the worktree had already moved past the state
+that produced it — so it would have sat open as a phantom against a core tool, and the next session
+re-running the grep would have got the new answer and been unable to tell whether it was fixed,
+flaky, or never real. `CLAUDE.md` names the tell exactly (*line drift between two otherwise-agreeing
+readings means the corpus MOVED rather than the reader ERRED*) and records that three of four
+sessions reached for *"they made a mistake"* first. I reached for *"the tool made a mistake"*, which
+is the same move aimed at an instrument instead of a person, and is worse: a person can correct the
+record, and a tool accusation just accumulates.
+
+**The operational half, and it is cheaper than the habit it replaces:** on a shared checkout, **name
+the TREE, not just the instant**. `git show HEAD:<path>` is one command and removes the ambiguity
+that a timestamp only *dates*. I had been stamping instants all session and still hit this, because
+a stamp tells a reader when two observations diverged and not which of them they can act on.
 
 **Status:** validated
 
