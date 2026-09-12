@@ -236,6 +236,76 @@ fn tool_params() -> HashMap<String, HashSet<String>> {
     map
 }
 
+/// Tool name → the values its `action` parameter declares in `"enum"`.
+///
+/// **This exists to keep the bare-identifier scan from firing on the corpus's dominant idiom.**
+/// `doc(get)`, `librarian(reindex)`, `workspace(activate)` and `memory(recall)` are
+/// action-dispatch shorthand for `doc(action="get")` and friends — house style throughout the
+/// manual, the guides and `CLAUDE.md` itself. Measured 2026-09-12 over the 132 present-tense
+/// surfaces at `408709ea`: **45 of the 48** bare identifiers that are not parameters are this
+/// shape. Billing them as parameter claims would have produced 45 false REDs.
+///
+/// Derived from the schema rather than allow-listed, which is the whole difference. An allowlist
+/// of `get`/`update`/`reindex`/… would also silence a genuinely dead action name, and it would
+/// need hand-editing every time a tool gains one. Reading `enum` means a retired action stops
+/// being excused the moment it leaves the schema.
+fn tool_actions() -> HashMap<String, HashSet<String>> {
+    let name_re = regex::Regex::new(
+        r#"fn name\(&self\)\s*->\s*&(?:'static\s+)?str\s*\{\s*"([a-z_][a-z0-9_]*)""#,
+    )
+    .unwrap();
+    let val_re = regex::Regex::new(r#""([a-z_][a-z0-9_]*)""#).unwrap();
+    let mut map: HashMap<String, HashSet<String>> = HashMap::new();
+
+    for text in production_sources() {
+        for m in name_re.captures_iter(&text) {
+            let name = m[1].to_string();
+            let after = m.get(0).unwrap().end();
+            let Some(schema_at) = text[after..].find("fn input_schema").map(|i| after + i) else {
+                continue;
+            };
+            // Bounded to this tool's schema: stop at the next `fn name(` so a tool with no
+            // `action` cannot inherit the next tool's enum.
+            let end = text[schema_at..]
+                .find("fn name(&self)")
+                .map(|i| schema_at + i)
+                .unwrap_or(text.len());
+            let region = &text[schema_at..end];
+            let Some(act) = region.find("\"action\"") else {
+                continue;
+            };
+            let Some(enum_at) = region[act..].find("\"enum\"").map(|i| act + i) else {
+                continue;
+            };
+            let Some(open) = region[enum_at..].find('[').map(|i| enum_at + i) else {
+                continue;
+            };
+            let Some(close) = region[open..].find(']').map(|i| open + i) else {
+                continue;
+            };
+            let entry = map.entry(name).or_default();
+            for v in val_re.captures_iter(&region[open..close]) {
+                entry.insert(v[1].to_string());
+            }
+        }
+    }
+    map
+}
+
+/// The bare identifiers of `call` that are parameter CLAIMS, with action-dispatch values removed.
+///
+/// Extracted so the exclusion rule is exercised by tests directly. Asserting it through a
+/// re-implementation in the test body would be a second level testing its own copy — green
+/// whatever the shipped rule does.
+fn billable_bare(call: &LineCall, actions: &HashMap<String, HashSet<String>>) -> Vec<String> {
+    let acts = actions.get(&call.tool);
+    call.bare
+        .iter()
+        .filter(|b| !acts.is_some_and(|a| a.contains(*b)))
+        .cloned()
+        .collect()
+}
+
 /// Documents that assert what the tools accept **right now**.
 ///
 /// Deliberately excludes `docs/issues/`, `docs/plans/`, `docs/superpowers/` and every archive:
@@ -304,12 +374,17 @@ fn present_tense_surfaces() -> Vec<PathBuf> {
     out
 }
 
-/// One anchored citation: where it is, and what it claims.
+/// One parameter claim, anchored to the tool whose parens it sits in.
 struct Cite {
     file: String,
     line: usize,
     tool: String,
     param: String,
+    /// Written as a bare identifier (`references(symbol, path)`) rather than `key=`. Carried
+    /// so the failure message can quote the form the author actually used — telling someone
+    /// their `references(name_path=` is wrong when the page says `references(name_path,` sends
+    /// them looking for a string that is not there.
+    bare: bool,
     text: String,
 }
 
@@ -319,6 +394,16 @@ struct Cite {
 struct LineCall {
     tool: String,
     params: Vec<String>,
+    /// Arguments written as a BARE identifier — no `=`, no value. The manual's signature form
+    /// (`references(name_path, path)`) names parameters this way, and [`params`] cannot see it
+    /// because [`NAMED_ARG`] requires the `=`.
+    ///
+    /// Deliberately NOT merged into `params`: a bare identifier is ambiguous in a way a
+    /// `key=` is not. It is a parameter NAME in `references(name_path, path)` and an argument
+    /// VALUE in `symbols(main)` / `get_guide(librarian)`, and the two are byte-identical.
+    /// Kept as a separate field so the caller decides, and so the ambiguity is visible in the
+    /// type rather than resolved silently inside the walker.
+    bare: Vec<String>,
     /// The argument span closed its `(` with a `{` or `[` still open. The call is malformed
     /// — or the scanner has met a shape it reads wrongly — and either way its `params` are a
     /// guess. See [`a_documented_call_closes_its_own_literals`].
@@ -412,9 +497,26 @@ fn calls_on_line(line: &str) -> Vec<LineCall> {
         // Blanked so an `=` inside a string literal (`grep(pattern="a=b")`) cannot be read as
         // a named argument.
         let span = quoted.replace_all(&span, "");
+        // A chunk that is EXACTLY one lowercase identifier, with nothing else in it. The
+        // strictness is the point: `include_body=true` and `path=…` both carry an `=` and are
+        // excluded here because [`params`] already owns them, and a chunk holding anything
+        // besides the identifier is not the manual's signature form.
+        let bare: Vec<String> = span
+            .split(',')
+            .filter_map(|chunk| {
+                let t = chunk.trim();
+                let mut cs = t.chars();
+                let head_ok = matches!(cs.next(), Some(c) if c.is_ascii_lowercase() || c == '_');
+                let rest_ok = t
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                (head_ok && rest_ok).then(|| t.to_string())
+            })
+            .collect();
         out.push(LineCall {
             tool,
             params: arg.captures_iter(&span).map(|a| a[1].to_string()).collect(),
+            bare,
             unclosed: closed && nest > 0,
         });
     }
@@ -437,6 +539,7 @@ fn named_args_on_line(line: &str) -> Vec<(String, String)> {
 
 fn anchored_cites() -> Vec<Cite> {
     let root = repo_root();
+    let actions = tool_actions();
     let mut out = Vec::new();
     for path in present_tense_surfaces() {
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -449,12 +552,20 @@ fn anchored_cites() -> Vec<Cite> {
             .to_string();
         for (i, line) in text.lines().enumerate() {
             for call in calls_on_line(line) {
-                for param in call.params {
+                let named = call.params.iter().cloned().map(|p| (p, false));
+                // A bare identifier that is one of this tool's declared ACTION values is the
+                // `doc(get)` dispatch shorthand, not a parameter claim. Excluded here rather
+                // than in the assertion so both tests see the same population.
+                let bare = billable_bare(&call, &actions)
+                    .into_iter()
+                    .map(|b| (b, true));
+                for (param, is_bare) in named.chain(bare) {
                     out.push(Cite {
                         file: rel.clone(),
                         line: i + 1,
                         tool: call.tool.clone(),
                         param,
+                        bare: is_bare,
                         text: line.trim().chars().take(110).collect(),
                     });
                 }
@@ -481,12 +592,16 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
         if !params.contains(&c.param) {
             let mut known: Vec<&str> = params.iter().map(String::as_str).collect();
             known.sort_unstable();
+            let form = if c.bare {
+                format!("`{}({}` — bare, no `=`", c.tool, c.param)
+            } else {
+                format!("`{}({}=`", c.tool, c.param)
+            };
             bad.push(format!(
-                "  {}:{}\n      `{}({}=` — {} has no such parameter.\n      line: {}\n      declared: {}",
+                "  {}:{}\n      {} — {} has no such parameter.\n      line: {}\n      declared: {}",
                 c.file,
                 c.line,
-                c.tool,
-                c.param,
+                form,
                 c.tool,
                 c.text,
                 known.join(", ")
@@ -499,6 +614,20 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
         "{} present-tense document(s) name a tool parameter that does not exist.\n\n{}\n\n\
              Fix the document, or — if the parameter is proposed rather than shipped — move the \
              claim to a spec or plan, which this scan deliberately does not read.\n\n\
+             IF THE CITATION IS `tool(ident)` WITH NO `=`, READ THIS FIRST. The scan bills bare \
+             identifiers because the manual names parameters that way 97 times, and \
+             `references(name_path, path)` rotted inside that blind spot for the whole life of \
+             its bug file. Two forms are excused and a third is your escape:\n  \
+             - an ACTION value (`doc(get)`, `librarian(reindex)`) is dispatch shorthand and is \
+             skipped, read from the schema's own `enum` — so a RETIRED action stops being excused \
+             the moment it leaves the schema, which is why they are not allow-listed.\n  \
+             - a real parameter is simply correct and never reaches here.\n  \
+             - IF YOU MEANT A VALUE, NOT A PARAMETER NAME, WRITE `tool(<placeholder>)`. \
+             `symbols(<found_file>)` reads as a value to a human and is invisible to this scan, \
+             because `<` is not an identifier character. That is the escape this parser owes you, \
+             and it is why there is no allowlist to add yourself to. Better still, name the \
+             parameter too — `symbols(path=<found_file>)` tells the reader which slot the value \
+             goes in, which the bare form never did.\n\n\
              IF THE PARAMETER LOOKS CORRECT, suspect the scanner before the document — and it \
              will not volunteer this, so it is written here. It reads one LINE at a time and \
              counts `()`, `{{}}` and `[]` outside double-quoted strings to find a call's own \
@@ -531,6 +660,27 @@ fn a_documented_call_names_a_live_tool() {
     let mut bad: Vec<String> = Vec::new();
 
     for c in anchored_cites() {
+        // Named-argument cites only. This test's anchor was `snake_case(` plus a `key=`, and the
+        // `=` was quietly doing two jobs: finding parameters, AND filtering out ordinary code. A
+        // bare-identifier cite has no `=`, so admitting them here makes every snake_case function
+        // call in a Rust example look like an anchored tool call — measured 2026-09-12, exactly
+        // 50 of them, 35 from `extending/adding-languages.md` alone, none a real violation.
+        //
+        // The sibling parameter test needs no such guard because it `continue`s on any name that
+        // is not a registered tool; this one exists to flag precisely those names, so it has no
+        // filter of its own and cannot borrow that one. The cost is real and stated rather than
+        // hidden: a RETIRED tool cited only in the bare form is invisible here. Closing that
+        // needs a discriminator separating `references(symbol, path)` in prose from
+        // `fn visit_node(node)` in a code sample, which no token-level rule provides.
+        //
+        // **What pins this line is the CORPUS, not a unit test**, and that is a standing
+        // liability rather than an oversight: defeating the filter reds with 50 findings only
+        // while `extending/adding-languages.md` still carries snake_case Rust samples (35 of the
+        // 50). Rewrite that page into fenced blocks the walker skips and this branch becomes
+        // silently untested — passing, and no longer discriminating.
+        if c.bare {
+            continue;
+        }
         // Only snake_case names — a single-word call in prose is too often ordinary English.
         if !c.tool.contains('_') {
             continue;
@@ -784,4 +934,105 @@ fn the_unclosed_flag_fires_on_the_malformed_form_and_not_the_correct_one() {
         "a call whose arguments wrap across lines is not malformed \u{2014} its paren never closes on \
          this line. Flagging it makes this gate red on correct documentation: {wrapped:?}"
     );
+}
+
+/// The manual's signature form names parameters, and the scan bills them.
+///
+/// The founding case: `references(name_path, path)` sat in three files for the whole life of
+/// `57ecbac8f925d7b8` while this suite was green, because [`NAMED_ARG`] requires an `=` and the
+/// signature form has none. Measured 2026-09-12 at `408709ea`: **97** bare identifiers in the
+/// present-tense corpus are real parameters written this way — every one of them unguarded
+/// until this landed, and any of them free to rot exactly as `name_path` did.
+#[test]
+fn the_signature_form_is_billed_as_a_parameter_claim() {
+    let sig = calls_on_line("**`references(name_path, path)`**");
+    assert_eq!(
+        sig[0].bare,
+        vec!["name_path", "path"],
+        "both identifiers are claims, not just the first — an earlier draft of this scan read \
+         only the leading argument and reported green over a live violation in the manual's own \
+         Recommended Workflow table"
+    );
+    assert!(
+        sig[0].params.is_empty(),
+        "and they stay OUT of `params`, which means `key=`: a caller told their \
+         `references(name_path=` is wrong goes looking for a string the page does not contain"
+    );
+
+    // The MIXED form, which is the commoner shape and the one a params-only scan reports on
+    // while being silently partial about it.
+    let mixed = calls_on_line("`edit_code(symbol, path, action=\"rename\", new_name)`");
+    assert_eq!(mixed[0].params, vec!["action"], "the `=` argument");
+    assert_eq!(
+        mixed[0].bare,
+        vec!["symbol", "path", "new_name"],
+        "and the three the guard used to drop while reporting on the same line"
+    );
+}
+
+/// Action-dispatch shorthand is not a parameter claim, and the exclusion is schema-derived.
+#[test]
+fn an_action_dispatch_value_is_not_billed_as_a_parameter() {
+    let actions = tool_actions();
+    assert!(
+        actions.get("doc").is_some_and(|a| a.contains("get")),
+        "control: the enum is actually being read. If this map is empty the whole exclusion \
+         below is vacuous and every assertion in it passes by finding nothing"
+    );
+
+    for line in [
+        "`doc(get)`",
+        "`librarian(reindex)`",
+        "`workspace(activate)`",
+        "`memory(recall)`",
+    ] {
+        let c = &calls_on_line(line)[0];
+        assert!(!c.bare.is_empty(), "the walker still SEES it: {line}");
+        assert!(
+            billable_bare(c, &actions).is_empty(),
+            "{line} is dispatch shorthand and must not be billed"
+        );
+    }
+
+    // Over-match guard, and the reason the exclusion is read from `enum` rather than
+    // allow-listed: a bare identifier on the SAME tool that is not a declared action is still a
+    // claim. A rule that simply excused every bare identifier on an action-bearing tool would
+    // satisfy the four assertions above and catch nothing.
+    let typo = &calls_on_line("`doc(hedaing)`")[0];
+    assert_eq!(
+        billable_bare(typo, &actions),
+        vec!["hedaing"],
+        "a non-action bare identifier on an action-bearing tool is still billed"
+    );
+}
+
+/// `tool(<placeholder>)` is the escape, and it is the one this parser owes.
+///
+/// `IC-6`: a parser over a namespace must give the author a way to write a token that is not a
+/// claim. Without it the only options are an allowlist — which silences real defects at the same
+/// sites — or a corpus quietly edited to dodge the scanner with nothing recording that it had to
+/// be, which this file's own history already did once.
+#[test]
+fn an_angle_bracket_placeholder_is_the_documented_escape() {
+    let escaped = calls_on_line("`symbols(<found_file>)` — a VALUE, not a parameter name");
+    assert!(
+        escaped[0].bare.is_empty(),
+        "`<` is not an identifier character, so the placeholder is not a claim: {:?}",
+        escaped[0].bare
+    );
+
+    // Paired with its opposite direction. The assertion above is monotone under the scan going
+    // dead — a walker that bills nothing at all satisfies it — so it is worth nothing alone.
+    let unescaped = calls_on_line("`symbols(found_file)`");
+    assert_eq!(
+        unescaped[0].bare,
+        vec!["found_file"],
+        "the SAME site without the brackets is billed; that contrast is the whole test"
+    );
+
+    // And the form the corpus was rewritten to, which is strictly better documentation: it names
+    // the slot the value goes in, which the bare form never did.
+    let named = calls_on_line("`symbols(path=<found_file>)`");
+    assert_eq!(named[0].params, vec!["path"], "the parameter IS checked");
+    assert!(named[0].bare.is_empty(), "the value is not");
 }

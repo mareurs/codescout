@@ -79,7 +79,7 @@ read the full symbols.
 
 1. `semantic_search("how are database errors handled")` — get a list of
    relevant files and line ranges.
-2. `symbols(found_file)` — see the symbol structure around those
+2. `symbols(path=<found_file>)` — see the symbol structure around those
    lines.
 3. `symbols(name, include_body=true, detail_level="full")` — read the
    specific function body.

@@ -60,7 +60,7 @@ matches — including imports, type annotations, comments, and tests.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `symbols(entry_point)` | Locate the starting function |
+| 1 | `symbols(name=<entry_point>)` | Locate the starting function |
 | 2 | `symbol_at` with `fields: ["def"]` on called functions | Follow the call chain forward |
 | 3 | `symbol_at` with `fields: ["hover"]` on parameters/return values | See resolved types at each stage |
 | 4 | `references` at the destination | Confirm which callers reach this point |
@@ -83,7 +83,7 @@ but can't follow indirection.
 |------|------|---------|
 | 1 | `references(symbol, path)` | Map all usages before renaming |
 | 2 | `edit_code(symbol, path, action="rename", new_name)` | LSP-powered rename across files |
-| 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
+| 3 | `grep(pattern=<old_name>)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
 
 **Why both `edit_code(action="rename")` and `grep`?** LSP rename handles code
