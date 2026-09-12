@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
+claimed_at: 2026-09-12
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-08
 owner: marius
@@ -95,23 +97,58 @@ threshold on a member that is really its mirror image.
 
 ## Fix
 
-Not started. Smallest correct change is to say "stale" rather than "changed", which is
-accurate for both classes and costs no bytes:
+Fixed. `check_all_memories` (`src/memory/anchors.rs`) now selects the noun from the actual
+decomposition rather than publishing the total under one class's name:
 
+```rust
+let reason = match (changed.len(), deleted.len()) {
+    (_, 0) => format!("{total_stale} of {total_anchored} anchored files changed"),
+    (0, _) => format!("{total_stale} of {total_anchored} anchored files deleted"),
+    (c, d) => format!("{total_stale} of {total_anchored} anchored files stale ({c} changed, {d} deleted)"),
+};
 ```
-"{N} of {M} anchored files stale"
-```
 
-A fuller form naming both counts reads better but is longer, and this string appears
-once per stale memory in a response that already lists them.
+**Chose the decomposed form over this file's own "smallest correct change" suggestion**
+(renaming "changed" to "stale" everywhere), and the over-match guard below is why: "stale"
+is accurate but strictly less informative than today's string in the ~87% single-class
+case, and the information it drops is already computed two lines above. This way the pure
+cases keep today's exact wording **and length** — no bytes added where nothing was wrong —
+and only the mixed case grows, which is the case that needs it.
 
+**Mutation-verified.** The mixed-case test was observed RED against the old string,
+failing with the defect stated literally: `a deleted anchor must be named as deleted, not
+folded into a changed-count: 2 of 2 anchored files changed`. GREEN after.
+
+**§ Resume's doc check, performed:** the old wording appears five more times in-tree —
+`src/memory/anchors.rs:85` (a doc comment quoting a past observation), two
+`docs/superpowers/plans/2026-03-06-memory-staleness-*` files, and two archived observation
+records. All five are **historical records of what was observed then**, not live
+prescriptions of the format, so all five are left as-is per CLAUDE.md § *Parsers Over a
+Namespace* ("just make the text current and delete the past" applies to live citations;
+these are measurements whose method matters). No test asserted on the string — the
+pre-existing `check_all_memories_stale` asserts on `changed_files` only.
+
+**SHA:** `f97a9a40794b3ee8e5c87ee138cbcc44f08b229c`
+**patch-id:** `4dbd1eb7f63bdbd879c433a3077a6cf97069cd09`
 ## Tests added
 
-None yet. A regression test would build a fixture memory anchoring one changed and one
-deleted file and assert the reason string does not claim both "changed" — asserting on
-the *name* of the failure state rather than on a count, which is the discriminator this
-repo's own testing discipline asks for.
+`src/memory/anchors.rs`, next to the existing `check_all_memories_stale`:
 
+- `check_all_memories_stale_reason_does_not_call_a_deleted_anchor_changed` — a memory
+  anchoring two files, one mutated and one deleted. Asserts the reason names `deleted` and
+  is not the old `"2 of 2 anchored files changed"`. The **mixed** fixture is load-bearing
+  and annotated as such: a one-deleted fixture would also pass against a string that
+  hardcodes "deleted", and a one-changed fixture passes against the *buggy* string, so only
+  the mixed shape separates a correct summary from either hardcoding.
+- `check_all_memories_stale_reason_says_changed_when_nothing_was_deleted` — over-match
+  guard: an all-changed staleness must still say `changed` and must **not** volunteer
+  `deleted`. This is what rules out the blanket "stale" rename, which would satisfy the
+  first test while degrading the common case.
+
+Asserts on the NAME of each failure state rather than on a count — the discriminator was
+already in the output, unused, which is the shape CLAUDE.md § *Testing Discipline* asks
+for. Observed RED/GREEN as described in § Fix; full `memory::anchors::` module green
+(25 tests).
 ## Workarounds
 
 Read `changed_files` and `deleted_files` from the response rather than the `reason`
@@ -119,10 +156,7 @@ string. The arrays are correct; only the summary is not.
 
 ## Resume
 
-Change the format string at `src/memory/anchors.rs:262` from "changed" to "stale", or
-render both counts. Check whether any doc or skill quotes the current wording before
-changing it.
-
+Done — see § Fix. Nothing left to resume.
 ## References
 
 - `src/memory/anchors.rs:258-263` (the string), `:184-207` (`check_path_staleness`)
