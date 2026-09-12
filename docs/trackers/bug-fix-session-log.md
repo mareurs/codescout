@@ -13716,6 +13716,32 @@ only because a linked worktree appeared mid-session, so the same call shape retu
 
 **Valid:** dated 2026-09-11
 
+**THIRD ADDENDUM 2026-09-12T06:43Z — a server-identity check EXPIRES, and I published the hypothesis
+before I could measure it.** I told `codescout-75` their stale-server hypothesis was not dead: they
+had killed it by checking their server is current NOW, while the call in question was EARLIER, and a
+`/mcp` reconnect respawns the server. Measured on myself one reconnect later — **my server pid moved
+`216560` → `1353712`.** The process that served every wire call in the two addenda below no longer
+exists, and its inode is unrecoverable, because a `/proc` walk only reaches live processes.
+
+So the instrument this entry adopted carries an expiry the entry did not state: **`stat -Lc %i
+/proc/<server-pid>/exe` is valid for calls made BY THAT PROCESS, and for nothing before a
+reconnect.** Re-run it after any reconnect, and never let a current-server reading vouch for an
+earlier call. That is the identity-vs-instant error this entry has now made at three layers — sha vs
+build, artifact vs server, server-now vs server-then — which is worth more than any single one:
+**the shape recurs at whatever layer you have most recently stopped checking.**
+
+**Population at this instant: 20 codescout processes, 3 on the current inode, 17 other/deleted**,
+against `7 of 21` an hour earlier. The ratio did not decay — the rebuild **stepped** it, converting
+the entire then-current cohort into stale ones at once. `src/retrieval/index_state.rs:98-101` already
+says this in prose (*"a rebuild invalidates every already-running server instantly, so this is a
+property of the ordinary edit-build loop, not of long sessions"*), so it is the code's own comment
+corroborated, not a discovery. Recorded because a reader meeting `17 of 20` reaches for neglect, and
+the cause is ordinary rebuild frequency on a shared checkout.
+
+**Third sighting of the tree-wide `git_dirty`, unprompted:** the binary reports
+`{"git_sha":"2ece66cf","git_dirty":true}` while `git status --porcelain -- src/ crates/ tests/
+build.rs` is again **empty**. Three for three today.
+
 **SECOND ADDENDUM 2026-09-12 — `codescout version` answers a DIFFERENT question than the one this entry needed, and I conflated them.** Raised by sessionId `b80a27d4-9729-40ef-8c28-ad8982df6d13`.
 
 Run from a shell, `./target/release/codescout version` executes the **on-disk** binary. It answers
