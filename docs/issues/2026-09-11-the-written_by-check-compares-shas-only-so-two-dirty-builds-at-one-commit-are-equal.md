@@ -215,6 +215,10 @@ read via the current_exe() path : FAIL
 read via /proc/<pid>/exe        : OK      (sha256 9625c74169aa6585…)
 ```
 
+**Independently reproduced** by `codescout-75` (sessionId b0b9bc40…) on a different probe binary:
+`/proc/PID/exe` read 47,416 bytes, the readlink string read 0 and failed. Two runs, different
+binaries, different methods — independent scopes rather than one instrument twice.
+
 So the obvious spelling records `None` **exactly in the zombie-server case** — the case this whole
 mechanism was built for (`2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state`,
 and the reason `exe_deleted` exists at all). Reading the **inode** instead — `fs::read("/proc/self/exe")`
@@ -224,8 +228,25 @@ note said this failure mode "is one the struct is shaped for": right about the s
 the consequence, and avoidable.
 
 **Priced with the real number rather than an order of magnitude:** `target/release/codescout` is
-**64,980,672 bytes** (62 MiB), so this is tens of milliseconds of hashing, once per process, and must
-be lazy — computed on first sidecar write or comparison, never at startup.
+**64,980,672 bytes** (62 MiB) — roughly 30-60 ms of BLAKE3 single-threaded, once per process, and it
+must be lazy: computed on first sidecar write or comparison, never at startup.
+
+**REJECTED — `fstat` on the opened `/proc/self/exe` fd, which avoids reading 62 MiB at all.**
+`(dev, inode, size, mtime)` comes back for free and is the obvious way to dodge the hash cost.
+Recorded with its refutation because it is precisely what the next reader reaches for. It fails in
+**both** directions, which by now is this section's pattern for every non-content-derived repair:
+
+- *Under-fires.* Inode numbers are **reused after deletion**, so a later build can inherit a dead
+  build's identity — the zombie case again, one layer down, in the mechanism built to detect it.
+- *Over-fires.* A relink that produces **byte-identical** output still gets a fresh `mtime`, so the
+  tuple reports "different build" for the same build.
+- *And it answers the wrong question.* A stat tuple identifies a **FILE**; the check asks about a
+  **BUILD**. That substitution is exactly what this file's own `IC-9 → IC-14` retag was about, so
+  taking the shortcut would re-commit the defect class being fixed, in the fix.
+
+Paying ~40 ms to keep a **content-derived** identity is the right trade; the stat shortcut buys
+speed by giving back the one property the mechanism exists for. (Alternative raised and refuted by
+`codescout-75`, sessionId b0b9bc40…; the over-fire count is this file's.)
 
 **Not attempted, and not prescribed as settled.** Two things want measuring first: whether two
 consecutive `cargo rb` runs over identical source produce byte-identical binaries here (if not, the
