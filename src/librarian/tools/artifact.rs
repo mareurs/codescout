@@ -1134,7 +1134,7 @@ mod tests {
     /// declaration.** The promise is kept only where the type the object deserialises into
     /// carries `#[serde(deny_unknown_fields)]` — a separate edit, in a different file, with
     /// no compiler relationship to the schema at all. `event` made the promise and broke it
-    /// (`docs/issues/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`)
+    /// (`docs/issues/archive/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`)
     /// while `augment`, folded into its `Args` the identical way, kept it.
     ///
     /// **Direction, named because the neighbouring guard is monotone the other way.**

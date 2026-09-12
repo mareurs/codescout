@@ -139,7 +139,7 @@ reconciles: `event`'s 9 described children plus `augment`'s 8 less the two decla
 target — `event_create::Args` carrying no `deny_unknown_fields` — is a *runtime* contradiction
 between a schema that declares `"additionalProperties": false` and code that silently drops,
 where A is a *test-time* guard-coverage mechanism. It is
-`docs/issues/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`.
+`docs/issues/archive/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`.
 One thing established here that it needed: the module doc's blanket warning that
 `deny_unknown_fields` "broke every `doc(update)` call" does **not** transfer to it, because
 `flatten_event_args` builds `Args` from the `event` object's own keys plus `artifact_id` and
@@ -186,9 +186,11 @@ key at top level (where it is probed), or manually verify the `Args` honors it.
 
 Fixed and archived — nothing to resume here. The two threads that continue elsewhere:
 
-- `docs/issues/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`
+- `docs/issues/archive/2026-09-11-the-event-object-declares-additionalproperties-false-and-nothing-enforces-it.md`
   carries the runtime half (candidate fix B), with the `flatten_event_args` finding that makes it
-  safe already recorded there.
+  safe already recorded there. **Fixed and archived 2026-09-12** (`6b64dc35`) — and the population
+  sweep it asked for returned a SECOND guarded site, `event.source`, which deserialises through
+  its own type and so is unreached by `deny_unknown_fields` on `Args`.
 - The sweep's own remaining edges are **mechanised rather than noted**: a second level of
   nesting, and a nested object no `required` table supplies, both red the build the moment they
   would cost coverage. That is the reason no "known coverage gap on the probe" note was filed as
