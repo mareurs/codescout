@@ -27,9 +27,15 @@ the same file mandates:
 
 **A command's DURATION is not one of them, and saying so is load-bearing** — the obvious
 inference is that a gate which always exceeds 120s is auto-backgrounded and therefore
-beyond the hook's reach, which would make this defect far larger than it is. It is false:
-the auto-backgrounded path carries `exit_code` and a full `wip_authors` through to the
-completion notification (§ Evidence, row 2). The trailing `echo` is the whole defect.
+beyond the hook's reach, which would make this defect far larger than it is. That is false
+for the generic completion envelope, which carries `exit_code` and a full `wip_authors`
+through (§ Evidence, row 2).
+
+**The qualifier is not decoration.** The `cargo test` completion envelope is a different
+renderer and is unmeasured (§ Evidence, row 3). If it turns out to drop the field, duration
+is *still* not the cause — the renderer is — so the sentence above stays true while the
+reason a reader would infer from it would be wrong. Do not let row 2 be read as covering
+the gate's own envelope.
 
 The four-command gate in § *Development Commands* is written as
 `cargo test … ; echo "LEAN exit=$?" ; cargo test … ; echo "DEFAULT exit=$?"` — it **ends
@@ -87,6 +93,17 @@ run_command("false")                                  -> exit_code: 1
    which reads exactly like the bug. One probe was burned naming a file committed minutes
    earlier. Re-derive a currently-dirty path before concluding anything.
 
+   **Denominator, published because it did NOT reproduce and absorbing it as a catch would
+   make this population look self-correcting** (`f3c594ce`, 2026-09-12): an
+   auto-backgrounded `cargo test --workspace` exiting 101 returned no `wip_authors`. The
+   named path (`src/server.rs`) was clean at that instant, so the precondition above is a
+   sufficient explanation — but it is not the only one available, because that run was also
+   in the test-summary envelope (§ Evidence, row 3). **Two candidate causes, and the
+   observation separates neither.** It is not a counter-example to row 2 and not a
+   confirmation of it. Recorded because it is the only observation either session has of
+   that cell, and because the author of the warning in this very bullet read his own
+   silence as a contradiction for about a minute before applying it.
+
 ## Environment
 
 codescout 0.15.0, branch `experiments`, Linux. Both feature lanes — nothing here is
@@ -116,26 +133,41 @@ status exists yet to trigger on.
 
 ## Evidence
 
-### Four invocation forms, all through `run_command`
+### Five invocation forms, all through `run_command`
 
 | form | exit_code seen | `wip_authors` | mechanism |
 |---|---|---|---|
 | bare failing command | 101 | **present** | trigger works |
-| auto-backgrounded past 120s | 101 (on completion) | **present** | notification carries the exit |
+| auto-backgrounded, **generic** envelope | 101 (on completion) | **present** | notification carries the exit |
+| auto-backgrounded, **test-summary** envelope | 101 (on completion) | *unmeasured* | § Resume, the open cell |
 | `<cmd> ; echo "… $?"` | 0 | **absent** | `echo` is the last statement |
 | explicit `run_in_background: true` | *(none, ever)* | **absent** | returns before an exit exists |
 
 **Row 2 is the one that changes how this bug reads, and it was nearly filed the other
 way.** The natural inference is that a gate always exceeding 120s can never produce a
-hook-visible exit, which would make the defect far larger than it is. It is false:
-auto-backgrounding preserves both the status and the attribution end to end. **Duration is
-not a cause; the trailing `echo` is the whole defect.** Measured 2026-09-12 by sessionId
-`b80a27d4`, who reports reasoning to the opposite conclusion and checking before sending
-it. Row 1 was corroborated independently by sessionId `8bd791df` on a bare
-`cargo test --workspace`.
+hook-visible exit, which would make the defect far larger than it is. That is false for the
+generic envelope: auto-backgrounding preserves both the status and the attribution end to
+end. **Duration is not a cause.** Measured 2026-09-12 by sessionId `b80a27d4`, who reports
+reasoning to the opposite conclusion and checking before sending it. Row 1 was corroborated
+independently by sessionId `8bd791df` on a bare `cargo test --workspace`.
 
-Rows 3 and 4 are silent for **different** reasons and only one is fixable by changing the
-trigger: row 3 has an exit status that is the wrong one, row 4 has none at all.
+**Row 3 exists because row 2 does not reach it, and neither measuring session said so at
+first — both wrote "backgrounded" when they had measured one envelope.** Row 2's run was
+driven with `sh -c`, whose completion result is the generic `{exit_code, stderr,
+wip_authors}`. A `cargo test` completion arrives in a **different** envelope — `{type:
+"test", exit_code, output_id, passed, failed, ignored, failures}` — which carries no
+`stdout` and has no `wip_authors` field at all in any observation to date.
+
+Which renderer you get is selected by **backgrounding, not by the command**: observed 4/4
+in one session (`f3c594ce`, 2026-09-12), two foreground `cargo test` runs returned the
+generic envelope — one of them with `wip_authors` present at exit 101 — while two
+auto-backgrounded `cargo test --workspace` runs returned the test-summary envelope. So no
+foreground run can probe row 3, which is why it is still open: the only path to that cell
+is a backgrounded `cargo test` that genuinely fails **and** names a currently-dirty file,
+and neither session has one.
+
+Rows 4 and 5 are silent for **different** reasons and only one is fixable by changing the
+trigger: row 4 has an exit status that is the wrong one, row 5 has none at all.
 
 ### The live incident this class produced, earlier the same day
 
@@ -171,8 +203,10 @@ Two things this instance carries that the first does not:
   the backgrounding compounded. They do not — one of those paths is silent and the other is
   loud, which is why the two must not be described as one "background" ceiling.
 
-Attribution recorded as the parties asked: the incident and the four-form measurement are
-`b80a27d4`'s, the bare-foreground corroboration of row 1 is `8bd791df`'s.
+Attribution recorded as the parties asked: the incident and the backgrounded generic-envelope
+measurement are `b80a27d4`'s, the bare-foreground corroboration of row 1 is `8bd791df`'s. The
+envelope split that turned four rows into five, and the denominator under § Reproduction, are
+`f3c594ce`'s.
 ### The extractor itself is not implicated
 
 `named_paths` is deliberately conservative — it requires a cargo-shaped span, a panic site,
@@ -230,16 +264,31 @@ manual route: `scripts/file-provenance.py` intersected with the socket enumerati
 
 ## Resume
 
-Pick a trigger from § Fix. Before implementing, re-derive the four-form table above
+Pick a trigger from § Fix. Before implementing, re-derive the five-form table above
 against a **currently** dirty path — the precondition decays, and a stale path yields a
 correct silence that reads as the bug.
 
-The sub-claim this file originally marked **not established** now is, and it **narrows**
-the bug rather than widening it: measured 2026-09-12 by sessionId `b80a27d4`, a completion
+The sub-claim this file originally marked **not established** is now half established, and
+that half **narrows** the bug: measured 2026-09-12 by sessionId `b80a27d4`, a completion
 notification for an auto-backgrounded failing job carries `exit_code: 101` and a full
-`wip_authors`. Only the explicit `run_in_background: true` form is silent. The form that
-looks most like the real gate is the loud one — so re-derive with four arms, not three, and
-do not treat "it was backgrounded" as an explanation for a missing attribution.
+`wip_authors`. So do not treat "it was backgrounded" as an explanation for a missing
+attribution.
+
+**The open cell, stated in the same shape as the claim it replaces rather than inferred
+from row 2.** That measurement used `sh -c`, i.e. the generic completion envelope. Whether
+the `cargo test` completion envelope (`type: "test"`) carries `wip_authors` is **not
+established by anyone**, and it is the envelope the mandated gate actually produces. The
+two observations that exist are both non-discriminating: `b80a27d4`'s backgrounded gate run
+had a real exit of 0 (trailing `echo`), and `f3c594ce`'s exited 101 but named a clean path
+(§ Reproduction, point 2).
+
+What would close it: a backgrounded `cargo test` that genuinely fails **and** names a
+currently-dirty file. Neither session has run it, deliberately — on this shared checkout it
+means arming a red no other session can distinguish from a broken test, which is itself a
+filed defect — `docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
+and `docs/issues/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`.
+A git worktree isolates it at the cost of a cold `target/`.
+That is a decision for an operator, not a thing to do quietly while peers are building.
 
 ## References
 
