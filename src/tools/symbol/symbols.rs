@@ -560,29 +560,6 @@ impl WalkAudit {
     }
 }
 
-/// Does this file declare a project root for some language?
-///
-/// Name-only, deliberately: parsing each candidate to confirm it declares a package
-/// would make this language-aware in a second way and buys nothing the caller needs.
-/// A false positive here costs a few extra tree-sitter parses of files that were
-/// reachable anyway; a false negative costs a silently unreachable symbol, which is
-/// the failure this whole path exists to prevent.
-fn is_project_manifest(path: &std::path::Path) -> bool {
-    const MANIFESTS: &[&str] = &[
-        "Cargo.toml",
-        "package.json",
-        "go.mod",
-        "pyproject.toml",
-        "setup.py",
-        "pom.xml",
-        "build.gradle",
-        "build.gradle.kts",
-    ];
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| MANIFESTS.contains(&n))
-}
-
 /// Map one language's `workspace/symbol` attempt onto whether that language is COVERED.
 ///
 /// `None` means the server did not answer — failed to start, errored, or blew the budget
@@ -628,69 +605,68 @@ fn lang_outcome(
     }
 }
 
-/// Which accepted files the tree-sitter pass must still cover.
+/// All accepted files, sorted for deterministic fallback order.
 ///
-/// Replaces a whole-call `matches.is_empty()` gate that asked *"did we find anything?"*
-/// and never *"did we search everywhere?"*, so one hit suppressed the only mechanism
-/// covering everything the LSP does not index — making a **cold** LSP return strictly
-/// more than a warm one. Measured at `13` against `1` on one unchanged tree; the single
-/// warm survivor was a *Python* symbol, because `matches` is not per-language and one
-/// hit in any language suppressed the fallback for all of them
-/// (`docs/issues/2026-09-12-the-tree-sitter-fallback-is-all-or-nothing-so-a-warm-lsp-returns-fewer-symbols.md`).
-///
-/// Two inputs decide the gap, and **which job each one does is the whole design**:
-///
-/// - `nested_roots` decides COVERAGE, and is structural — a directory under the search
-///   root carrying its own manifest is one the outer project does not build, so its
-///   files are the ones `workspace/symbol` cannot be expected to hold. Structural
-///   because it must not depend on the query.
-/// - `lsp_seen` only ever REMOVES work, and is query-scoped. `workspace_symbols` takes a
-///   pattern, so this set can establish that a file IS covered and never that it is not
-///   — an earlier draft used it for coverage and would have re-parsed the corpus on
-///   every selective search. Used solely to drop files the LSP demonstrably answered
-///   for, it cannot cause a miss: the worst case is re-parsing a covered file, and it is
-///   also what keeps a partially-covered root from emitting a symbol twice.
-///
-/// `lsp_produced_nothing` preserves today's behaviour exactly for a dead or still-indexing
-/// LSP: cover everything, because nothing has been established about any file.
+/// Used to be a coverage decision — which files the LSP does not build
+/// (`nested_roots`) or never answered for at all (`uncovered_langs`) — but that
+/// judged an LSP-covered file exempt from the tree-sitter pass even when the LSP's
+/// own answer for THIS query silently omitted a real match inside it. Measured:
+/// `frontmatter.rs` sits in the LSP's own workspace and rust-analyzer answers
+/// `workspace/symbol("parse")` with no error, yet the file's own `parse()` function
+/// is absent from that answer while its other symbols are not
+/// (docs/issues/2026-09-12-the-tree-sitter-fallback-is-all-or-nothing-so-a-warm-lsp-returns-fewer-symbols.md).
+/// No structural signal predicts which query will trigger that, so coverage can no
+/// longer be decided per file — every accepted file is a candidate, and
+/// `merge_deduped` is what keeps a file the LSP already answered correctly from
+/// producing a duplicate.
 ///
 /// **Sorted, and that is not cosmetic.** The caller stops at `search_pool_cap`, so
 /// iteration order decides which matches survive truncation, and `accepted` is a
-/// `HashSet` whose order varies between runs. Returning it unsorted would make a capped
-/// search answer the same query differently each time — the flake shape `WalkAudit`
-/// already exists to make visible.
-fn files_needing_fallback(
-    accepted: &std::collections::HashSet<PathBuf>,
-    nested_roots: &[PathBuf],
-    lsp_seen: &std::collections::HashSet<PathBuf>,
-    uncovered_langs: &std::collections::HashSet<&str>,
-    lsp_produced_nothing: bool,
-) -> Vec<PathBuf> {
-    let mut gap: Vec<PathBuf> = accepted
-        .iter()
-        .filter(|f| {
-            if lsp_produced_nothing {
-                return true;
-            }
-            // A language whose server never answered is uncovered WHOLESALE — every file
-            // of it, not only the ones under a nested root. This is the half measured on
-            // 2026-09-12 and not fixed by `nested_roots`: one Python hit made `matches`
-            // non-empty, so Rust files outside every nested root were left to a
-            // rust-analyzer that returned nothing, and `13` cold became `5` warm.
-            if ast::detect_language(f).is_some_and(|l| uncovered_langs.contains(l)) {
-                return true;
-            }
-            nested_roots.iter().any(|r| f.starts_with(r)) && !lsp_seen.contains(*f)
-        })
-        .cloned()
-        .collect();
+/// `HashSet` whose order varies between runs. Returning it unsorted would make a
+/// capped search answer the same query differently each time.
+fn files_needing_fallback(accepted: &std::collections::HashSet<PathBuf>) -> Vec<PathBuf> {
+    let mut gap: Vec<PathBuf> = accepted.iter().cloned().collect();
     gap.sort();
     gap
 }
 
+/// The (file, symbol name-path, start_line) triple that identifies a pushed match
+/// for dedup purposes. `None` when a required field is missing or the wrong JSON
+/// type — deliberately permissive at the call site (an unkeyable match is pushed
+/// rather than silently dropped, since losing a real result is worse than an
+/// occasional duplicate).
+fn dedup_key(v: &Value) -> Option<(String, String, i64)> {
+    Some((
+        v.get("file")?.as_str()?.to_string(),
+        v.get("symbol")?.as_str()?.to_string(),
+        v.get("start_line")?.as_i64()?,
+    ))
+}
+
+/// Append tree-sitter's `candidates` to `out`, dropping any whose `dedup_key`
+/// already appears in `pushed_keys` — set by the LSP loop for its own pushes, and
+/// grown here so a second candidate file cannot duplicate the first's. A candidate
+/// with no extractable key is pushed unconditionally: see `dedup_key`.
+fn merge_deduped(
+    candidates: Vec<Value>,
+    pushed_keys: &mut std::collections::HashSet<(String, String, i64)>,
+    out: &mut Vec<Value>,
+) {
+    for v in candidates {
+        let should_push = match dedup_key(&v) {
+            Some(k) => pushed_keys.insert(k),
+            None => true,
+        };
+        if should_push {
+            out.push(v);
+        }
+    }
+}
+
 /// Project-scope search (branch B of `Symbols::call`): one `workspace/symbol`
-/// request per language (per-language timeout), falling back to a tree-sitter
-/// walk when LSP yields nothing. Body is the old `scope.includes_project()` block.
+/// request per language (per-language timeout), then a tree-sitter pass over every
+/// accepted file that merges in anything the LSP's own answer omitted. Body is the
+/// old `scope.includes_project()` block.
 #[allow(clippy::too_many_arguments)]
 async fn search_project_symbols(
     ctx: &ToolContext,
@@ -709,10 +685,6 @@ async fn search_project_symbols(
     // one textDocument/documentSymbol request per file.
     let mut languages = std::collections::HashSet::new();
     let mut accepted_files = std::collections::HashSet::<PathBuf>::new();
-    // Directories under `root` that carry their own manifest. Collected in THIS walk
-    // rather than a second one: the walk already visits every non-ignored file, and a
-    // separate pass would be a second population that can drift from this one.
-    let mut nested_roots = Vec::<PathBuf>::new();
     let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
@@ -731,15 +703,6 @@ async fn search_project_symbols(
         };
         if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             let path = entry.path().to_path_buf();
-            // A manifest in `root` itself describes the project being searched, so it is
-            // not nested and its files are the LSP's own population.
-            if is_project_manifest(&path) {
-                if let Some(dir) = path.parent() {
-                    if dir != root {
-                        nested_roots.push(dir.to_path_buf());
-                    }
-                }
-            }
             if let Some(lang) = ast::detect_language(&path) {
                 languages.insert(lang);
                 accepted_files.insert(path);
@@ -755,21 +718,16 @@ async fn search_project_symbols(
     // workspace/symbol on a still-indexing server, init retry loop
     // on a server that keeps crashing) must not hang the whole
     // tool call past the MCP 60 s ceiling. On timeout we yield an
-    // empty result for that language; the tree-sitter fallback
-    // below still runs if every language produces nothing.
+    // empty result for that language; the tree-sitter pass below covers every
+    // accepted file regardless, so a language whose server never answers is
+    // covered the same way as one that answers but omits a match.
     // cap-class: RESULT_CAP symbols.per_lang_budget — probed
     const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
     let languages: Vec<&str> = languages.into_iter().collect();
-    // Files the LSP returned at least one symbol for. See `files_needing_fallback` for
-    // why this may only ever REMOVE work, never decide coverage.
-    let mut lsp_seen_files = std::collections::HashSet::<PathBuf>::new();
-    // Languages whose server never answered — failed to start, errored, or blew the
-    // per-language budget. Deliberately NOT the same as a server that answered with no
-    // matches: that one is covering its files and simply had no hit for this pattern.
-    // Every file of an uncovered language needs the tree-sitter pass, which is the half
-    // `nested_roots` cannot reach — it is about which projects the LSP BUILDS, not about
-    // whether its server is answering at all.
-    let mut uncovered_langs = std::collections::HashSet::<&str>::new();
+    // (file, symbol name-path, start_line) keys already pushed to `matches`. Grown by
+    // the LSP loop below and consulted by `merge_deduped` so the tree-sitter pass
+    // that follows cannot duplicate a symbol the LSP already found.
+    let mut pushed_keys = std::collections::HashSet::<(String, String, i64)>::new();
     let mut join_set = tokio::task::JoinSet::new();
     for lang in languages {
         let lsp = ctx.lsp.clone();
@@ -797,22 +755,14 @@ async fn search_project_symbols(
     while let Some(task_result) = join_set.join_next().await {
         // NOT REACHED BY ANY UNIT TEST — covered only by a live-LSP probe.
         //
-        // `lang_outcome` is tested directly on all three arms, and `files_needing_fallback`
-        // on its inputs, but the join between them — `None` becoming membership in
-        // `uncovered_langs` — runs only inside this async loop behind a real server. Do not
-        // credit those two suites with reaching it: a mutation swapping the two branches
-        // below leaves both green. The sibling case is this file's own
-        // `a_red_attaches_wip_authors_on_the_main_arm` comment, where every other test
-        // called the helper directly and the attachment site was unguarded for months.
-        //
-        // A `JoinError` (the task itself panicked) loses the language with it, so that
-        // language is silently treated as covered. Pre-existing and unchanged — the old
-        // code swallowed the same case at the same place.
-        let Ok((lang, outcome)) = task_result else {
+        // `lang_outcome` is tested directly on all three arms, but the join between
+        // it and this loop runs only inside this async loop behind a real server.
+        // A `JoinError` (the task itself panicked) loses the language with it too —
+        // pre-existing and unchanged, the old code swallowed both the same way.
+        let Ok((_lang, outcome)) = task_result else {
             continue;
         };
         let Some(symbols) = outcome else {
-            uncovered_langs.insert(lang);
             continue;
         };
         for sym in symbols {
@@ -839,15 +789,6 @@ async fn search_project_symbols(
             // visible to the agent under Project scope.
             let in_walk = *scope != crate::library::scope::Scope::Project
                 || accepted_files.contains(&sym.file);
-            // Recorded BEFORE the name and kind filters, and only for files the walk
-            // accepted. This set is what lets the fallback skip a file the LSP has
-            // demonstrably answered for — including in a root that is only partially
-            // covered, which is where a duplicate symbol would otherwise come from.
-            // It can never be read as evidence that a file is NOT covered: the LSP was
-            // asked for one pattern, so absence here is a fact about the query.
-            if in_root && in_walk {
-                lsp_seen_files.insert(sym.file.clone());
-            }
             if name_matches && kind_ok && in_root && in_walk {
                 // When include_body is requested, validate the range. If
                 // workspace/symbol returned a degenerate range, fall back to
@@ -874,32 +815,34 @@ async fn search_project_symbols(
                 } else {
                     None
                 };
-                matches.push(symbol_to_json(
-                    &sym,
-                    include_body,
-                    source.as_deref(),
-                    depth,
-                    true,
-                ));
+                let v = symbol_to_json(&sym, include_body, source.as_deref(), depth, true);
+                // Recorded so the tree-sitter pass below never re-adds this exact
+                // symbol — see `merge_deduped`. NOT REACHED BY ANY UNIT TEST: this insert
+                // only runs behind a real LSP response inside the async loop above: a
+                // mutation removing it is invisible to `fallback_gap_tests`, which tests
+                // `merge_deduped` directly with a hand-built `pushed_keys`, never this
+                // call site that populates it. Only a live-LSP probe (§ Reproduction probe
+                // B in the tracking bug) exercises the join between the two.
+                if let Some(k) = dedup_key(&v) {
+                    pushed_keys.insert(k);
+                }
+                matches.push(v);
             }
         }
     }
 
-    // Tree-sitter pass over the files the LSP cannot be covering. This used to run only
-    // when the LSP produced nothing at all, which made a warm LSP return strictly fewer
-    // symbols than a cold one — see `files_needing_fallback`.
+    // Tree-sitter pass over every accepted file, merged against what the LSP
+    // already found. This used to run only when the LSP produced nothing at all
+    // (`matches.is_empty()`), then only over files a structural coverage guess
+    // exempted the LSP from — both made a warm LSP return strictly fewer symbols
+    // than a cold one, because `workspace/symbol` can silently omit a real match
+    // inside a file it otherwise answers for correctly. See `files_needing_fallback`
+    // and `merge_deduped`.
     //
     // It no longer re-walks the tree. `accepted_files` was built above with the same
-    // `WalkBuilder` settings and the same `detect_language` test, so the second walk was
-    // a byte-identical population computed twice — and two populations that must agree
-    // are one that eventually will not.
-    for path in files_needing_fallback(
-        &accepted_files,
-        &nested_roots,
-        &lsp_seen_files,
-        &uncovered_langs,
-        matches.is_empty(),
-    ) {
+    // `WalkBuilder` settings and the same `detect_language` test, so a second walk
+    // would be a byte-identical population computed twice.
+    for path in files_needing_fallback(&accepted_files) {
         let path = path.as_path();
         if let Ok(symbols) = crate::ast::extract_symbols(path) {
             let source = if include_body {
@@ -907,6 +850,7 @@ async fn search_project_symbols(
             } else {
                 None
             };
+            let mut candidates = Vec::new();
             collect_matching(
                 &symbols,
                 name_ok,
@@ -914,9 +858,10 @@ async fn search_project_symbols(
                 source.as_deref(),
                 depth,
                 true,
-                matches,
+                &mut candidates,
                 kind_filter,
             );
+            merge_deduped(candidates, &mut pushed_keys, matches);
         }
         // Early cap to avoid scanning entire huge projects.
         // Uses the decoupled search-pool ceiling, not guard.max_results,
@@ -1536,7 +1481,8 @@ mod walk_audit_tests {
 
 #[cfg(test)]
 mod fallback_gap_tests {
-    use super::{files_needing_fallback, is_project_manifest};
+    use super::{dedup_key, files_needing_fallback, merge_deduped};
+    use serde_json::json;
     use std::collections::HashSet;
     use std::path::PathBuf;
 
@@ -1544,119 +1490,29 @@ mod fallback_gap_tests {
         paths.iter().map(PathBuf::from).collect()
     }
 
-    /// Every language's server answered. Named rather than inlined as `HashSet::new()`
-    /// because "no uncovered languages" is a claim these tests make, not an absence.
-    fn all_covered() -> HashSet<&'static str> {
-        HashSet::new()
-    }
-
-    /// A dead or still-indexing LSP must still get whole-tree coverage. This is the arm
-    /// that existed before the fix, and it has to keep behaving identically — a fix that
-    /// narrowed THIS case would turn a working cold path into a broken one.
+    /// The fallback no longer decides coverage per file — every accepted file is a
+    /// candidate, full stop. `merge_deduped` is what keeps this from duplicating an
+    /// LSP hit; this test is only about the candidate SET, so it must return
+    /// everything regardless of nesting, language coverage, or LSP activity — all of
+    /// which used to be separate inputs here and are gone.
     #[test]
-    fn everything_is_covered_when_the_lsp_produced_nothing() {
-        let accepted = set(&["src/a.rs", "src/b.rs", "fixtures/x/c.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), true);
-        assert_eq!(got.len(), accepted.len(), "cold LSP must cover every file");
-    }
-
-    /// With the LSP alive and answering for every language, only files under a nested
-    /// project root need covering — `src/` belongs to the outer project.
-    ///
-    /// `nested_roots` being non-empty is the load-bearing detail: pass `&[]` and this
-    /// silently becomes a test that the warm arm returns nothing, which is satisfied by a
-    /// fallback that was deleted outright.
-    #[test]
-    fn only_nested_roots_are_covered_when_the_lsp_answered() {
-        let accepted = set(&["src/a.rs", "fixtures/x/c.rs", "fixtures/x/d.rs"]);
-        let nested = vec![PathBuf::from("fixtures/x")];
-        let got =
-            files_needing_fallback(&accepted, &nested, &HashSet::new(), &all_covered(), false);
-        assert_eq!(
-            got,
-            vec![
-                PathBuf::from("fixtures/x/c.rs"),
-                PathBuf::from("fixtures/x/d.rs")
-            ],
-            "a file outside every nested root is the LSP's to answer for"
-        );
-    }
-
-    /// The half `nested_roots` cannot reach, measured 2026-09-12: one Python hit made
-    /// `matches` non-empty, so Rust files OUTSIDE every nested root were left to a
-    /// rust-analyzer that returned nothing, and cold `13` became warm `5`.
-    ///
-    /// `src/a.rs` is under no nested root, so only the language rule can put it in the
-    /// gap. That is the whole assertion.
-    #[test]
-    fn a_language_whose_server_never_answered_is_covered_wholesale() {
-        let accepted = set(&["src/a.rs", "scripts/t.py"]);
-        let mut uncovered = HashSet::new();
-        uncovered.insert("rust");
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &uncovered, false);
-        assert_eq!(
-            got,
-            vec![PathBuf::from("src/a.rs")],
-            "every file of an unanswered language needs the fallback, nested or not"
-        );
-    }
-
-    /// The discriminating twin of the test above, and the conflation the fix removes:
-    /// before it, a timed-out server returned `Ok(Vec::new())` and was byte-identical to
-    /// one that answered with no matches. Same inputs, same file, opposite verdict — and
-    /// the ONLY difference is whether `rust` is named uncovered.
-    ///
-    /// Without this half, `uncovered_langs.contains(_) -> true` passes the test above.
-    #[test]
-    fn a_language_that_answered_with_no_matches_is_not_reparsed() {
-        let accepted = set(&["src/a.rs", "scripts/t.py"]);
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), false);
-        assert!(
-            got.is_empty(),
-            "a server that answered and simply had no hit is still covering its files: {got:?}"
-        );
-    }
-
-    /// `lsp_seen` may only ever REMOVE work. Here the LSP answered for one file inside a
-    /// nested root — a partially covered root — so re-parsing it would emit that symbol
-    /// twice. `matches` is a flat push with no dedupe, so this is a correctness guard,
-    /// not an optimisation.
-    #[test]
-    fn a_file_the_lsp_already_answered_for_is_not_reparsed() {
-        let accepted = set(&["fixtures/x/c.rs", "fixtures/x/d.rs"]);
-        let nested = vec![PathBuf::from("fixtures/x")];
-        let seen = set(&["fixtures/x/c.rs"]);
-        let got = files_needing_fallback(&accepted, &nested, &seen, &all_covered(), false);
-        assert_eq!(
-            got,
-            vec![PathBuf::from("fixtures/x/d.rs")],
-            "a file the LSP answered for must not be parsed again"
-        );
-    }
-
-    /// `lsp_seen` must NOT suppress the cold arm. A stale or partial `lsp_seen` from a
-    /// language that answered while another died cannot be allowed to shrink whole-tree
-    /// coverage — and this is the pair that makes the `lsp_produced_nothing` branch a
-    /// real branch rather than an unreachable one.
-    #[test]
-    fn lsp_seen_does_not_shrink_the_cold_arm() {
-        let accepted = set(&["src/a.rs", "src/b.rs"]);
-        let seen = set(&["src/a.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &seen, &all_covered(), true);
-        assert_eq!(got.len(), 2, "the cold arm covers everything regardless");
+    fn every_accepted_file_is_a_candidate() {
+        let accepted = set(&["src/a.rs", "fixtures/x/c.rs", "scripts/t.py"]);
+        let got = files_needing_fallback(&accepted);
+        assert_eq!(got.len(), accepted.len());
     }
 
     /// The caller truncates at `search_pool_cap`, so iteration order decides which
-    /// symbols survive. `accepted` is a `HashSet`, whose order varies between runs, so an
-    /// unsorted return makes one query answer differently on successive calls.
+    /// symbols survive. `accepted` is a `HashSet`, whose order varies between runs, so
+    /// an unsorted return makes one query answer differently on successive calls.
     ///
     /// Asserted against a SORTED expectation built independently, not against
     /// `got.is_sorted()` — the latter is satisfied by a one-element result and by a
     /// HashSet that happened to iterate in order this run.
     #[test]
-    fn the_gap_is_sorted_so_a_capped_search_is_deterministic() {
+    fn the_candidate_list_is_sorted_so_a_capped_search_is_deterministic() {
         let accepted = set(&["z/9.rs", "a/1.rs", "m/5.rs", "b/2.rs"]);
-        let got = files_needing_fallback(&accepted, &[], &HashSet::new(), &all_covered(), true);
+        let got = files_needing_fallback(&accepted);
         let mut want: Vec<PathBuf> = accepted.iter().cloned().collect();
         want.sort();
         assert_eq!(got, want);
@@ -1665,27 +1521,79 @@ mod fallback_gap_tests {
     }
 
     #[test]
-    fn manifests_are_recognised_and_source_files_are_not() {
-        for name in [
-            "Cargo.toml",
-            "package.json",
-            "go.mod",
-            "pyproject.toml",
-            "build.gradle.kts",
-        ] {
-            assert!(
-                is_project_manifest(&PathBuf::from("some/dir").join(name)),
-                "{name} must be recognised as a project manifest"
-            );
-        }
-        // The negative half: without it, `fn is_project_manifest(_) -> bool { true }`
-        // passes the loop above and makes every directory a nested root.
-        for name in ["main.rs", "Cargo.lock", "README.md", "cargo.toml"] {
-            assert!(
-                !is_project_manifest(&PathBuf::from("some/dir").join(name)),
-                "{name} must NOT be recognised as a project manifest"
-            );
-        }
+    fn empty_accepted_set_yields_empty_candidates() {
+        assert!(files_needing_fallback(&HashSet::new()).is_empty());
+    }
+
+    #[test]
+    fn dedup_key_extracts_file_symbol_and_start_line() {
+        let v = json!({"file": "src/a.rs", "symbol": "foo", "start_line": 3, "kind": "Function"});
+        assert_eq!(
+            dedup_key(&v),
+            Some(("src/a.rs".to_string(), "foo".to_string(), 3))
+        );
+    }
+
+    /// A value missing any one of the three fields cannot be keyed — the call site
+    /// treats that as "push it, don't drop it", so the key itself must not silently
+    /// substitute a placeholder that would collide with a real key.
+    #[test]
+    fn dedup_key_is_none_when_a_field_is_missing() {
+        let v = json!({"file": "src/a.rs", "symbol": "foo"});
+        assert_eq!(dedup_key(&v), None);
+    }
+
+    /// The core correctness guard this bug is about: a tree-sitter candidate that
+    /// matches something the LSP already pushed must not be added again — the
+    /// mechanism `nested_roots`-based file skipping used to provide, now done at
+    /// symbol grain instead of file grain.
+    #[test]
+    fn a_candidate_already_pushed_by_the_lsp_is_dropped() {
+        let mut pushed_keys = HashSet::new();
+        pushed_keys.insert(("src/a.rs".to_string(), "foo".to_string(), 3i64));
+        let mut out = Vec::new();
+        let candidates = vec![
+            json!({"file": "src/a.rs", "symbol": "foo", "start_line": 3}),
+            json!({"file": "src/a.rs", "symbol": "bar", "start_line": 9}),
+        ];
+        merge_deduped(candidates, &mut pushed_keys, &mut out);
+        assert_eq!(
+            out.len(),
+            1,
+            "the duplicate of the LSP's own hit must not survive"
+        );
+        assert_eq!(out[0]["symbol"], "bar");
+    }
+
+    /// Two tree-sitter candidates sharing a key (e.g. the same nested-root file
+    /// reachable through two accepted-file entries) must not double-push either —
+    /// `pushed_keys` has to grow as `merge_deduped` runs, not only start from the
+    /// LSP's contribution.
+    #[test]
+    fn merge_deduped_also_catches_duplicates_within_its_own_candidates() {
+        let mut pushed_keys = HashSet::new();
+        let mut out = Vec::new();
+        let candidates = vec![
+            json!({"file": "src/a.rs", "symbol": "foo", "start_line": 3}),
+            json!({"file": "src/a.rs", "symbol": "foo", "start_line": 3}),
+        ];
+        merge_deduped(candidates, &mut pushed_keys, &mut out);
+        assert_eq!(out.len(), 1);
+    }
+
+    /// A keyless candidate is pushed regardless — losing a real result to a failed
+    /// key extraction would be worse than an occasional duplicate.
+    #[test]
+    fn a_candidate_with_no_extractable_key_is_pushed_unconditionally() {
+        let mut pushed_keys = HashSet::new();
+        let mut out = Vec::new();
+        let candidates = vec![json!({"file": "src/a.rs"}), json!({"file": "src/a.rs"})];
+        merge_deduped(candidates, &mut pushed_keys, &mut out);
+        assert_eq!(
+            out.len(),
+            2,
+            "an unkeyable value is never dropped for looking like a duplicate"
+        );
     }
 }
 
