@@ -1,7 +1,7 @@
 ---
-id: '13a1fbde684b4370'
+id: da911452d5a00116
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the documented-parameter guard bills only `key=value` args, so the manual''s signature and JSON forms are unscannable'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -183,34 +183,111 @@ and fixed; this one has the same shape and survived it.
 
 ## Fix
 
-Not fixed. Two candidate directions, neither costed here:
+Fixed in `67891d98` (patch-id `cb768ea8fccd422ad13785e352ed2388b868ef72`).
 
-1. Extend `calls_on_line` to bill BARE identifiers in a call span as parameter candidates when
-   the span contains no `=` at all. Narrow enough to avoid billing `grep(regex)`-style prose
-   that names a concept rather than a key — which is itself the hard part, since
-   `semantic_search(query)` names a real parameter and `grep(regex)` does not.
-2. Scan JSON `"arguments"` objects whose sibling `"tool"` key names a live tool. Structurally
-   unambiguous, and covers every worked example in the manual, but it is a second parser rather
-   than a widening of the first.
+Direction 1, and the reproduction **inverted this section's own difficulty claim** before a line
+was written. That is the part worth keeping.
 
-**A measurement hazard that must be read before either is attempted.** The instances that would
-have proved a widened predicate are GONE from the corpus as of the fix for
-`57ecbac8f925d7b8` — this session removed all six. A widened guard run against `experiments`
-today goes green and proves nothing. Recover fixtures from that commit's parent, or better, use
-`calls_on_line`, which is already extracted as a pure per-line function precisely so a case can
-be written without planting one in the corpus the gate scans.
+### The blocker named above is not the blocker
 
+This section said the hard part is that `semantic_search(query)` names a real parameter while
+`grep(regex)` does not, with no token-level rule between them. **That pair needs no rule.** The
+SCHEMA separates them: `query` is a `semantic_search` parameter and passes, `regex` is not a
+`grep` parameter and reds — the same mechanism the guard already applies to `=` args, correct on
+both for free. The framing mistook *"the two look identical"* for *"the two cannot be told
+apart"*, and only the second would have been a blocker.
+
+### The census, run with the production walker over all 132 present-tense surfaces at `408709ea`
+
+| bucket | n |
+|---|---|
+| bare identifiers that **are** real parameters | **97** |
+| bare identifiers that are not — action shorthand | 45 |
+| bare identifiers that are not — value positions | 3 |
+| actual defects in the tree today | **0** |
+
+**The 97 is the case for the fix, and the 0 is why it nearly did not get made.** `b0b9bc40`'s
+sweep (`04badf94`) removed every live instance, so a fix justified by today's catches looks
+worthless — the vanishing-fixture hazard this file warned about, arriving as an argument against
+the fix rather than as a missing test. What the widening actually buys is 97 live parameter
+claims that were never under the guard, any one free to rot exactly as `name_path` did. The
+corpus uses the bare form heavily and CORRECTLY, including mixed:
+`edit_code(symbol, path, action="rename", new_name)` had three params dropped while the guard
+reported on that same line — partial, which is worse than skipped.
+
+### The 45 are action shorthand, excluded from the SCHEMA rather than allow-listed
+
+`doc(get)`, `librarian(reindex)`, `workspace(activate)`, `memory(recall)` — house style in the
+manual, the guides and `CLAUDE.md` itself. `tool_actions()` reads each tool's `action` `enum`.
+An allowlist would have worked today and would also excuse a **retired** action forever, and
+would need hand-editing whenever a tool gains one. Reading `enum` means a dead action stops
+being excused the moment it leaves the schema.
+
+### The 3 are value positions, and this parser already owed them an escape
+
+`IC-6`'s obligation, and it turned out to be already satisfied and merely unsaid: `<` is not an
+identifier character, so `symbols(<found_file>)` is invisible to the scan. Now named **at the
+refusal site**, which is the whole point — a documented limitation and a silent reinterpretation
+cost a reader very different amounts. The three sites moved to `symbols(path=<found_file>)`,
+which is strictly better documentation: it names the slot the value goes in, which the bare form
+never did, and the neighbouring cells in those same tables already name parameters. Note this is
+**not** the corpus bent to suit the parser — the ambiguity was real, and a reader could not tell
+which cells named parameters and which named values either.
+
+### One coupling only the run revealed
+
+`anchored_cites` feeds BOTH tests and emits one `Cite` per parameter, so a call with no named
+args produced no `Cite` and was invisible to `a_documented_call_names_a_live_tool`. The `=` was
+quietly doing two jobs: finding parameters AND filtering out ordinary code. Dropping it made
+every snake_case call in `extending/adding-languages.md`'s Rust samples an "anchored tool
+call" — **50** findings, none real. That test now takes named cites only, population unchanged,
+with the cost stated in place: a retired tool cited ONLY in the bare form is invisible there.
+No reading of either test would have surfaced this; it appears only when the shared input widens.
 ## Tests added
 
-None yet. When one is written, it belongs against `calls_on_line` directly — the pure function —
-and must be observed RED against today's constants.
+Three, against `calls_on_line` and `billable_bare` directly — the pure functions — plus the two
+corpus-walking guards.
 
+- `the_signature_form_is_billed_as_a_parameter_claim` — the founding case, and the mixed form.
+- `an_action_dispatch_value_is_not_billed_as_a_parameter` — with a **non-vacuity control**
+  (`doc`'s enum is actually read; an empty map would pass every other assertion in it by finding
+  nothing) and an **over-match guard** (`doc(hedaing)` is still billed, so a rule excusing every
+  bare identifier on an action-bearing tool fails).
+- `an_angle_bracket_placeholder_is_the_documented_escape` — paired with its opposite direction,
+  because "the placeholder is not billed" is monotone under the walker going dead.
+
+**Mutations, one per guarded SITE, each observed:**
+
+| site | mutation | observed |
+|---|---|---|
+| `bare` extraction in `calls_on_line` | never collects | **3 tests** red |
+| action exclusion in `billable_bare` | filter defeated | 2 tests + **45 corpus documents** |
+| bare filter in the tool-name test | filter defeated | **50 corpus documents** |
+
+And **end to end**, which is what this bug is actually about: injecting
+`references(name_path, path)` into a real manual page reds the guard, naming `name_path` and
+**not** `path` — a real `references` parameter on the same line. Probe reverted.
+
+The over-match guard earned its place immediately: under mutation 1 the action test failed on
+`"the walker still SEES it"`, not on its exclusion assertion. A dead walker makes
+`billable_bare(…).is_empty()` *greener*.
+
+**One thing recorded rather than fixed.** The tool-name test's bare filter is pinned by the
+CORPUS, not by a unit test — defeating it reds only while `adding-languages.md` still carries
+snake_case Rust samples (35 of the 50). Rewrite that page into fenced blocks and the branch goes
+silently untested: passing, and no longer discriminating. Annotated on the line.
 ## Resume
 
-`f3c594ce-c424-40d3-a603-9693cfef3f63` held `tests/doc_tool_refs.rs` dirty when this was filed
-and was told the mechanism directly, including the fixture hazard above. Check with that session
-before widening the predicate; they may already be in it.
+Done. Fixed and archived by `f3c594ce-c424-40d3-a603-9693cfef3f63`, who held the file when this
+was filed — `b0b9bc40`'s judgement that a bug filed by the party who cannot write the remedy has
+the wrong owner was correct, and the handoff's most useful content was the fixture hazard, which
+is exactly what nearly argued the fix away.
 
+Still open and NOT closed by this: the JSON-payload blindness (`CALL_OPEN` never matches
+`"tool": "index(action: build)"`), which § Summary calls a **suppressor** rather than a miss — an
+unresolvable tool name stops anything from checking the arguments inside it, so the 7 sites hid
+an unknown number of argument defects. That is direction 2 above, a second parser rather than a
+widening of the first, and it remains unwritten.
 ## References
 
 - `tests/doc_tool_refs.rs:61-68` (the two constants and the header recording the prior narrowing)

@@ -173,7 +173,9 @@ parameter that does not exist"*, and whose `present_tense_surfaces()` walks `doc
 It was green over all six instances for this bug's entire open life — measured this session at
 `exit=0`, 5830 passed / 0 failed / 37 binaries, on a tree that still contained them.
 
-Why it cannot see them is filed as `13a1fbde684b4370` (`cluster/guard-narrower-than-its-name`):
+Why it cannot see them is filed as `da911452d5a00116` (`cluster/guard-narrower-than-its-name`),
+since fixed in `67891d98` and archived — the guard now bills the bare form, so the very citations
+on this page are under it:
 `calls_on_line` bills parameters only from `NAMED_ARG` matches, which require an `=`. The
 signature form `references(name_path, path)` parses cleanly and yields an EMPTY parameter list;
 the JSON payload form never matches `CALL_OPEN` at all.
