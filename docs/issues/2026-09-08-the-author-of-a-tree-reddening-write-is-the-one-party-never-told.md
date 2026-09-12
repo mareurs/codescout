@@ -224,6 +224,55 @@ that reds if the filter is relaxed.
 Finding 3 is the one worth reading twice: the author-side mechanism, built to stop
 misattribution, had a misattribution available in its own parser — found by writing it rather
 than by review.
+
+### A prevention-side candidate, on a different axis from options 1-3 (2026-09-12)
+
+Everything above is about **telling** the author. This is about the window not existing,
+and it is recorded here rather than in a tracker because a reader working this file is
+the reader who needs it — and because § Root cause argues that an instance left in
+message history is the one that never gets counted. The same holds for a remedy.
+
+**The constraint that produced it.** Any remedy firing when the author *leaves* has to
+fire on a state the author does not experience as leaving. `b0b9bc40` did not step away
+from a broken tree; they were between two edits of one refactor, and *"between two
+edits"* is most of a session. That rules out every trigger-shaped remedy.
+
+**Their candidate, which dissolves the constraint instead of meeting it:** the
+intermediate state exists because the refactor was **two tool calls**. `edit_code` adds
+`group_by_file_ranked` to `file_group.rs`; a second call switches the import in
+`display.rs`. Between them the tree does not build — not because anyone left, but because
+no primitive applies both at once. An **atomic multi-file edit** (one call, N edits across
+N files, applied together or not at all) fires on nothing and requires noticing nothing,
+because the state it prevents is never reachable. Precedent is one layer down already:
+`edit_file(edits=[…])` and `doc(patch={body_edits: […]})` are both atomic **within one
+file**, and a cross-file rename is exactly the operation that cannot be expressed in one.
+
+**Priced, not sold. Three caveats from its author, and two from the other party:**
+
+1. *Atomic against what?* Writing N files cannot be atomic against a concurrent reader
+   without a lock those readers respect, and a peer running `cargo` takes none. **So the
+   window moves rather than closes** — from the gap between two tool calls to the length
+   of one write burst. Whether that is the whole available win depends on how often peers
+   read, which nothing here measures.
+2. It does not cover a refactor spanning a type change and its test update: that is not
+   one write burst and this primitive does not reach it.
+3. A half-applied atomic edit is a tree **nobody authored**, which is harder to attribute
+   than the two-call version. Softer than it looks if built on the existing
+   temp-file-then-rename `atomic_write`, but that path has its own filed defect, so it is
+   a dependency rather than a free primitive.
+4. **It attacks the WINDOW; it does not attack the SHARING.** Peers compile each other's
+   uncommitted work continuously, and a shorter window is a smaller probability of the
+   same event. The orthogonal candidate is per-session worktree isolation, which this
+   repo already supports and which sessions routinely decline for cost — a shared
+   `target/`, a machine-local catalog, and a rebuild per tree. That trade is real and
+   unmeasured, and the two candidates are complements rather than rivals.
+5. Nothing here helps the case where the intermediate state is *intended* — an armed
+   mutation is a deliberate red, and no atomicity primitive can distinguish it from a
+   broken one.
+
+*Candidate by `b0b9bc40`; the constraint it answers, and points 4-5, by `b80a27d4`.
+Neither half is much use alone, which is why it is recorded jointly rather than
+attributed to the message it appeared in.*
 ## Workarounds
 
 For the **reader**, which is a different problem and already solved — credited to
