@@ -98,6 +98,38 @@ Where the harness supplies no parent id, **recording nothing beats recording a p
 own predecessor — that is what compaction removes — so `from=<peer>` is unfalsifiable from inside
 the one context that reads it. It surfaced only through an unrelated instrument: this repo stamps
 a `Session-Id` trailer on every commit, so `git log` holds a record the plugin does not control.
+
+### Third instance, 2026-09-12 — a confirmation, plus one refutation route this file said did not exist
+
+Session `05841db2-4ba0-4cb2-a22f-c0bc2f771e20` compacted and its payload read
+`from=f3c594ce-c424-40d3-a603-9693cfef3f63`. Socket enumeration at 19:26:53 returned 18 live
+sessions across 3 profiles, 5 of them in this checkout, and `f3c594ce` was one of them —
+PID 703051, name `attach-alias-advisory-anyhow`, status `waiting`.
+
+**Reported as a confirmation, not a catch.** Both effects landed exactly as the table above
+predicts: `.buddy/<sid>/state.json` recorded `parent_sid: f3c594ce-…`, and
+`active_specialists` was `[]` on both sides, so the adoption path was reached and did not
+fire. That is now **two independent near misses and zero observed transfers** — a
+denominator. The severity of the armed effect rests entirely on how often a session holds a
+non-empty specialist list, which neither instance measures.
+
+**New: the pointer's churn was observed directly, and the recorded lineage is a chain of
+contemporaries.** `.buddy/.current_session_id` was read twice about three minutes apart and
+held two *different* peer sids — `8bd791df-…` (`codescout-1a`, PID 924391) at ~19:27, then
+`f3c594ce-…` at ~19:30. Following the recorded parents: this session's `parent_sid` is
+`f3c594ce`, and `f3c594ce`'s own `parent_sid` is `8bd791df`. All three were alive at the same
+instant. The on-disk lineage is not a stale ancestor chain that merely decays — it is a chain
+of concurrent peers, re-pointed at whatever rate sessions start and compact.
+
+**And the "unfalsifiable from inside" claim above needs one narrowing.** It is right that a
+compacted session has no memory of its predecessor. But it does not need one: process start
+time refutes the lineage directly. PID 703051 started 2026-09-11 09:09:18, **7h47m before**
+the reading session's own process (PID 2706008, 16:56:18), and both transcripts were being
+appended within two minutes of the check (19:26:26 and 19:28:31). A predecessor cannot both
+predate you by seven hours and still be writing. This is cheaper than the `Session-Id`
+commit-trailer route this file names, needs no commits to exist, and works on the first turn
+after a compaction — so the accurate statement is that `from=` is unfalsifiable **from
+context**, not unfalsifiable from **inside the session**.
 ## Evidence
 
 Quoted from the peer's cross-session message (2026-09-03):

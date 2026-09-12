@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 135
-entry_high_water_W: 127
+entry_high_water_W: 128
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -187,6 +187,7 @@ entry_high_water_W: 127
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-128 | 2026-09-12 | med | **Verified a rebuild by PROCESS, not by file — and the verification expired eleven minutes later.** Identified my own server by `ppid` (PID 968351, inode `190428843`, shared with 3 peer servers), read its baked provenance (`git_sha=ad243cb7`, `git_dirty=true`), confirmed ancestry, then probed the wire: the `$VAR` source-gate refusal now names cause AND a performable remedy, and a 400-row `doc(find)` overflowed to a buffer whose envelope still carried the tool's own `corrections` with **no** `param_aliases` — the absence control, since two unrelated mechanisms write that key. At 19:33:11 a peer had relinked: on-disk inode `190441132`, and all four of those servers — mine included — now hold a deleted exe. | "The gate was green when I committed" is evidence about a suite, not the process answering my calls. Framed as *"the build on disk has my fix"* the same evidence goes false in 11 minutes with nothing marking the transition; framed as *"the process serving me"* it survives, because a running process keeps its mapped inode. **Also carries its own falsified count:** the entry first said "20 of 26" — `pgrep -f codescout` matches the `cargo`/`rustc`/`sccache` processes *building* it, so that counted pgrep's list rather than codescout servers. Re-derived: 19 of 21 on a dead inode, and the 2 on the current one are worker children of a peer's server, not session servers. | validated |
 | W-127 | 2026-09-12 | high | **Nearly filed a phantom bug against `grep` — the corpus moved mid-read, and the check was two commands.** Two reads of ONE line disagreed a minute apart: substring grep saw `{group_by_file, render_grouped}` at `display.rs:109`, a whole-word grep matched nothing there, and `read_file` saw `{group_by_file_ranked, …}`. My first hypothesis was that `grep` had mis-rendered the line. `git status` + `stat` showed the file DIRTY with an mtime **2 seconds** before my check — a peer wrote it while I was reading. Settled against both trees: HEAD has bare `group_by_file` (2 occurrences, 0 ranked), the worktree has the ranked variant, uncommitted. The instrument was right at each instant. | A bug filed against a core tool for returning content not in the file — **unreproducible by construction**, because the worktree had already moved past the state that produced it. It would have sat open as a phantom, and the next session re-running the grep would get the new answer and be unable to tell fixed from flaky from never-real. `CLAUDE.md` names the tell (line drift means the corpus MOVED, not that the reader ERRED) and records 3 of 4 sessions reaching for *"they made a mistake"*; I reached for *"the TOOL made a mistake"*, which is the same move aimed at an instrument — worse, because a person can correct the record and a tool accusation just accumulates. Also **corrects `codescout-75`'s self-criticism in their favour** — **⚠ RETRACTED 06:56Z, see the entry's correction block: the worktree/HEAD divergence postdated their claim, created by their own step-4 edit (now `48d39f53`), so their retraction stands whole. What the exchange actually found is their class — a claim can become TRUE after it is withdrawn, when the withdrawer edits toward it — and a ceiling on this row's own remedy: naming the TREE resolves two CONCURRENT readings and does nothing for two SEQUENTIAL states.** Operational half, cheaper than the habit it replaces: name the TREE, not just the instant — `git show HEAD:<path>` is one command and removes the ambiguity a timestamp only dates. | validated |
 | W-126 | 2026-09-12 | med | **Scouted the caller's INPUT, not its signature, and it inverted the implementation.** Fixing `447d98db54393338` meant giving `edit_file`'s keyword scan literal-awareness by reusing `src/util/text.rs`'s scanner rather than writing a second copy of the literal rules. Its existing caller threads `Scan` state line to line — correct for `literal_continuation_mask`, which walks real blocks. Reading the NEW caller's input showed `find_def_keyword` receives `lines_only_in(old, new)` joined: the lines an edit CHANGED, which are never contiguous source. So `blank_non_code` resets to `Scan::Code` per line, and the choice is annotated where it is made rather than left to look like an oversight. | Carried state would blank real code lying between two unrelated quotes — a **false negative**, which the module's stated asymmetry at `:45-49` calls the direction that corrupts rather than annoys, so it surfaces as no complaint from anyone. It would also have passed the entire suite: every existing scanner test feeds a real contiguous block, where carrying state is correct, so no fixture in the repo can express the failure. The guard that now reds on it, `blank_non_code_does_not_carry_literal_state_between_lines`, was written from the scout and not from an observed red — the one shape this ledger keeps finding that a test run cannot hand you. | validated |
 | W-125 | 2026-09-11 | high | **Ran the reproduction the FILE states, and the confirmation identified the binary as a side effect.** Closing `1e11cf9357136e0e` after `2183a058`, I ran the bug file's own stated reproduction (`doc(find, rel_path="docs/issues", limit=200)`) rather than one composed from its title. The envelope now carries the tool's own `corrections`; the same call earlier in the session returned only the four fixed envelope keys. Two properties make that a measurement rather than a reassurance: the OLD build cannot emit that key on this call by construction (fixed four-key literal, and its only `corrections` write was gated on a param alias that does not fire here), so the green is a POSITIVE binary identification and the release-binary mtime never had to be consulted — this repo already has a recon commit titled *"an mtime that proved nothing"*; and the control is an ABSENCE assertion, `param_aliases` must NOT be present, because two unrelated mechanisms write the key `corrections`. Bounded deliberately: establishes the no-alias path only. The both-fire merge arm is unit-tested, not wire-tested, and no production call was found that drives both at once. | `W-124` — filed against this SAME bug by another session — records the title-composed probe returning a clean green against unfixed code, caught only by re-reading the file's § *Summary* before reporting. That lesson was then written into the bug file's own § *Reproduction* as an explicit trap warning, and this session read it there and ran the stated reproduction instead. Without it the natural closing probe is the alias one, which passes either way: the session reports "verified on the wire" on evidence about the mechanism that was never defective, then archives the bug, moving the evidence out with it. This is `W-124` compounding one bug later through the ARTIFACT rather than through a person, which is what entry ids are for. | validated |
@@ -14019,6 +14020,58 @@ a stamp tells a reader when two observations diverged and not which of them they
 
 **Status:** validated
 
+## W-128 — the post-rebuild check that means something is inode-then-wire, not suite-then-belief
+
+**Valid:** dated 2026-09-12
+
+**Observed:** post-rebuild recon, 2026-09-12. A rebuild was announced; "are my two fixes
+live?" has a cheap wrong answer (the gate was green when I committed) and a chain that
+actually establishes it.
+
+1. **Which binary is serving me.** My MCP server is PID 968351, found by `ppid == <my CC
+   pid>` — not by name, and not by "the newest one". At 19:22 it held inode `190428843`,
+   shared with three peer servers. Inode equality is what licenses step 2: running the
+   on-disk file is then running *that* binary, not a same-named sibling.
+2. **What that binary was built from.** `./target/release/codescout version` reported
+   `git_sha=ad243cb7`, `git_dirty=true`. `git merge-base --is-ancestor` put all four of my
+   commits inside it, and only 4 commits (all docs-only) had landed since my last.
+3. **The wire.** `run_command("head -3 $SP/src/main.rs")` returned the new refusal — *"this
+   clause contains an unexpanded shell expansion, so the gate could not resolve where the
+   path points and blocked conservatively… re-run with the path written out literally"* —
+   cause plus a remedy the reader can perform. A `doc(find)` with a 400-row limit overflowed
+   to a buffer (110,752 bytes) and the **envelope still carried the tool's own
+   `corrections`** (the `rel_path` lift plus its hint), with **no** `param_aliases` — the
+   control my test carries, since a framework-only advisory is what the pre-fix envelope
+   would have produced.
+
+**The verification had an 11-minute shelf life, and that is the finding.** At **19:33:11**,
+re-deriving the population for this very entry, `target/release/codescout` had inode
+`190441132` — a peer had relinked mid-turn. All four servers from step 1, mine included, now
+hold `target/release/codescout (deleted)`. The probes stay valid **for the binary answering
+me**, because a running process keeps its mapped inode when the file is replaced; that is
+exactly why identifying the *process* rather than the *file* is the load-bearing step. Framed
+the usual way — "the build on disk contains my fix" — the same evidence would have been false
+within eleven minutes, with nothing to mark the transition.
+
+**Counterfactual:** "gate was green at commit time" is evidence about a suite, not about the
+process answering my calls, and cannot distinguish *shipped* from *built-then-superseded*.
+At 19:33:11, **19 of 21** codescout processes held a deleted exe.
+
+**⚠ I got that count wrong first, and the correction is worth more than the number.** The
+entry originally read *"20 of the 26 live codescout processes"*. `pgrep -f codescout` matches
+the `cargo`, `rustc`, `sccache` and `bash` processes **building** codescout, so I had counted
+pgrep's match list and called it codescout servers — `CLAUDE.md`'s *count the LIST, never the
+corpus*, committed while writing an entry about verification. Re-deriving also corrected the
+shape: the 2 processes on the current inode have `ppid` pointing at **another codescout
+server**, so they are worker children spawned after the relink, not session servers. Every
+session-serving process in this checkout is on a dead inode.
+
+**Rests on:** `git_dirty=true` bounds the claim — the build came from a tree with uncommitted
+content, so the wire behaviour is HEAD's Rust plus an unmeasurable delta. The two probes are
+positive observations of *behaviour*, which is why they survive that caveat; an ancestry
+check alone would not.
+
+**Status:** validated
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
