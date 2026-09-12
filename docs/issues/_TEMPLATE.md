@@ -67,6 +67,16 @@ Optional `unverified:` — the caveat, made queryable:
   applied only to a gitignored file, or a blocker that turned out to be an
   obsolete rule. ABSENCE means nothing outstanding — do not add it empty,
   because presence is the signal a query filters on.
+  Once the doubt is SETTLED, do not delete the field — open it with a
+  discharge marker: CLEARED / REFUTED / RESOLVED / WITHDRAWN as the first
+  word, uppercase, e.g.
+    unverified: 'CLEARED 2026-09-10. Was: the selector still ignored scope.'
+  doctor's terminal_status_with_caveat reads that as answered and stops
+  reporting the record, so the sentence saying what was doubted survives.
+  Leading and uppercase are both required ("resolved the crash by widening
+  the lock" is prose, not a declaration), and a marker is for a discharge
+  only — a caveat that got WORSE must keep reporting, which is why
+  MEASURED is not a marker. An unmarked caveat behaves exactly as before.
   Why it exists: measured 2026-08-19, 14 of 16 terminal-but-unarchived bug
   files stated their blocker in prose, where no query reads. That is how
   find(kind="bug", status="open") came to miss a `fixed` record whose own

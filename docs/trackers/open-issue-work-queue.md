@@ -117,7 +117,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
 | BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes plus a verification pass over the actionable bucket. Live and archived records triaged; `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker. Verifying the still-live bucket against CODE flipped one of four — the loudest — to correctly-parked: a deliberate design decision reads exactly like an unfixed gap in its author's own words | — |
-| BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **scouted, recommend NOT doing** 2026-09-12 — already declined once as `CAP-7` open decision 2. Its premise ("no such marker convention exists") is now false and its objection is defused by making absence mean today's behaviour — but the check gates nothing, and the convention spans four served surfaces. Awaiting a call | — |
+| BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **done** 2026-09-12 — shipped as an ADDITIVE marker: a leading uppercase `CLEARED`/`REFUTED`/`RESOLVED`/`WITHDRAWN` silences the record and keeps its text; an unmarked caveat behaves exactly as before, which is what defuses the 2026-08-19 objection. `MEASURED` is deliberately excluded — the one record using it is an ESCALATION. Verified live: 2 silenced, 3 negative controls still reporting; both test halves observed RED under mutation | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1808,6 +1808,38 @@ would have bought.
 **What would change the recommendation:** the check becoming gating, or the in-band markers
 spreading far enough that `doctor`'s output is mostly settled doubts. Both are observable, and the
 second is the one to watch — re-derive it, do not assume it has held.
+
+**SHIPPED 2026-09-12 — the recommendation was OVERRULED and one of its two premises was wrong.**
+Re-measured before building: `unverified:` is documented on **two** surfaces, not four —
+`src/prompts/guides/tracker-conventions.md` and `docs/issues/_TEMPLATE.md`. `CLAUDE.md`,
+`docs/TAXONOMY.md` and `.codescout/system-prompt.md` carry **zero** mentions, so `CAP-7`'s *"landed
+across four surfaces"* is itself stale. The cost argument above overstated the blast radius by
+double, which is worth leaving on the record rather than quietly correcting: a recommendation
+resting on an unre-derived count is the thing this ledger exists to catch.
+
+**The design ratifies the corpus's own convention.** A leading, uppercase `CLEARED` / `REFUTED` /
+`RESOLVED` / `WITHDRAWN` marks the doubt settled; the scan skips the record and the sentence saying
+what was doubted survives. An unmarked caveat is reported exactly as before, so no pre-existing
+record changes bucket — that is the whole answer to the 2026-08-19 objection, and it makes the
+change strictly additive.
+
+**Leading and uppercase are both load-bearing**, for the reason `librarian::statements` anchors
+`**Valid:**` at column 0: prose and field share a vocabulary, so *"resolved the crash by widening
+the lock"* must not read as a discharge. **And `MEASURED` is deliberately not a marker** — the one
+record opening `MEASURED … AND WORSE THAN THIS RECORD FIRST STATED` is an ESCALATION, and a rule
+keyed on *"the caveat was revisited"* would have silenced the single record in the population that
+got worse.
+
+**Verified against the live corpus with the rebuilt CLI, not only fixtures:** the two
+leading-uppercase records went silent, and three negative controls kept reporting — the escalation,
+a lowercase `Resolved by measurement …`, and a `Liveness caveat CLEARED …` whose marker is not
+first. **The headline count is NOT cited as evidence**: peers committed three `docs/issues/`
+commits between the two readings, so 120 → 119 is confounded by a corpus that moved, and the
+per-record check is the sound one.
+
+**Both test halves were observed RED under mutation** (`caveat_is_discharged` forced to `true`),
+not merely written: the absence assertion is monotone under a matcher that accepts everything, so
+its control — an ordinary caveat that must *still* report — is what makes it worth anything.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;

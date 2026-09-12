@@ -5391,6 +5391,58 @@ fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Vio
         .collect())
 }
 
+/// Whether an `unverified:` caveat DECLARES ITSELF DISCHARGED, and is therefore not a
+/// finding.
+///
+/// **Ratifies a convention the corpus invented rather than introducing one.** Measured
+/// 2026-09-12 over this check's own population: five records already open their caveat with
+/// a marker announcing the doubt's outcome — `CLEARED <date>`, `REFUTED <date>, both by
+/// measurement`, `Resolved by measurement, not by a fix from this session`. Five authors
+/// reached for the same shape independently, because the field has two machine-readable
+/// states (present / absent) and its writers need three: open, settled, never raised.
+/// Silencing a settled one previously meant DELETING the sentence recording what was doubted
+/// and how it resolved, which is why nobody did it and why the count drifted away from
+/// measuring unproven claims.
+///
+/// **Absence of a marker is unchanged behaviour, and that is the whole design.** This
+/// proposal was declined on 2026-08-19 (`CAP-7` open decision 2) because a marker "would
+/// leave every caveat written before today unmarked and force them all into whichever bucket
+/// the default picks". That cost is paid only if the default moves. It does not: an unmarked
+/// caveat is reported exactly as before, so no existing record changes bucket and the change
+/// is strictly additive. The premise that reasoning rested on — "no such marker convention
+/// exists" — was true when written and is not true now.
+///
+/// **LEADING and UPPERCASE, both load-bearing.** A marker is a declaration and a declaration
+/// goes first — the same reason [`crate::librarian::statements`] anchors `**Valid:**` at
+/// column 0 instead of matching its keyword anywhere: prose and field share a vocabulary, so
+/// *"resolved the crash by widening the lock"* would otherwise read as a discharge. Caps
+/// carry the rest; an uppercase first word is not something ordinary prose produces by
+/// accident, and it is what three of the five corpus records already wrote.
+///
+/// **`MEASURED` is deliberately NOT a marker, and excluding it is the point.** The fifth
+/// record opens `MEASURED 2026-09-05 AND WORSE THAN THIS RECORD FIRST STATED` — an
+/// ESCALATION wearing the same shape. A rule keyed on *"the caveat was revisited"* rather
+/// than *"the doubt was settled"* would silence the one record in the population that got
+/// worse, which is the most expensive single mistake available here.
+///
+/// Silence is monotone under a broken matcher — one that matched everything would empty the
+/// check and pass green — so the discrimination is pinned separately by
+/// `the_discharge_marker_parser_discriminates`, over a fixture whose answers are known.
+fn caveat_is_discharged(caveat: &str) -> bool {
+    const MARKERS: [&str; 4] = ["CLEARED", "REFUTED", "RESOLVED", "WITHDRAWN"];
+    // The FIRST word only. `split_whitespace` rather than a regex because the rule is
+    // POSITIONAL, not shaped: whatever follows the token — a date, a colon, a quoted former
+    // value — is the author's prose and none of this function's business.
+    let Some(first) = caveat.split_whitespace().next() else {
+        return false;
+    };
+    // Trim non-alphabetic edges so `CLEARED:` and `REFUTED,` count. This cannot smuggle a
+    // lowercase token through: trimming never changes case, so `Resolved` stays `Resolved`
+    // and does not match.
+    let token = first.trim_matches(|c: char| !c.is_ascii_alphabetic());
+    MARKERS.contains(&token)
+}
+
 /// `terminal_status_with_caveat`: a bug file whose `status` is terminal *and* whose
 /// `unverified:` field is non-empty.
 ///
@@ -5468,6 +5520,14 @@ fn scan_terminal_status_with_caveat(
             other => other.to_string(),
         };
         if caveat.is_empty() {
+            continue;
+        }
+
+        // A caveat that declares itself discharged is not a finding — see
+        // `caveat_is_discharged`. Checked BEFORE `scope.admit` so a settled doubt never
+        // enters the worklist, and so the skip is not scoped: a discharged record is
+        // discharged in every scope, unlike an admitted one.
+        if caveat_is_discharged(&caveat) {
             continue;
         }
 
@@ -8644,6 +8704,112 @@ mod tests {
                 .is_empty(),
             "an empty or whitespace-only caveat is not a caveat"
         );
+    }
+
+    /// A caveat that declares itself discharged stops firing, and keeps its text.
+    ///
+    /// The end-to-end half of `caveat_is_discharged` — that the marker reaches the scan at
+    /// all. Paired with `the_discharge_marker_parser_discriminates`, which pins WHICH strings
+    /// count; neither is worth much alone, because this one is satisfied by a matcher that
+    /// returns `true` for everything and that one never touches the scan.
+    ///
+    /// The control is the point: `still-open` carries an ordinary caveat and MUST still
+    /// report, or this test would pass against a scan that had stopped looking entirely.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_is_silent_on_a_discharged_caveat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "discharged",
+            "fixed",
+            Some("CLEARED 2026-09-10. Was: the population selector still ignored `scope`."),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "still-open",
+            "fixed",
+            Some("No regression test covers the corrected row."),
+        );
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_terminal_status_with_caveat(&mut ds, &cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "the discharged record is silent and the ordinary one still reports: {v:#?}"
+        );
+        assert!(
+            v[0].path.contains("still-open"),
+            "the surviving finding must be the UNMARKED record, not the marked one: {v:#?}"
+        );
+    }
+
+    /// Which strings count as a discharge marker, over a fixture with known answers.
+    ///
+    /// `terminal_status_with_caveat_is_silent_on_a_discharged_caveat` asserts an ABSENCE,
+    /// which is monotone under a matcher returning `true` for everything — that matcher
+    /// empties the check and passes green. This is what stands against it.
+    ///
+    /// Every row is a real shape from the 2026-09-12 corpus reading, and the fifth is why the
+    /// marker set is discharge VERBS rather than "the caveat was revisited": `MEASURED … AND
+    /// WORSE` is an ESCALATION, and silencing it would hide the one record in that population
+    /// which got worse rather than better.
+    #[test]
+    fn the_discharge_marker_parser_discriminates() {
+        for (caveat, expected, why) in [
+            (
+                "CLEARED 2026-09-10. Was: \"…\"",
+                true,
+                "leading, caps, dated",
+            ),
+            (
+                "REFUTED 2026-08-28, both by measurement",
+                true,
+                "second verb",
+            ),
+            ("WITHDRAWN — the premise expired", true, "third verb"),
+            (
+                "RESOLVED: by the rebuild",
+                true,
+                "trailing punctuation trimmed",
+            ),
+            (
+                "MEASURED 2026-09-05 AND WORSE THAN THIS RECORD FIRST STATED",
+                false,
+                "an ESCALATION must never be silenced",
+            ),
+            (
+                "Resolved by measurement, not by a fix from this session",
+                false,
+                "lowercase is prose, not a declaration",
+            ),
+            (
+                "Liveness caveat CLEARED 2026-08-30 after the rebuild",
+                false,
+                "not leading — a marker is a declaration and goes first",
+            ),
+            (
+                "resolved the crash by widening the lock",
+                false,
+                "ordinary prose sharing the field's vocabulary",
+            ),
+            ("No regression test.", false, "the common unmarked shape"),
+            ("", false, "empty is handled upstream but must not panic"),
+        ] {
+            assert_eq!(
+                caveat_is_discharged(caveat),
+                expected,
+                "{why} — caveat: {caveat:?}"
+            );
+        }
     }
 
     /// Archived files are included deliberately: `docs/issues/archive/` is where terminal

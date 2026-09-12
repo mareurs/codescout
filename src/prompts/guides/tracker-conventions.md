@@ -69,6 +69,21 @@ re-checked since a rebuild, a fix applied only to a gitignored file, or a blocke
 since become an obsolete rule. **Absence means nothing outstanding — never add it empty**,
 because presence is what a query filters on.
 
+**A settled doubt keeps its text — open the caveat with a DISCHARGE MARKER.** `CLEARED`,
+`REFUTED`, `RESOLVED` or `WITHDRAWN` as the first word, uppercase:
+`unverified: 'CLEARED 2026-09-10. Was: the selector still ignored scope.'` `doctor`'s
+`terminal_status_with_caveat` reads that as answered and stops reporting the record, so
+silencing a settled caveat no longer costs you the sentence recording what was doubted and
+how it resolved. Before this existed the field had two machine-readable states and its
+writers needed three, and five records had already invented this marker in prose where no
+check could read it.
+
+**Leading and uppercase are both required**, because prose and field share a vocabulary:
+*"resolved the crash by widening the lock"* is a sentence, not a declaration. **And do not
+use a marker to record an ESCALATION** — a caveat that got worse must keep reporting, which
+is why `MEASURED` is deliberately not one. An unmarked caveat behaves exactly as it always
+has, so nothing written before this convention changes meaning.
+
 Why it exists, measured 2026-08-19: of 16 terminal-but-unarchived bug files, **14 stated
 their blocker in prose** and none of it was reachable by a query. That is how
 `find(kind="bug", status="open")` — the triage query this guide and the activation
