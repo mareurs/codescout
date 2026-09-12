@@ -116,7 +116,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-72 | 1 | Raise `max_per_artifact` 1→2 (the "page limit 5→10" half is WITHDRAWN — see below) | **done** 2026-09-04 `998f64d3` — measured **+2/12** at harness `limit=5` (4/12 → 6/12, MRR 0.2708 → 0.3194). The class breakdown is the evidence, not the scalar: `preamble` 3→1 and `hit` 4→6 while `wrong_file` and `file-hits@5` held EXACTLY constant — the same files were always being found and the cap was showing the wrong chunk of them. `cap=2` is a genuine OPTIMUM: `cap=3` gives 6/12 and `cap=inf` 5/12, because uncapping lets one artifact flood the page. Mechanism: a ledger's preamble is a broad-spectrum attractor that beats every specific entry, so at `cap=1` the entry never reaches the page. **The blocker — `find.rs`'s two artifact-keyed side maps — is resolved** by `PageItem`, one record per HIT, guarded by `two_chunks_of_one_artifact_keep_their_own_matched_span` (observed RED first). **WITHDRAWN:** "page limit 5→10" named no product setting — `default_limit()` is 50 and the 5 is the benchmark harness's `--limit`; see `F-115` | — |
 | BL-73 | 1 | IC-5: rule whether the class promotes to `H` — its in-lane mechanism shipped 2026-09-02 (`58d85263`, `c06ecc28`) and two sibling axes grew their own guards, so the half-mechanism premise the ruling rested on is dead | **done** 2026-09-12 — ruled: the class had ALREADY promoted as a rule, per-member, into `CLAUDE.md` § *Development Commands*; the `H` destination on file was drift and is repointed. Class-level sentence deliberately NOT written | — |
 | BL-74 | 2 | BL-29: its `**Valid:**` conditional names an unobservable event ("until the snapshot gate reaches majority coverage") — the discriminator already existed when the entry was declared, so re-declare on a checkable condition | **done** 2026-09-12 — intent recovered from the record: the condition was a TRANSCRIPTION ARTIFACT, not an open requirement. `0dbfd0ee` shipped majority coverage 2026-08-16; the status line describing what the gate *requires* was transcribed into an event the entry *awaited*, inverting the verb. Re-declared on what is still owed | — |
-| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes. Live records and archived records triaged. Finding: `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker — five authors invented an in-band one. Nothing cleared, deliberately | — |
+| BL-75 | 3 | Triage `terminal_status_with_caveat`: a bug record that is terminal but carries an `unverified:` caveat is unreachable by the canonical triage query, so live residual work sits in files that read as closed | **done** 2026-09-12 — both passes plus a verification pass over the actionable bucket. Live and archived records triaged; `unverified:` has two machine states and needs three, so the count is partly an artifact of a missing discharged marker. Verifying the still-live bucket against CODE flipped one of four — the loudest — to correctly-parked: a deliberate design decision reads exactly like an unfixed gap in its author's own words | — |
 | BL-76 | 1 | Give `unverified:` a DISCHARGED form the scan can read, so a settled doubt keeps its text and stops firing. Five authors already invented in-band markers (`CLEARED`, `REFUTED`, `Resolved by measurement`) that `terminal_status_with_caveat` cannot see, because it keys on presence alone | **scouted, recommend NOT doing** 2026-09-12 — already declined once as `CAP-7` open decision 2. Its premise ("no such marker convention exists") is now false and its objection is defused by making absence mean today's behaviour — but the check gates nothing, and the convention spans four served surfaces. Awaiting a call | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
@@ -1699,6 +1699,40 @@ confirmation that was requested, so it stays.
 **Follow-up worth its own row, not done here:** give the field a discharged form the scan can read
 — a leading token, or a sibling key — so a settled doubt keeps its text and stops firing. That is
 the only change that makes this count mean what readers already assume it means.
+
+**VERIFICATION PASS 2026-09-12 — the actionable bucket checked against CODE, and one of four
+flipped.** Both passes above classify by what each caveat says about itself. A caveat is a
+**self-report**, and a self-report cannot distinguish *"unfixed gap"* from *"deliberate choice"* —
+an author writes both in the same words. So the still-live bucket was re-read against the
+implementation rather than the prose.
+
+- **Mis-bucketed — the shrink-guard record, and it was the one called loudest.** Its caveat reads
+  *"Advisory only — `edit_code(action=replace)` WARNS and does not refuse, so a caller who ignores
+  the warning still loses the code"*, which is true and reads like an unfixed data-loss gap. The
+  call site says otherwise: *"It warns rather than refuses, and there is deliberately no `force` to
+  escape: a refactor that legitimately collapses a long function into a short one is byte-identical
+  to the defect, so refusing would block the first in order to catch the second."* **Correctly
+  parked**, and its `create_file` half was separately resolved as a deliberate exemption.
+- **Confirmed live — the concurrent-activation guard.** The warning rides the response of the call
+  that *performed* the switch, so it reaches the switcher while the harmed party is whoever
+  resolves against the wrong workspace afterwards. An alarm delivered to the wrong observer.
+- **Confirmed live — the `append_entry` two-call window, and this ledger's own maintenance is an
+  instance.** Adding the rows above took `append_entry` (params) and then a separate body write,
+  leaving each entry row-less in between. Not avoidable: `index_row` is bound to the
+  section-writing path, so a params-backed ledger has no single-call form, and the allocator's own
+  comment states the bound — *"a caller doing two calls always leaves the entry row-less for the
+  interval between them, and no discipline available to them shortens it."*
+- **Confirmed live — the held-write-lock record.** Two of three prescribed remedies shipped; the
+  progress surface did not.
+
+**The record had also MOVED under the triage.** The shrink-guard file was renamed between pass 1
+and this check, so a citation written hours earlier was already dead. Re-resolve a bug path at use
+rather than carrying one across a pass.
+
+**So read the buckets above as a narrowing and verify any row before acting on it.** Three of four
+survived; the one that did not was the one whose prose was most alarming. The failure mode is
+precise: a deliberate design decision, written up honestly by its author as a limitation, is
+indistinguishable from an outstanding defect at the level of the sentence.
 
 ### BL-76 — `unverified:` has no discharged form the scan can read
 
