@@ -496,7 +496,7 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                     # spot counted twice, which at the point of use is indistinguishable
                     # from corroboration. The records were one directory down the whole
                     # time.
-                    # docs/issues/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
+                    # docs/issues/archive/2026-09-10-subagent-writes-leave-no-transcript-record-so-provenance-and-fmt-mine-refuse-them.md
                     who = rec.get("sessionId") or rec.get("session_id") or sid
                     when = rec.get("timestamp")
                     for b in content:
