@@ -780,7 +780,7 @@ pub fn append_entry(
     //
     // Before this existed the five section fields were accepted here and never read: the
     // code that honours them lived inside the prose branch that excluded this one
-    // (`docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
+    // (`docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
     let mut snapshot_missing = snapshot_missing;
     let section_written = match section {
         None => false,
@@ -1243,7 +1243,7 @@ fn insert_index_row(doc: &str, after_line: &str, row: &str) -> std::result::Resu
 /// reason this module keeps paying for.** It was inline in [`allocate_entry_id`], which
 /// is why `append_entry` accepted `title`/`body`/`anchor_heading`/`index_row` and silently
 /// dropped all four: the code that honours them lived inside the branch that excluded it
-/// (`docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
+/// (`docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
 /// A second copy would have reproduced that the moment either drifted.
 ///
 /// `caller` names the function in the refusal text. Both callers abort BEFORE any write,

@@ -1,11 +1,10 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 tags:
 - cluster/accepted-parameter-silently-dropped
 closed: null
 groundwork: 063681ed
-handed_to: 8bd791df
 opened: 2026-09-12
 owner: marius
 related: []
@@ -103,45 +102,68 @@ as a params row, then given a body section and a table row by a separate `doc(ac
 
 ## Fix
 
-**DECIDED 2026-09-12 — honour, not refuse.** Refusing is not a smaller version of honouring: it
-would make every params-backed ledger's maintenance louder without making it correct, closing the
-silence while leaving the two-call window that motivated finding it.
+Applied: **HONOUR**, in two commits.
 
-**Groundwork landed at `063681ed`** (sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63`), and it is
-behaviour-preserving today:
+Fix SHA: `a1ca3baa` — patch-id `3c7905291d88bba06c280d5f4870d9256e2cde46`
+Groundwork: `063681ed` — patch-id `e592ca340fd8bd2f702255bd1557215c5ebb876a`
 
-- `splice_pending_section` extracted from `allocate_entry_id`. It was inline there, **which is this
-  bug's root cause stated as code**: the routine that honours `title`/`body`/`anchor_heading`/
-  `index_row` lived inside the branch that excluded the params path. Shared rather than copied,
-  because a second copy reproduces the defect the moment either drifts. All 81 augmentation tests
-  pass against the extraction, which is what makes it behaviour-preserving rather than plausible.
-- `augmentation::append_entry` gains a `section` slot and writes it **before** `tx.commit()`,
-  mirroring `allocate_entry_id` — a failed splice rolls back, the id is not consumed, and the
-  refusal's *"nothing was written"* stays true.
-- `AppendOutcome` gains `section_written`, so the hint can stop telling a caller to write a section
-  the server already wrote.
+`063681ed` extracted `splice_pending_section` from `allocate_entry_id` and gave
+`augmentation::append_entry` a `section: Option<&PendingSection>` written BEFORE
+`tx.commit()`, so a failed splice rolls the transaction back and the id is not consumed.
+`a1ca3baa` hoisted the construction and wired the call site.
 
-**What remains is the tool-layer wiring**, and the call site says so in place rather than leaving a
-reader to infer it from a parameter that is always `None`: hoist the `index_row` + `PendingSection`
-construction out of the prose branch so both branches build it from **one** place. A second,
-copied construction is the thing this change exists to avoid.
+**What the filing could not know, and it inverts § Fix's own cost estimate:**
+`allocate_entry_id` already had both the `Option<&PendingSection>` signature and the
+write-then-commit ordering. Honour was therefore the *symmetric* change against exercised
+code, not the expensive one — which is the ground the decision actually rests on.
 
-**One detail that would be a silent defect when the wiring lands, recorded because only the
-restructuring author sees it:** `snapshot_missing` is derived from a body read taken BEFORE the
-write, so it must drop the new id when that id's index row was just written — otherwise the
-response asks the caller to do by hand the exact thing the call just did. That is **this bug, one
-field over**.
+**One silent defect avoided:** `snapshot_missing` is derived from a body read taken BEFORE
+the write, so it still named the id whose row the call had just added. Left alone it would
+have asked the caller to do by hand the exact thing just done for them — this bug, one
+field over.
 
+### A retraction, because the wrong version reached a commit message
+
+`a1ca3baa`'s message says the construction *"needed no hoist — it was already above the
+branch"*. **That is false.** At `063681ed` the `if a.entry_collection.is_none()` sits at
+`:74` and the two constructions at `:169` and `:192`, **eight-space indented, inside the
+prose branch**. The hoist was real and structural: three things moved together — the
+both-or-neither `index_row` check, the refusal of a row with no section triple, and the
+`PendingSection` construction.
+
+**How the false correction was produced is the reusable part.** The claim came from reading
+`:88`/`:118` in the WORKING TREE and taking them for the original — but the tree held
+sessionId `8bd791df`'s uncommitted hoist, which had already moved them. Re-checking a stale
+description against the live file is the right instinct, and here it returned a confidently
+wrong answer, because on a shared checkout *"current"* includes work in flight.
+`git show HEAD:<path>` separates them, and the four-space-versus-eight-space indent is the
+tell that survives. Caught by `8bd791df`, whose delete edit had specified the eight-space
+block as its `old_string` and succeeded — which it could not have done had the code already
+been hoisted.
+
+The reading matters beyond the record: *"no hoist needed"* makes this look like a
+one-character oversight, when it was the same structural shape as the bug itself — the code
+that honours the fields living inside the branch that excludes them.
 ## Tests added
 
-None yet. The discriminating test is a params append passing `index_row` + the section triple and
-asserting the body carries both afterwards; the mutation it must kill is dropping the section
-argument at the `augmentation::append_entry` call site.
+`a_params_append_writes_its_section_and_index_row_in_the_same_call`
+(`src/librarian/tools/append_entry.rs`), the params twin of
+`the_tool_writes_the_index_row_in_the_same_call`.
 
-Note the existing `the_tool_writes_the_index_row_in_the_same_call` covers the prose path only, and
-its own doc comment names REACHABILITY as the property it exists to pin — the same property this
-bug reports missing one branch over.
+**It asserts against the FILE, never the response**, and that is the whole design. The
+response carries an allocated id whether or not anything was written — that IS the defect —
+so a test reading `result["id"]` passes under the mutation it exists to catch while feeling
+like a test of the write. The first draft here reached for exactly that, which is worth
+recording: the wrong version is the one that comes naturally.
 
+It also asserts `snapshot_missing` does not name the id whose row the call just wrote, and
+that `section_written` is surfaced.
+
+**MUTATION, observed:** the params call site reverted to `None` reds it with the ledger
+byte-for-byte unchanged — no section, no row, `Ok` with an id. The filed defect verbatim,
+and the evidence a green compile could not give.
+
+Gate green: 9640 passed, 0 failed, both lanes.
 ## Workarounds
 
 Write the section and the index row in a following `doc(action="update", patch={body_edits: […]})`.

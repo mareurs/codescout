@@ -68,7 +68,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // defect stated as code: the routine that honours `title`/`body`/`anchor_heading`/
     // `index_row` sat inside the arm that excluded the params path, so a params caller
     // passing them got `Ok`, no section, no row and no diagnostic
-    // (docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md).
+    // (docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md).
     //
     // ALL THREE move together, not just the construction. The two refusals are what keep
     // the params path from gaining a way to write a row whose id nothing defines — the
@@ -1501,7 +1501,7 @@ mod tests {
 
     /// The PARAMS-path twin of `the_tool_writes_the_index_row_in_the_same_call`, and the
     /// discriminating test for
-    /// `docs/issues/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`.
+    /// `docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`.
     ///
     /// **Asserts against the FILE, never against the response.** The response carries an
     /// allocated id whether or not anything was written — that IS the defect being fixed:
