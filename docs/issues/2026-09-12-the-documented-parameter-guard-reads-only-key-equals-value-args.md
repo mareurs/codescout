@@ -50,42 +50,62 @@ Add `references(name_path, path)` to any file under `docs/manual/src/`, then run
 
 The discriminator is the `=`, not the wrongness of the parameter.
 
-### What the unscannable population actually costs, measured on the wire 2026-09-12
+### The full unscannable population, measured off the WIRE 2026-09-12 — hard-code these, they are about to vanish
 
-Both verified by running the call, not by reading a schema — a dropped key returns a
-plausible answer rather than an error, so the source does not show it.
+sessionId `b0b9bc40`'s census, recorded here verbatim because their fix removes every live
+instance and this guard's future test cannot discover what no longer exists. Method was not a
+grep against a schema file: they spawned the binary, took the real `tools/list` **after**
+`availability()` filtering, and diffed every JSON payload and signature form in `docs/manual`.
+**38** claims not in the schema, of which these survive classification:
+
+| claim | sites / files | what it actually is |
+|---|---|---|
+| `symbols(pattern)` | 14 / 6 | dropped silently → overview path |
+| `"tool": "index(action: build)"` | 4 | the TOOL NAME does not resolve — the call cannot dispatch at all |
+| `"tool": "workspace(action: status)"` | 3 | same shape |
+| `symbols(project)` | 1 | `symbol-navigation.md:18-26`, a whole passage teaching a param the activation banner explicitly says `symbols` does not have |
+| `memory(project)` | 1 | real key is `project_id` |
+| `grep(regex)` | 2 | real key is `pattern` |
+| `edit_file(…, content)` | 2 | an accepted alias of `body` since `f909a160`, non-canonical |
+| `symbols(dir)` | 1 | same table as `symbols(pattern)`; real key is `path` |
+
+**The two `"tool": "<name>(action: …)"` families are worse than a wrong parameter and neither
+session had them.** A wrong parameter is dropped and the call still runs; an unresolvable tool
+name cannot dispatch. 7 sites across 4 files, and they are invisible to this guard for the
+second reason in § Summary — `CALL_OPEN` never matches a JSON payload.
+
+**Also classified OUT, and that half is load-bearing:** `symbols(main)`, `grep(old_name)` and
+`get_guide(librarian)` are argument VALUES, not parameter names. A widened predicate that reds
+on them is worse than the gap.
+
+### Two calls run here rather than inherited
+
+Both verified by running them, not by reading a schema — a dropped key returns a plausible
+answer rather than an error, so the source does not show it.
 
 - `symbols(pattern="Cite", path="tests/doc_tool_refs.rs")` returned **all 23 symbols in the
-  file**, unfiltered. `pattern` is not accepted, is silently dropped, and the call falls
-  through to the overview path — so a reader following the manual gets a confident answer to
-  a question they did not ask (`IC-15` riding on top of this one). Taught in **6** manual
-  files, including `symbol-navigation.md`'s parameter TABLE.
+  file**, unfiltered — `IC-15` riding on top of this one.
 - `tree(pattern="*.rs", path="scripts")` returned **all 54 entries**, including `.js`, `.sh`,
-  `.py` and `.json`. The real key is `glob`. Taught in `file-operations.md` at :207, :215,
-  :236. This one was flagged as *likely* by `b0b9bc40` with an explicit "don't take it from
-  me, it's one call" — so it was run here rather than inherited, and it is a genuine defect.
+  `.py` and `.json`. The real key is `glob`. Taught in `file-operations.md` at :207, :215, :236.
 
-**The population is `b0b9bc40`'s, re-derived rather than copied**, and their count corrected
-an earlier reading of mine that said 4 files. The `references(name_path…)` instances that
-motivated the filing are already GONE from the corpus, fixed in their own commit — which is
-why `symbols(pattern)` and `tree(pattern)` are recorded here with their line numbers: they are
-the fixtures that survive.
+**`tree(pattern)` is NOT in the census above, and the reason is a finding about the census.**
+`b0b9bc40`'s JSON parser reads only fenced ` ```json ` blocks, and those three sites are prose —
+so an instrument that measured 38 claims off the live wire still has a shape it cannot see. They
+declined to take it on this session's say-so and will re-derive before touching it, which is the
+correct handling in both directions.
 
 ### Deliberately NOT defects — the discriminator set a widened guard must not red on
 
-Also `b0b9bc40`'s, and the more valuable half of the population, because a guard that reds on
-these is worse than the gap it closes:
-
 - `api-redesign.md:19` — a rename MAPPING table, which names dead parameters on purpose.
-- `api-redesign.md:61`, `:82`, `file-operations.md:154`, `:162` — `grep(pattern=…)`, where
-  `pattern` is real.
+- `api-redesign.md:61`, `:82`, `file-operations.md:154`, `:162` — `grep(pattern=…)`, real.
 - `augmentation-render-template.md:58`, `:74` — the JSON Schema `pattern` KEYWORD, not a
   codescout parameter at all.
 
-Nothing about token shape separates these from the defects above. `semantic_search(query)`
-names a real parameter and `grep(regex)` does not; both are a bare lowercase identifier in
-argument position. That is the whole difficulty of § Fix, and it is why this is filed rather
-than fixed in passing.
+**The census made the discriminator HARDER, not easier, and this is the sharpest statement of
+the § Fix difficulty.** `grep(regex)` is a real defect (the key is `pattern`) and
+`semantic_search(query)` is correct — and the two are byte-identical in shape: a bare lowercase
+identifier, alone, inside a call's parens. No token-level rule separates them. Whatever the
+remedy is, it has to consult the schema per call, not pattern-match the citation.
 
 ## Environment
 
