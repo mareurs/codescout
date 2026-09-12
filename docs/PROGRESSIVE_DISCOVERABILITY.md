@@ -129,7 +129,9 @@ symbols(name="Grid")                →  401 results (overflow, most are variabl
 - Apply inside the recursive traversal (e.g., `collect_matching`), not after.
 - Skip non-matching symbols but still recurse into their children (a class may not match
   `kind="function"`, but its methods will).
-- Be ignored for exact lookups (`name_path` parameter) where the user already knows what they want.
+- Apply in BOTH modes. `symbols` used to discard `kind` whenever the exact name-path mode was
+  active, on the reasoning that a name-path already pins the symbol; that made a mode flip a
+  SILENT filter drop. Redundant is not the same as wrong — apply it and there is no special case.
 
 ### Pattern 4: Caps Should Be Tight in Exploring Mode
 
@@ -294,7 +296,7 @@ and use `OutputGuard::overflow_json()` for serialization.
 ### Anti-Pattern 3: Returning the Same Hint for Every Tool
 
 Each tool should construct hints relevant to **its own parameters**. `symbols` pattern hints mention
-`kind` and `path`; `symbols` overview hints mention `depth` and `symbols(symbol=...)`;
+`kind` and `path`; `symbols` overview hints mention `depth` and `symbols(name=...)`;
 `semantic_search` hints mention `path` filtering. Generic hints like "narrow your search" are
 useless.
 

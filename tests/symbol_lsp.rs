@@ -335,7 +335,8 @@ async fn replace_symbol_round_trip_preserves_attributes() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": true
             }),
@@ -406,7 +407,8 @@ async fn replace_symbol_round_trip_preserves_python_decorator() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.py",
                 "include_body": true
             }),
@@ -468,7 +470,8 @@ async fn replace_symbol_round_trip_preserves_java_annotation() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/Main.java",
                 "include_body": true
             }),
@@ -535,7 +538,8 @@ async fn replace_symbol_round_trip_no_attributes() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": true
             }),
@@ -895,7 +899,8 @@ async fn replace_symbol_round_trip_agent_changes_attribute() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": true
             }),
@@ -955,7 +960,8 @@ async fn replace_symbol_round_trip_agent_changes_doc_comment() {
     let find_result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": true
             }),
@@ -1120,7 +1126,8 @@ async fn symbols_body_start_line_field_with_attributes() {
     let result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": true
             }),
@@ -1168,7 +1175,8 @@ async fn symbols_no_body_start_line_without_include_body() {
     let result = Symbols
         .call(
             json!({
-                "symbol": "target",
+                "name": "target",
+                "exact": true,
                 "path": "src/lib.rs",
                 "include_body": false
             }),
@@ -2362,7 +2370,8 @@ async fn symbols_name_path_does_not_return_local_variable_children() {
     let result = Symbols
         .call(
             json!({
-                "symbol": "my_fn",
+                "name": "my_fn",
+                "exact": true,
                 "path": "src/lib.rs"
             }),
             &ctx,

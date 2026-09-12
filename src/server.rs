@@ -3328,16 +3328,18 @@ mod tests {
     /// search parameter is `semantic`, not `query`, and the mismatch previously
     /// no-op'd silently rather than erroring (verified live: `query="zzz-nonexistent"`
     /// returned unfiltered results with no warning). `symbols` gained one on 2026-09-11,
-    /// a 2-pair array `("query","name")`/`("name_path","symbol")` — it advertised FOUR
-    /// name-ish properties for two concepts, and the fourth was not merely redundant:
-    /// `call()` read the exact-vs-substring MODE off which keys were PRESENT while the
-    /// pattern came from a separate precedence chain, so a key that lost the race still
-    /// flipped the mode (`symbols(query="Tool|Doc", symbol="x")` returned 0 matches with
-    /// the regex refusal suppressed). 4*3 + 2*5 + 1*5 + 1*4 + 2*2 = 35 — row for row the
-    /// table below, and entry for entry `EXPECTED_ALIAS_PAIRS`' 35.
+    /// and it was WIDENED to three pairs on 2026-09-12
+    /// (`("query","name")`/`("symbol","name")`/`("name_path","name")`): it advertised FOUR
+    /// name-ish properties for two concepts, then TWO, and now ONE. The last collapse is
+    /// not cosmetic — while `symbol` remained a property, the key a caller reached for
+    /// still selected the matching ALGORITHM (exact name-path vs substring), which is the
+    /// shape `8b396343` removed for `is_name_path`. The mode now comes from the VALUE
+    /// (`/` present) with a boolean `exact` as the two-way override. 4*3 + 2*5 + 1*5 +
+    /// 1*4 + 1*2 + 1*3 = 36 — row for row the table below, and entry for entry
+    /// `EXPECTED_ALIAS_PAIRS`' 36.
     ///
-    /// This sentence read `= 37` until 2026-09-11. `8b396343`'s own commit message
-    /// reported its change as "35 -> 37" when the pre-collapse population was 33 over
+    /// This sentence read `= 37` until 2026-09-11, then `= 35`. `8b396343`'s own commit
+    /// message reported its change as "35 -> 37" when the pre-collapse population was 33 over
     /// nine tools, and both numbers were transcribed here rather than derived. **Nothing
     /// caught it because no assertion reads this comment:**
     /// `every_declared_alias_pair_normalizes_to_its_own_canonical` compares
@@ -3355,7 +3357,7 @@ mod tests {
         ("create_file", 3),
         ("read_file", 5),
         ("doc", 2),
-        ("symbols", 2),
+        ("symbols", 3),
     ];
 
     /// `doc` is the one entry in the two tables above (and below, in
@@ -3608,7 +3610,7 @@ mod tests {
     /// `param_aliases()` body this session (`src/tools/symbol/edit_code.rs`,
     /// `src/tools/read_file.rs`, `src/fs/mod.rs`'s `PATH_PARAM_ALIAS_MAP` for the
     /// other six) — the same population `EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`
-    /// counts (35 pairs, 10 tools) — so a live-array mutation and this table now
+    /// counts (36 pairs, 10 tools) — so a live-array mutation and this table now
     /// disagree, which is what makes the check non-vacuous.
     ///
     /// For each hardcoded `(tool, received, canonical)` triple: feed a synthetic
@@ -3673,7 +3675,8 @@ mod tests {
         ("doc", "query", "semantic"),
         ("doc", "q", "semantic"),
         ("symbols", "query", "name"),
-        ("symbols", "name_path", "symbol"),
+        ("symbols", "symbol", "name"),
+        ("symbols", "name_path", "name"),
     ];
 
     #[tokio::test]
@@ -4171,7 +4174,7 @@ mod tests {
     /// copies against each other and cannot see this one. A narrowing of the COUNT (e.g.
     /// collapsing this 5-pair array down to the shared 3-pair `PATH_PARAM_ALIAS_MAP`) is
     /// now caught above, by `every_declared_alias_is_absent_from_the_schema`'s per-tool
-    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 35 — derived from each
+    /// table (`EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL`, true population 36 — derived from each
     /// tool's `param_aliases()` body, not transcribed): `read_file` is asserted to declare
     /// exactly 5 pairs, so dropping either extra pair reds it directly. What a COUNT
     /// cannot catch is a same-count KEY-IDENTITY substitution — e.g. `("output_id",
@@ -4749,8 +4752,40 @@ mod tests {
     /// rather than banked per the rule above — the point of the change is the
     /// contract, not the bytes. Report run 2026-09-11: TOTAL (21 tools) = 55_081,
     /// headroom 0.
+    ///
+    /// **Ratcheted UP 2026-09-12, 55_081 → 55_382 (+301), by collapsing `symbols`'
+    /// LAST two name properties to one.** `symbols` advertised `name` (substring)
+    /// and `symbol` (exact name-path), so the KEY a caller reached for still chose
+    /// the matching ALGORITHM — the shape `8b396343` removed for `is_name_path`,
+    /// surviving one layer up. `symbol` is now a third declared alias of `name`
+    /// (with `query` and `name_path`), the mode comes from the VALUE (`/` present),
+    /// and a new boolean `exact` is the two-way override.
+    ///
+    /// DERIVATION — and it needs two subtractions, not one, because the constant
+    /// and the tree had already drifted apart before this change. A report run on
+    /// this tree with `symbols.rs` reverted to HEAD measured TOTAL = 55_067, i.e.
+    /// **headroom 14** against the 55_081 above: someone shaved 14 chars without
+    /// lowering the constant. So the GROSS cost of this change is 55_382 − 55_067 =
+    /// **+315**, and the +301 in the heading is that gross figure net of the 14
+    /// chars of unbanked headroom this entry also removes, per the rule above.
+    ///
+    /// All of the +315 is `symbols`' own row (1_960 → 2_275); no second row moves.
+    /// −7 is the literal `/symbol` leaving the one-line description (108 → 101,
+    /// counted). The other +322 is schema, and it is three property blocks, each
+    /// measured as serialized JSON rather than estimated: `name` 74 → 282 (+208,
+    /// it now has to state the value-shape rule and name its override), `symbol`
+    /// 88 → 0 (−88, deleted), `exact` 0 → 202 (+202, added). 208 − 88 + 202 = 322,
+    /// which is the observed schema delta exactly.
+    ///
+    /// **The `exact` +202 is owed, not decoration** — § *Parsers Over a Namespace*
+    /// says a parser over a namespace owes an escape, and the value-shape rule
+    /// makes two inputs unrepresentable without one: an exact match on a bare
+    /// top-level name (`exact=true`), and a substring search for a value that
+    /// legitimately contains `/` (`exact=false`). One boolean covers both
+    /// directions, so nothing is left to document as a cost at the refusal site.
+    /// Report run 2026-09-12: TOTAL (21 tools) = 55_382, headroom 0.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_081;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 55_382;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

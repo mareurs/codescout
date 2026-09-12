@@ -95,7 +95,7 @@ impl Tool for Symbols {
     }
 
     fn description(&self) -> &str {
-        "Symbol navigation. Path only \u{2192} file/dir overview. name/symbol \u{2192} search across project. Both \u{2192} scoped search."
+        "Symbol navigation. Path only \u{2192} file/dir overview. name \u{2192} search across project. Both \u{2192} scoped search."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -103,14 +103,14 @@ impl Tool for Symbols {
             "## When to use\n\
              \n\
              - Browse a file/directory \u{2192} pass only `path` (overview mode, formerly `list_symbols`).\n\
-             - Know the name \u{2192} pass `name` (substring match on symbol names).\n\
-             - Pinpoint a specific symbol \u{2192} pass `symbol` (exact name-path).\n\
+             - Know the name \u{2192} pass `name`. The match mode comes from the VALUE: plain text is a substring search, a value containing `/` is an exact name-path lookup.\n\
+             - Pinpoint an exactly-named top-level symbol \u{2192} pass `name` plus `exact=true`.\n\
              - Know the concept \u{2192} use `semantic_search` first, then drill into symbols.\n\
              \n\
              ## Key parameters\n\
              \n\
-             - `name`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
-             - `symbol`: exact name-path (e.g. `\"MyStruct/my_method\"`) \u{2014} skips substring search.\n\
+             - `name`: the symbol to find (e.g. `\"handle\"` finds `handle_request`, `handle_error`; `\"MyStruct/my_method\"` is an exact name-path). Exact name matches are listed ahead of substring matches.\n\
+             - `exact`: override what `name`'s shape implies. `true` \u{2014} exact lookup on a bare name; `false` \u{2014} substring search on a value that contains `/`.\n\
              - `kind`: filter to `function`, `struct`, `interface`, `enum`, `module`, `constant`, `type`, `class`.\n\
              - `include_body=true`: returns full source of each match. Even without it, a search resolving to exactly ONE symbol auto-shows its code (a leaf's body, or a large container's direct-member shape).\n\
              - `path`: file, directory, or glob. Without a name argument, returns an overview of that path.\n\
@@ -134,8 +134,8 @@ impl Tool for Symbols {
             "type": "object",
             "description": "Path only \u{2192} file/dir overview (formerly list_symbols). Name \u{2192} search (formerly find_symbol). Both \u{2192} scoped search.",
             "properties": {
-                "name": { "type": "string", "description": "Substring match on symbol names." },
-                "symbol": { "type": "string", "description": "Exact name-path (e.g. 'MyStruct/my_method')." },
+                "name": { "type": "string", "description": "Symbol to find. Plain text is a substring match; a value containing '/' is an exact name-path ('MyStruct/my_method'). The MODE comes from this value, never from a second parameter — `exact` overrides it. Exact name matches lead the results." },
+                "exact": { "type": "boolean", "description": "Override what `name`'s shape implies: true = exact lookup on a bare name; false = substring search on a value that contains '/'. Omit to infer from the value." },
                 "path": { "type": "string", "description": "File, directory, or glob. Without a name argument, returns an overview of that path." },
                 "kind": {
                     "type": "string",
@@ -174,52 +174,57 @@ impl Tool for Symbols {
     }
 
     fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
-        // `query` and `name_path` were advertised schema properties until the
-        // four-name surface (`name`/`query`/`symbol`/`name_path`) collapsed to two.
-        // They remain accepted, but as ALIASES: `call_content` rewrites them via
-        // `normalize_params` before `call()` runs, so the mode selector in `call()`
-        // can only ever observe `name` (substring) or `symbol` (exact name-path).
-        // That is what makes resolving pattern-and-mode from those two keys alone
-        // complete rather than a narrowing — see `call()`'s own comment.
-        &[("query", "name"), ("name_path", "symbol")]
+        // `query`, `symbol` and `name_path` were advertised schema properties
+        // until the name surface collapsed to ONE. They remain accepted, but as
+        // ALIASES: `call_content` rewrites them via `normalize_params` before
+        // `call()` runs, so the only name-ish key `call()` can observe is `name`.
+        //
+        // `symbol` joining them is what removed the last place where a KEY's
+        // identity selected a matching ALGORITHM — the shape fixed for
+        // `is_name_path` at `8b396343`. The mode now comes from the VALUE
+        // (`/` present) with `exact` as the explicit override; see `call()`.
+        //
+        // Declaration order is the precedence order when a caller sends several:
+        // the first to claim `name` wins and the rest are reported superseded.
+        &[("query", "name"), ("symbol", "name"), ("name_path", "name")]
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         // Path-only-no-name overview path (formerly list_symbols).
-        // Dispatch to overview when no name argument was provided. Only TWO
-        // name-ish keys can reach `call()`: `query`/`name_path` are declared
-        // aliases (`param_aliases` above) that `call_content` has already
-        // rewritten to `name`/`symbol`.
-        let has_name_arg = input["name"].is_string() || input["symbol"].is_string();
-        if !has_name_arg {
+        // Dispatch to overview when no name argument was provided. Only ONE
+        // name-ish key can reach `call()`: `query`/`symbol`/`name_path` are
+        // declared aliases (`param_aliases` above) that `call_content` has
+        // already rewritten to `name`.
+        let Some(pattern) = input["name"].as_str() else {
             return list_overview(input, ctx).await;
-        }
+        };
 
-        // Resolve the pattern AND the matching mode in ONE step, so the mode can
-        // never disagree with the value that produced it. `name` first preserves
-        // the pre-collapse precedence (`query` -> `name` was the first key tried).
+        // The matching MODE comes from the VALUE, never from which key carried
+        // it. A name-path is spelled with `/`; anything else is a substring
+        // search. `exact` is the explicit override, and it is owed rather than
+        // optional — the inference alone makes two inputs unrepresentable, and
+        // this parameter covers BOTH directions:
         //
-        // The superseded form read the mode off key PRESENCE
-        // (`input["symbol"].is_string() || input["name_path"].is_string()`) while
-        // the pattern came from a separate precedence chain, so a key that LOST
-        // that race still flipped the mode: `symbols(query="Tool|Doc", symbol="x")`
+        //   * `exact=true`  — an exact lookup on a bare top-level name
+        //                     (`symbols(name="Tool", exact=true)`), which the
+        //                     inference would otherwise read as a substring.
+        //   * `exact=false` — a substring search for a value that contains `/`
+        //                     (a Kotlin backticked name, a path-like symbol),
+        //                     which the inference would otherwise read as an
+        //                     exact name-path.
+        //
+        // So there is no input the collapse makes unreachable, and nothing to
+        // document as a cost at the refusal site.
+        //
+        // The superseded form read the mode off key PRESENCE while the pattern
+        // came from a separate precedence chain, so a key that LOST that race
+        // still flipped the mode: `symbols(query="Tool|Doc", symbol="x")`
         // suppressed the regex refusal and returned 0 matches, and
         // `symbols(name="X", kind="function", name_path="zzz")` silently dropped
         // `kind`. Both were plausible answers, not errors.
-        //
-        // No error arm here: `has_name_arg` above already proved one of the two
-        // `as_str()` calls is `Some` (`serde_json::Value::is_string` is defined as
-        // `self.as_str().is_some()`), so this resolution cannot fail. A prior
-        // `ok_or_else` refusal here was provably unreachable — the same predicate
-        // decided the branch two lines up — and its removal is this fix, not a
-        // simplification of it: an unreachable "helpful" error is not a safety net,
-        // it is untested residue that reads as coverage.
         // docs/issues/archive/2026-09-11-the-symbols-no-name-refusal-is-unreachable.md
-        let (pattern, is_name_path) = input["name"]
-            .as_str()
-            .map(|p| (p, false))
-            .or_else(|| input["symbol"].as_str().map(|p| (p, true)))
-            .expect("has_name_arg above guarantees name or symbol resolves to a string");
+        let is_name_path =
+            optional_bool_param(&input, "exact").unwrap_or_else(|| pattern.contains('/'));
         let mut guard = OutputGuard::from_input(&input);
         // Search uses a tighter exploring cap than the default 200.
         // Skip the clobber when caller passed an explicit limit — from_input already
@@ -360,6 +365,7 @@ impl Tool for Symbols {
             include_body,
             include_body_explicit,
             &input,
+            pattern,
         );
         // A zero that cannot be trusted has to say so in the RESPONSE, not only in
         // `tracing`. The harm in the originating bug was never the retry — it was an
@@ -848,18 +854,56 @@ async fn search_library_symbols(
     Ok(())
 }
 
-/// Post-process the collected matches into the final result JSON: build the
-/// `by_file` distribution before truncation, apply the output-guard cap, strip
-/// bodies past `BODY_CAP`, focus/auto-inline small bodies, attach docstrings,
-/// and hoist a shared file when every match shares one.
+/// Relevance tier for one match's `name` against the caller's pattern. Lower
+/// leads. Three tiers, not two, because the substring predicate is
+/// case-INSENSITIVE (`pattern_lower` in `call()`), so `tool` is a legitimate
+/// hit for `Tool` and belongs above `fetch_tools` but below `Tool` itself.
+///
+/// Deliberately reads `name`, not `symbol`/`name_path`: an exact name-path
+/// lookup already pins its target, so every one of its matches lands in the
+/// same tier and the sort is a stable no-op there. The tier that discriminates
+/// is the substring one, which is the mode the `symbol` -> `name` collapse
+/// routes former exact callers into.
+fn relevance_rank(name: &str, pattern: &str) -> u8 {
+    if name == pattern {
+        0
+    } else if name.eq_ignore_ascii_case(pattern) {
+        1
+    } else {
+        2
+    }
+}
+
+/// Post-process the collected matches into the final result JSON: rank exact
+/// name matches first, build the `by_file` distribution before truncation,
+/// apply the output-guard cap, strip bodies past `BODY_CAP`, focus/auto-inline
+/// small bodies, attach docstrings, and hoist a shared file when every match
+/// shares one.
+#[allow(clippy::too_many_arguments)]
 fn finalize_search_results(
-    matches: Vec<Value>,
+    mut matches: Vec<Value>,
     guard: &OutputGuard,
     root: &std::path::Path,
     include_body: bool,
     include_body_explicit: Option<bool>,
     input: &Value,
+    pattern: &str,
 ) -> Value {
+    // Exact name matches lead. This is what keeps the `symbol` -> `name`
+    // collapse near-lossless: `symbols(symbol="Tool")` used to be an exact
+    // lookup, and after the collapse that value has no `/`, so it is a
+    // substring search that also returns `fetch_tools`, `MECHANISM_TOOLS` and
+    // friends. Ranking puts the hits the caller actually asked for back on top.
+    //
+    // MUST run before `guard.cap_items` below, and that ordering is the whole
+    // point rather than tidiness: the cap TRUNCATES, so an unranked exact match
+    // sitting past the cap is EVICTED from the response entirely. It also has
+    // to precede the `BODY_CAP` strip, or the bodies go to whichever matches
+    // the walk happened to reach first.
+    //
+    // `sort_by_key` is STABLE, so every match outside tier 0/1 keeps its scan
+    // position and this is a reorder, never a filter.
+    matches.sort_by_key(|m| relevance_rank(m["name"].as_str().unwrap_or_default(), pattern));
     // Build by_file distribution from the full result set BEFORE truncation.
     let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
     // The true distinct-file count over the FULL match set — `by_file_entries` is
@@ -896,7 +940,7 @@ fn finalize_search_results(
                 obj.remove("body");
                 obj.insert(
                     "body_omitted".to_string(),
-                    json!("use symbols with symbol for full body"),
+                    json!("use symbols with name for full body"),
                 );
             }
         }
@@ -1140,7 +1184,7 @@ pub(crate) fn focus_single_symbol(matches: &mut [Value], root: &std::path::Path)
                         "members_hint".to_string(),
                         json!(format!(
                             "{n} direct members ({line_span}-line {}). \
-                             symbols(symbol=\"{name}/<member>\", include_body=true) for a member body, \
+                             symbols(name=\"{name}/<member>\", include_body=true) for a member body, \
                              or include_body=true for the full source.",
                             kind.to_lowercase()
                         )),

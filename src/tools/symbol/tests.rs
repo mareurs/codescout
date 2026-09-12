@@ -8001,18 +8001,43 @@ async fn symbols_allows_plain_pattern() {
     assert!(result.is_ok(), "plain pattern should not be rejected");
 }
 
+/// The regex refusal is a property of SUBSTRING mode, so both ways of leaving
+/// that mode must skip it. `exact=true` is the interesting one: it is the only
+/// route to an exact lookup on a value the shape rule would otherwise read as
+/// a substring pattern, and `foo|bar` has no `/` to infer from.
 #[tokio::test]
-async fn symbols_allows_name_path_with_regex_chars() {
+async fn symbols_allows_regex_chars_in_an_exact_lookup() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let result = Symbols.call(json!({"symbol": "foo|bar"}), &ctx).await;
+    let via_flag = Symbols
+        .call(json!({"name": "foo|bar", "exact": true}), &ctx)
+        .await;
     assert!(
-        result.is_ok(),
-        "name_path should skip regex check, got err: {:?}",
-        result.err()
+        via_flag.is_ok(),
+        "exact=true must skip the regex check, got err: {:?}",
+        via_flag.err()
+    );
+
+    // The inferred route to the same mode, so a mutation that honoured only the
+    // explicit flag (or only the `/` rule) reds here rather than half-passing.
+    let via_shape = Symbols.call(json!({"name": "foo|bar/baz"}), &ctx).await;
+    assert!(
+        via_shape.is_ok(),
+        "a value containing '/' is a name-path and must skip the regex check \
+         too, got err: {:?}",
+        via_shape.err()
+    );
+
+    // Control: without either, the same characters ARE refused — otherwise both
+    // assertions above are satisfied by a build that never refuses anything.
+    let refused = Symbols.call(json!({"name": "foo|bar"}), &ctx).await;
+    assert!(
+        refused.is_err(),
+        "control: plain substring mode must still refuse regex syntax, else the \
+         two assertions above discriminate nothing: {refused:?}"
     );
 }
 
@@ -8089,13 +8114,13 @@ async fn the_two_modes_return_different_symbol_sets_on_this_fixture() {
     );
 
     let exact = Symbols
-        .call(json!({ "symbol": "Widget" }), &ctx)
+        .call(json!({ "name": "Widget", "exact": true }), &ctx)
         .await
         .unwrap();
     assert_eq!(
         name_kind_pairs(&exact),
         vec![("Widget".to_string(), "Struct".to_string())],
-        "symbol= is an exact name-path lookup and must return ONLY the struct: {exact:?}"
+        "exact=true is an exact name-path lookup and must return ONLY the struct: {exact:?}"
     );
 }
 
@@ -8107,8 +8132,12 @@ async fn the_two_modes_return_different_symbol_sets_on_this_fixture() {
 ///
 /// Before the fix this returned `Ok` with zero matches — a plausible answer,
 /// not an error, which is why nothing downstream noticed.
+///
+/// `symbol` is now a declared ALIAS of `name`, so reaching `call()` raw it is
+/// an unread key rather than a losing contender — which is what the test pins:
+/// no key other than `name` may reach the mode.
 #[tokio::test]
-async fn a_losing_symbol_key_cannot_suppress_the_regex_refusal() {
+async fn a_stray_symbol_key_cannot_suppress_the_regex_refusal() {
     let (_dir, ctx) = widget_project_ctx().await;
 
     let err = Symbols
@@ -8116,8 +8145,7 @@ async fn a_losing_symbol_key_cannot_suppress_the_regex_refusal() {
         .await
         .expect_err(
             "`name` supplied the pattern, so this is a substring search and the regex \
-             alternation must be refused; a bare `symbol` key that lost the precedence \
-             race must not flip the mode",
+             alternation must be refused; a stray `symbol` key must not flip the mode",
         );
 
     let rec = err
@@ -8130,12 +8158,12 @@ async fn a_losing_symbol_key_cannot_suppress_the_regex_refusal() {
     );
 }
 
-/// Same defect, second consequence: the losing key used to silently discard the
+/// Same defect, second consequence: the stray key used to silently discard the
 /// `kind` filter. Before the fix this returned the STRUCT — `kind="function"`
 /// dropped on the floor and the predicate switched to exact matching — for a
 /// call whose pattern came from `name`.
 #[tokio::test]
-async fn a_losing_symbol_key_cannot_discard_the_kind_filter() {
+async fn a_stray_symbol_key_cannot_discard_the_kind_filter() {
     let (_dir, ctx) = widget_project_ctx().await;
 
     let result = Symbols
@@ -8150,7 +8178,7 @@ async fn a_losing_symbol_key_cannot_discard_the_kind_filter() {
         name_kind_pairs(&result),
         vec![("Widget_new".to_string(), "Function".to_string())],
         "`name` supplied the pattern, so this is a substring search with kind=function \
-         applied; a losing `symbol` key must neither flip the mode nor drop `kind`. \
+         applied; a stray `symbol` key must neither flip the mode nor drop `kind`. \
          Got: {result:?}"
     );
 }
@@ -8167,7 +8195,10 @@ async fn kind_filters_an_exact_name_path_lookup_in_both_directions() {
     let (_dir, ctx) = widget_project_ctx().await;
 
     let matching_kind = Symbols
-        .call(json!({ "symbol": "Widget", "kind": "struct" }), &ctx)
+        .call(
+            json!({ "name": "Widget", "exact": true, "kind": "struct" }),
+            &ctx,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -8177,7 +8208,10 @@ async fn kind_filters_an_exact_name_path_lookup_in_both_directions() {
     );
 
     let wrong_kind = Symbols
-        .call(json!({ "symbol": "Widget", "kind": "function" }), &ctx)
+        .call(
+            json!({ "name": "Widget", "exact": true, "kind": "function" }),
+            &ctx,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -8189,10 +8223,10 @@ async fn kind_filters_an_exact_name_path_lookup_in_both_directions() {
 }
 
 /// The alias layer's half of the collapse, seen from `call()`'s side: after
-/// `call_content`'s rewrite the tool can only observe `name`/`symbol`, so a raw
-/// `query`/`name_path` key reaching `call()` directly — which every test that
-/// drives `Symbols.call` does — is NOT a name argument and falls through to the
-/// path OVERVIEW.
+/// `call_content`'s rewrite the tool can only observe `name`, so a raw
+/// `query`/`symbol`/`name_path` key reaching `call()` directly — which every
+/// test that drives `Symbols.call` does — is NOT a name argument and falls
+/// through to the path OVERVIEW.
 ///
 /// The discriminator is deliberately a pattern that matches NOTHING, because the
 /// shape keys do not separate the two: single-file overview and single-file
@@ -8220,7 +8254,7 @@ async fn a_raw_alias_key_reaching_call_directly_is_not_a_name_argument() {
         "control: `name` is a SEARCH and must filter everything out here: {search:?}"
     );
 
-    for alias in ["query", "name_path"] {
+    for alias in ["query", "symbol", "name_path"] {
         let result = Symbols
             .call(
                 json!({ alias: "zzz-no-such-symbol", "path": "src/lib.rs" }),
@@ -8239,6 +8273,163 @@ async fn a_raw_alias_key_reaching_call_directly_is_not_a_name_argument() {
              OVERVIEW. Got: {result:?}"
         );
     }
+}
+
+// ── exact matches lead the result list ────────────────────────────────────
+
+/// Fixture for the exact-match ranking, ONE file so the pre-sort order is the
+/// deterministic declaration order of a single tree-sitter walk (several files
+/// are collected from a `JoinSet` and arrive in whatever order they finish).
+///
+/// FIXTURE — three load-bearing details:
+///   * `Widget` is declared **LAST**. Scan order and rank order therefore
+///     DISAGREE, which is the only reason these assertions can see the sort at
+///     all. Move `Widget` to the top of the file and every assertion below
+///     still passes with the ranking deleted.
+///   * `GadgetWidget` and `WidgetFactory` carry `Widget` as a SUFFIX and a
+///     PREFIX respectively, so a rule that ranked by match position rather
+///     than by exactness could not masquerade as this one.
+///   * no `Cargo.toml`, so `workspace/symbol` yields nothing and the
+///     tree-sitter fallback answers — same reason as `widget_project_ctx`.
+///
+/// **Why a synthetic project rather than this repo, and it is not fastidiousness.**
+/// `search_project_symbols` gates its tree-sitter fallback on
+/// `if matches.is_empty()` — ALL-or-nothing, evaluated after `name_ok` filtering —
+/// so a WARM rust-analyzer suppresses the fallback and a COLD one does not, and
+/// the two see different file sets (rust-analyzer indexes workspace members only;
+/// the walk covers every `ignore`-walked source file, `tests/fixtures/*`'s own
+/// cargo projects included). A project-wide ordering assertion therefore depends
+/// on indexing state at call time and reads as a flake when it moves. Here the
+/// LSP branch is empty by construction, so exactly one population can answer.
+/// The `names.len() == 3` control below is what turns a violated assumption into
+/// a RED that names it, rather than a silent pass on a narrower population.
+async fn ranking_project_ctx() -> (tempfile::TempDir, ToolContext) {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub struct GadgetWidget {}\n\npub struct WidgetFactory {}\n\npub struct Widget {}\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+    (dir, ctx)
+}
+
+/// Names in the order the response lists them — NOT sorted, unlike
+/// `name_kind_pairs`. The order is the whole claim here.
+fn names_in_order(result: &Value) -> Vec<String> {
+    result["symbols"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|s| s["name"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `symbol` collapsing into `name` turns every exact `symbols(symbol="Tool")`
+/// lookup into a substring search, so the exact hits have to LEAD or the
+/// collapse is a silent quality regression for callers who never asked for a
+/// substring search. Measured on the live tree before this landed:
+/// `symbols(symbol="Tool")` returned 2 hits, both named exactly `Tool`;
+/// `symbols(name="Tool")` returned 26 across 15 files with neither exact hit
+/// first.
+///
+/// The ordering claim is stated RELATIVELY — every exact match precedes every
+/// substring-only match — rather than as a member list, so it survives the
+/// population moving underneath it. The absolute count sits beside it as a
+/// control, where a population change reds with a message instead of quietly
+/// satisfying a narrower claim.
+///
+/// Both halves are needed, because each alone is monotone in a direction the
+/// other is not: the ordering property survives a sort that drops everything
+/// else, and the count survives the sort being deleted entirely.
+#[tokio::test]
+async fn an_exact_name_match_leads_the_substring_results() {
+    let (_dir, ctx) = ranking_project_ctx().await;
+
+    let result = Symbols
+        .call(json!({ "name": "Widget" }), &ctx)
+        .await
+        .unwrap();
+
+    let names = names_in_order(&result);
+    assert_eq!(
+        names.len(),
+        3,
+        "control: all three substring matches must still be returned — a ranking \
+         that also FILTERS is not what is being asked for, and a count other than \
+         3 means the population moved (see `ranking_project_ctx`) rather than that \
+         the sort broke: {result:?}"
+    );
+    let last_exact = names.iter().rposition(|n| n == "Widget");
+    let first_substring = names.iter().position(|n| n != "Widget");
+    assert!(
+        last_exact < first_substring,
+        "every exact name match must precede every substring-only match; got \
+         {names:?}"
+    );
+}
+
+/// The ranking's load-bearing consequence, and the one an agent can actually
+/// observe: `OutputGuard::cap_items` truncates, so an unranked exact match that
+/// sorts below the cap is EVICTED from the response entirely — the answer the
+/// caller asked for, dropped in favour of substring noise.
+///
+/// `limit=1` is the cap. Without the sort the served row is the first-declared
+/// substring match; with it, the exact one.
+#[tokio::test]
+async fn a_capped_result_serves_the_exact_match_rather_than_evicting_it() {
+    let (_dir, ctx) = ranking_project_ctx().await;
+
+    let result = Symbols
+        .call(json!({ "name": "Widget", "limit": 1 }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result["total"].as_u64(),
+        Some(3),
+        "control: the cap must be TRUNCATING, not filtering the pool — if total \
+         is not 3 this test is measuring a search that found less, not a cap: \
+         {result:?}"
+    );
+    assert_eq!(
+        names_in_order(&result),
+        vec!["Widget".to_string()],
+        "one row survives the cap and it must be the exact match, not the \
+         first-declared substring hit: {result:?}"
+    );
+}
+
+/// The ranking is a REORDER, never a filter: a search whose pattern matches
+/// nothing exactly must still return every substring hit, in scan order.
+///
+/// Without this, a `relevance_rank` that dropped non-exact matches — or a sort
+/// keyed on something that panics on a missing `name` — would be invisible to
+/// the two tests above, both of which contain an exact match by construction.
+#[tokio::test]
+async fn a_search_with_no_exact_match_is_unchanged_by_the_ranking() {
+    let (_dir, ctx) = ranking_project_ctx().await;
+
+    let result = Symbols
+        .call(json!({ "name": "idget" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        names_in_order(&result),
+        vec![
+            "GadgetWidget".to_string(),
+            "WidgetFactory".to_string(),
+            "Widget".to_string(),
+        ],
+        "no exact match: every hit keeps its scan position — declaration order \
+         in the single fixture file: {result:?}"
+    );
 }
 
 #[test]

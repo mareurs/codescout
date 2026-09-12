@@ -84,7 +84,7 @@ Route by what you already know:
 
 | You know… | Use | Not |
 |---|---|---|
-| a symbol name | `symbols(name="Foo")`, then `symbols(name_path="Foo/bar", include_body=true)` | reading the whole file |
+| a symbol name | `symbols(name="Foo")`, then `symbols(name="Foo/bar", include_body=true)` | reading the whole file |
 | a concept, not a name | `semantic_search("where retries are configured")` | guessing filenames |
 | an exact string/regex | `grep(pattern, glob="*.rs")` | shell grep |
 | who calls X | `references(symbol, path)` | grep — it also matches comments and strings |

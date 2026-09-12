@@ -464,7 +464,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             let hint = format!(
                 "File has {total} top-level symbols ({flat_total} total including children). \
                  Use depth=0 for a top-level-only overview, or \
-                 symbols(symbol='...', include_body=true) for a specific symbol."
+                 symbols(name='...', include_body=true) for a specific symbol."
             );
             let ov = OverflowInfo {
                 shown,
@@ -480,7 +480,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             file_guard.max_results = LIST_SYMBOLS_SINGLE_FILE_CAP;
             let hint = format!(
                 "File has {total} symbols. Use depth=0 for top-level overview, \
-                 or symbols(symbol='ClassName/methodName', include_body=true) for a specific symbol."
+                 or symbols(name='ClassName/methodName', include_body=true) for a specific symbol."
             );
             file_guard.cap_items(json_symbols, &hint)
         };
