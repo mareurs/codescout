@@ -2385,7 +2385,53 @@ Raised by sessionId `b0b9bc40-5358-4a44-b342-a2a71dc50fad` against the first for
 
 Raised by sessionId `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who named the two-law composition and suggested it might be a new class. It is not — it is a fifth shape of this one, and the instance is the bug file above, per this tracker's own rule that an instance is a bug file and only the class is an `OB`.
 
-**Status:** open — 1 instance, 4 sessions, 2026-09-06. The mirror of a rule
+### Second instance, 2026-09-13 — the founding instance PREDICTED the middle state; this one COUNTS it
+
+Instance: `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`
+§ *Instance 2026-09-13*. 80 unpushed commits, five live sessions, one operator's authorisation.
+All four foreign authors were messaged before the push and **all four replied**. Outcome:
+**one** operator consulted, **59** foreign commits published, **three** replies landing in this
+class's middle state — *"not withheld, UNCLEARED"*. The shipped mechanism above enumerates that
+state correctly; what this instance measures is that enumerating it for the **pusher to read**
+does not reach the question the pusher then **asks a peer**.
+
+**The asking layer is one short.** *"Is anything of yours withheld?"* is a fact about a
+session's own state, so it is answerable without an operator — and it can only ever return
+state one. *"May these be published?"* is the question that governs and no session can answer
+it at all. A protocol whose question is answerable by the wrong party **collects four
+confident, correct, useless answers and reads as high compliance**: four-of-four replied, and
+nothing in that number reveals the question could not close the decision. That is this repo's
+*plausible answer rather than an error* shape, arriving in a protocol instead of a parser.
+So the reply format owes a distinction its words do not currently carry — **"I consulted my
+operator"** vs **"my standing instruction covers this"** come out as the same sentence.
+(Sharpened by sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63`, correcting a first write-up
+that read three accurate answers as failures to escalate — the three-state error committed
+inside the tally warning against it. The reply-format half is
+`b0b9bc40-5358-4a44-b342-a2a71dc50fad`'s.)
+
+**And the instance carries a position-3 finding about its own two catches, which is the part
+worth promoting.** Two near-misses happened in the same hour, both the *your grant does not
+cover a peer* mirror, one per session:
+
+| session | about to publish | caught by |
+|---|---|---|
+| the pusher | a foreign commit that landed **after** the operator's enumeration | **re-deriving the range** — remembered, not prompted |
+| `f3c594ce` | a peer's commit beneath their own refspec | **the `pre-push` guard** — fired unprompted |
+
+The guard fired *because* its author did not suspect anything, which is the only condition
+under which a check is worth having. The re-derivation required the pusher to already be in
+the frame of mind the check exists to supply. **A check gated on the doubt it is meant to
+produce is a policy wearing a mechanism's clothes** — § *Observer Blindness* position 3 read
+against itself, and `skill-frictions:SKF-22`'s *a trigger the model must notice is a policy,
+not a mechanism* one level up from where that entry sits. Formulated by
+`f3c594ce-c424-40d3-a603-9693cfef3f63`, who declined to claim it; recorded here because an
+unclaimed finding in a message log is not a finding.
+
+Also note both authors hit the mirror clause **while actively writing about it** — `f3c594ce`
+ran the offending push twenty minutes after quoting the other half of the rule at the pusher.
+That is this tracker's own vigilance finding reproducing, and it is now five.
+
+**Status:** open — 2 instances, 5 sessions, 2026-09-06 and 2026-09-13. The mirror of a rule
 already in `CLAUDE.md`: *visibility is not authority* is stated there as a limit
 on what a peer may **grant** you. This is the other half — a peer cannot
 **withhold** on your behalf either, because the withholding is invisible to the

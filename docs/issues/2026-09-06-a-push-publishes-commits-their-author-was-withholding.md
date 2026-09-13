@@ -456,11 +456,34 @@ is what the guard means by leaving each author *"exactly as UNCLEARED as they we
 **And the differentiator was NOT an already-open channel.** `b0b9bc40` read it that way — that
 the one escalation happened in the session already mid-conversation — and the message log
 refutes it: all four channels were opened by the same batch at the same instant, none
-pre-existing. What varied was whether a session treated *"is anything of yours withheld?"* as
-answerable from its own standing instruction or as a question only its operator could close.
-That distinction decides the remedy: *"no conversation is in progress"* is fixed by opening
-one, and this was not that. A session can be asked, reply honestly and promptly, and still
-leave its operator unconsulted — with nothing in the exchange marking the difference.
+pre-existing. What varied was **not** whether a session mistook the scope of its own authority. `f3c594ce`
+objected to that framing and is right: *"is anything of yours withheld?"* is a fact about a
+session's own state and **is** answerable without its operator, which is why three sessions
+answered it accurately and promptly — and `f3c594ce` said in the same breath that its answer
+was *"not withheld AND not a clearance"*, naming the middle state rather than sliding past it.
+Collapsing those replies into "failed to escalate" is the three-state error this instance was
+written to warn about, committed in its own tally.
+
+**So the ratio measures the QUESTION, not the answers.** *"Is anything of yours withheld?"* can
+only ever return state one. *"May these be published?"* is the question that governs, it was
+never asked, and no session can answer it anyway — only an operator can. Four accurate answers
+to a question that cannot reach the authorising layer is what four-asked / one-operator-consulted
+actually records. The one escalation happened because that session's state was genuinely
+ambiguous to itself, not because it read the question more carefully.
+
+That also relocates the remedy. *"No conversation is in progress"* is fixed by opening one —
+and all four were open, simultaneously, so that is not the gap. What is missing is a question
+whose honest answer requires an operator, plus a reply format that distinguishes **"I consulted
+mine"** from **"my standing instruction covers this"**, because those two come out as the same
+sentence. (The second half is `b0b9bc40`'s.)
+
+**This is `OB-20` reproducing — second instance, first with a count.** `OB-20` (*authorisation
+is invisible to the only party who can violate it*) already states the mechanism: *"not withheld
+is an answer about their INTENT, never about your authorisation"*. Its shipped mechanism is the
+`pre-push` guard's three-state enumeration, which is written for what the **pusher reads** and
+says nothing about what the pusher then **asks a peer** — one layer short, which is exactly the
+gap this instance fell into. Where `OB-20`'s founding instance predicted the middle state, this
+one measures it: three of four replies landed there, against 59 published foreign commits.
 
 (One-in-four raised by `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who corrected their own earlier
 line as true but incomplete. The channel-availability reading is theirs and is corrected here
