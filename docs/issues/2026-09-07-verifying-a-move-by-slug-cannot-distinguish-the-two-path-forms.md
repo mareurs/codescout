@@ -6,7 +6,7 @@ title: 'BUG: verifying an archive move by grepping the slug cannot separate fixe
 owners:
 - marius
 tags:
-- cluster/selector-narrower-than-its-population
+- cluster/addressing-without-an-escape-hatch
 - trackers
 - shared-checkout
 - measurement
@@ -143,13 +143,24 @@ fixture with one slug-form and one path-form citation, asserting both are return
 The convention note this file settled on was the right remedy for the population it had, and that
 population was not the whole one.
 
-**Second, it answers § Class's open question — and the answer is "widen", not "sibling".** That
-section records that `IC-18`'s claim is a selector *narrower* than its population while this
-file's is *wider*, and leaves the ruling to the cluster owner. Instance 7 is the **narrower**
-direction: the path-form selector misses a member it should have seen. So **one namespace
-ambiguity produces both directions depending only on which form you search for**, and a sibling
-class would split a single mechanism across two rows. The slug being a substring of the path is
-the whole cause in both.
+**Second, it does NOT answer § Class's open question the way this section first claimed —
+that paragraph was wrong and is replaced.** It read *"the answer is widen, not sibling"*,
+on the reasoning that one ambiguity producing both directions should not be split across
+two rows. `docs/trackers/issue-clusters.md` § *The entry shape* already rules the other
+way, and had done all along: `IC-6` and `IC-18` *"both present at the surface as 'the
+pattern matched the wrong thing'"*, and **the discriminator IS direction** — `IC-6` matches
+too much or cannot separate two tokens that collide, `IC-18` matches too little. Widening
+`IC-18` to *"selector and population disagree"* would collapse the one distinction the
+ledger uses to keep them apart, and it records that misclassification between exactly these
+two has already happened twice.
+
+So the two directions are two classes on purpose, and this file spans both — which the same
+ledger also rules on: *"if a finding satisfies a second class's claim, it is a second bug
+file."* Instances 7 and 8 are therefore filed as
+`docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`
+(`IC-18`), and **this file is retagged to `IC-6`** — its own mechanism is that a slug cannot
+separate the repaired path form from the dangling one, which is `IC-6`'s no-disambiguator
+half stated almost word for word. The rows above stay here as the investigation record.
 
 **The failure direction is the dangerous one, and is the opposite of this file's original.**
 Instances 1-6 are a grep returning hits a reader must interpret — visible, arguable, sometimes
@@ -158,14 +169,23 @@ Instance 8 is the same empty list being *right*, for a reason unconnected to the
 correctness — which is exactly the shape that keeps an instrument trusted.
 ## Class
 
-Tagged `cluster/selector-narrower-than-its-population` (`IC-18`) as the closest member of the
-closed set, **and it is the MIRROR direction**, which the cluster owner should rule on rather than
-inherit from this tag. `IC-18`'s claim is a selector *narrower* than the population it names —
-members it never saw cannot be counted. Here the selector is **wider**: it sees members it should
-not, and the surplus is indistinguishable from the target. The harm is the same shape (a count
-that answers a different question than the one asked) and the direction is opposite, so either
-`IC-18` widens to *"selector and population disagree"* or this earns a sibling.
+**RULED 2026-09-13: this file is `IC-6`, and the mirror question it raised is answered by
+separation rather than by widening.** It was tagged `cluster/selector-narrower-than-its-population`
+(`IC-18`) as the closest available fit, with a note that the direction was inverted and the
+cluster owner should rule. `docs/trackers/issue-clusters.md` § *The entry shape* holds the
+ruling and predates the question: `IC-6` and `IC-18` are separated **by direction** — `IC-6`
+matches too much *or cannot separate two tokens that collide*, `IC-18` matches too little.
 
+This file's mechanism is the first of those, almost verbatim: the slug is a substring of
+both path forms, so a slug grep cannot separate a repaired citation from a dangling one.
+That is `IC-6`'s **no-disambiguator** half, which is why nothing here felt like `IC-18`
+except the surface shape *"the pattern matched the wrong thing"* — the exact resemblance the
+ledger warns produces this mistake.
+
+The *narrower* direction is real and lives in the same namespace, but it is a different
+claim and therefore a different file: see § *Seventh and eighth* and
+`docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
+`IC-18` is not widened.
 ## Fix
 
 Not fixed; the remedy is a documented practice, not code.

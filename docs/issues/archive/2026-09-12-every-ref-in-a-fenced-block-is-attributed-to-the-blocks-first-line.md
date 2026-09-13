@@ -3,7 +3,7 @@ kind: bug
 status: archived
 title: 'BUG: every ref in a fenced block is attributed to the block''s first line'
 tags:
-- cluster/addressing-without-an-escape-hatch
+- cluster/attribute-derived-at-container-granularity
 closed: null
 opened: 2026-09-12
 owner: marius

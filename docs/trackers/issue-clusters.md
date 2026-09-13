@@ -13,7 +13,7 @@ tags:
 - mineable
 topic: issue clusters and rule promotion
 entry_prefix: IC
-entry_high_water_IC: 22
+entry_high_water_IC: 23
 ---
 
 > **Prefix:** `IC-N` — one **defect class** the bug corpus instantiates. Declared ledger; the
@@ -334,6 +334,7 @@ delete this subsection in the same commit.
 | IC-20 | a floor is published under the name of a total | `floor-published-under-the-name-of-a-total` | not yet — `n=1`; kept apart from `IC-19` on the remedy test (rename vs re-select) | **`partial`** — per-member gate shipped both directions; class gate in flight on `result-cap-marker-gate`, unmerged |
 | IC-21 | an instrument reports presence or a count where the decision turns on magnitude | `instrument-omits-the-dimension-that-grows` | not yet — `n=2`, one short; already 2 subsystems, so instance 3 meets both bars | **`designed`** — guard applied prospectively at `get.rs`, asserted; per-site only; verified 2026-09-03 |
 | IC-22 | a next-step hint is composed from the response shape, not from the request | `hint-composed-without-the-request` | not yet — n=4, **count bar cleared 2026-09-02** at `n=3`, judgement owed; seed **fixed** `bb4688fd`, second member open on the *preview* surface | none yet — **verified absent 2026-09-03**, not merely unchecked |
+| IC-23 | a per-item attribute is derived at the container's granularity, and is correct for the first item | `attribute-derived-at-container-granularity` | not yet — one member, one subsystem; opened 2026-09-13 by **retag out of `IC-6`** after the founding bug's diagnosis was falsified | none yet — the shape is **type-level** (hand out `(offset, item)` so ignoring the offset cannot compile), not a scan; a lint cannot see a plain field read |
 
 **Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
 column — that is the derivation, and it cannot go stale when a count moves. This sentence used to
