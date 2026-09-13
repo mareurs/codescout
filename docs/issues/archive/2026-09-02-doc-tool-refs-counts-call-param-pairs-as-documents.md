@@ -1,12 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/unclassified
+closed: 2026-09-13
 opened: 2026-09-02
-closed:
-severity: low
 owner: marius
 related: []
-tags: ["cluster/unclassified"]
-kind: bug
+severity: low
 ---
 
 # BUG: `a_documented_call_names_a_live_tool` counts (call × param) pairs and calls them "documents"
@@ -137,30 +138,15 @@ second way.
 
 ## Fix
 
-Not yet applied. Two independent one-liners, and they are worth keeping separate because
-they fail differently:
+**Fixed on `experiments` at `9e5feb7d`** (`9e5feb7dea2f499f44229f8b007ddc690945fdcf`), patch-id
+`37640bed7823e25de03ed4e2496355083e908960`.
 
-1. **Grain** — dedup by `(file, line, tool)` in `a_documented_call_names_a_live_tool`
-   before pushing, so one call is one finding. The parameter test must NOT be deduplicated;
-   its grain is already right.
-2. **Unit** — the message says `document(s)` while counting findings. Even after dedup the
-   two differ: one document can carry several stale calls. Name the unit the number
-   actually has (`stale call(s)`), per `CLAUDE.md` § *Testing Discipline* — *"a count of a
-   defect population must arrive with its unit or not at all"*.
+Both one-liners applied, kept as one change since they interact: extracted `stale_tool_call_findings(cites, names, allowed)` out of `a_documented_call_names_a_live_tool`, deduplicating on `(file, line, tool)` before pushing a finding — one call site is one finding regardless of its argument count. `a_documented_tool_parameter_exists_on_that_tool` was left untouched; its per-parameter grain was already correct. The message's unit was corrected from `"{n} present-tense document(s)"` to `"{n} stale call(s)"`, matching what `bad.len()` actually counts post-dedup.
 
-Fixing only (1) leaves a number that is right today and mislabelled; fixing only (2) leaves
-an honest label on an inflated number.
-
+The `MalformedReason`/`MalformedCapId` split under `docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md` was fixed in the same commit; unrelated code path, no shared call sites.
 ## Tests added
 
-None yet. A regression test wants a fixture surface carrying one retired-tool call with
-≥2 named arguments, asserting the failure names it **once**. Note that the natural
-assertion here is a count, and this file's own `the_scan_is_not_reading_an_empty_corpus`
-exists because `is_empty()` assertions are monotone under removal — a dedup that
-over-collapses (say, keying on `file` alone) would also produce a smaller number and
-satisfy a naive "reports once" check. Key the assertion on the emitted text, not the count
-alone.
-
+`tests/doc_tool_refs.rs::a_stale_call_is_reported_once_regardless_of_argument_count` — a synthetic 2-argument `artifact_event(action=…, artifact_id=…)` fixture (a real retired tool name, confirmed absent from `tool_names()`), asserting `stale_tool_call_findings` returns exactly one finding and that it names the offending tool — keyed on the emitted text, not the count alone, per this file's own note on dedups that over-collapse.
 ## Workarounds
 
 Read the finding blocks, not the headline number. Duplicate blocks with an identical

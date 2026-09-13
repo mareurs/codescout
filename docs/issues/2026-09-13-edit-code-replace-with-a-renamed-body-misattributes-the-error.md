@@ -52,7 +52,7 @@ edit_code(action="replace", path="<file>", symbol="foo",
 subject, with no mention that `bar` (the name actually in `body`) is why.
 
 Observed live 2026-09-13 while fixing `tests/result_caps.rs`
-(`docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`): renaming
+(`docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`): renaming
 `unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message` to
 `..._with_its_own_message` via `replace` with a full attributes+body payload hit exactly this
 message. The fix was to keep `symbol` and the body's fn name identical for the `replace` call, then
@@ -110,7 +110,7 @@ different name (new message, pointing at `rename`).
 
 ## References
 
-- Surfaced fixing `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`
+- Surfaced fixing `docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`
   in this same session (2026-09-13).
 - `tests/result_caps.rs`'s
   `unclassified_decls_reports_a_malformed_result_cap_id_with_its_own_message` — the function whose

@@ -209,7 +209,7 @@
 //! For the second the text named a token that was not on the line and prescribed the wrong
 //! repair. Fixed by splitting the RESULT_CAP case into its own `MalformedCapId(String)` variant,
 //! carrying the offending id so the message can name it; see
-//! `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md` and
+//! `docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md` and
 //! `unclassified_decls_reports_a_malformed_result_cap_id_with_its_own_message`, which now pins
 //! the corrected text.
 //!
@@ -265,7 +265,7 @@ enum CapClass {
     /// Split out of `MalformedReason` — until this split, both shapes rendered
     /// as `NOT_A_CAP with no reason`, a message naming a token that is nowhere
     /// on a `RESULT_CAP` line. See
-    /// `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
+    /// `docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
     MalformedCapId(String),
 }
 
@@ -1109,7 +1109,7 @@ fn unclassified_decls_names_every_offender_and_is_not_a_bare_count() {
 /// actual token and the actual defect rather than a `NOT_A_CAP` reason that was never
 /// written. Previously (until this fix) both producers shared one message —
 /// `NOT_A_CAP with no reason` — for a line that read `RESULT_CAP`; see
-/// `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
+/// `docs/issues/archive/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
 ///
 /// Narrowness, which an exemption test owes: a well-formed `RESULT_CAP a.b` decl sits in the
 /// same input and must NOT be reported — a filter that swallowed it would make the whole

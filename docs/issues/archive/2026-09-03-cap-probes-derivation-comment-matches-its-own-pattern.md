@@ -1,12 +1,13 @@
 ---
-id: aa8f15dc6b1d6a21
+id: 8971d1343f2410da
 kind: bug
-status: open
+status: fixed
 title: cap_probe.rs's published id-list derivation is false, and running it as written matches its own prose
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-09-13
 opened: 2026-09-03
 severity: medium
 ---
@@ -59,12 +60,20 @@ Live grep, 2026-09-03: `grep(pattern="cap-class: RESULT_CAP", path="src", worksp
 
 ## Fix
 
-Not designed. Correct `cap_probe.rs`'s derivation comment to match `tests/result_caps.rs`'s accurate description (parser over `git ls-files src`, not a shell grep), and consider adding a one-line cross-reference between the two so a future edit to one is more likely to catch drift in the other.
+**Fixed on `experiments` at `9e5feb7d`** (`9e5feb7dea2f499f44229f8b007ddc690945fdcf`), patch-id
+`37640bed7823e25de03ed4e2496355083e908960`.
 
+`cap_probe.rs`'s `PROBE_ROWS` doc comment corrected to describe the real derivation mechanism —
+`every_cap_constant_is_classified`'s own const-declaration parser over `git ls-files src`
+(`tests/result_caps.rs`) — matching that file's own header, and explicitly naming the
+self-matching-instrument hazard so a future reader does not re-derive the false grep instruction.
 ## Tests added
 
-None yet — this is a doc-comment defect; a code-level regression test does not directly apply, though a `doctest`-style assertion that the two files' derivation descriptions agree could be considered.
-
+None — this was a doc-comment-only defect (no code-level assertion applies), consistent with what
+this file's own § *Tests added* anticipated. `tests/result_caps.rs`'s existing
+`result_caps_and_probe_rows_correspond_in_both_directions` continues to guard the two files' id
+lists from drifting apart; nothing guards the two files' *prose descriptions* of the mechanism
+against drifting apart, which is the gap this bug instantiated.
 ## Workarounds
 
 Do not use the grep pattern quoted in `cap_probe.rs`'s module doc to audit the row count; use `every_cap_constant_is_classified`'s own logic, or trust `print_mutation_tally`'s reported total after independently spot-checking a handful of rows.
@@ -79,4 +88,3 @@ Do not use the grep pattern quoted in `cap_probe.rs`'s module doc to audit the r
 - `src/tools/core/cap_probe.rs:172-176` (approx.), `tests/result_caps.rs:25-29` (approx.)
 - Surfaced during `result-cap-marker-gate` branch's whole-branch review (2026-09-03), session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`, finding I2
 - `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md` (the no-escape half: a construct that means "cite this pattern in prose" is read by the very scanner it is written to describe)
-

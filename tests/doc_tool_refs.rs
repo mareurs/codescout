@@ -815,7 +815,7 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
 
 /// Findings for [`a_documented_call_names_a_live_tool`], deduplicated by `(file, line, tool)` —
 /// one call site is one finding, however many named arguments it carries. Filed as
-/// `docs/issues/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`:
+/// `docs/issues/archive/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`:
 /// [`anchored_cites`] emits one [`Cite`] per named argument, which is the right grain for
 /// [`a_documented_tool_parameter_exists_on_that_tool`] but not for this per-tool question — do
 /// NOT reuse this dedup there, its grain is already correct.
@@ -872,7 +872,7 @@ fn a_documented_call_names_a_live_tool() {
 
 /// A stale call carrying multiple named arguments must be reported once, not once per argument —
 /// the defect fixed alongside this test in
-/// `docs/issues/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`. Keyed on the
+/// `docs/issues/archive/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`. Keyed on the
 /// emitted text rather than the count alone, so a dedup that over-collapses (e.g. keying on
 /// `file` alone) cannot pass this by producing a smaller but still-wrong number.
 #[test]

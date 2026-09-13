@@ -1,12 +1,13 @@
 ---
-id: cc73e99dcbe70a2a
+id: a807b70cb7ee7340
 kind: bug
-status: open
+status: fixed
 title: classify()/unclassified_decls() conflate two defect shapes under one MalformedReason message
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-09-13
 opened: 2026-09-03
 severity: low
 ---
@@ -61,12 +62,14 @@ for a mutation that read `// cap-class: RESULT_CAP probed` above `MAX_MATCH_BYTE
 
 ## Fix
 
-Not designed. `classify()` should return distinguishable variants (or `MalformedReason` should carry which sub-case fired), and `unclassified_decls()` should render a message naming the actual annotation token found (`NOT_A_CAP` vs `RESULT_CAP`) and the actual defect (missing reason vs malformed id).
+**Fixed on `experiments` at `9e5feb7d`** (`9e5feb7dea2f499f44229f8b007ddc690945fdcf`), patch-id
+`37640bed7823e25de03ed4e2496355083e908960`.
 
+Split `CapClass::MalformedReason` into two variants: `MalformedReason` (unchanged — a `NOT_A_CAP` with an empty or absent reason) and a new `MalformedCapId(String)` carrying the offending fragment (a `RESULT_CAP` whose id fails `is_valid_cap_id`). `classify()`'s `RESULT_CAP` branch now returns `MalformedCapId(id.to_string())` instead of the shared variant. `unclassified_decls()` gained a dedicated arm rendering `"RESULT_CAP id {id:?} does not match `<tool>.<field>`"` (or, when nothing followed the token, `"RESULT_CAP with no id"`) — naming the actual annotation and the actual defect instead of a `NOT_A_CAP` reason that was never on the line.
 ## Tests added
 
-None yet. A fix should add a case distinguishing the two `MalformedReason` sub-shapes and asserting the message names the correct token in each.
-
+- `classify_rejects_a_result_cap_id_without_a_dot` updated to assert `CapClass::MalformedCapId("probed".into())` (was asserting the shared `MalformedReason`, which is still correct for `classify` but no longer the right variant here).
+- `unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message` renamed to `unclassified_decls_reports_a_malformed_result_cap_id_with_its_own_message` and its pinned expectation corrected to the new message — this test's own doc comment had explicitly recorded that it pinned *today's wrong text* so a fix and its wording would have to land together; both landed in the same commit.
 ## Workarounds
 
 A reader hitting this message should check the actual annotation line rather than trusting the message's stated token.
@@ -81,4 +84,3 @@ A reader hitting this message should check the actual annotation line rather tha
 - `tests/result_caps.rs` (`classify`, `unclassified_decls`) at `result-cap-marker-gate` branch, worktree `.worktrees/result-cap-marker-gate`
 - Found during Task 7 of the branch's SDD run, session ledger `.superpowers/sdd/2026-09-02-result-cap-marker-gate/progress.md`
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md` (the gate this bug lives inside)
-
