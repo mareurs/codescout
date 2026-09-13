@@ -272,6 +272,46 @@ real harm. Two reads disagreeing is a loud signal, and it is the reason this ent
 Also, minor and the class again: every commit in that window is authored `Marius Ailinca`,
 shared by every session on this machine. Git identity carried zero attribution signal; only the
 `Session-Id` trailer did.
+### 2026-09-13 — the window took an ARCHIVE MOVE, which is the multi-file case
+
+Observed while archiving `2026-09-12-every-ref-in-a-fenced-block-is-attributed-to-the-blocks-first-line.md`
+(`70e16d65`). Four paths were staged deliberately; `git diff --cached --name-status`
+one call later returned **eight**:
+
+```
+D  docs/issues/2026-09-12-audit-doc-refs-reads-a-backtick-inside-a-fence-as-syntax.md   <- mine
+A  docs/issues/2026-09-13-released-history-boundary-is-not-fence-aware.md               <- mine
+A  docs/issues/archive/2026-09-12-every-ref-in-a-fenced-block-...-first-line.md         <- mine
+M  docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md              <- mine
+M  docs/issues/archive/2026-09-12-the-red-attribution-hook-fires-only-on-a-non-zero-exit-...md
+R077 docs/issues/2026-09-13-an-env-var-...md -> docs/issues/archive/2026-09-13-an-env-var-...md
+M  docs/trackers/issue-clusters/IC-12-transient-shared-state-lies-to-readers.md
+M  src/tools/run_command/attribution.rs
+```
+
+No capture: the commit used a pathspec and landed exactly four files, and the
+`refuse an index commit carrying another session's staged paths` hook passed.
+
+**What this instance adds, and it is not "it happened again".** The intruding rows are
+not one edit — they are a **whole archive flow mid-execution**: an `R077` rename plus the
+cluster ledger the move re-points plus the source file the same session holds. This file's
+earlier evidence is about a peer staging *a file*. An archive move is a **multi-file atomic
+operation whose halves are meaningless apart**, and CLAUDE.md's own `doc(action="move")`
+hint mandates staging both halves together — so the peer was following the documented
+sequence exactly. Two sessions can each obey a correct multi-file staging rule and still
+produce one index neither of them described.
+
+The severity direction is worth stating because it cuts the other way from the rest of this
+file: a bare `git commit` here would not merely have captured a stray edit, it would have
+split a rename — `A` without `D`, or a ledger re-pointed at a path that had not moved yet.
+That is a corrupt archive rather than a misattributed one, and nothing downstream checks it.
+
+**Attribution is positive, not by adjacency.** `src/tools/run_command/attribution.rs` was
+named to sessionId `05841db2-4ba0-4cb2-a22f-c0bc2f771e20` by `scripts/fmt-mine.sh`'s
+provenance scan earlier in the same gate run, unprompted — which is `file-provenance`
+answering for **who wrote the file**, still not for who staged it. The two questions remain
+distinct and this instance does not close the second; see
+`the stage log records who STAGED, not who authored`.
 ## Hypotheses tried
 
 1. **Hypothesis:** the pre-commit stash (`docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`)
