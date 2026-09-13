@@ -365,15 +365,15 @@ pub(crate) fn containing_root<'a>(
 /// Shared rather than copied into both call sites because a remedy text duplicated across
 /// sites is `observer-blindness:OB-20`'s fifth shape — the copies drift and only one gets
 /// fixed.
-/// **The type here is `crate::tools::RecoverableError`, not the librarian's own, and the
-/// qualification is load-bearing.** Two identically-named, identically-`Display`ing types
-/// exist — `crate::librarian::tools::RecoverableError` `{message, hint}` (this module, line
-/// 45) and `crate::tools::RecoverableError` `{message, guidance, extra}`. Both reach the wire
-/// correctly, because `adapter.rs`'s `bridge_recoverable_error` converts the former to the
-/// latter at the boundary. So the choice is invisible at runtime and visible only to a test
-/// that downcasts, and the two call sites this replaces both built the HOST type. Writing
-/// bare `RecoverableError` inside this module silently picks the librarian one and reds
-/// `every_required_param_failure_names_its_action_and_routes` with a message about serde.
+///
+/// **The type is `crate::tools::RecoverableError`, the HOST one, and this module imports
+/// neither** — so it is spelled in full here on purpose. The librarian's own
+/// `LibrarianRecoverableError` (line 45) is a different type with a different shape
+/// (`{message, hint}` against `{message, guidance, extra}`), and `adapter.rs`'s
+/// `bridge_recoverable_error` converts it at the boundary. Both therefore reach the wire
+/// correctly, so the choice between them is invisible at runtime and visible only to a test
+/// that downcasts — which `every_required_param_failure_names_its_action_and_routes` does.
+/// Build the host type here; the two call sites this replaces both did.
 pub(crate) fn deser_error(
     e: serde_json::Error,
     action: &str,
