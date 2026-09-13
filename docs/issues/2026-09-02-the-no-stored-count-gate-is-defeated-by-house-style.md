@@ -194,6 +194,14 @@ against the corpus before being built, and the measurement refused it. What ship
 documented limitation `CLAUDE.md` § *Parsers Over a Namespace* prescribes for exactly this case,
 plus the probe that makes the refusal re-derivable.
 
+**Shipped in two commits, neither of them a fix, which is why this file is `mitigated` and not
+`fixed`.** The probe and this analysis are `053ebf24` (patch-id
+`30f69c2396e79fe7a1fe9b2e4c088e2416cb7d03`). The ledger's documentation half landed inside
+`cd138c30` (patch-id not cited: that commit's subject is the roster's mechanism column, and these
+paragraphs reached it as a working-tree capture on a shared checkout rather than as part of its
+change — recorded here so they stay traceable to the argument that produced them, and as one more
+instance of `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`).
+
 **Re-derive every figure below rather than citing it:**
 
 ```
