@@ -182,6 +182,43 @@ the module plus `workflow_analyze_ast`, with the one test that covered a *reacha
 `symbols(include_docs)` — moved to `src/tools/symbol/tests.rs` rather than lost. The matching delta
 on both lanes is what proves nothing else went with them.
 
+#### An INSTANT needs its frame too — and the cost is exactly the one this section warns about
+
+**2026-09-13.** Two sessions compared the last write to the same untracked files. One read
+`06:34:50Z` from the catalog's audit trail; the other read `09:34:50` from `stat`, unstamped.
+The first concluded *"the two clocks disagree by three hours and only one of them is about
+the author"*, and pointed the second at a real open bug — mtime measuring other sessions'
+git operations rather than the author's edits — as the likely cause.
+
+**There was no disagreement.** The box is UTC+3. `09:34:50+03:00` is `06:34:50Z`, the same
+event to the second. The offset WAS the difference, and it was read as evidence.
+
+Two things this adds to the law above.
+
+**The unit rule covers timestamps, and the unit is the FRAME.** `Z` on one reading and
+nothing on the other is the same defect as a count published without saying what it counts —
+and it is easier to miss, because a bare `HH:MM:SS` looks complete in a way a bare integer
+does not. The instrument that stamps its frame cannot protect a comparison against the one
+that does not.
+
+**The cost is the one § *Reaching a Peer Session* already names, realised from the other
+side.** That section says omitting the stamp makes *"ordinary churn present as a tooling
+defect, and the natural next step is to go debug an instrument that is working."* Here the
+reader went one step further and nominated a specific, real, filed bug as the explanation —
+which is worse than a vague suspicion, because a named cause closes the inquiry. The mtime
+bug is genuine; it simply was not what happened, and citing it lent a fabricated discrepancy
+the credibility of the corpus.
+
+**The tell, and it inverts the line-drift tell above.** There, drift between two otherwise
+agreeing readings meant the CORPUS MOVED rather than a reader erring. Here, a clean constant
+offset between two otherwise agreeing readings meant the FRAME DIFFERED rather than the event
+being observed twice. Both are the same instruction: when two careful readings differ by
+something *regular*, suspect the coordinate system before the observation. A three-hour gap
+that is exactly a timezone is not a measurement.
+
+Caught by the session holding the unstamped clock (`9403d62d`), who converted both to one
+frame and pinned the offset from their own `date` output rather than asserting it.
+
 ## Annotate the fixture — both directions
 
 **Law:** annotate a fixture's load-bearing detail, on the fixture line.
