@@ -48,7 +48,7 @@ of those, carrying a duplicate raw line: 48
 **48 of 802 (6.0%)**, over a walk of 859 commits. Unit: commits reachable from `HEAD`,
 walked with an explicit `--since='2026-09-01 00:00:00'` — the bare-date spelling of that
 cutoff returns a different population and is its own bug
-(`docs/issues/2026-09-06-a-bare-date-in-gits-since-is-filled-from-the-current-wall-clock.md`).
+(`docs/issues/archive/2026-09-06-a-bare-date-in-gits-since-is-filled-from-the-current-wall-clock.md`).
 
 ## Reproduction
 

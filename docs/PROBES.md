@@ -137,7 +137,7 @@ re-reads the lead when appending.
    in-tree instances: **zero**, swept at `c9e6cb6b` (see the bug file) — the exposure is
    ad-hoc measurement, which is exactly how it was found and one step from a published
    wrong denominator.
-   (`docs/issues/2026-09-06-a-bare-date-in-gits-since-is-filled-from-the-current-wall-clock.md`)
+   (`docs/issues/archive/2026-09-06-a-bare-date-in-gits-since-is-filled-from-the-current-wall-clock.md`)
 
 **There is deliberately no separate long form.** Each rule above carries its own
 incident inline, and cites the artifact holding the detail. Do not replace this with a
