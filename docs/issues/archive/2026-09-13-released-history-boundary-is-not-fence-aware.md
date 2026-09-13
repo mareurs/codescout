@@ -1,10 +1,12 @@
 ---
-id: '6228f4892066b689'
+id: daca7b2c8b7bf4da
 kind: bug
-status: open
+status: fixed
 title: 'BUG: released_history_boundary scans lines without fence awareness, so a changelog''s own example heading can become the boundary'
 tags:
 - cluster/addressing-without-an-escape-hatch
+claimed_at: 2026-09-13
+claimed_by: eba3d2c6-c1fe-4506-8e2b-a36417e4d9e4
 closed: null
 opened: 2026-09-13
 owner: marius
@@ -93,22 +95,50 @@ format without the scanner reading the demonstration as the thing demonstrated.
 
 ## Fix
 
-Not implemented. Two candidates, and the choice is not obvious:
+**Fixed 2026-09-13 — candidate 1 (track fences in the line scan), reusing the codebase's
+existing `FenceState` utility rather than hand-rolling a toggle.**
 
-1. **Track fences in the line scan.** Cheap, local, and duplicates state pulldown-cmark
-   already computes correctly three functions away — a second implementation of fence
-   parsing is how the two drift.
-2. **Derive the boundary from the pulldown-cmark event stream** that `parse_refs` already
-   walks, so heading detection has exactly one implementation. Costs a shared pass or a
-   second parse.
+Shipped `82dc327c` on `experiments`, patch-id
+`8f3275afdeb8c05c5e9046371b946803b8372937`.
 
-(2) is the one that cannot rot, and it is more work than this undemonstrated bug justifies
-on its own. Worth doing when something else opens that file.
+Mirrors `src/librarian/statements.rs`'s `first_declaration_line` exactly: feed each
+trimmed line to a `FenceState`, and treat a line as invisible to the heading match
+whenever `feed()` reports it as a delimiter itself or `in_fence()` is still true. No new
+fence-parsing logic was written — `FenceState` already had 10 other call sites in this
+codebase (`doctor.rs`, `edit_markdown.rs`, `entry_token.rs`, `rule.rs`, the `preview/`
+modules, `file_summary.rs`), so this was a matter of reaching for the established tool
+rather than inventing a new one.
+
+**Candidate 2 (derive the boundary from the pulldown-cmark event stream `parse_refs`
+already walks) was NOT taken.** The bug file itself judged it "more work than this
+undemonstrated bug justifies on its own" — still true; candidate 1 fully closes the
+failure mode this file describes.
+
+Regression test added mirroring the bug's own Reproduction section almost verbatim: a
+changelog whose only real heading is `[Unreleased]`, containing a fenced worked example
+of a `## [1.2.0]` entry. Confirmed RED before the fix (`Some(8)`, the fenced line),
+GREEN after (`None`). Sibling test
+`released_history_boundary_only_applies_to_changelogs` still passes unchanged.
+
+Gate: `fmt-mine.sh` clean; `clippy --workspace --all-targets --features local-embed -D
+warnings` clean; lean lane **3529 passed, 0 failed**; default lane **5487 passed, 0
+failed**.
+
+Not implemented, and not scheduled — the alternative for the record:
+
+**Derive the boundary from the pulldown-cmark event stream** that `parse_refs` already
+walks, so heading detection has exactly one implementation instead of two independently
+correct ones. Costs a shared pass or a second parse; the shipped fix's own regression
+test is what would have to keep passing if this is ever taken instead.
+
+Worth doing when something else opens this file for a reason unrelated to this bug.
 
 ## Tests added
 
-None — nothing is fixed. A test written now would assert current behaviour and pin the
-defect.
+`released_history_boundary_is_not_fooled_by_a_fenced_example`, in
+`src/librarian/tools/audit_doc_refs/mod.rs` beside the existing
+`released_history_boundary_only_applies_to_changelogs`. Confirmed RED against the pre-fix
+scanner, GREEN after.
 
 ## Resume
 
