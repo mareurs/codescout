@@ -75,6 +75,57 @@ Measured: the augment path (then the standalone `artifact_augment` tool) had two
 **different** tests, neither failing under the other's mutation — so a single mutation would have
 supported "covered" with the second site unguarded.
 
+## `contains` is monotone too — two assertions that survived removing the thing they guarded
+
+**2026-09-13, two sessions, two subsystems, same day.** Both assertions read correctly, were
+deliberately written to guard the property in question, and were worth nothing. Neither was
+found by review; each was found by one mutation.
+
+| | assertion | mutation applied | result |
+|---|---|---|---|
+| A | `err.contains("rename")` — *the refusal routes the caller to `action="rename"`* | delete the routing from the hint | **green** |
+| B | integration: *the citation scan finds a dateless-slug citation* | `stem[11..]` → `stem[12..]`, one byte short | **green** |
+
+**A** (`120e3207d427ea14`, `edit_code`): the *diagnosis* sentence already reads
+*"`replace` cannot rename"*, so the needle is present whether or not the remedy is. The
+assertion could not distinguish a message that routes the caller from one that merely
+mentions the word.
+
+**B** (`eba3d2c6`, `files_mentioning`): the mutation produced `"xample-bug"` — still a
+**substring** of the citer's `"example-bug"` text, so the `grep -F` still matched. The
+assertion could not distinguish the correct stem from a truncation of it.
+
+**The unifying claim, and it is the FIRST law in this file arriving at string assertions.**
+`haystack.contains(needle)` is **monotone in both arguments**: it is satisfied by a haystack
+that grew *and* by a needle that shrank. So it cannot discriminate
+
+- a needle present for the reason under test from one present for an unrelated reason (A), nor
+- a correct needle from any substring of it (B).
+
+Ask which direction the assertion is monotone under and mutate the other way — here, *both*
+ways are the wrong way, which is what makes `contains` unusually weak for a property claim.
+
+**The remedy is NOT "assert more".** Adding a second `contains` inherits the same monotonicity.
+It is **choose a needle that can only appear when the property holds**, or leave containment
+entirely:
+
+- A: assert the **callable form** `action="rename"`, which occurs only where the caller is
+  told what to run — not in the diagnosis.
+- B: a direct unit test with `assert_eq!` on the exact output. Equality is monotone under
+  nothing.
+
+**Both repairs were verified against the same mutation that defeated the original**, which is
+the only evidence that counts: the weaker form is what a later reader naturally writes, so each
+site carries a comment saying why the obvious assertion was rejected.
+
+**Why this is worth a section rather than a note.** A is `cluster/assertion-satisfiable-by-accident`
+occurring *inside a test written to guard remedy text* — the instrument built to catch a class
+of vagueness was vague in the same way. And in A the per-SITE discipline immediately above had
+already been followed: mutating the *verdict* site killed both tests and reproduced the bug's
+headline message verbatim, which read as full coverage. One site's kill said nothing about the
+other's, exactly as that section claims — and the surviving site was the one the test existed
+for.
+
 ## Loudness is a property of a PATH — the `BL-66` alarm nothing reached
 
 **Law:** loudness is a property of a PATH, not of a failure.
