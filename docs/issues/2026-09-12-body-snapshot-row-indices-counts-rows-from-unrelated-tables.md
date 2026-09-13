@@ -112,18 +112,44 @@ permanently unaddressable"* — and a table is the same shape.
 
 ## Fix
 
-Not implemented. Two directions, neither started:
+**Direction settled 2026-09-13: the augmentation carries an explicit anchor.** Not
+implemented.
 
-1. **Bound the scan to the snapshot block.** Needs a recorded boundary — the
-   augmentation would carry the block's anchor (header line, or a fenced marker the
-   template emits). This is also what an auto-`index_after_line` default needs, so the
+1. **Bound the scan to a recorded boundary — CHOSEN.** The augmentation gains a
+   `snapshot_anchor` field holding the block's header line verbatim, author-declared and
+   server-validated. This is also what an auto-`index_after_line` default needs, so the
    two wants share one primitive.
-2. **Require the row to match the template's column arity.** Cheaper, no schema change,
-   and discriminates the observed case (5 columns vs 2). Weaker: two 5-column tables in
-   one file would defeat it.
 
-Direction 1 is the one that generalises; direction 2 is what a gate could ship today.
+2. **Require the row to match the template's column arity — MEASURED WEAK, do not
+   reach for it.** Filed as "cheaper, no schema change, discriminates the observed case
+   (5 columns vs 2)". Measured on this file: **83 lines** match a generic 5-column
+   pattern, against **1** for the template's literal header row. Arity does not
+   discriminate here; it only appeared to because the counter-example examined was
+   2-column.
 
+**Deriving the anchor was considered and is FORBIDDEN, which is the part worth keeping.**
+The obvious third option — extract the template's static header and locate the block by
+matching it, no schema change — was written into a plan and rejected on review against
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md` § *The boundary*:
+
+> **Asymmetry — writes get a higher bar than reads.** Auto-accepting an *explicit* write
+> target is safe; auto-*guessing* a write target must still hard-error.
+
+An omitted `index_after_line` is **absent**, not malformed, and the same ADR reserves the
+teaching error for absent input. So deriving it is the guess the law forbids rather than
+the deterministic repair it permits. The code says so twice independently:
+`PendingIndexRow::after_line`'s doc — *"Explicit, never inferred… a wrong guess about
+placement on a WRITE needs manual repair"* — and `insert_index_row`'s — *"a write accepts
+an explicit target and never infers one"*.
+
+The tell that made derivation look safe, recorded because it is the reusable half: the
+justification was *"the header is unique **in this file**"*. That is a property of today's
+corpus, not of the scheme — the same *"it cannot happen"* reasoning `CLAUDE.md` §
+*Parsers Over a Namespace* says decays with the corpus, and the very thing this bug is
+about. The DRY objection to a schema field ("a second source of truth for something
+derivable") was also wrong: `render_template` defines the block's **shape**, an anchor
+defines its **location**, and this bug's own Root cause section is the argument that
+location is not recoverable from shape.
 ## Tests added
 
 None yet. The discriminating test is a body with a snapshot table plus a second table

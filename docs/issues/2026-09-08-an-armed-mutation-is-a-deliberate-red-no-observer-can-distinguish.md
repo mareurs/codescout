@@ -193,6 +193,85 @@ acts* property already implies a durable record; this is the argument for why du
 presence, is the load-bearing half.
 
 Still not built, still an operator's call on a shared gate surface.
+### Instance 2 — 2026-09-13, and the cost landed on a session that did everything the file asks
+
+A second instance, reported from **both** sides within one exchange, which is what makes it
+worth recording rather than merely counting.
+
+`codescout-aa` (sessionId `05841db2-4ba0-4cb2-a22f-c0bc2f771e20`) was mutation-testing
+`written_by_report` in `src/tools/semantic/index.rs` — three mutations, ~30s each, restored
+between. Mutation 1 deleted the `reading_binary_dirty` line. `8bd791df` ran the four-command
+gate in that window and got:
+
+```
+assertion `left == right` failed: the READER's dirty flag …
+  left: Null
+ right: true
+```
+
+Lean 3521/1, default 5468/1, clippy 0. The `left: Null` is the deleted field, so the red was
+a faithful report of a deliberate absence.
+
+**What is new here is the observer's conduct, because it exhausts the remedies this file
+already proposes and the cost still landed.** The 2026-09-08 instance concluded that asking
+beats telling; `8bd791df` asked. It also, *before* writing anything, ran
+`file-provenance.py --all` and read `fmt-mine`'s refusal — two independent instruments — and
+reported a **positive identification** rather than inferring from the dirty file next to the
+red. Adjacency would have returned the same answer on this occasion and is anti-evidence on a
+five-session tree (`CLAUDE.md` § *Reaching a Peer Session*, rule 1). None of that shortened
+the window: the gate still had to run, still went red, and still cost a triage plus a
+write-up.
+
+So the standing conclusion holds and sharpens: **an armed mutation is indistinguishable from a
+break by construction, and no amount of observer diligence closes it — only the mutating
+session knows, and only in advance.** `codescout-aa` named the gap themselves: they did not
+announce the window, and offered no mechanism because none exists here. `f3c594ce` said
+exactly the same thing after instance 1. Two authors, independently, reaching *"policy, not
+mechanism"* is the strongest evidence in this file that the third position of `CLAUDE.md` §
+*Observer Blindness* is unbuilt rather than merely unused.
+
+**A candidate mechanism, recorded because both authors stopped at policy — and it is HALF a
+mechanism, which the co-reporter caught.** The mutating session already touches the tree; a
+marker file it writes on arming and removes on restore (`.buddy/<sid>/armed-mutation`, naming
+the path under test) would let the gate runner distinguish the two states without asking, and
+would survive the mutator being busy.
+
+`05841db2` named the defect in it, and the correction matters more than the sketch: **only the
+ARMING half is unconditional.** The mutating session always writes the marker, but the reading
+half is *another trigger someone has to remember* — and this instance is precisely the case
+where the reader was mid-gate with a red in front of them and no reason to go looking. The
+sketch moves the remembering from the mutator to the observer rather than removing it. That is
+this file's own conclusion holding one layer up, against its own proposed remedy.
+
+**The refinement that follows, and where it lands.** The reading half becomes unconditional
+only if it rides an instrument that already fires on the red — which exists: `run_command` runs
+`scripts/attribute-red.py` on failure-shaped output (`02e61230`), so a marker read there
+reaches the observer without anyone deciding to look. At which point both halves reduce to one
+prior question, because that instrument carries the channel gap this same instance established:
+a `Bash` gate never reaches it. So *"build the marker"* and *"instrument the second channel"*
+are not two tasks — the first is worth little without the second, and the second makes the
+first cheap.
+
+Liveness for a stranded marker (crash mid-mutation) is the easy half: the sid in the path maps
+to a socket, so `/proc/<pid>` existence makes a dead session's marker ignorable with no timeout
+and no clock. Sketched jointly by `8bd791df` and `05841db2`; **not built**, and routed to an
+operator queue rather than settled between peers, because it is a new mechanism rather than a
+fix to an existing one.
+
+**`wip_authors` does not cover this, and the reason is worth pinning.** `02e61230` (same
+morning) widened `run_command`'s red-attribution to failure-*shaped* output rather than only a
+non-zero exit, and it was verified on the wire at 09:34. It did not fire here, and the
+hypothesis offered — a server predating the 09:27:41 build — was **wrong**: `readlink
+/proc/$PPID/exe` returned the live inode, not a `(deleted)` one. The operative cause is the
+ceiling `CLAUDE.md` § *Reaching a Peer Session* already states — *"native `Bash` bypasses
+`run_command` entirely, so on a `Bash` gate the silence means nothing"* — and the gate had been
+run through `Bash`, which the companion plugin permits today while the shell eval is live. So
+the hook's new coverage is real and orthogonal: widening the *trigger* from exit code to output
+shape does not reach a *channel* that was never instrumented.
+
+Raised by `05841db2-4ba0-4cb2-a22f-c0bc2f771e20`; observed and written up by
+`8bd791df-5ff4-40fe-af30-69cc3fefc2f7`. Neither party is at fault in a way a rule would have
+prevented, which is the point.
 ## Tests added
 
 None, and none is possible from inside the arming session: the state under test is *another

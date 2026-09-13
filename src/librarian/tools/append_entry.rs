@@ -89,22 +89,37 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         (None, None) => None,
         (Some(row), Some(after)) => Some(augmentation::PendingIndexRow {
             row: row.clone(),
-            after_line: after.clone(),
+            after_line: augmentation::RowAnchor::Explicit(after.clone()),
         }),
-        _ => {
-            let missing = if a.index_row.is_none() {
-                "index_row"
-            } else {
-                "index_after_line"
-            };
+        // A row with no per-call anchor defers to the ARTIFACT's own `snapshot_anchor`
+        // frontmatter declaration, resolved in `splice_pending_section` against the
+        // bytes about to be written. This is still an explicit target — declared once
+        // by the author rather than repeated per call — so it does not reach the
+        // auto-guessing the ADR above forbids; an artifact that declares nothing is
+        // refused there by name, not silently placed.
+        //
+        // It was previously the other half of a both-or-neither refusal. That refusal
+        // was right while no explicit target existed to defer TO, and the caller's only
+        // remaining option was a second call — the capture window
+        // `docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`
+        // names. `index_after_line` stays available and still wins when passed.
+        (Some(row), None) => Some(augmentation::PendingIndexRow {
+            row: row.clone(),
+            after_line: augmentation::RowAnchor::Declared,
+        }),
+        // The reverse half stays refused, and is NOT symmetric with the arm above:
+        // an anchor with no row names a placement for nothing, and no artifact-level
+        // declaration can supply the row's text.
+        (None, Some(_)) => {
             return Err(LibrarianRecoverableError::with_hint(
-                format!(
-                    "doc(action=\"append_entry\"): `index_row` and `index_after_line` are \
-                     both-or-neither — missing: {missing}"
-                ),
-                "Pass both: `index_row` is the row text with `{id}` for the allocated id, \
-                 `index_after_line` is an existing line to insert it after (for a \
-                 newest-first table, the separator).",
+                "doc(action=\"append_entry\"): `index_after_line` was passed with no \
+                 `index_row`, so there is no row to place"
+                    .to_string(),
+                "Pass `index_row` too — the row text, with `{id}` where the allocated id \
+                 goes. To place a row without naming the anchor per call, omit \
+                 `index_after_line` and declare the block once on the artifact: \
+                 doc(action=\"update\", id=…, patch={\"extra\": {\"snapshot_anchor\": \
+                 \"<the table's header line, verbatim>\"}}).",
             ));
         }
     };
@@ -1562,9 +1577,148 @@ mod tests {
         );
     }
 
-    /// Both or neither, refused at the boundary rather than half-applied. Mirrors the
-    /// existing `title`/`body`/`anchor_heading` triple, and the refusal must NAME the
-    /// missing half or the caller is left guessing which of two fields it was.
+    /// The point of the whole `snapshot_anchor` mechanism: a caller passes `index_row`
+    /// with NO `index_after_line`, and the row lands at the block's TAIL because the
+    /// artifact declared where its block is.
+    ///
+    /// **Asserts on POSITION, not merely presence.** `text.contains("| F-2 |")` would
+    /// pass with the row spliced under the header, which is the wrong end of a
+    /// newest-last ledger and the exact mistake a caller naming the separator by hand
+    /// makes. The index comparison against `| F-1 |` is what discriminates, and it is
+    /// why this test cannot be collapsed into the `contains` style of its siblings.
+    ///
+    /// Fixture detail that is load-bearing: `## Template` after the table. It gives the
+    /// walk a non-table line to stop at, so a locator that ran to EOF would still place
+    /// the row correctly here and pass — without it this test is monotone under that
+    /// mutation.
+    #[tokio::test]
+    async fn a_declared_snapshot_anchor_places_the_row_at_the_blocks_tail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "---\nkind: tracker\nsnapshot_anchor: '| ID |'\n---\n\n# Q\n\n| ID |\n|----|\n| F-1 |\n\n## Template\n",
+            &["F-1"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b",
+                   "index_row": "| {id} |"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["id"], "F-2");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let f1 = text.find("| F-1 |").expect("the seeded row must survive");
+        let f2 = text
+            .find("| F-2 |")
+            .unwrap_or_else(|| panic!("the row must land with no index_after_line: {text}"));
+        assert!(
+            f2 > f1,
+            "the row must land AFTER the last existing row, not under the header: {text}"
+        );
+        assert_eq!(
+            result["section_written"], true,
+            "the section still lands on this path: {result}"
+        );
+    }
+
+    /// The negative control, and the reason the mechanism does not quietly guess: an
+    /// artifact that declares no `snapshot_anchor` is REFUSED by name, and the ledger is
+    /// left byte-identical.
+    ///
+    /// Most trackers are this shape on purpose — measured 2026-09-13, only 3 of the 15
+    /// codescout artifacts with a `render_template` render a table into the body at all
+    /// — so this path is the common one, not an edge case.
+    #[tokio::test]
+    async fn an_undeclared_anchor_refuses_by_name_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        let before = "---\nkind: tracker\n---\n\n# Q\n\n| ID |\n|----|\n| F-1 |\n\n## Template\n";
+        seed_with_body(&ctx, "art1", &path, before, &["F-1"]);
+
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b",
+                   "index_row": "| {id} |"}),
+        )
+        .await
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("snapshot_anchor"),
+            "the refusal must NAME the missing declaration, or the reader cannot act on \
+             it: {msg}"
+        );
+        // Byte-identical: the abort happens before any write, so the promise the error
+        // text makes ("nothing was written") is checked rather than trusted.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "a refused placement must leave the ledger untouched"
+        );
+    }
+
+    /// An explicit `index_after_line` still wins when passed, so the new path is
+    /// additive. Without this, a change that made `Declared` unconditional would pass
+    /// every other test here.
+    #[tokio::test]
+    async fn an_explicit_after_line_still_overrides_the_declaration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "---\nkind: tracker\nsnapshot_anchor: '| ID |'\n---\n\n# Q\n\n| ID |\n|----|\n| F-1 |\n\n## Template\n",
+            &["F-1"],
+        );
+
+        call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b",
+                   "index_row": "| {id} |", "index_after_line": "|----|"}),
+        )
+        .await
+        .unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let sep = text.find("|----|").unwrap();
+        let f1 = text.find("| F-1 |").unwrap();
+        let f2 = text.find("| F-2 |").unwrap();
+        assert!(
+            f2 > sep && f2 < f1,
+            "the explicitly named separator must win over the declared tail: {text}"
+        );
+    }
+
+    /// A row with no anchor ANYWHERE — none passed per call, none declared on the
+    /// artifact — is refused at the boundary, and the refusal must name the field the
+    /// caller can act on.
+    ///
+    /// **This was a both-or-neither test and is no longer one.** `index_row` alone is
+    /// now legal when the artifact declares `snapshot_anchor`; what survives is the
+    /// narrower and more durable claim, that a refusal names an actionable field rather
+    /// than reporting an incomplete pair. Rationale updated rather than the test
+    /// deleted: the contract outlived the rule that motivated it.
+    ///
+    /// Pairs with `an_undeclared_anchor_refuses_by_name_and_writes_nothing`, which pins
+    /// the OTHER addressee — that the same refusal also names `snapshot_anchor`. One
+    /// test per route, because a message naming only one of the two leaves half the
+    /// readers with no next step, and neither assertion reds for the other's deletion.
     #[tokio::test]
     async fn an_index_row_without_its_anchor_is_refused_and_names_the_missing_half() {
         let (tmp, work) = repo_with_upstream();

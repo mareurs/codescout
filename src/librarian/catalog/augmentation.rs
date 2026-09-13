@@ -929,7 +929,36 @@ pub struct PendingIndexRow {
     /// Same law as [`PendingSection::anchor_heading`]
     /// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`) \u2014 a wrong
     /// guess about placement on a WRITE needs manual repair.
-    pub after_line: String,
+    pub after_line: RowAnchor,
+}
+
+/// Where a [`PendingIndexRow`] is to be placed.
+///
+/// **Both variants name an EXPLICIT target; neither infers one.** That distinction is
+/// the whole reason this is an enum rather than `Option<String>`:
+/// `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` § *The boundary*
+/// permits accepting an explicit write target and forbids guessing one, and
+/// `None` would have re-admitted exactly the state [`PendingIndexRow`]'s own doc
+/// says must stay unrepresentable — a row with no anchor at all.
+#[derive(Debug, Clone)]
+pub enum RowAnchor {
+    /// The caller named the line verbatim, per call.
+    Explicit(String),
+    /// The caller deferred to the ARTIFACT's own [`SNAPSHOT_ANCHOR_KEY`] frontmatter
+    /// declaration — still an explicit target, named once by the author in a file
+    /// that travels with the repo instead of once per call.
+    ///
+    /// Resolution happens in [`splice_pending_section`], which already holds the whole
+    /// document (frontmatter included) inside the caller's transaction, so the anchor
+    /// is read from the same bytes the row is spliced into. Resolving it earlier, at
+    /// the tool boundary, would read the file a second time and could observe a
+    /// different version than the one written.
+    ///
+    /// Refuses rather than falling back when the artifact declares no anchor, or when
+    /// the declaration matches no line or several: a row placed in a guessed table is
+    /// the defect this mechanism exists to prevent, and a wrong guess on a write needs
+    /// manual repair.
+    Declared,
 }
 
 #[derive(Debug, Clone)]
@@ -983,6 +1012,107 @@ pub(crate) fn declared_prefixes_from_frontmatter(
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// Frontmatter key by which a ledger declares WHERE its rendered snapshot block
+/// lives in the body: that block's header line, verbatim.
+///
+/// **Lives in frontmatter for exactly [`ENTRY_PREFIX_KEY`]'s reason** — the catalog
+/// is machine-local and git-ignored, so an augmentation-column declaration is absent
+/// in a fresh clone (HY-10), and the block would silently stop being locatable on
+/// every machine but the authoring one. The cost signal was concrete: putting it on
+/// [`AugmentationRow`] meant editing 58 construction sites across 21 files to add one
+/// optional declaration, which is the struct saying the fact does not belong to it.
+///
+/// **Declared, never derived, and that is the whole point.** Locating the block by
+/// matching `render_template`'s static header instead would be auto-*guessing* a
+/// write target, which `docs/adrs/2026-07-10-repair-and-continue-input-handling.md`
+/// § *The boundary* forbids: an absent `index_after_line` is absent input, not
+/// malformed input, and that ADR reserves the teaching error for absent. The
+/// derivation is also only safe because the header happens to be unique in today's
+/// bodies — a property of the corpus rather than of the scheme, and the very
+/// collision
+/// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+/// reports.
+///
+/// A **scalar** key rather than a nested map, for [`ENTRY_HIGH_WATER_PREFIX`]'s
+/// reason: the surgical frontmatter writers operate on single `key: value` lines,
+/// and re-emitting the whole block to hold a map reformats hand-authored files
+/// (BL-34).
+pub const SNAPSHOT_ANCHOR_KEY: &str = "snapshot_anchor";
+
+/// The snapshot block's header line as the artifact itself declares it, or `None`
+/// when it declares none.
+///
+/// `None` is the CORRECT state for most trackers, not a gap to fill. Measured
+/// 2026-09-13: of the 15 codescout artifacts carrying both a `render_template` and
+/// an `entry_collection`, only **3** render a table into the body at all
+/// (`open-issue-work-queue`, `legibility-backlog`,
+/// `2026-08-16-iron-law-gate-firing-audit`). The other 12 project their template
+/// into `librarian(action="context")` and hold no block to anchor — writing one into
+/// them would inject a table their author never had.
+///
+/// Mirrors [`declared_prefixes_from_frontmatter`] deliberately, down to reading
+/// `extra` rather than a typed field, so a caller declares this with the same
+/// `doc(action="update", patch={extra: …})` surface that already exists.
+pub(crate) fn declared_snapshot_anchor(
+    fm: Option<&crate::librarian::frontmatter::Frontmatter>,
+) -> Option<String> {
+    match fm.and_then(|f| f.extra.get(SNAPSHOT_ANCHOR_KEY)) {
+        Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        _ => None,
+    }
+}
+
+/// The last line of the contiguous `|`-anchored block headed by `anchor` — the line
+/// a new row must be inserted AFTER to land at the block's tail.
+///
+/// **Refuses rather than guesses, in both directions.** `None` when the anchor
+/// matches no line (the declaration has drifted from the body) and `None` when it
+/// matches more than one (the declaration does not identify a block). Silently
+/// picking the first match is the defect this whole mechanism exists to avoid: it is
+/// what `body_snapshot_row_indices` does today, and why a row in an unrelated table
+/// counts as a snapshot row.
+///
+/// Walking **down** from a known header is the mirror of `doctor`'s
+/// `table_is_about_status`, which walks **up** from a known data row to find its
+/// header. Same contiguity rule, opposite direction; neither returns a range, which
+/// is why this returns the tail line rather than `(start, end)` — `insert_index_row`
+/// addresses by line text, so a range would have to be converted back anyway.
+///
+/// Returns the line VERBATIM (minus its newline, as `str::lines` yields it) because
+/// `insert_index_row` compares trimmed — a caller that reconstructed the text would
+/// risk a whitespace mismatch against the very line it just read.
+pub(crate) fn snapshot_block_last_line(doc: &str, anchor: &str) -> Option<String> {
+    let needle = anchor.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = doc.lines().collect();
+    let mut header: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == needle {
+            if header.is_some() {
+                // Ambiguous: two lines answer to this anchor, so it names no single
+                // block. Refusing is the contract — see the doc comment.
+                return None;
+            }
+            header = Some(i);
+        }
+    }
+    let start = header?;
+    // Contiguous `|` run below the header: separator row, then data rows. Stops at
+    // the first non-table line, so a second table further down the file is out of
+    // reach by construction rather than by luck.
+    let mut last = start;
+    for (i, line) in lines.iter().enumerate().skip(start + 1) {
+        if line.trim_start().starts_with('|') {
+            last = i;
+        } else {
+            break;
+        }
+    }
+    Some(lines[last].to_string())
 }
 
 /// Allocate the next `<id_prefix>-N` for a **ledger**: an artifact that declares
@@ -1238,6 +1368,67 @@ fn insert_index_row(doc: &str, after_line: &str, row: &str) -> std::result::Resu
     }
 }
 
+/// Turn a [`RowAnchor`] into the literal line [`insert_index_row`] will match against.
+///
+/// `Explicit` passes through. `Declared` reads the artifact's [`SNAPSHOT_ANCHOR_KEY`]
+/// from `doc`'s own frontmatter and walks that block to its tail, so the row lands
+/// after the last existing row rather than under the header — which is what a
+/// newest-last ledger wants, and what a caller naming the separator by hand cannot
+/// express without knowing the current final row.
+///
+/// **Three distinct refusals, each naming which half is missing**, because they need
+/// different repairs and a single "could not place the row" would send the reader to
+/// the wrong one: the artifact declares no anchor (author must declare it), the
+/// declaration matches nothing (it has drifted from the body), or it matches several
+/// (it names no single block). All three abort before any write.
+fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> Result<String> {
+    let declared = match anchor {
+        RowAnchor::Explicit(line) => return Ok(line.clone()),
+        RowAnchor::Declared => {
+            let (fm, _) = crate::librarian::frontmatter::parse(doc).unwrap_or((None, doc));
+            declared_snapshot_anchor(fm.as_ref()).ok_or_else(|| {
+                LibrarianRecoverableError::with_hint(
+                    format!(
+                        "{caller}: cannot place the index row for {id}: this artifact declares no \
+                         `{SNAPSHOT_ANCHOR_KEY}` — no id was allocated and nothing was written"
+                    ),
+                    format!(
+                        "Either pass `index_after_line` explicitly, or declare the block once: \
+                         doc(action=\"update\", id=…, patch={{\"extra\": {{\"{SNAPSHOT_ANCHOR_KEY}\": \
+                         \"<the table's header line, verbatim>\"}}}}). Most trackers should declare \
+                         NONE — a body that renders no snapshot table has no block to anchor."
+                    ),
+                )
+            })?
+        }
+    };
+    snapshot_block_last_line(doc, &declared).ok_or_else(|| {
+        // Which of the two failures it was is worth the extra scan: "matches nothing" and
+        // "matches several" look identical from a bare None and have opposite repairs.
+        let hits = doc.lines().filter(|l| l.trim() == declared.trim()).count();
+        let (why, fix) = if hits == 0 {
+            (
+                "matches no line in the body",
+                "The declaration has drifted from the body — update `snapshot_anchor` to the \
+                 table's current header line, or restore the header.",
+            )
+        } else {
+            (
+                "matches more than one line in the body",
+                "The declaration names no single block. Make the snapshot table's header \
+                 distinguishable from the other tables that share it, then re-declare.",
+            )
+        };
+        LibrarianRecoverableError::with_hint(
+            format!(
+                "{caller}: cannot place the index row for {id}: `{SNAPSHOT_ANCHOR_KEY}` \
+                 (`{declared}`) {why} — no id was allocated and nothing was written"
+            ),
+            fix.to_string(),
+        )
+    })
+}
+
 /// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
 /// whole document so the caller writes it in ONE `fs::write`.
 ///
@@ -1331,7 +1522,12 @@ fn splice_pending_section(
         None => Ok(with_section),
         Some(r) => {
             let row = r.row.replace("{id}", id);
-            insert_index_row(&with_section, &r.after_line, &row).map_err(|e| {
+            // Resolve the anchor against `with_section` — the bytes about to be written,
+            // frontmatter included — so a `Declared` anchor is read from the same document
+            // version the row lands in. `?` propagates BEFORE any write, so the caller's
+            // "nothing was written" promise still holds.
+            let after = resolve_row_anchor(&with_section, &r.after_line, id, caller)?;
+            insert_index_row(&with_section, &after, &row).map_err(|e| {
                 LibrarianRecoverableError::with_hint(
                     format!(
                         "{caller}: cannot place the index row for {id}: {e} — no id was \
@@ -2517,6 +2713,106 @@ mod tests {
         );
     }
 
+    /// The walk's whole job: from a declared header, reach the block's LAST row, so a
+    /// new row lands at the tail of a newest-last ledger rather than under the header.
+    ///
+    /// Fixture detail that is load-bearing: the trailing `prose` line after the table.
+    /// Without it the table runs to EOF and the loop's `break` is never exercised, so a
+    /// walk that ignored non-table lines entirely would still pass.
+    #[test]
+    fn snapshot_block_last_line_walks_to_the_blocks_tail() {
+        let doc = "---\nkind: tracker\n---\n\n| ID | X |\n|----|---|\n| A-1 | a |\n| A-2 | b |\n\nprose\n";
+        assert_eq!(
+            snapshot_block_last_line(doc, "| ID | X |").as_deref(),
+            Some("| A-2 | b |"),
+            "must reach the last row, not stop at the header or the separator"
+        );
+    }
+
+    /// The discriminating test for
+    /// `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`:
+    /// a SECOND table further down must be unreachable. Contiguity is what makes that
+    /// true by construction rather than by the first table happening to be last.
+    ///
+    /// Mutating the walk to skip non-table lines (or to scan the whole document for the
+    /// final `|` line) reds exactly here and nowhere else in this file.
+    #[test]
+    fn snapshot_block_last_line_cannot_reach_a_second_table() {
+        let doc = "| ID | X |\n|----|---|\n| A-1 | a |\n\nprose\n\n| Other | T |\n|---|---|\n| A-9 | z |\n";
+        assert_eq!(
+            snapshot_block_last_line(doc, "| ID | X |").as_deref(),
+            Some("| A-1 | a |"),
+            "the walk must stop at the blank line, never crossing into the second table"
+        );
+    }
+
+    /// Two lines answering to one anchor name no single block, so the anchor is not an
+    /// explicit target and the call must refuse rather than take the first.
+    ///
+    /// Mutating the uniqueness check to `break` on first match (returning `Some`) reds
+    /// here and NOT in `..._walks_to_the_blocks_tail` — one kill per guarded site, which
+    /// is why this is a separate test rather than another assertion there.
+    #[test]
+    fn snapshot_block_last_line_refuses_a_duplicate_anchor() {
+        let doc =
+            "| ID | X |\n|----|---|\n| A-1 | a |\n\nprose\n\n| ID | X |\n|----|---|\n| A-9 | z |\n";
+        assert_eq!(
+            snapshot_block_last_line(doc, "| ID | X |"),
+            None,
+            "an anchor matching twice identifies no block; refusing is the contract"
+        );
+    }
+
+    /// A declaration that has drifted from the body refuses too — the other direction of
+    /// the same law, and the one a reader hits after renaming a column.
+    #[test]
+    fn snapshot_block_last_line_refuses_an_absent_anchor() {
+        let doc = "| ID | X |\n|----|---|\n| A-1 | a |\n";
+        assert_eq!(snapshot_block_last_line(doc, "| Gone | Y |"), None);
+        assert_eq!(
+            snapshot_block_last_line(doc, "   "),
+            None,
+            "a blank declaration is absent, not a match against a blank line"
+        );
+    }
+
+    /// A header with no rows under it yields the header itself, so the first row of an
+    /// empty table lands directly beneath it. Degenerate but reachable: it is the state
+    /// of every snapshot block on the day it is created.
+    #[test]
+    fn snapshot_block_last_line_on_an_empty_table_returns_the_header() {
+        let doc = "| ID | X |\n\nprose\n";
+        assert_eq!(
+            snapshot_block_last_line(doc, "| ID | X |").as_deref(),
+            Some("| ID | X |")
+        );
+    }
+
+    /// `declared_snapshot_anchor` reads `extra`, so it must accept what a caller writes
+    /// through `doc(update, patch={extra: …})` and reject what would silently become a
+    /// match against a blank line.
+    #[test]
+    fn declared_snapshot_anchor_reads_the_frontmatter_key_and_rejects_blanks() {
+        let parse = |doc: &str| {
+            let (fm, _) = crate::librarian::frontmatter::parse(doc).unwrap();
+            declared_snapshot_anchor(fm.as_ref())
+        };
+        assert_eq!(
+            parse("---\nkind: tracker\nsnapshot_anchor: '| ID | X |'\n---\n\nbody\n").as_deref(),
+            Some("| ID | X |")
+        );
+        assert_eq!(
+            parse("---\nkind: tracker\nsnapshot_anchor: '   '\n---\n\nbody\n"),
+            None,
+            "whitespace-only is a non-declaration, not an anchor"
+        );
+        assert_eq!(
+            parse("---\nkind: tracker\n---\n\nbody\n"),
+            None,
+            "no key at all is the CORRECT state for most trackers"
+        );
+    }
+
     #[test]
     fn an_index_row_without_a_heading_is_claimed_but_not_defined() {
         // The bug, on the exact fixture the test above pins. Four ids are CLAIMED,
@@ -3358,7 +3654,7 @@ mod tests {
             anchor_heading: "## Template for new entries".to_string(),
             index_row: Some(PendingIndexRow {
                 row: "| {id} | second |".to_string(),
-                after_line: "|----|-------|".to_string(),
+                after_line: RowAnchor::Explicit("|----|-------|".to_string()),
             }),
         };
         let out = allocate_entry_id(&mut cat, "art1", "F", Some(&section)).unwrap();
@@ -3416,7 +3712,7 @@ mod tests {
             anchor_heading: "## Template for new entries".to_string(),
             index_row: Some(PendingIndexRow {
                 row: "| {id} | never |".to_string(),
-                after_line: "| NO SUCH SEPARATOR |".to_string(),
+                after_line: RowAnchor::Explicit("| NO SUCH SEPARATOR |".to_string()),
             }),
         };
         let err = allocate_entry_id(&mut cat, "art1", "F", Some(&bad)).unwrap_err();
