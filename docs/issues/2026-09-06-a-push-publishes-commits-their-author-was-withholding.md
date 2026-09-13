@@ -492,6 +492,55 @@ unchanged.)
 
 Recorded at the request of `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who also supplied the
 asymmetry above.
+
+### Instance 2026-09-13 (second, same day) — nobody asked, and eight withheld commits went out
+
+The instance above records four sessions being asked before a push. This one, eleven hours later
+on the same checkout, records zero. Same file, same day, opposite discipline — which is the
+finding: asking is a behaviour some sessions perform and no session is bound by.
+
+**Measured.** `git reflog show origin/experiments` puts the push at **13:10:01**, landing tip
+`17d4b09d`, which sessionId `eba3d2c6-…` had committed at **13:09:51** — ten seconds earlier.
+Eight of session `05841db2`'s ten commits went with it (`23adef79`, `02e61230`, `96574bfa`,
+`9b096bda`, `85fdf59b`, `567a1604`, `e943b868`, `4e6baef5`), each confirmed individually with
+`git merge-base --is-ancestor <sha> origin/experiments` rather than by a range, since a range is
+a proxy for authorship the moment anyone else commits.
+
+That session's standing state was **withheld pending its operator's say-so**, stated in its own
+report at the end of four consecutive turns (*"Still not pushing."*). It was not asked.
+
+**The two survivors were spared by 91 seconds, not by a decision.** `5a0ee273` was committed at
+13:11:32 and `c10e54b6` after it; had the gate run a minute and a half faster they would have been
+in the prefix too. This file already records a **ninety-second** window on the other side of the
+same boundary — between an operator's authorisation and the push that honours it. These are
+different windows and the near-identical numbers are coincidence; what they share is that the
+contents of a push are decided by *timing*, and nothing in the mechanism is sensitive to intent on
+either side of it.
+
+**The PUSHER is not recoverable, and until now this file has only ever recorded the AUTHOR's
+side.** Git stores no pusher. The tip's `Session-Id` names who authored the last commit, which ten
+seconds before the push is a strong inference and is not proof — anyone with the checkout could
+have run it. So every instance here can name who was withholding and none can name who published,
+which is `issue-clusters:IC-10` holding about the very ledger that records this class. **A remedy
+that makes authors declare intent therefore cannot be verified by this file**: the party it would
+bind is the one party it cannot identify after the fact.
+
+**The guard was installed and live.** `.git/hooks/pre-push` is present and executable, references
+the foreign-session guard and `CODESCOUT_PUSH_ACK` five times, and `core.hooksPath` is unset, so
+it is the copy git runs. What is **not** recoverable is whether it fired, what it said, or whether
+an ack was supplied — an ack leaves no durable artifact, so *"a human read the refusal and decided"*
+and *"the guard was bypassed"* are indistinguishable afterwards. That is a second unrecorded
+decision sitting directly on top of the first this file is about, and
+`docs/issues/2026-09-10-the-ack-note-reports-no-foreign-population-exactly-when-the-ack-covered-all-of-it.md`
+reports the ack note itself misreporting its own population.
+
+**No harm done and that is not the point.** `experiments` is shared, never deleted, and nothing
+was damaged or lost; every one of the eight commits was gate-green and archived. The cost is
+entirely to the *decision*: an operator who had not authorised a push now has one, and the author
+who had been withholding learned of it by re-deriving the count during an unrelated
+reconnaissance — not from any notification, which is the same blind spot
+`docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
+names for a different write.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
