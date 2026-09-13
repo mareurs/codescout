@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
+claimed_at: 2026-09-13
+claimed_by: eba3d2c6-c1fe-4506-8e2b-a36417e4d9e4
 closed: null
 opened: 2026-09-13
 owner: marius
@@ -126,7 +128,36 @@ not assert one.
 
 ## Fix
 
-Not implemented. Three parts, in order of value:
+**Fixed 2026-09-13 — item 2 only, deliberately: the well-scoped slice, not the full redesign.**
+
+Shipped `568cd7d2` on `experiments`, patch-id `d4acc1441f9e1401da0aa0dd3bd3f40c64e543ed`.
+
+The hidden-write count (`len(records) - len(in_window) - len(undated)`) is now computed once
+and printed on every verdict, not only inside the `not who_set` (`UNKNOWN`) branch. `MINE` and
+`SHARED` — the verdicts a reader actually acts on to license a commit — now show "(N write(s)
+also exist but predate the window; re-run with --all to see them)" exactly when a write was
+excluded by the window, same wording as `UNKNOWN` already used.
+
+**Items 1 (stop deriving the window from commit time) and 3 (downgrade MINE to SHARED when a
+peer has a discarded write) are NOT done.** Those are design decisions about the tool's core
+semantics, not mechanical — left for a follow-up bug if the visibility fix here turns out not
+to be enough in practice.
+
+Regression test added to `tests/file-provenance.sh`, reusing the existing `src/committed.rs`
+fixture (peer write before the derived commit-time floor, this session's write after it) —
+confirmed RED against the pre-fix script (`FAIL ... expected to find: predate the window`),
+then green after the fix. Full suite: **120 passed, 0 failed**.
+
+Gate: `fmt-mine.sh` clean; `clippy --workspace --all-targets --features local-embed -D
+warnings` clean; lean lane (`cargo test --workspace --no-default-features`) **3522 passed, 0
+failed**; default lane (`cargo test --workspace`) **5469 passed, 2 failed** — both failures in
+`librarian::tools::audit_doc_refs::parser::tests` (fence-line attribution), a file this fix
+never touches. Checked, not assumed: `git status` showed `src/librarian/tools/audit_doc_refs/parser.rs`
+already dirty, and `./scripts/file-provenance.py --all` on it — the very tool this bug is
+about — returned `PEER`, naming a different, live, `busy` session as the writer. Using this
+fix to clear itself for commit is the reproduction this bug file argues for, run for real.
+
+Not implemented (items 1 and 3, listed for the record): Three parts, in order of value:
 
 1. **Stop deriving the window from a commit.** Either default to unbounded, or keep the
    cutoff only when the commit demonstrably contains the write (which requires content,
@@ -138,9 +169,8 @@ Not implemented. Three parts, in order of value:
 
 ## Tests added
 
-None. The discriminating test seeds a write by another session before the path's last
-commit, with that commit not containing the write, and asserts the default invocation does
-not return `MINE`. It reds today.
+`tests/file-provenance.sh`: "MINE also surfaces a write the window hid", against the
+existing `src/committed.rs` fixture. Confirmed RED before the fix, green after.
 
 ## Workarounds
 
@@ -156,6 +186,10 @@ revealed a live peer mid-refactor across 34 files. **The hook was right and the 
 routes to contradicted it, on the same file in the same minute** — which is the pairing
 worth keeping, because a reader who trusts the named tool over the vaguer hook gets the
 wrong answer by following instructions.
+
+**Closed 2026-09-13 for the visibility half (item 2).** Items 1 and 3 remain open questions
+about the tool's window semantics — pick up here if a hidden write on a MINE/SHARED verdict
+is still judged too easy to miss even with the caveat now printed.
 
 ## References
 
