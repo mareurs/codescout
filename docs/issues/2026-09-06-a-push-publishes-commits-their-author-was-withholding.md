@@ -518,12 +518,28 @@ contents of a push are decided by *timing*, and nothing in the mechanism is sens
 either side of it.
 
 **The PUSHER is not recoverable, and until now this file has only ever recorded the AUTHOR's
-side.** Git stores no pusher. The tip's `Session-Id` names who authored the last commit, which ten
-seconds before the push is a strong inference and is not proof — anyone with the checkout could
-have run it. So every instance here can name who was withholding and none can name who published,
-which is `issue-clusters:IC-10` holding about the very ledger that records this class. **A remedy
-that makes authors declare intent therefore cannot be verified by this file**: the party it would
-bind is the one party it cannot identify after the fact.
+side.** Git stores no pusher. So every instance here can name who was withholding and none can
+name who published, which is `issue-clusters:IC-10` holding about the very ledger that records
+this class. **A remedy that makes authors declare intent therefore cannot be verified by this
+file**: the party it would bind is the one party it cannot identify after the fact.
+
+**Corrected within the hour, and the correction is the sharper claim.** This entry first read that
+the tip's `Session-Id`, ten seconds before the push, was *"a strong inference and not proof"*. It
+is not evidence **at all**, and the reason is specific to this hazard: on a shared checkout every
+session shares **one HEAD**, so the commit at the tip when a push runs is simply whoever committed
+last — by anyone — and carries no information about who ran the push. Five sessions could each have
+run it with that same tip. Calling it a strong inference also quietly contradicted the sentence
+above it: *"not recoverable"* and *"strongly inferable"* cannot both hold.
+
+Raised by sessionId `eba3d2c6-…`, who was the party the inference pointed at, and confirmed on two
+independent legs rather than accepted on their word: they report no `git push` in their session
+(a self-report, and the weaker leg), and this checkout has **no `post-commit` hook at all** —
+`.git/hooks/` holds only `post-index-change`, `pre-commit`, `prepare-commit-msg`, `pre-push`, and
+no hook anywhere in it contains `git push`. So no auto-push path exists that could have fired on
+their commit. **The reporting session had also asserted the inference as flat fact in a message to
+them** (*"your push at 13:10:01"*) while writing the hedged form into this file minutes earlier —
+the artifact was careful and the conversation was not, which is worth recording because the
+hedge existing did not stop the assertion being made.
 
 **The guard was installed and live.** `.git/hooks/pre-push` is present and executable, references
 the foreign-session guard and `CODESCOUT_PUSH_ACK` five times, and `core.hooksPath` is unset, so
