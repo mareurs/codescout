@@ -1355,6 +1355,67 @@ they quote, so the path could not simply be swapped to the new one without inval
 fixed by appending a forward-note there instead of editing the historical values. Ordinary archival
 churn, but a reminder that a capture-and-archive sequence can compound: one event breaks provenance
 in two unrelated places on the same afternoon.
+## Instance 13 — 2026-09-13, Instance 11's detector fired, was printed, and was misread AGAIN
+
+`cd138c30` (sessionId `f0b1a4c7-e991-4478-bf22-b088483b6821`) carried two paragraphs written by
+sessionId `f3c594ce-c424-40d3-a603-9693cfef3f63` into `docs/trackers/issue-clusters.md`
+§ *The entry shape*. Additive, nothing lost, content correct where it sits; the commit's subject
+is the roster's mechanism column and does not mention them. Confirmed at the bytes by the
+capturing session, who read back three hunks — one mine at `@@ -88,12 +88,31 @@`, two theirs —
+and diagnosed themselves unprompted.
+
+**Almost nothing here is new, and that is the entry.** Same-file, INTRA-path, the shape
+`scripts/pre-commit-foreign-index.sh`'s own header names and says no ownership check can see.
+Both staging guards passed correctly. The remedy is the one that header already designs and
+already marks *"Not built here"* — record each path's blob at `git add`, re-hash at pre-commit,
+refuse if it moved.
+
+**What makes it worth a row is that Instance 11's detector worked and was ignored a second
+time.** That section reads *"`--numstat` answers did something get staged; only the diff answers
+what. I used a count as a check."* Four days later, a different session in this checkout read
+`git diff --cached --stat` reporting **95** changed lines on a file where their own edits were
+about **50**, and committed off it. Their own words: *"a stat answers 'did I stage what I meant
+to' and cannot answer 'is this only mine' — a selector narrower than the question."* That is
+Instance 11's sentence, re-derived from scratch by someone who had not read it, because it lives
+in a 1300-line bug file and the moment of need is a one-line command.
+
+So this is `CLAUDE.md` § *Observer Blindness*'s central measured claim landing on its own ledger:
+knowing the class prevents nothing, and the class was not merely known — it was **written down,
+in this file, about this detector**. The signal is free, correct, printed unprompted, and has now
+been misread by two independent sessions. A detector whose output is a number the reader must
+think to interrogate is a policy, not a mechanism.
+
+### The edit-path advisory is keyed to edit ORDER, not to who is about to commit
+
+The one genuinely new observation, and it corrects a claim its author published before checking
+the guards.
+
+`f3c594ce` did **not** capture this peer's 93 uncommitted lines in
+`scripts/pre-commit-ledger-counts.py`, and initially reported that as *"the guard that protects a
+committer from taking someone else's work"* doing its job. **There is no such guard.**
+`pre-commit-unreviewed-content.sh`'s header says so in as many words — it compares the committing
+blob against the *staged* blob, so content that was staged *is presumed reviewed*, and it lists
+this exact case under **WHAT IT DOES NOT CATCH**. The claim was published to a peer and in
+`77aee8b1`'s commit message before either hook was read. Recorded rather than quietly dropped,
+because *"a guard exists for this direction"* is precisely the belief
+`guard-narrower-than-its-name` is made of, and that header warns against it by name.
+
+What actually stopped that capture was the companion plugin's **PreToolUse** `[cs-hint]`:
+*"already has uncommitted changes that this session did not write."* It fires on the **edit**
+path. And that is the finding:
+
+| | edited the shared file | got the advisory | captured |
+|---|---|---|---|
+| `f0b1a4c7` | **first** | no — the file was clean when they wrote | yes |
+| `f3c594ce` | **second** | yes | no |
+
+The warning goes to whoever edits *later*, which is uncorrelated with who is about to commit.
+Both sessions were watching for this mechanism, in the same minutes, with the same tooling; one
+was told and one could not be. Not carelessness on either side and not an asymmetry of
+attention — the instrument is simply keyed to the wrong event. A commit-time re-hash (the unbuilt
+remedy above) is keyed to the right one, which is the argument for building it rather than for
+reading harder.
+
 ## Resume
 
 Decide remedy (1) vs (2) and record it in `docs/RELEASE.md` § git workflow, which today
