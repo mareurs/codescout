@@ -8,7 +8,7 @@ tags:
 - engine-5
 - ledger
 entry_prefix: OP
-entry_high_water_OP: 5
+entry_high_water_OP: 6
 ---
 
 # Operator Rules (OP-N)
@@ -26,6 +26,7 @@ Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 | OP-3 | triggered | durable-fact-written-to-per-profile-store | unmeasured | active |
 | OP-4 | triggered | partial-profile-config-update | unmeasured | active |
 | OP-5 | always | unverified-assertion | measured: a3 13.3% alone; stacked it cuts OP-1 7/10 → 2/10 | **retired** |
+| OP-6 | always | architecture-answered-without-the-specialist | unmeasured | active |
 
 One `always` rule against a 3–5 start band and a 5–10 ceiling, so there is real headroom —
 but headroom is not licence: Gate 3(a) binds independently of size, and all four `**Covers:**`
@@ -212,6 +213,62 @@ Also preserved, body-identical, as `prompt-engineering:scenarios/conclude-last/a
 Flip `**Status:**` to `active` and run `codescout operator-rules compile`. That alone re-arms it — but Gate 3(a) should refuse it while `OP-1` is active, since both carry `**Covers:** unverified-assertion`. Retiring `OP-1` first, or reviving `a3v2` under a distinct `**Covers:**`, are the two coherent paths.
 
 **Do not restore it on the strength of intuition alone.** The measurement that retired it is n=10 on the cleanest cut, with a ±30pt per-cell noise band — a large effect at small n. `A-33` sets up the confirming run.
+
+## OP-6 — Invoke the Architecture Snow Lion before answering architecture work
+
+**Imperative:** For architecture design, architecture questions, or architecture brainstorming, invoke the `buddy:architecture-snow-lion` skill BEFORE answering — unless its body is already in this context. Do not improvise the architectural answer.
+**Binding:** always
+**Shape:** imperative
+**Covers:** architecture-answered-without-the-specialist
+**Evidence:** unmeasured
+**Rests on:** operator instruction, 2026-09-13
+**Status:** active
+
+**Valid:** invariant
+
+Operator instruction, 2026-09-13. The skill is `buddy:architecture-snow-lion` (plugin `buddy`
+v0.11.3, installed as `buddy@sdd-misc-plugins` in all three profiles — verified, not assumed).
+Its own description is *"System boundaries, module design, interface decisions"*, and it carries
+operating principles a general answer reliably skips: a boundary needs a **named change
+scenario** or it is decoration; coupling claims cite the **import, not the diagram**; no
+abstraction before **two** concretes.
+
+**Why `always` and not `triggered`, which is the cheaper and more common outcome.** There is no
+selector that can fire on this rule's moment of need. `**Serves:**` routing matches a
+`selector_key` supplied by a tool call, and *"the user asked an architecture question"* is not a
+tool call — it is a judgement about the conversation, made before any tool runs. This is `OP-2`'s
+blocker one step worse: `OP-2` at least names `Agent`/`Task`, which the Index records as *"harness
+tools that are not `crate::tools::Tool` implementors in this process at all"*, so it routes
+nothing; this rule has no candidate tool to name. The resident copy is not a reinforcement of a
+routed one here, it is the only copy there can be — the same argument the Index makes for `OP-3`,
+that the resident copy reaches the agent *before* it chooses, and the routed copy only fires once
+it is already doing the right thing.
+
+`CLAUDE.md` § *Reaching a Peer Session* states the general form: **a trigger the model must notice
+is a policy, not a mechanism** (`skill-frictions:SKF-22`, where a skill went uninvoked for a whole
+session while its trigger condition was observed and said out loud). This rule is squarely in that
+class, so residency is what it has instead of a mechanism — and that is a weaker instrument, not
+an equal one. Recorded so nobody later reads the `always` binding as a strength claim.
+
+**Gates, checked rather than asserted.** Gate 3(a) — non-overlap — passes: the only other active
+`always` rule is `OP-1`, covering `unverified-assertion`, a different failure mode with a
+different remedy. Gate 3(b) — size — is not near binding: this is the **second** active `always`
+rule against a 3–5 start band, `OP-5` having retired. Headroom is not licence, and the argument
+above is 3(a)'s, not a size argument.
+
+**The honest weakness, stated because `**Evidence:** unmeasured` is easy to skim past.** `A-20`
+measured that stacking `always` rules **dilutes** rather than adds. That measurement was taken on
+two arms aimed at the *same* behaviour (`a3` + `a4`), so it does not directly predict a cost here
+— but it does mean a second resident rule is not free, and this one ships with no arm showing a
+deficit it closes. If an arm is ever run against `OP-1` alone versus `OP-1 + OP-6`, and `OP-1`'s
+100% moves, this entry is the first candidate for eviction, not `OP-1`.
+
+**Scope, narrow on purpose.** This rule is about *architecture* work. `buddy` ships eleven other
+specialists (`debugging-yeti`, `testing-snow-leopard`, `refactoring-yak`, `planning-crane`, …). A
+rule of the form *"invoke the right specialist"* across all twelve would be one imperative
+covering twelve failure modes, which is not a rule but a preamble, and would foreclose Gate 3(a)
+for each of them individually. If another specialist earns residency it gets its own `OP-N` and
+its own non-overlap argument.
 
 ## Template for new entries
 
