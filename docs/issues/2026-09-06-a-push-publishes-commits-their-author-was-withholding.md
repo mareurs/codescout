@@ -10,7 +10,7 @@ tags:
 - git-workflow
 - authorisation
 closed: null
-last_observed: 2026-09-11
+last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
@@ -387,6 +387,54 @@ question, and one `docs/RELEASE.md` § *Concurrent-Work Rules* has already answe
 author was withholding, so nothing was published against anyone's intent. This is an
 observation about the *procedure*, recorded because the path was exercised end-to-end rather
 than reasoned about.
+
+### Instance 2026-09-13 — asked before pushing, and a genuinely withheld state came back
+
+**First time the ask-first remedy was exercised against a real withheld commit.** 80 unpushed
+commits on `experiments`, all carrying a `Session-Id` trailer, from **five** sessions — and all
+five were live at the same instant (socket enumeration, 08:43:37). Split: 25 / 21 (the pusher) /
+19 / 8 / 7. The pusher's operator had authorised the push; each of the four foreign authors was
+messaged first with the reply states enumerated (`nothing`/`go` → push, `hold` → stop and return
+to the operator), and told plainly that holding one session's commits holds all 80, since the
+history is interleaved and no surgical exclusion exists.
+
+**Three of the four had nothing held. The fourth did.** `b0b9bc40-5358-4a44-b342-a2a71dc50fad`
+replied **hold** and went to their operator, reporting that the same operator had been shown the
+push split three times that day — at 36, 45 and 72 commits — and had deferred every time, most
+recently with an explicit *"push later"* while authorising the work itself. Their words: *"yes,
+this is closer to withheld than to merely-unpushed"*. They returned a real release within minutes
+and named all 7 SHAs.
+
+**The asymmetry is the finding, and it is theirs.** Had the push gone out silently the outcome
+would have been **identical** — that operator released anyway. So the value was not in the answer;
+it was in the answer being *asked for*. That is precisely the step a future session will skip,
+because the answer is usually yes, and skipping it is invisible on every occasion where it would
+have mattered exactly as much. This bug describes a state that is byte-identical to ordinary
+unpushed work; asking is the only instrument that reaches it, and it cost one round trip against
+80 commits.
+
+**A second correct behaviour, which must not be misread as an objection.**
+`8bd791df-5ff4-40fe-af30-69cc3fefc2f7` declined to say *"go"* at all — not because anything was
+held, but because clearing commits for publication was not theirs to do: *"I'd be laundering the
+decision in the other direction if I answered 'go' as though I could clear it."* A notice protocol
+has to distinguish **no objection**, **explicit release**, and **declines to speak to it**, and
+collapsing the third into either of the others is how a future run gets this wrong.
+
+**The guard agrees, in its own words.** The push went out with
+`CODESCOUT_PUSH_ACK` naming the four foreign sids explicitly rather than `all`, and the guard's
+reply is the cleanest statement of the split this file argues for:
+
+> *"your ack authorised 59 commit(s) by another session, and that is why this push is allowed —
+> every foreign author in the range was named. The ack records YOUR operator decision about them;
+> it does not speak for theirs, and it leaves each of them exactly as UNCLEARED as they were."*
+
+So the ack is doing what it should: recording one operator's decision without manufacturing four
+others. The gap this bug names is untouched by it — nothing in the repository still records that
+`b0b9bc40`'s 7 were withheld for most of a day, and nothing would have recorded it had they
+stayed withheld. Pushed as `dffb89c2..34a0beb1`.
+
+Recorded at the request of `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who also supplied the
+asymmetry above.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
