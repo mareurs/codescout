@@ -1,0 +1,296 @@
+{
+  "measured_date": "2026-09-13",
+  "scope": "scripted contract checks, one attached MCP instance; not a model behavioral eval",
+  "runtime_observed": {
+    "git_sha": "408709ea",
+    "git_dirty": true,
+    "pid": 2178312,
+    "exe_deleted": true
+  },
+  "fixture": "/tmp/codescout-harness-workflow-iBpI2X",
+  "latency_unit": "wall-clock milliseconds around awaited tool call including transport/tool overhead; sequential calls, no model thinking time",
+  "output_unit": "UTF-8 bytes of returned text content blocks; no token estimates",
+  "rows": [
+    {
+      "tool": "symbols",
+      "args": {
+        "path": "src/lib.rs",
+        "name": "answer",
+        "exact": true,
+        "include_body": true,
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 351,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "src/lib.rs (1)\n  Function  1-3  answer\n      pub fn answer() -> u32 {\n          41\n      }"
+          }
+        ],
+        "isError": false
+      },
+      "index": 1,
+      "text_content_utf8_bytes": 90
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "cargo test --offline",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X",
+        "timeout_secs": 30
+      },
+      "elapsed_ms": 503,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 101,\n  \"stdout\": \"\\nrunning 1 test\\ntest tests::answer_is_42 ... FAILED\\n\\nfailures:\\n\\n---- tests::answer_is_42 stdout ----\\n\\nthread 'tests::answer_is_42' (2923125) panicked at src/lib.rs:9:9:\\nassertion `left == right` failed\\n  left: 41\\n right: 42\\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\\n\\n\\nfailures:\\n    tests::answer_is_42\\n\\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\\n\\n\",\n  \"stderr\": \"   Compiling harness-contract-fixture v0.1.0 (/tmp/codescout-harness-workflow-iBpI2X)\\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s\\n     Running unittests src/lib.rs (target/debug/deps/harness_contract_fixture-93d5a3a8749d47f8)\\nerror: test failed, to rerun pass `--lib`\\n\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 2,
+      "text_content_utf8_bytes": 813
+    },
+    {
+      "tool": "edit_code",
+      "args": {
+        "action": "replace",
+        "path": "src/lib.rs",
+        "symbol": "missing_answer",
+        "body": "pub fn answer() -> u32 { 42 }",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 134088,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"ok\": false,\n  \"error\": \"symbol not found: missing_answer\",\n  \"hint\": \"Use symbols(path) to list symbols. Trait impl methods use format 'impl Trait for Struct/method'.\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 3,
+      "text_content_utf8_bytes": 174
+    },
+    {
+      "tool": "edit_code",
+      "args": {
+        "action": "replace",
+        "path": "src/lib.rs",
+        "symbol": "answer",
+        "body": "pub fn answer() -> u32 {\n    42\n}",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 156,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"1-3\",\n  \"hint\": \"verify callers: references(symbol=\\\"answer\\\", path=\\\"src/lib.rs\\\")\",\n  \"rel_path\": \"src/lib.rs\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 4,
+      "text_content_utf8_bytes": 155
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "cargo test --offline",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X",
+        "timeout_secs": 30
+      },
+      "elapsed_ms": 281,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"\\nrunning 1 test\\ntest tests::answer_is_42 ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\\n\\n\\nrunning 0 tests\\n\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\\n\\n\",\n  \"stderr\": \"   Compiling harness-contract-fixture v0.1.0 (/tmp/codescout-harness-workflow-iBpI2X)\\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s\\n     Running unittests src/lib.rs (target/debug/deps/harness_contract_fixture-93d5a3a8749d47f8)\\n   Doc-tests harness_contract_fixture\\n\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 5,
+      "text_content_utf8_bytes": 617
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "sh -c 'exit 7'",
+        "run_in_background": true,
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 5183,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"output_id\": \"@bg_0000002a\",\n  \"hint\": \"Process running. Output captured in @bg_0000002a — use run_command(\\\"tail -50 @bg_0000002a\\\") or grep/cat as needed.\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 6,
+      "text_content_utf8_bytes": 165
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "sh -c 'exit 7'; job_exit=$?; printf 'FIXTURE_EXIT=%s\\n' \"$job_exit\"",
+        "run_in_background": true,
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 5166,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"output_id\": \"@bg_0000002b\",\n  \"hint\": \"Process running. Output captured in @bg_0000002b — use run_command(\\\"tail -50 @bg_0000002b\\\") or grep/cat as needed.\",\n  \"stdout\": \"FIXTURE_EXIT=7\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 7,
+      "text_content_utf8_bytes": 195
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "seq 1 300",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 167,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14\\n15\\n16\\n17\\n18\\n19\\n20\\n21\\n22\\n23\\n24\\n25\\n26\\n27\\n28\\n29\\n30\\n31\\n32\\n33\\n34\\n35\\n36\\n37\\n38\\n39\\n40\\n41\\n42\\n43\\n44\\n45\\n46\\n47\\n48\\n49\\n50\\n51\\n52\\n53\\n54\\n55\\n56\\n57\\n58\\n59\\n60\\n61\\n62\\n63\\n64\\n65\\n66\\n67\\n68\\n69\\n70\\n71\\n72\\n73\\n74\\n75\\n76\\n77\\n78\\n79\\n80\\n81\\n82\\n83\\n84\\n85\\n86\\n87\\n88\\n89\\n90\\n91\\n92\\n93\\n94\\n95\\n96\\n97\\n98\\n99\\n100\\n101\\n102\\n103\\n104\\n105\\n106\\n107\\n108\\n109\\n110\\n111\\n112\\n113\\n114\\n115\\n116\\n117\\n118\\n119\\n120\\n121\\n122\\n123\\n124\\n125\\n126\\n127\\n128\\n129\\n130\\n131\\n132\\n133\\n134\\n135\\n136\\n137\\n138\\n139\\n140\\n141\\n142\\n143\\n144\\n145\\n146\\n147\\n148\\n149\\n150\\n151\\n152\\n153\\n154\\n155\\n156\\n157\\n158\\n159\\n160\\n161\\n162\\n163\\n164\\n165\\n166\\n167\\n168\\n169\\n170\\n171\\n172\\n173\\n174\\n175\\n176\\n177\\n178\\n179\\n180\\n181\\n182\\n183\\n184\\n185\\n186\\n187\\n188\\n189\\n190\\n191\\n192\\n193\\n194\\n195\\n196\\n197\\n198\\n199\\n200\\n201\\n202\\n203\\n204\\n205\\n206\\n207\\n208\\n209\\n210\\n211\\n212\\n213\\n214\\n215\\n216\\n217\\n218\\n219\\n220\\n221\\n222\\n223\\n224\\n225\\n226\\n227\\n228\\n229\\n230\\n231\\n232\\n233\\n234\\n235\\n236\\n237\\n238\\n239\\n240\\n241\\n242\\n243\\n244\\n245\\n246\\n247\\n248\\n249\\n250\\n251\\n252\\n253\\n254\\n255\\n256\\n257\\n258\\n259\\n260\\n261\\n262\\n263\\n264\\n265\\n266\\n267\\n268\\n269\\n270\\n271\\n272\\n273\\n274\\n275\\n276\\n277\\n278\\n279\\n280\\n281\\n282\\n283\\n284\\n285\\n286\\n287\\n288\\n289\\n290\\n291\\n292\\n293\\n294\\n295\\n296\\n297\\n298\\n299\\n300\\n\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 8,
+      "text_content_utf8_bytes": 1428
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "tail -10 @bg_0000002a",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 160,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 9,
+      "text_content_utf8_bytes": 20
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "tail -10 @bg_0000002b",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 163,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"FIXTURE_EXIT=7\\n\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 10,
+      "text_content_utf8_bytes": 52
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "seq 1 3000",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 158,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"type\": \"generic\",\n  \"exit_code\": 0,\n  \"output_id\": \"@cmd_99701bec\",\n  \"stdout\": \"1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14\\n15\\n16\\n17\\n18\\n19\\n20\\n--- 2970 lines omitted ---\\n2991\\n2992\\n2993\\n2994\\n2995\\n2996\\n2997\\n2998\\n2999\\n3000\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 11,
+      "text_content_utf8_bytes": 246
+    },
+    {
+      "tool": "run_command",
+      "args": {
+        "command": "sed -n '1500,1502p' @cmd_99701bec",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 161,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"1500\\n1501\\n1502\\n\"\n}"
+          }
+        ],
+        "isError": false
+      },
+      "index": 12,
+      "text_content_utf8_bytes": 54
+    },
+    {
+      "tool": "read_file",
+      "args": {
+        "path": "Cargo.toml",
+        "toml_key": "package",
+        "workspace": "/tmp/codescout-harness-workflow-iBpI2X"
+      },
+      "elapsed_ms": 159,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "4 lines\n\n[package]\nname = \"harness-contract-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\""
+          }
+        ],
+        "isError": false
+      },
+      "index": 13,
+      "text_content_utf8_bytes": 87
+    },
+    {
+      "tool": "read_file",
+      "args": {
+        "path": "Cargo.toml",
+        "toml_key": "package",
+        "workspace": "/home/marius/work/claude/codescout"
+      },
+      "elapsed_ms": 230,
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "12 lines\n\n[package]\nname = \"codescout\"\nversion = \"0.15.0\"\nedition = \"2021\"\ndescription = \"High-performance coding agent toolkit MCP server\"\nrepository = \"https://github.com/mareurs/codescout\"\nhomepage = \"https://mareurs.github.io/codescout/\"\ndocumentation = \"https://mareurs.github.io/codescout/\"\nlicense = \"MIT\"\nrust-version = \"1.88\"\nbuild = \"build.rs\"\nexclude = [\".codescout/\", \"docs/\", \"!docs/PROGRESSIVE_DISCOVERABILITY.md\", \"!docs/trackers/operator-rules.md\", \"scripts/\", \".github/\", \"CLAUDE.md\"]\n"
+          }
+        ],
+        "isError": false
+      },
+      "index": 14,
+      "text_content_utf8_bytes": 502
+    }
+  ]
+}

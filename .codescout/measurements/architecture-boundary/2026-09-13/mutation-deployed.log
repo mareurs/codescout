@@ -1,0 +1,14 @@
+...........F
+======================================================================
+FAIL: test_deployed_lane_retains_defaults_and_both_release_features (__main__.WeightControls.test_deployed_lane_retains_defaults_and_both_release_features)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/codescout-boundary-mutations-M3Ro6F/deployed/tests/test_architecture_boundary_probe.py", line 161, in test_deployed_lane_retains_defaults_and_both_release_features
+    self.assertNotIn("--no-default-features", deployed)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '--no-default-features' unexpectedly found in ('cargo', 'tree', '--no-default-features', '--features', 'server-stack,local-embed', '-e', 'normal', '--prefix', 'none', '--format', '{p}')
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.011s
+
+FAILED (failures=1)

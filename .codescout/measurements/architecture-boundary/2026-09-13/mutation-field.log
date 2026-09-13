@@ -1,0 +1,14 @@
+....E.......
+======================================================================
+ERROR: test_test_only_field_does_not_erase_constructor_delimiters (__main__.ContextControls.test_test_only_field_does_not_erase_constructor_delimiters)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/codescout-boundary-mutations-M3Ro6F/field/tests/test_architecture_boundary_probe.py", line 97, in test_test_only_field_does_not_erase_constructor_delimiters
+    self.assertIn("live: true", bodies["new"][0])
+                                ~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.011s
+
+FAILED (errors=1)

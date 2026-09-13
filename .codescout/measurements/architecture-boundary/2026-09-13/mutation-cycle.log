@@ -1,0 +1,21 @@
+.......F....
+======================================================================
+FAIL: test_detects_long_cycle_without_reciprocal_edges (__main__.StaticControls.test_detects_long_cycle_without_reciprocal_edges)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/codescout-boundary-mutations-M3Ro6F/cycle/tests/test_architecture_boundary_probe.py", line 38, in test_detects_long_cycle_without_reciprocal_edges
+    self.assertEqual(result["population_cycles"], [["execution", "knowledge", "intelligence"]])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != [['execution', 'knowledge', 'intelligence']]
+
+Second list contains 1 additional elements.
+First extra element 0:
+['execution', 'knowledge', 'intelligence']
+
+- []
++ [['execution', 'knowledge', 'intelligence']]
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.011s
+
+FAILED (failures=1)
