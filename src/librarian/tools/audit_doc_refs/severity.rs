@@ -173,7 +173,12 @@ pub fn released_history_boundary(text: &str, md_path: &Path) -> Option<u32> {
     if !name.eq_ignore_ascii_case("CHANGELOG.md") {
         return None;
     }
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     text.lines().enumerate().find_map(|(i, line)| {
+        let trimmed = line.trim_start();
+        if fence.feed(trimmed) || fence.in_fence() {
+            return None;
+        }
         // `## [1.2.3] - 2026-01-01`, but not `## [Unreleased]`.
         let rest = line.strip_prefix("## ")?;
         let inner = rest.trim_start().strip_prefix('[')?;

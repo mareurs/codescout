@@ -2211,6 +2211,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn released_history_boundary_is_not_fooled_by_a_fenced_example() {
+        use std::path::Path;
+        // A changelog showing what its own entries look like, inside a fence, in
+        // the [Unreleased] section. The only real "## [x]" heading is
+        // [Unreleased] itself -- nothing has been released yet, so there is no
+        // boundary to find. A line scan with no fence awareness reads the fenced
+        // example as a real version heading and returns its line number instead.
+        let text = "# Changelog\n\n\
+                        ## [Unreleased]\n\n\
+                        Example of an entry:\n\n\
+                        ```\n\
+                        ## [1.2.0] - 2026-01-01\n\
+                        ### Fixed\n\
+                        - something in src/gone.rs\n\
+                        ```\n\n\
+                        - a real unreleased change citing src/also-gone.rs\n";
+        assert_eq!(
+            severity::released_history_boundary(text, Path::new("CHANGELOG.md")),
+            None
+        );
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn explicit_paths_override_default_exclude() {
