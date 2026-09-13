@@ -58,6 +58,23 @@ fn files_mentioning(root: &std::path::Path, stem: &str, exclude: &str) -> Option
     Some(files)
 }
 
+/// The dateless slug for a dated-slug stem (`YYYY-MM-DD-<slug>` -> `<slug>`), or `None` if
+/// `stem` does not have that shape. Mirrors `scripts/pre-commit-ledger-counts.py`'s `_stem()`
+/// exactly, byte for byte -- every `**Members:**` line under `docs/trackers/issue-clusters/`
+/// cites a member by THIS form, deliberately, so a cluster member's identity survives an
+/// archive move (the same reason that script strips the date). `files_mentioning` searches
+/// for the dated stem alone, which cannot match a citation holding only the dateless form:
+/// the search string is not a substring of the cited text.
+/// `docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
+fn dateless_slug(stem: &str) -> Option<&str> {
+    let bytes = stem.as_bytes();
+    if stem.len() > 11 && bytes[4] == b'-' && bytes[7] == b'-' && bytes[10] == b'-' {
+        Some(&stem[11..])
+    } else {
+        None
+    }
+}
+
 /// How many citing files to name before switching to a count alone.
 const CITATION_SAMPLE: usize = 20;
 
@@ -260,10 +277,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Scanned AFTER the move, so it reads the tree the caller is about to commit rather
     // than the one they started from, and excludes the artifact's own new path — a file
     // carrying its former slug in a superseded note cites itself, which is not work.
+    // Scans the DATED stem first, then the dateless slug too when the stem has that shape
+    // (`dateless_slug`'s doc comment says why: issue-clusters Members lines cite by the
+    // dateless form on purpose). Either scan failing to run makes the whole result `None`
+    // rather than silently reporting only the half that succeeded.
     let citing_files = old_full
         .file_stem()
         .and_then(|s| s.to_str())
-        .and_then(|stem| files_mentioning(&root_path, stem, &a.new_rel_path));
+        .and_then(|stem| {
+            let mut found = files_mentioning(&root_path, stem, &a.new_rel_path)?;
+            if let Some(slug) = dateless_slug(stem) {
+                found.extend(files_mentioning(&root_path, slug, &a.new_rel_path)?);
+                found.sort();
+                found.dedup();
+            }
+            Some(found)
+        });
 
     // THE ID HALF OF THE SAME OBLIGATION, and it was missing for as long as the path half
     // existed. `previous_id` and `id_changed` are reported three fields down and the tool
@@ -800,6 +829,102 @@ mod tests {
         assert!(
             listed.iter().any(|p| p.ends_with("ic-example.md")),
             "a bare-slug citation with no path wrapper must be found: {listed:?}"
+        );
+    }
+
+    /// SECOND reproduction, credited to a peer's correction of the first
+    /// (`44ebfc3bd48ceb53` § Summary/Root cause, updated 2026-09-13): the real
+    /// mechanism was the DATE PREFIX, not the path wrapper. `files_mentioning` searched only
+    /// for the artifact's dated file stem (`2026-09-13-example-bug`), but every
+    /// `**Members:**` line under `docs/trackers/issue-clusters/` cites members by the
+    /// DATELESS slug (`example-bug`) on purpose -- a cluster member's identity has to
+    /// survive an archive move, and `scripts/pre-commit-ledger-counts.py`'s `_stem()`
+    /// already strips the date for exactly that reason. Fixed by also searching the
+    /// dateless form (`dateless_slug`) and merging both scans.
+    ///
+    /// `the_citation_scan_sees_a_bare_slug_with_no_path_wrapper` above does not exercise this
+    /// -- it varies the path-wrapper dimension while holding the date-prefix dimension
+    /// constant (its fixture's stem, "foo", has no date to begin with), so it could not have
+    /// failed in the direction this bug reported.
+    #[tokio::test]
+    async fn the_citation_scan_finds_a_dateless_slug_citation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let row = ArtifactRow {
+            id: "aabbccdd11223345".into(),
+            abs_path: tmp.path().join("docs/issues/2026-09-13-example-bug.md"),
+            kind: "bug".into(),
+            status: "open".into(),
+            title: Some("Example Bug".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+
+        let src = tmp.path().join("docs/issues/2026-09-13-example-bug.md");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(
+            &src,
+            "---\nid: aabbccdd11223345\nkind: bug\n---\n# Example Bug\n",
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build();
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for the scan to run at all"
+        );
+
+        // The dateless form, exactly how an issue-clusters Members line cites it -- no
+        // date, no path, no backticks even, since the ledger's own text above omits them
+        // half the time too.
+        let citer = tmp
+            .path()
+            .join("docs/trackers/issue-clusters/ic-example.md");
+        std::fs::create_dir_all(citer.parent().unwrap()).unwrap();
+        std::fs::write(&citer, "**Members:** example-bug\n").unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223345",
+                "new_rel_path": "docs/issues/archive/2026-09-13-example-bug.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed: Vec<String> = result["inbound_path_citations"]
+            .as_array()
+            .expect("the scan ran, so the list must be present rather than null")
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+            .collect();
+
+        assert!(
+            listed.iter().any(|p| p.ends_with("ic-example.md")),
+            "a dateless-slug citation must be found: {listed:?}"
         );
     }
 
