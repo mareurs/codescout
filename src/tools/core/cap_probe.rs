@@ -186,10 +186,14 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 //   stops saying that it did, which is `IC-13` exactly.
 
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
-/// 2026-09-02 census in `tests/result_caps.rs`. The id list is derived from
-/// the gate itself (`grep(pattern="cap-class: RESULT_CAP", path="src")`),
-/// never copied from a report, and `tests/result_caps.rs`'s correspondence
-/// check keeps the two from drifting apart in either direction.
+/// 2026-09-02 census. The id list is derived from
+/// [`every_cap_constant_is_classified`]'s own const-declaration parser over
+/// `git ls-files src` (`tests/result_caps.rs`), never copied from a report or
+/// from a shell `grep` — a `grep(pattern="cap-class: RESULT_CAP", path="src")`
+/// over this very file matches its own prose about itself, which is exactly
+/// the self-matching-instrument hazard `tests/result_caps.rs`'s header warns
+/// about (`IC-18`). `tests/result_caps.rs`'s correspondence check keeps the
+/// two lists from drifting apart in either direction.
 pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/core/types.rs --
     ProbeRow {

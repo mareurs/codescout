@@ -95,9 +95,9 @@
 //!   `src/logging.rs:81 MAX_LOG_BYTES — NOT_A_CAP with no reason`.
 //! - `RESULT_CAP` with an id outside the grammar → rewrite
 //!   `src/tools/grep.rs:781` to `// cap-class: RESULT_CAP probed` →
-//!   `src/tools/grep.rs:782 MAX_MATCH_BYTES — NOT_A_CAP with no reason`.
-//!   **The message is wrong for this condition** — see *Two defects sharing a
-//!   message* below.
+//!   ``src/tools/grep.rs:782 MAX_MATCH_BYTES — RESULT_CAP id "probed" does not
+//!   match `<tool>.<field>` ``. See *Two defects, two messages* below — this used
+//!   to render as `NOT_A_CAP with no reason`, naming a token nowhere on the line.
 //!
 //! [`result_caps_and_probe_rows_correspond_in_both_directions`]:
 //! - a tracked `src/**.rs` unreadable → `git add` a `src/zz_phantom.rs` whose
@@ -203,15 +203,15 @@
 //!
 //! ### What the run found
 //!
-//! **Two defects sharing one message.** `classify` returns `MalformedReason`
-//! for a `NOT_A_CAP` with no reason AND for a `RESULT_CAP` whose id is outside
-//! the grammar, and [`unclassified_decls`] renders both as
-//! `— NOT_A_CAP with no reason`. For the second the text names a token that is
-//! not on the line and prescribes the wrong repair. The two need different
-//! fixes, so one message sends half the readers to the wrong place. Pinned (not
-//! fixed) by
-//! `unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message`,
-//! so a fix and its wording must land together.
+//! **Two defects, two messages — previously shared one.** `classify` used to return one
+//! `MalformedReason` variant for both a `NOT_A_CAP` with no reason AND a `RESULT_CAP` whose id is
+//! outside the grammar, and [`unclassified_decls`] rendered both as `— NOT_A_CAP with no reason`.
+//! For the second the text named a token that was not on the line and prescribed the wrong
+//! repair. Fixed by splitting the RESULT_CAP case into its own `MalformedCapId(String)` variant,
+//! carrying the offending id so the message can name it; see
+//! `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md` and
+//! `unclassified_decls_reports_a_malformed_result_cap_id_with_its_own_message`, which now pins
+//! the corrected text.
 //!
 //! **Two conditions are shadowed by a sibling assertion, not dead.** The
 //! `tests/` exclusion above can only be violated by input that also violates
@@ -252,13 +252,21 @@ enum CapClass {
     ResultCap(String),
     NotACap(String),
     Unclassified,
-    /// An annotation is present but unusable: either a `NOT_A_CAP` with an
-    /// empty reason, or a `RESULT_CAP` whose id does not match the
-    /// grammar's `[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*` production (e.g.
-    /// `RESULT_CAP probed`, a bare word with no dot). Distinguished from
-    /// `Unclassified` because "the annotation exists" is not the property
-    /// we want, and the two need different failure text.
+    /// A `NOT_A_CAP` annotation present but with an empty or absent reason: the
+    /// token was written, but "the annotation exists" is not the property
+    /// wanted. Distinguished from `MalformedCapId` because the two need
+    /// different failure text — see that variant's doc.
     MalformedReason,
+    /// A `RESULT_CAP` annotation whose id does not match the grammar
+    /// `[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*` (e.g. `RESULT_CAP probed`, a bare word
+    /// with no dot). Carries the offending fragment (empty if nothing followed
+    /// the token) so [`unclassified_decls`] can name it.
+    ///
+    /// Split out of `MalformedReason` — until this split, both shapes rendered
+    /// as `NOT_A_CAP with no reason`, a message naming a token that is nowhere
+    /// on a `RESULT_CAP` line. See
+    /// `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
+    MalformedCapId(String),
 }
 
 #[test]
@@ -531,7 +539,7 @@ fn classify_rejects_a_result_cap_id_without_a_dot() {
     };
     assert_eq!(
         classify(&decl),
-        CapClass::MalformedReason,
+        CapClass::MalformedCapId("probed".into()),
         "\"probed\" has no dot and does not match the id grammar \
          [a-z][a-z0-9_]*.[a-z][a-z0-9_]*; classify must not silently accept \
          it as ResultCap(\"probed\")"
@@ -873,7 +881,7 @@ fn classify(decl: &CapDecl) -> CapClass {
                 .unwrap_or_default()
                 .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_');
             if id.is_empty() || !is_valid_cap_id(id) {
-                return CapClass::MalformedReason;
+                return CapClass::MalformedCapId(id.to_string());
             }
             return CapClass::ResultCap(id.to_string());
         }
@@ -1089,28 +1097,25 @@ fn unclassified_decls_names_every_offender_and_is_not_a_bare_count() {
     );
 }
 
-/// The `MalformedReason` branch has TWO producers and ONE message, and this is
-/// the only fixture that drives the second producer through the real
+/// The `MalformedReason`/`MalformedCapId` split has TWO producers, one message each, and
+/// this is the only fixture that drives the RESULT_CAP producer through the real
 /// [`unclassified_decls`].
 ///
 /// `unclassified_decls_names_every_offender_and_is_not_a_bare_count` covers
 /// `NOT_A_CAP` with no reason. `classify_rejects_a_result_cap_id_without_a_dot`
-/// covers [`classify`]'s verdict on a dotless `RESULT_CAP` id. Neither shows
-/// what the GATE PRINTS for the second case — and what it prints names the
-/// wrong token: a line reading `// cap-class: RESULT_CAP probed` is reported as
-/// `NOT_A_CAP with no reason`, sending the reader to add a reason to a token
-/// that is nowhere on the annotated line. Observed through the live gate,
-/// 2026-09-03: rewriting `src/tools/grep.rs:781` to
-/// `// cap-class: RESULT_CAP probed` printed
-/// `src/tools/grep.rs:782 MAX_MATCH_BYTES — NOT_A_CAP with no reason`.
+/// covers [`classify`]'s verdict on a dotless `RESULT_CAP` id. Neither shows what the GATE
+/// PRINTS for the second case — this does: a line reading `// cap-class: RESULT_CAP probed`
+/// is reported as `RESULT_CAP id "probed" does not match `<tool>.<field>``, naming the
+/// actual token and the actual defect rather than a `NOT_A_CAP` reason that was never
+/// written. Previously (until this fix) both producers shared one message —
+/// `NOT_A_CAP with no reason` — for a line that read `RESULT_CAP`; see
+/// `docs/issues/2026-09-03-classify-conflates-two-malformed-reasons-under-one-message.md`.
 ///
-/// This test pins TODAY's (misdirecting) text rather than tolerating it
-/// silently, so a fix and its wording have to land together. Narrowness, which
-/// an exemption test owes: a well-formed `RESULT_CAP a.b` decl sits in the same
-/// input and must NOT be reported — a filter that swallowed it would make the
-/// whole `RESULT_CAP` side of the gate vacuous while staying green.
+/// Narrowness, which an exemption test owes: a well-formed `RESULT_CAP a.b` decl sits in the
+/// same input and must NOT be reported — a filter that swallowed it would make the whole
+/// `RESULT_CAP` side of the gate vacuous while staying green.
 #[test]
-fn unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_message() {
+fn unclassified_decls_reports_a_malformed_result_cap_id_with_its_own_message() {
     let decls = vec![
         CapDecl {
             name: "GOOD_MAX".into(),
@@ -1119,8 +1124,8 @@ fn unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_mess
             annotation: Some("RESULT_CAP a.b — probed".into()),
         },
         // LOAD-BEARING: the payload must start with `RESULT_CAP`, not
-        // `NOT_A_CAP`. That is what makes the shared message a MISdirection
-        // rather than a terse one — swap the token and this fixture stops
+        // `NOT_A_CAP`. That is what makes this a distinct producer rather
+        // than a terse one — swap the token and this fixture stops
         // demonstrating anything the sibling test does not already cover.
         CapDecl {
             name: "BAD_MAX".into(),
@@ -1131,13 +1136,14 @@ fn unclassified_decls_reports_a_malformed_result_cap_id_under_the_not_a_cap_mess
     ];
     assert_eq!(
         unclassified_decls(&decls),
-        vec!["src/bad.rs:7 BAD_MAX — NOT_A_CAP with no reason".to_string()],
-        "the dotless RESULT_CAP id must be REPORTED — `MalformedReason` is a \
+        vec![
+            "src/bad.rs:7 BAD_MAX — RESULT_CAP id \"probed\" does not match `<tool>.<field>`"
+                .to_string()
+        ],
+        "the dotless RESULT_CAP id must be REPORTED — `MalformedCapId` is a \
          refusal, not a classification — and the well-formed sibling must not \
-         be. The message text asserted here is today's, and it is wrong: \
-         `NOT_A_CAP` appears nowhere on the annotated line. Recorded as a defect \
-         in this file's header rather than quietly accepted, because two \
-         conditions needing different fixes share one message"
+         be. The message must name the offending id and the RESULT_CAP grammar, \
+         not a NOT_A_CAP reason that is nowhere on the line"
     );
 }
 
@@ -1235,6 +1241,17 @@ fn unclassified_decls(decls: &[CapDecl]) -> Vec<String> {
                 "{}:{} {} — NOT_A_CAP with no reason",
                 d.file, d.line, d.name
             )),
+            CapClass::MalformedCapId(id) => Some(if id.is_empty() {
+                format!(
+                    "{}:{} {} — RESULT_CAP with no id (expected `<tool>.<field>`)",
+                    d.file, d.line, d.name
+                )
+            } else {
+                format!(
+                    "{}:{} {} — RESULT_CAP id {id:?} does not match `<tool>.<field>`",
+                    d.file, d.line, d.name
+                )
+            }),
             CapClass::ResultCap(_) | CapClass::NotACap(_) => None,
         })
         .collect();

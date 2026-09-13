@@ -813,6 +813,41 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
     );
 }
 
+/// Findings for [`a_documented_call_names_a_live_tool`], deduplicated by `(file, line, tool)` —
+/// one call site is one finding, however many named arguments it carries. Filed as
+/// `docs/issues/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`:
+/// [`anchored_cites`] emits one [`Cite`] per named argument, which is the right grain for
+/// [`a_documented_tool_parameter_exists_on_that_tool`] but not for this per-tool question — do
+/// NOT reuse this dedup there, its grain is already correct.
+fn stale_tool_call_findings(
+    cites: &[Cite],
+    names: &HashSet<String>,
+    allowed: &HashSet<&str>,
+) -> Vec<String> {
+    let mut seen: HashSet<(String, usize, String)> = HashSet::new();
+    let mut bad = Vec::new();
+
+    for c in cites {
+        if c.bare {
+            continue;
+        }
+        if !c.tool.contains('_') {
+            continue;
+        }
+        if names.contains(&c.tool) || allowed.contains(c.tool.as_str()) {
+            continue;
+        }
+        if !seen.insert((c.file.clone(), c.line, c.tool.clone())) {
+            continue;
+        }
+        bad.push(format!(
+            "  {}:{}\n      `{}(…)` names no registered tool.\n      line: {}",
+            c.file, c.line, c.tool, c.text
+        ));
+    }
+    bad
+}
+
 /// An anchored call to a name no tool answers to.
 ///
 /// Separate from the parameter test because the remedies differ: a wrong parameter is a one-token
@@ -822,51 +857,48 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
 fn a_documented_call_names_a_live_tool() {
     let names = tool_names();
     let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
-    let mut bad: Vec<String> = Vec::new();
-
-    for c in anchored_cites() {
-        // Named-argument cites only. This test's anchor was `snake_case(` plus a `key=`, and the
-        // `=` was quietly doing two jobs: finding parameters, AND filtering out ordinary code. A
-        // bare-identifier cite has no `=`, so admitting them here makes every snake_case function
-        // call in a Rust example look like an anchored tool call — measured 2026-09-12, exactly
-        // 50 of them, 35 from `extending/adding-languages.md` alone, none a real violation.
-        //
-        // The sibling parameter test needs no such guard because it `continue`s on any name that
-        // is not a registered tool; this one exists to flag precisely those names, so it has no
-        // filter of its own and cannot borrow that one. The cost is real and stated rather than
-        // hidden: a RETIRED tool cited only in the bare form is invisible here. Closing that
-        // needs a discriminator separating `references(symbol, path)` in prose from
-        // `fn visit_node(node)` in a code sample, which no token-level rule provides.
-        //
-        // **What pins this line is the CORPUS, not a unit test**, and that is a standing
-        // liability rather than an oversight: defeating the filter reds with 50 findings only
-        // while `extending/adding-languages.md` still carries snake_case Rust samples (35 of the
-        // 50). Rewrite that page into fenced blocks the walker skips and this branch becomes
-        // silently untested — passing, and no longer discriminating.
-        if c.bare {
-            continue;
-        }
-        // Only snake_case names — a single-word call in prose is too often ordinary English.
-        if !c.tool.contains('_') {
-            continue;
-        }
-        if names.contains(&c.tool) || allowed.contains(c.tool.as_str()) {
-            continue;
-        }
-        bad.push(format!(
-            "  {}:{}\n      `{}(…)` names no registered tool.\n      line: {}",
-            c.file, c.line, c.tool, c.text
-        ));
-    }
+    let bad = stale_tool_call_findings(&anchored_cites(), &names, &allowed);
 
     assert!(
         bad.is_empty(),
-        "{} present-tense document(s) call a tool that does not exist.\n\n{}\n\n\
+        "{} stale call(s) name a tool that does not exist.\n\n{}\n\n\
          If the name is a live alias, add it to ALIAS_ALLOWLIST with the declaration site — \
          but read that constant's comment first: the last candidate for it was a gap in this \
          file's own extractor, not a real alias.",
         bad.len(),
         bad.join("\n\n")
+    );
+}
+
+/// A stale call carrying multiple named arguments must be reported once, not once per argument —
+/// the defect fixed alongside this test in
+/// `docs/issues/2026-09-02-doc-tool-refs-counts-call-param-pairs-as-documents.md`. Keyed on the
+/// emitted text rather than the count alone, so a dedup that over-collapses (e.g. keying on
+/// `file` alone) cannot pass this by producing a smaller but still-wrong number.
+#[test]
+fn a_stale_call_is_reported_once_regardless_of_argument_count() {
+    let cite = |param: &str| Cite {
+        file: "docs/example.md".to_string(),
+        line: 335,
+        tool: "artifact_event".to_string(),
+        param: param.to_string(),
+        bare: false,
+        text: "`artifact_event(action=\"list\", artifact_id=X)`".to_string(),
+    };
+    let cites = vec![cite("action"), cite("artifact_id")];
+    let names = tool_names();
+    let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
+
+    let bad = stale_tool_call_findings(&cites, &names, &allowed);
+
+    assert_eq!(
+        bad.len(),
+        1,
+        "one call carrying two named arguments must produce one finding, not one per argument: {bad:?}"
+    );
+    assert!(
+        bad[0].contains("artifact_event"),
+        "the one finding must still name the offending tool: {bad:?}"
     );
 }
 
