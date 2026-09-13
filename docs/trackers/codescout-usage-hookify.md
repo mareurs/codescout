@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 12
+entry_high_water_H: 13
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -650,6 +650,68 @@ no alarm; and ADR-2026-08-27's clause that a negative result must name its scope
 why the skip list is printed rather than applied quietly.
 
 **Valid:** conditional — the five suites become hermetic and the deny-list empties
+
+### H-13 — Gate the `entry_prefix:` declaration itself — a "decide before adding more" warning has no trigger, and thirteen arrived while it said so
+
+**Valid:** invariant
+
+**Status:** proposed · **Surface:** `scripts/pre-commit-ledger-counts.py` (or a sibling rule in the
+same runner)
+
+**The observation, measured 2026-09-13 at tree `34274412`.** `docs/TAXONOMY.md` § *Main taxonomy*
+carries a ⚠️ block reading *"One session log declared `entry_prefix: [F, W]` … Decide it
+deliberately before adding more."* Fourteen declare it — three inline as
+`entry_prefix: ["F", "W"]`, eleven as a block sequence. So **thirteen arrived while the warning said
+not to add more**, including one the same day, by a session that had not read the line. Derivation,
+because the count will decay exactly like the one it replaces:
+
+```sh
+grep -lE '^entry_prefix:$' docs/trackers/*.md | wc -l              # 11 block-sequence
+grep -lE '^entry_prefix: \["F", "W"\]' docs/trackers/*.md | wc -l  #  3 inline
+```
+
+**The defect is not the stale integer — it is that the precondition has no trigger.** *"Decide
+before adding more"* is a gate written in prose, and its enforcement depends on the actor having
+read a file they have no reason to open. A session opening a new work stream copies
+`docs/templates/session-log.md`, declares `entry_prefix`, and never touches `TAXONOMY.md`; the only
+party who reads the warning is someone already editing the document, which is the one population
+that is not about to add a declarer. Correcting the number — which `34274412` did — leaves the
+mechanism untouched and the next thirteen will arrive the same way.
+
+**Proposed rule: key on the declaration, not on the reader.** Fire when a commit ADDS or CHANGES an
+`entry_prefix:` line (inline or block-sequence) in any staged file.
+
+- **warn**, never deny, when the declared set includes `F` or `W`: name the open contradiction, cite
+  `TAXONOMY.md` § *Main taxonomy*'s ⚠️ block, and state the trade in one line — declaring F/W makes
+  them dangling-checked but gives one token many definers; leaving them undeclared keeps ambiguity.
+  The author then decides *at the moment of declaring*, which is the only moment the decision is
+  cheap.
+- **deny** is wrong here and the reason matters: the contradiction is **unresolved by design**, not
+  a defect. A deny would force every new work stream to resolve a corpus-wide question before it can
+  open a session log, which is a much larger tax than the ambiguity it prevents.
+- **carve-out:** a rename or re-indentation of an existing declaration is not an addition. Diff the
+  declared SET, not the line, or the eleven block-sequence declarers re-trip on every reformat.
+
+**Why a hook rather than better prose — the general shape, which is the reusable half.** An
+instruction of the form *"decide X before doing Y"* placed in the document that *describes* X is
+read by X's readers and ignored by Y's actors, and the two populations barely intersect. This is
+§ *Observer Blindness* position 3 — the correct path should end in a safe state, or the check should
+run when nobody is worried — and the trigger that *happens anyway* is the declaration itself.
+Deliberately **not** filed as a new `OB-N`: it is one instance, it sits close to `OB-1`'s
+*"a bound published to an audience that never reads it"*, and a one-member class forces exactly the
+fit `issue-clusters.md` warns against. If a second instance of *precondition-in-the-describing-doc*
+turns up, it earns a class.
+
+**Rests on:** the two `grep -l … | wc -l` commands above, re-derivable; and `34274412`, which
+corrected the count and left this mechanism open on purpose.
+
+**Provenance.** Found while checking whether two new trackers needed TAXONOMY rows — they did not
+(§ *Work-stream-specific prefixes* says session logs own no slot), so the row-add dissolved and this
+was underneath it. Offered first to sessionId `f0b1a4c7-e991-4478-bf22-b088483b6821`, who owns the
+ledger-rule surface and had the script open; they declined on scope — their operator cleared them
+for the mechanism-column work and not for adding rules to a script they happened to be holding —
+and asked that it be written up here rather than front-run. Recorded because the boundary is the
+right one and worth seeing twice.
 
 ## Template for new entries
 
