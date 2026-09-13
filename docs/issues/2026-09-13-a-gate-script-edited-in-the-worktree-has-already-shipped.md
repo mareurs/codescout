@@ -117,6 +117,18 @@ Nothing in flight. The remedy text (candidate 3) shipped with the rule; candidat
 ## References
 
 - `scripts/pre-commit-run.sh:157` — the pathspec that decides which commits run the checker.
+- `docs/issues/2026-09-01-cluster-count-gate-lists-the-index-but-reads-the-worktree.md` — the
+  **closest prior art, and a different bug.** There the two worlds are *population vs content*
+  inside one gate: `tracked_all_bug_files()` lists the index while `actual_counts()` reads the
+  worktree, so a peer's half-written file moves the count. Here they are *code vs data* across the
+  hook boundary: the checker's own source ships from the worktree while its corpus is read from
+  the index. Same family, opposite halves — and the consequence differs, because this one leaves
+  the author green while refusing everyone else.
+  **Found by a prior-art check run AFTER this file was committed, not before.** That ordering is
+  the defect worth recording: `git grep -il 'reads the index'` over `docs/issues/` would have
+  surfaced it in one command at filing time. A peer filing on the same day proposed a fix that
+  would have reintroduced a defect closed 48 hours earlier, for want of the same one command
+  (`fc7ff085`, withdrawn). *"Already documented" is checkable* — check it before filing, not after.
 - `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md` — the same
   shape at a different pair of guards; reported as its third instance of the day by the session
   this refusal landed on.
