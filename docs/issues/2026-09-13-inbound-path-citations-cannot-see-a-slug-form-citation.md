@@ -1,7 +1,7 @@
 ---
 id: '44ebfc3bd48ceb53'
 kind: bug
-status: open
+status: investigating
 title: 'BUG: doc(action=move)''s inbound_path_citations cannot see a slug-form citation, and reports [] rather than the form it searched'
 tags:
 - cluster/selector-narrower-than-its-population
@@ -62,6 +62,32 @@ Not established in code; the behaviour is black-box so far. What is established 
 artifact", and the two differ by exactly the slug-only form. Whether that is a regex, a
 `LIKE` over a stored citation table, or the `cites` edge set is unread — and the direction
 does not depend on which.
+
+## Investigation update, 2026-09-13 — the reported form does not reproduce
+
+**Ran the reproduction before reading the fix plan, per this repo's own rule
+(`bug-fix-session-log:W-32`), and it changed the picture.** `files_mentioning`
+(`src/librarian/tools/mv.rs`) greps for `old_full.file_stem()` as a plain `-F` substring
+— and for a dated-slug filename, the file stem **is** the slug. A new test,
+`the_citation_scan_sees_a_bare_slug_with_no_path_wrapper`, seeds a citer whose only
+mention of the target is a bare slug with no path syntax anywhere (`"**Members:** foo\n"`)
+and asserts it is found. **It passes against current source**, unmodified — shipped as
+`5ea1f2ad` on `experiments`, no production code touched.
+
+This root cause — called "not established in code; the behaviour is black-box so far" by
+this file's own Root cause section — is now partially established, and in the direction
+opposite to what was assumed: the resolver is **not** path-form-only. A slug-only
+citation with zero path decoration is already visible to it.
+
+**This does not explain instances 7 and 8.** Both are real, observed `[]` results on
+real moves where a slug citation existed. What it rules out is the specific mechanism
+this file names ("the selector is the path form"). Candidate directions not yet checked:
+cross-session timing (the citing file's on-disk content at scan time vs. when a reader
+later confirmed the citation existed), the `exclude` parameter matching more broadly than
+intended, or a git-grep environment difference (`--untracked` scope, `.gitignore`
+interaction) between this reproduction's fresh tempdir and the real checkout's actual
+git state at the time. **Left `investigating`, not `fixed` — the symptom is real, the
+named mechanism for it is refuted, and the true mechanism is still open.**
 
 ## Fix
 
