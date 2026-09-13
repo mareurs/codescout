@@ -497,6 +497,11 @@ tool_use "$A" mcp__codescout__edit_file '{"path":"src/committed.rs","old_string"
 out="$(run src/committed.rs)"
 has "a write AFTER it is the dirty-state author" "$out" "MINE"
 hasnt "and the pre-commit author stays excluded" "$out" "$PEER"
+# MINE is the verdict a reader acts on to license a commit -- so it is the one that most
+# needs the same "writes exist outside the window" caveat UNKNOWN already prints. Before
+# this case existed the caveat was scoped to the empty-who_set branch only, so a hidden
+# peer write on a MINE-verdict path was invisible at exactly the point a reader would act.
+has "MINE also surfaces a write the window hid" "$out" "predate the window"
 
 # --all must still reach past the derived floor, or the escape hatch is decorative.
 has "--all reaches past the derived floor" "$(run --all src/committed.rs)" "$PEER"

@@ -580,6 +580,11 @@ def main(argv: list[str]) -> int:
             elif floor is None or _key(when) >= floor:
                 in_window.append(who)
         who_set = set(in_window) | set(undated)
+        # Records the window excluded -- present regardless of verdict, because a hidden
+        # write is exactly as real on a MINE path as on an UNKNOWN one. Equals len(records)
+        # whenever who_set is empty, which is what makes this a drop-in for the count the
+        # UNKNOWN branch used to compute only for itself.
+        hidden = len(records) - len(in_window) - len(undated)
 
         if not who_set:
             unknown += 1
@@ -595,8 +600,8 @@ def main(argv: list[str]) -> int:
                   "you can reach. An older copy of this message said to stop looking "
                   "for a subagent's owner; that rested on a count taken through a glob "
                   "which could not reach those files.")
-            if records:
-                print(f"          ({len(records)} write(s) exist but predate the window; "
+            if hidden:
+                print(f"          ({hidden} write(s) exist but predate the window; "
                       f"re-run with --all to see them)")
             continue
 
@@ -606,6 +611,12 @@ def main(argv: list[str]) -> int:
         print(f"{verdict:9} {rel}")
         if floor:
             print(f"          window: writes at or after {floor}")
+        if hidden:
+            # MINE is the verdict a reader acts on to license a commit, so this caveat
+            # matters most exactly here -- a peer write the window hid is still a peer
+            # write. Previously only the UNKNOWN branch printed it.
+            print(f"          ({hidden} write(s) also exist but predate the window; "
+                  f"re-run with --all to see them)")
         if mine:
             print(f"          written by THIS session ({me[:8]})")
         for w in peers:
