@@ -493,7 +493,7 @@ mod tests {
     /// The twin of the case above, on the same fixture — and it USED TO ASSERT THE
     /// DEFECT. Its previous form required the identical red at exit 0 to produce nothing,
     /// which is exactly the silence
-    /// `docs/issues/2026-09-12-the-red-attribution-hook-fires-only-on-a-non-zero-exit-the-mandated-gate-never-produces.md`
+    /// `docs/issues/archive/2026-09-12-the-red-attribution-hook-fires-only-on-a-non-zero-exit-the-mandated-gate-never-produces.md`
     /// was filed about: `<red> ; echo "LEAN exit=$?"` exits 0 with the real failure sitting
     /// in stdout, and CLAUDE.md MANDATES that shape for the gate.
     ///

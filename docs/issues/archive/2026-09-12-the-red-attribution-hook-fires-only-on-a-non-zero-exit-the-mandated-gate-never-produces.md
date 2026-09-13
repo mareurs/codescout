@@ -1,10 +1,12 @@
 ---
-id: '1afba4dac700e5d1'
+id: 5e246c4bfa47fea3
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the red-attribution hook fires only on a non-zero exit, which the gate shape CLAUDE.md mandates never produces'
 tags:
 - cluster/selector-narrower-than-its-population
+claimed_at: 2026-09-13
+claimed_by: 05841db2-4ba0-4cb2-a22f-c0bc2f771e20
 ---
 
 # BUG: the red-attribution hook fires only on a non-zero exit, which the gate shape CLAUDE.md mandates never produces
@@ -139,7 +141,7 @@ status exists yet to trigger on.
 |---|---|---|---|
 | bare failing command | 101 | **present** | trigger works |
 | auto-backgrounded, **generic** envelope | 101 (on completion) | **present** | notification carries the exit |
-| auto-backgrounded, **test-summary** envelope | 101 (on completion) | *unmeasured* | § Resume, the open cell |
+| auto-backgrounded, **test-summary** envelope | 101 (on completion) | **carried and rendered** | resolved by reading 2026-09-13 — see below |
 | `<cmd> ; echo "… $?"` | 0 | **absent** | `echo` is the last statement |
 | explicit `run_in_background: true` | *(none, ever)* | **absent** | returns before an exit exists |
 
@@ -169,6 +171,23 @@ and neither session has one.
 Rows 4 and 5 are silent for **different** reasons and only one is fixable by changing the
 trigger: row 4 has an exit status that is the wrong one, row 5 has none at all.
 
+
+**Row 3 is closed by READING, not by a probe, and saying which matters because the row spent a
+day open for want of one.** Both call sites were traced:
+
+- `src/tools/run_command/output.rs` attaches `wip_authors` **after** the whole envelope
+  if/else, so it is not envelope-specific — the `type: "test"` object built by
+  `summarize_test_output` reaches that line like any other shape.
+- `format_run_command` appends it **unconditionally across output shapes**, after all branch
+  logic, with a comment at the site giving the reason: it must be rendered there *"or it
+  reaches nobody"*. So the buffered `type: "test"` compact render carries it too.
+
+The envelope was therefore never the cause, and the two non-discriminating observations that
+left this row open are each fully explained by their own stated precondition — one had a real
+exit of 0, the other named a clean path. **What remains unmeasured is that cell live**, and
+closing it that way still means arming a red on a shared checkout, which § Resume rightly calls
+an operator's decision. The point worth keeping: two sessions deferred this row waiting for a
+probe neither could safely run, and the answer was two `if let Some` sites apart.
 ### The live incident this class produced, earlier the same day
 
 A compile red (`E0425` in `display.rs`, plus a warning in `symbols.rs`) was hit by a
@@ -231,30 +250,83 @@ running.**
 
 ## Fix
 
-Not started. The trigger is one line; the decision is which signal replaces it.
+**Chosen: trigger on status OR output** (§ Fix option 2), implemented as a cheap in-process
+pre-filter rather than by moving the decision into Python.
 
-- **Trigger on the OUTPUT, not the status** — run the hook when the combined output
-  contains a `DIAGNOSTIC_PATH` match whose file is dirty, regardless of exit code. Covers
-  every form including the two silent ones. The extractor is already conservative enough to
-  make false positives unlikely, and a spurious `wip_authors` is cheap next to a silent
-  one. Cost: the hook runs on some successful commands that merely printed a diagnostic.
-- **Trigger on status OR output** — narrower version of the above, keeping today's
-  behaviour and adding the output path only when `exit_code == 0`.
-- **Attach on background completion** — separate change, and **narrower than this file
-  first stated**: needed only for the explicit `run_in_background: true` form. The
-  auto-backgrounded path already attaches on completion, so this buys the one remaining
-  silent form rather than "background" as a category.
-- **Name the ceilings in CLAUDE.md** — the minimum, and it does not fix the silence. If
-  only this ships, § *Reaching a Peer Session* must stop saying the standing instruction
-  *replaces* going looking, because for the gate it does not.
+```rust
+if exit_code == 0 && !names_a_diagnostic(red_text) {
+    return None;
+}
+```
 
+**Why not "spawn whenever there is output".** Stage 0's economics are real and were already
+defended by a TIMING test — *"without it every green command in the session pays a process
+spawn"*. `names_a_diagnostic` is an allocation-free scan (`contains` for `-->` and
+`panicked at`, one `lines()` pass for line-initial `error` / `Error:`), so a green command
+printing ordinary cargo chatter still short-circuits in microseconds.
+
+**The pre-filter is deliberately WIDER than the engine and must never be narrower.** It checks
+only the distinctive literal each `DIAGNOSTIC_PATH` pattern requires, not the span, filename or
+line-number parts. A false positive costs one python spawn and the engine then answers
+correctly; a false negative is the silent wrong answer this whole bug is about. If the two ever
+disagree, they must disagree in that direction.
+
+**The Rust/Python duplication is guarded, not trusted** — the shape `build.rs`'s hand-copied
+`extract_surface` already cost this repo once. Two tests hold it: one fixture per engine pattern
+asserting the pre-filter admits it, and a count of `re.compile(` entries **read out of
+`scripts/attribute-red.py` at test time** — derived, never stored — so adding a sixth pattern
+reds with a message naming the file to edit rather than silently narrowing coverage.
+
+**Not fixed, and stated rather than glossed:** the explicit `run_in_background: true` form
+(row 5) is still silent and no trigger change reaches it — it returns before an exit status or a
+complete output exists. Separate change.
+
+**CLAUDE.md § *Reaching a Peer Session* updated in the same commit**, because it was the half
+that turned silence into a confident wrong answer. It now states the real trigger (non-zero
+**or** failure-shaped output), says explicitly that the gate ends in `echo` and why that
+mattered, and names **two** remaining ceilings instead of one — native `Bash`, and explicit
+`run_in_background`.
+
+Fix SHA: `02e61230`
+Patch-id: `0165f0030711f26ba0158de5405c93af365ac73d`
 ## Tests added
 
-None yet. A regression test is writable without a server and should assert the pair, not
-one arm: a failing command whose output names a dirty path must attach `wip_authors` in
-**both** the bare and the trailing-`echo` forms. Asserting only the bare form re-passes on
-today's code and proves nothing.
+Seven assertions in `src/tools/run_command/attribution.rs`, and the two that matter were each
+observed RED by mutating the production line — not by being written and passing.
 
+| mutation of the gate | test that reds | direction |
+|---|---|---|
+| back to `exit_code == 0` alone | `the_same_red_at_exit_zero_still_answers` | coverage |
+| removed entirely (`i32::MIN`) | `a_zero_exit_with_nothing_failure_shaped_spawns_nothing` | cost, at **110ms** — a real spawn |
+
+Each killed **exactly one** test, and a different one. That pins the condition from both sides
+by behaviour, which the previous arrangement did not: `exit_code == 0` was guarded against
+deletion only by a TIMING assertion, *"exactly the kind that gets relaxed on a loaded machine"*
+in its own words.
+
+- **`the_same_red_at_exit_zero_still_answers`** is the inverted twin of
+  `the_same_red_at_exit_zero_says_nothing`, which **asserted this defect as correct**. Its
+  docstring records that, so the next reader does not re-add it. It opens by establishing the
+  engine answers at exit 101 on the same fixture — without that, an absent `python3` yields the
+  same `None` as a deleted gate and the test would pass proving nothing.
+- **`a_zero_exit_with_nothing_failure_shaped_spawns_nothing`** keeps the cost guard but its old
+  fixture had to change: it was `"error: --> src/lib.rs:1:1"`, correct while the gate was
+  `exit_code == 0` alone and a **false pass** the moment the gate learned to read the text — it
+  would have asserted a spawn is skipped using the exact input that must now cause one. The
+  fixture's non-diagnostic property is now itself asserted, so a later edit cannot re-break it
+  quietly.
+- **`the_prefilter_admits_every_shape_the_engine_matches`** — one fixture per `DIAGNOSTIC_PATH`
+  pattern, plus the derived-count check described in § Fix.
+
+All green: `attribution::tests` 9/9, `run_command::` 184/184, the six `claude_md` prompt-surface
+tests 6/6 (read by name, since this commit edits CLAUDE.md).
+
+**One verification this session could NOT do, stated because its absence is invisible:** the fix
+is Rust, so it is not in the running MCP binary until a `cargo rb` + `/mcp`. Every measurement
+above is the test suite and the source; **no wire probe of the fixed behaviour exists yet**. The
+reproduction in § Reproduction was re-run against the *unfixed* running binary and reproduced
+exactly — bare form `wip_authors` present, `; echo` form absent — which establishes the defect,
+not the fix.
 ## Workarounds
 
 Read `exit_code` **and** the echoed text. On the mandated gate the real lane statuses are
@@ -264,32 +336,26 @@ manual route: `scripts/file-provenance.py` intersected with the socket enumerati
 
 ## Resume
 
-Pick a trigger from § Fix. Before implementing, re-derive the five-form table above
-against a **currently** dirty path — the precondition decays, and a stale path yields a
-correct silence that reads as the bug.
+Fixed and archived. Rows 1, 2, 3 and 4 of § Evidence are closed; **row 5 is not** — an explicit
+`run_in_background: true` returns before an exit status or a complete output exists, so no
+trigger change reaches it. That is a separate change and nobody holds it.
 
-The sub-claim this file originally marked **not established** is now half established, and
-that half **narrows** the bug: measured 2026-09-12 by sessionId `b80a27d4`, a completion
-notification for an auto-backgrounded failing job carries `exit_code: 101` and a full
-`wip_authors`. So do not treat "it was backgrounded" as an explanation for a missing
-attribution.
+**One thing this fix created, filed rather than left:** it adds a sixth concurrent caller of
+`wip_author_diagnostic`, which widens a pre-existing race —
+`docs/issues/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`.
+A sibling test holds `CODESCOUT_NO_WIP_ATTRIBUTION` across an `.await` and every caller reads it.
+It reds `a_red_attaches_wip_authors_on_the_main_arm` intermittently and did so once on 2026-09-13.
+The repo's own ruling (`src/config/global.rs`) rules out `#[serial]` as the remedy, so it needs a
+pure seam.
 
-**The open cell, stated in the same shape as the claim it replaces rather than inferred
-from row 2.** That measurement used `sh -c`, i.e. the generic completion envelope. Whether
-the `cargo test` completion envelope (`type: "test"`) carries `wip_authors` is **not
-established by anyone**, and it is the envelope the mandated gate actually produces. The
-two observations that exist are both non-discriminating: `b80a27d4`'s backgrounded gate run
-had a real exit of 0 (trailing `echo`), and `f3c594ce`'s exited 101 but named a clean path
-(§ Reproduction, point 2).
-
-What would close it: a backgrounded `cargo test` that genuinely fails **and** names a
-currently-dirty file. Neither session has run it, deliberately — on this shared checkout it
-means arming a red no other session can distinguish from a broken test, which is itself a
-filed defect — `docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
-and `docs/issues/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`.
-A git worktree isolates it at the cost of a cold `target/`.
-That is a decision for an operator, not a thing to do quietly while peers are building.
-
+**And the verification this fix still lacks, stated because its absence is invisible:** no wire
+probe of the FIXED behaviour exists. The running MCP binary was built at 09:00:17 and this change
+was written at 09:08:59, so the two post-rebuild probes that day both measured the *unfixed*
+binary and reproduced the defect exactly — which establishes the bug, not the fix. **That near
+miss is worth carrying:** *"the fix is broken"* and *"the fix is not in this binary"* produce
+byte-identical observations, and only an mtime comparison separates them. Verify on the wire after
+the next `cargo rb`: `sh -c '<red naming a dirty path>' ; echo "LEAN exit=$?"` must now carry
+`wip_authors`.
 ## References
 
 - `scripts/attribute-red.py` — `DIAGNOSTIC_PATH`, `named_paths`, `dirty_paths`
