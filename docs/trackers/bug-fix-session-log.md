@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 135
-entry_high_water_W: 130
+entry_high_water_F: 136
+entry_high_water_W: 131
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,7 @@ entry_high_water_W: 130
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-136 | 2026-09-13 | high | design-gap | open | **A fix direction recorded as "settled" can be settled on the CHOICE and silent on the DEFAULT, and the default is where the whole corpus lands.** `BL-77`'s plan closes both alternatives with measurements and an ADR ruling, then never says what an ABSENT `snapshot_anchor` means — which on day one is all **24** augmented trackers, since the field does not exist yet. The two candidate defaults produce opposite wrong answers over the same 24 rows (whole-body scan preserves the exact false negative the bug was filed to remove; empty-set silences `snapshot_drift` corpus-wide via `body_keeps_snapshot`'s empty early-return), and neither is visible at unit-test grain because fixtures get written to whichever assumption the implementer held. Found by scouting the seam before typing, not by the plan being wrong about anything it addressed. |
 | F-135 | 2026-09-11 | med | verification/shared-checkout | open | **A shared-checkout rebuild maps to no commit, and POSITIVE BINARY IDENTIFICATION identifies the CHANGE, never the BUILD.** `cargo rb` relinked at 20:50:14 with zero code commits on HEAD since the previous build, while three peer-owned source files sat dirty. I read that as "their work is compiled in" and the mtimes refuted it — all three were written 1m33s to 2m51s AFTER the link, so the binary holds an intermediate state of them that is in no commit and no longer on disk. Both natural inferences are wrong in opposite directions. Puts a ceiling on `W-125`: its remedy answers *"does this binary contain my fix?"* and says nothing about what else is in there, and on a solo checkout those two questions coincide, which is why the gap is invisible from inside the practice. The specific wire claim survives because `src/tools/core/types.rs` is unmodified since 17:17:40, before the link — a property of that verification, not of the method. See `F-135` below. |
 | F-134 | 2026-09-11 | med | design/scope | open | **A bug's own stated fix preference can conflict with a design invariant its author didn't check against the actual code.** `b75d2660ef37198c` recommended oversampling grep's context mode the way simple mode does; the actual code (`grep.rs:121`) documents that simple mode's oversample is display-capped by `cap_grouped` and context mode has no equivalent cap, so following the recommendation verbatim would have shipped a 4x output-size regression alongside the fix. Took the bug's own second, more conservative option instead. See `F-134` below. |
 | F-132 | 2026-09-10 | med | process/attribution | open | **Novelty of the discovery ROUTE is not novelty of the DEFECT, and the two are indistinguishable from the inside.** Filed a duplicate of a bug already in the 96-row list I had read six hours earlier (`7e0968e2ddfcbc07`), title truncated past the discriminating token. A dedup query was run two hours before, for a bug found by *reading*; skipped for this one, found by *measurement* — a surprise does not present as a rediscovery. Recurred in mild form within 24 hours. A check gated on suspicion is not reached by the case that needs it. |
@@ -187,6 +188,7 @@ entry_high_water_W: 130
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-131 | 2026-09-13 | med | **Scouted a test file's rule-parity section before planning a gate, and found the parser the gate reuses is already filed debt.** `tests/issue_clusters.rs` requires every `#[test]` to be declared `HOOK_OWED` / `HOOK_ONLY` / `NOT_HOOK_OWED` *with a reason*, and `the_hook_enforces_every_rule_it_declares` compares that against `scripts/pre-commit-ledger-counts.py`'s `HOOK_RULES` by **equality, not subset**. Decisive find: `no_mechanism_status_is_a_bare_verdict` already reads `OWED, not yet implemented — needs the mechanism-status parser ported`, citing open bug `c77c15b68a60e126` (`cluster/guard-narrower-than-its-name`) — and the planned gate reuses that same parser. | Both new tests would have redded the parity gate on first run, which is cheap and self-announcing. The expensive half is the repair that red invites: declare them `NOT_HOOK_OWED`, landing a **fourth** `OWED, not yet implemented` entry against that one bug — widening an open IC-14 instance inside a change advertising itself as closing a gate hole, invisible to a reviewer reading a green suite. **The cheap red hides the expensive decision behind it.** Scout converts it into a scope question asked before any code is written. Also derived rather than cited: **20 of 23** index rows agree with their class field; the 3 that differ are three different kinds (IC-13 real drift, IC-2 a parenthetical, IC-3 no verdict token at all), so equality reds two of them wrongly — the vocabulary is the design question, the predicate is nearly free. | validated |
 | W-130 | 2026-09-12 | high | **Three readings of one cause, every one taken through the instrument that caused it.** `e69ebcbb96c28f7f` held that subagent writes reach no transcript; the cause had gone substrate → version (*"2.1.x emits none — zero across 41 versions, 1,928 dispatches"*), both counted through `scan()`'s own **non-recursive** `d.glob("*.jsonl")`. 2.1.x writes them to `<project-dir>/<parent-sid>/subagents/agent-<id>.jsonl`, one directory below reach, so every count returned zero and read as corroboration. Re-derived with `find`: **756** files, **755** carrying the flag, **192,797** records, newest same-day on **2.1.267** — inside the range cited as emitting none. | The file had queued two fixes — a controller-written sidecar per SDD task, and a working-tree substitute question — both workarounds for a substrate gap that is not there, each shipping a **second source of truth** for data the harness already writes, neither wrong in any way its own tests could show. Real fix: one glob plus a fallback correction, no parsing change. Worse, the conclusion was written into the **user-facing** refusal — *"stop looking for the owner — there is none recorded"* — while `fmt-mine.sh`'s whole remedy is *ask the named owner*: `--all` before named 10 owners, **0 of 10 live**; after, 11, the new one `[LIVE]` with a socket. **Operational form: when a count of "does the substrate contain X" returns zero, re-derive it with an instrument that does not share the first one's window.** | validated |
 | W-129 | 2026-09-12 | high | **The control fired, and what it caught was that the guard I was narrowing was load-bearing for a reason nobody had written down.** Fixing `d4db8a2d93bdced9` (fmt-mine refusing this session's own files on a mixed scan), I paired the positive assertion with *"THEIR file must be byte-untouched"*. It fired on the first draft: **`rustfmt <file>` is not per-file** — it descends into every `mod` the file declares, so formatting `$MINE` rewrote a peer's child module. Verified at the bytes on rustfmt 1.9.0-stable; `--skip-children` is nightly-only. | `ce3a628db5fa1168` — the defect the script exists to close — re-admitted **through the regression test written to close a different bug in the same script**, with every other assertion green: exit code, refusal text, peer socket, narrow command. The positive assertion passed *because* the formatter had run over everything. Second-order, and the half worth carrying: the wholesale refusal read as over-caution but was the only thing closing that door, since a peer's child can only be damaged if it too needs formatting and such a file is by construction a row in the same scan. **Before narrowing a guard that looks broader than its stated reason, ask what else its breadth is covering** — it will not be in the code, because anyone who knew would have written it. | validated |
 | W-128 | 2026-09-12 | med | **Verified a rebuild by PROCESS, not by file — and the verification expired eleven minutes later.** Identified my own server by `ppid` (PID 968351, inode `190428843`, shared with 3 peer servers), read its baked provenance (`git_sha=ad243cb7`, `git_dirty=true`), confirmed ancestry, then probed the wire: the `$VAR` source-gate refusal now names cause AND a performable remedy, and a 400-row `doc(find)` overflowed to a buffer whose envelope still carried the tool's own `corrections` with **no** `param_aliases` — the absence control, since two unrelated mechanisms write that key. At 19:33:11 a peer had relinked: on-disk inode `190441132`, and all four of those servers — mine included — now hold a deleted exe. | "The gate was green when I committed" is evidence about a suite, not the process answering my calls. Framed as *"the build on disk has my fix"* the same evidence goes false in 11 minutes with nothing marking the transition; framed as *"the process serving me"* it survives, because a running process keeps its mapped inode. **Also carries its own falsified count:** the entry first said "20 of 26" — `pgrep -f codescout` matches the `cargo`/`rustc`/`sccache` processes *building* it, so that counted pgrep's list rather than codescout servers. Re-derived: 19 of 21 on a dead inode, and the 2 on the current one are worker children of a peer's server, not session servers. | validated |
@@ -14159,6 +14161,85 @@ Claude Code layout detail that can move — which is the argument for the re-der
 habit, not against it.
 
 **Status:** validated
+
+## W-131 — Rule-parity scout re-scoped a ledger gate: the parser it reuses is already an unported, bug-filed debt
+
+**Valid:** dated 2026-09-13
+
+**Observed:** scouted the rule-parity section of `tests/issue_clusters.rs` before planning a new gate that compares the roster's mechanism column against each class file's `**Mechanism status:**` field. The seam was two levels deeper than the plan assumed.
+
+**What the scout surfaced.** Three hidden contracts, none visible from the ledger or from the test I was extending:
+
+1. `every_cluster_rule_is_hook_owed_or_exempt` refuses any `#[test]` in that file absent from all three of `HOOK_OWED`, `HOOK_ONLY`, `NOT_HOOK_OWED` — and `NOT_HOOK_OWED` entries carry a *reason string*, so adding a test forces writing down which side owes it.
+2. `the_hook_enforces_every_rule_it_declares` compares that declaration against `HOOK_RULES` in `scripts/pre-commit-ledger-counts.py` by **equality, not subset**, so a hook-owed classification is only landable together with a real Python implementation.
+3. Decisive: `no_mechanism_status_is_a_bare_verdict` is *already* declared `"OWED, not yet implemented — needs the mechanism-status parser ported"`, citing open bug `c77c15b68a60e126` (`cluster/guard-narrower-than-its-name`, IC-14). The planned gate reuses that exact parser.
+
+**Counterfactual — what shipping without the scout produces.** Both new tests red `every_cluster_rule_is_hook_owed_or_exempt` on their first run, which is cheap and self-announcing. The expensive half is what the obvious repair then is: declare them `NOT_HOOK_OWED`, which lands a *fourth* `OWED, not yet implemented` entry against `c77c15b68a60e126` — widening an open IC-14 instance in the same change that advertises itself as closing a gate hole. The cheap red hides the expensive decision behind it, and the decision is the one a reviewer would not see. The scout converts it into a scope question asked before any code: port the mechanism-status parser to the hook and close a third of that bug, or add a second unported consumer.
+
+**Derived rather than cited** (script in scratchpad, reusing `is_unbasised`'s own `VERDICTS` vocabulary): **20 of 23** index rows agree with their class field, 3 disagree, and the three are three different kinds —
+
+| id | index cell | class field | kind |
+|---|---|---|---|
+| IC-13 | `none yet` | `shipped (detector)` | genuine drift; the detector shipped 2026-09-03 as `tests/result_caps.rs` |
+| IC-2 | `designed (exemplar shipped)` | `designed` | parenthetical the gate must tolerate |
+| IC-3 | `**family 1 GATED** (…)` | `partial` | cell carries **no verdict token at all** |
+
+So a naive equality gate reds on all three, two of them wrongly, and would be rightly deleted. **The vocabulary is the design question; the predicate is nearly free.** IC-2 and IC-3 are the known-answer fixtures for that question and exist in the corpus today — they are not hypothetical cases to invent.
+
+**Prior art this confirms.** `IC-4`'s own `**Mechanism status:**` field already records this exact drift happening on 2026-09-02 and names why nothing caught it: *"the count columns are gated by `tests/issue_clusters.rs`; the mechanism column is not."* It was named, left, and recurred. Verified at the bytes: `parse_index_rows` (`tests/issue_clusters.rs:509-526`) extracts only the **slug** cell from a `| IC-` row, and `mechanism_statuses` scans `**Mechanism status:**` *field lines*, so no parser on either side reads the table's mechanism cell.
+
+**Status:** validated
+
+## F-136 — BL-77's settled fix does not say what an ABSENT snapshot_anchor means, and on day one that is all 24 augmented trackers
+
+**Valid:** invariant
+
+**Severity:** high · **Status:** open · **Category:** design-gap
+
+**Observed:** `BL-77` / `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+records its fix direction as **settled** — *"the augmentation gains a `snapshot_anchor` field holding
+the block's header line verbatim, author-declared and server-validated"* — with the two alternatives
+explicitly closed (column-arity **measured weak**: 83 lines match a generic 5-column pattern against 1
+for the template's literal header; derivation **forbidden** by
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md` § *The boundary*).
+
+Scouting the seam before implementing surfaced a hole the plan does not cover: **it never says what
+an ABSENT anchor means**, and on day one that is every tracker. `doc(action="find", kind="tracker",
+augmented=true)` returns **24** augmented trackers in this project, and the field does not exist yet,
+so all 24 arrive undeclared. The two available defaults are not close together:
+
+- **Absent ⇒ scan the whole body (today's behaviour).** Backward-compatible, and preserves the exact
+  false negative `BL-77` was filed to remove, for every tracker until someone hand-declares an anchor.
+  The fix would ship without fixing anything observable.
+- **Absent ⇒ no snapshot block.** `body_snapshot_row_indices` returns empty, so `body_keeps_snapshot`
+  returns `false` (it early-returns on an empty `in_body`) for all 24 at once. That silences
+  `snapshot_drift` across the corpus — the `tool-usage-patterns` false-positive direction, inverted
+  and corpus-wide.
+
+**Why this is a gap in the PLAN rather than a thing to decide while typing:** the two defaults are
+each individually defensible and produce opposite wrong answers over the same 24 rows, and neither is
+visible at unit-test grain — fixtures get written to whichever assumption the implementer held, and
+the suite then confirms it. This is § *Testing Discipline*'s population-vs-member law: a per-tracker
+claim checked against a fixture the implementer authored is vacuous for the 24 real members.
+
+**What the scout cost and saved:** four reads — `body_snapshot_row_indices`, `body_keeps_snapshot`,
+`row_from_sql`, and the migration block in `catalog/mod.rs`. Without it the shape reads as a
+mechanical column add: `column_exists`-guarded `ALTER TABLE artifact_augmentation ADD COLUMN
+snapshot_anchor TEXT` (the `entry_collection` precedent at `catalog/mod.rs:167-173`), a 14th field,
+`row.get(13)` — note `row_from_sql` is **positional**, so every `SELECT` column list must move in
+step — and three consumers (`augmentation.rs:530` `snapshot_stale_note`, `augmentation.rs:724`
+`append_entry`, `doctor.rs:4350` `scan_snapshot_drift`). All of that is correct and none of it
+answers the question above.
+
+**Rests on:** `doc(action="find", kind="tracker", augmented=true)` = 24, read 2026-09-13 at tree
+`2e8a8361`. The count is the *live* augmented set on this machine's catalog, which is gitignored — a
+clone that has not run `reindex` reports fewer, so re-derive rather than cite.
+
+**Proposed resolution (not applied):** a third option the bug file does not list — **absent ⇒ scan
+the whole body, AND emit the undeclared state as a `doctor` finding**, so the 24 become a worklist
+that drains rather than a silent default. That keeps backward compatibility, makes the gap
+*countable* instead of invisible, and matches the ADR's asymmetry: a read may fall back, a write may
+not. Needs the bug's owner to rule before implementation.
 
 ## Template for new entries
 
