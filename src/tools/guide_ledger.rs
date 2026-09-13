@@ -88,6 +88,15 @@ pub struct GuideLedger {
     /// Latching: once a hook has reported in, it has reported in. Survives
     /// `clear` and `rekey`, neither of which says anything about whether a hook
     /// is installed.
+    /// The conversation this ledger is currently keyed to; `None` on the
+    /// anonymous tier and before any key is adopted.
+    ///
+    /// Exists so a PER-REQUEST identity source can be consulted on every call.
+    /// The rendezvous reports only *changes*, so its caller can hand `rekey` a
+    /// session and know it is new; a `_meta` id arrives on every request, so
+    /// without this comparison `rekey_if_changed` would clear the ledger on
+    /// every call and re-deliver every guide forever.
+    key: Option<String>,
     rendezvous_active: bool,
 }
 
@@ -117,6 +126,7 @@ impl GuideLedger {
             emitted,
             notices: HashSet::new(),
             idle_ttl: None,
+            key: Some(session_id.to_string()),
             rendezvous_active: false,
         }
     }
@@ -129,6 +139,7 @@ impl GuideLedger {
             emitted: Default::default(),
             notices: HashSet::new(),
             idle_ttl,
+            key: None,
             rendezvous_active: false,
         }
     }
@@ -262,10 +273,29 @@ impl GuideLedger {
         if repointed.is_some() {
             self.path = repointed;
         }
+        self.key = Some(session.to_string());
         self.emitted.clear();
         // Notices re-arm with the guides, for the same reason `clear` re-arms
         // them: the model on the other end has never been told.
         self.notices.clear();
+    }
+
+    /// Adopt `session`, re-arming everything, but ONLY when it differs from the
+    /// conversation this ledger already holds. Returns whether a re-arm happened.
+    ///
+    /// The guard is the entire point. [`rekey`](Self::rekey) is unconditional,
+    /// which is correct for the rendezvous — `Rendezvous::poll` yields a session
+    /// only when the slot *changed*, so its caller never offers the same one
+    /// twice. A per-request source has no such filter: it re-states the same id
+    /// on every call, so an unguarded rekey would clear the ledger on every call
+    /// and re-deliver every guide forever — the delivery bug this mechanism
+    /// exists to prevent, wearing the costume of a fix for it.
+    pub fn rekey_if_changed(&mut self, session: &str) -> bool {
+        if self.key.as_deref() == Some(session) {
+            return false;
+        }
+        self.rekey(session);
+        true
     }
 
     /// Forget the named topics so they inject again, leaving every other topic
@@ -1204,6 +1234,58 @@ mod tests {
         l.set_rendezvous_active(true);
         l.rekey("conv-B");
         assert!(l.rendezvous_active(), "rekey must not close the gate");
+    }
+
+    #[test]
+    fn rekey_if_changed_re_arms_only_when_the_conversation_actually_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("conv-a", Some(dir.path().to_path_buf()));
+        l.insert("librarian".to_string());
+        assert!(l.contains("librarian"));
+
+        // The same conversation, restated — which is exactly what a PER-REQUEST
+        // identity source does on every single call. This must be a no-op. If it
+        // is not, the ledger is cleared on every call and every guide is
+        // re-delivered forever: the delivery bug, reintroduced by its own fix.
+        assert!(
+            !l.rekey_if_changed("conv-a"),
+            "an unchanged id must not re-arm"
+        );
+        assert!(
+            l.contains("librarian"),
+            "an unchanged conversation must keep the topics it was already sent"
+        );
+
+        // A different conversation holds nothing, so the re-arm is total.
+        assert!(l.rekey_if_changed("conv-b"), "a new id must re-arm");
+        assert!(!l.contains("librarian"));
+    }
+
+    #[test]
+    fn a_freshly_loaded_ledger_already_knows_its_own_conversation() {
+        // Kills the mutation where `load` leaves `key` unset. The first
+        // meta-bearing request would then read as a conversation CHANGE to the
+        // very conversation already being served, and wipe a correct ledger.
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("conv-a", Some(dir.path().to_path_buf()));
+        l.insert("librarian".to_string());
+        assert!(!l.rekey_if_changed("conv-a"));
+        assert!(l.contains("librarian"));
+    }
+
+    #[test]
+    fn an_anonymous_ledger_adopts_a_conversation_once_and_then_holds_it() {
+        // The anonymous tier has no key to start with, so the first assertion is
+        // a genuine change; the second must not be. Covers the `None` arm of the
+        // comparison, which the keyed tests above never reach.
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("librarian".to_string());
+        assert!(l.rekey_if_changed("conv-a"), "first adoption is a change");
+        assert!(!l.contains("librarian"));
+
+        l.insert("librarian".to_string());
+        assert!(!l.rekey_if_changed("conv-a"), "re-stating it is not");
+        assert!(l.contains("librarian"));
     }
 
     #[test]

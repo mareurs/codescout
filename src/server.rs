@@ -1083,6 +1083,45 @@ impl CodeScoutServer {
         self.guide_hints_emitted.lock().re_arm(&refs);
     }
 
+    /// Adopt the conversation a client asserted on THIS request, re-arming the
+    /// guide ledger when it names a conversation we were not already serving.
+    ///
+    /// This is the per-request identity tier the guide-ledger design doc ranks
+    /// above the rendezvous (`docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`,
+    /// § *Ranked options*, rank 3). It needs no companion hook and no
+    /// side-channel file, and it is the only tier that can distinguish a
+    /// subagent's call from its parent's: they share `CLAUDE_CODE_SESSION_ID`,
+    /// the process and the connection, so nothing else on the wire differs.
+    ///
+    /// **Inert until a client sends a CONVERSATION-scoped key — which is not the
+    /// same as "until a client populates `_meta`", because they already do.**
+    /// Claude Code 2.1.270 sends `claudecode/toolUseId` and `progressToken` on
+    /// every call (observed on the wire 2026-09-13); both are per-call, and
+    /// `session_key::CONVERSATION_META_KEYS` records why neither is usable here.
+    /// So `asserted` is `None` on every live call and this returns without
+    /// touching the ledger. Shipping the reader ahead of its sender costs one
+    /// `Option` check per call, and the client-side plumbing it needs exists.
+    ///
+    /// **Known limitation, deliberately not closed here.** Adoption re-arms; it
+    /// does not restore. Returning to a previously-served conversation re-sends
+    /// its guides rather than remembering what it had already received, because
+    /// one ledger is held per process, not one per conversation. That
+    /// over-delivers, which is this ledger's documented safe direction
+    /// ([`GuideLedger::load`]: "degrading to re-sending a guide, never to
+    /// suppressing one"). Restoring instead needs a conversation→ledger map and
+    /// is a separate decision.
+    fn adopt_request_conversation(&self, asserted: Option<String>) -> Option<String> {
+        let session = asserted?;
+        let rekeyed = self.guide_hints_emitted.lock().rekey_if_changed(&session);
+        if rekeyed {
+            tracing::info!(
+                session = %session,
+                "conversation asserted on the request; re-arming the guide ledger"
+            );
+        }
+        Some(session)
+    }
+
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
     /// call through the whole request path.
     ///
@@ -1131,6 +1170,12 @@ impl CodeScoutServer {
 
         let tool = self.resolve_tool(&req.name)?;
 
+        // Read before `req.arguments` moves on the next line: that partial move
+        // makes `req` unusable as a whole afterwards, and `meta` is the only
+        // other field anything on this path needs.
+        let asserted_conversation =
+            crate::tools::session_key::conversation_from_meta(req.meta.as_ref().map(|m| &m.0));
+
         let input: Value = Self::parse_input(req.arguments);
         let workspace_override = Self::extract_workspace_override(&input);
 
@@ -1176,6 +1221,14 @@ impl CodeScoutServer {
         // subagent reusing this live process never updates, while the rendezvous is
         // polled on every call and tracks the conversation we are CURRENTLY serving.
         let rendezvous_session = self.poll_rendezvous();
+        // A conversation asserted on the REQUEST outranks the rendezvous slot: it
+        // is per-call rather than per-process, needs no companion hook, and is the
+        // only source that can separate a subagent's calls from its parent's.
+        // `None` on every call today — no client sends it — so this leaves the
+        // rendezvous result exactly as it was.
+        let serving_session = self
+            .adopt_request_conversation(asserted_conversation)
+            .or(rendezvous_session);
         self.poll_guide_rearm();
 
         let mut ctx = self.build_context(progress, peer);
@@ -1196,7 +1249,7 @@ impl CodeScoutServer {
             self.agent.clone(),
             self.debug,
             self.session_id.clone(),
-            rendezvous_session.unwrap_or_else(|| self.cc_session_id.clone()),
+            serving_session.unwrap_or_else(|| self.cc_session_id.clone()),
         );
         let input_for_record = input.clone();
 
@@ -10013,6 +10066,68 @@ mod guide_hint_tests {
                 .unwrap_or_default()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "the opener must not re-fire on later calls"
+        );
+    }
+
+    /// A conversation asserted on the REQUEST re-arms the ledger; re-stating the
+    /// same one does not.
+    ///
+    /// Drives `call_tool_inner` — the single production funnel — and not
+    /// `call_content`, deliberately: the `_meta` read and the adoption both live
+    /// on that path, so a `call_content` test would stay green with the entire
+    /// wiring deleted. This is the only test here that touches the wire shape.
+    #[tokio::test]
+    async fn a_conversation_asserted_on_the_request_rearms_the_ledger_once() {
+        async fn call(server: &CodeScoutServer, conversation: Option<&str>) -> Vec<String> {
+            let mut params = json!({
+                "name": "run_command",
+                "arguments": {"command": "echo hi"},
+            });
+            if let Some(id) = conversation {
+                let mut meta = serde_json::Map::new();
+                meta.insert(
+                    crate::tools::session_key::CONVERSATION_META_KEYS[0].to_string(),
+                    json!(id),
+                );
+                params["_meta"] = Value::Object(meta);
+            }
+            let req: CallToolRequestParams = serde_json::from_value(params).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            guide_blocks(&out.content)
+        }
+
+        let (_dir, server) = make_server().await;
+
+        // 1. The opener fires on the first guide-eligible call of the session.
+        assert!(
+            !call(&server, None).await.is_empty(),
+            "the session opener must fire on the first call"
+        );
+
+        // 2. POSITIVE CONTROL. Ordinary dedup holds. Without this assertion the
+        //    next step proves nothing: a guide that fired on every call would
+        //    satisfy step 3 just as well as a genuine re-arm would.
+        assert!(
+            call(&server, None).await.is_empty(),
+            "a second call in the same conversation must be deduped"
+        );
+
+        // 3. A DIFFERENT conversation, asserted on the request. This is the
+        //    subagent case: same process, same session id, same connection —
+        //    only `_meta` differs, and it is the only thing that can.
+        assert!(
+            !call(&server, Some("conv-child")).await.is_empty(),
+            "a newly asserted conversation must be re-armed"
+        );
+
+        // 4. The SAME conversation restated, which is what every subsequent call
+        //    from that subagent looks like. Must NOT re-arm.
+        assert!(
+            call(&server, Some("conv-child")).await.is_empty(),
+            "re-stating the same conversation must not re-arm"
         );
     }
 

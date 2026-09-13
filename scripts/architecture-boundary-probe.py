@@ -1370,7 +1370,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--runtime-binary",
         type=Path,
-        default=Path(shutil.which("codescout") or "/home/marius/.cargo/bin/codescout"),
+        default=Path(
+            shutil.which("codescout")
+            or Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo") / "bin" / "codescout"
+        ),
         help="codescout executable queried with MCP tools/list",
     )
     return parser.parse_args(argv)

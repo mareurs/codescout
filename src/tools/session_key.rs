@@ -35,6 +35,32 @@ impl SessionKey {
 /// in the chain changes. Probed unconditionally — never gated on `clientInfo`.
 pub const HARNESS_SESSION_VARS: &[&str] = &["CLAUDE_CODE_SESSION_ID"];
 
+/// `_meta` keys probed, in order, for a per-request conversation identity.
+///
+/// A LIST rather than one key, for exactly the reason [`HARNESS_SESSION_VARS`]
+/// is one: there is no reserved key to standardise on. `Mcp-Client-Session-Id`
+/// via `params._meta` (modelcontextprotocol PR #2822) was closed for lacking
+/// compelling use cases and redirected to `transports-wg#36`, so every sender
+/// that exists is vendor-namespaced and an eventual standard key is one more
+/// entry here rather than a replacement for this one. Extend by adding an
+/// entry; nothing else in the chain changes.
+///
+/// **Two keys are deliberately NOT probed, both measured finer than a
+/// conversation.** Note what this means: the list has no senders, but `_meta`
+/// itself is populated in the wild.
+///
+/// - `claudecode/toolUseId` — Claude Code 2.1.270 sends it on EVERY `tools/call`,
+///   beside `progressToken`. Identifies one tool call.
+/// - `x-codex-turn-metadata` — Codex CLI (PR #15190, 2026-03-19). Identifies one
+///   turn.
+///
+/// Keying the ledger on either would re-arm every topic on every call or every
+/// turn — the over-delivery this ledger exists to prevent. A granularity
+/// mismatch is worse than probing nothing, not a near-miss worth taking; both
+/// are pinned in `no_sub_conversation_key_is_ever_probed`. Observed on the wire
+/// 2026-09-13 against Claude Code 2.1.270 and Pi 0.85.1.
+pub const CONVERSATION_META_KEYS: &[&str] = &["dev.codescout.mcp/conversationId"];
+
 /// First non-empty wins: explicit, then each harness var in order, then
 /// `Anonymous`. Values are trimmed; whitespace-only counts as absent.
 pub fn resolve<I>(explicit: Option<String>, harness: I) -> SessionKey
@@ -63,6 +89,36 @@ where
     SessionKey::Anonymous
 }
 
+/// The conversation id a client asserted on this request's `_meta`, if any.
+/// First non-empty key in [`CONVERSATION_META_KEYS`] wins, matching
+/// [`resolve`]'s rule for the env chain.
+///
+/// `None` covers every "the client said nothing" shape — absent `_meta`, absent
+/// key, a non-string value, or whitespace — and none of them is an error: a
+/// client that sends nothing must behave exactly as it does today.
+///
+/// **No client populates these keys yet — and the precise claim matters, because
+/// the shorter one is false.** `_meta` IS populated: Claude Code sends
+/// `claudecode/toolUseId` and `progressToken` on every call; Codex CLI sends turn
+/// metadata; Pi sends no `_meta` at all. What no client sends is a
+/// CONVERSATION-scoped identifier. (Claude Code issue #76391 is the open ask for
+/// one; #41836 is a neighbouring HTTP-scoped request that never mentions
+/// `_meta`.) So this returns `None` on every live call today. It ships ahead of
+/// its sender
+/// because it is the only tier that can tell a subagent's call from its
+/// parent's: they share the session id, the process and the connection, and
+/// differ only in what a client could choose to stamp here.
+pub fn conversation_from_meta(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<String> {
+    let meta = meta?;
+    CONVERSATION_META_KEYS.iter().find_map(|key| {
+        let raw = meta.get(*key)?.as_str()?;
+        let trimmed = raw.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +136,109 @@ mod tests {
                 source: KeySource::Explicit
             }
         );
+    }
+
+    fn meta_map(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_conversation_id_is_read_from_the_namespaced_meta_key() {
+        let m = meta_map(&[(CONVERSATION_META_KEYS[0], serde_json::json!("conv-7"))]);
+        assert_eq!(conversation_from_meta(Some(&m)), Some("conv-7".to_string()));
+    }
+
+    #[test]
+    fn a_conversation_id_is_trimmed_like_every_other_rank() {
+        let m = meta_map(&[(CONVERSATION_META_KEYS[0], serde_json::json!("  conv-7\n"))]);
+        assert_eq!(conversation_from_meta(Some(&m)), Some("conv-7".to_string()));
+    }
+
+    #[test]
+    fn every_shape_of_client_silence_yields_no_conversation() {
+        // Five DISTINCT ways a client can say nothing. Asserted per-shape rather
+        // than as one aggregate: a mutation that revives exactly one of them
+        // (say, accepting a non-string) must still red, and an aggregate
+        // "returns None somewhere" would absorb it.
+        assert_eq!(conversation_from_meta(None), None, "no _meta at all");
+        assert_eq!(
+            conversation_from_meta(Some(&meta_map(&[]))),
+            None,
+            "_meta present but empty"
+        );
+        assert_eq!(
+            conversation_from_meta(Some(&meta_map(&[(
+                "progressToken",
+                serde_json::json!("p")
+            )]))),
+            None,
+            "_meta carries someone else's key, not ours"
+        );
+        assert_eq!(
+            conversation_from_meta(Some(&meta_map(&[(
+                CONVERSATION_META_KEYS[0],
+                serde_json::json!(42)
+            )]))),
+            None,
+            "our key, non-string value"
+        );
+        assert_eq!(
+            conversation_from_meta(Some(&meta_map(&[(
+                CONVERSATION_META_KEYS[0],
+                serde_json::json!("   ")
+            )]))),
+            None,
+            "our key, whitespace-only"
+        );
+    }
+
+    #[test]
+    fn the_conversation_meta_key_stays_vendor_namespaced() {
+        // `_meta` is a SHARED protocol slot: a bare key would collide with the
+        // next vendor to want one. Shape, not spelling — `transports-wg#36` may
+        // yet rename ours, and that rename must not red.
+        assert!(
+            !CONVERSATION_META_KEYS.is_empty(),
+            "an empty probe list makes conversation_from_meta dead code while \
+             every other test here still passes — assert the inputs exist first"
+        );
+        for key in CONVERSATION_META_KEYS {
+            assert!(
+                key.contains('/') || key.contains('.') || key.contains('-'),
+                "probe key must be vendor-namespaced, not bare: {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_sub_conversation_key_is_ever_probed() {
+        // Keys OBSERVED on the wire (2026-09-13) that are finer than a
+        // conversation. Probing any would re-arm every topic on every call or
+        // turn — the over-delivery this ledger exists to prevent, and strictly
+        // worse than probing nothing.
+        //
+        // A denylist rather than a substring heuristic, because
+        // `claudecode/toolUseId` advertises nothing about its granularity in its
+        // name — and it is the one someone would reach for, having looked at a
+        // real `_meta` and correctly noticed it is populated on every call.
+        const MEASURED_TOO_FINE: &[&str] = &[
+            "claudecode/toolUseId",  // Claude Code 2.1.270 — per tool call
+            "progressToken",         // per request
+            "x-codex-turn-metadata", // Codex CLI — per turn
+        ];
+        for key in CONVERSATION_META_KEYS {
+            assert!(
+                !MEASURED_TOO_FINE.contains(key),
+                "key is finer than a conversation and must not be probed: {key}"
+            );
+            assert!(
+                !key.to_ascii_lowercase().contains("turn"),
+                "a turn-granularity key must never be probed: {key}"
+            );
+        }
     }
 
     #[test]
