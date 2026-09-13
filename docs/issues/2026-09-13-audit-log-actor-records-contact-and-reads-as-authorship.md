@@ -1,0 +1,110 @@
+---
+status: open
+opened: 2026-09-13
+closed:
+severity: medium
+owner: marius
+related: []
+tags:
+- cluster/authorship-unrecoverable-after-the-fact
+kind: bug
+---
+
+# `audit_log`'s `actor` records CONTACT and reads as AUTHORSHIP
+
+`librarian(action="audit_log", row_id=...)` answers *"whose connection wrote this
+catalog row?"*. A reader on a shared checkout asks it *"who authored this
+artifact?"* and gets a confident, well-formatted, wrong name.
+
+The mechanism is that **`reindex` writes an audit row for every artifact it
+re-embeds**, stamped with the reindexing session's id. So the most recent
+reindexer becomes the `actor` of record on artifacts it has never written a byte
+of — and `reindex` is a routine, encouraged call.
+
+## Observed (2026-09-13, ~14:5x)
+
+A peer (`9403d62d`) asked whether the untracked architecture-boundary-probe work
+was mine. It is not — I have never touched it. Yet:
+
+```
+librarian(action="audit_log", row_id="51baab12f451feb6")   # its session log
+librarian(action="audit_log", row_id="c61d542269b5c6de")   # its measurement tracker
+```
+
+both return rows with `actor: codescout:8bd791df-5ff4-40fe-af30-69cc3fefc2f7`
+— me. Had the peer run that check instead of asking, the instrument would have
+contradicted my answer and neither of us could have said which was wrong.
+
+The real writer is `actor: codescout:anonymous`, via `doc.create` / `doc.update`:
+
+| at (+03:00) | actor | verb | payload |
+|---|---|---|---|
+| 2026-09-11 13:07:48 | anonymous | `librarian.reindex` | insert |
+| 2026-09-13 09:13:55 | anonymous | `doc.update` | `file_sha256`, `updated_at`, `file_mtime` |
+| 2026-09-13 09:29:57 | anonymous | `doc.create` | `slug` |
+| 2026-09-13 09:35:39 | anonymous | `doc.update` | `file_sha256`, … |
+| 2026-09-13 09:19:04 | **8bd791df (me)** | `librarian.reindex` | **`embedded_sha256` only** |
+| 2026-09-13 12:27:43 | **8bd791df (me)** | `librarian.reindex` | **`embedded_sha256` only** |
+
+## The obvious discriminator does not work
+
+A reader who notices the problem reaches for `verb` — and `verb` is
+**per-connection, not per-row**. `Catalog::set_audit_verb`
+(`src/librarian/catalog/mod.rs:578`) is explicit:
+
+> *Best-effort verb tag for subsequent audit rows on this connection. The verb
+> persists until the next stamp — it means "last dispatched verb", not "verb of
+> this exact statement"; audit_log documents this.*
+
+`audit_log` does document it, in its `note` field
+(`src/librarian/tools/audit_log.rs:257`) — and that note is about `verb`'s own
+accuracy. **Nothing anywhere says `actor` is contact rather than authorship**, which
+is the reading that actually costs something. I asserted `verb` as the
+discriminator to the peer before reading `set_audit_verb`, and had to correct it.
+
+**What IS reliable is the payload shape**, and it is documented nowhere:
+
+- `embedded_sha256` alone changed → a re-embedding pass. Not a content write.
+- `file_sha256` / `slug` / `source` changed → a real content write.
+
+## Why this class
+
+`IC-10`, whose roster entry already reads *"`Session-Id` commit trailer, hook
+installed and live; **uncommitted half still none**"*. This is precisely the
+uncommitted half: `audit_log` is the one instrument that looks like it answers
+authorship for an artifact that has never been committed, and it does not. It
+fails in the class's signature way — a plausible name, not an error.
+
+It also compounds with `scripts/file-provenance.py`, whose `UNKNOWN` is loudly
+labelled *"a statement about coverage, NOT about ownership"*. A reader who
+correctly refuses to read `UNKNOWN` as unowned then reaches for `audit_log` as the
+second opinion — and gets a **name**, which reads as the stronger answer. Two
+instruments, and the more confident one is the wrong one.
+
+## What is NOT established
+
+- **Whether any session has actually acted on this.** Today produced a near-miss
+  (the peer asked rather than checked), not a measured wrong action. I have not
+  searched the corpus for a past misattribution traceable to this.
+- **How wide the blast is.** Every artifact re-embedded by a reindex gets a row, so
+  the population is plausibly "every artifact in the project, attributed to
+  whoever reindexed last" — but I checked two row ids, not the table. Deriving
+  that count is the obvious next step and I have not done it.
+- **Whether `codescout:anonymous` is itself recoverable.** It means a codescout
+  writer with no `CLAUDE_CODE_SESSION_ID` (CLI invocation, or a session started
+  without it). Whether anything else in the trail narrows it, I did not check.
+
+## Fix directions, neither started
+
+1. **Cheapest, and matches the precedent already set today.** `file-provenance.py`
+   had the same shape and was fixed by *surfacing the caveat in the output*
+   (`568cd7d2`, bug archived `a328c8bb`). Add to `audit_log`'s `note`: that a
+   `librarian.reindex` row with an `embedded_sha256`-only payload is contact, not
+   authorship, and that `actor` answers "whose connection", not "who wrote".
+2. **Stronger, more invasive.** Give the response a derived per-row field — e.g.
+   `content_write: true|false` from the payload keys — so the discriminator is a
+   field rather than a thing the reader must reconstruct. This is the version that
+   survives a reader who never opens the `note`.
+
+Direction 1 is what a session could ship today; direction 2 is what makes the
+instrument answer the question it is actually asked.
