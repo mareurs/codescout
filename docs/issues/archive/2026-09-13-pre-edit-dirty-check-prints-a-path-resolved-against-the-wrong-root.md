@@ -1,7 +1,7 @@
 ---
-id: '1d7e1aad8de63851'
+id: 796944d5cac8e20f
 kind: bug
-status: open
+status: fixed
 title: 'BUG: pre-edit-dirty-check prints a path resolved against the session cwd, and keys its seen-marker on the spelling'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -113,22 +113,31 @@ will look.
 
 ## Fix
 
-Not attempted. Direction: resolve once, immediately after `projectRoot` is known —
-`const abs = isAbsolute(targetPath) ? targetPath : join(projectRoot, targetPath)` — and use
-`abs` for the display and the marker key. Leave the git call as it is, or pass `abs`; both
-work.
+**Fixed 2026-09-13.** Shipped `codescout-companion:0e49d2a` (repo `claude-plugins`, patch-id
+`be1809f6287126bc4f627635033aa8ac2ef43de0`).
 
-That also fixes the marker's spelling-sensitivity for free, which is the half with a real
-cost: two spellings of one path currently get two "first edit" warnings, and a rename resets
-the per-session bound the hook deliberately imposes at `:69-71`.
+`targetPath` is now resolved to an absolute path exactly once, immediately after
+`projectRoot` is computed (`const absTargetPath = isAbsolute(targetPath) ? targetPath :
+join(projectRoot, targetPath)`), and that value is used for both the marker hash and the
+displayed `rel`. The `git()` call is untouched, per this file's own note that it was never
+affected (it runs with `-C projectRoot` explicitly).
 
-**Do not fix this by absolutizing inside `inputPath()`.** It has other callers that may rely
-on the raw value, and it has no `projectRoot` to resolve against — the resolution belongs at
-the call site that already computed one.
+Not done via `inputPath()` itself, per this file's own warning: the fix lives at the call
+site that already has `projectRoot`, not inside a helper with no root to resolve against.
+
+Reproduced the exact reported symptom before fixing: a session with cwd at the plugin's
+own `.buddy` subdirectory, editing a project-relative path, printed
+`` `.buddy/tests/example.rs` `` — a path that does not exist — byte-for-byte matching this
+file's Symptom section.
 
 ## Tests added
 
-None — not fixed.
+`codescout-companion/hooks/pre-edit-dirty-check.test.sh` (new file), 5 cases: from the
+project root (control, correct either way), from a subdirectory (the reported
+reproduction — confirmed RED against the pre-fix source via `git stash`, printing the
+exact `.buddy/...` symptom text), and a same-file-different-spelling case (relative vs.
+absolute path in the tool payload) proving the marker converges on one key. All 5 pass
+post-fix; the subdirectory and spelling cases fail pre-fix.
 
 ## Workarounds
 
