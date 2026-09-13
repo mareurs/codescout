@@ -130,6 +130,59 @@ predate you by seven hours and still be writing. This is cheaper than the `Sessi
 commit-trailer route this file names, needs no commits to exist, and works on the first turn
 after a compaction — so the accurate statement is that `from=` is unfalsifiable **from
 context**, not unfalsifiable from **inside the session**.
+
+### Fourth instance, 2026-09-13 — self-refuting inside the banner, and the first near miss with a DISCRIMINATOR
+
+Session `05841db2-4ba0-4cb2-a22f-c0bc2f771e20` (`codescout-aa`, profile `.claude-kat`, PID 2706008)
+compacted at ~09:30 and its banner read:
+
+```
+sid=05841db2-…  from=b80a27d4-…  source=compact
+payload-file=.buddy/05841db2-…/reload-payload-compact.md
+```
+
+**Positive identification, not elimination.** `b80a27d4-9729-40ef-8c28-ad8982df6d13` resolves
+through `/home/marius/.claude-sdd/sessions/872862.json` to name `codescout-87`, profile
+`.claude-sdd`, cwd this checkout, status `idle` — a live peer. Recorded lineage this time is
+`05841db2` → `b80a27d4` → `b0b9bc40-…` (`.claude-sdd`, PID 1456596), and **both ancestors sit on a
+profile that is not the reading session's**, so no `ListAgents` call from inside it could ever have
+surfaced either. Instance 3's chain-of-contemporaries finding holds with a fresh chain and a new
+edge: the pointer crosses profile boundaries, because the checkout is what it is shared by.
+The churn was caught again — `.buddy/.current_session_id` held `b80a27d4` at compact time and
+`05841db2` at 09:54:25, rewritten mid-turn.
+
+**The cheapest refutation yet, and it needs nothing outside the banner.** Instance 3 narrowed *"un-
+falsifiable from context"* to *"falsifiable from inside, via process start time"* — which still
+requires resolving the named peer's PID. Cheaper: **the banner contradicts itself on one line.**
+`payload-file` is under the READING session's own sid while `from=` names another. For
+`source=compact` the payload is read from your own directory, so any `from=` naming a different sid
+disagrees with the path printed beside it. Zero lookups, available on the first turn, and it still
+works after every named peer has exited.
+
+A second route, independent and nearly as cheap: this session's own pre-compaction commits carry
+`Session-Id: 05841db2` (`23adef79`, `02e61230`, `96574bfa`), so **the sid survives compaction** and
+the "previous session" for `source=compact` is you. That refutes any differing `from=` without
+resolving the named peer at all — where the commit-trailer route as this file previously described
+it checks the NAMED session's commits.
+
+**First instance carrying a DISCRIMINATOR rather than an absence — and the prior readings were
+monotone under the very thing they excluded.** Instances 2 and 3 recorded `active_specialists: []`
+on both sides and read it as *"the adoption path was reached and did not fire"*. `[]` on both sides
+cannot separate that from *"it fired and copied an empty list"*: the observation is identical under
+both, which is § *Testing Discipline*'s monotone law holding against this file's own evidence.
+
+Here the two sides differ observably. `loaded_skills.json` holds **3** skills for `05841db2` and
+**5** for `b80a27d4`, three of them (`writing-plans`, `subagent-driven-development`,
+`using-git-worktrees`) unique to the peer. The reload restored `reconnaissance` — present in the
+reading session's own list at `first_ts 1789149189` — and **none** of the peer's three unique
+skills. So the payload's CONTENT is the reading session's and only the `from=` attribution is
+wrong, which is now shown rather than inferred.
+
+`active_specialists` was `[]` on both sides again, so the tally is **three near misses, zero
+observed transfers** — but this is the first where a transfer would have been VISIBLE had it
+occurred, so it is the first that is evidence about the mechanism rather than about the sample.
+**The armed effect is still unmeasured in the direction that matters:** nothing here exercises a
+non-empty `active_specialists`, and severity rests entirely on how often a session holds one.
 ## Evidence
 
 Quoted from the peer's cross-session message (2026-09-03):
@@ -150,8 +203,23 @@ None — no code in this repository implements the mechanism described.
 
 ## Workarounds
 
-A session using `buddy`'s reload payload for an authorship decision should independently cross-check via process ancestry and/or the session registry (as the reporting peer did) rather than trusting `from=` alone, exactly as `docs/conventions/shared-checkout-commit-sequence.md` already prescribes for staged-file authorship generally.
+**Check the banner against itself first — it costs nothing and needs no peer to still exist.** For
+`source=compact` the payload is read from the reading session's own directory, so `payload-file`
+and `from=` must name the same sid. When they disagree, `from=` is wrong and you are done; no
+registry lookup, no `/proc` walk, no live peer required. Second-cheapest, and independent: your own
+pre-compaction commits carry `Session-Id: <your sid>`, and the sid survives compaction — so for
+`source=compact` the "previous session" is you, and any other value is refuted without resolving
+whoever it names.
 
+Only if both are unavailable, fall back to the expensive routes: process start time against the
+named peer's PID (instance 3), or resolving the sid through
+`$CLAUDE_CONFIG_DIR/sessions/<pid>.json` across **every** profile — the named session is routinely
+on a different one (instance 4), so a single-profile scan returns a plausible "not found".
+
+Either way, a session using `buddy`'s reload payload for an authorship decision must cross-check
+rather than trust `from=` alone, exactly as
+`docs/conventions/shared-checkout-commit-sequence.md` already prescribes for staged-file authorship
+generally.
 ## Resume
 
 1. ~~Independently reproduce or further trace the mechanism~~ — **done 2026-09-08**, see § *Verified at the bytes*. The plugin source was read; the mechanism, the two effects and the one-branch fix are all named there. What remains is a fix in the `buddy` plugin's own repo, which is not this repository's code.
