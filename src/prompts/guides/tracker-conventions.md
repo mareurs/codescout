@@ -245,6 +245,30 @@ is already ignoring them.
 Note the gate only catches the subset that lands in a full-severity surface, so the grep
 is the check — not a green CI run.
 
+**Verifying the sweep afterward needs a different pattern than the sweep itself — grepping the
+slug is the mistake to avoid.** An archive move keeps the filename and changes only the
+directory, so the slug — the part everyone reaches for, because it is the memorable half — is
+invariant under exactly the change being verified: `docs/issues/2026-09-01-<slug>.md` and
+`docs/issues/archive/2026-09-01-<slug>.md` both contain `<slug>`, so a slug grep returns the same
+hit whether a citation was fixed or not. Both misreadings were observed on this repo within about
+ninety seconds of each other — a completed sweep reported as 5 still-dangling refs, and an
+unswept corpus reported as clean.
+
+- **Verify with the full old path, never the slug.** `docs/issues/<name>.md` as a literal prefix
+  cannot match the archive form; it is the only pattern that answers "is anything still
+  dangling?"
+- **Always pair it with the archive-form control.** `git grep -F 'docs/issues/archive/<name>.md'`
+  must return non-zero, or a `0` from the first grep is indistinguishable from a typo'd pattern
+  matching nothing.
+- **Move before you write the citation, not after.** A Members line, tracker row or
+  cross-reference written after the move already names the new path, so a slug-only
+  verification has nothing to hide — the same zero is honest either way.
+- **`doc(action="move")`'s `inbound_path_citations` field has the same blind spot.** It matches
+  the path form only, so a bare-slug citation — every `**Members:**` line in
+  `docs/trackers/issue-clusters/` is one — is invisible to it and reports as `[]`. Read that as
+  "no path-form citations found," not "no citations exist," and grep the slug yourself, before
+  the move, to catch those.
+
 **Cite where the file IS, never where the archive flow will put it.** The sweep above
 repairs citations that *were* correct when written; it can never reach one that was wrong
 on the day it was written. A citation is authored at **fix** time; the archive move is a
