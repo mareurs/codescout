@@ -358,10 +358,35 @@ impl RemoteEmbedder {
         })
     }
 
+    /// Create an embedder against an OpenAI-compatible endpoint, resolving the
+    /// bearer token from `EMBED_API_KEY`.
+    ///
+    /// This is the ambient-env edge: it reads the variable once and hands the value
+    /// to [`Self::custom_with`], which is where the logic lives. Tests drive
+    /// `custom_with` directly with a value, so none of them has to mutate
+    /// process-global state — `docs/conventions/test-env-isolation.md` option A.
+    ///
+    /// **Reachability, recorded because it is not what a reader assumes of a `pub fn`.**
+    /// Nothing in this workspace calls it: the `custom:` model prefix it was built for
+    /// was removed and now hard-errors with a migration hint (`crate::create_embedder_with_config`,
+    /// step 5), and the replacement path routes through [`Self::from_url`]. Two
+    /// instruments agree on that — the LSP reference index and a workspace-wide grep,
+    /// which do not share a scope. It is kept because this crate is published and
+    /// removing a `pub fn` is a breaking change, not because anything here needs it.
     pub fn custom(base_url: &str, model: &str) -> Result<Self> {
+        Self::custom_with(base_url, model, std::env::var("EMBED_API_KEY").ok())
+    }
+
+    /// The body of [`Self::custom`], with the bearer token as a parameter.
+    ///
+    /// Note the HTTPS predicate here is `starts_with("https://")`, which is STRICTER
+    /// than [`Self::from_url`]'s `is_https_or_loopback` — a loopback Ollama with a key
+    /// is accepted there and refused here. That difference is pre-existing and is left
+    /// alone deliberately: changing it would alter published behaviour, which is a
+    /// separate decision from moving the env read.
+    pub fn custom_with(base_url: &str, model: &str, api_key: Option<String>) -> Result<Self> {
         Self::require_model(model)?;
         let endpoint = format!("{}/v1/embeddings", base_url.trim_end_matches('/'));
-        let api_key = std::env::var("EMBED_API_KEY").ok();
         if api_key.is_some() && !base_url.starts_with("https://") {
             bail!(
                 "HTTPS required when EMBED_API_KEY is set — \
@@ -1049,29 +1074,26 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn custom_rejects_http_with_api_key() {
-        unsafe { std::env::set_var("EMBED_API_KEY", "sk-test-key") };
-        let result = RemoteEmbedder::custom("http://example.com", "model");
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
+        let result =
+            RemoteEmbedder::custom_with("http://example.com", "model", Some("sk-test-key".into()));
         let err = result.err().expect("should be Err");
         assert!(err.to_string().contains("HTTPS"));
     }
 
     #[test]
-    #[serial_test::serial]
     fn custom_allows_http_without_api_key() {
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
-        let result = RemoteEmbedder::custom("http://localhost:11434", "model");
+        let result = RemoteEmbedder::custom_with("http://localhost:11434", "model", None);
         assert!(result.is_ok());
     }
 
     #[test]
-    #[serial_test::serial]
     fn custom_allows_https_with_api_key() {
-        unsafe { std::env::set_var("EMBED_API_KEY", "sk-test-key") };
-        let result = RemoteEmbedder::custom("https://api.example.com", "model");
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
+        let result = RemoteEmbedder::custom_with(
+            "https://api.example.com",
+            "model",
+            Some("sk-test-key".into()),
+        );
         assert!(result.is_ok());
     }
     /// The required-model contract, enforced at CONSTRUCTION rather than at request
@@ -1089,9 +1111,7 @@ mod tests {
     /// one entry point — guarding `from_url` alone leaves `openai`, `ollama` and
     /// `custom` accepting the same empty string. Mutating any single site reds this.
     #[test]
-    #[serial_test::serial]
     fn every_constructor_refuses_an_empty_model() {
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
         for (name, err) in [
             (
                 "from_url",
@@ -1104,7 +1124,7 @@ mod tests {
             ("ollama", RemoteEmbedder::ollama("").err()),
             (
                 "custom",
-                RemoteEmbedder::custom("https://api.example.com", "").err(),
+                RemoteEmbedder::custom_with("https://api.example.com", "", None).err(),
             ),
         ] {
             let err = err.unwrap_or_else(|| panic!("{name} accepted an empty model"));
@@ -1122,9 +1142,7 @@ mod tests {
     /// before testing, and pin that here so a later simplification to `is_empty()`
     /// reds instead of silently narrowing the guard.
     #[test]
-    #[serial_test::serial]
     fn a_whitespace_only_model_is_refused_like_an_empty_one() {
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
         for m in ["   ", "\t", "\n", " \t "] {
             assert!(
                 RemoteEmbedder::from_url("http://127.0.0.1:1", m, None).is_err(),
@@ -1137,21 +1155,21 @@ mod tests {
     /// they cannot detect: a guard that refused *every* model would satisfy both of
     /// them completely. This is what reds if the check is ever widened past empty.
     #[test]
-    #[serial_test::serial]
     fn a_non_empty_model_still_constructs() {
-        unsafe { std::env::remove_var("EMBED_API_KEY") };
         assert!(
             RemoteEmbedder::from_url("http://127.0.0.1:1", "CodeRankEmbed-Q4_K_M.gguf", None)
                 .is_ok()
         );
         assert!(RemoteEmbedder::ollama("nomic-embed-text").is_ok());
-        assert!(
-            RemoteEmbedder::custom("https://api.example.com", "text-embedding-3-small").is_ok()
-        );
+        assert!(RemoteEmbedder::custom_with(
+            "https://api.example.com",
+            "text-embedding-3-small",
+            None
+        )
+        .is_ok());
     }
 
     #[test]
-    #[serial_test::serial]
     fn from_url_normalizes_bare_host() {
         let e = RemoteEmbedder::from_url("http://127.0.0.1:43300", "nomic", None).unwrap();
         assert_eq!(e.endpoint, "http://127.0.0.1:43300/v1/embeddings");
@@ -1202,15 +1220,27 @@ mod tests {
         assert!(!is_https_or_loopback("http://example.com/127.0.0.1"));
     }
 
+    /// **The one test in this crate that mutates the process environment, and the only
+    /// one that has to.** Its subject IS ambient-env behaviour: to show `from_url`
+    /// ignores `EMBED_API_KEY`, the variable has to be set while it runs. Every other
+    /// env-touching test here was driving a knob and now passes it as a value instead
+    /// (`custom_with`), which is `docs/conventions/test-env-isolation.md` option A.
+    ///
+    /// So this keeps `#[serial]` and the convention's option C applies with its limits
+    /// understood: `#[serial]` coordinates only among annotated tests, and nothing stops
+    /// an untagged reader elsewhere in this binary. That is tolerable here only because
+    /// the population of readers is now ONE — `custom`, whose logic moved to
+    /// `custom_with` — and no test calls it.
+    ///
+    /// It was named `from_url_falls_back_to_env_api_key`, which asserted the opposite of
+    /// what it checks: the fallback was REMOVED (see `from_url`'s docstring), and this is
+    /// the regression pin for that removal.
+    ///
+    /// Loopback host so a leaked key does not also trip the HTTPS guard — that guard is
+    /// orthogonal here and covered by `is_https_or_loopback_matches_host_exactly`.
     #[test]
     #[serial_test::serial]
-    fn from_url_falls_back_to_env_api_key() {
-        // `from_url` used to fall back to EMBED_API_KEY when the argument was
-        // None — that made it read ambient config, which is exactly the shape
-        // docs/conventions/test-env-isolation.md rules out (an untagged test
-        // elsewhere reading the same var can race a tagged one that sets it).
-        // Loopback host so a leaked key doesn't also trip the HTTPS guard —
-        // that guard is orthogonal to this test and is covered elsewhere.
+    fn from_url_ignores_an_ambient_env_api_key() {
         unsafe { std::env::set_var("EMBED_API_KEY", "sk-should-be-ignored") };
         let e = RemoteEmbedder::from_url("http://127.0.0.1:43300", "model", None).unwrap();
         unsafe { std::env::remove_var("EMBED_API_KEY") };

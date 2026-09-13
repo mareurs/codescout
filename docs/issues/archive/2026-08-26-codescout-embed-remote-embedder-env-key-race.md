@@ -46,7 +46,9 @@ grep -n 'EMBED_API_KEY\|serial_test::serial\|fn from_url_normalizes' crates/code
 Four sites `set_var("EMBED_API_KEY", ...)` / `remove_var("EMBED_API_KEY")` under
 `#[serial_test::serial]`: `custom_rejects_http_with_api_key`,
 `custom_allows_http_without_api_key`, `custom_allows_https_with_api_key`,
-`from_url_falls_back_to_env_api_key`. Three sites call `from_url(..., None)` — which reads
+`from_url_ignores_an_ambient_env_api_key` (named `from_url_falls_back_to_env_api_key` at the
+time, renamed 2026-09-13 because it asserted the opposite of what it said). Three sites call
+`from_url(..., None)` — which reads
 the same var via `RemoteEmbedder::from_url`'s `api_key.or_else(|| std::env::var("EMBED_API_KEY").ok())`
 (`:182`) — with no `#[serial]` tag at all: `from_url_normalizes_v1_suffix`,
 `from_url_normalizes_v1_embeddings_suffix`, `from_url_normalizes_trailing_slash`.
@@ -122,8 +124,8 @@ was retired, not patched).
 
 ## Tests added
 
-`from_url_falls_back_to_env_api_key` (`crates/codescout-embed/src/remote.rs`, kept its
-name despite now testing the opposite) rewritten as the regression test: sets
+`from_url_ignores_an_ambient_env_api_key` (`crates/codescout-embed/src/remote.rs`) rewritten as
+the regression test: sets
 `EMBED_API_KEY=sk-should-be-ignored`, calls `from_url(loopback_url, model, None)`, asserts
 `api_key.is_none()`. Confirmed RED first for the right reason — the initial version used a
 non-loopback host and failed on the HTTPS guard instead of the assertion; corrected to a
