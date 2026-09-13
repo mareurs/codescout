@@ -122,6 +122,40 @@ with the archive-form control, which needs no severity policy at all. Whether
 `code_comment_capped` should stay capped is a real question and belongs to whoever owns that
 policy — a comment is lower-stakes than prose, so the cap is defensible; what is not
 defensible is that the capped population is **unmeasured**.
+### Seventh and eighth, 2026-09-13 — the ambiguity is IN A CODE PATH, and it runs the other way
+
+`doc(action="move")` returns an `inbound_path_citations` field: the citations it believes point
+at the file being moved. **It matches the PATH form, so a citation written as a bare slug is
+invisible to it** — and it reports that as `[]` rather than as "not checked".
+
+| # | session | what happened |
+|---|---|---|
+| 7 | `f3c594ce` | archived the fenced-line-attribution bug; `inbound_path_citations: []`, while `IC-6`'s `**Members:**` line **did** cite it, by slug. Caught only because the slug had been grepped BEFORE the move, for an unrelated reason. |
+| 8 | `8bd791df` | archived the file-provenance bug the same day; also `[]`, and that zero was **correct** — but only because they wrote the `IC-2` Members entry *after* moving, so it already named the new slug. |
+
+**Two things this pair settles that the six above could not.**
+
+**First, § Tests added is now wrong where it is most confident.** It reads: *"this is a defect in
+how a human-or-agent verifies, not in a code path"*, and concludes a test is the wrong instrument.
+That was true of instances 1-6, which are all readers running greps. `inbound_path_citations` is
+not a reader — it is shipped code making the same substring assumption, and it is **testable**: a
+fixture with one slug-form and one path-form citation, asserting both are returned, reds today.
+The convention note this file settled on was the right remedy for the population it had, and that
+population was not the whole one.
+
+**Second, it answers § Class's open question — and the answer is "widen", not "sibling".** That
+section records that `IC-18`'s claim is a selector *narrower* than its population while this
+file's is *wider*, and leaves the ruling to the cluster owner. Instance 7 is the **narrower**
+direction: the path-form selector misses a member it should have seen. So **one namespace
+ambiguity produces both directions depending only on which form you search for**, and a sibling
+class would split a single mechanism across two rows. The slug being a substring of the path is
+the whole cause in both.
+
+**The failure direction is the dangerous one, and is the opposite of this file's original.**
+Instances 1-6 are a grep returning hits a reader must interpret — visible, arguable, sometimes
+loud. Instance 7 is an **empty list**, which reads as "nothing to do" and prompts no second look.
+Instance 8 is the same empty list being *right*, for a reason unconnected to the field's
+correctness — which is exactly the shape that keeps an instrument trusted.
 ## Class
 
 Tagged `cluster/selector-narrower-than-its-population` (`IC-18`) as the closest member of the
@@ -136,6 +170,16 @@ that answers a different question than the one asked) and the direction is oppos
 
 Not fixed; the remedy is a documented practice, not code.
 
+- **Move BEFORE you write the citation, not after.** Contributed by `8bd791df` from instance 8,
+  and it is the strongest item here because it is a *sequence* rather than a check: a Members
+  line, tracker row or cross-reference written after the move already names the new path, so
+  `inbound_path_citations`' blind spot has nothing to hide. Written first, the same zero is
+  false. Neither ordering is more natural, which is why this has to be said out loud — and it
+  makes the field's unreliability harmless without requiring anyone to remember the field is
+  unreliable.
+- **Do not read `inbound_path_citations: []` as "no citations".** It means "no PATH-FORM
+  citations", and slug-form ones are common — every `**Members:**` line in
+  `docs/trackers/issue-clusters/` cites by slug. Grep the slug yourself before the move.
 - **Verify with the full old path, never the slug.** `docs/issues/<name>.md` as a literal prefix
   cannot match the archive form. This is the only pattern that answers *"is anything still
   dangling?"*.
@@ -152,6 +196,14 @@ Where this belongs is `get_guide("tracker-conventions")` § *Bug files*, beside 
 recipe, since that is the surface a session archiving a bug actually opens.
 
 ## Tests added
+
+**Both paragraphs below are SUPERSEDED and kept because the reasoning is still
+instructive about the population they were written over.** § *Sixth instance* shows the
+gate's coverage is real at the tool level and absent at the reporting level
+(`code_comment_capped` plus a 50-row findings cap over 14637 broken refs). § *Seventh and
+eighth* shows the substring assumption is **also in shipped code** —
+`doc(action="move")`'s `inbound_path_citations` — where it IS testable, and reds today
+against a fixture holding one slug-form and one path-form citation. Read those two first.
 
 None, and a test is the wrong instrument: this is a defect in how a human-or-agent verifies, not
 in a code path. The mechanical half that *could* be checked already exists —
