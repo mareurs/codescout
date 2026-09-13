@@ -160,24 +160,29 @@ fn escaping_sites() -> Vec<(String, String, String)> {
     found
 }
 
-/// What `cargo package` would actually ship for `pkg`. `None` if cargo could not answer.
-fn packaged_files(pkg: &str) -> Option<BTreeSet<String>> {
+/// What `cargo package` would actually ship for `pkg`. `Err(cause)` if cargo could not answer,
+/// carrying cargo's own stderr — previously collapsed to `None`, discarding the one artifact
+/// that would have named why (`docs/issues/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`).
+fn packaged_files(pkg: &str) -> Result<BTreeSet<String>, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let out = Command::new(cargo)
+    let out = Command::new(&cargo)
         .args(["package", "--list", "--allow-dirty", "--offline", "-p", pkg])
         .current_dir(repo_root())
         .output()
-        .ok()?;
+        .map_err(|e| format!("failed to spawn `{cargo}`: {e}"))?;
     if !out.status.success() {
-        return None;
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("exited {} with no stderr", out.status)
+        } else {
+            stderr
+        });
     }
-    Some(
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|l| l.trim().replace('\\', "/"))
-            .filter(|l| !l.is_empty())
-            .collect(),
-    )
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().replace('\\', "/"))
+        .filter(|l| !l.is_empty())
+        .collect())
 }
 
 #[test]
@@ -191,9 +196,12 @@ fn every_escaping_include_str_survives_cargo_package() {
     pkgs.dedup();
 
     for pkg in pkgs {
-        let Some(shipped) = packaged_files(&pkg) else {
-            unanswered.push(pkg);
-            continue;
+        let shipped = match packaged_files(&pkg) {
+            Ok(s) => s,
+            Err(cause) => {
+                unanswered.push(format!("{pkg}: {cause}"));
+                continue;
+            }
         };
         for (site, p, target) in sites.iter().filter(|(_, p, _)| *p == pkg) {
             if !shipped.contains(target.as_str()) {
@@ -206,9 +214,9 @@ fn every_escaping_include_str_survives_cargo_package() {
     // the gate exists to remove.
     assert!(
         unanswered.is_empty(),
-        "`cargo package --list` failed for: {}. The gate could not be evaluated, which is \
+        "`cargo package --list` failed for:\n  {}\nThe gate could not be evaluated, which is \
          not the same as passing — re-run once cargo can list these packages.",
-        unanswered.join(", ")
+        unanswered.join("\n  ")
     );
 
     assert!(
@@ -220,6 +228,20 @@ fn every_escaping_include_str_survives_cargo_package() {
          pattern), immediately after the entry that strips its directory. Then confirm with \
          `cargo package --list --allow-dirty | grep '^docs/'`.",
         missing.join("\n  ")
+    );
+}
+
+/// `docs/issues/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`: a forced
+/// `cargo package --list` failure must surface cargo's own stderr, not just an opaque `None`.
+/// Forced with a package name that cannot exist in this workspace, rather than mocking the
+/// process, so the assertion is against real cargo behavior.
+#[test]
+fn packaged_files_carries_cargos_stderr_on_failure() {
+    let err = packaged_files("this-package-does-not-exist-in-the-workspace-8f3c1a")
+        .expect_err("a nonexistent package must not resolve to a file list");
+    assert!(
+        !err.is_empty(),
+        "the cause must be non-empty — an empty string is the same silence this bug reported"
     );
 }
 
