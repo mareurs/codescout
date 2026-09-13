@@ -159,7 +159,7 @@ two has already happened twice.
 So the two directions are two classes on purpose, and this file spans both — which the same
 ledger also rules on: *"if a finding satisfies a second class's claim, it is a second bug
 file."* Instances 7 and 8 are therefore filed as
-`docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`
+`docs/issues/archive/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`
 (`IC-18`), and **this file is retagged to `IC-6`** — its own mechanism is that a slug cannot
 separate the repaired path form from the dangling one, which is `IC-6`'s no-disambiguator
 half stated almost word for word. The rows above stay here as the investigation record.
@@ -186,7 +186,7 @@ ledger warns produces this mistake.
 
 The *narrower* direction is real and lives in the same namespace, but it is a different
 claim and therefore a different file: see § *Seventh and eighth* and
-`docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
+`docs/issues/archive/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
 `IC-18` is not widened.
 ## Fix
 

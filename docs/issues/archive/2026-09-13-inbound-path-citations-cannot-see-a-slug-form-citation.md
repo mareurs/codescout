@@ -1,7 +1,7 @@
 ---
-id: '44ebfc3bd48ceb53'
+id: c57e9f7272b36f3f
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: doc(action=move)''s inbound_path_citations cannot see a slug-form citation, and reports [] rather than the form it searched'
 tags:
 - cluster/selector-narrower-than-its-population
@@ -131,9 +131,30 @@ interaction) between this reproduction's fresh tempdir and the real checkout's a
 git state at the time. **Left `investigating`, not `fixed` — the symptom is real, the
 named mechanism for it is refuted, and the true mechanism is still open.**
 
+**Closed by `f3c594ce` the same day: the true mechanism is the date prefix, not the path
+wrapper — see the rewritten § Root cause above and the shipped fix below.** The three
+candidate directions listed just above (timing, `exclude`, git-grep environment) were never
+checked because none of them were needed; recorded as ruled-out-by-supersession rather than
+acquitted individually.
+
 ## Fix
 
-Not implemented. Two halves, and only the first is code:
+**Fixed 2026-09-13.** Shipped `dd2060ad` on `experiments`, patch-id
+`cc7d69ecdf1a0919d7a4f6a20239b88c78211aed`.
+
+`files_mentioning` now also searches the dateless form when the stem has the
+`YYYY-MM-DD-<slug>` shape, via a new `dateless_slug` helper that mirrors
+`scripts/pre-commit-ledger-counts.py`'s `_stem()` byte-for-byte (same length check, same
+three dash positions). The call site unions both scans (dated stem, then dateless slug if
+applicable), sorts and dedups, and propagates `None` from either scan rather than silently
+reporting only the half that succeeded.
+
+This is half of item 1 (**widen**, not report) from the original two-halves list below --
+the report-the-scope half (`docs/adrs/2026-08-27-negative-results-name-their-scope.md`) is
+not done and is not needed now that the actual population is covered. Item 2 (the
+ordering rule) stands as an independent mitigation and needed no change.
+
+Original two-halves list, superseded by the above:
 
 1. **Widen or report.** Either resolve slug-form citations too, or name the form that was
    searched so `[]` carries its scope — `docs/adrs/2026-08-27-negative-results-name-their-scope.md`
@@ -152,8 +173,13 @@ path"* — true of its six reader-side instances, and false here.
 
 ## Tests added
 
-None; not fixed. The fixture is named above so whoever picks it up does not have to
-rediscover it.
+`the_citation_scan_finds_a_dateless_slug_citation` (`src/librarian/tools/mv.rs`), seeding a
+citation in exactly the form an issue-clusters Members line uses (`"**Members:**
+example-bug\n"`, no date, no path, no backticks). Confirmed RED before the fix (the
+case was first pinned as `..._known_limitation` with an inverted assertion, per this
+repo's own § Testing Discipline on mutating the production path rather than trusting an
+assertion's existence), GREEN after. `5ea1f2ad`'s bare-slug test is unaffected and still
+passes -- it guards a different, orthogonal dimension.
 
 ## Resume
 

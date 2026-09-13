@@ -65,7 +65,7 @@ fn files_mentioning(root: &std::path::Path, stem: &str, exclude: &str) -> Option
 /// archive move (the same reason that script strips the date). `files_mentioning` searches
 /// for the dated stem alone, which cannot match a citation holding only the dateless form:
 /// the search string is not a substring of the cited text.
-/// `docs/issues/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
+/// `docs/issues/archive/2026-09-13-inbound-path-citations-cannot-see-a-slug-form-citation.md`.
 fn dateless_slug(stem: &str) -> Option<&str> {
     let bytes = stem.as_bytes();
     if stem.len() > 11 && bytes[4] == b'-' && bytes[7] == b'-' && bytes[10] == b'-' {
@@ -833,7 +833,7 @@ mod tests {
     }
 
     /// SECOND reproduction, credited to a peer's correction of the first
-    /// (`44ebfc3bd48ceb53` § Summary/Root cause, updated 2026-09-13): the real
+    /// (`c57e9f7272b36f3f` § Summary/Root cause, updated 2026-09-13): the real
     /// mechanism was the DATE PREFIX, not the path wrapper. `files_mentioning` searched only
     /// for the artifact's dated file stem (`2026-09-13-example-bug`), but every
     /// `**Members:**` line under `docs/trackers/issue-clusters/` cites members by the
