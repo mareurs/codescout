@@ -136,6 +136,63 @@ session at arm time qualifies; one that depends on peers reading it does not.
 
 **Not built, and deliberately not built tonight.** Announcement is available and imperfect;
 building the marker is a design change to a shared gate surface, which is an operator's call.
+### 2026-09-13: the red did not read as BROKEN. It read as a POLICY QUESTION.
+
+Third instance, and it adds a failure kind this file does not name. Armed by sessionId
+`f3c594ce-c424-40d3-a603-9693cfef3f63`, observed by `8bd791df` at 21:29 on a `tests/doc_tool_refs.rs`
+mutation. **No announcement was made** — not withheld on `OB-23` grounds, simply not thought of,
+which is `SKF-22` arriving exactly as predicted.
+
+**The new part.** This file's whole framing is `broken` versus `deliberately red`, a two-way bit.
+The mutation here was to a guard that SCANS THE CORPUS, so defeating it did not produce a generic
+`... FAILED`. It produced a detailed, correct-looking finding list:
+
+```
+45 present-tense document(s) name a tool parameter that does not exist.
+  docs/architecture/augmented-artifacts (13), src/prompts/guides/librarian (8),
+  librarian-runtime (7), workspace-state (4)
+  Sample: `memory(recall` — bare, no `=`;  `doc(update` — bare, no `=`
+```
+
+Every file named is real, every form quoted is really in it, and the guard's own message explains
+what it thinks is wrong. So the observer did not read *"a test is broken"*. They read **a
+disagreement about intended behaviour**, and asked the right question about it: *"if the bare
+`doc(update` form is meant to be legal and the test needs the carve-out, that's your call."*
+
+That is a **third** state, and it is worse than the two this file already has, because it is
+*actionable*. `broken` invites standing down. A policy question invites deciding — and a peer who
+had decided *"yes, the bare form is legal, add the carve-out"* would have written a carve-out into
+a guard mid-mutation, against a mutation, on my behalf. Nothing would have looked wrong at any
+step. The generalisation: **a mutation to a guard produces a red carrying the guard's own
+reasoning, and reasoning is exactly what makes a red look legitimate rather than defective.**
+
+**A better routing instrument was used, and the file's thesis held anyway — which is the value of
+the datapoint.** `59112612` reached `git grep HEAD` and inferred. `8bd791df` had
+`scripts/file-provenance.py` via `fmt-mine`, which named me **positively**: `PEER, window from
+2026-09-12T09:05:58Z, sessionId f3c594ce…, LIVE`. They also checked that none of their own three
+touched files appeared among the 45 — a real independent check, not an elimination. Correct
+identification, first try, no inference. **And it still carried no information about which kind of
+red it was**, because the arming bit is not on disk. § *Why this is not the same bug* predicted
+this; it is now measured against the improved instrument rather than the weak one.
+
+**Blast radius reached a THIRD party, one the arming session had no reason to model.**
+`05841db2` was preparing to push `experiments` — 80 commits, 5 sessions, 25 mine — and a
+second-hand *"the gate is red"* is exactly the signal that should stop a push. It did not only
+because they sent a courtesy notice first and I could say the red was stale. That is two
+independent courtesies covering for a missing mechanism, and neither was owed. § *An announcement
+also under-describes its own blast radius* lists three failure kinds under one exit code; add a
+fourth — **a stale red report outliving the red, and blocking an unrelated action**. The red lasted
+under a minute; the report of it was still live twenty minutes later.
+
+**What would have helped, and it is not announcement.** The passive marker this section already
+prefers would have worked here, and this instance sharpens the requirement: the marker must be
+readable **after the fact**, because the damage travelled as a *report* rather than as a build. A
+marker present only while the mutation is armed labels the build log and does nothing for the
+sentence a peer writes about it afterwards. `59112612`'s *unconditional, written at the moment it
+acts* property already implies a durable record; this is the argument for why durability, not just
+presence, is the load-bearing half.
+
+Still not built, still an operator's call on a shared gate surface.
 ## Tests added
 
 None, and none is possible from inside the arming session: the state under test is *another
