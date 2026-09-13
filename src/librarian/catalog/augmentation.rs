@@ -259,7 +259,25 @@ pub struct UpdateEntryOutcome {
     /// `undefined_in_body_note` for why gating it would silence the larger half of the
     /// defect.
     pub undefined_in_body: Option<String>,
+    /// True when this call re-rendered the patched row into the committed snapshot
+    /// table, so the body and `params` already agree and `snapshot_stale` will be
+    /// `None` for a reason other than "this tracker keeps no snapshot".
+    ///
+    /// Surfaced because the two silences are otherwise indistinguishable to a caller,
+    /// and they license opposite next actions: nothing to do, versus update the table
+    /// by hand. That is the same trap `a1ca3baa` fixed one field over, where
+    /// `snapshot_missing` kept naming the id whose row the call had just written.
+    pub row_resynced: bool,
 }
+
+/// The augmentation columns [`update_entry`] reads in one query:
+/// `(params, params_schema, entry_collection, render_template)`.
+///
+/// An alias rather than a bare tuple because `clippy::type_complexity` denies the
+/// four-element form under the gate's long clippy invocation — and only there, not
+/// under a bare `cargo clippy`, which is why it is easy to add locally and discover
+/// from someone else's blocked gate.
+type EntryUpdateColumns = (String, Option<String>, Option<String>, Option<String>);
 
 /// Patch the fields of ONE entry in `params.<entry_collection>`, leaving every
 /// other row untouched.
@@ -319,16 +337,16 @@ pub fn update_entry(
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-    let row: Option<(String, Option<String>, Option<String>)> = tx
+    let row: Option<EntryUpdateColumns> = tx
         .query_row(
-            "SELECT params, params_schema, entry_collection
+            "SELECT params, params_schema, entry_collection, render_template
              FROM artifact_augmentation WHERE artifact_id = ?1",
             [artifact_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?;
 
-    let Some((params_text, params_schema, declared_collection)) = row else {
+    let Some((params_text, params_schema, declared_collection, render_template)) = row else {
         return Err(LibrarianRecoverableError::new(format!(
             "update_entry: artifact `{artifact_id}` has no augmentation — augment it with an entry_collection first"
         )));
@@ -412,8 +430,25 @@ pub fn update_entry(
          WHERE artifact_id = ?2",
         rusqlite::params![new_params_text, artifact_id],
     )?;
+    // Re-render this row in the committed table BEFORE the commit, so a failed splice
+    // rolls the params write back rather than creating a new disagreement. A no-op for
+    // any artifact that declares no `snapshot_anchor` — see `resync_snapshot_row`.
+    let row_resynced = resync_snapshot_row(
+        &tx,
+        artifact_id,
+        entry_id,
+        &params,
+        render_template.as_deref(),
+    )?;
     tx.commit()?;
 
+    // The advisory below is now the FALLBACK path, not the only one. An artifact that
+    // declares a `snapshot_anchor` had its row re-rendered above, inside the
+    // transaction; everything else still only gets told. Kept because that "everything
+    // else" is the majority — most trackers keep no body snapshot at all — and because
+    // an artifact whose row exists in params but not yet in the table is reported here
+    // rather than having a row invented for it by guess.
+    //
     // Unlike `append_entry`, this path never read the body — so the third
     // instance of the drift (a status flipped in params while the committed
     // table still shows the old value) had nothing that could have noticed.
@@ -429,7 +464,23 @@ pub fn update_entry(
         .filter_map(|i| i.rsplit_once('-'))
         .filter_map(|(_, n)| n.parse::<u64>().ok())
         .collect();
-    let snapshot_stale = snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices);
+    // Suppressed when this call re-rendered the row: the body is current by
+    // construction, so the advisory would be asking for work already done — the
+    // `a1ca3baa` trap one field over, where `snapshot_missing` kept naming the id
+    // whose row the call had just written.
+    //
+    // It has to be suppressed HERE rather than fixed inside the note, because
+    // `snapshot_stale_note` cannot tell a synced row from a stale one at all: it tests
+    // `in_body.contains(&num)` — PRESENCE — and then emits a message asserting the row
+    // "still shows the PREVIOUS field values", which is a claim about CONTENT it never
+    // checked. That is a defect in its own right and filed separately; this gate is
+    // correct regardless of how it is resolved, because a row we just wrote is current
+    // whichever way the note learns to ask.
+    let snapshot_stale = if row_resynced {
+        None
+    } else {
+        snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices)
+    };
     let undefined_in_body = undefined_in_body_note(cat, artifact_id, entry_id);
 
     Ok(UpdateEntryOutcome {
@@ -438,6 +489,7 @@ pub fn update_entry(
         entries_total,
         snapshot_stale,
         undefined_in_body,
+        row_resynced,
     })
 }
 
@@ -1427,6 +1479,139 @@ fn resolve_row_anchor(doc: &str, anchor: &RowAnchor, id: &str, caller: &str) -> 
             fix.to_string(),
         )
     })
+}
+
+/// Re-render ONE entry's row in the committed snapshot block, so a params write and
+/// the table a reader sees stop disagreeing.
+///
+/// **Per-ROW rather than per-BLOCK, and that is a safety property rather than a
+/// scope cut.** Re-rendering the whole block would overwrite every other row from
+/// `params` — and measured 2026-09-13 on `open-issue-work-queue.md`, the columns do
+/// not share an answer about which side is current: `Status` was stale in params on
+/// 25 rows, `Bug` was stale in params on 6 and in the body on 1, and `Task` is fuller
+/// in params on 13 rows and in the body on 4. A block re-render picks one winner for
+/// all of them and is wrong about at least one column whichever way it picks, while
+/// looking like a clean sync. A row re-render touches the one line whose new content
+/// the caller just supplied, so the blast radius is exactly the write.
+///
+/// Returns `Ok(false)` — a silent no-op, not an error — when the artifact declares no
+/// [`SNAPSHOT_ANCHOR_KEY`], carries no `render_template`, or renders no row for this
+/// id. That is the majority: most trackers keep no body snapshot, and for them this
+/// path must not change behaviour at all.
+///
+/// **Runs INSIDE the caller's transaction, before commit**, matching
+/// [`allocate_entry_id`] — so a failed splice rolls the params write back rather than
+/// leaving the two halves disagreeing in a new way. That is a deliberate departure
+/// from the comment below the call site, which argues the body signal is advisory and
+/// "must never be able to fail the mutation the caller asked for": true of a REPORT,
+/// and the wrong bargain for a WRITE, where a half-applied pair is worse than a
+/// refused one. The departure is bounded by the `None` cases above — an artifact that
+/// has not opted in cannot reach the new failure mode.
+fn resync_snapshot_row(
+    tx: &rusqlite::Transaction<'_>,
+    artifact_id: &str,
+    entry_id: &str,
+    params: &Value,
+    render_template: Option<&str>,
+) -> Result<bool> {
+    let Some(tmpl) = render_template else {
+        return Ok(false);
+    };
+    let abs_path: Option<String> = tx
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id = ?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(abs_path) = abs_path else {
+        return Ok(false);
+    };
+    let Ok(doc) = std::fs::read_to_string(&abs_path) else {
+        return Ok(false);
+    };
+    let (fm, _) = crate::librarian::frontmatter::parse(&doc).unwrap_or((None, doc.as_str()));
+    let Some(anchor) = declared_snapshot_anchor(fm.as_ref()) else {
+        return Ok(false);
+    };
+
+    // Render the FULL template and pick this id's line out of it, rather than
+    // rendering a one-element collection. A template may legitimately compute a cell
+    // from the whole collection (a rank, a total, a "first of its status"), and the
+    // one-element shortcut would silently produce a different row than the table it
+    // is being spliced into.
+    let rendered = crate::librarian::tools::render::render_params(tmpl, params).map_err(|e| {
+        LibrarianRecoverableError::new(format!(
+            "update_entry: `{entry_id}` was patched, but re-rendering the snapshot row failed: \
+             {e} — nothing was written"
+        ))
+    })?;
+    let row_re = regex::Regex::new(&format!(r"^\|\s*{}\s*\|", regex::escape(entry_id)))
+        .map_err(|e| LibrarianRecoverableError::new(format!("update_entry: {e}")))?;
+    let Some(new_row) = rendered.lines().find(|l| row_re.is_match(l)) else {
+        // The template emits no row for this id. Not an error: an entry can exist in
+        // params and be deliberately excluded from the rendered table by a filter.
+        return Ok(false);
+    };
+
+    // Locate the block, then the row WITHIN it. Scanning the whole document for the
+    // id would reach a row in an unrelated table, which is the defect
+    // `docs/issues/2026-09-12-body-snapshot-row-indices-counts-rows-from-unrelated-tables.md`
+    // reports and the reason the anchor is declared rather than inferred.
+    let Some(block_last) = snapshot_block_last_line(&doc, &anchor) else {
+        return Ok(false);
+    };
+    let lines: Vec<&str> = doc.lines().collect();
+    let start = lines.iter().position(|l| l.trim() == anchor.trim());
+    let end = lines.iter().rposition(|l| *l == block_last);
+    let (Some(start), Some(end)) = (start, end) else {
+        return Ok(false);
+    };
+    let Some(idx) = (start..=end).find(|i| row_re.is_match(lines[*i])) else {
+        // The id has no row in this block yet. Adding one is `append_entry`'s job with
+        // an `index_row`; inventing a row here would place it by guess.
+        return Ok(false);
+    };
+    if lines[idx] == new_row {
+        return Ok(false);
+    }
+
+    // The empty-cell guard, and it exists for a specific default: MiniJinja renders an
+    // UNDEFINED variable as the empty string and that is pinned as intended behaviour
+    // (`missing_var_does_not_error_by_default`). Correct for a context bundle, where a
+    // blank cell is cosmetic; against a file it turns a params-key rename into silent
+    // truncation of real content. Comparing populated cell COUNTS catches exactly that
+    // and stays silent for an ordinary edit that shortens a cell.
+    let populated = |row: &str| row.split('|').filter(|c| !c.trim().is_empty()).count();
+    if populated(new_row) < populated(lines[idx]) {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "update_entry: `{entry_id}` was patched, but the re-rendered snapshot row has \
+                 fewer populated cells than the one it would replace ({} -> {}) — nothing was \
+                 written",
+                populated(lines[idx]),
+                populated(new_row)
+            ),
+            "MiniJinja renders an undefined variable as empty, so a renamed or removed `params` \
+             key blanks its cell instead of failing. Check that `render_template` still names \
+             the fields this entry carries."
+                .to_string(),
+        ));
+    }
+
+    let mut out: Vec<&str> = lines.clone();
+    out[idx] = new_row;
+    let mut text = out.join("\n");
+    if doc.ends_with('\n') {
+        text.push('\n');
+    }
+    std::fs::write(&abs_path, &text).map_err(|e| {
+        LibrarianRecoverableError::new(format!(
+            "update_entry: `{entry_id}` was patched, but writing the snapshot row to \
+             {abs_path} failed: {e} — the params change was rolled back"
+        ))
+    })?;
+    Ok(true)
 }
 
 /// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the

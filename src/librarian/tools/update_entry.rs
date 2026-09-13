@@ -80,6 +80,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(note) = outcome.snapshot_stale {
         out["snapshot_stale"] = json!(note);
     }
+    // Reported only when true, and only because the two SILENCES are otherwise
+    // identical to a caller: no `snapshot_stale` because the row was just re-rendered,
+    // versus no `snapshot_stale` because this tracker keeps no snapshot. Those license
+    // opposite next actions — nothing to do, versus update the table by hand — and the
+    // response that omits both is the one a caller acts on.
+    if outcome.row_resynced {
+        out["row_resynced"] = json!(true);
+    }
     // The citation half, and independent of the row half above: `snapshot_stale` is
     // satisfied by an index row showing current values, while a row defines no token at
     // all. An entry can be perfectly in-sync and still be uncitable.
@@ -216,6 +224,203 @@ mod tests {
             "the row is present but outdated — that is the distinguishing case: {note}"
         );
         assert!(note.contains("T-1"), "{note}");
+    }
+
+    /// Seeds a tracker that DOES render a snapshot: a `render_template`, plus a
+    /// `snapshot_anchor` frontmatter key naming the table's header line.
+    ///
+    /// Separate from `seed_with_body`, which pins `render_template: None` on purpose
+    /// ("the signal must not depend on it"). That test's claim and these are opposite
+    /// halves — one asserts the advisory fires without a template, these assert the
+    /// re-render happens with one — so they must not share a fixture.
+    fn seed_rendered(
+        ctx: &ToolContext,
+        id: &str,
+        path: &std::path::Path,
+        body: &str,
+        tmpl: &str,
+        tasks: Value,
+    ) {
+        std::fs::write(path, body).unwrap();
+        let cat = ctx.catalog.lock();
+        artifact::upsert(
+            &cat,
+            &artifact::TestArtifactRowBuilder::new(id)
+                .with_abs_path(crate::util::fs::RepoPath::from(path).into_string())
+                .with_kind("tracker")
+                .build(),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "p".into(),
+                params: json!({ "tasks": tasks }).to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                render_template: Some(tmpl.to_string()),
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("tasks".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// The point of the per-row re-render: patching `params` updates the committed
+    /// table, so the two stop disagreeing without the caller editing the body by hand.
+    ///
+    /// **Asserts the OTHER rows are byte-identical**, which is the whole reason this is
+    /// per-row rather than per-block. A block re-render would also produce a correct
+    /// `T-1` here and would silently rewrite `T-2` from params — and on a real tracker
+    /// the columns disagree about which side is current, so that is a loss dressed as a
+    /// sync.
+    #[tokio::test]
+    async fn a_declared_anchor_re_renders_the_patched_row_and_leaves_the_others_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_rendered(
+            &ctx,
+            "art1",
+            &path,
+            // The T-2 row is deliberately NOT what the template would render for it
+            // (`stale-on-purpose` vs `open`): if this were a block re-render it would be
+            // overwritten, and that difference is what the assertion below detects.
+            "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | stale-on-purpose |\n\ntail\n",
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}",
+            json!([{"id": "T-1", "status": "open"}, {"id": "T-2", "status": "open"}]),
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("| T-1 | done |"),
+            "the patched row must be re-rendered into the body: {text}"
+        );
+        assert!(
+            text.contains("| T-2 | stale-on-purpose |"),
+            "a per-ROW re-render must not touch any other row, even one params disagrees \
+             with: {text}"
+        );
+        assert_eq!(
+            result["row_resynced"], true,
+            "the caller must be able to tell this silence from 'no snapshot here': {result}"
+        );
+        assert!(
+            result.get("snapshot_stale").is_none(),
+            "the row was just re-rendered, so the advisory must not ask for it again — the \
+             `a1ca3baa` trap one field over: {result}"
+        );
+    }
+
+    /// The negative control, and the majority case: an artifact that declares no
+    /// `snapshot_anchor` behaves exactly as before — body untouched, advisory fires.
+    ///
+    /// Without this, making the re-render unconditional would pass the test above.
+    #[tokio::test]
+    async fn without_a_declared_anchor_the_body_is_untouched_and_the_advisory_still_fires() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        let before = "---\nkind: tracker\n---\n\n# Q\n\n| ID | status |\n| T-1 | open |\n\ntail\n";
+        seed_rendered(
+            &ctx,
+            "art1",
+            &path,
+            before,
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}",
+            json!([{"id": "T-1", "status": "open"}]),
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "an artifact that did not opt in must not have its body written at all"
+        );
+        assert!(
+            result.get("row_resynced").is_none(),
+            "row_resynced is reported only when true: {result}"
+        );
+        assert!(
+            result["snapshot_stale"].is_string(),
+            "the advisory is the fallback for exactly this case: {result}"
+        );
+    }
+
+    /// The empty-cell guard, and the rollback that makes it safe.
+    ///
+    /// MiniJinja renders an UNDEFINED variable as the empty string, pinned as intended
+    /// by `missing_var_does_not_error_by_default`. Correct for a context bundle, where
+    /// a blank cell is cosmetic; against a file it turns a removed or renamed `params`
+    /// key into silent truncation of real content.
+    ///
+    /// **Asserts the params change was ROLLED BACK**, not merely that the call errored.
+    /// The write runs inside the caller's transaction precisely so a refused splice
+    /// cannot leave params ahead of the body — a half-applied pair is worse than a
+    /// refused one, and only reading params back can tell the two apart.
+    #[tokio::test]
+    async fn a_render_that_would_blank_a_cell_is_refused_and_the_params_change_rolls_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        let before = "---\nkind: tracker\nsnapshot_anchor: '| ID | status | note |'\n---\n\n# Q\n\n| ID | status | note |\n| T-1 | open | keep-me |\n\ntail\n";
+        seed_rendered(
+            &ctx,
+            "art1",
+            &path,
+            before,
+            "| ID | status | note |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} | {{ t.note }} |\n{% endfor %}",
+            json!([{"id": "T-1", "status": "open", "note": "keep-me"}]),
+        );
+
+        // Deleting `note` makes the template render its cell empty rather than fail.
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"note": null}}),
+        )
+        .await
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("fewer populated cells"),
+            "the refusal must name WHY, or the caller cannot tell it from a write error: {msg}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "the body must be byte-identical after a refused splice"
+        );
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(
+            params["tasks"][0]["note"], "keep-me",
+            "the params write must have ROLLED BACK — a refused splice that left params \
+             ahead would create the very disagreement this feature removes: {params}"
+        );
     }
 
     /// The other branch: the row is not rendered at all, so it exists only in
