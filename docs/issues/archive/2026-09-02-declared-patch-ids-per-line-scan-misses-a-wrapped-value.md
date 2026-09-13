@@ -1,14 +1,14 @@
 ---
-id: '4c00caf1fcf49365'
+id: 5c8895224c8ff8d2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the patch-id scan is per-line, so a declaration whose value wraps is invisible'
 tags:
 - cluster/selector-narrower-than-its-population
 - doctor
 - provenance
 - line-scan
-closed: null
+closed: 2026-09-13
 opened: 2026-09-02
 owner: marius
 related:
@@ -135,22 +135,23 @@ window must preserve it.
 
 ## Fix
 
-Not yet implemented. The constraint above is the design: widen the window, keep the
-section scope.
+**Fixed on `experiments` at `85386c04`** (`85386c04253deb3580ac3ea3eee5a9acb43932c1`), patch-id
+`a87ac49cf35a0b84a9080b380114a422412892d6`.
 
-- **Candidate.** Scan a two-line window — the current line joined to its successor —
-  or scan the `## Fix` section body as a single string with newlines normalised to
-  spaces before the `patch-id` search, keeping `FenceState` line-driven so E2 still
-  holds. The second is simpler and strictly more general; the first is a smaller diff.
-- **Test it must satisfy, and the trap.** A fixture with the value on the following
-  line. Note the sibling defect this file's own class predicts: a fixture written as a
-  single line with `\n` embedded is not the same input as two real lines once the
-  helper joins them, so the fixture must be written as genuine multi-line text.
-
+Applied the "simpler and strictly more general" candidate named above: `declared_patch_ids` now
+builds a single `joined` string from every non-fenced line in the (already section-scoped) body,
+with newlines normalised to a space, and runs the existing `patch-id` → backtick → backtick search
+over that joined string once, instead of once per line. Fence tracking (`FenceState`) is unchanged
+and still line-driven, so a worked example inside a fence is still excluded — the line-window and
+section-scope axes stayed independent, per this file's own constraint.
 ## Tests added
 
-None yet — capture-on-notice record.
-
+`non_terminal_status_with_fix_anchor_reads_a_patch_id_that_wraps_to_the_next_line`
+(`src/librarian/tools/doctor.rs`) — seeds two bug files: one with a genuine multi-line `## Fix`
+section where `patch-id` ends a line and its backticked value opens the next (must now be
+FLAGGED, since `open` + a declared anchor is exactly what the check exists to catch), and one
+where the same wrapped shape sits inside a fenced worked example (must stay unflagged, proving
+fence exclusion survived the join to a single search string).
 ## Workarounds
 
 Keep `patch-id` and its backticked value on the same line. The `## Fix provenance`

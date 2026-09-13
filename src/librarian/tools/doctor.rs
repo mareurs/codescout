@@ -6395,7 +6395,7 @@ fn declared_patch_ids(content: &str) -> Vec<String> {
     // Newlines normalised to spaces before the search, rather than searching each line in
     // isolation: the population is a DECLARATION, and declarations wrap because prose wraps.
     // `patch-id` ending one line with its backticked value opening the next is invisible to a
-    // per-line scan by construction (`docs/issues/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`).
+    // per-line scan by construction (`docs/issues/archive/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`).
     // Fence tracking stays line-driven so a worked example inside a fence is still excluded —
     // that half (E2) is orthogonal and must survive unchanged.
     let mut joined = String::new();
@@ -9517,8 +9517,8 @@ mod tests {
         };
         assert_eq!(v.len(), 2, "both shapes are declarations: {v:#?}");
     }
-    /// `docs/issues/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`: a
-    /// declaration whose 40-hex value wraps to the next line was invisible to a per-line scan,
+    /// `docs/issues/archive/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`:
+    /// a declaration whose 40-hex value wraps to the next line was invisible to a per-line scan,
     /// so a bug file that DID declare its patch-id was reported as if it had not. Fence tracking
     /// (E2 in that file) must survive unchanged — a worked example inside a fence must stay
     /// excluded even though lines are now joined across the rest of the section.

@@ -12,7 +12,7 @@ closed: null
 opened: 2026-09-02
 owner: marius
 related:
-- docs/issues/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md
+- docs/issues/archive/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md
 severity: low
 ---
 
