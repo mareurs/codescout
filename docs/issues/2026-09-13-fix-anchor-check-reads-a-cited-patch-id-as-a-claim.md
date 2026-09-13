@@ -119,6 +119,18 @@ stricter read is a breaking change or a no-op.
 
 ## References
 
+- **`docs/issues/archive/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md` —
+  the SAME function, failing in the opposite direction, and missed on this file's first pass.** It
+  names the implementation this bug is about and which this file did not cite:
+  `declared_patch_ids`, `src/librarian/tools/doctor.rs:5245-5278`. There, the scan finds `patch-id`
+  and then searches **only the remainder of that same line** for the opening backtick, so a
+  declaration whose 40-hex value wraps to the next line yields no match — and
+  `non_terminal_status_with_fix_anchor` reports a correct-looking **zero** for a record that did
+  declare its provenance. **That is a false NEGATIVE; this file is the false POSITIVE**, and the two
+  bound one function from opposite sides: it misses declarations that wrap, and counts mentions that
+  do not. Anyone fixing either should read both, because a widening that catches the wrapped value
+  also catches more mentions. Surfaced by `git grep -il non_terminal_status_with_fix_anchor --
+  'docs/issues/archive/*.md'` — one command, not run before this file was opened.
 - `docs/trackers/issue-clusters/IC-6-addressing-without-an-escape-hatch.md`
 - Sibling defect found the same day, same mechanism, opposite direction:
   `docs/issues/2026-09-13-fix-anchor-check-reports-absent-when-it-means-unparseable.md`

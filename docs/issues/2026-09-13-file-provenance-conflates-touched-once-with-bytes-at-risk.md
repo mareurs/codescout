@@ -135,6 +135,17 @@ been absorbed"* — which would also cover the mtime-vs-authorial-write confusio
 
 ## References
 
+- **`docs/issues/archive/2026-09-13-file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head.md`
+  — the SAME window, failing in the opposite direction, filed the same day and missed on the first
+  pass of this file.** There the scan window defaults to the target path's last commit time and
+  discards older writes as *"baked into HEAD"* — false on a shared checkout, because a pathspec
+  commit of `P` by session A does not include session B's unstaged edits to `P`. So a live co-owner
+  is silently dropped and the tool reports `MINE` to whoever wrote most recently. **That is a false
+  NEGATIVE; this file is the false POSITIVE.** The two are complementary rather than duplicate — one
+  window, over-reporting at one end and under-reporting at the other — and a fix to either that does
+  not read the other risks trading one for the other. Found by running
+  `git grep -il 'file-provenance' -- 'docs/issues/archive/*.md'`, which takes one command and was not
+  run before this file was opened.
 - Instance 2 measured and reported by sessionId `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`, who also
   supplied the framing that the two causes share a consequence at the point of use.
 - `scripts/fmt-mine.sh` — the consumer that turns a false positive into a refusal
