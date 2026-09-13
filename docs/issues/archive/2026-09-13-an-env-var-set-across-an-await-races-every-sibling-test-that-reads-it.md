@@ -1,7 +1,7 @@
 ---
-id: '69240af63a21c039'
+id: 366b17bf8048d819
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: a test holds a process-global env var across an await, and six sibling tests read it'
 tags:
 - cluster/transient-shared-state-lies-to-readers
@@ -167,10 +167,41 @@ describe.
 
 ## Resume
 
-Unclaimed. Build the pure seam in § Fix, then confirm with all six callers still running
-concurrently — the point is that they can, so a fix verified by serialising them has
-verified nothing.
+Fixed and archived.
 
+Fix SHA: `e943b868`
+Patch-id: `4156c3dadcfc02dd35fe1a361fc8428b78785719`
+
+Gate green at fix time: FMT 0, CLIPPY 0, LEAN 0 (3814 passed), DEFAULT 0 (5858 passed), 0 failed
+targets in either lane. **All six callers ran concurrently in that default-lane run and passed** —
+none is `#[serial]`, which is the condition this file asked for: a fix verified by serialising them
+would have verified nothing.
+
+**What is NOT claimed:** that the race did not recur. A green run is the output a still-racy suite
+also gives, and this file's own § *Workarounds* says so. The claim is that the mutation no longer
+exists — `env::set_var` / `env::remove_var` in this module went 4 → 0, checkable by grep, and not a
+function of how many times the suite happened to pass.
+
+**One thing found on the way out, deliberately NOT re-filed.** `crates/codescout-embed/src/remote.rs`
+still holds 10 `set_var` / `remove_var` calls across six `#[serial_test::serial]` tests on
+`EMBED_API_KEY`. That is not a new instance: it is the managed residue of
+`docs/issues/archive/2026-08-26-codescout-embed-remote-embedder-env-key-race.md`, whose fix removed
+the *untagged reader* (`from_url`'s ambient fallback) rather than the tagged writers, and it lives
+in a separate crate — hence a separate test binary and a separate process, so it cannot reach this
+one. Recorded here because the grep that finds this bug finds that cluster too, and the honest
+answer is "already filed, already fixed, read the archive" rather than a second bug file.
+
+**What a next session might still want, and why it was not done here:** nothing guards this class.
+`docs/conventions/test-env-isolation.md` declares it closed ("`set_var` / `remove_env` occurrences
+in the default `cargo test` build went 119 → 0", "Nothing remains in this class") and this module
+reintroduced it anyway, which is the definition of a policy without a mechanism (CLAUDE.md
+§ *Observer Blindness*, third position). A `tests/env_isolation.rs` in the shape of
+`tests/feature_lanes.rs` — an allowlist of `(path, reason)` pairs, a scan of `src` / `crates` /
+`tests`, and a companion assertion that every allowlisted path still matches, so a broken detector
+or an empty walk reds instead of passing — would close it. It was not built here because its
+allowlist would have to carry the codescout-embed cluster above, and a new gate whose first act is
+to bless ten known-bad sites is worth a deliberate decision rather than a drive-by. Fix that
+cluster first, then the guard starts clean.
 ## References
 
 - `src/config/global.rs` — the ruling that `set_var` in a parallel test binary is UB

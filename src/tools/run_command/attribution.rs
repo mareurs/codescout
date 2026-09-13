@@ -140,7 +140,7 @@ const TIMEOUT_ENV: &str = "CODESCOUT_WIP_ATTRIBUTION_TIMEOUT_MS";
 /// `realloc` `environ`), and `#[serial]` locks only against tests that opt in. See
 /// `src/config/global.rs` and `src/librarian/tools/audit_doc_refs/mod.rs`, which each
 /// removed this same pattern for that reason.
-/// `docs/issues/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`
+/// `docs/issues/archive/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttributionEnv {
     /// False when [`DISABLE_ENV`] is set to any value at all.

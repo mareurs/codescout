@@ -342,7 +342,7 @@ trigger change reaches it. That is a separate change and nobody holds it.
 
 **One thing this fix created, filed rather than left:** it adds a sixth concurrent caller of
 `wip_author_diagnostic`, which widens a pre-existing race —
-`docs/issues/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`.
+`docs/issues/archive/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`.
 A sibling test holds `CODESCOUT_NO_WIP_ATTRIBUTION` across an `.await` and every caller reads it.
 It reds `a_red_attaches_wip_authors_on_the_main_arm` intermittently and did so once on 2026-09-13.
 The repo's own ruling (`src/config/global.rs`) rules out `#[serial]` as the remedy, so it needs a
