@@ -68,6 +68,26 @@ form, with the selector narrowed all the way to empty.
 `--exact` does not help, because the failure is not fuzzy-versus-exact matching: an exact match
 against a name that does not exist is still an empty selection.
 
+**ONE CLAIM, TWO TAILS — and the wide tail is the one nobody writes down.** A selector too NARROW
+returns `0 passed; 0 failed`, exit `0`. A selector too WIDE returns a plausible pile. Measured the
+same evening, thirty minutes after this file was opened: a prior-art check over `docs/issues/archive/`
+was run with the pattern `fix anchor|Fix provenance` and returned **119 files** — because
+`## Fix provenance` is a section heading every archived bug carries. The pattern matched the corpus's
+furniture, not its content.
+
+Neither tail returns an error. **Both are answers about the SELECTOR that get read as answers about
+the CORPUS** — `0` reads as *"nothing is wrong"*, `119` reads as *"this is thoroughly covered"*, and
+the true reading of each is *"ask a better question"*. The narrow tail is the one this class usually
+records, because an empty result feels like information; the wide tail is more comfortable still,
+which is why it goes unexamined. Narrowing the pattern to the detector's actual name is what turned
+that 119 into two real neighbours (`bdc13887`).
+
+**The pairing matters for the remedy.** "Read `filtered out: N`" answers only the narrow tail. The
+general form is: *before believing a selector's result, state what the selector would return if it
+were wrong in each direction* — and if you cannot name a result that would look different, the
+number is about your pattern. (Second tail contributed by sessionId
+`f0b1a4c7-e991-4478-bf22-b088483b6821`, who named the two as one claim.)
+
 ## Evidence
 
 **The incident, which is the reason this is filed rather than noted.** While editing

@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 13
+entry_high_water_H: 14
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -712,6 +712,95 @@ ledger-rule surface and had the script open; they declined on scope — their op
 for the mechanism-column work and not for adding rules to a script they happened to be holding —
 and asked that it be written up here rather than front-run. Recorded because the boundary is the
 right one and worth seeing twice.
+
+### H-14 — Run the prior-art grep FOR the author when a new docs/issues file appears — three sessions skipped it in one evening and all three knew the rule
+
+**Valid:** conditional — a second evening produces a third instance of a bug file filed without its prior art
+
+**Status:** proposed, **needs a second datapoint before building** · **Surface:**
+`scripts/pre-commit-run.sh` (advisory path), triggered on the same condition as `:157`
+
+**The observation, 2026-09-13.** Two sessions filed **nine** bug files between them, and **four**
+went in without the one command that would have surfaced their nearest prior art:
+
+| filer | filings | missing prior art |
+|---|---|---|
+| `f0b1a4c7-e991-4478-bf22-b088483b6821` | 4 | 1 (`b93cfb34`) |
+| `9403d62d-116b-46ea-ac9b-004acff2b1cb` | 5 | 3 (`bdc13887` ×2, `fc7ff085` ×1) |
+
+Both ran the check **after** committing, and only because the other prompted it.
+
+**Two corrections to this table, both from getting the unit wrong, and they are worth more than the
+numbers.** The first draft listed a third session at 1-of-1 and put its own author at 4. Neither
+held. `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66` **filed nothing that day** — the commit credited to
+them there was *this* author amending *this* author's file at their request, and reading a test file
+before endorsing a fix is a different act from filing one with or without a citation. Counting them
+inflated the denominator with a non-member and made the rate look better than it is. And the author
+undercounted their own filings by one. Both errors are § *Testing Discipline*'s *count the LIST,
+never the corpus*, committed inside a table about failing to check — which is the entry's own claim
+arriving a third time, in the entry. Caught by `aa272bed`, who ran the rule on a figure that flattered
+them.
+
+**This is NOT an `OB`, and the admission test is what says so.** *Would a more careful version of the
+same party have caught it?* Yes — one `git grep`, no special access, no held parameter. It fails the
+test cleanly. The right name is an **unpaid cost**, not a blind spot, and filing it as an `OB` would
+prescribe building something that already exists.
+
+**SCOPE THAT DECLASSIFICATION CAREFULLY — it covers the prior-art gap and nothing else.**
+`docs/issues/2026-09-13-home-path-scan-cannot-see-a-new-script-until-commit.md` carries **two**
+findings, and only one of them is this. The gate's population boundary being published solely in the
+enforcement layer **is** structural and stays OB-shaped: an author writing a new script has no
+reason to open `tests/committed_paths.rs`, and no amount of care manufactures that reason. The
+prior-art gap sitting in the same file is not, because one command reaches it. Same file, two
+classes, and a reader skimming the declassification could take it as covering both. (Separation
+flagged by `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`.)
+
+**But "so the fix is a habit" is wrong, and the corpus already measured that.**
+`skill-frictions:SKF-22`: *a trigger the model must notice is a policy, not a mechanism* — the
+reconnaissance skill went uninvoked for a full session while its trigger condition was observed and
+**stated out loud**. § *Observer Blindness* position 3 ranks the shapes: best is making the correct
+path end in a safe state; next best is an unconditional policy tied to **a trigger that happens
+anyway**. *"Remember to grep before filing"* is neither, and it is the shape that failed three times
+tonight among parties who all knew the rule. **Not-an-OB rules out the class; it does not rule out
+the mechanism** — that conflation was mine, corrected by `f0b1a4c7`.
+
+**Proposed rule — two triggers that happen anyway, and the earlier one is better.**
+
+1. **PREFERRED: hang a near-neighbour scan off `doc(action="create", kind="bug")`.** That fires at
+   the moment the population is being added to, which is strictly earlier than committing and is the
+   moment the author still holds the context to judge a candidate. It also needs no new search
+   machinery: the catalog already has semantic search, which is a better instrument for *nearest
+   neighbour* than a token grep — `file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head`
+   and `file-provenance-conflates-touched-once-with-bytes-at-risk` share almost no distinctive tokens
+   and are the same mechanism failing in opposite directions, which is exactly the pair a grep is
+   worst at and an embedding is best at. (Trigger and instrument both proposed by
+   `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`, improving on the commit-time version below.)
+2. **FALLBACK: the `docs/issues/*.md` pre-commit path**, which `scripts/pre-commit-run.sh:157`
+   already runs rules on. Later, and grep-based, but it needs nothing new wired.
+
+Either beats the discipline none of the filers kept on the day they were all thinking hardest about
+it.
+
+- **Advisory only — refuse nothing.** It cannot know which neighbour is relevant and does not need
+  to; the job is to make the one command unskippable by running it for the author. A refusal here
+  would demand a judgement the tool cannot make, which is the guard-remedy failure this repo has
+  already paid for twice.
+- **Carve-out:** cap the output. A slug word like `gate` or `check` matches most of the archive, and
+  a pile reads as coverage — see
+  `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` § *Root cause*, where
+  an over-wide prior-art pattern returned 119 files. The advisory must not reproduce the defect it
+  exists to catch.
+- **Why the passing path matters:** when it finds nothing, say so with its denominator — *"searched N
+  archived bug files, no candidates"* — or the silence is indistinguishable from the check not
+  running. Same law as `H-13` and the same as the home-path gate's missing denominator.
+
+**Deliberately NOT built yet.** One evening of three sessions is one evening, and the `**Valid:**`
+condition above states what would promote it. Raised and sharpened by
+`f0b1a4c7-e991-4478-bf22-b088483b6821`, whose correction supplied both the SKF-22 citation and the
+trigger; the not-an-OB half is mine and was the easier half.
+
+**Rests on:** `b93cfb34`, `bdc13887`, `e2b5acaf` — three commits adding prior-art citations that
+should have been present at filing time.
 
 ## Template for new entries
 
