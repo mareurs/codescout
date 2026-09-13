@@ -427,6 +427,17 @@ pub enum CorruptionVerdict {
     Clean,
     /// The edit dropped the target symbol's own definition — caller must roll back.
     TargetDropped,
+    /// The body was a complete declaration, but it declared THIS name instead of the
+    /// target's — caller must roll back.
+    ///
+    /// Split out of `TargetDropped`, which it is a special case of by the name-set test
+    /// alone: the target's name is absent either way. They are separated because the
+    /// REPAIRS are opposite. `TargetDropped` means "you sent statements, send a
+    /// declaration"; this means "you sent a declaration, and `replace` is the wrong
+    /// action for it — `rename` is." A caller told the first when the second is true
+    /// re-checks a body that was already correct and has no route to the real rule.
+    /// Measured 2026-09-13: two sessions hit it, one of them twice in an hour.
+    TargetRenamed(String),
     /// The edit overshot and dropped these sibling symbols — caller must roll back.
     /// Sorted, so the resulting error message is deterministic.
     SiblingsDropped(Vec<String>),
@@ -494,6 +505,28 @@ pub fn corruption_verdict(
         if pre_count > 0
             && crate::symbol::query::count_symbols_by_name_path(post, counted_name_path) == 0
         {
+            // TWO causes reach this test and they take OPPOSITE repairs, so tell them
+            // apart here rather than naming the commoner one downstream. A body that
+            // was a complete declaration under a DIFFERENT name leaves a 1:1
+            // substitution behind: nothing else vanished, and exactly one name
+            // appeared. A body of bare statements leaves no replacement name.
+            if let Some(pre) = pre_set {
+                let post_set = collect_all_name_paths(post);
+                let mut appeared: Vec<String> = post_set.difference(pre).cloned().collect();
+                let lost_others = pre
+                    .difference(&post_set)
+                    .filter(|np| {
+                        np.as_str() != counted_name_path
+                            && target_ast_name_path != Some(np.as_str())
+                    })
+                    .count();
+                // Exactly one appeared, nothing else lost. A wider shape (two new
+                // names, or a sibling also gone) is NOT a rename — it is damage, and
+                // must keep falling through to the blunter verdicts below.
+                if lost_others == 0 && appeared.len() == 1 {
+                    return CorruptionVerdict::TargetRenamed(appeared.remove(0));
+                }
+            }
             return CorruptionVerdict::TargetDropped;
         }
 
@@ -1039,10 +1072,89 @@ mod tests {
 
     #[test]
     fn target_dropped_when_symbol_vanishes_from_post_ast() {
-        let pre = set(&["foo"]);
-        let post = [sym("bar")]; // foo is gone
+        // FIXTURE CHANGED 2026-09-13 and the reason is load-bearing. This read
+        // `pre = {foo}`, `post = [bar]` — which is a 1:1 SUBSTITUTION, i.e. the rename
+        // case, and it was asserting `TargetDropped` for it. That is the conflation
+        // 493feb07511a15b0 reports, pinned by its own regression test.
+        //
+        // The fixture now drops `foo` and puts NOTHING in its place, which is what
+        // "vanishes" in the test's name has always meant. `keeper` is here so the post
+        // AST is non-empty for a reason unrelated to the target.
+        let pre = set(&["foo", "keeper"]);
+        let post = [sym("keeper")]; // foo is gone, and nothing replaced it
         let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post), false);
         assert_eq!(verdict, CorruptionVerdict::TargetDropped);
+    }
+    #[test]
+    fn a_body_declaring_a_different_name_is_a_rename_not_a_dropped_target() {
+        // The name-set test alone cannot separate these: the target's name is absent
+        // either way. What separates them is what took its place — a complete
+        // declaration under another name leaves a 1:1 substitution, bare statements
+        // leave nothing.
+        let pre = set(&["foo", "keeper"]);
+        let renamed = vec![sym("bar"), sym("keeper")];
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&renamed), false),
+            CorruptionVerdict::TargetRenamed("bar".to_string()),
+        );
+
+        // THE NON-VACUITY CONTROL, and it is the one that matters: the new branch must
+        // not swallow the verdict it was split out of. A body of bare statements drops
+        // `foo` and puts no name in its place, so nothing appeared.
+        let statements_only = vec![sym("keeper")];
+        assert_eq!(
+            corruption_verdict(
+                1,
+                Some(&pre),
+                Some("foo"),
+                "foo",
+                Some(&statements_only),
+                false
+            ),
+            CorruptionVerdict::TargetDropped,
+        );
+    }
+
+    #[test]
+    fn a_rename_shaped_verdict_requires_a_clean_one_for_one_substitution() {
+        // Damage that merely RESEMBLES a rename must keep falling through to the blunter
+        // verdicts. Both cases below have the target absent and a new name present, and
+        // neither is a rename — telling the caller "you meant to rename" would send them
+        // to retry an edit that is destroying other symbols.
+        let pre = set(&["foo", "keeper"]);
+
+        // A sibling went with it. The verdict stays TargetDropped rather than becoming
+        // SiblingsDropped, because the target-absent branch is ranked FIRST and returns
+        // before the sibling check — pre-existing and unchanged here. What this pins is
+        // only that the RENAME branch did not fire: `lost_others` is 1, so the one-for-one
+        // test fails and the blunter diagnosis survives.
+        let sibling_gone = vec![sym("bar")];
+        assert_eq!(
+            corruption_verdict(
+                1,
+                Some(&pre),
+                Some("foo"),
+                "foo",
+                Some(&sibling_gone),
+                false
+            ),
+            CorruptionVerdict::TargetDropped,
+        );
+
+        // Two names appeared where one symbol stood: the body is not a single
+        // declaration, so `rename` would not have helped and must not be suggested.
+        let two_appeared = vec![sym("bar"), sym("baz"), sym("keeper")];
+        assert_eq!(
+            corruption_verdict(
+                1,
+                Some(&pre),
+                Some("foo"),
+                "foo",
+                Some(&two_appeared),
+                false
+            ),
+            CorruptionVerdict::TargetDropped,
+        );
     }
 
     #[test]

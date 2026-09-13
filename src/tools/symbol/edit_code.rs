@@ -866,7 +866,11 @@ impl EditCode {
                 "Try symbols(path) to refresh, then retry; or narrow the edit via \
                  edit_file with unique anchors.",
             )),
+            // `pre_count = 0` above means the rename branch, which is nested inside the
+            // same `pre_count > 0` test as TargetDropped, is unreachable here too — a
+            // removal replaces the target with nothing, so no name can appear.
             CorruptionVerdict::TargetDropped
+            | CorruptionVerdict::TargetRenamed(_)
             | CorruptionVerdict::Clean
             | CorruptionVerdict::Unverified => None,
         };
@@ -1150,6 +1154,17 @@ impl EditCode {
 
         // Both corrupting verdicts roll the file back identically; only the message differs.
         let rollback_reason = match &verdict {
+            CorruptionVerdict::TargetRenamed(new_name) => Some((
+                format!(
+                    "edit_code replace('{name_path}') was given a complete declaration, but it \
+                     declares `{new_name}` instead of `{name_path}`. `replace` cannot rename — \
+                     applying this would have removed `{name_path}` and added a different \
+                     symbol. File restored."
+                ),
+                "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
+                 replace the body in a second call if it also changed. To replace only the \
+                 body, keep the declared name identical to `symbol`.",
+            )),
             CorruptionVerdict::TargetDropped => Some((
                 format!(
                     "edit_code replace('{name_path}') dropped the symbol definition — \

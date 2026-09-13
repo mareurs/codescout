@@ -6746,6 +6746,103 @@ async fn edit_code_replace_repairs_truncated_lsp_range_from_ast() {
         "repair must be reported in the response; got warning: {warning:?}"
     );
 }
+/// The refusal a `replace` gets when its body declares a DIFFERENT name must name the
+/// action that actually works. Pins the REMEDY, not the predicate.
+///
+/// `CLAUDE.md` § *Testing Discipline*: "a suite tests a guard's PREDICATE and never its
+/// REMEDY TEXT ... every assertion is about who is refused; nobody writes one about where
+/// the refusal sends you." Before this test, the guard refused correctly and told the
+/// caller their body was "not just body statements" — false, and with no route to
+/// `action="rename"`. Two sessions followed it on 2026-09-13, one of them twice in an hour.
+///
+/// This cannot check the remedy is CORRECT, only that it still routes somewhere a caller
+/// can act on — which is exactly the regression that happened. Asserting on `rename` reds
+/// on deletion and survives rewording, which is the whole trade.
+#[tokio::test]
+async fn a_replace_whose_body_renames_is_told_to_use_rename() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("src").join("lib.rs");
+    // `keeper` is here so the post-edit AST is non-empty for a reason unrelated to the
+    // target: without it, "one name appeared" and "the file is now just one symbol" are
+    // the same observation.
+    std::fs::write(&file, "fn keeper() {}\nfn foo() {\n    let _ = 1;\n}\n").unwrap();
+
+    let target = SymbolInfo {
+        name: "foo".to_string(),
+        name_path: "foo".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 1,
+        end_line: 3,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![target]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    // A COMPLETE declaration — signature, braces, the lot — under a different name.
+    // That is the whole point: the old message blamed an incomplete body.
+    let err = EditCode
+        .call(
+            json!({
+                "action": "replace",
+                "symbol": "foo",
+                "path": "src/lib.rs",
+                "body": "fn bar() {\n    let _ = 2;\n}",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("replace must refuse to rename")
+        .to_string();
+
+    // ASSERT ON THE CALLABLE FORM, NOT THE WORD. `rename` alone also appears in the
+    // diagnosis ("`replace` cannot rename"), so `err.contains("rename")` is satisfied
+    // whether or not the remedy survives — measured 2026-09-13 by deleting the routing
+    // from the hint, which left that assertion GREEN. That is
+    // `cluster/assertion-satisfiable-by-accident` occurring inside the test written to
+    // guard remedy text. `action="rename"` appears only where the caller is told what to
+    // run.
+    assert!(
+        err.contains(r#"action="rename""#),
+        "the refusal must route the caller to the action that works, in callable form; got: {err}"
+    );
+    assert!(
+        err.contains("bar"),
+        "the refusal must name the name the body actually declares; got: {err}"
+    );
+    assert!(
+        !err.contains("not just body statements"),
+        "the old message diagnosed an incomplete body, which is false here; got: {err}"
+    );
+
+    // The predicate is unchanged: refusing still rolls back.
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("fn foo()") && !content.contains("fn bar()"),
+        "a refused replace must restore the file; got:\n{content}"
+    );
+}
 
 /// gap 2 of `docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md`:
 /// removing a non-empty module reported the module's OWN children as "dropped
