@@ -6392,7 +6392,13 @@ fn declared_patch_ids(content: &str) -> Vec<String> {
     fn is_patch_id(s: &str) -> bool {
         s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
     }
-    let mut out = Vec::new();
+    // Newlines normalised to spaces before the search, rather than searching each line in
+    // isolation: the population is a DECLARATION, and declarations wrap because prose wraps.
+    // `patch-id` ending one line with its backticked value opening the next is invisible to a
+    // per-line scan by construction (`docs/issues/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`).
+    // Fence tracking stays line-driven so a worked example inside a fence is still excluded —
+    // that half (E2) is orthogonal and must survive unchanged.
+    let mut joined = String::new();
     let mut fence = crate::util::markdown_fence::FenceState::new();
     for line in content.lines() {
         let t = line.trim_start();
@@ -6402,23 +6408,26 @@ fn declared_patch_ids(content: &str) -> Vec<String> {
         if fence.in_fence() {
             continue;
         }
-        // `to_ascii_lowercase` is byte-for-byte length-preserving, so offsets found in `lower`
-        // index `t` safely, and every offset used below lands just past ASCII.
-        let lower = t.to_ascii_lowercase();
-        let mut from = 0usize;
-        while let Some(rel) = lower[from..].find("patch-id") {
-            let after = from + rel + "patch-id".len();
-            if let Some(open) = t[after..].find('`') {
-                let vstart = after + open + 1;
-                if let Some(close) = t[vstart..].find('`') {
-                    let val = &t[vstart..vstart + close];
-                    if is_patch_id(val) {
-                        out.push(val.to_string());
-                    }
+        joined.push_str(t);
+        joined.push(' ');
+    }
+    let mut out = Vec::new();
+    // `to_ascii_lowercase` is byte-for-byte length-preserving, so offsets found in `lower`
+    // index `joined` safely, and every offset used below lands just past ASCII.
+    let lower = joined.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find("patch-id") {
+        let after = from + rel + "patch-id".len();
+        if let Some(open) = joined[after..].find('`') {
+            let vstart = after + open + 1;
+            if let Some(close) = joined[vstart..].find('`') {
+                let val = &joined[vstart..vstart + close];
+                if is_patch_id(val) {
+                    out.push(val.to_string());
                 }
             }
-            from = after;
         }
+        from = after;
     }
     out
 }
@@ -9507,6 +9516,53 @@ mod tests {
             scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
         };
         assert_eq!(v.len(), 2, "both shapes are declarations: {v:#?}");
+    }
+    /// `docs/issues/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`: a
+    /// declaration whose 40-hex value wraps to the next line was invisible to a per-line scan,
+    /// so a bug file that DID declare its patch-id was reported as if it had not. Fence tracking
+    /// (E2 in that file) must survive unchanged — a worked example inside a fence must stay
+    /// excluded even though lines are now joined across the rest of the section.
+    #[tokio::test]
+    async fn non_terminal_status_with_fix_anchor_reads_a_patch_id_that_wraps_to_the_next_line() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "wrapped",
+            "open",
+            "",
+            &format!(
+                "## Fix\n\n**Fixed on `experiments` at `655c0b6f`**, patch-id\n`{FIXTURE_PATCH_ID}`."
+            ),
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "wrapped-fenced-example-must-stay-excluded",
+            "open",
+            "",
+            &format!("## Fix\n\nHow to record one:\n\n```\npatch-id\n`{FIXTURE_PATCH_ID}`\n```\n"),
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
+            scan_non_terminal_status_with_fix_anchor(&mut scope, &cat.conn).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "the wrapped prose declaration must be FLAGGED (its anchor is now found, so `open` \
+         disagrees with the declared fix), and the fenced worked example must stay unflagged \
+         (its patch-id is correctly excluded, so it has no anchor to disagree over): {v:#?}"
+        );
+        assert!(
+            v[0].path.contains("/wrapped.md"),
+            "the flagged one must be the real wrapped declaration, not the fenced example: {v:#?}"
+        );
     }
 
     /// `zombie` means *no longer observed, root cause unconfirmed* — fixed once, recurred, now
