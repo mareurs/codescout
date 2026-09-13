@@ -1075,7 +1075,7 @@ mod tests {
         // FIXTURE CHANGED 2026-09-13 and the reason is load-bearing. This read
         // `pre = {foo}`, `post = [bar]` — which is a 1:1 SUBSTITUTION, i.e. the rename
         // case, and it was asserting `TargetDropped` for it. That is the conflation
-        // 493feb07511a15b0 reports, pinned by its own regression test.
+        // 120e3207d427ea14 reports, pinned by its own regression test.
         //
         // The fixture now drops `foo` and puts NOTHING in its place, which is what
         // "vanishes" in the test's name has always meant. `keeper` is here so the post
