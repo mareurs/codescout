@@ -748,6 +748,61 @@ mod tests {
         );
     }
 
+    /// REPRODUCTION for the reported bug (docs/issues/2026-09-13-inbound-path-citations-cannot-
+    /// see-a-slug-form-citation.md): does a citation written as a bare SLUG, with no path
+    /// wrapper at all, get missed?
+    ///
+    /// `files_mentioning` greps for `old_full.file_stem()` -- which for a dated-slug filename
+    /// IS the slug -- as a plain `-F` substring, so a bare-slug mention should already be a
+    /// substring hit with no path syntax required. This test exists to settle empirically
+    /// whether that reasoning holds, per the reported bug's own admission that its root cause
+    /// was "not established in code; the behaviour is black-box so far".
+    #[tokio::test]
+    async fn the_citation_scan_sees_a_bare_slug_with_no_path_wrapper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(tmp.path())
+                .arg("init")
+                .output()
+                .is_ok_and(|o| o.status.success()),
+            "fixture needs a git repo for the scan to run at all"
+        );
+
+        // No path syntax anywhere -- exactly the form the reported bug claims is invisible.
+        let citer = tmp
+            .path()
+            .join("docs/trackers/issue-clusters/ic-example.md");
+        std::fs::create_dir_all(citer.parent().unwrap()).unwrap();
+        std::fs::write(&citer, "**Members:** foo\n").unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed: Vec<String> = result["inbound_path_citations"]
+            .as_array()
+            .expect("the scan ran, so the list must be present rather than null")
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+            .collect();
+
+        assert!(
+            listed.iter().any(|p| p.ends_with("ic-example.md")),
+            "a bare-slug citation with no path wrapper must be found: {listed:?}"
+        );
+    }
+
     /// The id scan reports `null` when it could not run, exactly as its path twin does.
     ///
     /// Mirrors `a_citation_scan_that_cannot_run_reports_null_not_an_empty_list` on purpose:
