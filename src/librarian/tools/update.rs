@@ -226,6 +226,49 @@ fn try_preserving_frontmatter_patch(doc: &str, patch: &UpdatePatch) -> Option<St
     }
     spliced.then_some(out)
 }
+/// The file half of an update landed on disk; the catalog half then failed. Returns a
+/// `RecoverableError` naming BOTH facts, because the bare rusqlite error this replaces
+/// answers "did anything happen?" and invites exactly the wrong remedy: retrying
+/// `body_edits` blind duplicates the already-applied change (the content is not
+/// idempotent to re-splice), while the catalog row — including `file_sha256` — never
+/// caught up to what is actually on disk.
+///
+/// `is_locked` narrows the WORDING, not the WRAPPING: a lock-contention failure is the
+/// common transient case (safe to retry after checking file state), so its hint says so
+/// explicitly; every other cause still gets the same "the file already changed, do not
+/// blindly retry" framing, because the ordering hazard is identical regardless of why
+/// the catalog write failed.
+/// docs/issues/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
+fn file_written_but_catalog_failed(e: anyhow::Error, full: &std::path::Path) -> anyhow::Error {
+    let is_locked = e.downcast_ref::<rusqlite::Error>().is_some_and(|re| {
+        matches!(re, rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == rusqlite::ErrorCode::DatabaseBusy)
+    });
+    let hint = if is_locked {
+        format!(
+            "The file at {} was already written; the catalog record failed because the \
+             database was locked (a concurrent writer held it past the busy timeout) — this is \
+             usually transient. Do NOT retry the same patch blind: read the file first to \
+             confirm whether the edit already landed (it did), then either re-run with just the \
+             catalog-affecting fields (e.g. commit_refresh=true) or wait and retry the whole \
+             call only if the file shows no change. Underlying error: {e}",
+            full.display()
+        )
+    } else {
+        format!(
+            "The file at {} was already written; the catalog record failed to save, so its \
+             row (including file_sha256) does not yet reflect the new content. Do NOT retry the \
+             same patch blind — re-applying body_edits against a file that already has them \
+             duplicates the change. Read the file first to confirm what landed. Underlying \
+             error: {e}",
+            full.display()
+        )
+    };
+    super::LibrarianRecoverableError::with_hint(
+        "doc(action=\"update\") wrote the file but the catalog record failed",
+        hint,
+    )
+}
 
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
 /// Mirrors the batch semantics of `edit_file`'s heading-addressed `edits=[...]`. Used by
@@ -673,7 +716,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_sha256: crate::librarian::util::sha_of_bytes(new_content.as_bytes()),
         confidence: row.confidence,
     };
-    artifact::upsert_and_mint_slug(&cat, &updated_row)?;
+    // NOT REACHED BY ANY UNIT TEST: `file_written_but_catalog_failed` is tested
+    // directly against a hand-built error, but the join here -- an ACTUAL
+    // `upsert_and_mint_slug` failure after the file write above has already landed
+    // on disk -- needs real lock contention (a second connection holding
+    // `BEGIN IMMEDIATE` past the 5s busy_timeout) to exercise, which no test in
+    // this suite constructs.
+    if let Err(e) = artifact::upsert_and_mint_slug(&cat, &updated_row) {
+        return Err(file_written_but_catalog_failed(e, &full));
+    }
 
     // Keep the entry-count report: a params patch replaces an array wholesale
     // (RFC 7396), so a caller re-sending a trimmed collection silently deletes the
@@ -2053,6 +2104,69 @@ text
         let body = "Just prose, no dated headers.\n";
         assert_eq!(trim_history(body, 2), body);
     }
+    #[test]
+    fn catalog_lock_contention_names_the_file_and_forbids_a_blind_retry() {
+        let path = std::path::PathBuf::from("/tmp/whatever/artifact.md");
+        let sqlite_busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_string()),
+        );
+        let err = file_written_but_catalog_failed(anyhow::Error::new(sqlite_busy), &path);
+        let rec = err
+            .downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+            .expect("must be the librarian RecoverableError, so this routes isError:false");
+        assert!(
+            rec.message
+                .contains("wrote the file but the catalog record failed"),
+            "message must say BOTH halves happened, not just that something failed: {}",
+            rec.message
+        );
+        let hint = rec.hint.as_deref().unwrap_or("");
+        assert!(
+            hint.contains(&path.display().to_string()),
+            "hint must name the file that was already written: {hint}"
+        );
+        assert!(
+            hint.contains("do NOT retry") || hint.contains("Do NOT retry"),
+            "hint must forbid the blind retry that duplicates content: {hint}"
+        );
+        assert!(
+            hint.contains("usually transient"),
+            "a lock-contention cause must be named as such via wording that cannot leak \
+                 from the underlying error's own message, not folded into the generic case: {hint}"
+        );
+    }
+
+    #[test]
+    fn catalog_write_failure_for_a_non_lock_cause_still_forbids_a_blind_retry() {
+        // The wrapping and the "do not retry blind" guidance apply regardless of WHY
+        // the catalog write failed -- only the WORDING should differ by cause. A
+        // constraint violation or a corrupt row must not be silently folded into the
+        // "transient, safe to retry" framing the lock case gets.
+        let path = std::path::PathBuf::from("/tmp/whatever/artifact.md");
+        let other = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("UNIQUE constraint failed".to_string()),
+        );
+        let err = file_written_but_catalog_failed(anyhow::Error::new(other), &path);
+        let rec = err
+            .downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+            .unwrap();
+        let hint = rec.hint.as_deref().unwrap_or("");
+        assert!(
+            hint.contains(&path.display().to_string()),
+            "hint must name the file even for a non-lock cause: {hint}"
+        );
+        assert!(
+            hint.contains("do NOT retry") || hint.contains("Do NOT retry"),
+            "the retry warning must not be conditional on the cause being a lock: {hint}"
+        );
+        assert!(
+            !hint.contains("busy timeout") && !hint.contains("usually transient"),
+            "a non-lock cause must not borrow the lock-specific transient framing: {hint}"
+        );
+    }
+
     #[test]
     fn body_edits_replace_without_content_points_at_edit_action() {
         // Regression (2026-06-09): old_string/new_string with action="replace"
