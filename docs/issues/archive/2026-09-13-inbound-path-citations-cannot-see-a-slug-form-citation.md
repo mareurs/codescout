@@ -181,6 +181,28 @@ repo's own § Testing Discipline on mutating the production path rather than tru
 assertion's existence), GREEN after. `5ea1f2ad`'s bare-slug test is unaffected and still
 passes -- it guards a different, orthogonal dimension.
 
+**Second unit, added after a live mutation found the integration test above
+under-discriminates.** Credited to `f3c594ce`: the integration test's
+`assert!(listed.iter().any(|p| p.ends_with(...)))` can be satisfied by an OVERLAPPING
+substring, not just the exact slug, because the citer text is itself matched by `-F`
+substring search. Proven live, not just asserted: mutating `dateless_slug`'s slice bound
+from `stem[11..]` to `stem[12..]` produces `"xample-bug"` (one byte short of
+`"example-bug"`) and the integration test **stayed green**, because `"xample-bug"` is
+still a substring of the citer's `"example-bug"` text. `dateless_slug_strips_exactly_the_date_prefix`
+asserts the exact output with `assert_eq!`, which the same mutation reds. Three mutations
+run: always-`None` (full revert) reds both tests; `stem[12..]` reds only the new unit
+test and passes the integration test, reproducing the exact gap described rather than
+only describing it; the shipped `stem[11..]` passes both.
+
+## Residual, not owed by this fix
+
+**Two independent implementations of "strip the date prefix," one rule, no gate comparing
+them.** `dateless_slug` (Rust, this file) mirrors `scripts/pre-commit-ledger-counts.py`'s
+`_stem()` (Python) byte-for-byte by inspection, but nothing asserts they stay in sync if
+either changes. Flagged by `f3c594ce` as the shape that put three ledgers on one prefix
+before (see `bug-fix-session-log` cross-refs) -- not fixed here, worth a line for whoever
+next touches either one.
+
 ## Resume
 
 Found while archiving the fenced-line-attribution bug, and filed **separately from**
