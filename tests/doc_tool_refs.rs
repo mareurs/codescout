@@ -233,7 +233,82 @@ fn tool_params() -> HashMap<String, HashSet<String>> {
             }
         }
     }
+
+    // The advertised surface is the source schema PLUS what `list_tools` injects, and reading
+    // only the source made this guard narrower than the tool it checks. `server.rs`'s
+    // `inject_workspace_param` adds an optional `workspace` pin to every `pinnable()` tool
+    // between `input_schema()` and the wire, so `{"tool": "symbols", "arguments":
+    // {"workspace": …}}` is a CORRECT document that a source-only extractor reports as naming a
+    // parameter that does not exist. Found 2026-09-13 when the JSON-payload scan reached the one
+    // page using it; the prose scan never had. `server.rs`'s own `tool_surface_chars` already
+    // reproduces this injection for the byte budget, with a comment saying a bare
+    // `input_schema()` measurement "would miss ~6.2 KB of injected `workspace` prose" — the
+    // knowledge existed in the codebase and this file did not share it.
+    let unpinnable = unpinnable_tools();
+    assert!(
+        !unpinnable.is_empty(),
+        "control: `Tool::pinnable`'s exclusion list parsed EMPTY, which would silently grant \
+         every tool a `workspace` parameter and loosen this guard in the false-negative \
+         direction — the one direction no assertion in this file can report"
+    );
+    for (name, params) in map.iter_mut() {
+        if !unpinnable.contains(name) {
+            params.insert("workspace".to_string());
+        }
+    }
     map
+}
+
+/// Tools that do NOT receive the injected `workspace` pin.
+///
+/// Read from `Tool::pinnable`'s own `matches!` arm rather than restated, so adding a tool to that
+/// list cannot leave this guard checking against a surface the server no longer advertises.
+fn unpinnable_tools() -> HashSet<String> {
+    // Compiled once. The same shape cost this suite 0.32s -> 133s in `calls_on_line` and was
+    // invisible to every assertion; clippy's `regex_creation_in_loops` catches it here, which is
+    // the mechanism that lesson was missing.
+    static LIT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let lit = LIT.get_or_init(|| regex::Regex::new(r#""([a-z_][a-z0-9_]*)""#).unwrap());
+    let mut out = HashSet::new();
+    for text in production_sources() {
+        let Some(at) = text.find("fn pinnable(&self) -> bool {") else {
+            continue;
+        };
+        let Some(m) = text[at..].find("matches!").map(|i| at + i) else {
+            continue;
+        };
+        // Balanced scan to `matches!`'s own closing paren. A bare `find(')')` lands on
+        // `self.name()`'s paren — which sits BEFORE every string literal in the arm, so the
+        // extraction silently returned nothing. The control assertion in `tool_params` caught
+        // that; it is the reason this comment exists rather than a quiet `.find(')')`.
+        let bytes = text.as_bytes();
+        let Some(open) = text[m..].find('(').map(|i| m + i) else {
+            continue;
+        };
+        let mut depth = 0usize;
+        let mut close = open;
+        for (i, &b) in bytes[open..].iter().enumerate() {
+            match b {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if close <= open {
+            continue;
+        }
+        let lit_matches = lit.captures_iter(&text[m..close]);
+        for c in lit_matches {
+            out.insert(c[1].to_string());
+        }
+    }
+    out
 }
 
 /// Tool name → the values its `action` parameter declares in `"enum"`.
@@ -569,6 +644,96 @@ fn anchored_cites() -> Vec<Cite> {
                         text: line.trim().chars().take(110).collect(),
                     });
                 }
+            }
+        }
+    }
+    out
+}
+
+/// What one surface's fenced ` ```json ` blocks yielded.
+///
+/// The two counters are not bookkeeping. A parser that silently declines everything satisfies
+/// every assertion about what it finds, so the population it *refuses* has to be as visible as
+/// the population it reads — which is the same defect, one level up, that this whole file exists
+/// to catch.
+#[derive(Default)]
+struct PayloadScan {
+    /// Objects carrying both `"tool"` and `"arguments"` — the shape that is a real call.
+    cites: Vec<Cite>,
+    /// Fenced json blocks that parsed as JSON, payload or not.
+    parsed: usize,
+    /// Fenced json blocks `serde_json` refused — elisions (`…`), fragments, deliberate
+    /// non-examples. Skipping them is correct; skipping them SILENTLY is not.
+    unparseable: usize,
+}
+
+/// Argument keys named in the manual's JSON payload form.
+///
+/// **A second parser, deliberately, and the parent bug (`da911452d5a00116`) said so.**
+/// [`CALL_OPEN`] anchors on `name(`, and the payload form has no paren — it uses `:` and `{`.
+/// Widening `\b…\(` to reach it would mean matching bare prose, which is how the guard would
+/// start reporting on English.
+///
+/// **This input is real JSON, which is the whole reason this is cheap.** The parent bug had to
+/// invent a `<placeholder>` escape because its input was prose and a parser over prose owes one
+/// (`IC-6`). A fenced ` ```json ` block either parses or it does not — no grammar to design, no
+/// escape to invent, no house convention silently dictated by a scanner.
+fn json_payload_cites() -> PayloadScan {
+    let root = repo_root();
+    let mut out = PayloadScan::default();
+
+    for path in present_tense_surfaces() {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+
+        let lines: Vec<&str> = text.lines().collect();
+        let mut i = 0usize;
+        while i < lines.len() {
+            if lines[i].trim_start().starts_with("```json") {
+                let open = i;
+                let mut j = i + 1;
+                while j < lines.len() && !lines[j].trim_start().starts_with("```") {
+                    j += 1;
+                }
+                let block = lines[open + 1..j.min(lines.len())].join("\n");
+                match serde_json::from_str::<serde_json::Value>(&block) {
+                    Ok(v) => {
+                        out.parsed += 1;
+                        // One block may hold a single call or an array of them.
+                        let items: Vec<&serde_json::Value> = match v.as_array() {
+                            Some(a) => a.iter().collect(),
+                            None => vec![&v],
+                        };
+                        for item in items {
+                            let (Some(tool), Some(args)) = (
+                                item.get("tool").and_then(serde_json::Value::as_str),
+                                item.get("arguments").and_then(serde_json::Value::as_object),
+                            ) else {
+                                continue; // a config example, not a call — parsed, not a payload
+                            };
+                            for key in args.keys() {
+                                out.cites.push(Cite {
+                                    file: rel.clone(),
+                                    line: open + 1,
+                                    tool: tool.to_string(),
+                                    param: key.clone(),
+                                    bare: false,
+                                    text: format!("{{\"tool\": \"{tool}\", \"arguments\": {{…}}}}"),
+                                });
+                            }
+                        }
+                    }
+                    Err(_) => out.unparseable += 1,
+                }
+                i = j + 1;
+            } else {
+                i += 1;
             }
         }
     }
@@ -1035,4 +1200,86 @@ fn an_angle_bracket_placeholder_is_the_documented_escape() {
     let named = calls_on_line("`symbols(path=<found_file>)`");
     assert_eq!(named[0].params, vec!["path"], "the parameter IS checked");
     assert!(named[0].bare.is_empty(), "the value is not");
+}
+
+/// A JSON payload example names arguments its tool actually declares.
+///
+/// The second of the two forms `docs/manual` teaches, and the one
+/// `a_documented_tool_parameter_exists_on_that_tool` cannot see: [`CALL_OPEN`] anchors on
+/// `name(`, and `{"tool": "symbols", "arguments": {…}}` has no paren anywhere. Measured
+/// 2026-09-13 at `d779fbd3`: **89 argument claims across 191 parsed blocks**, none of them under
+/// any guard until this landed.
+///
+/// This is the surface a reader is most likely to COPY — it is a ready-made call — and codescout
+/// drops unknown keys rather than rejecting them (`IC-15`), so a wrong key here produces a
+/// successful call that quietly does something else.
+#[test]
+fn a_documented_json_payload_names_real_parameters() {
+    let scan = json_payload_cites();
+    let schemas = tool_params();
+
+    // Non-vacuity FIRST, because every assertion below is satisfied by a parser that reads
+    // nothing. Floors, not equalities: a doc edit should not red this, a parser that stopped
+    // working should. Derivation — measured 2026-09-13 at `d779fbd3`: 191 parsed, 17 declined,
+    // 89 cites. The floors sit ~20% under each so ordinary churn has room.
+    assert!(
+        scan.parsed >= 150,
+        "only {} fenced json blocks parsed (was 191 on 2026-09-13). Either the corpus shrank a \
+         lot or the block scanner stopped finding fences — check the ```json detection before \
+         lowering this.",
+        scan.parsed
+    );
+    assert!(
+        scan.cites.len() >= 70,
+        "only {} argument claims found (was 89 on 2026-09-13). Blocks are parsing, so this is \
+         the `tool`+`arguments` shape recognition, not the fence scan.",
+        scan.cites.len()
+    );
+    // The population the parser DECLINES, asserted rather than absorbed. Elisions and fragments
+    // are legitimately unparseable; a sudden majority means the scanner is mis-slicing blocks.
+    assert!(
+        scan.unparseable * 4 < scan.parsed,
+        "{} of {} fenced json blocks failed to parse — more than a quarter. That is a scanner \
+         fault, not a corpus of elided examples (17 of 191 on 2026-09-13).",
+        scan.unparseable,
+        scan.parsed
+    );
+
+    let mut bad: Vec<String> = Vec::new();
+    for c in &scan.cites {
+        let Some(params) = schemas.get(&c.tool) else {
+            continue; // not a tool — `a_documented_call_names_a_live_tool`'s business
+        };
+        if !params.contains(&c.param) {
+            let mut known: Vec<&str> = params.iter().map(String::as_str).collect();
+            known.sort_unstable();
+            bad.push(format!(
+                "  {}:{}\n      \"arguments\": {{ \"{}\": … }} — {} has no such parameter.\n      \
+                 declared: {}",
+                c.file,
+                c.line,
+                c.param,
+                c.tool,
+                known.join(", ")
+            ));
+        }
+    }
+
+    assert!(
+        bad.is_empty(),
+        "{} JSON payload example(s) name an argument their tool does not declare.\n\n{}\n\n\
+         This form is checked by a SECOND parser, not by the prose scan — `CALL_OPEN` requires a \
+         `(` and a payload has none. Two consequences worth knowing before you debug a surprise \
+         here:\n  \
+         - the input is real JSON, so there is no grammar to fight and no escape to invent. If a \
+         block should not be scanned, it is not valid JSON or it lacks a `tool`/`arguments` \
+         pair — do not reach for a marker.\n  \
+         - the declared set above includes `workspace` for pinnable tools, because \
+         `list_tools` INJECTS it between `input_schema()` and the wire. If a parameter you know \
+         is real is reported missing, suspect that list: an extractor reading only the source \
+         schema is narrower than the tool it checks, which is exactly the defect that surfaced \
+         when this scan first ran.",
+        bad.len(),
+        bad.join("\n\n")
+    );
 }
