@@ -368,11 +368,17 @@ session".
   file touched by three sessions in an hour makes proximity *anti*-evidence. To attribute a
   write: intersect the socket enumeration with `scripts/file-provenance.py`, then resolve the
   survivors. **When the write you are attributing is one a BUILD RED names, you no longer have
-  to remember any of that** — `run_command` runs `scripts/attribute-red.py` on every non-zero
-  exit and attaches the answer, so the standing instruction is *read the `wip_authors` line
-  the failure already carries* rather than *think to go looking*. Its ceiling is that native
-  `Bash` bypasses `run_command` entirely, so **on a `Bash` gate the silence means nothing and
-  the manual route above is still yours to run.** It names who WROTE the file, never who broke
+  to remember any of that** — `run_command` runs `scripts/attribute-red.py` whenever a command
+  either exits non-zero **or** prints something failure-shaped, and attaches the answer, so the
+  standing instruction is *read the `wip_authors` line the failure already carries* rather than
+  *think to go looking*. **The second half of that trigger is not a nicety: the four-command gate
+  ends in `echo`, so `;` sequencing makes its exit status 0 with the real `101` sitting in stdout
+  as text** — until 2026-09-13 the hook was silent on the one command sequence this file
+  mandates, and a reader with the full red on screen and no attribution beside it routed it by
+  adjacency and named the wrong owner. **Two ceilings remain, and both mean the silence says
+  nothing:** native `Bash` bypasses `run_command` entirely, and an explicit
+  `run_in_background: true` returns before any exit status exists to hook on. On either, **the
+  manual route above is still yours to run.** It names who WROTE the file, never who broke
   the build, and the move it enables is *ask*, not *fix*: the holder may be mid-edit, and
   repairing their uncommitted Rust is its own filed defect. **Prefer the CHANNEL over the
   ANSWER — derive the sid from the socket a message arrived on, which the sender does not

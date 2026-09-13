@@ -181,6 +181,45 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
     Some(dir.join("attribute-red.py"))
 }
 
+/// Does this text look like it NAMES a file in a failure?
+///
+/// A cheap, allocation-free **necessary condition** for `attribute-red.py`'s
+/// `DIAGNOSTIC_PATH` list — deliberately WIDER than it, never narrower. Each engine
+/// pattern requires one distinctive literal, and this checks for those literals without
+/// the span, filename or line-number parts:
+///
+/// | engine pattern | required literal | checked here |
+/// |---|---|---|
+/// | `^\s*-->\s+path:N:N`            | `-->`          | `contains` |
+/// | `panicked at '?path.rs:N`       | `panicked at`  | `contains` |
+/// | `panicked at path.rs:N`         | `panicked at`  | `contains` |
+/// | `^error(\[…\])?:.*path.rs`      | line-initial `error` | `starts_with` |
+/// | `^\s*Error:\s+path.(rs\|py\|sh\|md)` | `Error:` after optional ws | `trim_start` |
+///
+/// **Wider is the load-bearing direction.** A false positive costs one python spawn, and
+/// the engine then answers correctly anyway. A false negative is a silent wrong answer,
+/// which is the entire defect this gate exists to close — so if these two ever disagree,
+/// they must disagree in this direction.
+///
+/// **This duplicates knowledge that lives in Python, and the duplication is guarded rather
+/// than trusted.** `the_prefilter_admits_every_shape_the_engine_matches` carries one
+/// fixture per engine pattern, and `the_engine_pattern_count_matches_the_prefilters_fixtures`
+/// reds when a sixth pattern is added to `scripts/attribute-red.py` without a fixture here
+/// — so drift surfaces as a failing test naming the file to edit, not as a silent
+/// narrowing. (The same shape as `build.rs`'s hand-copied `extract_surface`, which this
+/// repo has already paid for once.)
+fn names_a_diagnostic(text: &str) -> bool {
+    if text.contains("-->") || text.contains("panicked at") {
+        return true;
+    }
+    // `^error` in the engine is start-of-line with NO leading whitespace; `^\s*Error:`
+    // allows it. Mirrored exactly rather than collapsed to one trim, because collapsing
+    // would be wider on one and is free to be — but writing the asymmetry down is what
+    // lets the next reader check it against the table above.
+    text.lines()
+        .any(|l| l.starts_with("error") || l.trim_start().starts_with("Error:"))
+}
+
 /// `None` whenever there is nothing to say, and — deliberately — also whenever the tool
 /// could not find out. The two are indistinguishable here on purpose: the alternative is
 /// emitting a diagnostic about the diagnostic into a failure the reader is already trying
@@ -196,8 +235,20 @@ pub(crate) async fn wip_author_diagnostic(
     work_dir: &Path,
 ) -> Option<String> {
     // Stage 0 — the outermost gate, and the reason the rest can afford to be expensive.
-    // A green command spawns nothing: no python, no git, no extraction.
-    if exit_code == 0 {
+    // A green command with nothing failure-shaped in its output spawns nothing: no
+    // python, no git, no extraction.
+    //
+    // It is NOT `exit_code == 0` alone, and that was the defect. `;` sequencing makes the
+    // last statement's status the whole command's, so `<red> ; echo "LEAN exit=$?"` exits
+    // 0 with the real 101 sitting in stdout as text — and CLAUDE.md § *Development
+    // Commands* MANDATES that shape, for a good reason unrelated to exits (`&&` would skip
+    // the default-lane rebuild that clears the librarian-less-binary trap). So the one
+    // command sequence every session is told to run was the one this hook could not see,
+    // while § *Reaching a Peer Session* told readers the attached line replaced going
+    // looking. An unnamed ceiling under that instruction converts into a confident wrong
+    // answer: measured 2026-09-12, a reader with the full red on screen and no attribution
+    // beside it routed it by ADJACENCY and named the wrong owner.
+    if exit_code == 0 && !names_a_diagnostic(red_text) {
         return None;
     }
     if std::env::var_os(DISABLE_ENV).is_some() {
@@ -296,10 +347,23 @@ mod tests {
     /// Stage 0 is the whole economics: without it every green command in the session pays
     /// a process spawn. Asserted by TIME rather than by reading the branch, because the
     /// claim is about cost and a branch can be present and still slow.
+    ///
+    /// The fixture must contain NOTHING failure-shaped. The first version used
+    /// `"error: --> src/lib.rs:1:1"`, which was correct while the gate was `exit_code == 0`
+    /// alone and became a FALSE PASS the moment the gate learned to read the text — it
+    /// would have asserted that a spawn is skipped using the exact input that must now
+    /// cause one. Ordinary cargo chatter is the right fixture: it is what a green command
+    /// actually prints. The `names_a_diagnostic` assertion below pins that property of the
+    /// fixture, so a later edit to the string cannot quietly re-break it.
     #[tokio::test]
-    async fn a_zero_exit_spawns_nothing() {
+    async fn a_zero_exit_with_nothing_failure_shaped_spawns_nothing() {
         let t = std::time::Instant::now();
-        let got = wip_author_diagnostic(0, "error: --> src/lib.rs:1:1", Path::new(".")).await;
+        let quiet = "   Compiling codescout v0.15.0\n    Finished `dev` profile in 3.21s\n";
+        assert!(
+            !names_a_diagnostic(quiet),
+            "fixture must be non-diagnostic or this test proves nothing"
+        );
+        let got = wip_author_diagnostic(0, quiet, Path::new(".")).await;
         assert!(got.is_none(), "a green command must produce no hint");
         assert!(
             t.elapsed() < Duration::from_millis(50),
@@ -426,20 +490,103 @@ mod tests {
         );
     }
 
-    /// The twin of the case above, on the same fixture. Without it, `exit_code == 0`
-    /// could be deleted and only a TIMING assertion would notice — and a timing
-    /// assertion is exactly the kind that gets relaxed on a loaded machine.
+    /// The twin of the case above, on the same fixture — and it USED TO ASSERT THE
+    /// DEFECT. Its previous form required the identical red at exit 0 to produce nothing,
+    /// which is exactly the silence
+    /// `docs/issues/2026-09-12-the-red-attribution-hook-fires-only-on-a-non-zero-exit-the-mandated-gate-never-produces.md`
+    /// was filed about: `<red> ; echo "LEAN exit=$?"` exits 0 with the real failure sitting
+    /// in stdout, and CLAUDE.md MANDATES that shape for the gate.
+    ///
+    /// The discrimination the old form provided is preserved and improved rather than
+    /// dropped. It existed because "without it, `exit_code == 0` could be deleted and only
+    /// a TIMING assertion would notice". The condition is now pinned from BOTH sides by
+    /// behaviour: delete the gate entirely and
+    /// `a_zero_exit_with_nothing_failure_shaped_spawns_nothing` reds on cost; restore it as
+    /// an unconditional `exit_code == 0 -> None` and THIS one reds on coverage. Neither
+    /// direction rests on a timing assertion any more — the kind that gets relaxed on a
+    /// loaded machine.
     #[tokio::test]
-    async fn the_same_red_at_exit_zero_says_nothing() {
+    async fn the_same_red_at_exit_zero_still_answers() {
         let Some(dir) = dirty_fixture_repo() else {
             eprintln!("skipping: git unavailable");
             return;
         };
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+        // Establish the engine can answer AT ALL here, at the exit code that always
+        // worked. Without it an absent python3 yields the same `None` as a deleted gate,
+        // and this test would pass while proving nothing.
+        if wip_author_diagnostic(101, red, dir.path()).await.is_none() {
+            eprintln!("skipping: no diagnostic at exit 101 either (python3 absent?)");
+            return;
+        }
+        let got = wip_author_diagnostic(0, red, dir.path())
+            .await
+            .expect("the engine answers here at 101, so exit 0 with the same red must too");
         assert!(
-            wip_author_diagnostic(0, red, dir.path()).await.is_none(),
-            "the identical text at exit 0 must produce nothing"
+            got.contains("src/held.rs"),
+            "the hint must name the dirty file the red is about; got: {got}"
         );
+    }
+    /// One fixture per `DIAGNOSTIC_PATH` pattern in `scripts/attribute-red.py`, asserting
+    /// the cheap Rust pre-filter admits every shape the Python engine can match.
+    ///
+    /// This is the half of the coupling that can be checked directly. The pre-filter is
+    /// allowed to be WIDER than the engine and must never be narrower, so each of these
+    /// must pass; none of them says anything about how much wider it is, and that is fine
+    /// — a false positive costs one spawn, a false negative is the silent wrong answer the
+    /// whole gate exists to prevent.
+    #[test]
+    fn the_prefilter_admits_every_shape_the_engine_matches() {
+        // (engine pattern it stands for, text)
+        let per_pattern = [
+            ("rustc span", "  --> src/a.rs:1:1\n"),
+            (
+                "panic site, quoted",
+                "thread 'x' panicked at 'src/a.rs:3', oh no\n",
+            ),
+            ("panic site, bare", "panicked at src/a.rs:3:9\n"),
+            (
+                "error: line naming a .rs",
+                "error[E0425]: cannot find value in src/a.rs\n",
+            ),
+            ("Error: line", "  Error: scripts/x.sh\n"),
+        ];
+        for (which, text) in per_pattern {
+            assert!(
+                names_a_diagnostic(text),
+                "pre-filter rejected the {which} shape, so the engine would never be \
+                 spawned for it: {text:?}"
+            );
+        }
+        assert_eq!(
+            per_pattern.len(),
+            engine_pattern_count(),
+            "the fixture set above must hold exactly one entry per DIAGNOSTIC_PATH \
+             pattern in scripts/attribute-red.py"
+        );
+    }
+
+    /// Count `re.compile(` entries inside `attribute-red.py`'s `DIAGNOSTIC_PATH` list.
+    ///
+    /// Derived at test time from the file that ships, never stored here — a stored number
+    /// is the thing this repo refuses, and it would go stale in exactly the direction that
+    /// matters (a sixth pattern added, the pre-filter silently too narrow for it, no
+    /// signal). Returns 0 rather than panicking if the shape is unrecognisable, so the
+    /// assertion above reports a mismatch instead of this helper exploding.
+    fn engine_pattern_count() -> usize {
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/attribute-red.py"
+        ))
+        .unwrap_or_default();
+        let Some(start) = src.find("DIAGNOSTIC_PATH = [") else {
+            return 0;
+        };
+        let rest = &src[start..];
+        let Some(end) = rest.find("\n]") else {
+            return 0;
+        };
+        rest[..end].matches("re.compile(").count()
     }
 
     /// The field must be RENDERED, not merely stored. `format_run_command` is what
