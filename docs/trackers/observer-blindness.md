@@ -2423,7 +2423,24 @@ under which a check is worth having. The re-derivation required the pusher to al
 the frame of mind the check exists to supply. **A check gated on the doubt it is meant to
 produce is a policy wearing a mechanism's clothes** — § *Observer Blindness* position 3 read
 against itself, and `skill-frictions:SKF-22`'s *a trigger the model must notice is a policy,
-not a mechanism* one level up from where that entry sits. Formulated by
+not a mechanism* one level up from where that entry sits.
+
+**And the pusher's half is worse than "an informal habit versus a guard", which is how it was
+first written here.** The re-derivation was a **designed step in a sequence being actively
+built** — written down, deliberate, and one the pusher had just finished recording as a rule.
+It still degraded to a habit at the moment of use, and at that moment it is indistinguishable
+from one. So the line does not fall between *casual* and *engineered*; it falls between
+*something that runs itself* and *everything else*, and a correct written-down procedure sits
+on the losing side of it. The guard's own step 5 — *verify the INDEX, not the exit code* — is
+the same law one rung down. (Correction supplied by
+`f3c594ce-c424-40d3-a603-9693cfef3f63` against a first form that undersold it.)
+
+**The strongest datum for that is theirs, and it is about working memory rather than care:**
+the guard caught them on a clause they had **quoted, correctly, in their own words, to another
+session twenty minutes earlier**. Not skimmed, not half-known — explained. If holding a rule in
+working memory is compatible with walking into it from the other end, then working memory is
+not a control, and every remaining *the model must notice* step in this repo is weaker than it
+reads. Formulated by
 `f3c594ce-c424-40d3-a603-9693cfef3f63`, who declined to claim it; recorded here because an
 unclaimed finding in a message log is not a finding.
 
