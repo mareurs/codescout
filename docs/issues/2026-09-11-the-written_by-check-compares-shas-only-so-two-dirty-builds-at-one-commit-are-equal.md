@@ -296,6 +296,9 @@ an alarm nothing could reach (§ *Testing Discipline*, *loudness is a property o
 
 ## Done 2026-09-13 — the "smaller half" only; the predicate is UNCHANGED
 
+`85fdf59b` · patch-id `6a95ff87326c8683fd72407b6ef8bc8ca5f9f62a`. Gate green: FMT 0, CLIPPY 0,
+LEAN 0 (3813 passed), DEFAULT 0 (5848 passed), 0 failed targets in either lane.
+
 `written_by_report(w, reading_sha, reading_dirty) -> Option<Value>` extracted from
 `IndexStatus::call`, same shape and same reason as `retrieval::sync::guard_stale_binary`. It adds
 `reading_binary_dirty` beside `reading_binary_sha`, closing the asymmetry named at the end of

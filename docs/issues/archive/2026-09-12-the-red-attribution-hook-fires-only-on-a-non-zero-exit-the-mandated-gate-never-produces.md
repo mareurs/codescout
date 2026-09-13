@@ -362,8 +362,25 @@ at a zero exit. The second is the control, and it is the half that carries the w
 alone proves the hook fires and says nothing about whether it still discriminates. Run them as a
 pair or neither.
 
-**What this does NOT establish:** row 5 (`run_in_background: true`) is untouched and still open;
-and a green gate is not evidence about the race below — that is a different instrument.
+**What this does NOT establish, and the third item is the one that reads as covered:** row 5
+(`run_in_background: true`) is untouched and still open; a green gate is not evidence about the
+race below, which is a different instrument; and **this verification is scoped to `run_command`,
+which is a CHANNEL, not the trigger.** Native `Bash` never enters the hook at all, so widening the
+trigger from non-zero-exit to failure-shaped output cannot reach it — different axis, not a
+residual. Do not read "the trigger now covers the mandated gate shape" as "gate runs now carry
+attribution": a gate run through `Bash` carries none, and its silence means nothing.
+
+That matters more than a footnote because `Bash` is **deliberately permitted while the
+`security.shell_command_mode` eval is in flight** (CLAUDE.md § *Companion Plugin*), so the
+uninstrumented channel is a live arm rather than an edge case, and any coverage figure taken
+through `run_command` alone is scoped to one arm of a running experiment. Demonstrated the same
+day: a peer ran the four-command gate through `Bash`, hit a red in this session's uncommitted
+`index.rs`, received no `wip_authors` line, and resolved the authorship by hand — correctly, via
+`file-provenance.py --all` plus `fmt-mine`, which is exactly the manual route § *Reaching a Peer
+Session* keeps for this case. The ceiling was named in that section by this author while fixing the
+trigger, and then not applied by the same author one session later when a peer reported the
+silence; a stale-binary hypothesis was offered instead and refuted by the peer
+(sessionId of `render-snapshot-from-params`, socket pid 924391).
 
 **Build identity is a precondition of the probe, not a footnote — settle it FIRST.** The earlier
 attempt measured a binary built at 09:00:17 against a change written at 09:08:59, so both probes
