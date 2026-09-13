@@ -348,14 +348,37 @@ It reds `a_red_attaches_wip_authors_on_the_main_arm` intermittently and did so o
 The repo's own ruling (`src/config/global.rs`) rules out `#[serial]` as the remedy, so it needs a
 pure seam.
 
-**And the verification this fix still lacks, stated because its absence is invisible:** no wire
-probe of the FIXED behaviour exists. The running MCP binary was built at 09:00:17 and this change
-was written at 09:08:59, so the two post-rebuild probes that day both measured the *unfixed*
-binary and reproduced the defect exactly — which establishes the bug, not the fix. **That near
-miss is worth carrying:** *"the fix is broken"* and *"the fix is not in this binary"* produce
-byte-identical observations, and only an mtime comparison separates them. Verify on the wire after
-the next `cargo rb`: `sh -c '<red naming a dirty path>' ; echo "LEAN exit=$?"` must now carry
-`wip_authors`.
+**Verified on the wire 2026-09-13 09:34, serving pid 3143840** (binary built 09:27:41, i.e. after
+the fix commit `02e61230` at 09:24:37). Two paired observations, both at `exit_code: 0`:
+
+| command shape | names a dirty path | `wip_authors` |
+|---|---|---|
+| `sh -c 'printf "error[E0425]…\n  --> src/librarian/tools/mod.rs:10:5\n"' ; echo "LEAN exit=$?"` | yes | **present** — named the live holder and its socket |
+| `echo "touched src/librarian/tools/mod.rs and it was fine" ; echo "LEAN exit=$?"` | yes | **absent** |
+
+The first is an output the pre-fix code **cannot** produce: stage 0 returned `None` unconditionally
+at a zero exit. The second is the control, and it is the half that carries the weight — a
+`names_a_diagnostic` stuck returning `true` produces the first row byte-for-byte, so the probe
+alone proves the hook fires and says nothing about whether it still discriminates. Run them as a
+pair or neither.
+
+**What this does NOT establish:** row 5 (`run_in_background: true`) is untouched and still open;
+and a green gate is not evidence about the race below — that is a different instrument.
+
+**Build identity is a precondition of the probe, not a footnote — settle it FIRST.** The earlier
+attempt measured a binary built at 09:00:17 against a change written at 09:08:59, so both probes
+that day reproduced the defect *exactly* and established the bug rather than the fix. **`"the fix
+is broken"` and `"the fix is not in this binary"` produce byte-identical observations.** An mtime
+comparison separates them by inference; **`readlink /proc/$PPID/exe` run inside `run_command`
+separates them by reading the serving process**, because that shell is a child of the MCP server
+itself. It is the right instrument here because several builds run at once — 18 of 25 live
+`codescout` processes were on `(deleted)` inodes at the time of this probe, each an older binary
+still answering some session. A newest-file-on-disk check cannot see that; the `$PPID` read cannot
+miss it.
+
+(Copying the probe: backticks inside the inner double-quoted `printf` are substituted by `sh`, so
+a backticked identifier vanishes from stdout and adds a `command not found` line on stderr.
+Harmless — the `-->` still trips the filter — but escape them if you want a clean transcript.)
 ## References
 
 - `scripts/attribute-red.py` — `DIAGNOSTIC_PATH`, `named_paths`, `dirty_paths`

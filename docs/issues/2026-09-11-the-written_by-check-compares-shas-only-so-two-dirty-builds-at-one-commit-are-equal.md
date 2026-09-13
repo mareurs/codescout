@@ -1,7 +1,7 @@
 ---
 id: bfdfeebd4e5ca130
 kind: bug
-status: open
+status: investigating
 title: 'BUG: the written_by check compares shas only, so two different dirty builds at one commit compare equal and the warning is suppressed'
 tags:
 - cluster/guard-narrower-than-its-name
@@ -259,6 +259,59 @@ non-Linux route. Recorded as a shape with a named failure surface, not a smaller
 comparing the two fields is handed a dirty-aware value on one side and a dirty-blind one on the
 other, with nothing marking the difference. That asymmetry is a defect on its own terms whatever
 happens to the predicate.
+
+## Two constraints the Fix section above does not record (2026-09-13)
+
+Found by reading the call site rather than the struct, while doing the "smaller half" below.
+
+**1. The one repair immune to all three refutations is forbidden by the site's own documented
+convention.** Every prescription above is a *predicate*, and each was refuted for over- or
+under-firing. The obvious escape is to delete the predicate — report `written_by` unconditionally
+and let the reader adjudicate — and there is a sibling site in this repo that does exactly that and
+argues for it: `src/tools/config/mod.rs:448-456` reports the answering build's `(git_sha, git_dirty,
+pid, exe_deleted)` on every `ProjectStatus` call, with the comment *"Unconditional, for the same
+reason: a field that appears only when something is wrong cannot be used to confirm that things are
+right."*
+
+That argument applies here verbatim — and `index.rs` has ruled the other way, deliberately and in
+writing. `src/tools/semantic/index.rs:750-752`: *"reported only when it was NOT this build —
+presence-means-a-problem, same convention as `model_mismatch` and `last_sync_skipped` below and
+above."* Three fields in one result object share that convention, and `format_index_status`
+branches on `model_mismatch.is_object()`, so presence is load-bearing in the formatter too.
+
+The two sites therefore follow **opposite, each-documented conventions**, and it is not drift: they
+answer different questions (*which build is answering you* is always knowable; *who wrote this
+sidecar* is a comparison). **This is why the bug is hard.** Not that nobody thought of reporting
+unconditionally — that doing so puts `written_by` at odds with two neighbours in the same JSON
+object. Whoever closes this either pays that cost knowingly or needs the content-derived build
+identity, because there is no third predicate left. Do not find the sibling site and read it as the
+fix; it is the fork.
+
+**2. The branch has no test and cannot be given one at the call site.** It sits behind
+`result["indexed"] == true` (`index.rs:731`), which requires a live Qdrant returning a non-zero
+chunk count — so no local lane reaches it, and the default lane does not even compile
+`server-stack`. Measured 2026-09-13: `reading_binary_sha` occurred **once in the entire tree**, at
+its production site, with zero assertions anywhere on it. The mechanism this whole bug is about was
+an alarm nothing could reach (§ *Testing Discipline*, *loudness is a property of a PATH*).
+
+## Done 2026-09-13 — the "smaller half" only; the predicate is UNCHANGED
+
+`written_by_report(w, reading_sha, reading_dirty) -> Option<Value>` extracted from
+`IndexStatus::call`, same shape and same reason as `retrieval::sync::guard_stale_binary`. It adds
+`reading_binary_dirty` beside `reading_binary_sha`, closing the asymmetry named at the end of
+§ *Fix*. **The sha-only predicate is carried across untouched — this does not fix the bug**, which
+stays open pending constraint 1 above and the two measurements § *Fix* asks for.
+
+The reader's identity is a **parameter** rather than an `env!` read inside the function,
+specifically so a fixture can express the *silent* branch: with the reading sha baked in, every
+fixture sha differs from it by construction and the silence would be untestable.
+
+**Still not measured, and it wants a decision rather than a drive-by.** Whether two consecutive
+`cargo rb` runs over identical source produce byte-identical binaries here is the measurement the
+runtime-hash proposal rests on — and taking it means **two release builds on a shared checkout,
+each unlinking the binary four other live sessions in this tree are executing**. That is a
+peer-affecting act, not a local probe; it needs the operator's say-so. The non-Linux route is open
+too.
 ## Tests added
 
 None. A regression test needs two builds at one sha with different content, so the cheap version
