@@ -16,8 +16,13 @@ severity: medium
 
 `doc(action="move")` returns `inbound_path_citations` — the citations it believes point at
 the artifact being moved, so a caller can re-point them in the same commit. It resolves
-citations in the **path** form (`docs/issues/<date>-<slug>.md`). A citation written as a
-bare **slug** is never examined, and the response reports `[]` rather than saying so.
+them by grepping for the artifact's **dated file stem** as a literal substring, so a
+citation of the **dateless** slug is never matched, and the response reports `[]` rather
+than naming the form it searched.
+
+**Read § Root cause, not this paragraph's first draft.** The mechanism was originally given
+here as "path form only" and that was refuted by `5ea1f2ad`; the discriminator is the date
+prefix, not the path wrapper.
 
 `IC-18` exactly: *"a zero reads as 'not present' rather than 'not looked at'."*
 
@@ -57,12 +62,49 @@ a move that also renamed, instance 2 a move that did not.
 
 ## Root cause
 
-Not established in code; the behaviour is black-box so far. What is established is the
-**shape**: the resolver's selector is the path form, the population is "citations of this
-artifact", and the two differ by exactly the slug-only form. Whether that is a regex, a
-`LIKE` over a stored citation table, or the `cites` edge set is unread — and the direction
-does not depend on which.
+**ESTABLISHED 2026-09-13, and it is neither of the two mechanisms proposed so far.**
 
+`files_mentioning` (`src/librarian/tools/mv.rs`) runs
+`git grep --untracked -l -F -e <stem>`, where `stem` is the artifact's **file stem**. Its
+own doc comment states the assumption that fails: *"Stems in this corpus are **dated
+slugs** and effectively unique; a short or generic stem would over-report, which is the
+safe direction."*
+
+So the selector is a literal substring search for the **dated** stem:
+
+```
+stem searched     2026-09-12-audit-doc-refs-reads-a-backtick-inside-a-fence-as-syntax
+IC-6 cites        `audit-doc-refs-reads-a-backtick-inside-a-fence-as-syntax` (2026-09-12)
+                   ^^ dateless, with the date OUTSIDE the backticks
+```
+
+A `-F` search for the dated stem cannot match a dateless citation. **The discriminator is
+the date prefix, not the path wrapper** — a citation of the bare dated stem with no
+directory at all IS found, which is exactly what `5ea1f2ad` pins.
+
+**This corpus has two citation conventions and the scan knows one.** Paths and prose cite
+the dated form; **every `**Members:**` line under `docs/trackers/issue-clusters/` cites the
+dateless slug**, because a cluster member's identity has to survive an archive move. The
+repo already knows this: `scripts/pre-commit-ledger-counts.py`'s `_stem()` strips the date
+for precisely that reason, and its comment says so — *"the dateless slug — a bug file's
+identity ACROSS a rename"*. Two components of one system disagree about what a slug is, and
+only one of them is documented as making a choice.
+
+**Correcting this file's own first answer, which was wrong in the same way the bug it came
+from was.** § *Root cause* originally read *"the resolver's selector is the path form ...
+the direction does not depend on"* the implementation. It does. `eba3d2c6` refuted it with
+`5ea1f2ad` and moved this file to `investigating` rather than accepting it, which was the
+right call: the symptom was real and the named cause was not. That is the third time in one
+day on this chain — the fenced-block bug named a backtick, this file named a path wrapper,
+and both times § *Root cause* hedged on the implementation while the § *Summary* asserted
+the direction as fact.
+
+**`5ea1f2ad`'s test is correct and under-covers, in the shape `IC-23` was opened for.** It
+pins that a citation of the dated stem with no path wrapper is found — true, and never the
+failing case. The dimension that decides the outcome is the **date prefix**, and the fixture
+holds it constant. A guard that varies the wrapper while fixing the prefix cannot fail in
+the direction the bug reports, which is this repo's monotone-direction law arriving at a
+test written to refute a bug rather than to catch one.
 ## Investigation update, 2026-09-13 — the reported form does not reproduce
 
 **Ran the reproduction before reading the fix plan, per this repo's own rule
