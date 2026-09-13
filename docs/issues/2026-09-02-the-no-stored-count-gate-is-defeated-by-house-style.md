@@ -1,13 +1,15 @@
 ---
 id: '40ca63a3b3497558'
 kind: bug
-status: open
+status: taken
 title: 'BUG: the no-stored-count gate is defeated by the repo''s own typographic house style'
 tags:
 - cluster/addressing-without-an-escape-hatch
 - issue-clusters
 - gate
 - house-style
+claimed_at: 2026-09-13
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -38,10 +40,38 @@ escapes a gate they did not know existed.
 
 ## Symptom (Effect)
 
-A live count stated in backticks passes the gate silently. The ledger goes on storing
-the derived value the gate was inverted to remove, and the failure is invisible to both
-parties: the author believes house style, the gate believes a quotation.
+**A live count stated in backticks passes the gate silently**, and backticks are the default
+typographic choice for every figure on those lines — so the author reaching for house style
+escapes a gate they did not know existed.
 
+**REPRODUCED 2026-09-13 on the production path, and this is the part that was never
+measured.** `` `n=1` `` was added to `IC-23`'s `**Members:**` — a class created that day,
+whose count is genuinely current, so the claim was LIVE and not a quotation — then
+`cargo test --test issue_clusters`: **24 passed**, `no_class_field_states_a_bare_n` among
+them. Probe reverted.
+
+### The original second paragraph is WITHDRAWN, and the policy text refutes it
+
+It read: *"The ledger goes on storing the derived value the gate was inverted to remove."*
+That is false, and `no_class_field_states_a_bare_n`'s own doc comment says why:
+
+> A backticked `` `n=N` `` is untouched and still means what it always meant: a QUOTATION of
+> a superseded figure, preserved with its derivation. **The migration wrapped every live
+> claim in backticks rather than deleting it**, so no sentence lost its history — only its
+> obligation to stay current.
+
+Measured: **33 backticked `n=` across 21 of the 22 class files**, inside `**Members:**` and
+`**Promotes to:**`. Those are the migration's deliberate output, not violations accumulating
+through the hole. The digits are on disk; the obligation is not.
+
+So the defect is **narrower and sharper** than filed: not *"the ledger is full of stored
+counts"* but *"a NEW live count cannot be distinguished from the history, and the natural
+way to write one escapes the check"*.
+
+This file asserting a consequence its own gate's documentation contradicts is `OB-26` — a
+§ Summary/§ Symptom stating as fact what was never checked — occurring in a bug filed about
+a gate. The § Summary's mechanism claim was right throughout; only the consequence was
+invented.
 ## Reproduction
 
 Observed 2026-09-02, n=1, by the session that wrote it:
@@ -140,24 +170,45 @@ the parameter is the party structurally least able to see it.
 
 ## Fix
 
-Not implemented, and `wontfix` is a defensible terminal state — say so explicitly rather
-than leaving it open by default if that is the ruling.
+**Not implemented.** Designed and costed; the implementing change touches a shared
+pre-commit hook and is held for an operator's go-ahead (see § Resume).
 
-Candidates, cheapest first:
+**The obvious fix is REFUSED by measurement, and that is the useful half.** Removing the
+backtick escape reds all 33 legitimate quotations across 21 of 22 class files. That is a
+campaign over a population whose coverage ratio is ~100% — CLAUDE.md § *Observer Blindness*:
+*"a coverage ratio that is neither ~0% nor ~100% is a boundary someone drew before it is
+drift"*, and at ~100% it is emphatically a boundary. It would also land in the ledger the
+ADR names as the repo's contention head (16 sessions, 53 commits in one day), which is why
+that file was split per class in the first place.
 
-- **Say it at the refusal site.** The failure message already teaches the escape
-  (*"If you meant to QUOTE a figure … wrap it in backticks"*). It could also name the
-  trap: *a backticked number is not checked, so do not reach for backticks out of house
-  style if you mean today's count.* This reaches only authors who see a refusal, which
-  is exactly the population that does **not** include this instance — the gate stayed
-  green.
-- **Require quotations to be marked as such.** e.g. only skip an `n=` in a span that
-  also carries a superseded marker. Costs a corpus migration and re-opens the positional
-  problem for the two legitimate opening citations.
-- **Nothing.** The forcing function moved to `scripts/pre-commit-ledger-counts.py`
-  (member prose, not numbers), so the stored count matters less than it did; the residual
-  is a stale figure nobody is obliged to update.
+An explicit superseded-marker (`was n=11`, strikethrough, a `**Superseded:**` prefix) costs
+the same 33-site sweep and buys the same thing. Rejected for the same reason.
 
+**THE AFFORDABLE FIX IS DIFF-SCOPED, and the hook already holds every input it needs.**
+`scripts/pre-commit-ledger-counts.py` reads the ledger at both `head` and `index`
+(`read_ledger(source)`), and CHECK 3 already computes `members_fields()` for both. A CHECK 4
+would refuse a backticked `n=<N>` that is present on a `**Members:**` / `**Promotes to:**`
+line in the INDEX and absent from the same line at HEAD:
+
+- every existing quotation is untouched forever, because its line is unchanged;
+- a new live count cannot be introduced without the hook seeing it;
+- no sweep, no grandfather list, no marker to remember.
+
+That is § *Observer Blindness* position 3 in its best shape — the correct path ends in a
+safe state, so compliance leaves nothing armed — rather than a rule anyone must recall.
+
+**Precedent exists for the shape:** `a_class_gaining_a_member_names_it` is already declared
+HOOK-ONLY *"because it compares the INDEX against HEAD, a question no working-tree test can
+pose"*. CHECK 4 is the same kind of question, so it joins `HOOK_RULES` and is exempted on
+the Rust side with that reason, which `the_hook_enforces_every_rule_it_declares` and
+`every_cluster_rule_is_hook_owed_or_exempt` both police.
+
+**Owed alongside it, and cheap either way:** the escape is currently **undocumented**.
+§ *The entry shape* says only *"Never a bare `n=`"*, and nothing there or at the refusal site
+defines *bare*, so a reader cannot learn that a backtick suppresses the check. CLAUDE.md
+§ *Parsers Over a Namespace* prescribes exactly this when no escape is affordable: *"say so
+at the refusal site — a documented limitation and a silent reinterpretation cost a reader
+very different amounts."* That half needs no hook change and no sweep.
 ## Tests added
 
 None — capture-on-notice record, n=1.
