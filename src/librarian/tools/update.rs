@@ -243,13 +243,13 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
     let mut buf = working.to_string();
     for (i, edit) in edits.iter().enumerate() {
         let heading = edit["heading"].as_str().ok_or_else(|| {
-            super::RecoverableError::with_hint(
+            super::LibrarianRecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'heading' field"),
                 "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}. Editing text BEFORE the first heading? That is the preamble, it belongs to no section, and `heading: \"^\"` targets it with action=\"edit\".",
             )
         })?;
         let action = edit["action"].as_str().ok_or_else(|| {
-            super::RecoverableError::with_hint(
+            super::LibrarianRecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'action' field"),
                 format!(
                     "Allowed actions: {}.",
@@ -275,7 +275,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
 
         buf = if action == "edit" {
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
-                super::RecoverableError::with_hint(
+                super::LibrarianRecoverableError::with_hint(
                     format!("body_edits[{i}]: old_string is required for action='edit'"),
                     "Pass {action: \"edit\", heading, old_string, new_string, replace_all?}.",
                 )
@@ -314,7 +314,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
                         if edit["include_subsections"].as_bool().unwrap_or(false) {
                             consumed.extend(victims);
                         } else {
-                            return Err(super::RecoverableError::with_hint(
+                            return Err(super::LibrarianRecoverableError::with_hint(
                                 format!(
                                     "body_edits[{i}]: replace on '{heading}' would wipe {n} nested heading(s): {list}. \
                                      Pass include_subsections: true to opt into consuming children.",
@@ -336,7 +336,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
                 false,
             )
             .map_err(|e| {
-                super::RecoverableError::with_hint(
+                super::LibrarianRecoverableError::with_hint(
                     format!("body_edits[{i}]: {e}"),
                     "Check heading name and action.",
                 )
@@ -365,7 +365,7 @@ macro_rules! lift_top_level_param {
         if let Some(top) = $top.take() {
             match &$patch {
                 Some(existing) if *existing != top => {
-                    return Err(super::RecoverableError::with_hint(
+                    return Err(super::LibrarianRecoverableError::with_hint(
                         format!(
                             "doc(action=\"update\"): conflicting `{}` values — the top-level param and `patch.{}` disagree",
                             $name, $name
@@ -396,7 +396,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // guard below, which would answer a specific mistake with a generic route.
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() || args.get("rel_path").is_some()
     {
-        return Err(super::RecoverableError::with_hint(
+        return Err(super::LibrarianRecoverableError::with_hint(
             "doc(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
             "Use doc(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, extra, body, body_edits, params).",
         ));
@@ -404,7 +404,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(p) = args.get("patch") {
         if !p.is_null() && !p.is_object() {
-            return Err(super::RecoverableError::with_hint(
+            return Err(super::LibrarianRecoverableError::with_hint(
                 "doc(action=\"update\") patch must be a JSON object mapping field names to new values",
                 "e.g. patch={\"status\": \"fixed\"}. A patch that is an array or scalar is not a valid RFC 7396 merge document.",
             ));
@@ -459,7 +459,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `commit_refresh` is the one legitimate empty patch — recording that a refresh cycle
     // ran is a real effect even when the body did not move.
     if a.patch.is_empty() && !a.commit_refresh {
-        return Err(super::RecoverableError::with_hint(
+        return Err(super::LibrarianRecoverableError::with_hint(
             "doc(action=\"update\") was given nothing to change",
             "Pass patch={...} naming at least one of status, title, owners, tags, topic, time_scope, extra, body, body_edits, params — e.g. patch={\"status\": \"fixed\"}. A top-level status/title/owners/tags/topic/time_scope/extra is lifted into `patch` for you and reported under `corrections`. To record a refresh cycle without changing the body, pass commit_refresh=true.",
         ));
@@ -479,7 +479,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let patch = &a.patch;
 
     if patch.body.is_some() && patch.body_edits.is_some() {
-        return Err(super::RecoverableError::with_hint(
+        return Err(super::LibrarianRecoverableError::with_hint(
             "patch fields `body` and `body_edits` are mutually exclusive",
             "Use `body_edits` for surgical per-section edits, or `body` for full-document overwrite (pair with `force=true` if it would shrink the file by >50%).",
         ));
@@ -619,7 +619,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 Some(aug) if aug.append_mode && aug.history_cap.is_some()
             );
             if !allow_history_trim {
-                return Err(super::RecoverableError::with_hint(
+                return Err(super::LibrarianRecoverableError::with_hint(
                     format!(
                         "body-shrink guard: write to {} {}",
                         full.display(),
@@ -784,10 +784,12 @@ pub(crate) fn write_field_to_frontmatter(
 ) -> Result<()> {
     const WRITABLE: &[&str] = &["status", "title", "topic", "time_scope"];
     if !WRITABLE.contains(&field) {
-        return Err(crate::librarian::tools::RecoverableError::with_hint(
-            format!("frontmatter field `{field}` is not writable"),
-            format!("writable scalar fields: {}", WRITABLE.join(", ")),
-        ));
+        return Err(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                format!("frontmatter field `{field}` is not writable"),
+                format!("writable scalar fields: {}", WRITABLE.join(", ")),
+            ),
+        );
     }
     let cat = ctx.catalog.lock();
     let row = artifact::get(&cat, artifact_id)?
@@ -795,12 +797,12 @@ pub(crate) fn write_field_to_frontmatter(
     let full = row.abs_path.clone();
     let original = std::fs::read_to_string(&full).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            crate::librarian::tools::RecoverableError::with_hint(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
                 format!("artifact file not found on disk: {}", full.display()),
                 "the file may have been deleted or moved outside of librarian",
             )
         } else {
-            crate::librarian::tools::RecoverableError::with_hint(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
                 format!("failed to read {}: {e}", full.display()),
                 "check file permissions",
             )
@@ -1534,7 +1536,7 @@ text
         .unwrap_err();
 
         assert!(err
-            .downcast_ref::<super::super::RecoverableError>()
+            .downcast_ref::<super::super::LibrarianRecoverableError>()
             .is_some());
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_ne!(row.status, "fixed", "a refused call must not write");
@@ -1632,7 +1634,7 @@ text
         .unwrap_err();
 
         assert!(err
-            .downcast_ref::<super::super::RecoverableError>()
+            .downcast_ref::<super::super::LibrarianRecoverableError>()
             .is_some());
         let content = std::fs::read_to_string(tmp.path().join("doc_tag_conflict.md")).unwrap();
         assert!(

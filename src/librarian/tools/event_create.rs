@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{event_edges, events, sources};
 
 fn any_value_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -191,53 +191,55 @@ pub fn payload_requirements_sentence() -> String {
 pub(crate) fn validate_payload(kind: &str, p: &Value) -> Result<()> {
     let obj = p
         .as_object()
-        .ok_or_else(|| RecoverableError::new("payload must be object"))?;
+        .ok_or_else(|| LibrarianRecoverableError::new("payload must be object"))?;
     match kind {
         "note" => {
             obj.get("text")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("note.text required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("note.text required"))?;
         }
         "reviewed" => { /* both fields optional */ }
         "status_change" => {
             obj.get("to")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("status_change.to required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("status_change.to required"))?;
         }
         "field_patch" => {
             obj.get("field")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("field_patch.field required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("field_patch.field required"))?;
             obj.get("to")
-                .ok_or_else(|| RecoverableError::new("field_patch.to required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("field_patch.to required"))?;
         }
         "superseded_by" => {
             obj.get("target_artifact_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    RecoverableError::new("superseded_by.target_artifact_id required")
+                    LibrarianRecoverableError::new("superseded_by.target_artifact_id required")
                 })?;
         }
         "external_signal" => {
             obj.get("source_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("external_signal.source_id required"))?;
-            obj.get("summary")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("external_signal.summary required"))?;
+                .ok_or_else(|| {
+                    LibrarianRecoverableError::new("external_signal.source_id required")
+                })?;
+            obj.get("summary").and_then(|v| v.as_str()).ok_or_else(|| {
+                LibrarianRecoverableError::new("external_signal.summary required")
+            })?;
         }
         "intent" => {
             obj.get("hypothesis")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("intent.hypothesis required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("intent.hypothesis required"))?;
         }
         "verdict" => {
             let outcome = obj
                 .get("outcome")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| RecoverableError::new("verdict.outcome required"))?;
+                .ok_or_else(|| LibrarianRecoverableError::new("verdict.outcome required"))?;
             if !matches!(outcome, "confirmed" | "refuted" | "partial" | "abandoned") {
-                return Err(RecoverableError::new(
+                return Err(LibrarianRecoverableError::new(
                     "verdict.outcome must be confirmed|refuted|partial|abandoned",
                 ));
             }
@@ -310,7 +312,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     })?;
 
     if !ALLOWED_KINDS.contains(&a.kind.as_str()) {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("unknown event kind: {}", a.kind),
             format!("allowed: {}", ALLOWED_KINDS.join(", ")),
         ));
@@ -327,7 +329,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(ref target) = a.resolves_intent_event_id {
         if a.kind != "verdict" {
-            return Err(RecoverableError::new(
+            return Err(LibrarianRecoverableError::new(
                 "resolves_intent_event_id only valid on verdict events",
             ));
         }
@@ -343,18 +345,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         match target_kind.as_deref() {
             Some("intent") => {}
             Some(k) => {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "target event {target} is kind={k}, not intent"
                 )))
             }
             None => {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "target event {target} not found"
                 )))
             }
         }
         if !event_edges::incoming_by_rel(&cat, target, "resolves")?.is_empty() {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "intent {target} already resolved"
             )));
         }
@@ -392,7 +394,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .payload
             .get("target_artifact_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| RecoverableError::new("superseded_by.target_artifact_id required"))?;
+            .ok_or_else(|| {
+                LibrarianRecoverableError::new("superseded_by.target_artifact_id required")
+            })?;
         Some(crate::librarian::catalog::links::LinkRow {
             src_id: a.artifact_id.clone(),
             dst_id: target_id.into(),
@@ -748,7 +752,7 @@ pub(crate) mod tests {
         .await
         .unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "expected RecoverableError, got: {err:#}"
         );
     }
@@ -936,7 +940,7 @@ pub(crate) mod tests {
         .await
         .unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "expected RecoverableError, got: {err:#}"
         );
         assert!(

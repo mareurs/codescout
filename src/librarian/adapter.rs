@@ -954,7 +954,7 @@ fn is_mutating_doc_action(action: &str) -> bool {
 /// exists to prevent. See
 /// docs/issues/archive/2026-07-10-librarian-recoverable-error-downcast-never-matches.md.
 fn bridge_recoverable_error(e: anyhow::Error) -> anyhow::Error {
-    match e.downcast::<crate::librarian::tools::RecoverableError>() {
+    match e.downcast::<crate::librarian::tools::LibrarianRecoverableError>() {
         Ok(lib) => match lib.hint {
             Some(h) => crate::tools::RecoverableError::with_hint(lib.message, h).into(),
             None => crate::tools::RecoverableError::new(lib.message).into(),
@@ -1643,7 +1643,7 @@ mod tests {
         // route_tool_error downcasts to crate::tools::RecoverableError; the
         // librarian type must be bridged to it, or every librarian recoverable
         // error hard-fails (isError: true) and aborts sibling parallel calls.
-        let e = crate::librarian::tools::RecoverableError::with_hint(
+        let e = crate::librarian::tools::LibrarianRecoverableError::with_hint(
             "artifact not found",
             "check the id",
         );

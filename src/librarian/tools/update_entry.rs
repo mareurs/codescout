@@ -1,4 +1,4 @@
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::augmentation;
 use anyhow::Result;
 use serde::Deserialize;
@@ -41,7 +41,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // returned `changed_fields: ["status"]` with the row's `task` untouched. Same
     // defect shape as the edit_file guard that covered one write path of three.
     if args.get("entry").is_some() {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             "update_entry: `entry` is append_entry's parameter — this action takes `fields`"
                 .to_string(),
             "Re-send the patch as fields={...}. `entry` is the whole row for a NEW entry; \
@@ -53,7 +53,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"update_entry\") requires 'id', 'entry_collection' and 'entry_id': {e}"), "e.g. doc(action=\"update_entry\", id=\"<16-hex>\", entry_collection=\"observations\", entry_id=\"T-17\", fields={\"status\": \"closed\"}). This patches ONE row; patch={params:...} would replace the whole collection.")
     })?;
     if !a.fields.is_object() {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "update_entry: `fields` must be a JSON object",
         ));
     }

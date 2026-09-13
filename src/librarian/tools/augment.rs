@@ -1,5 +1,5 @@
 use crate::librarian::catalog::{artifact, augmentation};
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -40,12 +40,12 @@ fn validate_merged_against_schema(
 ) -> Result<()> {
     if let Some(new_schema) = new_schema {
         crate::librarian::tools::schema_validate::validate(new_schema, current).map_err(|e| {
-            RecoverableError::new(format!("merged params violate params_schema: {e}"))
+            LibrarianRecoverableError::new(format!("merged params violate params_schema: {e}"))
         })?;
     } else if let Some(schema_text) = stored_schema {
         crate::librarian::tools::schema_validate::validate_against_stored(schema_text, current)
             .map_err(|e| {
-                RecoverableError::new(format!("merged params violate params_schema: {e}"))
+                LibrarianRecoverableError::new(format!("merged params violate params_schema: {e}"))
             })?;
     }
     Ok(())
@@ -77,7 +77,7 @@ fn sidecar_write_through(
         })?;
 
     if !outcome.refused.is_empty() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "the augmentation WAS updated, but its committed sidecar was NOT republished. \
              This call did not set {fields}, and the sidecar disagrees with the catalog on \
              {those}. One of the two is stale and nothing here can tell which — mtime cannot, \
@@ -130,7 +130,7 @@ fn process_goal_tracker_merge(
         .map(Vec::as_slice)
         .unwrap_or(&empty_vec);
     if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
-        return Err(RecoverableError::new(format!("{e}")));
+        return Err(LibrarianRecoverableError::new(format!("{e}")));
     }
 
     let post_status = current.get("status").and_then(|s| s.as_str());
@@ -172,7 +172,7 @@ fn process_goal_tracker_merge(
                     "refresh_at": chrono::Utc::now().to_rfc3339(),
                 })))
             }
-            GateOutcome::Block(reason) => Err(RecoverableError::new(format!(
+            GateOutcome::Block(reason) => Err(LibrarianRecoverableError::new(format!(
                 "goal auto-close gate blocked: {reason}"
             ))),
         }
@@ -189,11 +189,11 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
 
     // Create/replace path — prompt is required
     let prompt = a.prompt.ok_or_else(|| {
-        RecoverableError::new("prompt is required (set merge=true to patch params only)")
+        LibrarianRecoverableError::new("prompt is required (set merge=true to patch params only)")
     })?;
 
     if artifact::get(&cat, &a.id)?.is_none() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "artifact '{}' not found",
             a.id
         )));
@@ -214,7 +214,9 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
     if let Some(schema) = &a.params_schema {
         let parsed_params: Value = serde_json::from_str(&params_str)?;
         crate::librarian::tools::schema_validate::validate(schema, &parsed_params).map_err(
-            |e| RecoverableError::new(format!("initial params violate params_schema: {e}")),
+            |e| {
+                LibrarianRecoverableError::new(format!("initial params violate params_schema: {e}"))
+            },
         )?;
     }
 
@@ -274,14 +276,15 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // resolvable here). See get_guide("progressive-disclosure").
     if let Some(path) = a.params_path.take() {
         if a.params.is_some() {
-            return Err(RecoverableError::new(
+            return Err(LibrarianRecoverableError::new(
                 "pass at most one of `params` or `params_path`",
             ));
         }
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|e| RecoverableError::new(format!("params_path: reading {path}: {e}")))?;
+        let raw = std::fs::read_to_string(&path).map_err(|e| {
+            LibrarianRecoverableError::new(format!("params_path: reading {path}: {e}"))
+        })?;
         let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
-            RecoverableError::new(format!("params_path content is not valid JSON: {e}"))
+            LibrarianRecoverableError::new(format!("params_path content is not valid JSON: {e}"))
         })?;
         // The schema's `"type": "object"` constrains only the INLINE `params`
         // argument — `params_path` bypasses that boundary entirely. Without
@@ -298,7 +301,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 Value::Null => "null",
                 Value::Object(_) => unreachable!(),
             };
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 format!(
                     "params_path: top-level JSON must be an object, found {shape}"
                 ),
@@ -431,7 +434,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             if !patched_siblings {
                 let found = augmentation::merge_params(&cat, &a.id, &patch)?.found;
                 if !found {
-                    return Err(RecoverableError::new(format!(
+                    return Err(LibrarianRecoverableError::new(format!(
                         "no augmentation for artifact '{}' — call doc(action=\"augment\") first",
                         a.id
                     )));
@@ -540,7 +543,7 @@ mod tests {
         let err = call(&ctx, json!({"id": "nope", "prompt": "Test"}))
             .await
             .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[tokio::test]
@@ -1078,7 +1081,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "must be recoverable so the caller can retry with a wrapped object"
         );
         assert!(
@@ -1112,7 +1115,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
 
         // A refused call must not disturb what was already stored.
         let cat = ctx.catalog.lock();
@@ -1140,7 +1143,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     /// A real repo on disk: `.git`, an artifact declaring its sidecar, and the catalog row.
@@ -1355,7 +1358,7 @@ mod tests {
         .expect_err("republishing an unnamed field over a disagreeing sidecar must refuse");
 
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "a refusal is recoverable — sibling calls must survive it: {err:#}"
         );
         let msg = format!("{err:#}");

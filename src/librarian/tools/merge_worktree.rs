@@ -22,7 +22,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 use super::worktree::{FORK_EVENT_KIND, LINEAGE_REL};
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::artifact::{self, ArtifactRow};
 use crate::librarian::catalog::augmentation;
 use crate::librarian::catalog::events;
@@ -42,19 +42,20 @@ struct Args {
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)
-        .map_err(|e| RecoverableError::new(format!("merge_worktree requires 'root': {e}")))?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        LibrarianRecoverableError::new(format!("merge_worktree requires 'root': {e}"))
+    })?;
     let root = RepoPath::from(Path::new(&a.root)).into_string();
 
     let mut cat = ctx.catalog.lock();
     let Some(registration) = reg::get(&cat, &root)? else {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("no worktree registration for `{root}`"),
             "Unregistered legacy rows: use librarian(action=\"doctor\") + fix=\"reseat_worktree\", or doc(action=\"graft\") instead.",
         ));
     };
     if registration.status != "active" {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "registration for `{root}` is `{}` — nothing to merge",
             registration.status
         )));
@@ -180,7 +181,7 @@ fn check_rebase_invariant(registration: &reg::RegistrationRow) -> Result<()> {
     }
     match is_ancestor("HEAD", branch) {
         Some(true) | None => Ok(()),
-        Some(false) => Err(RecoverableError::with_hint(
+        Some(false) => Err(LibrarianRecoverableError::with_hint(
             format!(
                 "worktree branch `{branch}` has diverged from `{}`'s HEAD — neither is an ancestor of the other",
                 registration.main_root

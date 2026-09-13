@@ -117,7 +117,7 @@ use crate::librarian::catalog::graft;
 use crate::librarian::catalog::worktree;
 use crate::librarian::{current_project, ids};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 
 mod scope;
 
@@ -565,7 +565,7 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
 /// report. Reads-only; safe to invoke against a live catalog.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: Args = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             format!("doctor: bad args: {e}"),
             "scope must be one of project|repo|umbrella|all; limit/offset are integers; \
              see librarian(action=\"doctor\") in the input schema",
@@ -1451,29 +1451,29 @@ fn validate_prune_request<'a>(
     conn: &rusqlite::Connection,
 ) -> Result<&'a std::path::Path> {
     if fix != "prune_missing" {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "unknown fix '{fix}' — supported: prune_missing (requires root=<absolute path of the dead/renamed repo root>)"
         )));
     }
     let root = root.ok_or_else(|| {
-        RecoverableError::new(
+        LibrarianRecoverableError::new(
             "fix=prune_missing requires root=<absolute path of the dead/renamed repo root to prune>",
         )
     })?;
     let root_path = std::path::Path::new(root);
     if !root_path.is_absolute() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "root must be an absolute path, got '{root}'"
         )));
     }
     if root_path.exists() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "root '{root}' still exists on disk — prune_missing only removes rows under a dead/renamed root; nothing pruned"
         )));
     }
     let root_str = crate::util::fs::RepoPath::from_path(root_path).to_string();
     if worktree::covering_conn(conn, &root_str)?.is_some() {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!(
                 "root '{root}' is covered by an ACTIVE worktree registration — pruning would delete the catalog's only record of an unmerged worktree's history"
             ),
@@ -1500,32 +1500,34 @@ fn validate_rehome_request<'a>(
     conn: &rusqlite::Connection,
 ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     let old = old_root.ok_or_else(|| {
-        RecoverableError::new(
+        LibrarianRecoverableError::new(
             "fix=rehome requires old_root=<absolute path the repo used to live at>",
         )
     })?;
     let new = new_root.ok_or_else(|| {
-        RecoverableError::new("fix=rehome requires new_root=<absolute path the repo now lives at>")
+        LibrarianRecoverableError::new(
+            "fix=rehome requires new_root=<absolute path the repo now lives at>",
+        )
     })?;
     let (op, np) = (std::path::Path::new(old), std::path::Path::new(new));
     if !op.is_absolute() || !np.is_absolute() {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "old_root and new_root must both be absolute paths",
         ));
     }
     if op.exists() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "old_root '{old}' still exists — rehome only migrates rows from a path that is gone"
         )));
     }
     if !np.exists() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "new_root '{new}' does not exist — cannot rehome onto a missing directory"
         )));
     }
     let old_str = crate::util::fs::RepoPath::from_path(op).to_string();
     if worktree::covering_conn(conn, &old_str)?.is_some() {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!(
                 "old_root '{old}' is covered by an ACTIVE worktree registration — rehoming would orphan the catalog's only record of an unmerged worktree's history"
             ),
@@ -1781,7 +1783,7 @@ async fn run_fix(
                 None => match ctx.current_project.as_deref() {
                     Some(cp) => cp.git_root.clone(),
                     None => {
-                        return Err(RecoverableError::new(
+                        return Err(LibrarianRecoverableError::new(
                             "fix=repair_frontmatter_id needs a scope — activate a project, \
                              or pass root=<repo root>. The catalog spans every repo indexed \
                              on this machine, and this fix rewrites files.",
@@ -1837,7 +1839,7 @@ async fn run_fix(
             let (old, new) = validate_rehome_request(root, new_root, &cat.conn)?;
             let plan = crate::librarian::catalog::gc::plan_rehome(&cat.conn, &old, &new)?;
             if plan.rows.is_empty() && plan.collisions.is_empty() {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "no catalog rows found under old_root '{}'",
                     old.display()
                 )));
@@ -1913,7 +1915,7 @@ async fn run_fix(
                 None => match ctx.current_project.as_deref() {
                     Some(cp) => cp.git_root.clone(),
                     None => {
-                        return Err(RecoverableError::new(
+                        return Err(LibrarianRecoverableError::new(
                             "fix=export_augmentations needs a scope — activate a project, \
                              or pass root=<repo root>. The catalog spans every repo indexed \
                              on this machine, and this fix writes files.",
@@ -1959,7 +1961,7 @@ async fn run_fix(
                 },
             }))
         }
-        other => Err(RecoverableError::new(format!(
+        other => Err(LibrarianRecoverableError::new(format!(
             "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', \
              'rehome', 'repair_frontmatter_id', 'mint_slugs', or 'export_augmentations'"
         ))),

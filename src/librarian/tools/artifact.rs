@@ -2,14 +2,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, Tool, ToolContext};
+use super::{LibrarianRecoverableError, Tool, ToolContext};
 
 /// `event_create` arrives as `{id, event: {kind, payload, …}}` so the event kind never
 /// shares a key with the document `kind`. `event_create::Args` is flat and reads
 /// `artifact_id`; lift the object and carry the id under that name.
 fn flatten_event_args(args: &Value) -> Result<Value> {
     let id = args["id"].as_str().ok_or_else(|| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             "doc(action=\"event_create\") requires 'id'",
             "e.g. doc(action=\"event_create\", id=\"<16-hex>\", event={kind: \"note\", payload: {text: \"…\"}})",
         )
@@ -17,7 +17,7 @@ fn flatten_event_args(args: &Value) -> Result<Value> {
     let mut flat = match args.get("event") {
         Some(Value::Object(m)) => m.clone(),
         _ => {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "doc(action=\"event_create\") requires an `event` object",
                 "event={kind: <note|reviewed|status_change|field_patch|superseded_by|external_signal|intent|verdict>, payload: {…}}",
             ))
@@ -34,7 +34,7 @@ fn flatten_event_args(args: &Value) -> Result<Value> {
 /// nested object and carry `id`/`merge` into it.
 fn flatten_augment_args(args: &Value) -> Result<Value> {
     let id = args["id"].as_str().ok_or_else(|| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             "doc(action=\"augment\") requires 'id'",
             "e.g. doc(action=\"augment\", id=\"<16-hex>\", augment={prompt: \"…\"})",
         )
@@ -42,7 +42,7 @@ fn flatten_augment_args(args: &Value) -> Result<Value> {
     let mut flat = match args.get("augment") {
         Some(Value::Object(m)) => m.clone(),
         _ => {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "doc(action=\"augment\") requires an `augment` object",
                 "augment={prompt: \"…\", params: {…}, …}",
             ))
@@ -350,7 +350,7 @@ impl Tool for Artifact {
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
-                RecoverableError::new(
+                LibrarianRecoverableError::new(
                     "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale",
                 )
             })?;
@@ -377,7 +377,7 @@ impl Tool for Artifact {
                 "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
                 "gather"       => super::refresh::call(ctx, args).await,
                 "list_stale"   => super::refresh_stale::call(ctx, args).await,
-                other => Err(RecoverableError::new(format!(
+                other => Err(LibrarianRecoverableError::new(format!(
                     "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, event_create, event_list, augment, gather, list_stale"
                 ))),
             }
@@ -401,7 +401,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
         );
     }
@@ -459,7 +459,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
         );
     }
@@ -930,7 +930,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-        let re = err.downcast_ref::<RecoverableError>().expect("recoverable");
+        let re = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .expect("recoverable");
         assert!(
             re.hint.as_deref().unwrap().contains("event={kind:"),
             "{re:?}"

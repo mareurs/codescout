@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::artifact::{self, ArtifactRow};
 use crate::librarian::frontmatter::Frontmatter;
 
@@ -10,7 +10,7 @@ fn validate_rel_path(rel: &str) -> Result<()> {
     use std::path::{Component, Path};
     let p = Path::new(rel);
     if p.is_absolute() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "rel_path must be relative: {}",
             rel
         )));
@@ -18,13 +18,13 @@ fn validate_rel_path(rel: &str) -> Result<()> {
     for c in p.components() {
         match c {
             Component::ParentDir => {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "rel_path must not contain `..`: {}",
                     rel
                 )))
             }
             Component::Prefix(_) | Component::RootDir => {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "rel_path must be relative: {}",
                     rel
                 )))
@@ -202,7 +202,7 @@ pub(crate) fn reject_reserved_extra_keys(
         crate::librarian::frontmatter::RESERVED_KEYS.join(", ")
     ));
 
-    Err(RecoverableError::with_hint(
+    Err(LibrarianRecoverableError::with_hint(
         format!(
             "extra must not contain frontmatter field(s) the schema already models: {}",
             clashes.join(", ")
@@ -254,7 +254,7 @@ pub(crate) fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
     if !(body.starts_with("---\n") || body.starts_with("---\r\n")) {
         return Ok(());
     }
-    Err(RecoverableError::with_hint(
+    Err(LibrarianRecoverableError::with_hint(
         "body begins with its own `---` frontmatter block, which would be written BELOW \
          the catalog's and silently ignored"
             .to_string(),
@@ -289,7 +289,7 @@ pub(crate) fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
 fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String> {
     match requested {
         Some(s) if kind == "bug" && !BUG_STATUSES.contains(&s) => {
-            Err(RecoverableError::new(format!(
+            Err(LibrarianRecoverableError::new(format!(
                 "status {s:?} is not a bug status; use one of: {}",
                 BUG_STATUSES.join(", ")
             )))
@@ -316,7 +316,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // schema said was fine.
     if let Some(aug) = &a.augment {
         if aug.params_path.is_some() {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "doc(action=\"create\") augment.params_path is not supported",
                 "params_path is only honored by doc(action=\"augment\") — for create, pass \
                  augment.params inline instead of a file path.",
@@ -341,7 +341,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         .map(|root| root.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    RecoverableError::with_hint(
+                    LibrarianRecoverableError::with_hint(
                         format!("unknown repo `{r}`"),
                         format!("Valid repo names: {valid}"),
                     )
@@ -353,7 +353,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .as_ref()
             .map(|p| p.abs_path.clone())
             .ok_or_else(|| {
-                RecoverableError::with_hint(
+                LibrarianRecoverableError::with_hint(
                     "no active project — cannot resolve rel_path",
                     "Pass repo=<name> or activate a project via workspace(action='activate', ...)",
                 )
@@ -372,7 +372,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
     let full = base_dir.join(&a.rel_path);
     if full.exists() {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "path exists: {}",
             full.display()
         )));
@@ -865,7 +865,7 @@ mod tests {
         .await
         .expect_err("augment.params_path must be refused, not silently accepted or dropped");
 
-        let re = match err.downcast_ref::<RecoverableError>() {
+        let re = match err.downcast_ref::<LibrarianRecoverableError>() {
             Some(re) => re,
             None => panic!(
                 "must be a RecoverableError naming the reason, not a raw parse failure: {err}"

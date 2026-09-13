@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::links;
 
 use rusqlite::OptionalExtension;
@@ -22,7 +22,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"graph\") requires 'id': {e}"), "e.g. doc(action=\"graph\", id=\"<16-hex>\", depth=2). Get an id from doc(action=\"find\", ...).")
     })?;
     if a.depth < 1 || a.depth > 3 {
-        return Err(RecoverableError::new("depth must be between 1 and 3"));
+        return Err(LibrarianRecoverableError::new(
+            "depth must be between 1 and 3",
+        ));
     }
 
     let cat = ctx.catalog.lock();

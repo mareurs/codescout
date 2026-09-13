@@ -42,12 +42,12 @@ pub(crate) const HIDDEN_STATUSES: &[&str] = &["archived", "superseded", "retired
 /// Keep returning plain `anyhow` errors (→ `isError: true`) for genuine
 /// bugs: panics, security violations, IO/database failures.
 #[derive(Debug)]
-pub struct RecoverableError {
+pub struct LibrarianRecoverableError {
     pub message: String,
     pub hint: Option<String>,
 }
 
-impl std::fmt::Display for RecoverableError {
+impl std::fmt::Display for LibrarianRecoverableError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)?;
         if let Some(h) = &self.hint {
@@ -57,9 +57,9 @@ impl std::fmt::Display for RecoverableError {
     }
 }
 
-impl std::error::Error for RecoverableError {}
+impl std::error::Error for LibrarianRecoverableError {}
 
-impl RecoverableError {
+impl LibrarianRecoverableError {
     /// Construct a recoverable error wrapped in `anyhow::Error` so it can
     /// flow through `Result<_, anyhow::Error>` tool calls via `?`.
     ///

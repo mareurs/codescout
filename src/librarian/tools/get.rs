@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, augmentation, entry_cite, links, observations};
 use rusqlite;
 use rusqlite::OptionalExtension;
@@ -272,7 +272,7 @@ struct Args {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section",
         ));
     }
@@ -286,13 +286,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         a.start_line.is_some() || a.end_line.is_some(),
     ];
     if body_selectors.iter().filter(|b| **b).count() > 1 {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set",
         ));
     }
     if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
         if s > e {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "start_line ({s}) must be <= end_line ({e})"
             )));
         }
@@ -316,7 +316,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let row = match artifact::get(&cat, &a.id)? {
             Some(r) => r,
             None => {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "unknown artifact id '{}'. If this id came from an earlier call, an \
                      doc(action=\"move\") since then will have re-keyed it (id = \
                      sha256(abs_path)); find it by path with doc(action=\"find\", \
@@ -345,7 +345,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let links_json = if want_links {
             let direction = a.links_direction.as_deref().unwrap_or("both");
             if !matches!(direction, "out" | "in" | "both") {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "invalid links_direction '{}' — must be \"out\", \"in\", or \"both\"",
                     direction
                 )));
@@ -560,14 +560,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(ref filter) = a.entry_filter {
         let aug_row = aug.as_ref().ok_or_else(|| {
-            RecoverableError::new(
+            LibrarianRecoverableError::new(
                 "entry_filter set but this artifact is not augmented — declare \
                  entry_collection on its augmentation, or retrofit it \
                  (docs/conventions/retrofitting-trackers-for-filtering.md)",
             )
         })?;
         let collection = aug_row.entry_collection.as_deref().ok_or_else(|| {
-            RecoverableError::new(
+            LibrarianRecoverableError::new(
                 "entry_filter set but the augmentation has no entry_collection — \
                  declare which params array holds the filterable rows",
             )
@@ -577,7 +577,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .get(collection)
             .and_then(|v| v.as_array())
             .ok_or_else(|| {
-                RecoverableError::new(format!(
+                LibrarianRecoverableError::new(format!(
                     "entry_collection points at `{collection}` but params has no array there"
                 ))
             })?;
@@ -910,7 +910,7 @@ mod tests {
             .await
             .expect_err("unknown id must error, not return null");
         assert!(
-            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+            err.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
                 .is_some(),
             "unknown-id error must be recoverable (isError:false), not a fatal bail"
         );
@@ -965,7 +965,7 @@ mod tests {
             .await
             .expect_err("conflicting selectors must error");
         assert!(
-            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+            err.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
                 .is_some(),
             "conflicting-selector error must be recoverable (isError:false), not a fatal bail"
         );

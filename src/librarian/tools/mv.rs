@@ -63,7 +63,7 @@ const CITATION_SAMPLE: usize = 20;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        super::RecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
+        super::LibrarianRecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
     })?;
 
     // Defense-in-depth: new_rel_path must stay within the resolved root. Reject
@@ -77,7 +77,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )
         })
     {
-        return Err(super::RecoverableError::new(format!(
+        return Err(super::LibrarianRecoverableError::new(format!(
             "new_rel_path '{}' must be a non-empty relative path with no '..' or absolute segments",
             a.new_rel_path
         )));
@@ -94,8 +94,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // that backend on every move.
     let (old_full, new_full, new_id, root_path) = {
         let cat = ctx.catalog.lock();
-        let row = artifact::get(&cat, &a.id)?
-            .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
+        let row = artifact::get(&cat, &a.id)?.ok_or_else(|| {
+            super::LibrarianRecoverableError::new(format!("unknown id `{}`", a.id))
+        })?;
 
         // Fork-on-first-write gate: a worktree session may not move an artifact
         // that belongs to the main checkout — that would rename the shared
@@ -103,7 +104,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // the main checkout.
         if let Some(cp) = ctx.current_project.as_deref() {
             if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-                return Err(super::RecoverableError::new(
+                return Err(super::LibrarianRecoverableError::new(
                 "refused from a worktree session: this artifact belongs to the main checkout. \
                  Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
             ));
@@ -122,7 +123,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let new_full = root_path.join(&a.new_rel_path);
 
         if new_full.exists() {
-            return Err(super::RecoverableError::new(format!(
+            return Err(super::LibrarianRecoverableError::new(format!(
                 "destination '{}' already exists — choose a different path or delete it first",
                 a.new_rel_path
             )));

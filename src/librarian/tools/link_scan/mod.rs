@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::scope::{apply_scope, Scope};
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{find as cat_find, links};
 use crate::util::fs::RepoPath;
 
@@ -308,7 +308,7 @@ fn rests_on_edge(
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: Args = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             format!("link_scan: bad args: {e}"),
             "see librarian(action=\"link_scan\") input schema",
         )

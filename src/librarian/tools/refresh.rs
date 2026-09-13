@@ -1,6 +1,6 @@
 use crate::librarian::catalog::augmentation;
 use crate::librarian::tools::gather::{gather_all, GatherSource};
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -34,7 +34,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
 
     let aug = aug_row.ok_or_else(|| {
-        RecoverableError::new(format!(
+        LibrarianRecoverableError::new(format!(
             "no augmentation for artifact '{}' — call doc(action=\"augment\") first",
             a.id
         ))

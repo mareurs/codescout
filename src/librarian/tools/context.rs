@@ -646,7 +646,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let semantic_candidate_ids: Option<Vec<String>> = if a.anchor_id.is_none() {
         if let Some(vec) = topic_vec {
             let store = ctx.artifact_store.as_ref().ok_or_else(|| {
-                crate::librarian::tools::RecoverableError::new(
+                crate::librarian::tools::LibrarianRecoverableError::new(
                     "artifact semantic search backend unavailable — set `[librarian] \
                      vector_backend = \"sqlite-vec\"` (or CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) \
                      for the offline backend.",

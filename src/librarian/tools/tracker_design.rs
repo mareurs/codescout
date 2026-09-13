@@ -7,7 +7,7 @@
 //! deferred until archetype selection proves frustrating in practice.
 
 use crate::librarian::catalog::{artifact, augmentation};
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -598,7 +598,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // both fields as unhonored because a type error and an absent key were indistinguishable
     // downstream.
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::new(format!(
+        LibrarianRecoverableError::new(format!(
             "tracker_design: could not read arguments — {e}. Valid params are `intent` \
              (string) and `archetype` (string, one of: {}).",
             archetype_names().join(", ")
@@ -612,7 +612,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .as_array()
             .and_then(|list| list.iter().find(|x| x["name"] == want).cloned());
         let Some(found) = found else {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 format!("unknown archetype '{want}'"),
                 format!("Valid archetypes: {}.", archetype_names().join(", ")),
             ));

@@ -10,7 +10,7 @@
 //! `Scope::Project`. Callers must explicitly pass `all` to get the
 //! pre-scoping workspace-wide behaviour.
 
-use super::RecoverableError;
+use super::LibrarianRecoverableError;
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -88,7 +88,7 @@ pub fn resolve_scope(
     if policy == UmbrellaPolicy::Require && requested == Some(Scope::All) {
         if let Some(cp) = current {
             if cp.umbrella.is_none() {
-                return Err(RecoverableError::new(
+                return Err(LibrarianRecoverableError::new(
                     "scope=\"all\" requires a configured umbrella — without one it crosses into \
                      unrelated workspace projects. Use scope=\"repo\" to widen to your repo, or \
                      configure [[umbrella]] in workspace.toml to group related projects.",
@@ -146,7 +146,7 @@ pub fn apply_scope(
         scope_name: &str,
     ) -> Result<&'a CurrentProject> {
         current.ok_or_else(|| {
-            RecoverableError::new(format!(
+            LibrarianRecoverableError::new(format!(
                 "scope={} requires an active project. The host has not activated one \
              (call workspace(action='activate', path=...)).",
                 scope_name
@@ -185,7 +185,7 @@ pub fn apply_scope(
         Scope::Umbrella => {
             let cp = require(current, "umbrella")?;
             let umbrella_name = cp.umbrella.as_deref().ok_or_else(|| {
-                RecoverableError::new(format!(
+                LibrarianRecoverableError::new(format!(
                     "scope=umbrella but no umbrella declared for {}. \
                      Add a [[umbrella]] block to workspace.toml or use scope=repo|all.",
                     cp.abs_path.display(),
@@ -196,10 +196,10 @@ pub fn apply_scope(
                 .iter()
                 .find(|u| u.name == umbrella_name)
                 .ok_or_else(|| {
-                    RecoverableError::new(format!("umbrella `{umbrella_name}` not found"))
+                    LibrarianRecoverableError::new(format!("umbrella `{umbrella_name}` not found"))
                 })?;
             if umb.members.is_empty() {
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "umbrella `{umbrella_name}` has no members"
                 )));
             }

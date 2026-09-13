@@ -316,7 +316,7 @@ pub struct TrackerParams {
     pub parse_warnings: Vec<ParseWarning>,
 }
 
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -458,7 +458,7 @@ pub const MAX_FILES_DEFAULT: usize = 10_000;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: AuditArgs = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             format!("audit_doc_refs: bad args: {e}"),
             "see librarian(action=\"audit_doc_refs\") input schema",
         )
@@ -466,7 +466,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(scope) = args.scope.as_deref() {
         if scope != "project" {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "audit_doc_refs is project-scoped in v1",
                 "call from within the target project, or omit `scope`",
             ));
@@ -477,7 +477,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .current_project
         .as_ref()
         .ok_or_else(|| {
-            RecoverableError::new("audit_doc_refs: no active project; activate one first")
+            LibrarianRecoverableError::new("audit_doc_refs: no active project; activate one first")
         })?
         .abs_path
         .clone();
@@ -782,7 +782,9 @@ async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         .current_project
         .as_ref()
         .ok_or_else(|| {
-            crate::librarian::tools::RecoverableError::new("audit_doc_refs: no active project")
+            crate::librarian::tools::LibrarianRecoverableError::new(
+                "audit_doc_refs: no active project",
+            )
         })?
         .abs_path
         .clone();
@@ -921,7 +923,7 @@ async fn find_tracker_path(ctx: &ToolContext, id: &str) -> Option<String> {
 /// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
 fn enforce_file_cap(file_count: usize, max_files: usize) -> Result<()> {
     if file_count > max_files {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("audit_doc_refs: glob matched {file_count} files (cap {max_files})"),
             "tighten `paths` glob or set LIBRARIAN_AUDIT_MAX_FILES",
         ));
@@ -1000,7 +1002,7 @@ fn collect_markdown_files(
     let mut include_builder = globset::GlobSetBuilder::new();
     for g in globs {
         include_builder.add(globset::Glob::new(g).map_err(|e| {
-            RecoverableError::with_hint(format!("bad glob {g}: {e}"), "fix glob syntax")
+            LibrarianRecoverableError::with_hint(format!("bad glob {g}: {e}"), "fix glob syntax")
         })?);
     }
     let include_set = include_builder.build()?;
@@ -1008,7 +1010,10 @@ fn collect_markdown_files(
     let mut exclude_builder = globset::GlobSetBuilder::new();
     for g in excludes {
         exclude_builder.add(globset::Glob::new(g).map_err(|e| {
-            RecoverableError::with_hint(format!("bad exclude glob {g}: {e}"), "fix glob syntax")
+            LibrarianRecoverableError::with_hint(
+                format!("bad exclude glob {g}: {e}"),
+                "fix glob syntax",
+            )
         })?);
     }
     let exclude_set = exclude_builder.build()?;
@@ -1161,7 +1166,7 @@ fn build_response(
         // existing caller's behavior silently changes.
         "low" | "any" => findings.iter().any(|f| counts(f).is_some()) as i32,
         other => {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 format!("audit_doc_refs: unknown fail_on value `{other}`"),
                 "valid values: high | med | low | never",
             ))
@@ -1948,7 +1953,7 @@ mod tests {
         // which is UB in a parallel test binary. See the note in config/global.rs.
         let err = enforce_file_cap(5, 1).unwrap_err();
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "a glob explosion must be recoverable, not a hard failure; got: {err}"
         );
         let msg = format!("{err}");

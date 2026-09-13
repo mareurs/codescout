@@ -34,7 +34,7 @@ struct Args {
 /// the tests exercise, which is why it read as complete.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)
-        .map_err(|e| super::RecoverableError::new(format!("delete requires 'id': {e}")))?;
+        .map_err(|e| super::LibrarianRecoverableError::new(format!("delete requires 'id': {e}")))?;
 
     // The catalog guard lives in an EXPLICIT BLOCK, and the block is the fix rather
     // than a tidy-up. The vector delete below is `async`, and this guard is a
@@ -47,8 +47,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `SqliteVecArtifactStore` for the two ways this enforcement disappears silently.
     let (abs_path, existed) = {
         let cat = ctx.catalog.lock();
-        let row = artifact::get(&cat, &a.id)?
-            .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
+        let row = artifact::get(&cat, &a.id)?.ok_or_else(|| {
+            super::LibrarianRecoverableError::new(format!("unknown id `{}`", a.id))
+        })?;
 
         // Fork-on-first-write gate: a worktree session may not delete an artifact
         // that belongs to the main checkout — that would delete the shared row/file
@@ -56,7 +57,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // checkout.
         if let Some(cp) = ctx.current_project.as_deref() {
             if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-                return Err(super::RecoverableError::new(
+                return Err(super::LibrarianRecoverableError::new(
                 "refused from a worktree session: this artifact belongs to the main checkout. \
                  Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
             ));
@@ -68,7 +69,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let abs_path = row.abs_path.clone();
         let roots = super::managed_roots(ctx);
         if super::containing_root(&roots, &abs_path).is_none() {
-            return Err(super::RecoverableError::new(format!(
+            return Err(super::LibrarianRecoverableError::new(format!(
                 "artifact '{}' is outside every managed root — refusing to delete {}",
                 a.id,
                 abs_path.display()

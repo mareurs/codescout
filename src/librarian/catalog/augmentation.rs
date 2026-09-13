@@ -1,5 +1,5 @@
 use crate::librarian::catalog::Catalog;
-use crate::librarian::tools::{schema_validate, RecoverableError};
+use crate::librarian::tools::{schema_validate, LibrarianRecoverableError};
 use anyhow::Result;
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
@@ -127,7 +127,7 @@ fn validate_rule_globs(entry_collection: &str, params: &Value) -> Result<()> {
             let Some(s) = p.as_str() else { continue };
             if let Err(e) = globset::Glob::new(s) {
                 let rule_id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("<no id>");
-                return Err(RecoverableError::new(format!(
+                return Err(LibrarianRecoverableError::new(format!(
                     "invalid glob `{s}` in rule `{rule_id}`'s paths: {e}"
                 )));
             }
@@ -153,7 +153,9 @@ fn merge_params_dry(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<O
     apply_merge_patch(&mut current, patch);
     if let Some(schema_text) = existing.params_schema.as_deref() {
         schema_validate::validate_against_stored(schema_text, &current).map_err(|e| {
-            RecoverableError::new(format!("merge_params: patch violates params_schema: {e}"))
+            LibrarianRecoverableError::new(format!(
+                "merge_params: patch violates params_schema: {e}"
+            ))
         })?;
     }
     validate_rule_globs(existing.entry_collection.as_deref().unwrap_or(""), &current)?;
@@ -283,7 +285,7 @@ pub fn update_entry(
     fields: Value,
 ) -> Result<UpdateEntryOutcome> {
     let Some(patch) = fields.as_object() else {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "update_entry: `fields` must be a JSON object",
         ));
     };
@@ -295,7 +297,7 @@ pub fn update_entry(
     // path it replaced was silent; it must not be silent in a narrower way.
     // docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
     if patch.is_empty() {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             "update_entry: `fields` is empty — there is nothing to patch".to_string(),
             "Pass at least one field, e.g. fields={\"status\": \"done\"}; a null value deletes a \
              key. If you passed the patch under a different parameter name, note that `entry` \
@@ -304,7 +306,7 @@ pub fn update_entry(
         ));
     }
     if patch.contains_key("id") {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             "update_entry: `id` cannot be changed through a field patch".to_string(),
             "Entry ids key entry_cite rows (`<slug>:<local>`), so re-keying one would strand \
              every citation of it with nothing to repair them. Append a new entry and mark this \
@@ -327,13 +329,13 @@ pub fn update_entry(
         .optional()?;
 
     let Some((params_text, params_schema, declared_collection)) = row else {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "update_entry: artifact `{artifact_id}` has no augmentation — augment it with an entry_collection first"
         )));
     };
 
     if declared_collection.as_deref() != Some(entry_collection) {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("update_entry: `{entry_collection}` is not this artifact's entry_collection"),
             match declared_collection {
                 Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
@@ -347,7 +349,7 @@ pub fn update_entry(
     // Locate the row before mutating, so the immutable borrow ends before the
     // schema re-validation needs `params` whole again.
     let Some(arr) = params.get(entry_collection).and_then(|v| v.as_array()) else {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "update_entry: `{entry_collection}` holds no entry array on artifact `{artifact_id}`"
         )));
     };
@@ -372,14 +374,14 @@ pub fn update_entry(
         } else {
             String::new()
         };
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("update_entry: no entry `{entry_id}` in `{entry_collection}`"),
             format!("Known ids: {}{}", known.join(", "), suffix),
         ));
     };
 
     let Some(obj) = params[entry_collection][position].as_object_mut() else {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "update_entry: entry `{entry_id}` is not a JSON object"
         )));
     };
@@ -396,7 +398,7 @@ pub fn update_entry(
 
     if let Some(schema_text) = params_schema.as_deref() {
         schema_validate::validate_against_stored(schema_text, &params).map_err(|e| {
-            RecoverableError::new(format!(
+            LibrarianRecoverableError::new(format!(
                 "update_entry: patched entry violates params_schema: {e}"
             ))
         })?;
@@ -609,13 +611,13 @@ pub fn append_entry(
         .optional()?;
 
     let Some((params_text, params_schema, declared_collection)) = row else {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "append_entry: artifact `{artifact_id}` has no augmentation — augment it with an entry_collection first"
         )));
     };
 
     if declared_collection.as_deref() != Some(entry_collection) {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("append_entry: `{entry_collection}` is not this artifact's entry_collection"),
             match declared_collection {
                 Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
@@ -738,7 +740,7 @@ pub fn append_entry(
 
     if let Some(schema_text) = params_schema.as_deref() {
         schema_validate::validate_against_stored(schema_text, &params).map_err(|e| {
-            RecoverableError::new(format!(
+            LibrarianRecoverableError::new(format!(
                 "append_entry: new entry violates params_schema: {e}"
             ))
         })?;
@@ -786,13 +788,13 @@ pub fn append_entry(
         None => false,
         Some(s) => {
             let path = abs_path.as_deref().ok_or_else(|| {
-                RecoverableError::new(format!(
+                LibrarianRecoverableError::new(format!(
                     "append_entry: artifact `{artifact_id}` has no file on disk, so the \
                      section cannot be written — no id was allocated"
                 ))
             })?;
             let doc = std::fs::read_to_string(path).map_err(|e| {
-                RecoverableError::new(format!(
+                LibrarianRecoverableError::new(format!(
                     "append_entry: cannot read `{path}` to write the section: {e} — no id was \
                      allocated and nothing was written"
                 ))
@@ -802,7 +804,7 @@ pub fn append_entry(
             let level = body_entry_heading_level(&doc, id_prefix).unwrap_or(2);
             let updated = splice_pending_section(&doc, &new_id, level, s, "append_entry")?;
             std::fs::write(path, &updated).map_err(|e| {
-                RecoverableError::new(format!(
+                LibrarianRecoverableError::new(format!(
                     "append_entry: cannot write the section into `{path}`: {e} — no id was \
                      allocated"
                 ))
@@ -1040,12 +1042,12 @@ pub fn allocate_entry_id(
         )
         .optional()?;
     let Some(abs_path) = abs_path else {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "allocate_entry_id: unknown artifact `{artifact_id}`"
         )));
     };
     let doc = std::fs::read_to_string(&abs_path).map_err(|e| {
-        RecoverableError::new(format!(
+        LibrarianRecoverableError::new(format!(
             "allocate_entry_id: cannot read `{abs_path}`: {e} — the ledger's own body is \
              where the id maximum is derived from"
         ))
@@ -1054,7 +1056,7 @@ pub fn allocate_entry_id(
     // One read, three answers: the declaration, the body maximum, and (via the
     // body) the durability check the caller needs.
     let (fm, body) = crate::librarian::frontmatter::parse(&doc)
-        .map_err(|e| RecoverableError::new(format!("allocate_entry_id: {e}")))?;
+        .map_err(|e| LibrarianRecoverableError::new(format!("allocate_entry_id: {e}")))?;
     // Scalar or sequence: a session log legitimately owns two namespaces (F-N
     // frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
     // `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
@@ -1062,7 +1064,7 @@ pub fn allocate_entry_id(
     let declared = declared_prefixes_from_frontmatter(fm.as_ref());
 
     if declared.is_empty() {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("allocate_entry_id: `{abs_path}` does not declare an entry_prefix"),
             format!(
                 "A ledger declares its id namespace in FRONTMATTER, so the declaration is \
@@ -1073,7 +1075,7 @@ pub fn allocate_entry_id(
         ));
     }
     if !declared.iter().any(|d| d == id_prefix) {
-        return Err(RecoverableError::with_hint(
+        return Err(LibrarianRecoverableError::with_hint(
             format!("allocate_entry_id: `{id_prefix}` is not declared by this ledger"),
             format!(
                 "`{abs_path}` declares `{ENTRY_PREFIX_KEY}: {}` — pass one of those, or add \
@@ -1150,7 +1152,7 @@ pub fn allocate_entry_id(
     // a second session blocks on the write lock, so it cannot interleave here.
     let updated =
         crate::librarian::frontmatter::upsert_int_line(&doc, &hw_key, next).ok_or_else(|| {
-            RecoverableError::with_hint(
+            LibrarianRecoverableError::with_hint(
                 format!(
                     "allocate_entry_id: `{abs_path}` has no frontmatter block to record \
                      `{hw_key}` in"
@@ -1185,7 +1187,7 @@ pub fn allocate_entry_id(
         Some(s) => splice_pending_section(&updated, &id, level, s, "allocate_entry_id")?,
     };
     std::fs::write(&abs_path, &updated).map_err(|e| {
-        RecoverableError::new(format!(
+        LibrarianRecoverableError::new(format!(
             "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e} — no \
              id was allocated"
         ))
@@ -1308,7 +1310,7 @@ fn splice_pending_section(
                 tail.join(", ")
             )
         };
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             format!(
                 "{caller}: cannot place {id} before `{}`: {e} — no id was allocated and \
                  nothing was written",
@@ -1330,7 +1332,7 @@ fn splice_pending_section(
         Some(r) => {
             let row = r.row.replace("{id}", id);
             insert_index_row(&with_section, &r.after_line, &row).map_err(|e| {
-                RecoverableError::with_hint(
+                LibrarianRecoverableError::with_hint(
                     format!(
                         "{caller}: cannot place the index row for {id}: {e} — no id was \
                          allocated and nothing was written"
@@ -1402,7 +1404,7 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
                 return Ok(raw.to_string());
             }
         }
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "append_entry: cite `{raw}` — no such entry (slug or local id not found)"
         )));
     }
@@ -1416,12 +1418,12 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
         .collect::<Result<Vec<_>, _>>()?;
     match ids.len() {
         1 => Ok(ids.into_iter().next().unwrap()),
-        0 => Err(RecoverableError::with_hint(
+        0 => Err(LibrarianRecoverableError::with_hint(
             format!("append_entry: cite `{raw}` did not resolve"),
             "Use a 16-hex artifact id, a `<slug>:<local>` entry id, or a unique rel_path."
                 .to_string(),
         )),
-        _ => Err(RecoverableError::new(format!(
+        _ => Err(LibrarianRecoverableError::new(format!(
             "append_entry: cite `{raw}` is ambiguous ({} artifacts match)",
             ids.len()
         ))),
@@ -3837,7 +3839,7 @@ mod tests {
         upsert(&cat, &a).unwrap();
 
         let err = resolve_cite_ref(&cat.conn, "trk:F-99").unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[test]
@@ -3859,7 +3861,7 @@ mod tests {
         .unwrap();
 
         let err = resolve_cite_ref(&cat.conn, "dup.md").unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[test]

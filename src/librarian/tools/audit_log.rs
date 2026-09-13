@@ -1,7 +1,7 @@
 //! `librarian(action="audit_log")` — query the catalog audit trail (T-1/T-2's
 //! `catalog_audit` table) and dry-run/apply pruning of old rows.
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::audit;
 use crate::librarian::catalog::audit::{host, shard};
 use anyhow::Result;
@@ -66,13 +66,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .filter(|k| args.get(*k).is_some_and(|v| !v.is_null()))
             .collect();
         if !present.is_empty() {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "export does not accept filters or prune_before_ms; it exports every unexported row — remove: {}",
                 present.join(", ")
             )));
         }
         let root = project_root(ctx).ok_or_else(|| {
-            RecoverableError::new(
+            LibrarianRecoverableError::new(
                 "export requires a resolved current project with a git root — no current project is set"
                     .to_string(),
             )
@@ -106,7 +106,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .filter(|k| args.get(*k).is_some_and(|v| !v.is_null()))
             .collect();
         if !present.is_empty() {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "prune_before_ms does not accept filters; it prunes by time only — remove: {}",
                 present.join(", ")
             )));
@@ -147,7 +147,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
     if let Some(op) = &f.op {
         if !matches!(op.as_str(), "insert" | "update" | "delete") {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "op '{op}' — expected one of: insert, update, delete"
             )));
         }
@@ -383,7 +383,7 @@ mod tests {
         let err = call(&ctx, json!({"action": "audit_log", "op": "bogus"}))
             .await
             .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[tokio::test]
@@ -422,7 +422,7 @@ mod tests {
         .await
         .unwrap_err();
         let re = err
-            .downcast_ref::<RecoverableError>()
+            .downcast_ref::<LibrarianRecoverableError>()
             .expect("must be a RecoverableError, not a silent discard");
         assert!(
             re.to_string().contains("actor"),
@@ -629,7 +629,7 @@ mod tests {
         .await
         .unwrap_err();
         let re = err
-            .downcast_ref::<RecoverableError>()
+            .downcast_ref::<LibrarianRecoverableError>()
             .expect("must be a RecoverableError, not a silent discard of the destructive verb");
         assert!(re.to_string().contains("prune_before_ms"), "{re}");
     }
@@ -687,7 +687,7 @@ mod tests {
         .await
         .unwrap_err();
         let re = err
-            .downcast_ref::<RecoverableError>()
+            .downcast_ref::<LibrarianRecoverableError>()
             .expect("must be a RecoverableError, not a silent discard");
         assert!(re.to_string().contains("tbl"), "{re}");
     }

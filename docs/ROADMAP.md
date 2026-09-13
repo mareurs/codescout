@@ -507,6 +507,45 @@ last Kotlin bug in that family closed on
 2026-08-15 and is archived at
 `docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
 
+### Collapse the Two `RecoverableError` Types Into One
+
+**Priority:** Low | **Effort:** Large
+
+`src/librarian/tools/mod.rs` and `src/tools/core/types.rs` each define their own
+`RecoverableError` struct. The host type (`core::types`) is a strict superset —
+`message` + a `Guidance` enum (`Hint`/`Warning`/`MustFollow`) + a structured `extra`
+JSON map — while the librarian type carries only `message` + a plain `hint:
+Option<String>` and its constructors return `anyhow::Error` directly rather than
+`Self`. `src/librarian/adapter.rs::bridge_recoverable_error` converts the librarian
+type into the host type so `route_tool_error` (which downcasts to the host type
+only) can render it; `src/librarian/server.rs` is a second, unbridged serving path
+that downcasts to the librarian type natively.
+
+**Why not done now:** collapsing means folding the librarian type's `hint` into
+`Guidance::Hint` and deleting both the librarian type and the bridge — but the two
+types have **249** and **491** call sites respectively (740 total, ~100 files), and
+the librarian side's calling convention (`RecoverableError::new(msg) -> anyhow::Error`
+via `?`) differs from the host side's (`RecoverableError::new(msg) -> Self`, used in
+`Result<T, RecoverableError>` signatures), so every librarian call site's shape
+changes, not just its import. Plan-and-subagent-dispatch sized work, not a single
+sitting.
+
+**What's already done:** the name collision itself (`use super::*` bringing the
+librarian type into scope under the bare name, shadowed by a sibling
+`use crate::tools::RecoverableError` in the same file's test block) is fixed by
+renaming the librarian type to `LibrarianRecoverableError` — see
+`docs/issues/archive/2026-09-12-two-recoverableerror-types-share-a-name-and-the-bridge-hides-the-difference.md`.
+The rename removes the ambiguity but not the duplication; the bridge and the two
+call-site populations above are exactly what a future collapse would need to price
+and touch.
+
+**Options, from the original bug file, still valid:**
+- **Collapse to one type** (this entry) — ends the class of bug for good, largest
+  diff.
+- **Leave as two types, bridged** (current state after the rename) — the bridge
+  keeps working for every existing call site; the residual risk is only a future
+  call site built outside the bridged path, which now fails loudly at compile time
+  (wrong type name) rather than silently at runtime (wrong downcast).
 ### Dangerous-Command Audit Log
 
 **Priority:** Medium | **Effort:** Small/Medium

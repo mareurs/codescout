@@ -1,4 +1,4 @@
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, augmentation};
 use anyhow::Result;
 use serde::Deserialize;
@@ -59,7 +59,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. doc(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
     })?;
     if !a.entry.is_object() {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "append_entry: `entry` must be a JSON object",
         ));
     }
@@ -97,7 +97,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             } else {
                 "index_after_line"
             };
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 format!(
                     "doc(action=\"append_entry\"): `index_row` and `index_after_line` are \
                      both-or-neither — missing: {missing}"
@@ -117,7 +117,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // reason this path exists.
     let section = match (&a.title, &a.body, &a.anchor_heading) {
         (None, None, None) if index_row.is_some() => {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "doc(action=\"append_entry\"): `index_row` needs a section — pass \
                  `title` + `body` + `anchor_heading` too"
                     .to_string(),
@@ -143,7 +143,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .filter(|(_, absent)| *absent)
             .map(|(name, _)| name)
             .collect();
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 format!(
                     "append_entry: writing a prose entry needs `title`, `body` and \
                      `anchor_heading` together — missing: {}",
@@ -167,7 +167,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // the race) — see `augmentation::allocate_entry_id`.
     if a.entry_collection.is_none() {
         if a.entry.as_object().is_some_and(|o| !o.is_empty()) {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "append_entry: `entry` fields cannot be stored without an `entry_collection`"
                     .to_string(),
                 "This ledger has no params collection, so those fields would be silently \
@@ -177,7 +177,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             ));
         }
         if !a.cites.is_empty() {
-            return Err(RecoverableError::with_hint(
+            return Err(LibrarianRecoverableError::with_hint(
                 "append_entry: `cites` is not supported on a prose ledger".to_string(),
                 "Reserve the id, write the body, and cite in prose — link_scan derives the \
                  edges from the text."
@@ -203,7 +203,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Some(cp) = ctx.current_project.as_deref() {
             if let Some(row) = artifact::get(&cat, &a.id)? {
                 if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-                    return Err(RecoverableError::with_hint(
+                    return Err(LibrarianRecoverableError::with_hint(
                         "append_entry: id allocation is not supported from a worktree checkout"
                             .to_string(),
                         "An entry id is ledger-wide state and must key to the main tracker. \
@@ -356,7 +356,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Some(cp) = ctx.current_project.as_deref() {
             if let Some(row) = artifact::get(&cat, &a.id)? {
                 if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-                    return Err(RecoverableError::with_hint(
+                    return Err(LibrarianRecoverableError::with_hint(
                         "append_entry: `cites` is not supported from a worktree checkout".to_string(),
                         "Entry-graph edges must key to the main tracker. Omit `cites`, or append from the main checkout.".to_string(),
                     ));
@@ -1027,7 +1027,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[tokio::test]
@@ -1046,7 +1046,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     #[tokio::test]
@@ -1170,7 +1170,7 @@ mod tests {
         let err = call(&ctx, json!({"id": main_id, "id_prefix": "HY", "entry": {}}))
             .await
             .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
         assert!(
             err.to_string().contains("worktree"),
             "expected the worktree guard, got: {err}"
@@ -1262,7 +1262,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
         let cat = ctx.catalog.lock();
         // atomic: entry NOT appended.
         let aug = augmentation::get(&cat, "art1").unwrap().unwrap();
@@ -1293,7 +1293,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
         assert!(
             err.to_string().contains("worktree"),
             "expected the worktree-guard error, got: {err}"

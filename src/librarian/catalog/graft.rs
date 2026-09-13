@@ -11,7 +11,7 @@
 
 use crate::librarian::catalog::augmentation::next_index;
 use crate::librarian::catalog::Catalog;
-use crate::librarian::tools::RecoverableError;
+use crate::librarian::tools::LibrarianRecoverableError;
 use anyhow::Result;
 use rusqlite::params;
 use serde_json::Value;
@@ -54,17 +54,17 @@ fn row_exists(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
 /// re-pointed and orphaned.
 pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<GraftReport> {
     if from_id == into_id {
-        return Err(RecoverableError::new(
+        return Err(LibrarianRecoverableError::new(
             "graft: from_id and into_id are the same row",
         ));
     }
     if !row_exists(&cat.conn, from_id)? {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "graft: unknown from_id `{from_id}`"
         )));
     }
     if !row_exists(&cat.conn, into_id)? {
-        return Err(RecoverableError::new(format!(
+        return Err(LibrarianRecoverableError::new(format!(
             "graft: unknown into_id `{into_id}`"
         )));
     }
@@ -387,7 +387,7 @@ fn merge_augmentation(
             obj.insert(coll.clone(), Value::Array(merged));
         }
         None => {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "graft: into_id `{into_id}` augmentation params is not a JSON object"
             )))
         }

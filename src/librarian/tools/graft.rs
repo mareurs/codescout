@@ -3,7 +3,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 
 #[derive(Deserialize)]
 struct Args {
@@ -16,7 +16,7 @@ struct Args {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::new(format!("graft requires 'from_id' and 'into_id': {e}"))
+        LibrarianRecoverableError::new(format!("graft requires 'from_id' and 'into_id': {e}"))
     })?;
 
     let mut cat = ctx.catalog.lock();
@@ -31,10 +31,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // to keep into the one you meant to discard, and nothing rebuilds it.
     if !a.force.unwrap_or(false) {
         use crate::librarian::catalog::{artifact, augmentation, events, links, observations};
-        let from = artifact::get(&cat, &a.from_id)?
-            .ok_or_else(|| RecoverableError::new(format!("unknown from_id `{}`", a.from_id)))?;
-        let into = artifact::get(&cat, &a.into_id)?
-            .ok_or_else(|| RecoverableError::new(format!("unknown into_id `{}`", a.into_id)))?;
+        let from = artifact::get(&cat, &a.from_id)?.ok_or_else(|| {
+            LibrarianRecoverableError::new(format!("unknown from_id `{}`", a.from_id))
+        })?;
+        let into = artifact::get(&cat, &a.into_id)?.ok_or_else(|| {
+            LibrarianRecoverableError::new(format!("unknown into_id `{}`", a.into_id))
+        })?;
         return Ok(json!({
             "dry_run": true,
             "grafted": false,

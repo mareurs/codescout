@@ -72,17 +72,19 @@ pub(crate) fn guard_temp_workspace_write(
     let catalog_db = crate::librarian::catalog::catalog_db_path(conn)
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
     if should_refuse(&root_c, catalog_db.as_deref(), &env.temp_dir, env.opted_in) {
-        return Err(crate::librarian::tools::RecoverableError::with_hint(
-            format!(
-                "refusing to write an artifact rooted under the system temp dir ({}) into the \
+        return Err(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                format!(
+                    "refusing to write an artifact rooted under the system temp dir ({}) into the \
                  shared persistent catalog — this is how probe/test runs pollute the catalog",
-                env.temp_dir.display()
-            ),
-            format!(
-                "Use an isolated catalog (under the temp dir, or in-memory) for tests, or set \
+                    env.temp_dir.display()
+                ),
+                format!(
+                    "Use an isolated catalog (under the temp dir, or in-memory) for tests, or set \
                  {ALLOW_ENV}=1 if this scratch workspace is intentional."
+                ),
             ),
-        ));
+        );
     }
     Ok(())
 }
@@ -211,7 +213,7 @@ mod tests {
         let err = guard_temp_workspace_write(&ws, &cat.conn, &env)
             .expect_err("temp workspace + real (outside-temp) catalog must be refused");
         assert!(
-            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+            err.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
                 .is_some(),
             "refusal must be a librarian RecoverableError (routes to isError:false): {err}"
         );

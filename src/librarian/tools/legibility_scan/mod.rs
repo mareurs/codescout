@@ -2,7 +2,7 @@
 //! reconciles the `docs/trackers/legibility-backlog.md` augmented artifact.
 //! Phase 2b of docs/superpowers/specs/2026-06-13-dzo-friction-probes-design.md.
 
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -26,7 +26,7 @@ pub struct LegibilityScanArgs {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: LegibilityScanArgs = serde_json::from_value(args).map_err(|e| {
-        RecoverableError::with_hint(
+        LibrarianRecoverableError::with_hint(
             format!("legibility_scan: bad args: {e}"),
             "see librarian(action=\"legibility_scan\") input schema",
         )
@@ -35,7 +35,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .current_project
         .as_ref()
         .ok_or_else(|| {
-            RecoverableError::new("legibility_scan: no active project; activate one first")
+            LibrarianRecoverableError::new("legibility_scan: no active project; activate one first")
         })?
         .abs_path
         .clone();
@@ -333,7 +333,7 @@ async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
     let project_root = ctx
         .current_project
         .as_ref()
-        .ok_or_else(|| RecoverableError::new("legibility_scan: no active project"))?
+        .ok_or_else(|| LibrarianRecoverableError::new("legibility_scan: no active project"))?
         .abs_path
         .clone();
     std::fs::create_dir_all(project_root.join("docs/trackers"))?;

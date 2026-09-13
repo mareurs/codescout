@@ -8,7 +8,7 @@
 //! fallback date as a parameter so the default-is-decay rule is testable without a
 //! fixture repository.
 
-use crate::librarian::tools::RecoverableError;
+use crate::librarian::tools::LibrarianRecoverableError;
 use crate::util::markdown_fence::FenceState;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -222,7 +222,7 @@ pub fn declared_section_text(
 }
 
 /// Parse a declared class. `Ok(None)` means the section declares nothing.
-pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, RecoverableError> {
+pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, LibrarianRecoverableError> {
     let Some(raw) = first_declaration_line(section_text, valid_re()) else {
         return Ok(None);
     };
@@ -249,7 +249,7 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
         let is_valid_date =
             iso_re().is_match(d) && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok();
         if !is_valid_date {
-            return Err(RecoverableError {
+            return Err(LibrarianRecoverableError {
                 message: format!("`**Valid:** dated {d}` is not an ISO date"),
                 hint: Some(format!(
                     "Use `dated YYYY-MM-DD`. The three forms are: {FORMS}"
@@ -270,7 +270,7 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
         if is_boundary {
             let cond = after.trim().trim_start_matches(['—', '–', '-']).trim();
             if cond.is_empty() {
-                return Err(RecoverableError {
+                return Err(LibrarianRecoverableError {
                     message: "`**Valid:** conditional` names no condition".to_string(),
                     hint: Some(format!(
                         "Name the event that ends validity: `conditional — <event>`. A \
@@ -284,7 +284,7 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
         }
     }
 
-    Err(RecoverableError {
+    Err(LibrarianRecoverableError {
         message: format!("`**Valid:** {rest}` is not a known class"),
         hint: Some(format!("The three forms are: {FORMS}")),
     })
@@ -294,7 +294,7 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
 pub fn resolve_validity(
     section_text: &str,
     fallback_date: &str,
-) -> Result<Validity, RecoverableError> {
+) -> Result<Validity, LibrarianRecoverableError> {
     Ok(parse_validity(section_text)?.unwrap_or_else(|| Validity::Dated(fallback_date.to_string())))
 }
 

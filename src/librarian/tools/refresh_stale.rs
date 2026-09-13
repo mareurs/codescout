@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::librarian::catalog::augmentation;
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{LibrarianRecoverableError, ToolContext};
 
 use super::scope::Scope;
 
@@ -31,7 +31,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         Scope::All => None,
         Scope::Repo => {
             let cp = current.ok_or_else(|| {
-                RecoverableError::new(
+                LibrarianRecoverableError::new(
                     "scope=repo requires a resolved current project. Pass scope=\"all\".",
                 )
             })?;
@@ -39,14 +39,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         Scope::Project => {
             let cp = current.ok_or_else(|| {
-                RecoverableError::new(
+                LibrarianRecoverableError::new(
                     "scope=project requires a resolved current project. Pass scope=\"all\".",
                 )
             })?;
             Some(cp.abs_path.as_path())
         }
         Scope::Umbrella => {
-            return Err(RecoverableError::new(
+            return Err(LibrarianRecoverableError::new(
                 "scope=umbrella is not supported. Use scope=project|repo|all.",
             ));
         }

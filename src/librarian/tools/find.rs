@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::scope::{apply_scope, resolve_scope, Scope, ScopeApplied, UmbrellaPolicy};
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::augmentation;
 use crate::librarian::catalog::find::{catalog_summary, count_matching, find, FindOpts};
 use crate::librarian::filter::FilterNode;
@@ -746,7 +746,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // as a plain filter. Recoverable, not a hard failure that aborts
             // sibling calls (omnibus 49ee6a03, F11).
             None => {
-                return Err(RecoverableError::with_hint(
+                return Err(LibrarianRecoverableError::with_hint(
                     "semantic search requires an embedding service, which is not configured",
                     "Retry without the `semantic` param (use `filter` with a `contains` op on \
                      title/rel_path for a literal match), or configure an embedder.",
@@ -863,7 +863,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // catalog locking); the sync `find` below handles the non-semantic case.
     let semantic_page = if let Some(vec) = semantic_vec {
         let store = ctx.artifact_store.as_ref().ok_or_else(|| {
-            RecoverableError::new(
+            LibrarianRecoverableError::new(
                 "artifact semantic search backend unavailable — the configured Qdrant is \
                  unreachable. Set `[librarian] vector_backend = \"sqlite-vec\"` (or \
                  CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend.",
@@ -1234,7 +1234,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         .cloned()
                         .collect::<Vec<_>>()
                         .join(", ");
-                    return Err(RecoverableError::new(format!(
+                    return Err(LibrarianRecoverableError::new(format!(
                         "No indexed artifacts match rel_path ~ {hint:?}. \
                          Found {} unindexed file(s): {sample}. \
                          Run librarian(action=\"reindex\", scope=\"project\") to index them, then retry.",
@@ -1406,7 +1406,7 @@ mod tests {
             .expect_err("semantic without an embedder must error");
 
         assert!(
-            err.downcast_ref::<RecoverableError>().is_some(),
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "must be RecoverableError so the agent can retry without `semantic`; got: {err}"
         );
     }
@@ -3152,7 +3152,7 @@ mod tests {
         let ctx = mk_ctx(cat);
         let err = call(&ctx, json!({"scope": "all"})).await.unwrap_err();
         assert!(
-            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+            err.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
                 .is_some(),
             "scope=all without umbrella must be RecoverableError, got: {err}"
         );

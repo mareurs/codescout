@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, Tool, ToolContext};
+use super::{LibrarianRecoverableError, Tool, ToolContext};
 
 pub struct Librarian;
 
@@ -126,7 +126,7 @@ impl Tool for Librarian {
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
-                RecoverableError::new(
+                LibrarianRecoverableError::new(
                     "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log",
                 )
             })?;
@@ -151,7 +151,7 @@ impl Tool for Librarian {
                 "doctor"             => super::doctor::call(ctx, args).await,
                 "merge_worktree"     => super::merge_worktree::call(ctx, args).await,
                 "audit_log"          => super::audit_log::call(ctx, args).await,
-                other => Err(RecoverableError::new(format!(
+                other => Err(LibrarianRecoverableError::new(format!(
                     "unknown action '{other}' — expected one of: context, reindex, status, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
                 ))),
             }
@@ -175,7 +175,7 @@ mod tests {
             .call(&mk_ctx(), serde_json::json!({"action": "bogus"}))
             .await
             .unwrap_err();
-        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
 
     /// Probe site for `librarian`, forward direction. Rationale, the `deny_unknown_fields` measurement, and the reason the

@@ -90,7 +90,9 @@ pub(crate) fn map_tool_result(r: Result<serde_json::Value>) -> CallToolResult {
             CallToolResult::success(vec![Content::text(text)])
         }
         Err(e) => {
-            if let Some(rec) = e.downcast_ref::<crate::librarian::tools::RecoverableError>() {
+            if let Some(rec) =
+                e.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+            {
                 let mut body = serde_json::json!({ "error": rec.message });
                 if let Some(h) = &rec.hint {
                     body["hint"] = serde_json::Value::String(h.clone());
@@ -148,8 +150,8 @@ mod tests {
 
     #[test]
     fn map_tool_result_recoverable_returns_success_with_error_body() {
-        use crate::librarian::tools::RecoverableError;
-        let err = RecoverableError::with_hint("bad input", "use foo");
+        use crate::librarian::tools::LibrarianRecoverableError;
+        let err = LibrarianRecoverableError::with_hint("bad input", "use foo");
         let res = map_tool_result(Err(err));
         // Recoverable → success, no isError flag set
         assert!(!res.is_error.unwrap_or(false));

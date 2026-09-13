@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, ToolContext};
+use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, links};
 
 #[derive(Deserialize)]
@@ -27,13 +27,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let src_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.src_id)?;
 
         if artifact::get(&cat, &src_id)?.is_none() {
-            return Err(RecoverableError::new(format!(
+            return Err(LibrarianRecoverableError::new(format!(
                 "src artifact `{}` not found",
                 src_id
             )));
         }
         let dst = artifact::get(&cat, &a.dst_id)?.ok_or_else(|| {
-            RecoverableError::new(format!("dst artifact `{}` not found", a.dst_id))
+            LibrarianRecoverableError::new(format!("dst artifact `{}` not found", a.dst_id))
         })?;
         (src_id, dst)
     };
