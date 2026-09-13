@@ -120,12 +120,57 @@ const DISABLE_ENV: &str = "CODESCOUT_NO_WIP_ATTRIBUTION";
 /// `#[cfg(test)]` construct can reach is a branch the shipped path never proves.
 const TIMEOUT_ENV: &str = "CODESCOUT_WIP_ATTRIBUTION_TIMEOUT_MS";
 
-fn attribution_timeout() -> Duration {
-    std::env::var(TIMEOUT_ENV)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(ATTRIBUTION_TIMEOUT_DEFAULT)
+/// Resolved configuration for the attribution hint. One `from_env`, everything else takes
+/// values — the `BuildCheckEnv` / `ServerEnv::from_env` shape that
+/// `docs/conventions/test-env-isolation.md` § *Established exemplars* prescribes. Tests
+/// construct this literally and mutate nothing.
+///
+/// **Both knobs were read from the process environment inside the async body until
+/// 2026-09-13, and two tests drove them with `set_var`.** `cargo test` runs one binary with
+/// a thread per core, so a test mutating the environment mutates every sibling's input:
+/// six call sites reach [`wip_author_diagnostic`], four of them assert a POSITIVE answer,
+/// and any of those scheduled inside the opt-out test's window got `None` and failed on an
+/// assertion about its own behaviour — for a reason living in a different test. The comment
+/// at that site argued the pattern was safe on two grounds and both were false: the
+/// `remove_var` was AFTER the await, not before it, and the siblings did read the key,
+/// because they all call the one function that reads it.
+///
+/// `#[serial]` is NOT the remedy, even though it is already a dependency and would make the
+/// symptom go away: `set_var` while another thread calls `getenv` is UB (glibc may
+/// `realloc` `environ`), and `#[serial]` locks only against tests that opt in. See
+/// `src/config/global.rs` and `src/librarian/tools/audit_doc_refs/mod.rs`, which each
+/// removed this same pattern for that reason.
+/// `docs/issues/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttributionEnv {
+    /// False when [`DISABLE_ENV`] is set to any value at all.
+    pub enabled: bool,
+    /// Ceiling on the scan — see [`ATTRIBUTION_TIMEOUT_DEFAULT`].
+    pub timeout: Duration,
+}
+
+impl Default for AttributionEnv {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout: ATTRIBUTION_TIMEOUT_DEFAULT,
+        }
+    }
+}
+
+impl AttributionEnv {
+    /// The only thing in this module that reads the environment. Called once, at the edge;
+    /// the result is handed inward.
+    pub(crate) fn from_env() -> Self {
+        Self {
+            enabled: std::env::var_os(DISABLE_ENV).is_none(),
+            timeout: std::env::var(TIMEOUT_ENV)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .map(Duration::from_millis)
+                .unwrap_or(ATTRIBUTION_TIMEOUT_DEFAULT),
+        }
+    }
 }
 
 static SCRIPT_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
@@ -229,10 +274,31 @@ fn names_a_diagnostic(text: &str) -> bool {
 /// What this NEVER does is turn silence into an exoneration. The engine refuses to render
 /// "no record" as "not yours"; this wrapper must not undo that by treating its own
 /// failures as evidence.
+///
+/// This is the shipped edge: it resolves [`AttributionEnv`] from the process environment
+/// once and hands it to [`wip_author_diagnostic_with`]. Tests that need to drive either
+/// knob call that directly with a struct they built — never by mutating the environment,
+/// which is shared with every concurrently running test.
 pub(crate) async fn wip_author_diagnostic(
     exit_code: i32,
     red_text: &str,
     work_dir: &Path,
+) -> Option<String> {
+    wip_author_diagnostic_with(exit_code, red_text, work_dir, &AttributionEnv::from_env()).await
+}
+
+/// The body of [`wip_author_diagnostic`], with its configuration as a parameter.
+///
+/// Split out so the opt-out and timeout branches are reachable from a test **without**
+/// process-global state. The knobs stay real environment variables on the shipped path —
+/// the timeout especially is a genuine operator knob, since the scan's cost is a function
+/// of a machine's transcript corpus — but resolving them is [`AttributionEnv::from_env`]'s
+/// job, at the edge, exactly once.
+pub(crate) async fn wip_author_diagnostic_with(
+    exit_code: i32,
+    red_text: &str,
+    work_dir: &Path,
+    env: &AttributionEnv,
 ) -> Option<String> {
     // Stage 0 — the outermost gate, and the reason the rest can afford to be expensive.
     // A green command with nothing failure-shaped in its output spawns nothing: no
@@ -251,7 +317,7 @@ pub(crate) async fn wip_author_diagnostic(
     if exit_code == 0 && !names_a_diagnostic(red_text) {
         return None;
     }
-    if std::env::var_os(DISABLE_ENV).is_some() {
+    if !env.enabled {
         return None;
     }
 
@@ -273,7 +339,7 @@ pub(crate) async fn wip_author_diagnostic(
         let _ = stdin.shutdown().await;
     }
 
-    let out = match tokio::time::timeout(attribution_timeout(), child.wait_with_output()).await {
+    let out = match tokio::time::timeout(env.timeout, child.wait_with_output()).await {
         Ok(Ok(o)) => o,
         // Timed out or failed. Silent, per the doc above — never "nobody wrote it".
         _ => return None,
@@ -388,13 +454,14 @@ mod tests {
             return;
         };
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
-        // Process-global, and `src/agent/mod.rs`'s EnvGuard warns against exactly this in
-        // a default-feature test. Tolerated on a narrow basis: this key is read by one
-        // function in one module, no sibling test sets or reads it, and it is removed
-        // before the await point that could interleave. Do not widen the pattern.
-        std::env::set_var(DISABLE_ENV, "1");
-        let got = wip_author_diagnostic(101, red, dir.path()).await;
-        std::env::remove_var(DISABLE_ENV);
+        // The knob as a VALUE, not as process state. This test used to `set_var` the real
+        // env var and hold it across the await below, which made every concurrently
+        // scheduled sibling read it — see `AttributionEnv`'s docstring for what that cost.
+        let env = AttributionEnv {
+            enabled: false,
+            ..Default::default()
+        };
+        let got = wip_author_diagnostic_with(101, red, dir.path(), &env).await;
         assert!(
             got.is_none(),
             "the opt-out must suppress a hint the same input produces without it; got: {got:?}"
@@ -403,11 +470,14 @@ mod tests {
 
     /// The timeout must END the wait, not become an answer.
     ///
-    /// Reachable only because the ceiling is an env knob: with a `const` there is no input
-    /// that makes a 30 s branch fire inside a test, so `_ => return None` would be
-    /// unguarded and a mutation turning it into a verdict survives silently. That branch
-    /// is the one place where "we could not find out" is closest to being rendered as
-    /// "we found out", which is the failure the whole engine refuses.
+    /// `_ => return None` is the one place where "we could not find out" is closest to being
+    /// rendered as "we found out", which is the failure the whole engine refuses — so it has
+    /// to be reachable, or a mutation turning it into a verdict survives silently.
+    ///
+    /// It is reachable because the ceiling is a **parameter**. It used to be reachable because
+    /// the ceiling was an env knob a test could `set_var`, which bought the same coverage and
+    /// charged every concurrent sibling for it; the knob is still a real env var on the
+    /// shipped path, resolved once by `AttributionEnv::from_env`.
     #[tokio::test]
     async fn a_timed_out_scan_is_silence_and_never_a_verdict() {
         let Some(dir) = dirty_fixture_repo() else {
@@ -415,9 +485,12 @@ mod tests {
             return;
         };
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
-        std::env::set_var(TIMEOUT_ENV, "1"); // 1 ms: no process finishes in that
-        let got = wip_author_diagnostic(101, red, dir.path()).await;
-        std::env::remove_var(TIMEOUT_ENV);
+        let env = AttributionEnv {
+            // 1 ms: no process finishes in that.
+            timeout: Duration::from_millis(1),
+            ..Default::default()
+        };
+        let got = wip_author_diagnostic_with(101, red, dir.path(), &env).await;
         assert!(
             got.is_none(),
             "a scan that ran out of time must say nothing at all; got: {got:?}"

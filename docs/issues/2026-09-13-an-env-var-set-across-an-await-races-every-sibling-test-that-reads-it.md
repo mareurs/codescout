@@ -1,10 +1,12 @@
 ---
 id: '69240af63a21c039'
 kind: bug
-status: open
+status: taken
 title: 'BUG: a test holds a process-global env var across an await, and six sibling tests read it'
 tags:
 - cluster/transient-shared-state-lies-to-readers
+claimed_at: 2026-09-13
+claimed_by: 05841db2-4ba0-4cb2-a22f-c0bc2f771e20
 ---
 
 ## Summary
@@ -107,24 +109,56 @@ until 2026-09-13 there were three of those. It is the shape that gets re-run and
 
 ## Fix
 
-Not started. Direction, per the repo's own ruling above: give the disable and timeout knobs
-a pure seam so tests drive them as parameters rather than as process state — the shape
-`audit_doc_refs` moved to when it removed its `set_var`. `wip_author_diagnostic` keeps
-reading the environment on the shipped path; only the decision it derives becomes
-separately testable.
+Built 2026-09-13: `AttributionEnv { enabled, timeout }` with `Default` and a `from_env()` that is
+the **only** thing in the module touching the environment — the shape
+`docs/conventions/test-env-isolation.md` § *Established exemplars* prescribes, copied from
+`BuildCheckEnv` (`src/agent/build_check.rs`) rather than invented.
 
-The discrimination the current test provides must survive: its docstring records that an
-absence assertion alone is satisfied by any mechanism producing absence, and is meaningful
-only paired with `a_red_naming_a_dirty_file_reaches_the_engine` demonstrating presence on
-the same fixture.
+`wip_author_diagnostic` is now a thin shipped edge that resolves the struct once and delegates to
+`wip_author_diagnostic_with(exit_code, red_text, work_dir, &env)`, which holds the old body with
+`std::env::var_os(DISABLE_ENV)` replaced by `!env.enabled` and `attribution_timeout()` by
+`env.timeout`. `attribution_timeout()` is gone, folded into `from_env`.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+**Both knobs stay real environment variables on the shipped path.** The timeout especially is an
+operator knob, not a test seam — the scan's cost is a function of a machine's transcript corpus,
+which this repo has watched grow 5.0 → 7.0 → 11.9 s. What moved is *where* they are read: once, at
+the edge, instead of inside an async body six concurrent callers reach.
 
+**The four positive-expecting callers were deliberately left on the shipped wrapper.** They
+exercise `from_env()` end to end, which is the path that ships; nothing sets the variables any
+more, so there is nothing for them to race. `from_env()` itself has no unit test, matching
+`BuildCheckEnv::from_env`, whose `Default` is tested and whose reader is not.
+
+**Verification is STRUCTURAL, and it has to be — § *Workarounds* is right that a green run proves
+nothing about a race.** The claim is not "it did not recur", it is that the mutation no longer
+exists: `env::set_var` / `env::remove_var` occurrences in this module went **4 → 0**, and the only
+`std::env::*` call left is the single read inside `AttributionEnv::from_env`. A static absence is
+checkable by grep and does not decay with the number of times the suite happened to pass.
 ## Tests added
 
-None — not fixed.
+No new test. The two offending tests were rewritten to construct `AttributionEnv` literally instead
+of mutating the process, and both keep their original assertion and discrimination:
 
+- `the_opt_out_suppresses_a_hint_that_would_otherwise_fire` — still paired with
+  `a_red_naming_a_dirty_file_reaches_the_engine`, which runs the same fixture and red *without* the
+  flag and gets output. That pairing is the whole discrimination; an absence assertion alone is
+  satisfied by any mechanism producing absence.
+- `a_timed_out_scan_is_silence_and_never_a_verdict` — its docstring's reachability argument was
+  rewritten, because it no longer holds for the reason it stated. The branch used to be reachable
+  *because the ceiling was an env knob a test could `set_var`*; it is now reachable because the
+  ceiling is a parameter. Same coverage, no charge to concurrent siblings.
+
+**Two observed reds on the production path**, each killing exactly one test — an assertion's
+existence is not evidence:
+
+| mutation | red |
+|---|---|
+| `if !env.enabled` → `if !env.enabled && false` | `the_opt_out_suppresses_a_hint_that_would_otherwise_fire` |
+| `env.timeout` → `ATTRIBUTION_TIMEOUT_DEFAULT` | `a_timed_out_scan_is_silence_and_never_a_verdict` |
+
+The first mutation also forced a recompile, which settled a build-identity question positively: the
+run before it reported `Finished in 0.19s` with no `Compiling` line, and nine greens from a
+possibly-stale test binary are indistinguishable from nine greens from a current one.
 ## Workarounds
 
 Re-run the suite; the race is probabilistic. Do not read a single green run as a fix, and
