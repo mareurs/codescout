@@ -594,10 +594,27 @@ and that party grows over time. Any future remedy that makes asking cheaper is w
 that makes refusing louder — the refusal already works, and what it costs is what will eventually
 buy someone's bypass.
 
-**One session in the stack, `eb54c34f-…`, holds five rungs and has been contacted by nobody all
-day** — it committed `9bce79c7` during this very exchange. It is not withholding; it has never
+**One session in the stack, `eb54c34f-…`, held five rungs and had been contacted by nobody all
+day** — it committed `9bce79c7` during this very exchange. It was not withholding; it had never
 been asked. That is the failure mode this file is about, sitting in the same stack as the success
 above it, and the difference between them is entirely whether a channel was opened.
+
+**So one was opened, and the outcome is the cheapest datapoint in this file.** A single
+informational message — their commits' position, the withhold below them, the prefix mechanics,
+and the 13:10:01 precedent — sent with **nothing to answer and no clearance sought**. They
+acknowledged, reported their stack had already grown to seven (`38ae6d7a`, `7f2fd2c8` added since
+the snapshot), and **took it to their operator so they would not be caught by a fait-accompli
+push**. Cost: one message. Effect: a party who would have been swept without being told is now
+deciding in advance, and a second party (`eba3d2c6`) picked up the conversation from there.
+
+**And the honest half, which is why this is not a remedy yet.** Nothing made that happen. No guard
+fired, no gate refused, nothing in the tooling knew `eb54c34f` existed or that their work was in
+anyone's prefix — a session simply noticed and chose to send a message, and a different session on
+a different day would not. That is a **policy, not a mechanism** (`skill-frictions:SKF-22`), and it
+is the same shape as the ask-before-pushing discipline one paragraph up: it works every time
+somebody performs it and binds nobody. What the datapoint establishes is only that the remedy is
+**cheap** — one message, no authority transferred, no round trip to anyone's operator — which is
+the argument for wiring it, not evidence that it is wired.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
