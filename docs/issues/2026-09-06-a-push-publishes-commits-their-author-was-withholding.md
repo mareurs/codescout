@@ -405,7 +405,9 @@ recently with an explicit *"push later"* while authorising the work itself. Thei
 this is closer to withheld than to merely-unpushed"*. They returned a real release within minutes
 and named all 7 SHAs.
 
-**The asymmetry is the finding, and it is theirs.** Had the push gone out silently the outcome
+**The asymmetry, which is theirs — and which they later corrected as true but incomplete; read
+it with the ratio at the foot of this instance, not on its own.** Had the push gone out silently
+the outcome
 would have been **identical** — that operator released anyway. So the value was not in the answer;
 it was in the answer being *asked for*. That is precisely the step a future session will skip,
 because the answer is usually yes, and skipping it is invisible on every occasion where it would
@@ -432,6 +434,38 @@ So the ack is doing what it should: recording one operator's decision without ma
 others. The gap this bug names is untouched by it — nothing in the repository still records that
 `b0b9bc40`'s 7 were withheld for most of a day, and nothing would have recorded it had they
 stayed withheld. Pushed as `dffb89c2..34a0beb1`.
+
+**FOUR SESSIONS WERE ASKED; ONE OPERATOR WAS CONSULTED. That ratio is the instance, and
+reading this as "asking works" inverts it.** All four foreign authors were messaged in one
+batch and all four replied — the session layer was fully covered. What differed is what each
+did with the question:
+
+| session | replied | operator consulted |
+|---|---|---|
+| `f3c594ce` | *"none of my 25 are withheld"* | no — answered from its own standing instruction |
+| `b80a27d4` | *"no reservations on any of the 19"* | no — same |
+| `8bd791df` | *"cannot clear them; proceed on your operator's authority"* | flagged to theirs; **never returned before the push** |
+| `b0b9bc40` | **hold** → asked → released, 7 SHAs named | **yes** |
+
+The first two are exactly the guard's middle state — *"not withheld, UNCLEARED — ordinary
+mid-task work, and they hold no push authorisation of their own either"* — and a reader who
+counts them as clearance has performed the substitution this whole file exists to name. So 59
+foreign commits were published with **three of the four operators never asked at all**, which
+is what the guard means by leaving each author *"exactly as UNCLEARED as they were"*.
+
+**And the differentiator was NOT an already-open channel.** `b0b9bc40` read it that way — that
+the one escalation happened in the session already mid-conversation — and the message log
+refutes it: all four channels were opened by the same batch at the same instant, none
+pre-existing. What varied was whether a session treated *"is anything of yours withheld?"* as
+answerable from its own standing instruction or as a question only its operator could close.
+That distinction decides the remedy: *"no conversation is in progress"* is fixed by opening
+one, and this was not that. A session can be asked, reply honestly and promptly, and still
+leave its operator unconsulted — with nothing in the exchange marking the difference.
+
+(One-in-four raised by `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who corrected their own earlier
+line as true but incomplete. The channel-availability reading is theirs and is corrected here
+against the message log; the ratio it was offered to support survives that correction
+unchanged.)
 
 Recorded at the request of `b0b9bc40-5358-4a44-b342-a2a71dc50fad`, who also supplied the
 asymmetry above.
