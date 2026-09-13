@@ -1,7 +1,7 @@
 ---
 id: '9c58cc41923b5c23'
 kind: bug
-status: open
+status: investigating
 title: doc(action=update) writes the file, fails the catalog write, and reports only the failure — so the retry duplicates the section
 owners:
 - marius
@@ -87,11 +87,88 @@ assuming this is confined to `update`.
 
 None — filed on first observation, per capture-on-notice. No fix attempted.
 
+## Fix
+
+`doc(action="update")`'s `call()` writes the file (`std::fs::write`) then upserts the
+catalog row (`artifact::upsert_and_mint_slug`) as two separate fallible steps, and the
+second one's `?` propagated the bare `rusqlite`/`anyhow` error straight to the caller.
+
+Fixed the reporting half, not the ordering half: a new `file_written_but_catalog_failed`
+helper (`src/librarian/tools/update.rs`) wraps ANY failure of the catalog upsert in a
+`LibrarianRecoverableError` that states BOTH facts — the file was already written, and
+the catalog record failed — and explicitly tells the caller not to retry the same patch
+blind. A `rusqlite::ErrorCode::DatabaseBusy` cause gets wording naming it as the common
+transient case; every other cause gets the same "do not retry blind" framing without the
+transient language, since borrowing that framing for a non-lock cause (a constraint
+violation, a corrupt row) would be a false reassurance.
+
+**Ordering itself is unchanged.** The file write still happens before the catalog write,
+so the race this bug is about can still occur — what changed is that the caller now gets
+an accurate diagnosis instead of a message that reads as "nothing happened". Reordering
+(catalog first) was considered and rejected: catalog writes are the side more prone to
+lock contention, so putting them first does not remove the race, and a catalog-succeeds/
+file-fails ordering leaves `file_sha256` claiming bytes that are not actually on disk —
+plausibly worse than the current duplicate-content failure mode, and file writes fail far
+more rarely than a busy-timeout does.
+
+**`append_entry` is not exempt, and is now confirmed rather than merely suspected.**
+(`src/librarian/catalog/augmentation.rs`) opens a single `IMMEDIATE` transaction, does
+`std::fs::write` for the section, then `tx.commit()`. A file-write failure rolls the
+transaction back cleanly (matches its own "no id was allocated" error text) — but a
+`tx.commit()` failure AFTER the file write succeeds leaves the section on disk with its id
+never persisted, and a retry allocates a fresh id and writes a second section. Not fixed
+here: a peer session is actively working in that function (adding a `section` parameter),
+so this is flagged to them directly rather than edited concurrently. Left open as scope for
+a follow-up.
+
+**Fix SHA:** `bf068e61`, patch-id `ffc2ac691b32b33b35e6ff8bfd79aa34f9ed97a8`.
+
 ## Workarounds
 
 **Do not retry a `database is locked` from `doc(action="update")` blind.** Read the target file
 first and check whether the edit landed; if it did, the remaining work is the catalog half only.
 `occurrence: N` on a `body_edits` `remove` is the repair for a duplicate that already exists.
+
+## Resume
+
+**Partially fixed 2026-09-13.** The reporting/remedy-text half of `doc(action="update")` is
+fixed and tested (see § Fix). The ordering/race itself is NOT fixed — the file write still
+precedes the catalog write, so this can still happen; what changed is that it now surfaces
+accurately instead of as a bare `database is locked`.
+
+**The general form** (named by the session that confirmed a second instance, `8bd791df`):
+a filesystem write and a SQLite commit cannot be atomic with respect to each other, so every
+write-then-commit pair has a window where the file is ahead of the catalog. The only question
+a given site owes is what a RETRY does to a file that is already ahead of its catalog row —
+that is decidable per site, unlike "does this have the same shape", which is not. Two answers
+so far: `append_entry` DUPLICATES (a fresh id, a second section) because the row that would
+have recorded "already applied" was never persisted; `resync_snapshot_row` (`update_entry`,
+added 2026-09-13) CONVERGES because no id is allocated, so a retry re-renders the same row
+idempotently — milder, but the same window, and worth naming rather than letting the milder
+consequence stand in for "fine".
+
+**Owed, in priority order:**
+1. The same fix's WIRING is untested (`NOT REACHED BY ANY UNIT TEST` annotation at the call
+   site in `update.rs`) — `file_written_but_catalog_failed` is unit-tested directly against a
+   hand-built error, but no test constructs real cross-connection lock contention to exercise
+   the join between `call()` and the helper.
+2. `append_entry`'s DUPLICATING instance of the general form (§ Fix) — confirmed by reading
+   the code, not fixed, flagged to the session working in that function.
+3. Whether `write_field_to_frontmatter`'s callers (e.g. `event_create`) have the same ordering,
+   and which answer (duplicates / converges) applies — not checked this pass.
+4. A `git grep` for every other `std::fs::write` followed by a `tx.commit()` or catalog upsert
+   in `src/librarian/`, asking the DUPLICATES-or-CONVERGES question at each site, rather than
+   waiting for the next instance to be found by accident.
+
+**A misroute happened while chasing (2), worth recording since it is this repo's own
+Observer Blindness class in a live instance.** The append_entry finding was about
+`8bd791df`'s code and was first sent to `f3c594ce` — correct several turns earlier when
+they said they were adding a `section` parameter to that function, wrong by the time the
+message went out, because they had since moved to a different file entirely. The routing
+used a REMEMBERED conversation instead of a live check at send-time — attribution by
+adjacency, exactly what `CLAUDE.md` § *Reaching a Peer Session* names. `file-provenance.py
+--all <path>` names the current writer of a path in one call and is the cheap fix; use it
+at SEND time, not from memory of who said what earlier in the session.
 
 ## References
 
