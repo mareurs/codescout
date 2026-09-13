@@ -86,10 +86,17 @@ instruments, and the more confident one is the wrong one.
 - **Whether any session has actually acted on this.** Today produced a near-miss
   (the peer asked rather than checked), not a measured wrong action. I have not
   searched the corpus for a past misattribution traceable to this.
-- **How wide the blast is.** Every artifact re-embedded by a reindex gets a row, so
-  the population is plausibly "every artifact in the project, attributed to
-  whoever reindexed last" — but I checked two row ids, not the table. Deriving
-  that count is the obvious next step and I have not done it.
+- **How wide the blast is — PARTIALLY MEASURED 2026-09-13 ~15:03, and the unit
+  matters more than the number.** `audit_log(actor="codescout:8bd791df-…")`
+  returns `filtered_total: 12480`. That is **not** 12,480 codescout artifacts:
+  the tool's own `shards.note` says `filtered_total` sums a machine-wide local
+  count (*"filter_where carries no repo predicate"*) with repo-scoped shard rows
+  — **two halves counted over different populations**. So it bounds the hazard
+  across every repo sharing this catalog and is not a per-project figure; a
+  per-project count needs a different query than this one. What IS clean: the
+  reindex that landed this very bug file reported `embedded: 1330`, so one
+  routine call stamped my sid on ~1330 rows in a single pass. The defect
+  demonstrated itself through the act of recording it.
 - **Whether `codescout:anonymous` is itself recoverable.** It means a codescout
   writer with no `CLAUDE_CODE_SESSION_ID` (CLI invocation, or a session started
   without it). Whether anything else in the trail narrows it, I did not check.
