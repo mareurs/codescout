@@ -18,16 +18,46 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`doc(action="append_entry", id=…, id_prefix=…)`. **Twenty-three are declared today** (re-derived 2026-08-31 by
-reading `entry_prefix:` out of every frontmatter block): AA, CAP, CM, CTX, DC, ET, F, FND,
-FT, GF, GG, H, HY, **OB**, OP, R, S, SD, SV, TB, U, W, WP.
+`doc(action="append_entry", id=…, id_prefix=…)`. **Thirty-two are declared today** (re-derived 2026-09-13 by
+reading `entry_prefix:` out of every frontmatter block under `docs/trackers/`): A, AA, AC, CAP, CM,
+CTX, DC, ET, F, FND, FT, GF, GG, H, HY, I, IC, **OB**, OP, R, RQ, S, SD, SKF, SM, SR, SV, T, TB, U,
+W, WP.
 
 *Counting rule, stated because a bare integer inherits whichever rule the reader picks
 (`observer-blindness:OB-1`):* distinct **prefixes**, not declaration lines. Excluded from
-the raw grep are two worked examples inside `tracker-conventions.md`'s fenced blocks, one
-`entry_prefix: null` (a tracker deliberately owning no namespace), and the six bare
-`entry_prefix:` block-sequence headers — those contribute F and W, which are counted once
-each rather than seven times.
+the raw grep are documentation examples in fenced blocks (these now live in
+`docs/manual/src/concepts/entry-citations.md`, not `tracker-conventions.md` — the corpus moved),
+quoted frontmatter inside `docs/superpowers/plans/` and `docs/issues/`, one `entry_prefix: null`
+(a tracker deliberately owning no namespace), and the bare `entry_prefix:` block-sequence headers —
+those contribute F and W, counted once each rather than once per log.
+
+**The command, so the number is re-derivable rather than quotable** — publish the derivation, not
+the value:
+
+```sh
+awk '
+  /^entry_prefix:[[:space:]]*$/ { inlist=1; next }                       # bare: a block sequence follows
+  /^entry_prefix:/ { n=split($0,a,/[^A-Za-z]+/)                          # inline: `IC`, or `["F", "W"]`
+                     for(i=3;i<=n;i++) if(a[i]~/^[A-Z]+$/) print a[i]
+                     inlist=0; next }
+  inlist && /^[[:space:]]*-[[:space:]]/ { t=$NF; gsub(/[^A-Za-z]/,"",t)  # `- F` AND `  - F`
+                                          if(t~/^[A-Z]+$/) print t; next }
+  { inlist=0 }
+' docs/trackers/*.md | sort -u | wc -l
+```
+
+**Why it is an `awk` and not a `grep -A3`, measured 2026-09-13 while writing this line.** The
+obvious form — `grep -hA3 '^entry_prefix:' | grep -oE '\b[A-Z]{1,4}\b' | sort -u` — returns **35**,
+because the three-line window sweeps uppercase tokens out of whatever follows: it yields `FULL`,
+`IN` and `N` alongside the real prefixes. It returns a *plausible number rather than an error*, so
+the count and the command beside it would have disagreed with nothing to mark which was wrong. The
+version above was run before being published; the naive one is recorded here so the next author
+does not re-derive it and trust it.
+
+**A selector note paid for the same day, because it cost a wrong intermediate count:** the
+block-sequence form appears BOTH flush-left (`- F`) and indented (`  - F`). A `^- ` pattern matches
+seven of the eleven and silently drops four, and the four then read as *declaring something else*
+rather than *not matched* — which is why the `awk` anchors on `-` without `^`.
 
 *(This sentence read "Thirteen" until 2026-08-26 and "Fifteen" until 2026-08-28, and was
 **exact when measured** each time — `CTX` was declared on 2026-08-21 by `711a25cf`, two
@@ -48,10 +78,20 @@ whole argument for re-deriving on read rather than trusting the figure — and f
 the count next to the command that produces it.)*
 
 > ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
-> below.** One session log declared `entry_prefix: [F, W]`. That is a real, unresolved
+> below.** **Fourteen** session logs declare F/W — three as `entry_prefix: ["F", "W"]`, eleven as a
+> block sequence (`grep -lE '^entry_prefix:$' docs/trackers/*.md` → 11, plus
+> `grep -lE '^entry_prefix: \["F", "W"\]'` → 3; re-derived 2026-09-13). That is a real, unresolved
 > contradiction between this document and the corpus — not a typo here. Decide it
 > deliberately before adding more: declaring F/W makes them dangling-checked but gives one
-> token many definers; leaving them undeclared keeps ambiguity. Measured 2026-08-19 across
+> token many definers; leaving them undeclared keeps ambiguity.
+>
+> **This warning said "One session log" until 2026-09-13, and thirteen more were added while it
+> said so** — including one that same day, by a session that had not read this line. That is the
+> load-bearing part: an instruction of the form *decide before adding more* has no trigger, so it
+> is read only by someone already editing this file, and every addition happens somewhere else.
+> The count is not the decay here; **the unenforced precondition is**. A gate keyed on the
+> `entry_prefix` declaration itself would fire at the moment of the act it is trying to govern —
+> which is § *Observer Blindness* position 3, and is owed. Measured 2026-08-19 across
 > 10 repos in 2 umbrellas: **33% of cross-file entry citations are ambiguous** and F/W are
 > the dominant contributors (`F-1` alone has 169 definers). codescout at 28% is among the
 > healthiest — this is a property of the per-file `PREFIX-N` convention, not a local defect.
