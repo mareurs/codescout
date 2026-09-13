@@ -287,7 +287,23 @@ Still open and NOT closed by this: the JSON-payload blindness (`CALL_OPEN` never
 `"tool": "index(action: build)"`), which § Summary calls a **suppressor** rather than a miss — an
 unresolvable tool name stops anything from checking the arguments inside it, so the 7 sites hid
 an unknown number of argument defects. That is direction 2 above, a second parser rather than a
-widening of the first, and it remains unwritten.
+widening of the first.
+
+**CLOSED 2026-09-13 by `abd85071` (patch-id `1c8318fb5b5a0c557e883c150539117bc2ee2940`), filed
+and archived as `067febaee23f1a22`.** Both halves resolved, differently:
+
+- the **unresolvable-name** half was already gone — `04badf94` fixed all 7, and the grep that
+  proves it returns 0. So the suppressor's own premise had expired before the fix was written.
+- the **argument-key** half was real and is now guarded: **89 claims across 191 parsed blocks**,
+  none of which any guard had ever read. The "unknown number" is now a bounded one.
+
+Two things that bug found which this one did not predict. The payload input is real JSON, so it
+needed **no escape and no disambiguator** — the opposite of this bug, which had to invent
+`<placeholder>` because its input was prose; picking a format-aware parser over a wider regex is
+what avoided the `IC-6` debt. And its first run exposed a defect in `tool_params()` itself:
+the extractor read only the source `input_schema()` while `list_tools` **injects** a `workspace`
+parameter for every `pinnable()` tool, so the guard was checking documents against a schema
+narrower than the one the tool advertises — and would have red a correct page.
 ## References
 
 - `tests/doc_tool_refs.rs:61-68` (the two constants and the header recording the prior narrowing)
