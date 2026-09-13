@@ -71,6 +71,31 @@ is already staring at a red:
 That sentence is exactly right and arrives exactly too late. Nothing says the inverse at the moment
 it would help: *a new script gets no coverage from me until you stage it.*
 
+**THE STRONGEST EVIDENCE IN THIS FILE IS THAT ITS TWO FILERS DEMONSTRATED IT, and it was added after
+the fact by one of them.** The doc comment at `tests/committed_paths.rs:153-166` — fourteen lines,
+immediately above the function — already documents **every** fact this record treats as a discovery:
+
+> *"'Tracked' rather than 'committed', and the word is load-bearing in both directions. `git
+> ls-files` lists index entries, so a file is in scope the moment it is `git add`-ed — which is
+> strictly before any commit exists, so narrowing the population from the filesystem to the index
+> loses no catch. And an UNTRACKED file is out of scope, which is the fix: this gate previously
+> walked the filesystem, so one session's scratch script under `scripts/` red the shared gate for
+> every session in the checkout while the message told each of them their* committed *scripts were
+> broken.*
+>
+> *The cost was the abort more than the false positive: `cargo test` is fail-fast across binaries, so
+> this failing hid every integration target ordered after it."*
+
+The staging boundary, the exclusion as a deliberate fix, the prior incident, its downstream cost,
+and a link to the archived bug — all of it, eight lines above the code both filers proposed to
+change. **Neither read it.** One proposed scanning untracked files; the other endorsed the finding.
+
+That is not carelessness and calling it that would waste the datapoint. The bound lives in the
+**enforcement layer**, whose readers are people already editing the gate — a population that by
+construction excludes anyone writing a new script and wondering whether they are covered. The defect
+and its own missed documentation have the **same** audience mismatch, which is why the file arrived
+without either author noticing the file was answering itself.
+
 ## Hypotheses tried
 
 1. **Reviewer oversight.** **Refuted** — reproduced above; the scan returns 5-passed over a file
@@ -101,12 +126,26 @@ Not implemented. Options, cheapest first:
    costs when it is not findable from the place a reader lands, and it is the argument for keeping
    this bullet struck through rather than deleting it.
 
-2. **Say the boundary in the passing direction — now the only live option.** The exclusion is
-   documented three times in `tests/committed_paths.rs` (`:76-78`, `:121-127`, `:154-158`) and in
-   the failure message, all of which are read *after* something has gone wrong or by someone already
-   editing the gate. Nothing surfaces it to an author writing a new script. A line in
-   `CONTRIBUTING.md` or the script template is the § *Observer Blindness* "move the scope to the read
-   surface" remedy and costs nothing.
+2. **Say the boundary in the passing direction — and this is the option the repo's own rule
+   PRESCRIBES, not merely the one left standing.** CLAUDE.md § *Observer Blindness* position 3 names
+   this class and its remedy outright: *"a bound that lives in the ENFORCEMENT layer — a test module
+   header, a gate script, a hook — is correctly published to an audience that never reads the
+   number… the fix is to move the scope to the read surface, not to record the lesson. Publishing
+   again is redundant and reading harder is impossible, since the reader does not know the other
+   surface exists."* The distinction matters for whoever reads this next: *only remaining option* and
+   *prescribed option* age very differently.
+
+   **Concrete shape — have the PASSING path name its own denominator.** The gate currently emits
+   nothing on success, so an author who writes `scripts/foo.py`, runs the gate and sees green has no
+   way to learn they were never in the population. One line fixes it:
+
+   > `scanned N tracked scripts under scripts/; untracked files are out of scope by design — stage
+   > yours before trusting this.`
+
+   That reaches the author at the only moment they are looking, and
+   `the_tracked_population_is_not_vacuous` already establishes the precedent of asserting about the
+   population rather than about the findings. (Shape proposed by sessionId
+   `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`.)
 
 3. Leave it, and accept that a new script is uncovered until it is staged — a window of seconds in
    the normal flow, and a morning in the flow that actually happened.
@@ -129,18 +168,31 @@ the consequence. It will stay green under every fix above.
 
 ## Resume
 
-Decide between fix 1 and fix 2. Also worth an `OB-N`: the party who structurally cannot see this is
-the **author of a new file**, because the only instrument that names the defect is blind to their
-file by construction, and the party who can see it is whoever runs the suite *after* the commit — a
-different session, at a moment when it is already shared. That is the OB admission test met
-squarely: "was careless" is disqualifying, "holds the parameter that would reveal it" qualifies, and
-here nobody held it.
+**The 09-11 trade is SETTLED and is not up for re-litigation — read this before proposing a
+widening.** Scan untracked and one session's scratch file reds the shared gate for everyone, with a
+message naming the wrong cause, and `cargo test`'s fail-fast-across-binaries behaviour hides every
+integration target ordered after it. Scan tracked-only and a new file is uncovered until staged.
+Both costs are real; the second was chosen deliberately on 2026-09-11. Two sessions reached for
+option 1 within 48 hours of that decision, which is the whole reason this paragraph exists.
+
+What remains open is only option 2 above. Decide whether the denominator line belongs in the gate's
+passing output (reaches the author, needs a code change) or in `CONTRIBUTING.md` and the script
+template (free, but is itself a surface the author may not read — the same failure one level over).
+The gate's own output is the stronger candidate for exactly that reason.
+
+Also worth an `OB-N` if a second instance appears: the party who structurally cannot see this is the
+**author of a new file**, because the only instrument that names the defect is blind to their file
+by construction, and the party who can see it is whoever runs the suite *after* staging. Not filed
+as a class today — one instance, and `issue-clusters.md` warns against forcing a one-member fit.
 
 ## References
 
 - Observed, diagnosed and reported by sessionId `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`, including
   the framing carried into this file: the guard's POPULATION moved rather than the code changing, so
-  the defect was unreachable by construction until the commit that exposed it.
+  the defect was unreachable by construction **until it was staged**. (Reworded at their own request
+  from *"until the commit that exposed it"*, which overstated by one step — `git add` admits the
+  file, not the commit. They verified `tracked_scripts()` shells `git ls-files -- scripts` before
+  asking for the change rather than taking the correction on trust.)
 
 **The triggering INSTANCE is fixed; this bug is not.** `scripts/architecture-boundary-probe.py`'s
 hardcoded fallback was repaired on `experiments` at SHA
