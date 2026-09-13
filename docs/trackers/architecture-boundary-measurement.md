@@ -216,126 +216,16 @@ measurements.
 
 ## Resume protocol
 
-Read **Status** and **Bounded baseline and verdict — 2026-09-13** first. The compaction checkpoint is historical context; its pending test/measurement checklist has been superseded by this review. Confirm home workspace and fresh git status before doing new work. Do not restart broad measurement merely because shared HEAD moved: preserve the named frozen snapshot and version any changed source-population definition. Design approval is next; runtime implementation is not yet authorized.
+Read **Status** and **Bounded baseline and verdict — 2026-09-13** first. Confirm home workspace and fresh git status before doing new work. Do not restart broad measurement merely because shared HEAD moved: preserve the named frozen snapshot and version any changed source-population definition. Design approval is next; runtime implementation is not yet authorized.
 ## Status
 
-**Phase:** bounded architecture review complete; recommendations await design approval. Read **Bounded baseline and verdict — 2026-09-13** below, which supersedes the earlier compaction checklist.
+**Phase:** bounded architecture review complete; recommendations await design approval. Read **Bounded baseline and verdict — 2026-09-13** below.
 
 **Verification:** 14 probe regression tests and self-test pass. Four applied mutation candidates were detected, zero survived. Second full gate completed with FMT_EXIT=0, CLIPPY_EXIT=0, LEAN_EXIT=0, DEFAULT_EXIT=0, in the required order; logs are under `.codescout/measurements/architecture-boundary/2026-09-13/gate2-*.log`. The earlier formatter refusal/default attribution failure remain in the first-run logs. These gates do not establish server-stack coverage.
 
 **Source bound:** frozen snapshot 23adef79023ebc43ea30d8d8e50a2175bacab5aa, not current shared HEAD; corrected measurement commands retained their exit-2 HEAD-change warning. No numeric finding is a whole-project/compiler-resolution claim.
 
-**Next action:** discuss and approve the job/result vertical slice before runtime implementation. Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. No runtime refactor, commit or push was performed.
-## Compaction checkpoint — 2026-09-13
-
-**Status:** paused at the user's request to preserve context; measurement work remains in progress.
-**Valid:** dated 2026-09-13
-**Rests on:** the preserved review and raw measurement artifacts below, the production probe, its regression suite, and the linked reproduction records.
-
-### Scope and decisions retained
-
-The user requested an architecture review for a natural, efficient agent harness, then a review of this measurement tracker, then approved improving the probe and collecting the evidence. This is approval for measurement work, not an approved runtime refactor or service split. Keep one MCP surface while evaluating internal boundaries. No commit or push has been made by this work stream.
-
-The original tracker is a good measurement contract: frozen populations, independently interpretable dimensions, positive controls, and no extraction decision based on size alone. Its fresh-Copilot-chat blocker is historical, not current: codescout calls work in this Codex session and this tracker is cataloged as `c61d542269b5c6de`. The added requirements are action-level distinctions, the actual deployed feature lane, and workflow evidence. Do not infer agent friction from error frequency alone.
-
-### Architecture findings to carry forward
-
-These are qualitative review findings and refactoring candidates, not conclusions derived from an accepted numeric baseline. The preserved original review contains the detailed source/live evidence and tradeoffs.
-
-| Candidate | Weak spot identified in review | Direction to evaluate |
-|---|---|---|
-| Result contract | Outcome, payload, rendering, buffering, notices and follow-up instructions are entangled. An agent needs reliable distinctions between failure, partial results and successful completion. | Typed result envelope carrying outcome, provenance, completeness, notices and continuations; text/JSON/buffering as projections. |
-| Request identity | Tools repeatedly resolve ambient Agent/project/workspace state. Activation and workspace overrides make it difficult to reason about which project a multi-step request uses. | Resolve caller/project/workspace once per request and pass explicit scoped capabilities. Preserve existing pins and guards. |
-| Long-running work | Background commands expose detached log handles; indexing has a separate abort mechanism. A log location is not a job lifecycle contract. | Explicit job handles with running/completed/failed/cancelled state, terminal result and cancellation semantics. |
-| Edits | File and semantic editing share preparation, locking, validation and invalidation concerns but express them through different paths. | Shared prepared-edit/commit/invalidation mechanics beneath the public tools; preserve syntax checks, path security and write locks. |
-| Librarian mutations | Filesystem and SQLite catalog changes need coordinated recovery; successful work on one side must not silently look like complete success. | Recoverable mutation boundary with explicit partial-failure/reconciliation behavior. |
-
-Do not replace working LSP and retrieval interfaces merely for tidiness. The first candidate is an internal seam; a crate/process split requires additional evidence. Priority among the candidates remains provisional until the baseline and representative workflows have been evaluated.
-
-### Work already implemented, but not fully gated
-
-Work-stream files:
-
-- `scripts/architecture-boundary-probe.py`: existing untracked probe, modified in place; preserve pre-existing work.
-- `tests/test_architecture_boundary_probe.py`: new regression tests.
-- This tracker and the issue records below.
-
-Probe changes implemented:
-
-- Enumerate simple directed population cycles, including length-three cycles without reciprocal edges; canonicalize rotations.
-- Require the server registration positive control to construct a name imported from `crate::tools`, rather than accepting an unrelated `Arc::new`.
-- Recognize multiline context field reads and Agent aliases; separate direct field reads from helper-expanded footprints.
-- Preserve production constructor/function delimiters when masking test-only struct fields and initializer fields.
-- Add the deployed dependency lane `--features server-stack,local-embed` with defaults retained, alongside the original lanes. This follows the inspected `cargo rb` alias.
-- Add advertised tool/action rows: direct branch reads, shared dispatch-prefix reads, separate librarian context, resolvable delegates and explicit unresolved routes.
-
-The initial regression run observed failures before the corresponding fixes (including a missing direct-field result and missing action helpers). The first whole-repository run then failed on `Agent::new` because test-field masking consumed a production delimiter; a focused regression reproduced that before the fix. Latest checkpoint verification: `python3 tests/test_architecture_boundary_probe.py` exited 0, **12 tests ran and passed**. This is evidence for those fixtures, not an exhaustive Rust parser or runtime dependency graph.
-
-Still pending: current self-test rerun, applied mutation checks, full repository gate, final whole-repository measurement with the action additions, and baseline interpretation. Earlier review-phase gate results do not validate these newer probe changes.
-
-### Reproduced probe defects and records
-
-All remain unarchived; implementations above exist in the worktree, but full verification and a durable fix commit are not yet recorded. Some issue Fix sections still describe the pre-implementation state; reconcile them during resume rather than interpreting that prose as evidence that no work happened.
-
-- [Longer cycles omitted](../issues/2026-09-13-architecture-probe-omits-longer-cycles.md) — catalog `a4d7380dc4643d88`.
-- [Multiline context omitted](../issues/2026-09-13-architecture-probe-misses-multiline-context.md) — `d648b0a40c1c0bf8`.
-- [Registration control accepts non-tools](../issues/2026-09-13-architecture-probe-registration-control-accepts-nontools.md) — `dd4a2785969615c9`.
-- [Test-field masking consumes production structure](../issues/2026-09-13-architecture-probe-test-field-masking.md) — `83b1a79f605582b3`.
-
-Do not archive as fixed until the required verification and regression evidence are present; record fix SHA and stable patch-id when there is an authorized fix commit.
-
-### Preserved artifacts and exact measurement identity
-
-Local project copies are under `.codescout/measurements/architecture-boundary/2026-09-13/`. They survive conversation compaction and are accessible to other profiles using this checkout; they are **local artifacts, not committed backups**. Source and destination SHA-256 values were compared and match.
-
-- `baseline-initial.json` — 1,356,751 bytes; SHA-256 `b578889215d60ec471d4ca08ebc8de51b786976457307abbd7ec1a1739948df3`.
-- `codescout-agent-harness-architecture-review-2026-09-12.md` — 21,369 bytes; SHA-256 `f94937b2dfc9141f7dbca846a1eaa1430294e3e64411a2f0a76f05901a71e9cc`.
-
-The preliminary JSON records:
-
-- Branch `experiments`; frozen source HEAD `23adef79023ebc43ea30d8d8e50a2175bacab5aa`.
-- Start `2026-09-13T09:04:55+03:00`; finish `2026-09-13T09:07:07+03:00`.
-- Static/context source and Cargo measurements use tracked bytes from `git archive` at that HEAD; live tool registry uses the installed executable, not a verified build of that HEAD.
-- `measurement_stable: true` and `worktree_changed_during_measurement: true`: frozen HEAD stayed the same while the shared worktree changed. The recorded worktree digests are not the frozen archive's digest.
-- Dirty tracked Rust path recorded at both endpoints: `src/tools/run_command/attribution.rs`.
-- **This file predates action-row additions**; its context object has no `action_rows`. Do not present it as the final action-aware baseline.
-
-Checkpoint worktree SHA-256 values (not the version that necessarily generated the preliminary JSON):
-
-- Probe: `e04ee21ef4a026e636fa3a423318603e165842e1673c5e12a355388b610e24d7`.
-- Tests: `bc6e5b659b4cb87a5fab05a7b4125e0f622d44c290d1405a919a0dee5fd07b97`.
-
-Original temporary locations, useful only if investigating provenance — **fenced deliberately, not for looks: these are `/tmp` paths that do not survive a reboot, and `audit_doc_refs` rates an unresolvable backticked path-shaped token `high`, which reds CI. A fenced block caps the severity (`code_block`); ordinary backticks get `policy_default`, which is `high`.**
-
-```
-/tmp/codescout-architecture-baseline-aTsJEG/baseline-initial.json
-/tmp/codescout-agent-harness-architecture-review-2026-09-12.md
-/tmp/codescout-boundary-cycle-VANLia/                     (cycle fixtures)
-```
-
-The durable copies are under `.codescout/measurements/architecture-boundary/2026-09-13/`, committed alongside this tracker — prefer those; the `/tmp` paths above are recorded only to tie the committed artifacts to the run that produced them. The portable cycle reproduction is also in its issue file.
-
-### Instrument limitations that must remain visible
-
-- Static scanning is lexical, not compiler resolution: macros, re-exports, unqualified references and conditional compilation require explicit bounds. A qualified concrete reference is not automatically proof of bypassing a trait boundary.
-- Helper-expanded context footprints are heuristic, not exhaustive call graphs or observed runtime dependencies. Unique-name fallback can lack module identity; some method syntax remains unresolved.
-- Action rows distinguish direct branch/shared-prefix observations and selected delegates; they do not yet prove complete transitive per-action dependence. Unknown routes must remain unknown, never zero.
-- The history field named `positive_control_inspected_commit` is selected by the script; a human has **not yet inspected its diff**. It cannot be credited as a manual control. Review merge handling, renames and historical path classification before accepting ratios.
-- Dependency weight counts unique exact printed package lines, not distinct crates, compile time, memory or binary contribution. Tree decorations can affect that unit.
-- Installed binary version/size/mtime do not prove source identity. Preserve the runtime/source distinction.
-- No end-to-end workflow measurements or model behavioral evaluations have been completed. Scripted round trips/bytes/latency are contract measurements, not spontaneous agent efficiency or actual token counts.
-
-### Exact continuation checklist
-
-1. Flush caches with `workspace(post_compact=true)`, confirm the home project, read this checkpoint, `docs/PROBES.md` and relevant architecture/friction memories. Inspect fresh git status: this is a shared, changing checkout with unrelated Rust, documentation and audit changes. Do not revert or format peers' files.
-2. Re-read the current probe/test functions before editing. Re-run `python3 tests/test_architecture_boundary_probe.py` and `python3 scripts/architecture-boundary-probe.py self-test`. Apply candidate mutations in isolated copies and record observed kills/survivors; no such mutation pass has happened yet.
-3. Run the current probe into a **new** artifact, retaining the preliminary one: `python3 scripts/architecture-boundary-probe.py all --repo /home/marius/work/claude/codescout --history-limit 500 --output <new-baseline.json>`. Capture terminal exit status, exact source HEAD, timestamps, probe hash and runtime identity. Ensure the result now contains action rows.
-4. Independently recount raw edges, check known positive/negative references, inspect unclassified files and unresolved context/action routes. Manually inspect the selected co-change commit and validate history semantics; do not merely copy aggregate numbers.
-5. Add bounded, reproducible live workflow checks in disposable fixtures: successful symbol edit and verification; missing/ambiguous target recovery; oversized-output follow-up; failed background command terminal status; project activation versus pinned operations. Record actual calls, outcome, elapsed time and UTF-8 output bytes separately. Do not mutate the user's source for a demo. If moving to model evals, first read the prompt-engineering operating guide.
-6. Run the required repository gate for this work: `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, then `cargo test --workspace`. Separate test lanes with `;`, not `&&`, and capture their individual exits so the default rebuild always runs. Respect formatter ownership refusals; do not substitute a workspace-wide formatter on this shared tree. Default/lean green is not coverage for server-stack; consult its CI lane.
-7. Update the issue records with actual implementation/verification state. No commit/push is authorized by this checkpoint. Archive only when the project's fix evidence requirements are satisfied.
-8. Publish a bounded observed baseline and revise candidate priorities in this tracker. Only then propose the first runtime refactor with its concrete workflow benefit, cost and regression controls.
-
+**Next action:** discuss and approve the job/result vertical slice before runtime implementation. Missing-symbol latency repetition and unresolved action paths remain explicitly scoped follow-ups. The work stream — probe, regression tests, this tracker and its seven bug files — is committed in `d3a2c24f`. No runtime refactor has been implemented.
 ## Bounded baseline and verdict — 2026-09-13
 
 **Status:** review evidence collected; recommendations below are proposals, not approved runtime changes.
@@ -354,6 +244,40 @@ Reject the static totals in `baseline-initial.json` and `baseline-actions.json`:
 
 The registry in the report came from a newly started installed release executable at `target/release/codescout`; its recorded size/mtime are not proof of source identity. The separate workflow checks used the attached MCP, whose status reported `git_sha=408709ea`, dirty build, deleted executable, PID 2178312. Neither runtime is silently equated to the frozen source.
 
+### Filed defects
+
+Seven bugs were filed from this work stream. The probe implementation and all
+seven files are committed in `d3a2c24f`. Six are architecture-probe defects; the
+seventh is a codescout defect this work surfaced, listed here because nothing
+else found it — not because it is an instrument problem.
+
+Architecture-probe defects:
+
+- [Longer cycles omitted](../issues/2026-09-13-architecture-probe-omits-longer-cycles.md) — `a4d7380dc4643d88`.
+- [Multiline context omitted](../issues/2026-09-13-architecture-probe-misses-multiline-context.md) — `d648b0a40c1c0bf8`.
+- [Registration control accepts non-tools](../issues/2026-09-13-architecture-probe-registration-control-accepts-nontools.md) — `dd4a2785969615c9`.
+- [Test-field masking consumes production structure](../issues/2026-09-13-architecture-probe-test-field-masking.md) — `83b1a79f605582b3`.
+- [Invented internal imports](../issues/2026-09-13-architecture-probe-invents-internal-imports.md) — `0094594dea9a52b7`.
+- [Mangled alias-like identifiers](../issues/2026-09-13-architecture-probe-mangles-as-identifiers.md) — `b6b0361595f8b3f5`.
+
+Not an instrument defect:
+
+- [Background command loses terminal status](../issues/2026-09-13-background-command-loses-terminal-status.md) — `7a17adf0a2766a96`. A `run_command` defect, surfaced by the live workflow checks below.
+
+The last two probe defects are the pair that invalidated the earlier static
+totals, and both carry `cluster/addressing-without-an-escape-hatch` (`IC-6`) —
+which is the reason the 379 → 315 change is an instrument correction and not an
+architectural improvement. Do not archive any of these as fixed until the
+project's fix-evidence requirements are met: gate green plus a regression test,
+with the fix SHA **and** its stable patch-id recorded.
+
+Rejected artifact, retained deliberately: `baseline-initial.json` (1,356,751
+bytes, SHA-256
+`b578889215d60ec471d4ca08ebc8de51b786976457307abbd7ec1a1739948df3`) **predates
+the action-row additions** — its context object has no `action_rows`, so it is
+not merely superseded on edge totals; it cannot answer an action question at
+all. Every measurement artifact named in this section is tracked under
+`.codescout/measurements/architecture-boundary/2026-09-13/`.
 ### Static dependency observations
 
 **Unit:** unique (classified production source file, classified target module) lexical edge. The raw list, its independently deduplicated file/module keys, and the matrix sum each recount to **315**, of which **144** cross populations.
@@ -467,6 +391,6 @@ Probe: **14 regression tests pass**, self-test passes. Final checked worktree SH
 
 The first full gate had formatter refusal, clippy/lean success and a default-lane failure in a peer-modified attribution test. A second full gate is recorded in `gate2-*.log`; terminal results are recorded in the current Status section when available. Do not credit the first run as green or these lanes as server-stack coverage.
 
-No runtime refactor, commit, push or archive operation was performed. Issue bodies are being reconciled with prototype implementation state; fix SHA/patch-id remain absent because no fix commit was made. Before committing this work, perform required peer coordination and final review of the exact diff.
+No runtime refactor was implemented, and nothing has been archived. The work stream is committed in `d3a2c24f`; the six architecture-probe defects it fixes remain `investigating` rather than archived, because archiving requires this project's fix evidence — gate green plus a regression test, with the fix SHA and its stable patch-id recorded on each file.
 
 Next useful work is **design approval for the job/result slice**, not more broad scans. Before implementation, settle job lifetime across reconnects/compaction, cancellation ownership, retention and backward-compatible rendering; add deterministic failed/success/cancelled job checks. Separate follow-ups: repeat the missing-symbol latency check; resolve edit_file/edit_code action footprints; widen the frozen population only as a separately versioned measurement; characterize merges/renames before stronger historical claims.
