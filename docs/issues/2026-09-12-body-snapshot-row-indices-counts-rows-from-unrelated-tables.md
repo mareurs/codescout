@@ -190,13 +190,34 @@ become a worklist that drains instead of a silent default. Backward-compatible, 
 countable, and respects the ADR asymmetry this bug already cites — a **read** may fall back, a
 **write** may not.
 
-**Implementation shape, already scouted, so the next session need not re-read it:**
-`column_exists`-guarded `ALTER TABLE artifact_augmentation ADD COLUMN snapshot_anchor TEXT`
-(precedent: `entry_collection` at `src/librarian/catalog/mod.rs:167-173`); a 14th field on
-`AugmentationRow`; `row_from_sql` is **positional**, so it becomes `row.get(13)` and every `SELECT`
-column list must move in step; three consumers to thread it through — `augmentation.rs:530`
-(`snapshot_stale_note`), `augmentation.rs:724` (`append_entry`), `doctor.rs:4350`
-(`scan_snapshot_drift`).
+**CORRECTED 2026-09-13 — the shape below was wrong, and the primitive is ALREADY BUILT.**
+`snapshot_anchor` shipped at `59e8c970` (12:29 that day) as a **frontmatter `extra` key**, read by
+`declared_snapshot_anchor()` (`src/librarian/catalog/augmentation.rs:1110`) — deliberately not a
+typed field and not a DB column, *"so a caller declares this with the same `doc(action="update",
+patch={extra: …}`) surface that already exists."* There is **no migration to write**: the
+`ALTER TABLE` / 14th-field / positional-`row_from_sql` plan this section previously carried answered
+a question nobody had. It is struck rather than deleted because it is exactly the wrong turn the
+next reader would otherwise take.
+
+~~`column_exists`-guarded `ALTER TABLE artifact_augmentation ADD COLUMN snapshot_anchor TEXT`; a
+14th field on `AugmentationRow`; `row_from_sql` is positional, so `row.get(13)` and every `SELECT`
+must move in step.~~
+
+**What is actually left**, verified at the bytes: `body_snapshot_row_indices` still takes
+`(body, id_prefix)` and still scans the whole document with `(?m)^\|` — unchanged at `1864-1877`.
+The defect is live. Threading the existing anchor into that **read** path, plus its three consumers
+(`augmentation.rs:530` `snapshot_stale_note`, `augmentation.rs:724` `append_entry`,
+`doctor.rs:4350` `scan_snapshot_drift`), is the whole remaining job — and `resync_snapshot_row`
+(`:1534`) is the worked example of how to read it and what absent means: `Ok(false)`, a silent
+no-op, falling back to the advisory.
+
+**THE REAL BLOCKER IS NOT THE RULING, IT IS ADOPTION.** `grep -rln '^snapshot_anchor:'
+docs/trackers/` returns **nothing** — no tracker in this repo declares one. Both halves of `BL-29`'s
+remedy shipped 2026-09-13 (`dd5c58b5`, `59e8c970`) are inert corpus-wide, including on
+`open-issue-work-queue.md`, the tracker `BL-29` was filed about. Wiring this read path without
+arming any anchor produces a mechanism that is correct and reaches nothing — CLAUDE.md § *Testing
+Discipline*'s *"loudness is a property of a PATH"*, in advance rather than in hindsight. Decide
+adoption and wiring together. (Corpus grep by sessionId `8bd791df-5ff4-40fe-af30-69cc3fefc2f7`.)
 
 **Claim released deliberately:** worked 2026-09-13 by sessionId
 `9403d62d-116b-46ea-ac9b-004acff2b1cb` and set back to `investigating` rather than left `taken`,

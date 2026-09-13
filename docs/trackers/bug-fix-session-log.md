@@ -14241,6 +14241,45 @@ that drains rather than a silent default. That keeps backward compatibility, mak
 *countable* instead of invisible, and matches the ADR's asymmetry: a read may fall back, a write may
 not. Needs the bug's owner to rule before implementation.
 
+---
+
+## CORRECTION 2026-09-13, same evening — this entry's central premise was FALSE when written
+
+**`snapshot_anchor` already existed.** It shipped at `59e8c970` (2026-09-13 **12:29:21**), and this
+entry was committed at `41370609` (**19:18:07**) — **six hours and forty-nine minutes later**. Every
+"the field does not exist yet" clause above is wrong, and so is the implementation shape: it is a
+**frontmatter `extra` key** read by `declared_snapshot_anchor()`
+(`src/librarian/catalog/augmentation.rs:1110`), deliberately *not* a typed field or a DB column —
+*"so a caller declares this with the same `doc(action="update", patch={extra: …}`) surface that
+already exists."* No `ALTER TABLE`, no 14th field, no positional `row_from_sql` change. That whole
+paragraph was scouted carefully and answered a question nobody had.
+
+**And the absent case is decided and shipped.** `resync_snapshot_row`
+(`augmentation.rs:1534-1536`) returns `Ok(false)` — a silent no-op — for any artifact declaring no
+anchor, falling back to the existing advisory. That is precisely the ruling this entry says is owed.
+
+**How it was missed, because the cause is reusable and unflattering.** The seam was scouted
+properly — `body_snapshot_row_indices`, `body_keeps_snapshot`, `row_from_sql`, the migration block —
+and the bug file said *"Not implemented"*, which was believed. **What was never done is a grep for
+`snapshot_anchor` itself: the token the proposed fix is named after.** Prior-art discipline was
+applied to `docs/issues/archive/` and never to the code. A search for the name of the thing you are
+about to build costs one command and was not run — the same evening this session filed `H-14` about
+exactly that.
+
+**WHAT SURVIVES, narrowed to what is actually true.** `BL-77` is about `body_snapshot_row_indices`,
+which **counts** rows; `resync_snapshot_row` **writes** one. The counting function still takes
+`(body, id_prefix)` and still scans the whole document with `(?m)^\|` — verified unchanged at
+`1864-1877`. So the defect is live, the primitive its fix needs is **already built**, and what remains
+is threading it into the read path plus three consumers.
+
+**AND A BIGGER BLOCKER THIS ENTRY DID NOT REACH.** `grep -rln '^snapshot_anchor:' docs/trackers/`
+returns **nothing** — not one tracker in the repo declares one. Both halves of `BL-29`'s remedy
+shipped today (`dd5c58b5` append-side, `59e8c970` update-side) are therefore **inert corpus-wide**,
+including on `open-issue-work-queue.md`, the very tracker `BL-29` was filed about. The original
+worry was *"what does absent mean for 24 trackers"*; the answer is that absent is the state of **all**
+of them and the mechanism reaches none. Found by sessionId
+`8bd791df-5ff4-40fe-af30-69cc3fefc2f7`, at the code rather than by inference.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
