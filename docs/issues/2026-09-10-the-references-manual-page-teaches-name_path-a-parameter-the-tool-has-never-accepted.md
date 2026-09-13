@@ -163,6 +163,26 @@ whole-project listing with no signal. Being filed separately by
 Left correct and untouched: `api-redesign.md`'s rename mapping table (documents old → new; not a
 claim that the old name works), and `name_path` as an internal Rust struct field in
 `adding-languages.md`.
+
+## Fix provenance
+
+Fixed on `experiments` — SHA `8b5084749bf637065b904afa3e2789bfa209094c`, patch-id
+`7f1c3570357d4702c8c01fbfdb474428d5e1838c`.
+
+**Why this section exists when `## Fix` above says the same thing.** `doctor`'s
+`terminal_status_without_fix_anchor` reads a declared `## Fix provenance` pointer, not prose
+under `## Fix`, and not the frontmatter `closed:` date — setting that date alone left the check
+firing, which is how this section came to be written. The pair is the anchor: the SHA is
+positional and dies when `experiments` is rebased (which happens after every ship), the patch-id
+is a content hash of the diff and survives rebase *and* cherry-pick.
+
+**The trap this record was flagged for, recorded because it is the general case.** Before this
+section existed, the file READ as anchored: five commit-like hashes sit in its prose
+(`92f28d51`, `4a104036`, `47af2676`, `34cad9d9`, and the fix itself), every one of them a commit
+the bug was *observed* or *reasoned* at rather than closed by. A reader scanning for provenance
+finds one and stops looking. Mentioning a hash and claiming one are indistinguishable to any
+reader — and to the detector, which is the same no-disambiguator shape as
+`cluster/addressing-without-an-escape-hatch`.
 ## Tests added
 
 **None, and the reason is a second bug rather than an accepted gap.**
