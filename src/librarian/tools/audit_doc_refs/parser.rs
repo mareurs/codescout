@@ -38,14 +38,14 @@ pub fn parse_refs(
             Event::Code(content)
                 if !suppression.blocks_everything() && !is_markup_display(content.as_ref()) =>
             {
-                for raw in tokenize_code_span(content.as_ref()) {
+                for (row, raw) in tokenize_code_span(content.as_ref()) {
                     if suppression.blocks(raw) {
                         continue;
                     }
                     if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
-                            md_line: line,
+                            md_line: line + row,
                             raw_ref: raw.to_string(),
                             ref_kind: kind,
                             position: RefPosition::InlineSpan,
@@ -56,14 +56,17 @@ pub fn parse_refs(
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Text(content) if in_code_block && !suppression.blocks_everything() => {
-                for raw in tokenize_code_span(content.as_ref()) {
+                // `line` is where the EVENT's span starts, which for a fenced block is
+                // its first content line and not the line each ref sits on. `row`
+                // recovers the rest — see `tokenize_code_span`.
+                for (row, raw) in tokenize_code_span(content.as_ref()) {
                     if suppression.blocks(raw) {
                         continue;
                     }
                     if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
-                            md_line: line,
+                            md_line: line + row,
                             raw_ref: raw.to_string(),
                             ref_kind: kind,
                             position: RefPosition::FencedBlock,
@@ -242,7 +245,9 @@ pub fn parse_prose_refs(text: &str, md_path: &Path, syntax: PathSyntax) -> Vec<R
             .or_else(|| line.strip_prefix("#"))
             .or_else(|| line.strip_prefix("*"))
             .unwrap_or(line);
-        for raw in tokenize_code_span(line) {
+        // The offset is always 0 here: this loop feeds ONE line at a time, and the
+        // enclosing `text.lines()` enumeration already owns the line number.
+        for (_, raw) in tokenize_code_span(line) {
             // Prose puts sentence punctuation against the path — `see
             // docs/a.md).` — which a citation never includes. Trailing-only:
             // a LEADING '(' has already been split off by the tokenizer, and
@@ -408,18 +413,62 @@ mod prose_tests {
     }
 }
 
-fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
-    // Split on whitespace AND on punctuation that wraps path-like tokens in
-    // realistic code shapes — function-call parens, quotes, commas, backticks.
-    // Without this, a fenced-block line like
-    //   read_markdown("docs/trackers/foo.md",
-    // would be a single whitespace-separated token with the function-call
-    // prefix attached, producing a missing-FilePath false positive on the
-    // wrong string. Splitting on `(`, `)`, `"`, `,`, etc. lets the real path
-    // surface as its own token.
-    s.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | ',' | ';' | '`'))
-        .map(trim_token_edges)
-        .filter(|t| !t.is_empty())
+/// The token separators for `tokenize_code_span`. A free `fn` rather than a closure so
+/// it can be handed to `str::find` in both polarities without borrow gymnastics.
+fn is_code_span_sep(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | ',' | ';' | '`')
+}
+
+/// Split a code span or fenced-block body into path-like tokens, yielding each token
+/// with the number of newlines that precede it **within `s`**.
+///
+/// Splits on whitespace AND on punctuation that wraps path-like tokens in realistic
+/// code shapes — function-call parens, quotes, commas, backticks. Without this, a
+/// fenced-block line like
+///   read_markdown("docs/trackers/foo.md",
+/// would be a single whitespace-separated token with the function-call prefix
+/// attached, producing a missing-FilePath false positive on the wrong string.
+/// Splitting on `(`, `)`, `"`, `,`, etc. lets the real path surface as its own token.
+///
+/// **The line offset is load-bearing, and dropping it is a silent defect rather than a
+/// compile error — which is why it is returned rather than left to the caller.**
+/// pulldown-cmark hands a fenced block's entire body to `parse_refs` as ONE
+/// `Event::Text` whose span starts at the block's *first content line*. A caller that
+/// stamps every token with the event's start line therefore misattributes every ref
+/// below the block's first line, by a distance that grows with the block's height —
+/// unbounded, not off-by-one. `parse_prose_refs` feeds one line at a time and so always
+/// receives 0; that is the exception, not the contract.
+///
+/// A token can never *contain* a newline, because `\n` is whitespace and therefore a
+/// separator — which is why a token has a line and not a line range. `trim_token_edges`
+/// only strips `[]{}` and a trailing `.`, so trimming cannot move a token across a line
+/// either. Both facts are what make this offset exact rather than approximate.
+fn tokenize_code_span(s: &str) -> impl Iterator<Item = (u32, &str)> + '_ {
+    let mut cursor = 0usize;
+    let mut newlines = 0u32;
+    std::iter::from_fn(move || {
+        while cursor < s.len() {
+            let rest = &s[cursor..];
+            // Separator runs are the only place a '\n' can sit, so counting them here
+            // counts every newline in `s` exactly once.
+            let Some(skip) = rest.find(|c: char| !is_code_span_sep(c)) else {
+                cursor = s.len();
+                return None;
+            };
+            newlines += rest[..skip].bytes().filter(|&b| b == b'\n').count() as u32;
+            let start = cursor + skip;
+            let tail = &s[start..];
+            let end = start + tail.find(is_code_span_sep).unwrap_or(tail.len());
+            let at = newlines;
+            let raw = &s[start..end];
+            cursor = end;
+            let token = trim_token_edges(raw);
+            if !token.is_empty() {
+                return Some((at, token));
+            }
+        }
+        None
+    })
 }
 /// Whether a code span is *displaying markup* rather than making a reference.
 ///
@@ -906,6 +955,94 @@ mod tests {
         assert_eq!(cands[0].ref_kind, RefKind::FilePath);
         assert_eq!(cands[0].position, RefPosition::InlineSpan);
     }
+    #[test]
+    fn a_fenced_block_ref_reports_its_own_line_not_the_blocks_first() {
+        // The core regression. Before the fix BOTH refs reported line 4 — the fenced
+        // block's first CONTENT line — because pulldown-cmark hands a fence's whole
+        // body over as one `Event::Text` and `md_line` was read off that event's span
+        // start.
+        //
+        // The fence deliberately contains NO backtick, and that is this fixture's
+        // load-bearing detail. The filed bug diagnosed a backtick desynchronising an
+        // inline-code counter; this case is the falsifier, because the drift is here
+        // without one. Add a backtick and the test still passes while no longer being
+        // able to tell the two explanations apart.
+        //
+        // line:   1       2  3    4          5          6
+        let md = "intro\n\n```\ndocs/a.md\ndocs/b.md\n```\n";
+        let (cands, _) = parse(md);
+        let got: Vec<(u32, &str)> = cands
+            .iter()
+            .map(|c| (c.md_line, c.raw_ref.as_str()))
+            .collect();
+        assert_eq!(got, vec![(4, "docs/a.md"), (5, "docs/b.md")]);
+    }
+    #[test]
+    fn fenced_line_drift_grows_with_the_block_it_is_not_an_off_by_one() {
+        // Pins the MAGNITUDE, which the sibling above cannot: across a two-line fence,
+        // "attribute to the block's first line" and "subtract one" give the same
+        // answer. The filed bug read the defect as an off-by-one for exactly that
+        // reason — both fences it sampled happened to be two lines tall, so the number
+        // it published was a property of its sample, not of the defect.
+        //
+        // The 40 filler lines are the whole point of the fixture: shrink them and this
+        // silently stops discriminating a real fix from a `line + 1`, which would
+        // answer 5 here.
+        let filler = 40u32;
+        let mut md = String::from("intro\n\n```\n"); // fence opens on line 3
+        for _ in 0..filler {
+            md.push_str("filler\n"); // lines 4..=43
+        }
+        md.push_str("docs/deep.md\n```\n"); // ref on line 44
+        let want = 3 + filler + 1;
+        let (cands, _) = parse(&md);
+        let got: Vec<(u32, &str)> = cands
+            .iter()
+            .map(|c| (c.md_line, c.raw_ref.as_str()))
+            .collect();
+        assert_eq!(got, vec![(want, "docs/deep.md")]);
+    }
+
+    #[test]
+    fn a_backtick_inside_a_fence_does_not_change_attribution() {
+        // The control that keeps the falsified explanation falsified. A future reader
+        // meeting a line-drift report here must not "fix" it by suspending an
+        // inline-code counter inside fences: there is no such counter — pulldown-cmark
+        // owns fence state — and this case would stay green while the real defect
+        // returned. Drift here is identical in magnitude to the no-backtick sibling.
+        //
+        // line:   1       2  3    4             5          6
+        let md = "intro\n\n```\nre = \"[`*]\"\ndocs/b.md\n```\n";
+        let (cands, _) = parse(md);
+        let got: Vec<(u32, &str)> = cands
+            .iter()
+            .map(|c| (c.md_line, c.raw_ref.as_str()))
+            .collect();
+        assert_eq!(got, vec![(5, "docs/b.md")]);
+    }
+
+    #[test]
+    fn an_inline_code_span_folds_its_newline_so_the_row_offset_is_inert_there() {
+        // INERT FIXTURE, annotated as inert so nobody credits it with coverage it does
+        // not provide. `parse_refs`' `Event::Code` arm adds the same `line + row`
+        // offset the fenced arm does, but pulldown-cmark normalises a newline inside
+        // an inline code span to a SPACE — so `row` is observably always 0 there and
+        // that arm's offset is never exercised by any input. Measured, not assumed:
+        // without the fold this would return [(1, a), (2, b)].
+        //
+        // Kept as a TRIPWIRE rather than deleted. If pulldown-cmark ever stops
+        // folding, this reds — and that red is the notice that the inline arm has
+        // become live and now needs a real case. Deleting the fixture buys nothing and
+        // removes the only thing that would ever say so.
+        let md = "see `docs/a.md\ndocs/b.md` here\n";
+        let (cands, _) = parse(md);
+        let got: Vec<(u32, &str)> = cands
+            .iter()
+            .map(|c| (c.md_line, c.raw_ref.as_str()))
+            .collect();
+        assert_eq!(got, vec![(1, "docs/a.md"), (1, "docs/b.md")]);
+    }
+
     /// The audit's own manual page documents each `ref_kind` with one example ref,
     /// written with double-backtick delimiters so the inner backticks render. Every
     /// one of those examples was reported as drift against this repo — the tool
