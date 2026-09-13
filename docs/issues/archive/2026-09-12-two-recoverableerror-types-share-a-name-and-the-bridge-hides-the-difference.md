@@ -1,7 +1,7 @@
 ---
-id: '6cb8c56e5ba6001a'
+id: 077308f225dbd8ec
 kind: bug
-status: open
+status: fixed
 title: 'BUG: two RecoverableError types share a name, and the bridge that makes both correct removes the feedback'
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -111,13 +111,26 @@ None for the class. The assertion-message repair landed in `cdd71995`.
 
 ## Resume
 
-Decide between rename and collapse before writing anything — the third option is already in
-place and is what this file argues is insufficient.
+**FIXED 2026-09-13.** Renamed the librarian type to `LibrarianRecoverableError` via
+LSP-aware rename (249 sites, 33 files) rather than collapsing — the user's call,
+with the collapse option carried forward to `docs/ROADMAP.md`'s new "Collapse the
+Two RecoverableError Types Into One" entry for future investigation rather than
+dropped.
 
-Note for whoever takes it: `route_tool_error` downcasts to the **host** type only, so any new
-site that builds the librarian type outside the bridged path would hard-fail as `isError: true`
-and abort sibling parallel calls. That is the 2026-07-10 bug returning, and it is the concrete
-cost that makes this more than tidiness.
+One site the rename tool could not reach: `lift_top_level_param!`
+(`src/librarian/tools/update.rs:368`), a `macro_rules!` definition referencing
+`super::RecoverableError` in its own body — macro token trees aren't part of the
+LSP rename's reference graph. Caught immediately by `cargo build` (`E0433`), fixed
+by hand. Worth naming as a class: an LSP-based rename over a namespace with a
+macro definition owes the same escape-hatch scrutiny as any other parser over a
+namespace (`cluster/addressing-without-an-escape-hatch`, already this bug's tag).
+
+Gate green in the mandated order. Verified the two types' constructors and
+call-site populations directly (251 refs / 33 files for the librarian type, 491
+refs / 69 files for the host type) before choosing rename over collapse — the
+reference counts are what make collapse's cost concrete rather than assumed.
+
+**Fix:** `e0b8d235`, patch-id `4e3e0072836d1518f732f107ebce1e2376992580`.
 
 ## References
 
