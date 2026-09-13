@@ -1,15 +1,13 @@
 ---
 id: '40ca63a3b3497558'
 kind: bug
-status: taken
+status: mitigated
 title: 'BUG: the no-stored-count gate is defeated by the repo''s own typographic house style'
 tags:
 - cluster/addressing-without-an-escape-hatch
 - issue-clusters
 - gate
 - house-style
-claimed_at: 2026-09-13
-claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-02
 owner: marius
@@ -159,6 +157,27 @@ Contributed by session `f13f8169`, which wrote both the inverted assertion and t
 and which supplied this direction rather than defending the design — the author holding
 the parameter is the party structurally least able to see it.
 
+### E5 — the repair was replayed against history before being built, and history refused it
+
+`scripts/probe-backticked-count.py --replay` walks every commit that ever touched this ledger
+and prints what the proposed check would have refused, with the prose around each token. Run
+2026-09-13 at `41370609`, over the 334 such commits then reachable: **11 commits in 11 days, 14
+tokens**, of which one reader judged 8 wrong refusals — *including the commit that filed this
+bug*. Derivation in § *Fix*; re-run the script rather than citing these figures, and note that
+the denominator moved by one between two runs an hour apart.
+
+What makes this evidence rather than a second opinion: the script does not classify. It prints
+the surrounding sentence and says so, because the live-or-quoted distinction is not in the
+grammar — which is the same claim § *Summary* makes about the gate, now demonstrated on the
+repair rather than argued about it.
+
+### E6 — AGREEMENT is the one property that is computable, and it is rare
+
+`--agreement` reports backticked figures equal to today's derived count: **5 of 69**,
+2026-09-13. Those five read as current and will go silently wrong on their class's next member;
+the other 64 differ from the corpus and are therefore visibly quotations. That ratio is what
+makes an advisory possible at all — at 69 of 69 it would be a re-print of the ledger, and at 0
+of 69 it would be an absence assertion pinned to an absence.
 ## Hypotheses tried
 
 - *"The gate is missing a disambiguator."* **Falsified by the code** — the backtick IS
@@ -170,49 +189,123 @@ the parameter is the party structurally least able to see it.
 
 ## Fix
 
-**Not implemented.** Designed and costed; the implementing change touches a shared
-pre-commit hook and is held for an operator's go-ahead (see § Resume).
+**Not implemented — and the held design is now FALSIFIED, not merely unshipped.** It was measured
+against the corpus before being built, and the measurement refused it. What ships instead is the
+documented limitation `CLAUDE.md` § *Parsers Over a Namespace* prescribes for exactly this case,
+plus the probe that makes the refusal re-derivable.
 
-**The obvious fix is REFUSED by measurement, and that is the useful half.** Removing the
-backtick escape reds all 33 legitimate quotations across 21 of 22 class files. That is a
-campaign over a population whose coverage ratio is ~100% — CLAUDE.md § *Observer Blindness*:
-*"a coverage ratio that is neither ~0% nor ~100% is a boundary someone drew before it is
-drift"*, and at ~100% it is emphatically a boundary. It would also land in the ledger the
-ADR names as the repo's contention head (16 sessions, 53 commits in one day), which is why
-that file was split per class in the first place.
+**Re-derive every figure below rather than citing it:**
 
-An explicit superseded-marker (`was n=11`, strikethrough, a `**Superseded:**` prefix) costs
-the same 33-site sweep and buys the same thing. Rejected for the same reason.
+```
+python3 scripts/probe-backticked-count.py --replay      # what the check would have refused
+python3 scripts/probe-backticked-count.py --agreement   # the one discriminator that survived
+```
 
-**THE AFFORDABLE FIX IS DIFF-SCOPED, and the hook already holds every input it needs.**
-`scripts/pre-commit-ledger-counts.py` reads the ledger at both `head` and `index`
-(`read_ledger(source)`), and CHECK 3 already computes `members_fields()` for both. A CHECK 4
-would refuse a backticked `n=<N>` that is present on a `**Members:**` / `**Promotes to:**`
-line in the INDEX and absent from the same line at HEAD:
+### The sweep stays refused, unchanged
 
-- every existing quotation is untouched forever, because its line is unchanged;
-- a new live count cannot be introduced without the hook seeing it;
-- no sweep, no grandfather list, no marker to remember.
+Removing the backtick escape reds all 33 legitimate quotations across 21 of 22 class files — a
+campaign over a population at ~100% coverage, which `CLAUDE.md` § *Observer Blindness* calls a
+boundary someone drew rather than drift, landing in the file an ADR names as this repo's
+contention head. An explicit superseded-marker costs the same sweep for the same benefit.
 
-That is § *Observer Blindness* position 3 in its best shape — the correct path ends in a
-safe state, so compliance leaves nothing armed — rather than a rule anyone must recall.
+### The diff-scoped check is REFUSED BY MEASUREMENT, and that is the useful half
 
-**Precedent exists for the shape:** `a_class_gaining_a_member_names_it` is already declared
-HOOK-ONLY *"because it compares the INDEX against HEAD, a question no working-tree test can
-pose"*. CHECK 4 is the same kind of question, so it joins `HOOK_RULES` and is exempted on
-the Rust side with that reason, which `the_hook_enforces_every_rule_it_declares` and
-`every_cluster_rule_is_hook_owed_or_exempt` both police.
+The design was: refuse a backticked `n=<N>` present on a gated line in the INDEX and absent from
+that same line at HEAD. Every existing quotation untouched forever because its line does not
+change; no sweep, no grandfather list, no marker to remember. The shape had precedent —
+`a_class_gaining_a_member_names_it` is already declared HOOK-ONLY for posing exactly this
+INDEX-against-HEAD question.
 
-**Owed alongside it, and cheap either way:** the escape is currently **undocumented**.
-§ *The entry shape* says only *"Never a bare `n=`"*, and nothing there or at the refusal site
-defines *bare*, so a reader cannot learn that a backtick suppresses the check. CLAUDE.md
-§ *Parsers Over a Namespace* prescribes exactly this when no escape is affordable: *"say so
-at the refusal site — a documented limitation and a silent reinterpretation cost a reader
-very different amounts."* That half needs no hook change and no sweep.
+Replayed over every commit that has ever touched this ledger — **334 of them, at `41370609`,
+2026-09-13** — restricted to the post-inversion regime, since a bare `n=` was legal before
+`1b3ac36b` and demoting one to a backticked quotation was then the *prescribed* act:
+
+> **11 commits in 11 days**, carrying **14** newly-appearing backticked tokens.
+
+**Both halves of that sentence carry a unit, and the denominator moved while it was being
+written** — 334 was 333 an hour earlier, and an earlier pass of this same replay reported **64**
+where the shipped script reports **68**, because one counted *(commit, field)* pairs and the
+other counts *tokens*. Neither was wrong; they answer different questions, and they are near
+enough that no reader would have queried either. That is `CLAUDE.md` § *Testing Discipline*'s
+four-defensible-numbers law arriving inside the file arguing for a measurement, which is why
+every figure here names its unit and its tree and why the script prints its own denominator.
+Over all history the figure is 24 commits / 68 tokens; the 13 commits and 54 tokens that
+separate that from the post-inversion reading are the two one-time migrations and can never
+recur.
+
+**The token count is derived and exact; the split below is an ADJUDICATION and is mine.** Whether
+a token was a live claim or a quotation turns on whether its author *asserted* the number or
+*mentioned* it — not in the grammar, not recoverable by any parser, and the reason the script
+prints the surrounding prose and refuses to classify. One reader, reading all 14:
+
+| verdict | n | shape |
+|---|---|---|
+| correct refusal — a live count written in backticks | 5 | `` **`n=16`, 2026-09-02, re-derived** `` |
+| arguable | 1 | `` **Count not re-derived beyond `n=1`.** `` |
+| **wrong refusal — a quotation or a mention** | **8** | `` (`n=24`, quoted here and never updated) `` |
+
+**The decisive one is `15b0be3c` — the commit that FILED THIS BUG.** Its `**Members:**`
+derivation quotes the token twice, in this sentence:
+
+> *…so `` `n=11` `` quoting a retired figure and `` `n=11` `` asserting today's count are
+> byte-identical — nothing in the grammar separates mentioning a number from making one.*
+
+The check would have refused the commit whose prose explains the defect the check exists to
+catch. That is not a tuning failure and no threshold repairs it: § *Summary*'s mechanism —
+**the escape and the violation are byte-identical** — applies unchanged to any check keyed on
+the same token, so the instrument inherits the blindness it was built to remove. `IC-6` holding
+about the gate built to fix `IC-6`.
+
+### What DOES discriminate, and where it belongs
+
+Agreement with the derived count. A backticked `` `n=7` `` on a class the corpus says holds 24
+is *visibly* a quotation — no reader mistakes it for current. A backticked `` `n=24` `` on a
+class holding 24 reads as today's count whether or not it is one, and goes silently wrong on
+that class's next member. Agreement is the hazard state, and it is rare enough to be an
+advisory rather than a re-print of the ledger: **5 of 69** backticked figures, 2026-09-13.
+
+It ships as `--agreement`, on a **read** path, refusing nothing. That placement is the finding,
+not a hedge: on the commit path a false positive costs a peer their commit in this checkout's
+contention head, and the replay above says most positives would be false. On a read path the
+same instrument costs a glance. Both modes print their **denominator**, because every reading
+here is an existence report over a parse — a parser that silently matched nothing would return
+a clean empty list, and `0 of 0` is visibly broken where a bare `0` is reassuring. There is no
+test behind that script; the denominator is the vacuity guard.
+
+### The documentation half, and a correction to this file
+
+`## The entry shape` now defines *bare* and states the limitation at the point where a field is
+**written**. **The earlier claim here that the escape was undocumented *at the refusal site* was
+FALSE** — `scripts/pre-commit-ledger-counts.py`'s CHECK 1 has said *"wrap it in backticks. A
+backticked `n=N` is a quotation and is deliberately not checked"* since `1b3ac36b`, the inversion
+commit itself, and `no_class_field_states_a_bare_n`'s assertion message carries the same
+sentence. So did this ledger's `## Index` blockquote.
+
+Two things are worth more than the correction. **First, why the claim was wrong**: it was an
+*absence* claim — "nothing defines bare" — checked by reading one surface and not the other two.
+Monotone under exactly the failure that occurred, which is § *Testing Discipline*'s first law
+arriving at a sentence in a bug file rather than at an assertion.
+
+**Second, why the remaining gap is real anyway, and is the whole point of the paragraph that
+shipped.** All three surfaces that document the escape are *refusal* surfaces — reached only by
+someone who already wrote a **bare** `n=` and was stopped. The author who reaches for a backtick
+unprompted trips nothing and reads none of them. The escape was documented to everyone except
+the population that uses it, which is § *Observer Blindness* position 3 verbatim: the bound was
+published to an audience that never opens that surface, so the fix is to **move it to the read
+surface**, not to write it again.
 ## Tests added
 
-None — capture-on-notice record, n=1.
+**None, and the absence is a finding rather than debt.** No regression test exists because no
+production behaviour changed — the check that would have needed one was refused by measurement.
+What stands in its place is `scripts/probe-backticked-count.py`, whose two modes each print a
+**denominator**, so a silently-broken parser reads as `0 of 0` instead of as a clean ledger.
+Both modes exit non-zero on that shape rather than reporting it quietly.
 
+Nor is the shipped documentation testable in the way that would matter. `CLAUDE.md`
+§ *Testing Discipline* already records the ceiling — pinning prose reds on every rewording, and
+a shape assertion buys ARRIVAL, never ANSWERABILITY. Here it would buy even less: the
+paragraph's entire claim is about *which surface a reader reaches*, and no assertion in this
+repo can observe a reader.
 ## Workarounds
 
 Do not write a live count in this ledger at all. Cite
@@ -221,15 +314,27 @@ makes the sentence undecayable.
 
 ## Resume
 
-Open, n=1, and the disposition question is *where does instance 2 land* rather than
-whether the trade-off was right. Filed as a bug file rather than a session-log friction
-for exactly that reason: the trigger is repo-wide house style, so the next
-accidental-escaper will be in a different work stream and will never read this session's
-log. A cluster tag is the only surface where n=2 finds n=1. Argued by peer session
-`9716a130`; the deciding authority is `CLAUDE.md` § *Bug Tracking* — *"Open a bug file
-for ANY bug noticed during work — including incidental bugs we won't fix and tool
-quirks."*
+**Status `mitigated` — not `fixed`, not `wontfix`.** The mechanism is untouched and still
+reachable: a live count written in backticks passes the gate today exactly as it did when this
+was filed. What changed is that the escape is now stated where a field is *written*, and the one
+computable discriminator ships as an advisory. `wontfix` would misreport that as a decision not
+to act; `fixed` would misreport a documented limitation as a closed hole.
 
+**Do not rebuild the commit-path check.** That is the durable half of this file, and it is
+phrased as an instruction rather than a conclusion for a specific reason: the design is genuinely
+attractive — bounded, precedented by `a_class_gaining_a_member_names_it`, no sweep, no marker —
+and it will look free to the next reader exactly as it looked free to this one, twice. Run
+`--replay` first. It takes seconds and it is the whole argument.
+
+**Left open deliberately, and named so it is not discovered as a surprise:** `--agreement` runs
+from nothing. It is wired to no gate, no hook, and not to `scripts/probe-cluster-census.py` —
+which is the surface a reader of these counts actually opens. That is `declared-not-wired`
+waiting to happen, and it is left rather than fixed in passing because the census probe is this
+ledger's shared read path: folding a second advisory into it is a change to a surface every
+session reads, not a tidy-up. The original filing question — *where does instance 2 land* —
+is unchanged and still the reason this is a bug file rather than a session-log friction: the
+trigger is repo-wide house style, so the next accidental escaper will be in a different work
+stream and will never read this session's log.
 ## References
 
 - `tests/issue_clusters.rs` — `bare_n_values`, `parse_bare_n_claims`,
