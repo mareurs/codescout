@@ -83,13 +83,39 @@ it would help: *a new script gets no coverage from me until you stage it.*
 
 Not implemented. Options, cheapest first:
 
-1. **Scan staged-or-untracked-under-`scripts/` in the pre-commit hook**, separately from the
-   tracked-only test. The hook already runs at exactly the moment the file becomes publishable.
-2. **Say the boundary in the passing direction.** The control test's name asserts the exclusion
-   works; nothing surfaces it to an author. A line in `CONTRIBUTING.md` or the script template costs
-   nothing and is the § *Observer Blindness* "move the scope to the read surface" remedy.
-3. Leave it, and accept that new scripts are caught one commit late on a branch that is never
-   deleted.
+1. ~~**Scan staged-or-untracked-under-`scripts/` in the pre-commit hook**, separately from the
+   tracked-only test.~~ **WITHDRAWN 2026-09-13, and the withdrawal is the most useful thing in this
+   file.** It is half redundant and half forbidden:
+   - *Staged is already in scope.* `git ls-files` lists index **entries**, so a file enters the
+     population the moment it is `git add`-ed — strictly before any commit exists
+     (`tests/committed_paths.rs:154-158`, which says so outright: *"narrowing the population from
+     the filesystem to the index loses no catch"*).
+   - *Untracked is deliberately excluded, and scanning it was itself a filed defect.*
+     `docs/issues/archive/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md`
+     records the gate walking the filesystem with `std::fs::read_dir`, so **any** session's
+     in-progress scratch probe reddened the shared build for every other session, under a message
+     telling them their committed scripts were broken. The fix was this exclusion. Proposing to undo
+     it would reintroduce that defect **two days after it was closed**.
+
+   The author of this file proposed it without knowing either fact. That is what a rejected approach
+   costs when it is not findable from the place a reader lands, and it is the argument for keeping
+   this bullet struck through rather than deleting it.
+
+2. **Say the boundary in the passing direction — now the only live option.** The exclusion is
+   documented three times in `tests/committed_paths.rs` (`:76-78`, `:121-127`, `:154-158`) and in
+   the failure message, all of which are read *after* something has gone wrong or by someone already
+   editing the gate. Nothing surfaces it to an author writing a new script. A line in
+   `CONTRIBUTING.md` or the script template is the § *Observer Blindness* "move the scope to the read
+   surface" remedy and costs nothing.
+
+3. Leave it, and accept that a new script is uncovered until it is staged — a window of seconds in
+   the normal flow, and a morning in the flow that actually happened.
+
+**The claim this file still makes, narrowed by the above:** the blind window is **untracked**, not
+*until commit*. `git add` closes it, which makes the ordering `git add` → gate → commit sufficient
+and the natural `git add` → commit ordering the whole defect. The title overstates it by one step
+and is left unrenamed deliberately — `id = sha256(abs_path)`, so a rename mints a new id and strands
+this record's citations for a wording fix.
 
 ## Tests added
 
@@ -127,6 +153,13 @@ Recording the distinction here because a fix commit sitting in a bug file is the
 gets read as closure (see the sibling defect this session filed on precisely that misreading).
 
 - `tests/committed_paths.rs:170`
+- **`docs/issues/archive/2026-09-11-the-committed-scripts-gate-scans-the-filesystem-so-an-untracked-file-reds-it.md`
+  — read this before proposing any widening.** It is the inverse defect (selector WIDER than its
+  name, `IC-14`'s mirror), it was closed two days before this file was opened, and its fix is the
+  exclusion this file complains about. The two records bound the design from opposite sides: scan
+  untracked and one session reds everyone's build; scan tracked-only and a new file is uncovered
+  until staged. Neither is free, the trade was made deliberately, and this file argues only that the
+  chosen side is **undocumented to authors**, not that it is wrong.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md`
 - CLAUDE.md § *Observer Blindness* — name who structurally cannot see it, who can, and the check that
   runs when nobody is worried
