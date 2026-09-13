@@ -88,11 +88,30 @@ Seven fields, and nothing else is required.
 |---|---|
 | `**Slug:**` | the `cluster/<slug>` tag value — the closed-set entry the gate checks against |
 | `**Claim:**` | the mechanism, stated so it can be false |
-| `**Members:**` | the query, plus a per-member derivation. **Never a bare `n=`** — counts are derived (`scripts/probe-cluster-census.py`), and `no_class_field_states_a_bare_n` refuses one here |
+| `**Members:**` | the query, plus a per-member derivation. **Never a bare `n=`** — counts are derived (`scripts/probe-cluster-census.py`), and `no_class_field_states_a_bare_n` refuses one here. *Bare* means **outside backticks**; read the two paragraphs under this table before reaching for a backtick |
 | `**Blind party:**` | who structurally cannot see it, and why — or `none — ordinary design defect` |
 | `**Promotes to:**` | target surface, per the routing table below |
 | `**Mechanism status:**` | `none yet` \| `designed` \| `shipped (<what>)` — borrowed from `OB` |
 | `**Valid:**` | `invariant` \| `dated YYYY-MM-DD` \| `conditional — <event>` |
+
+**What *bare* means, and the limitation it carries.** A `n=` counts as a claim only **outside** a
+complete backtick pair. A backticked `` `n=27` `` is read as a QUOTATION — a superseded figure kept
+with its derivation — and is deliberately not checked, which is what let the 2026-09-02 migration
+wrap every live claim rather than delete it, so no sentence lost its history. **But the escape
+cannot separate a quotation from a live claim: the two are byte-identical.** A current count
+written in backticks therefore passes the gate and then decays exactly like the stored count the
+gate was inverted to remove, with nothing to report it. This is said *here* because the refusal
+text — which does spell the escape out — only ever reaches someone who already wrote a **bare**
+one. The author who reaches for a backtick unprompted never sees it.
+
+**A commit-path check for this was designed, measured and REFUSED. Do not rebuild it.** Refusing a
+backticked `n=` that appears on a gated line and was not there at HEAD would have blocked 11
+commits in 11 days, and of the 14 tokens involved roughly 8 were legitimate quotations or mentions
+— *including the commit that filed the bug*, whose derivation quotes the token twice in order to
+explain that the two readings are byte-identical. A parser keyed on the undiscriminated token
+inherits the blindness it was built to remove, which is `IC-6` holding about the gate built to fix
+it. The replay, and the one discriminator that did survive, are in
+`docs/issues/2026-09-02-the-no-stored-count-gate-is-defeated-by-house-style.md`.
 
 A **slug is claim-shaped, never topic-shaped**: `blast-radius-exceeds-visibility`, not
 `concurrency`. A topic slug re-creates the tag soup this replaces; a claim slug can be false,
@@ -268,9 +287,29 @@ delete this subsection in the same commit.
 > every one a peer filing bugs in the same checkout and none a mistake by whoever last wrote the
 > cell. A sweep's own result is falsified by the next commit, so no amount of care held it.
 >
-> **What the row keeps is what no query derives:** the promotion verdict, the subsystem spread,
-> and mechanism status. Those are adjudications. The row used to mix a derived counter with a
+> **What the row keeps is what no query derives:** the promotion verdict and the subsystem spread.
+> Those are adjudications. The row used to mix a derived counter with a
 > human verdict, which is precisely why bumping the counter forced a write to the verdict's file.
+>
+> **The `mechanism` column was deleted 2026-09-13, and its reason is the `n` column's reason with
+> one word changed.** Mechanism status is not *derived*, so the argument above never reached it —
+> but it was *duplicated*, and duplication alone is enough. The authoritative copy is each class
+> file's `**Mechanism status:**` field; the cell was a second one, sitting in the file 23 classes
+> share. Measured at deletion — comparing the **leading verdict word** of each cell against its
+> field's, parentheticals ignored, against the worktree at `4f268eb1` — **2 of 23 disagreed**:
+> `IC-13` read `none yet` against a detector that had shipped 2026-09-03 as `tests/result_caps.rs`,
+> and `IC-3`'s cell led with no verdict word at all. Neither was catchable, because **no parser on
+> either side ever read that cell** — `parse_index_rows` takes the slug and stops, and
+> `mechanism_statuses` scans field lines. `IC-4`'s own field had already recorded this exact drift
+> on 2026-09-02 and left it named rather than fixed; it recurred. Read mechanism status from the
+> class file, or from `python3 scripts/probe-cluster-census.py`, which renders it beside the
+> verdict.
+>
+> **Two cells carried a sentence the class file did not, and both were migrated before deletion**
+> rather than lost — `IC-11`'s *registry-keyed check over everything delivered to a model* and
+> `IC-21`'s *per-site only*. A column delete done as a regex would have dropped both silently,
+> which is the cost this note exists to record: the duplicate was not a pure copy, and finding
+> that out is an audit, not a `sed`.
 > Historical counts in the entries below are **backticked** — `` `n=27` `` — and that is the
 > ledger's escape for a quotation: preserved with its derivation, never updated, ignored by both
 > parsers. A *bare* `n=` is now a gate failure rather than a claim to check.
@@ -310,31 +349,31 @@ delete this subsection in the same commit.
 > requires is that the unit of filing be the *claim satisfied*, not the investigation that found
 > it.
 
-| id | class | slug | promotes to | mechanism |
-|---|---|---|---|---|
-| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | `OB-3` — 2026-09-01 | partial; **split taken → IC-17** |
-| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
-| IC-3 | declaration is not execution | `declared-not-wired` | `OB-7` — promoted 2026-09-01 | **family 1 GATED** (`tests/tool_reachability.rs`); 2 of 3 families open |
-| IC-4 | config propagation is additive | `config-propagation-is-additive` | `OB` — passes admission test; hook owed | **partial** — 2 of 8 surfaces (`hooksPath`, worktree gitdir) |
-| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | `H` — seven subsystems **adjudicated over 12 members, not re-adjudicated since**; the *"mechanism owed"* clause is **withdrawn 2026-09-04** as stale | `shipped (partial)` — `scripts/build-windows.sh` (`4816d64f`), local-vs-lane half only; CI half open |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
-| IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | not yet — 2 of 4 unconfirmed | shipped (partial) |
-| IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | `DC` | **`shipped (partial)`** — doctor's four closure re-checks; verified 2026-09-03 |
-| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | not yet — two tags withdrawn as misfits | none yet |
-| IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | **clears both bars 2026-09-01** — n=3, spread 3, via second-read retag | **`shipped (partial)`** — `Session-Id` commit trailer, hook installed and live; **uncommitted half still none**; verified 2026-09-03 |
-| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | **CLEARS BOTH BARS — spread RE-ADJUDICATED 2026-09-04 over the whole membership: 9 doc surfaces**, superseding the four per-member deltas that ran the 2026-09-01 reading from 4 to 7. Two of the nine are new *in kind*: a **different repository** (companion-plugin hooks) and **`prompt:` YAML delivered as live instructions**, both outside the boundary of every gate this repo owns | none yet — the mechanizable sub-shape is a registry-keyed check over *everything delivered to a model*, not a scanner over a path set |
-| IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | not yet — n=2, and the remedy so far is knowledge rather than mechanism | none yet |
-| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | clears both bars — **spread re-derived 2026-09-01 over the 9 then: 5 coarse / 7 fine** (was 6 / 11 over the pre-ruling 16); **not re-derived over the 12** | none yet — **clause widened + 7 non-members moved out 2026-09-01** to IC-19/20/21/22; claim was true of all 9 then, and the three 2026-09-02 additions were judged against it at filing |
-| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | **CLEARS BOTH BARS — spread RE-ADJUDICATED 2026-09-04 over the whole membership: 16 distinct guards** (was 6 over the 11 then), 14 cited code subsystems as a corroborating floor | none yet — the mechanizable sub-shape is a name-to-predicate comparison, and the worktree guard is a **five-deep** known-answer fixture for it |
-| IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | clears count; **spread adjudicated 2026-09-01 — 6 subsystems** | **partial** — probe at 5 of 8 sites 2026-09-02; shared half extracted AND un-feature-gated |
-| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule | designed; positive-form guard owed |
-| IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | `OB-8` (+ OB-2) — 2026-09-01 | partial |
-| IC-18 | a selector is narrower than the population it names | `selector-narrower-than-its-population` | clears both bars 2026-09-01 — 6 subsystems; remedy already Accepted as ADR-2026-08-27 for the tool-facing half | **partial** — nothing reaches an author-written selector |
-| IC-19 | a truncated window is ordered by a key unrelated to why it was requested | `truncated-window-ordered-by-the-wrong-key` | **clears the count bar on creation** — 4 subsystems as of 2026-09-02; spread and `OB` routing still unadjudicated | none yet — **verified absent 2026-09-03**, not merely unchecked |
-| IC-20 | a floor is published under the name of a total | `floor-published-under-the-name-of-a-total` | not yet — `n=1`; kept apart from `IC-19` on the remedy test (rename vs re-select) | **`partial`** — per-member gate shipped both directions; class gate in flight on `result-cap-marker-gate`, unmerged |
-| IC-21 | an instrument reports presence or a count where the decision turns on magnitude | `instrument-omits-the-dimension-that-grows` | not yet — `n=2`, one short; already 2 subsystems, so instance 3 meets both bars | **`designed`** — guard applied prospectively at `get.rs`, asserted; per-site only; verified 2026-09-03 |
-| IC-22 | a next-step hint is composed from the response shape, not from the request | `hint-composed-without-the-request` | not yet — n=4, **count bar cleared 2026-09-02** at `n=3`, judgement owed; seed **fixed** `bb4688fd`, second member open on the *preview* surface | none yet — **verified absent 2026-09-03**, not merely unchecked |
-| IC-23 | a per-item attribute is derived at the container's granularity, and is correct for the first item | `attribute-derived-at-container-granularity` | not yet — one member, one subsystem; opened 2026-09-13 by **retag out of `IC-6`** after the founding bug's diagnosis was falsified | none yet — the shape is **type-level** (hand out `(offset, item)` so ignoring the offset cannot compile), not a scan; a lint cannot see a plain field read |
+| id | class | slug | promotes to |
+|---|---|---|---|
+| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | `OB-3` — 2026-09-01 |
+| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | `OB-6` — promoted 2026-09-01 |
+| IC-3 | declaration is not execution | `declared-not-wired` | `OB-7` — promoted 2026-09-01 |
+| IC-4 | config propagation is additive | `config-propagation-is-additive` | `OB` — passes admission test; hook owed |
+| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | `H` — seven subsystems **adjudicated over 12 members, not re-adjudicated since**; the *"mechanism owed"* clause is **withdrawn 2026-09-04** as stale |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | `CLAUDE.md` § Parsers Over a Namespace — **landed** |
+| IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | not yet — 2 of 4 unconfirmed |
+| IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | `DC` |
+| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | not yet — two tags withdrawn as misfits |
+| IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | **clears both bars 2026-09-01** — n=3, spread 3, via second-read retag |
+| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | **CLEARS BOTH BARS — spread RE-ADJUDICATED 2026-09-04 over the whole membership: 9 doc surfaces**, superseding the four per-member deltas that ran the 2026-09-01 reading from 4 to 7. Two of the nine are new *in kind*: a **different repository** (companion-plugin hooks) and **`prompt:` YAML delivered as live instructions**, both outside the boundary of every gate this repo owns |
+| IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | not yet — n=2, and the remedy so far is knowledge rather than mechanism |
+| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | clears both bars — **spread re-derived 2026-09-01 over the 9 then: 5 coarse / 7 fine** (was 6 / 11 over the pre-ruling 16); **not re-derived over the 12** |
+| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | **CLEARS BOTH BARS — spread RE-ADJUDICATED 2026-09-04 over the whole membership: 16 distinct guards** (was 6 over the 11 then), 14 cited code subsystems as a corroborating floor |
+| IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | clears count; **spread adjudicated 2026-09-01 — 6 subsystems** |
+| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule |
+| IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | `OB-8` (+ OB-2) — 2026-09-01 |
+| IC-18 | a selector is narrower than the population it names | `selector-narrower-than-its-population` | clears both bars 2026-09-01 — 6 subsystems; remedy already Accepted as ADR-2026-08-27 for the tool-facing half |
+| IC-19 | a truncated window is ordered by a key unrelated to why it was requested | `truncated-window-ordered-by-the-wrong-key` | **clears the count bar on creation** — 4 subsystems as of 2026-09-02; spread and `OB` routing still unadjudicated |
+| IC-20 | a floor is published under the name of a total | `floor-published-under-the-name-of-a-total` | not yet — `n=1`; kept apart from `IC-19` on the remedy test (rename vs re-select) |
+| IC-21 | an instrument reports presence or a count where the decision turns on magnitude | `instrument-omits-the-dimension-that-grows` | not yet — `n=2`, one short; already 2 subsystems, so instance 3 meets both bars |
+| IC-22 | a next-step hint is composed from the response shape, not from the request | `hint-composed-without-the-request` | not yet — n=4, **count bar cleared 2026-09-02** at `n=3`, judgement owed; seed **fixed** `bb4688fd`, second member open on the *preview* surface |
+| IC-23 | a per-item attribute is derived at the container's granularity, and is correct for the first item | `attribute-derived-at-container-granularity` | not yet — one member, one subsystem; opened 2026-09-13 by **retag out of `IC-6`** after the founding bug's diagnosis was falsified |
 
 **Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
 column — that is the derivation, and it cannot go stale when a count moves. This sentence used to

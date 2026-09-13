@@ -53,6 +53,7 @@ HOOK_RULES = [
     "every_open_bug_file_declares_one_known_defect_class",
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
+    "no_index_row_stores_a_mechanism",
 ]
 
 LEDGER = "docs/trackers/issue-clusters.md"
@@ -461,6 +462,41 @@ def parse_index_counts(ledger: str, valid: set[str]) -> dict[str, int]:
     return out
 
 
+def index_rows_with_extra_cells(ledger: str) -> list[tuple[str, str]]:
+    """Mirrors `index_rows_with_extra_cells` -- Index rows carrying a cell past `promotes to`.
+
+    `| a | b | c | d |` splits on `|` into six pieces: a leading and a trailing empty, plus the
+    four content cells. Anything longer is a fifth column, which since 2026-09-13 means a
+    `mechanism` cell has been refilled. That cell was a second copy of the entry's own
+    `**Mechanism status:**` field, sitting in the one file every IC record shares; nothing read
+    it, so it drifted on 2 of 23 rows before it was deleted.
+
+    POSITIONAL, not a scan for the word. Two rows' `promotes to` prose legitimately contains
+    "mechanism" -- IC-5 quotes a withdrawn "mechanism owed" clause and IC-12 says the remedy is
+    knowledge rather than mechanism -- so a word scan reds on correct rows and gets deleted.
+    """
+    out: list[tuple[str, str]] = []
+    for line in ledger.splitlines():
+        if not line.startswith("| IC-"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) > 6:
+            out.append((cells[1], " | ".join(cells[5:-1])))
+    return out
+
+
+def index_header_readvertises_mechanism(ledger: str) -> str | None:
+    """The Index header line if it still names the deleted column, else None.
+
+    The rows can be clean while the header invites the next editor to refill them, so this is a
+    separate finding rather than a second condition on the row scan.
+    """
+    for line in ledger.splitlines():
+        if line.startswith("| id | class | slug") and "mechanism" in line:
+            return line
+    return None
+
+
 def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     """Mirrors `actual_counts` -- seeded at 0 so a class with no members is still compared."""
     out = {s: 0 for s in valid}
@@ -684,6 +720,23 @@ def main() -> int:
             # arm reliably exercised regardless of what the live corpus holds on a given day.
             print(json.dumps(cluster_tags(frontmatter(sys.stdin.read()) or "")))
             return 0
+        elif arg == "--fixture-index-mechanism":
+            # Pure over stdin, so `the_index_mechanism_scan_discriminates` can feed a table whose
+            # answers are known. The live corpus cannot reach the interesting branch AT ALL: the
+            # check exists to keep a refilled column out, so a correct ledger has zero findings
+            # forever, and asserting over it would be an absence assertion pinned to an absence
+            # -- green whether the scan works or is deleted. The fixture is the only surface on
+            # which this parser can be shown to return a non-empty answer.
+            fx = sys.stdin.read()
+            print(
+                json.dumps(
+                    {
+                        "extra": index_rows_with_extra_cells(fx),
+                        "header": index_header_readvertises_mechanism(fx),
+                    }
+                )
+            )
+            return 0
     if source not in ("index", "worktree", "head"):
         raise SystemExit(f"--source must be index|worktree|head, got {source!r}")
 
@@ -726,6 +779,46 @@ def main() -> int:
             "derivation -- wrap it in backticks. A backticked `n=N` is a quotation and is\n"
             "deliberately not checked. If you meant to state today's count, cite the probe\n"
             "instead, so the sentence cannot decay.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 4 -- the Index table stores no mechanism status.
+    #
+    # Mirrors `no_index_row_stores_a_mechanism`. The number is its order of ADDITION, not of
+    # execution: it sits above CHECK 3 because CHECK 3 exits early on three paths, so anything
+    # placed below it is unreachable on most commits.
+    #
+    # The cell was deleted 2026-09-13 -- a second copy of the entry's own
+    # `**Mechanism status:**` field, in the one file every IC record shares, read by no parser
+    # on either side and therefore ungated. It drifted on 2 of 23 rows. Positional rather than a
+    # scan for the word: two rows carry "mechanism" in their `promotes to` prose legitimately,
+    # and a word scan would red on correct rows and be deleted for it.
+    refilled = index_rows_with_extra_cells(ledger)
+    stale_header = index_header_readvertises_mechanism(ledger)
+    if refilled or stale_header:
+        rows = [f"{ic} -- Index row carries a fifth cell: `{cell}`" for ic, cell in refilled]
+        if stale_header:
+            rows.append(f"the Index header still names the column: {stale_header}")
+        print(
+            "the Index table stores mechanism status again:\n  "
+            + "\n  ".join(rows)
+            + "\n\n"
+            "IF YOU EDITED THE ROSTER -- delete the cell. That text belongs in the entry's own\n"
+            "`**Mechanism status:**` under docs/trackers/issue-clusters/, and is read back with\n"
+            "`python3 scripts/probe-cluster-census.py`, which renders it beside the verdict.\n"
+            "\n"
+            "IF YOU DID NOT TOUCH docs/trackers/issue-clusters.md, THIS IS NOT YOUR DEFECT and\n"
+            "the fix above is not yours to make. This check reads the INDEX, so a peer's\n"
+            "uncommitted migration of that file is invisible to it and you are refused for\n"
+            "their in-flight work. Ask them -- the question has an answer they can give\n"
+            "('landing now' or 'backed out'), which is why this sends you to a person and not\n"
+            "to a file:\n"
+            "    python3 scripts/file-provenance.py docs/trackers/issue-clusters.md\n"
+            "Do NOT edit their files. Do NOT reach for --no-verify: this same run carries the\n"
+            "one-tag and growth checks your own bug files need, so silencing a refusal that is\n"
+            "not yours silences two that are.",
             file=sys.stderr,
         )
         _emit_sequence_tail()

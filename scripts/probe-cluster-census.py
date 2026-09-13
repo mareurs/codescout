@@ -21,6 +21,16 @@ THE COUNT IS A FLOOR. Population is `git ls-files docs/issues` -- the INDEX -- s
 untracked in-flight bug file is invisible by construction. That is deliberate and matches the
 gate: gating on untracked files lets one session red another's build.
 
+THIS IS ALSO WHERE MECHANISM STATUS IS READ, since 2026-09-13. The roster's Index table carried a
+`mechanism` cell until then -- a second copy of the `**Mechanism status:**` field each per-IC
+record holds, sitting in the one file all 23 of them share, read by no parser on either side and
+therefore ungated. It drifted: 2 of 23 cells disagreed with their field at deletion. The column is
+gone and this probe renders the field instead, beside the verdict, out of the same parse it
+already did. Note what that makes this table: `n` is DERIVED and exact, while `verdict` and
+`mechanism` are human adjudications reported VERBATIM -- three columns, two epistemic kinds. Do
+not summarise either of the latter two; summarising a judgement is how a probe starts inventing
+one.
+
 AND ON A SHARED CHECKOUT THE DEFAULT SOURCE IS NOT A COMMIT. `--source=worktree` reads files as
 they sit on disk, which on this repo means WITH every other session's uncommitted edits folded
 in -- a count over a tree that never existed at any commit and never will. Each session's own
@@ -179,10 +189,13 @@ def main() -> int:
 
     print(f"cluster census — {len(rows)} classes over {len(G.bug_files())} tracked bug files")
     print(f"source: {args.source} (a floor — untracked peer work is invisible)\n")
-    print(f"{'ID':<7} {'n':>3}  {'slug':<44} verdict")
-    print(f"{'-' * 7} {'-' * 3}  {'-' * 44} {'-' * 40}")
+    print(f"{'ID':<7} {'n':>3}  {'slug':<44} {'verdict':<34} mechanism")
+    print(f"{'-' * 7} {'-' * 3}  {'-' * 44} {'-' * 34} {'-' * 34}")
     for r in rows:
-        print(f"{r['id']:<7} {r['n']:>3}  {r['slug']:<44} {_clip(r['verdict'], 40)}")
+        print(
+            f"{r['id']:<7} {r['n']:>3}  {r['slug']:<44} "
+            f"{_clip(r['verdict'], 34):<34} {_clip(r['mechanism'], 34)}"
+        )
 
     unadjudicated = [
         r

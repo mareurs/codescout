@@ -1437,6 +1437,249 @@ fn no_index_row_stores_a_count() {
     );
 }
 
+/// Index rows carrying a cell past the `promotes to` column, as `(id, joined extra cells)`.
+///
+/// `| a | b | c | d |` splits on `|` into six pieces — a leading and a trailing empty, and the
+/// four content cells. Anything longer is a fifth column. Deliberately positional rather than
+/// looking for the word `mechanism`: two rows' `promotes to` prose legitimately contains it
+/// (`IC-5` quotes a withdrawn *"mechanism owed"* clause, `IC-12` says the remedy is knowledge
+/// rather than mechanism), so a word scan would red on correct rows and be deleted.
+///
+/// Pure over `text` so [`the_index_mechanism_scan_discriminates`] can feed it known answers.
+fn index_rows_with_extra_cells(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if !line.starts_with("| IC-") {
+            continue;
+        }
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        if cells.len() > 6 {
+            let id = cells.get(1).copied().unwrap_or_default().to_owned();
+            let extra = cells[5..cells.len() - 1].join(" | ");
+            out.push((id, extra));
+        }
+    }
+    out
+}
+
+/// The Index table stores no mechanism status — deleted 2026-09-13, for the `n` column's reason.
+///
+/// **Why deleted rather than gated.** The cell was a second copy of each entry's
+/// `**Mechanism status:**` field, in the one file 23 classes share. Nothing read it:
+/// [`parse_index_rows`] takes the slug cell and stops, [`parse_index_counts`] takes the cell after
+/// it, and [`mechanism_statuses`] scans field lines. So it drifted with nothing to notice —
+/// measured at deletion, comparing each cell's leading verdict word against its field's,
+/// parentheticals ignored: **2 of 23 disagreed.** `IC-13` read `none yet` against a detector that
+/// had shipped 2026-09-03 as `tests/result_caps.rs`; `IC-3`'s cell led with no verdict word at all.
+/// `IC-4`'s own field had already recorded this exact drift on 2026-09-02, named it, and left it.
+///
+/// A gate comparing cell to field was the other candidate and is strictly worse: it compares
+/// across two FILES, so a peer mid-way through a legitimate two-write edit reds it — the hazard
+/// [`every_declared_class_has_an_index_row`] already has to explain in its failure text. Deleting
+/// the copy makes the disagreement unrepresentable instead, which is `CLAUDE.md` § *Observer
+/// Blindness* position 3: the correct path ends in a safe state.
+///
+/// **Vacuity.** An absence assertion, monotone under parser failure — an
+/// [`index_rows_with_extra_cells`] that matched nothing passes forever. Two existing guards stand
+/// against that and are reused rather than reimplemented: [`every_declared_class_has_an_index_row`]
+/// asserts more than ten rows still parse off the same `| IC-` anchor, and
+/// [`the_index_row_parser_discriminates`] proves that parser is not vacuous. The second assertion
+/// here covers the other direction — a header that still advertises the column.
+///
+/// The fenced template block in the Index file carries no specimen `| IC-` row (verified at
+/// deletion: 23 such lines for 23 classes), so no fence skip is needed. Adding a fenced example
+/// row later would arm this gate silently — put it behind a leading space if you need one.
+///
+/// **This test and the hook read DIFFERENT TREES, and the divergence is the interesting part.**
+/// `ledger_text()` reads the worktree; the hook defaults to `--source=index`. So while a
+/// migration of this file is uncommitted, the author's own `cargo test` is green and every
+/// peer's *commit* is refused — the author is the one party who cannot observe their own blast
+/// radius. Measured 2026-09-13, on this rule's first day: the gate and the corpus edit were both
+/// uncommitted, and because `scripts/pre-commit-run.sh` invokes the script from the WORKING TREE,
+/// the rule was live for every session the instant it was saved. **A gate script edited in the
+/// worktree has already shipped** — there is no commit boundary to reason about. Land this rule
+/// and the corpus change in one commit, and until then expect to be the only one who sees green.
+///
+/// Mutation that must kill this: re-add a mechanism cell to any Index row, or the word to the
+/// header.
+#[test]
+fn no_index_row_stores_a_mechanism() {
+    let text = ledger_text();
+
+    let extra = index_rows_with_extra_cells(&text);
+    let rows: Vec<String> = extra
+        .iter()
+        .map(|(id, cell)| format!("{id} — Index row carries a fifth cell: `{cell}`"))
+        .collect();
+    assert!(
+        rows.is_empty(),
+        "the Index table stores mechanism status again:\n  {}\n\n\
+         IF YOU EDITED THE ROSTER — delete the cell. That text belongs in the entry's own \
+         `**Mechanism status:**` under `docs/trackers/issue-clusters/`, and is read back with \
+         `python3 scripts/probe-cluster-census.py`, which renders it beside the verdict. The \
+         column was deleted 2026-09-13 because nothing read it and it had drifted on 2 of 23 \
+         rows.\n\n\
+         IF YOU DID NOT TOUCH THAT FILE this is not your defect and the fix above is not yours \
+         to make — a peer is mid-migration on a shared checkout. Ask them; the question has an \
+         answer they can give:\n    \
+         python3 scripts/file-provenance.py docs/trackers/issue-clusters.md",
+        rows.join("\n  ")
+    );
+
+    let header = text
+        .lines()
+        .find(|l| l.starts_with("| id | class | slug"))
+        .expect(
+            "the Index table header moved — every parser here anchors on it, so they are now \
+             asserting over a table nobody reads",
+        );
+    assert!(
+        !header.contains("mechanism"),
+        "the Index header still advertises a `mechanism` column: {header}\n\n\
+         The rows may already be clean; a header alone is enough to invite the next editor to \
+         refill it."
+    );
+}
+
+/// The known-answer table for the two tests below.
+///
+/// A real `const`, not a copy in each test. [`the_ledger_parsers_agree_on_a_fixture`]'s doc
+/// comment says its fixture "is [`the_bare_n_claim_parser_discriminates`]'s, deliberately" while
+/// the two are in fact separate hand-maintained literals that nothing keeps in step — a shared
+/// intent enforced by nobody. Sharing the binding is the cheap way not to repeat that.
+///
+/// Every row is a planted mutant-killer; the assertions name which mutation each one kills.
+const INDEX_MECHANISM_FIXTURE: &str = "\
+| id | class | slug | promotes to |
+|---|---|---|---|
+| IC-1 | fine | `alpha-slug` | `OB-1` — promoted |
+| IC-2 | refilled | `beta-slug` | `OB-2` | none yet |
+| IC-3 | two refilled | `gamma-slug` | not yet | partial | extra |
+| IC-4 | prose | `delta-slug` | the remedy is knowledge rather than mechanism |
+| IC-5 | quoted | `epsilon-slug` | the *\"mechanism owed\"* clause is withdrawn |
+| note | a table row that is not an index row | `zeta-slug` | x | y |
+";
+
+/// Feeds [`index_rows_with_extra_cells`] a table whose answers are known, covering the ways a
+/// looser parser goes wrong — and, in the last two rows, the way a STRICTER one does.
+///
+/// The `mechanism`-in-prose rows are the load-bearing fixture detail: they are why this parser
+/// counts columns instead of scanning for the word. Delete them and a future rewrite to
+/// `line.contains("mechanism")` looks correct, passes here, and reds the live ledger on `IC-5`
+/// and `IC-12` — both of which say "mechanism" in their `promotes to` cell today, correctly.
+#[test]
+fn the_index_mechanism_scan_discriminates() {
+    let got = index_rows_with_extra_cells(INDEX_MECHANISM_FIXTURE);
+    let ids: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
+
+    assert_eq!(
+        ids,
+        vec!["IC-2", "IC-3"],
+        "only rows with a cell past `promotes to` are findings; got {got:?}"
+    );
+    assert_eq!(
+        got[0].1, "none yet",
+        "the finding must quote the offending cell, so the refusal names what to delete"
+    );
+    assert_eq!(
+        got[1].1, "partial | extra",
+        "two extra cells join rather than reporting only the first — a row refilled twice is \
+         still one row to fix"
+    );
+
+    // The direction a word-scan would get wrong. These rows are CORRECT and must not be findings.
+    assert!(
+        !ids.contains(&"IC-4") && !ids.contains(&"IC-5"),
+        "a four-cell row whose `promotes to` prose contains the word `mechanism` is correct — \
+         both shapes are live in the ledger today, and flagging them is how this gate gets \
+         deleted: {got:?}"
+    );
+
+    // Non-`| IC-` lines are not rows, however many pipes they carry.
+    assert!(
+        !ids.contains(&"note"),
+        "only `| IC-` lines are index rows; got {got:?}"
+    );
+
+    // The header arm, which the row scan cannot see.
+    assert_eq!(
+        INDEX_MECHANISM_FIXTURE
+            .lines()
+            .find(|l| l.starts_with("| id | class | slug"))
+            .map(|l| l.contains("mechanism")),
+        Some(false),
+        "the fixture's header must be CLEAN, so the parity test below pins `header: null` \
+         rather than a value — a fixture that failed both arms could not tell them apart"
+    );
+}
+
+/// The hook script's column-count scan agrees with this one, on a fixture the corpus cannot reach.
+///
+/// Required by the porting contract in
+/// `docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md`:
+/// *"Each ported rule owes its own discrimination test … a fixture with a known answer fed
+/// through the PYTHON implementation, so a check that silently stops matching is not mistaken
+/// for a clean corpus. A ported rule without one converts a Rust guard into a pair where one
+/// half is decoration."*
+///
+/// **Why the live corpus cannot serve here, structurally rather than incidentally.** This rule
+/// exists to keep a deleted column out, so a correct ledger yields zero findings forever. A
+/// corpus-driven comparison is therefore two empty lists — green whether the Python scan works
+/// or has been deleted outright. Compare with [`the_hook_script_agrees_on_the_cluster_parsers`],
+/// which runs against the live worktree and today returns `declared: {}` and `claimed: []` for
+/// exactly that reason: two of its three arms compare empty to empty. This fixture is the only
+/// surface on which the Python side can be shown to return a non-empty answer.
+///
+/// Mutation that must kill this: change the Python's `len(cells) > 6` bound, drop its
+/// `startswith("| IC-")` anchor, or make it scan for the word instead of counting columns.
+#[test]
+fn the_hook_script_agrees_on_the_index_mechanism_scan() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-index-mechanism",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(INDEX_MECHANISM_FIXTURE.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        extra: Vec<(String, String)>,
+        header: Option<String>,
+    }
+    let theirs: Reply =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON object");
+
+    assert_eq!(
+        index_rows_with_extra_cells(INDEX_MECHANISM_FIXTURE),
+        theirs.extra,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about which Index rows carry \
+         a cell past `promotes to`"
+    );
+    assert!(
+        !theirs.extra.is_empty(),
+        "the Python side returned nothing on a fixture with two planted findings — the check is \
+         present but no longer matching, which on the live corpus is indistinguishable from a \
+         clean ledger"
+    );
+    assert_eq!(
+        theirs.header, None,
+        "the fixture header is clean, so the Python header arm must return null; a value here \
+         means it matches something it should not"
+    );
+}
+
 /// Every declared class has an Index row — the emptiness guard for [`no_index_row_stores_a_count`].
 ///
 /// If [`parse_index_rows`] matched nothing — a renamed column, a reformatted table, a slug cell
@@ -1651,6 +1894,7 @@ const HOOK_OWED: &[&str] = &[
     "every_open_bug_file_declares_one_known_defect_class",
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
+    "no_index_row_stores_a_mechanism",
 ];
 
 /// Rules the hook enforces that CANNOT be a test here, with the reason it cannot.
@@ -1746,10 +1990,21 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "cross-language parser parity over the live corpus; a test OF the hook",
     ),
     (
+        "the_hook_script_agrees_on_the_index_mechanism_scan",
+        "cross-language parser parity over a fixture; a test OF the hook, and the only surface \
+         where the Python column-count scan can return a non-empty answer",
+    ),
+    (
         "the_index_file_holds_no_class_sections",
         "OWED, not yet implemented — cheap (the Index file must hold no `## IC-N —` heading) \
          and grouped with the other two rather than shipped alone; \
          docs/issues/2026-09-11-three-ledger-rules-are-tested-but-not-enforced-at-commit-time.md",
+    ),
+    (
+        "the_index_mechanism_scan_discriminates",
+        "vacuity guard for the column-count scan; also pins that a four-cell row whose prose \
+         mentions the deleted column is NOT a finding, which is the direction a word-scan \
+         rewrite would get wrong",
     ),
     (
         "the_index_row_parser_discriminates",
