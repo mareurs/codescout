@@ -741,6 +741,28 @@ never the corpus*, committed inside a table about failing to check — which is 
 arriving a third time, in the entry. Caught by `aa272bed`, who ran the rule on a figure that flattered
 them.
 
+**A SECOND FAILURE MODE, WHICH THIS ENTRY'S PROPOSED MECHANISM DOES NOT TOUCH — and it was found in
+the correction rather than in the thing corrected.** The 7-vs-9 gap was not only the author's
+undercount. `aa272bed`'s *"seven"* was never derived: it was **imported from a neighbouring corpus**
+— the architecture-probe bug count they had written into that tracker's defect inventory twenty
+minutes earlier (6 probe bugs + `background-command-loses-terminal-status`), filed by a different,
+absent author and about a different class entirely. Salient, plausible for *"filings tonight"*, and
+from the wrong population.
+
+That is `CLAUDE.md` § *Testing Discipline* exactly: *"Derive it, don't cite it: one population
+yielded four defensible numbers inside an hour, each the right answer to a different question — and
+near enough to each other that no reader would have queried any of them."* **Seven and nine are near
+enough.** Nothing about 7 looked wrong; it was re-derived only because the author happened to be
+checking their own half.
+
+**The remedies diverge, which is why this is a separate paragraph and not a footnote.** Failing to
+check prior art is answered by a scan at filing time — the mechanism this entry proposes. *Reaching
+for the nearest available number when the correct one requires a derivation* is **not**: no scan
+reaches it, because nothing is missing and nothing is stale. The number is simply an answer to a
+question nobody asked. The remedy for that one is the rule already written — **state the unit, or do
+not state the number** — and it is a writing-time discipline, not a hook. An entry proposing a
+mechanism should say plainly which of its own failures the mechanism would not have caught.
+
 **This is NOT an `OB`, and the admission test is what says so.** *Would a more careful version of the
 same party have caught it?* Yes — one `git grep`, no special access, no held parameter. It fails the
 test cleanly. The right name is an **unpaid cost**, not a blind spot, and filing it as an `OB` would
@@ -776,7 +798,25 @@ the mechanism** — that conflation was mine, corrected by `f0b1a4c7`.
    worst at and an embedding is best at. (Trigger and instrument both proposed by
    `aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`, improving on the commit-time version below.)
 2. **FALLBACK: the `docs/issues/*.md` pre-commit path**, which `scripts/pre-commit-run.sh:157`
-   already runs rules on. Later, and grep-based, but it needs nothing new wired.
+   already runs rules on. Later, and grep-based, and — measured — **not sufficient on its own.**
+
+**WHY GREP IS THE FALLBACK AND NOT THE MECHANISM, which took a retraction to establish.** The
+original framing of this entry was that prior art is *"checkable in one command, which is what makes
+not checking indefensible rather than merely unlucky."* That is **too strong**, and its author
+withdrew it. Their own neighbour was found with `git grep -il 'reads the index'` — which worked
+because that neighbour's **title** happens to contain the phrase. Lexical luck. The two neighbours
+found on the other half of the tally share almost no distinctive tokens with the files that missed
+them: `file-provenance-conflates-touched-once-with-bytes-at-risk` against
+`file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head` are the same window failing in
+opposite directions, and no single grep term reaches both. **So the one command returns nothing, and
+a nothing from a prior-art grep reads as *"no prior art"* rather than *"wrong query"*** — this
+entry's own narrow tail, arriving inside the claim that proposed it.
+
+That is the argument for semantic search over grep, and it is stronger than *"earlier"*: an
+embedding does not require the author and the prior filer to have chosen the same words, which is
+exactly what two people describing opposite halves of one mechanism will not do. (Retraction and
+the lexical-luck diagnosis by `f0b1a4c7-e991-4478-bf22-b088483b6821`, generalising against
+themselves.)
 
 Either beats the discipline none of the filers kept on the day they were all thinking hardest about
 it.
@@ -794,10 +834,14 @@ it.
   archived bug files, no candidates"* — or the silence is indistinguishable from the check not
   running. Same law as `H-13` and the same as the home-path gate's missing denominator.
 
-**Deliberately NOT built yet.** One evening of three sessions is one evening, and the `**Valid:**`
-condition above states what would promote it. Raised and sharpened by
-`f0b1a4c7-e991-4478-bf22-b088483b6821`, whose correction supplied both the SKF-22 citation and the
-trigger; the not-an-OB half is mine and was the easier half.
+**Deliberately NOT built yet.** One evening of two filers is one evening, and the `**Valid:**`
+condition above states what would promote it. The not-an-OB classification is this author's and was
+the easy half. The corrections that make the entry worth keeping are not: the SKF-22 citation and
+the grep retraction are `f0b1a4c7-e991-4478-bf22-b088483b6821`'s; the `doc(action="create")` trigger,
+the semantic-search instrument, the OB/unpaid-cost scope separation and the table correction are
+`aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66`'s. **The two prior-art neighbours in `bdc13887` are this
+author's own find** — prompted by `f0b1a4c7`, run and diagnosed here — and are credited that way
+because they asked for the narrowing.
 
 **Rests on:** `b93cfb34`, `bdc13887`, `e2b5acaf` — three commits adding prior-art citations that
 should have been present at filing time.
