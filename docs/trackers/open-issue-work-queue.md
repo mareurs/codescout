@@ -42,7 +42,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 
 | ID | Ph | Task | Status | Bug |
 |----|---:|------|--------|-----|
-| BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | done | `875e5d03d980ceac` |
+| BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | done | `2bd71246fc807cba` |
 | BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | done-archived | `8e665c2d041ebb04` |
 | BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | done-archived | `02d2d9d8a7eeec2e` |
 | BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | done-archived | `fc00c33f2403ae8a` |
