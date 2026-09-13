@@ -8,6 +8,7 @@ owners:
 tags:
 - cluster/unclassified
 topic: catalog/file write atomicity
+unverified: 'Partial: bf068e61 fixed doc(action=update) only. The identical file-write-then-commit window in append_entry (src/librarian/catalog/augmentation.rs) is confirmed and NOT fixed -- a tx.commit() failure after a successful std::fs::write leaves the section on disk with its id never persisted, and a retry allocates a fresh id and writes a second section. Left unfixed because a peer session was actively editing that function (adding a `section` parameter), so it was flagged to them rather than edited concurrently. Ordering is also unchanged by design: catalog-first was considered and rejected.'
 ---
 
 ## Summary

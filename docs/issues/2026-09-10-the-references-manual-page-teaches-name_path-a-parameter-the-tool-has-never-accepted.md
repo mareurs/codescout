@@ -7,7 +7,7 @@ owners:
 - marius
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-09-12
 opened: 2026-09-10
 related: []
 severity: low
