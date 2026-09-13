@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: investigating
 tags:
 - cluster/addressing-without-an-escape-hatch
 closed: null
@@ -166,6 +166,41 @@ trusting it on a tracker whose body holds more than one `| PREFIX-N |` table.
 Blocks BL-29's third option (`docs/trackers/open-issue-work-queue.md`): defaulting
 `index_after_line` to the last snapshot row requires knowing which rows are snapshot
 rows, which is exactly what this defect denies.
+
+**BLOCKED ON ONE RULING before implementation — `bug-fix-session-log:F-136` (2026-09-13).** The
+fix direction above is settled on the CHOICE and silent on the DEFAULT: it never says what an
+**absent** `snapshot_anchor` means, and on day one that is every augmented tracker — **24** of them
+(`doc(action="find", kind="tracker", augmented=true)`, tree `2e8a8361`; the catalog is gitignored, so
+re-derive rather than cite). The two available defaults fail in opposite directions over the same 24
+rows:
+
+- **absent ⇒ scan the whole body** (today's behaviour) preserves the exact false negative this bug
+  was filed to remove, for every tracker, until someone hand-declares an anchor — the fix ships
+  without fixing anything observable;
+- **absent ⇒ no snapshot block** makes `body_snapshot_row_indices` empty, so `body_keeps_snapshot`
+  early-returns `false` and `snapshot_drift` goes silent across all 24 at once — the
+  `tool-usage-patterns` false-positive direction, inverted and corpus-wide.
+
+Neither is visible at unit-test grain: fixtures get written to whichever assumption the implementer
+holds, and the suite then confirms it (§ *Testing Discipline*'s population-vs-member law).
+
+**A third option the list above does not carry**, offered for the ruling rather than assumed:
+*absent ⇒ scan the whole body **and** emit the undeclared state as a `doctor` finding*, so the 24
+become a worklist that drains instead of a silent default. Backward-compatible, makes the gap
+countable, and respects the ADR asymmetry this bug already cites — a **read** may fall back, a
+**write** may not.
+
+**Implementation shape, already scouted, so the next session need not re-read it:**
+`column_exists`-guarded `ALTER TABLE artifact_augmentation ADD COLUMN snapshot_anchor TEXT`
+(precedent: `entry_collection` at `src/librarian/catalog/mod.rs:167-173`); a 14th field on
+`AugmentationRow`; `row_from_sql` is **positional**, so it becomes `row.get(13)` and every `SELECT`
+column list must move in step; three consumers to thread it through — `augmentation.rs:530`
+(`snapshot_stale_note`), `augmentation.rs:724` (`append_entry`), `doctor.rs:4350`
+(`scan_snapshot_drift`).
+
+**Claim released deliberately:** worked 2026-09-13 by sessionId
+`9403d62d-116b-46ea-ac9b-004acff2b1cb` and set back to `investigating` rather than left `taken`,
+because no live session holds it — the ruling is the blocker, not the typing.
 
 ## References
 
