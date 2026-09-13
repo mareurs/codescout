@@ -557,6 +557,47 @@ who had been withholding learned of it by re-deriving the count during an unrela
 reconnaissance — not from any notification, which is the same blind spot
 `docs/issues/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
 names for a different write.
+
+### Instance 2026-09-13 (third) — the mechanism WORKED, published as a denominator
+
+Third push attempt on the same stack, same day. This one resolved correctly end to end, and it is
+recorded for the reason § *Testing Discipline* gives: a file that collects only failures makes the
+class look unsolved, and a confirmation is a **denominator**, never a catch.
+
+**What happened.** SessionId `eba3d2c6-…`, told by its operator to push everything, hit the guard
+at an uncleared rung and **asked the three-state question** rather than acking through it. This
+session answered `uncleared` (not withheld for cause — no authorization of its own), took the
+question to its operator, got clearance, and pushed **its own two commits by refspec**. `eba3d2c6`
+pushed only its own. Neither pushed the other's. The ladder advanced
+`db631424 → c10e54b6 → 5ea1f2ad` in three separate pushes by two authors, and at no point did
+either party publish work belonging to anyone who had not been asked.
+
+It then stopped, correctly. The next rung `4f268eb1` belongs to `8bd791df-…`, who had been asked
+earlier and answered **withheld** — the third branch, explicitly *"do not push it"*. It was
+respected. Every push in this sequence was a refspec naming one author's own tip; the binary
+*"is it withheld?"* that `OB-20` records as unanswerable was never asked, because the form that
+replaced it can represent the state an author mid-task actually holds.
+
+**And the new structural fact, which is the part worth more than the confirmation: A CLEARED
+COMMIT ABOVE A WITHHELD ONE IS NOT PUSHABLE, AND NO AUTHORIZATION CHANGES THAT.** Clearance is
+granted per **author**; a push sends a **prefix**. This session's `2d1b90cc` and `e50afb66` are
+cleared by their operator — standing clearance, no further question needed — and are pinned behind
+`4f268eb1` anyway, confirmed with `git merge-base --is-ancestor 4f268eb1 2d1b90cc`. So *"get your
+own commits cleared"* is **not** sufficient to publish them, and an author who believes clearance
+is what stands between them and a push has the model wrong.
+
+**That is also where the pressure to bypass comes from, and naming it is the point.** One genuine
+withhold freezes every commit above it, from every session, including cleared ones — blast radius
+unbounded upward and rising with stack depth. The ladder is correct and this is its cost: the
+party who most wants the withhold overridden is never its author, it is whoever is stacked above,
+and that party grows over time. Any future remedy that makes asking cheaper is worth more than one
+that makes refusing louder — the refusal already works, and what it costs is what will eventually
+buy someone's bypass.
+
+**One session in the stack, `eb54c34f-…`, holds five rungs and has been contacted by nobody all
+day** — it committed `9bce79c7` during this very exchange. It is not withholding; it has never
+been asked. That is the failure mode this file is about, sitting in the same stack as the success
+above it, and the difference between them is entirely whether a channel was opened.
 ## Hypotheses tried
 
 1. **Hypothesis:** reading `git log origin/<branch>..HEAD --stat` before pushing
