@@ -166,13 +166,23 @@ claim that the old name works), and `name_path` as an internal Rust struct field
 
 ## Fix provenance
 
-Fixed on `experiments` — SHA `8b5084749bf637065b904afa3e2789bfa209094c`, patch-id
-`7f1c3570357d4702c8c01fbfdb474428d5e1838c`.
+- **SHA:** `8b5084749bf637065b904afa3e2789bfa209094c`
+- **patch-id:** `7f1c3570357d4702c8c01fbfdb474428d5e1838c`
+
+**What it cost to satisfy this check, recorded because the message does not say it.** Three
+forms were tried and only the third discharged it: `closed: 2026-09-12` in frontmatter (the
+date was correct and necessary, and moved the count not at all), then this heading carrying
+the same facts in PROSE (also no change), then the two bullets above. The detector's text
+reads *"no `## Fix provenance` pointer is declared"* and *"Record both lines"* — and *both
+lines* is literal: it parses `- **SHA:**` and `- **patch-id:**` as structured fields, so a
+section with the right heading and the right hashes in a sentence satisfies nothing. A reader
+who has the facts and writes them readably gets a refusal that says the section is absent when
+it is present and merely unparseable, which is a worse failure than silence because it sends
+them to add a heading they already added.
 
 **Why this section exists when `## Fix` above says the same thing.** `doctor`'s
-`terminal_status_without_fix_anchor` reads a declared `## Fix provenance` pointer, not prose
-under `## Fix`, and not the frontmatter `closed:` date — setting that date alone left the check
-firing, which is how this section came to be written. The pair is the anchor: the SHA is
+`terminal_status_without_fix_anchor` reads this declared section, not prose
+under `## Fix`, and not the frontmatter `closed:` date. The pair is the anchor: the SHA is
 positional and dies when `experiments` is rebased (which happens after every ship), the patch-id
 is a content hash of the diff and survives rebase *and* cherry-pick.
 
