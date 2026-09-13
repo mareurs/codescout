@@ -162,7 +162,7 @@ fn escaping_sites() -> Vec<(String, String, String)> {
 
 /// What `cargo package` would actually ship for `pkg`. `Err(cause)` if cargo could not answer,
 /// carrying cargo's own stderr — previously collapsed to `None`, discarding the one artifact
-/// that would have named why (`docs/issues/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`).
+/// that would have named why (`docs/issues/archive/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`).
 fn packaged_files(pkg: &str) -> Result<BTreeSet<String>, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let out = Command::new(&cargo)
@@ -231,7 +231,7 @@ fn every_escaping_include_str_survives_cargo_package() {
     );
 }
 
-/// `docs/issues/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`: a forced
+/// `docs/issues/archive/2026-09-02-a-gate-reports-it-could-not-run-and-discards-why.md`: a forced
 /// `cargo package --list` failure must surface cargo's own stderr, not just an opaque `None`.
 /// Forced with a package name that cannot exist in this workspace, rather than mocking the
 /// process, so the assertion is against real cargo behavior.
