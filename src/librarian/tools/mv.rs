@@ -928,6 +928,34 @@ mod tests {
         );
     }
 
+    /// Direct unit test on the boundary itself, not just an end-to-end citation-found
+    /// assertion -- credited to a peer's mutation finding: `assert!(listed.iter().any(...))`
+    /// in the integration test can be satisfied by an OVERLAPPING substring rather than the
+    /// exact slug, because a citer's text is itself matched by `-F` substring search. Proven
+    /// live: mutating the slice bound from `stem[11..]` to `stem[12..]` produces
+    /// `"xample-bug"` instead of `"example-bug"` -- one byte short -- and the integration
+    /// test above still passed, because `"xample-bug"` is *also* a substring of the citer's
+    /// `"example-bug"` text. `assert_eq!` on the exact output has no such overlap to hide
+    /// behind.
+    #[test]
+    fn dateless_slug_strips_exactly_the_date_prefix() {
+        assert_eq!(
+            super::dateless_slug("2026-09-13-example-bug"),
+            Some("example-bug"),
+            "must strip exactly the 11-byte YYYY-MM-DD- prefix, no more and no less"
+        );
+        assert_eq!(
+            super::dateless_slug("not-a-dated-stem"),
+            None,
+            "a stem without dashes at positions 4, 7, 10 has no dateless form"
+        );
+        assert_eq!(
+            super::dateless_slug("2026-09-13"),
+            None,
+            "exactly the date with nothing after it has no slug to return"
+        );
+    }
+
     /// The id scan reports `null` when it could not run, exactly as its path twin does.
     ///
     /// Mirrors `a_citation_scan_that_cannot_run_reports_null_not_an_empty_list` on purpose:
