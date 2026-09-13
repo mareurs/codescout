@@ -119,7 +119,7 @@ server advertises every tool the redirect names, on every start.**
 *(This sentence named **six** until 2026-09-07 while the table below listed **seven** missing —
 `CreateFile` was in the table and out of the prose. Caught by `cda3afe5` spot-checking the
 exoneration rather than taking it. It is the count-versus-its-own-enumeration defect from
-`docs/issues/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`,
+`docs/issues/archive/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`,
 committed for the third time today by this author, inside the file that reports it. The number
 came from the registration site and the list came from my own tool set; nothing reconciled
 them.)*

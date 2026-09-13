@@ -73,7 +73,7 @@ Not implemented. Two halves, and only the first is code:
 2. **The ordering rule, which needs no code and is already recorded.** Move BEFORE writing
    the citation; a Members line written afterwards already names the new path. Contributed
    by `8bd791df` from instance 2 and now in
-   `docs/issues/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`
+   `docs/issues/archive/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`
    § Fix. It is a **sequence rather than a check**, so it does not require anyone to
    remember the field is unreliable.
 
@@ -104,7 +104,7 @@ under-match (`IC-18`). Same namespace ambiguity, two classes, by design.
 
 ## References
 
-- `docs/issues/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`
+- `docs/issues/archive/2026-09-07-verifying-a-move-by-slug-cannot-distinguish-the-two-path-forms.md`
   — the mirror direction, and where the ordering rule lives.
 - `docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md` — the class.
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the ruling half (1) above

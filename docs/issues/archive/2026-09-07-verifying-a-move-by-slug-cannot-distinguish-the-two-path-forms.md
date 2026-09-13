@@ -1,7 +1,7 @@
 ---
-id: b8c0716a0fd4c17d
+id: d840fae563de18d4
 kind: bug
-status: open
+status: fixed
 title: 'BUG: verifying an archive move by grepping the slug cannot separate fixed citations from broken ones, because the slug is a substring of both path forms'
 owners:
 - marius
@@ -11,6 +11,8 @@ tags:
 - shared-checkout
 - measurement
 topic: verifying a citation sweep, and the pattern that cannot answer it
+claimed_at: 2026-09-13
+claimed_by: eba3d2c6-c1fe-4506-8e2b-a36417e4d9e4
 ---
 
 ## Summary
@@ -212,8 +214,15 @@ Not fixed; the remedy is a documented practice, not code.
 - **Emit the list, then count the list — never the corpus.** Instance 1 is a headline derived from
   the tool and an enumeration derived from the eye, with nothing reconciling them.
 
-Where this belongs is `get_guide("tracker-conventions")` § *Bug files*, beside the existing sweep
-recipe, since that is the surface a session archiving a bug actually opens.
+**Fixed 2026-09-13.** Shipped `17d4b09d` on `experiments`, patch-id
+`d78515b5834c1e9542a439bbc9118bb7768c8343` — the six bullets above added to
+`get_guide("tracker-conventions")` § *Bug files*, beside the existing sweep recipe (the surface a
+session archiving a bug actually opens), verbatim as drafted in this file. `"docs/issues/<name>.md as
+a literal prefix"`, the archive-form control, the move-before-cite ordering, and the
+`inbound_path_citations` caveat are now load-bearing prose there rather than only recorded here.
+`prompt_surfaces_reference_only_real_tools` and the full gate (fmt, clippy, lean 3529/0, default
+5487/0) confirmed clean — a prose-only change, so no new test was written; the existing prompt-surface
+guard is what could have caught a stale tool name and did not fire.
 
 ## Tests added
 
