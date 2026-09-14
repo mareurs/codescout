@@ -186,12 +186,46 @@ Not implemented. The change is to each recipe, not to the code:
 table row defines no citable token and that the table is worth keeping if it reads well; the
 defect is the protocol taught for maintaining it, not the table.
 
-**The durable half is a gate, and it is not obvious what it asserts.** A check that every
-append passes `index_row` would be wrong — 28 of 49 guarded ledgers keep no row table. The
-assertion that fits is on the *documentation*: a recipe that names `append_entry` and mentions
-an index row must also name `index_row`. That is shape-testable in the way
-`src/prompts/mod.rs`'s surface tests already are, and it reds on exactly the regression that
-happened. Not built here; argued so the next person does not start from scratch.
+**The durable half is a gate, and the precedent above does not just support it — it rules out
+the obvious form.** `the_hook_script_agrees_on_the_cluster_parsers` (`tests/issue_clusters.rs:1479`)
+failed in two ways, and each predicts a way a worked-example gate would be decoration. Addendum
+from sessionId `6be73414-…` (`bug-fix-session-log:F-146`, `ed777457`), who read the test rather
+than taking this file's summary of it:
+
+| candidate gate | analogue | verdict |
+|---|---|---|
+| *the example's parameters are a subset of the schema's* | parser parity | **decoration** — passes whenever today's example names every parameter it USES, and says nothing about the ones it OMITS, which is this defect exactly |
+| *where a schema declares a coupling, an example using either parameter must use both, and one using neither must say why* | rule parity | **reds on the recipe we both followed** — `index_row` / `index_after_line` are both-or-neither and the recipe names neither |
+
+The second form is better than the one this file proposed first (*"a recipe naming
+`append_entry` and an index row must also name `index_row`"*), which is the right KIND — keyed
+on an omission, not a subset — but hand-picked: a human had to know *"index row"* was the
+trigger phrase. Deriving the trigger from the schema's own declared coupling generalises to
+every coupled pair without anyone choosing phrases, and carries a *"say why"* escape, which is
+the forcing function `NOT_HOOK_OWED` already uses in this repo.
+
+**Both of the precedent's failure modes are real, and one is verifiable in a single command.**
+`python3 scripts/pre-commit-ledger-counts.py --source=worktree --json` returns
+`"claimed": []` and `"declared": {}` today — **two of that test's three arms compare empty to
+empty**, so the corpus cannot reach the branches and a deletion there is invisible to it. Run
+2026-09-14 by this session. The second failure is not vacuity but SCOPE: parser parity is not
+rule parity, nothing compared the rule SETS, and the one-tag rule was absent from the hook for
+months while redding the shared gate
+(`docs/issues/archive/2026-09-09-the-pre-commit-cluster-hook-enforces-a-subset-of-the-gate-it-mirrors.md`).
+
+*Reported and not re-run here:* `F-146` states that dropping the inline-`[a, b]` arm from the
+Python leaves that parity test green, verified there by mutation. This session did not reproduce
+it and does not assert it — `cluster_tags` feeds `actual_counts`, which is the one arm that is
+NOT empty, so the outcome may depend on whether the corpus carries a flow-style tag on the day.
+Re-derive before citing it.
+
+**Do not close this by deleting the index tables.** `get_guide("librarian")` is explicit that a
+table row defines no citable token and that the table is worth keeping if it reads well; the
+defect is the protocol taught for maintaining it, not the table.
+
+A check requiring every append to pass `index_row` would also be wrong — 28 of 49 guarded
+ledgers keep no row table. The assertion belongs on the *documentation*, in the coupling form
+above.
 
 Fix SHA: *(not yet fixed)*
 Patch-id: *(not yet fixed)*
@@ -240,7 +274,10 @@ This file claims only that the recipes did not migrate.
   `19bee2ac`, the commit that carried two authors' work because neither could pathspec out of it.
 - `docs/trackers/issue-clusters/IC-11-doc-contradicted-by-code.md` — the class, for the recipe
   half only; see § Root cause on why the rank half has none.
-- `docs/trackers/bug-fix-session-log.md` § `F-146` (`23651065`) — sessionId `6be73414-…`'s entry
-  from the other side, and the source of the rank correction to § Root cause. Written with
-  `index_row` + `index_after_line` in a single call, which is also the first independent
-  confirmation that the workaround in this file behaves as documented.
+- `docs/trackers/bug-fix-session-log.md` § `F-146` (`23651065`, addendum `ed777457`) — sessionId
+  `6be73414-…`'s entry from the other side: the source of the rank correction to § Root cause and
+  of the two-gate table in § Fix. Written with `index_row` + `index_after_line` in a single call,
+  which is also the first independent confirmation that the workaround in this file behaves as
+  documented. It carries the inclusion test for the rank half, for whoever meets a second
+  instance: *a second copy of a contract that decays independently of the original and outranks
+  it at composition time.*
