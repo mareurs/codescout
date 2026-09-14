@@ -118,7 +118,7 @@ fn without_test_module(src: &str) -> &str {
     }
 }
 
-fn offending_sites() -> Vec<(String, String)> {
+fn offending_sites() -> Vec<(String, usize, String)> {
     let allowed: BTreeSet<&str> = ALLOWED.iter().map(|(f, _)| *f).collect();
     let mut hits = Vec::new();
     for rel in tracked_src_files() {
@@ -127,11 +127,29 @@ fn offending_sites() -> Vec<(String, String)> {
         }
         let src = std::fs::read_to_string(repo_root().join(&rel))
             .unwrap_or_else(|e| panic!("failed to read {rel}: {e}"));
-        for stmt in without_test_module(&src).split(';') {
+        let body = without_test_module(&src);
+
+        let mut offset = 0usize;
+        for stmt in body.split(';') {
             if statement_is_resolve_then_pick(stmt) {
-                let flat = stmt.split_whitespace().collect::<Vec<_>>().join(" ");
-                hits.push((rel.clone(), flat.chars().take(140).collect()));
+                // Locate the `.get(` INSIDE the statement, not the statement's start. A
+                // `;`-split statement begins at the tail of its predecessor — closing braces,
+                // a doc comment for the next item — so reporting its head printed
+                // "} } } path } /// Read from an output buffer ref" and sent the reader
+                // nowhere. Observed when the guard's own mutation was run; the predicate was
+                // right and its locator was noise, which no assertion here would have caught.
+                let rel_pos = stmt.find(".get(").unwrap_or(0);
+                let line = body[..offset + rel_pos].matches('\n').count() + 1;
+                let excerpt: String = stmt[rel_pos.saturating_sub(40)..]
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(120)
+                    .collect();
+                hits.push((rel.clone(), line, excerpt));
             }
+            offset += stmt.len() + 1; // +1 for the ';' the split consumed
         }
     }
     hits
@@ -143,7 +161,7 @@ fn stream_selection_is_not_reinvented_per_caller() {
     let offenders = offending_sites();
     let rendered: Vec<String> = offenders
         .iter()
-        .map(|(f, s)| format!("  {f}\n      {s}"))
+        .map(|(f, line, s)| format!("  {f}:{line}\n      …{s}"))
         .collect();
 
     assert!(
