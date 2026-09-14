@@ -1,8 +1,10 @@
 ---
 kind: bug
-status: open
+status: taken
 tags:
 - cluster/unclassified
+claimed_at: 2026-09-14
+claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
 closed: null
 opened: 2026-09-14
 owner: marius
@@ -62,16 +64,66 @@ contended by three concurrent `cargo test --workspace` runs.
 
 ## Root cause
 
-Unknown — not investigated. The shape is a cached or in-flight compile result surfaced without
-a freshness check, but which layer holds the staleness is unestablished: it could be an LSP
-diagnostic cache, a memoised `cargo check`, or a result computed before the edit and delivered
-after. **Inferred from the symptom, not measured** — recorded this way deliberately rather
-than picking the plausible one, per this repo's own rule that an unmeasured mechanism is a
-hypothesis wearing a conclusion's clothes.
+**ESTABLISHED 2026-09-14 at `27f3627a`, by reading the three functions that own the state
+machine.** It is the third of the three candidates this section originally listed — a result
+computed before the edit and delivered after — and not an LSP or `cargo` cache. There are **two**
+independent defects, and the second is the one the § Fix directions do not reach.
 
-What IS established: the advisory's content was true earlier in the session and false when
-shown, and nothing in its text distinguishes those.
+### 1. The trigger that would clear the notice is DROPPED, and dropped silently
 
+`on_source_write` (`src/agent/build_check.rs:469-512`) gates on `may_start`:
+
+```rust
+if !st.may_start(Instant::now(), env.debounce) {
+    return;                       // no state change, no pending flag, no record
+}
+```
+
+and `may_start` (`:196-199`) is `!matches!(self.state, Running) && debounce_elapsed(...)`.
+
+So **any write landing while a check is in flight is discarded entirely.** `SessionBuildState`
+(`:172-179`) is `{ edits, state, last_started }` — there is no `pending`/`dirty` field, so a
+suppressed trigger leaves nothing to replay. The window is not the 1500 ms debounce
+(`DEBOUNCE_DEFAULT`, `:78`) but the **check's own duration**, documented in this module's header
+as a measured ~7 s `--all-targets` incremental — roughly 4.7x the debounce.
+
+**The write most likely to be discarded is the one that FIXES the tree.** Break at T0 and the
+check starts at T0; the repair lands somewhere inside T0+1.5s..T0+7s, which is exactly the
+interval `may_start` refuses. Nothing after that burst writes `.rs`, so nothing re-checks.
+
+### 2. The in-flight result then overwrites state AFTER the repair
+
+The spawned task closes over `edits` cloned at spawn time and ends:
+
+```rust
+let outcome = run_once(&root, &edits, &env).await;
+if let Ok(mut st) = slot.lock() { st.state = outcome; }   // unconditional
+```
+
+So the failure is not merely *retained* across the repair — it is **written down several seconds
+after the repair landed**, by a check that began before it, over a file list that predates it.
+That is why the gate could run green minutes later and change nothing.
+
+### 3. Delivery cannot detect any of this, by signature
+
+`take_notice(state: &mut BuildCheckState)` (`:528`) receives no instant, no tree state, no edit
+generation — and `BuildCheckState::Done { my_break, delivered }` (`:149-153`) stores none. The
+reader is structurally incapable of telling a 2-second-old result from a 40-minute-old one. This
+is `OB-20`'s shape one layer down: the notice ARRIVES correctly and says nothing answerable,
+because the party rendering it holds no input that could falsify it.
+
+### Why that changes § Fix
+
+"Carry the result's instant" addresses **3** and neither **1** nor **2**. A correctly-stamped
+notice about a tree repaired forty minutes ago is still a notice about a tree repaired forty
+minutes ago; the reader now knows it is old, which is not the same as knowing it is false. The
+defect that has to be closed is the dropped trigger — a `pending` flag re-armed on suppression
+and drained when a check completes, so the repair's own write re-checks.
+
+**Not yet reproduced by observation.** The chain above is three unconditional code paths plus
+one branch; the branch (`may_start` false while `Running`) is the only part a test needs, and
+that test is owed with the fix. A live reproduction requires reddening a checkout shared with
+five live sessions, which is `9ca234d453d61233` and was declined.
 ## Evidence
 
 Three independent readings within the same minute, two of them authoritative:
@@ -121,6 +173,6 @@ the result is cached, memoised, or merely late.
 
 ## References
 
-- `docs/issues/2026-09-14-audit-doc-refs-omits-the-one-ref-kind-every-archive-breaks.md` — the
+- `docs/issues/archive/2026-09-14-audit-doc-refs-omits-the-one-ref-kind-every-archive-breaks.md` — the
   change being edited when this fired
 - `CLAUDE.md` § *Bug Tracking* — misleading errors from codescout's own MCP tools are in scope
