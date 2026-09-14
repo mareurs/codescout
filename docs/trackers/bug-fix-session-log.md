@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 154
+entry_high_water_F: 155
 entry_high_water_W: 135
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 135
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-155 | 2026-09-14 | med | cross-session | open | **A peer attributed a staged changeset to me by TOPIC, and topic adjacency survives an explicit handoff.** `codescout-e7` named *"your `.err` changeset"*; the `.err` read-side is peer `40130`'s, handed to them by me in writing that evening. No harm — they committed by pathspec and left it alone — but a sweep would have landed it under my name. `CLAUDE.md` § *Reaching a Peer Session* names only **diff** adjacency (*"`git diff --stat` names insertions and names no author"*); this attributed by **who is associated with the subject**, a reading that never touches the tree. **A handoff is visible only to its parties** — I told `40130`, not the room — and no tool records a transfer: `file-provenance.py` returned `UNKNOWN`, and the socket route answers who *sent a message*, not who *owns a changeset*. Tell: announce a handoff to the room, and say *"is this yours?"* rather than *"your changeset"*. |
 | F-154 | 2026-09-14 | med | reasoning/citation-resolution | open | **Refuted a peer's citation by finding a sound match in a file they never named — verification succeeded, on the wrong object.** They said "the hook's `four`" meaning `codescout-companion/hooks/pre-edit-dirty-check.mjs:118`, a **runtime advisory** claiming "Four such captures are recorded in" a file whose highest instance is now **14**. I checked `scripts/pre-commit-foreign-index.sh:144`, found "all four arms" (test arms, sound, not stale), and sent a correction that was itself the error it described. **A confirming match terminates a search**, so finding a *sound* "four" was worse than finding none — it converted an unfinished search into a confident refutation. Distinct from `F-150` (region of input space), `F-151` (shape of search) and `F-153` (right command, wrong pair): this is the right command, correctly run, on the **wrong artifact**, resolved by token rather than referent. Tell: quote the file:line you checked back to the other party *before* concluding — the mismatch is visible with no further reading. Their hook also contradicts itself in place ("Four such captures" four lines above "instance 5"), so it was never once-true. |
 | F-153 | 2026-09-14 | med | cross-session | open | **Ran the bytes check `F-147` prescribes, pointed at the wrong PAIR — and its output is smallest exactly when the capture is worst.** `2aec3cd4` carried peer `codescout-e7`'s whole `## F-152` section plus their `entry_high_water_F` bump. I ran `git diff -- <file>` after committing, read `1 insertion`, and reported the peer's work safe. `git diff` is worktree↔index; the question was index↔HEAD. Their section was already absorbed into my index, so the calm number was the *signature* of the capture, not evidence against it. Second instance in one day by the author of `F-147`, three commits after committing `F-147`'s own text into the captured file. Nothing lost (`432e379f` holds the index row). Tell: *"what am I about to commit?"* is answered only by `git diff --cached`; `git diff` answers *"what am I leaving behind?"*, and that answer shrinks as the capture grows. |
 | F-152 | 2026-09-14 | med | record-vs-code drift | fixed-verified | **Repaired a per-SITE defect per-FEATURE, then recorded it as done.** `7e9619698bebe094` read *"Direction 2 IMPLEMENTED (`b21ad3b4`)"*; scouting that record's own § *Resume* precondition showed the direction had shipped at **one of four** sites. `project_security_config` copies the whole `SecuritySection`, so every refusal prescribing a `.codescout/project.toml` edit is defeated by the same per-process cache — `indexing_enabled`, `shell_command_mode` and `max_index_bytes` were all still sending readers to an edit the cache cannot see, the shell gate among them. The overclaim, not the defect, is what would have hidden them: a record that reads as settled sends the next session to Direction 1 and is never revisited. This is `CLAUDE.md`'s **mutate once per guarded SITE, not once per feature** arriving as a defect in a *fix* rather than as a law about *tests* — knowing the class prevented nothing; the record's own standing precondition caught it. Fixed `10a3c10d`; both guard assertions mutation-killed independently. |
@@ -15337,6 +15338,26 @@ They meant a different file. `codescout-companion/hooks/pre-edit-dirty-check.mjs
 **Tell.** When disputing someone's citation, **quote the file and line you checked back to them before drawing the conclusion.** Not as courtesy — as a referent check. The moment I had written *"`pre-commit-foreign-index.sh:144`"* next to their words *"the hook"*, the mismatch was visible without any further reading. And note that the hook's header contradicted itself in place: *"Four such captures"* sits four lines above *"(instance 5, `e0525462`)"*, so this was never decay catching up with a once-true number — it was inconsistent when written, and a reader checking only the number would confirm it against the wrong half of its own comment.
 
 **Rests on:** nothing external.
+
+## F-155 — Topic adjacency attributes work to whoever is associated with the subject, and survives an explicit handoff
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** open · **Category:** cross-session
+
+**Observed.** Peer `codescout-e7` reported stepping around *"your `.err` changeset (541 insertions, 6 files) sitting staged in the shared index"*. It is not mine. The `.err` read-side work — `read_file` and `grep` honouring the suffix — belongs to peer `40130`, who found the `.err` mechanism and to whom I **explicitly declined and handed that half**, in writing, earlier the same evening. They have since shipped it (`4f62a824`, `8618922f`); what remained staged when I checked was `tests/buffer_stream_policy.rs`, 23 insertions in 1 file, also theirs.
+
+No harm done — `codescout-e7` committed by pathspec and left it untouched, and said so. Had they swept it, it would have landed under my name in both the tree and their record.
+
+**Mechanism — topic adjacency, and `CLAUDE.md` names only the file kind.** § *Reaching a Peer Session* rule one is *"Never route by adjacency"*, derived for **diff adjacency**: *"`git diff --stat` names insertions and names no author."* This was not that. `codescout-e7` did not attribute by who touched the file; they attributed by **who is associated with the subject matter**. I found `.err`, verified it, wrote `F-151` about it, and corresponded about it all evening — so *"whose is the `.err` changeset?"* resolves to me by association, from a reading that never touches the tree at all.
+
+**And the sharp part: topic adjacency survives an explicit handoff, because a handoff is visible only to its parties.** I gave that half to `40130` in a message to `40130`. `codescout-e7` was not on that thread and had no way to see it. Nothing in the working tree, the index, the log or any provenance tool records a transfer of ownership — the commits that would record it arrive *after* the window in which the misattribution is possible. So handing work to a peer on a shared checkout **creates** an interval in which the work is topically one session's and factually another's, and the only artifact naming the true owner is a private message.
+
+**Why the standard instruments do not close it.** `scripts/file-provenance.py` returned `UNKNOWN` for the file — 4 writes, all predating its window — so the positive identifier was unavailable exactly when needed. And the socket route (§ *Reaching a Peer Session*) answers *"which session sent this message"*, never *"who owns this changeset"*. Neither is broken; neither is aimed at this question.
+
+**Tell, and it is one line for the author rather than a check for the reader:** **announce a handoff to the room, not only to the recipient.** A third party attributing staged work has no channel that carries it otherwise. The cheaper half, for the attributing side: when the staged work is topically someone's but you have not seen them write it, say *"is this yours?"* rather than *"your changeset"* — `codescout-e7` did step around it correctly, so the sentence cost nothing here and would have cost a commit under the wrong name if they had not.
+
+**Rests on:** `.err` read-side ownership staying with `40130`. If it returns to me the instance stands as history and the mechanism is unaffected.
 
 ## Template for new entries
 
