@@ -3310,7 +3310,7 @@ mod tests {
         );
     }
     /// The silent half of
-    /// `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`:
+    /// `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`:
     /// `project.toml` is read once when a project becomes resident and cached for the
     /// life of the process, and until `config_is_stale` existed only codescout's OWN
     /// write tools re-read it. An edit made in an editor, by `Bash`, or by any other

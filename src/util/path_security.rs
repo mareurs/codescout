@@ -2614,7 +2614,7 @@ mod tests {
             !err.contains("— change the config."),
             "must not send the reader to edit project.toml and retry: the config is cached \
              for the process's life, so that edit is invisible until a restart. See \
-             docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md: {err}"
+             docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md: {err}"
         );
         assert!(
             err.contains("/mcp"),

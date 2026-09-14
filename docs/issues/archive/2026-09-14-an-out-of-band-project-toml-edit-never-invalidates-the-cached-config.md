@@ -1,14 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
-unverified: 'REMEDY-TEXT FIX COMPLETE 2026-09-14 across all four refusal sites: b21ad3b4 (file_write_enabled, patch-id cad267e7e761b85c94ae66c764e64b3ff044cfe8) plus 10a3c10d (indexing_enabled, shell_command_mode, max_index_bytes, patch-id 22af528ed42dd6c7fef1d65aea29eb4cf449c17e). The one-site reading in the earlier stamp was WRONG: project_security_config copies the whole SecuritySection, so the staleness reaches 14 production call sites including the shell gate -- see section Scope. Direction 1, observing the file so the cache cannot go stale, is NOT implemented, so the SILENT direction is untouched: a project resident with file_write_enabled = true (or shell_command_mode = warn) flipped on disk still permits, with no error. Record stays open for that half and is deliberately not archived.'
 ---
 
 # BUG: an out-of-band `project.toml` edit never invalidates the cached config, and the write refusal's own remedy is that edit
@@ -174,7 +173,32 @@ unchanged, so the **silent direction is exactly as broken as before**. A project
 `file_write_enabled = true`, flipped to `false` on disk, still accepts writes and prints
 nothing. No message exists on that path to correct, which is why the cheap repair cannot reach
 it — and it is the direction an operator would care about more, since it fails toward
-permitting writes rather than refusing them. § *Resume*'s question is **answered** — see § *Scope*, and the
+permitting writes rather than refusing them. **DIRECTION 1 IMPLEMENTED 2026-09-14 (`344aff6e`). Both directions are now shipped and this
+record is closed.**
+
+`ConfigStamp` is a `(mtime, len)` fingerprint of `project.toml` — one `stat`, no read, no parse,
+which is what makes it affordable on the path every gated call takes.
+`ActiveProject::config_is_stale()` compares it; `reload_config_from_disk()` re-reads and
+re-stamps **together** and is the single writer of that pair. Construction takes the pair out of
+`ProjectResources`, so no site can set one without the other.
+
+**The seam is `security_config` / `security_config_for`, not `ensure_resident` — § *Resume* named
+the latter and that would have under-covered.** `ensure_resident` is where the cache goes stale,
+but `with_project_at` only calls it when a `workspace_override` is present, so an **unpinned**
+tool call never reaches it. Every gated call does reach a security decision through
+`project_security_config`, which only those two functions call. Implementing this record
+literally would have compiled, passed a test driven through a pinned workspace, and left the
+majority of traffic serving stale config. Recorded as `bug-fix-session-log:F-157`.
+
+**Residual, stated rather than left to infer.** An edit preserving both mtime and length is
+invisible, which on a coarse-mtime filesystem includes a same-size edit inside one tick. The
+alternative is hashing the file on every gated call. Two cached-config readers are deliberately
+out of scope and named in `security_config`'s doc comment so nobody re-derives them as covered:
+`current_capabilities` reads `shell_command_mode` to decide whether to *advertise* `run_command`
+(stale there advertises a tool that then correctly refuses — degraded, not permissive), and
+`max_index_bytes` is a resource bound rather than a gate.
+
+§ *Resume*'s question is **answered** — see § *Scope*, and the
 answer widened this record rather than closing it.
 
 **The one-site reading was wrong, and § *Scope* is why.** Four refusals prescribe a
@@ -219,11 +243,30 @@ kills it independently at `:2717`. Both reported `KILLED (rc=101, 1 test(s) ran)
 is part of the verdict, since a mutation that never compiled would wear the same word with
 0 tests run.
 
-**For the silent half — still none, and this is the part that matters.** A regression test there
-must drive the **out-of-band** edit (write `project.toml` with `std::fs`, not through
-`edit_file`), or it re-triggers the very reload it is meant to prove absent and passes
-vacuously. That test cannot be written against today's code, because there is no seam that
-re-reads; it belongs with whatever Direction 1 ships.
+**For the silent half, added 2026-09-14 (`344aff6e`) — the part that mattered.**
+`an_out_of_band_project_toml_edit_reaches_the_next_gated_call` and
+`an_out_of_band_edit_reaches_the_pinned_security_config_too` (`src/agent/mod.rs`). **The
+`std::fs::write` in each is the whole test**, exactly as this section predicted it would have to
+be: driving the edit through `edit_file` calls `reload_config_if_project_toml` and refreshes by a
+different route, so the test would pass against the broken code. Both are annotated on the
+fixture line to say so, because a tidy-up onto the tool API deletes the coverage and leaves the
+assertion green.
+
+The two are separate guarded **sites**, not one law tested twice — the pinned twin is its own
+code path with its own wiring. Each mutation killed exactly its own test (`1 passed; 1 failed`,
+the opposite one each time), which is the evidence that they are independent rather than
+redundant. The pinned test asserts `shell_command_mode` rather than `file_write_enabled` because
+a pinned non-home workspace defaults to read-only and `project_security_config` forces that field
+false regardless of config — it would have asserted vacuously, passing whether or not the reload
+happened.
+
+Both run in the lean lane as well as the default one (buffer lines 158/190 and 4319/4321 of the
+gate run), so neither is vacuous under `--no-default-features`.
+
+**What was NOT re-run:** the original four-step live-MCP probe in § *Reproduction*. This is
+archived on the documented bar — gate green plus a regression test — against unit coverage of the
+same mechanism, not against a fresh `cargo rb` + `/mcp` replay of the probe. A reader wanting
+end-to-end confirmation should replay it.
 ## Workarounds
 
 Pass `workspace=` per call to a project whose cached config already says what you want, or
@@ -232,25 +275,22 @@ is the one thing that does not work, and is what the error message tells you to 
 
 ## Resume
 
-**The precondition this section used to name is ANSWERED — see § *Scope*.** Yes, and not
-marginally: the whole `SecuritySection` is served stale across 14 production call sites,
-including the shell gate. Verified at the bytes 2026-09-14.
+**Nothing. Both directions are shipped and this record is closed** — remedy text at `b21ad3b4`
+and `10a3c10d`, the cache itself at `344aff6e`.
 
-**That settles the direction question rather than leaving it open, and settles it toward
-Direction 1.** Direction 2 can only ever repair *messages*, and the two gates that matter
-most — writes and shell — both fail **silently in the permissive direction**, where no message
-exists to repair. Every remedy-text fix is now shipped (`b21ad3b4`, `10a3c10d`), so Direction
-2 is exhausted: what remains is entirely Direction 1.
+What a future reader should know rather than re-derive:
 
-The seam is `Agent::ensure_resident` (`src/agent/mod.rs:668`) on its cache-hit branch —
-verified this session: the fast path and the re-check under the write lock **both** return
-`Ok(())` after at most upgrading `read_only`, and neither touches `p.config`. A
-stat-per-gated-call would sit there.
-
-One caveat for whoever takes it, cheap to state and expensive to rediscover: the refusal
-messages now shipped assume the `edit_file` reload path stays reachable. If Direction 1
-removes or reroutes `reload_config_if_project_toml_for`, then
-`CONFIG_IS_CACHED_REMEDY` and its guard test must move with it.
+- **The staleness check lives at `security_config` / `security_config_for`, not at
+  `ensure_resident`.** Earlier revisions of this section named `ensure_resident` and were wrong
+  in a way that reads as right — see § *Fix*. If a new gate ever reads `p.config.security`
+  directly instead of going through `project_security_config`, it leaves the covered set
+  silently.
+- **The shipped refusal messages assume the `edit_file` reload path stays reachable.** If
+  `reload_config_if_project_toml` is removed or rerouted, `CONFIG_IS_CACHED_REMEDY`
+  (`src/config/project.rs`) and its guard test must move with it.
+- **The residual is granularity, not coverage** — `(mtime, len)`, so a same-size edit inside one
+  coarse mtime tick is still missed. Hashing per gated call is the only thing that closes that,
+  and it costs a read and a parse per tool invocation.
 ## References
 
 - `src/agent/mod.rs:668` — `ensure_resident`, "load + cache on miss"
@@ -261,12 +301,13 @@ removes or reroutes `reload_config_if_project_toml_for`, then
 
 ## Fix provenance
 
-**Partial — the remedy-text direction only, now complete across all four sites. This bug is
-NOT closed by it; the silent direction is untouched.**
+**Complete — both directions.**
 
-- **SHA:** `b21ad3b4` (experiments) — site 1 of 4, `file_write_enabled`. Positional; does not survive a rebase of `experiments`.
+- **SHA:** `b21ad3b4` (experiments) — remedy text, site 1 of 4 (`file_write_enabled`).
 - **patch-id:** `cad267e7e761b85c94ae66c764e64b3ff044cfe8`
-- **SHA:** `10a3c10d` (experiments) — sites 2-4, the shared constant, and the asymmetry guard.
+- **SHA:** `10a3c10d` (experiments) — remedy text, sites 2-4, the shared constant, the asymmetry guard.
 - **patch-id:** `22af528ed42dd6c7fef1d65aea29eb4cf449c17e`
+- **SHA:** `344aff6e` (experiments) — Direction 1: `ConfigStamp`, the staleness check, both regression tests.
+- **patch-id:** `2ab7a09a05ea0833e13d72ffa8c972bc6d39a8ca`
 
-If either SHA stops resolving, recover the commit by its patch-id.
+If any SHA stops resolving, recover the commit by its patch-id.

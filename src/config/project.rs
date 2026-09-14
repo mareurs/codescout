@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 /// inert for an edit made in an editor, by `Bash`, or by any other process — the call
 /// re-runs and prints the byte-identical refusal, which reads as the remedy not having
 /// been performed. See
-/// `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`.
+/// `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`.
 ///
 /// **The `file_write_enabled` refusal must NOT use this** — it needs a stricter remedy,
 /// because the `edit_file` escape offered here is unreachable exactly when writes are the

@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 155
+entry_high_water_F: 157
 entry_high_water_W: 136
 ---
 
@@ -54,7 +54,9 @@ entry_high_water_W: 136
 | F-155 | 2026-09-14 | med | cross-session | open | **A peer attributed a staged changeset to me by TOPIC, and topic adjacency survives an explicit handoff.** `codescout-e7` named *"your `.err` changeset"*; the `.err` read-side is peer `40130`'s (sid `9403d62d`), handed to them by me in writing that evening. **Their size figure was right and an earlier revision of this row wrongly corrected it** — 541/6 at 21:41:53 and 23/1 at 21:42:5x are the same instrument at two instants, across a commit that landed between them; see the entry. No harm — they committed by pathspec and left it alone — but a sweep would have landed it under my name. `CLAUDE.md` § *Reaching a Peer Session* names only **diff** adjacency (*"`git diff --stat` names insertions and names no author"*); this attributed by **who is associated with the subject**, a reading that never touches the tree. **A handoff is visible only to its parties** — I told `40130`, not the room — and no tool records a transfer: `file-provenance.py` returned `UNKNOWN`, and the socket route answers who *sent a message*, not who *owns a changeset*. Tell: announce a handoff to the room, and say *"is this yours?"* rather than *"your changeset"*. |
 | F-154 | 2026-09-14 | med | reasoning/citation-resolution | open | **Refuted a peer's citation by finding a sound match in a file they never named — verification succeeded, on the wrong object.** They said "the hook's `four`" meaning `codescout-companion/hooks/pre-edit-dirty-check.mjs:118`, a **runtime advisory** claiming "Four such captures are recorded in" a file whose highest instance is now **14**. I checked `scripts/pre-commit-foreign-index.sh:144`, found "all four arms" (test arms, sound, not stale), and sent a correction that was itself the error it described. **A confirming match terminates a search**, so finding a *sound* "four" was worse than finding none — it converted an unfinished search into a confident refutation. Distinct from `F-150` (region of input space), `F-151` (shape of search) and `F-153` (right command, wrong pair): this is the right command, correctly run, on the **wrong artifact**, resolved by token rather than referent. Tell: quote the file:line you checked back to the other party *before* concluding — the mismatch is visible with no further reading. Their hook also contradicts itself in place ("Four such captures" four lines above "instance 5"), so it was never once-true. |
 | F-153 | 2026-09-14 | med | cross-session | open | **Ran the bytes check `F-147` prescribes, pointed at the wrong PAIR — and its output is smallest exactly when the capture is worst.** `2aec3cd4` carried peer `codescout-e7`'s whole `## F-152` section plus their `entry_high_water_F` bump. I ran `git diff -- <file>` after committing, read `1 insertion`, and reported the peer's work safe. `git diff` is worktree↔index; the question was index↔HEAD. Their section was already absorbed into my index, so the calm number was the *signature* of the capture, not evidence against it. Second instance in one day by the author of `F-147`, three commits after committing `F-147`'s own text into the captured file. Nothing lost (`432e379f` holds the index row). Tell: *"what am I about to commit?"* is answered only by `git diff --cached`; `git diff` answers *"what am I leaving behind?"*, and that answer shrinks as the capture grows. |
-| F-152 | 2026-09-14 | med | record-vs-code drift | fixed-verified | **Repaired a per-SITE defect per-FEATURE, then recorded it as done.** `7e9619698bebe094` read *"Direction 2 IMPLEMENTED (`b21ad3b4`)"*; scouting that record's own § *Resume* precondition showed the direction had shipped at **one of four** sites. `project_security_config` copies the whole `SecuritySection`, so every refusal prescribing a `.codescout/project.toml` edit is defeated by the same per-process cache — `indexing_enabled`, `shell_command_mode` and `max_index_bytes` were all still sending readers to an edit the cache cannot see, the shell gate among them. The overclaim, not the defect, is what would have hidden them: a record that reads as settled sends the next session to Direction 1 and is never revisited. This is `CLAUDE.md`'s **mutate once per guarded SITE, not once per feature** arriving as a defect in a *fix* rather than as a law about *tests* — knowing the class prevented nothing; the record's own standing precondition caught it. Fixed `10a3c10d`; both guard assertions mutation-killed independently. |
+| F-157 | 2026-09-14 | med | plan-vs-code drift | fixed-verified | **A bug record named the seam where state goes STALE, not where the stale state is SERVED.** `314063b0c9e3444c`'s § *Resume* pointed at `Agent::ensure_resident`'s cache-hit branch — true, and under-covering: `with_project_at` only calls it when a `workspace_override` is present, so an unpinned tool call never reaches it. Every gated call does reach `project_security_config`, so the staleness check went there. Implementing the record literally would have compiled, passed a test driven through a pinned workspace, and left the majority of traffic serving stale config. Drift rather than error: I wrote that § *Resume* line earlier the same session, as the correct answer to *where does this go stale* — the fix asks *where is it read*, and the two differ here. Tell: re-derive a named seam against the question you are actually answering; the two questions coincide often enough to have no tell of their own. |
+| F-156 | 2026-09-14 | med | instrument-has-a-direction | fixed-verified | **Scouted a struct's READERS with call_graph and never its CONSTRUCTORS, which no direction of that instrument reaches.** Adding a field to `ActiveProject` reddened the shared build on three initializers I had not enumerated, after a scout that ran `call_graph` (28 edges, 11 files), `references` and `grep` — every one of which answers about the read side. Three of four came out of `rustc`, not my plan. Cheap only because `E0063` is total over this class; the same blind spot over a trait impl or a serde attribute is silent. `call_graph` takes a `direction` and I passed one, and nothing in the result says a FIELD has a second side that `callers`/`callees` does not name — a complete answer to the wrong half. Tell: `grep '<TypeName> {'` before adding a field. Blocked peer `327926` from compiling for ~4 min; the class framing is theirs. |
+| F-152 | 2026-09-14 | med | record-vs-code drift | fixed-verified | **Repaired a per-SITE defect per-FEATURE, then recorded it as done.** `314063b0c9e3444c` read *"Direction 2 IMPLEMENTED (`b21ad3b4`)"*; scouting that record's own § *Resume* precondition showed the direction had shipped at **one of four** sites. `project_security_config` copies the whole `SecuritySection`, so every refusal prescribing a `.codescout/project.toml` edit is defeated by the same per-process cache — `indexing_enabled`, `shell_command_mode` and `max_index_bytes` were all still sending readers to an edit the cache cannot see, the shell gate among them. The overclaim, not the defect, is what would have hidden them: a record that reads as settled sends the next session to Direction 1 and is never revisited. This is `CLAUDE.md`'s **mutate once per guarded SITE, not once per feature** arriving as a defect in a *fix* rather than as a law about *tests* — knowing the class prevented nothing; the record's own standing precondition caught it. Fixed `10a3c10d`; both guard assertions mutation-killed independently. |
 | F-151 | 2026-09-14 | high | reasoning/search-scope | open | **Searched for CONSUMERS of a field, never for how the handle is RESOLVED — and the resolver was four lines from the struct.** `BufferEntry.stderr` is reachable via an `.err` suffix (`output_buffer.rs:289` `strip_suffix`, `:674` stream select), verified live: `grep -c TOKEN @cmd_x.err` → `1`. Distinct from `F-150`: that is about the region of input space an observation was taken in, this is about the shape of the search. *"Who reads this field?"* presumes the answer is a reader; an escape hatch that transforms the KEY is invisible to every grep phrased around the VALUE. Tell: when N call sites agree, read the thing they all call. Cost: a § Workarounds that sent readers to native `Bash` for a stream a four-character suffix already served. Peer `40130` owns the larger half — `.err` is on **no** agent-facing surface, and three sessions concluded the stream unrecoverable that evening, wrong in the same direction, which reads exactly like corroboration. |
 | F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `4c433eb615bedf68` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
 | F-147 | 2026-09-14 | med | cross-session | fixed-verified | **A pathspec commit captured a peer's staged edit to the same file, because I read the staged SET instead of the staged DIFF.** `git status --short` answers which paths; only `git diff --cached` answers which bytes. |
@@ -15258,7 +15260,7 @@ Verified live rather than accepted: `@cmd_a11f5743`, 4000 stdout lines plus one 
 
 **Severity:** med · **Status:** fixed-verified · **Category:** record-vs-code drift
 
-**Observed:** `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`
+**Observed:** `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`
 recorded *"Direction 2 IMPLEMENTED (`b21ad3b4`)"* — the remedy-text half, done. Scouting that
 record's own § *Resume* precondition ("confirm whether any other cached config field carries a
 security decision") showed the direction had been implemented at **one of four** sites.
@@ -15388,6 +15390,89 @@ Caught before reporting, by asking which *branch* the observation took rather th
 **Why this is a `W-N` and not another `F-N`.** This is `F-150`'s mechanism — an observation taken at one point on a thresholded axis, where *"no mechanism"* and *"mechanism not reached"* emit identical bytes — recurring inside the **verification of the fix for the bug `F-150` was written about**. The class did not stop occurring. What changed is that the entry existed, so *"which side of the gate did this land on?"* was already loaded. That is the only thing a ledger can actually buy, and it is worth recording that it paid once.
 
 **Rests on:** `needs_summary` remaining a combined-size gate at `MAX_INLINE_TOKENS`. If the envelope's branch predicate changes, the threshold above is stale but the discipline is not.
+
+## F-156 — Scouted a struct's readers with call_graph and never its constructors, which no direction of that instrument reaches
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** fixed-verified · **Category:** instrument-has-a-direction
+
+**Observed:** Adding `config_stamp` to `ActiveProject` broke the shared build on three
+initializers I had not enumerated. I had scouted this struct carefully — `call_graph` on
+`project_security_config` (28 edges, 11 files), `references`, `grep` for every reader of
+`config.security` — and every one of those instruments answers about the **read** side.
+A struct's **construction** sites are not reachable from its read sites by any of them.
+Three of four initializers came out of `rustc`, not out of my plan: `Agent::new`'s inline
+activation, the workspace-activate path, and a test helper. Only `build_workspace` was on my
+list, and it was there because I happened to read it for a different reason.
+
+**Cost:** ~4 minutes of red `cargo check` on a checkout shared with three live sessions. One
+peer (`327926`) was blocked from compiling and had staged work parked behind it. Cheap this
+time only because the compiler is total over this particular class — `E0063` cannot be
+missed. The same blind spot over a non-exhaustive relationship (a trait impl, a serde
+attribute, a match on a non-`#[non_exhaustive]` enum in another crate) produces silence
+instead.
+
+**Why care was the wrong instrument:** I did not skip the scout. I ran the richest tool
+available and it answered completely — about one direction. `call_graph(direction="callers")`
+takes a `direction` parameter and I passed one; nothing in the result says a *field* has a
+second side that `callers`/`callees` does not name. A confident, complete answer to the wrong
+half, which is this evening's fourth instance of that shape and the first in a code tool
+rather than in prose.
+
+**Tell, cheap and mechanical:** before adding a field to a struct, `grep '<TypeName> {'` — the
+construction sites, which no call-graph direction reaches. The compiler will catch it in Rust;
+the habit is for every language where it will not, and for keeping a shared tree green rather
+than merely eventually-correct.
+
+**Credit:** the framing is `327926`'s, from the message reporting my red — *"a struct's
+construction sites are not reachable from its read sites by the instrument you used, and
+nothing told you the instrument had a side."* I had the incident; they had the class.
+
+**Rests on:** `ActiveProject` being constructed by explicit struct literals. A `Default` impl
+or a builder would change the population and make the compiler's coverage partial rather than
+total.
+
+## F-157 — A bug record named the seam where state goes stale, not where the stale state is served
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** fixed-verified · **Category:** plan-vs-code drift
+
+**Observed:** `314063b0c9e3444c`'s § *Resume* named the fix seam:
+*"the seam is `Agent::ensure_resident` (`src/agent/mod.rs:668`) on its cache-hit branch — that
+is where the config is known-stale and no re-read happens."* That sentence is **true** and
+implementing against it would have under-covered the bug. `ensure_resident` is where the cache
+goes stale; it is not where the staleness is **served**, and it is not on the path of every
+gated call — `with_project_at` only calls it when a `workspace_override` is present, so an
+unpinned tool call never touches it. Every gated call does reach a security decision through
+`project_security_config`, which only `security_config` and `security_config_for` call. The
+check went there instead.
+
+**Cost:** none, because the scout ran before the edit. Had it not, the fix would have compiled,
+passed a hand-written test driven through a pinned workspace, and left every unpinned call
+serving stale config — a green suite over the majority of the traffic.
+
+**Why this is drift rather than an error:** I wrote that § *Resume* line **earlier the same
+session**, and it was the correct answer to the question being asked at the time — *where does
+the config go stale?* The fix asks a different question — *where is a stale config served?* —
+and the two have different answers in this codebase. A record names the seam its author was
+looking at, and the next reader arrives with a different question and no marker that the seam
+was chosen under one.
+
+**Tell:** when a record names a seam, re-derive it against the question you are actually
+answering. *Where does the state go wrong* and *where is the wrong state read* coincide often
+enough that the distinction has no tell of its own — which is why it needs a standing check
+rather than noticing.
+
+**Two consumers deliberately left out of scope**, named in `Agent::security_config`'s doc
+comment so nobody re-derives them as covered: `current_capabilities` reads
+`shell_command_mode` directly to decide whether to *advertise* `run_command` (stale there
+advertises a tool that then correctly refuses — degraded, not permissive), and `max_index_bytes`
+is a resource bound rather than a gate.
+
+**Rests on:** `project_security_config` remaining the single derivation every gate reads. If a
+gate ever reads `p.config.security` directly, it leaves the covered set silently.
 
 ## Template for new entries
 

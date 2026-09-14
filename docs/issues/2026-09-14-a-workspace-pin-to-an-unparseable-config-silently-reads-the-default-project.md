@@ -63,7 +63,7 @@ Step 3 is the control; without it, step 4 is indistinguishable from "the memory 
 
 **Each probe must be a FRESH root.** A root already resident carries a cached config, and
 breaking its `project.toml` afterwards changes nothing — see
-`docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`,
+`docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`,
 which will mask this one if you reuse a root.
 
 ## Environment
@@ -126,5 +126,5 @@ project lookup — those need different fixes.
 
 - `src/agent/mod.rs:668` — `ensure_resident`
 - `src/config/project.rs:498` — `load_with_global_base`
-- `docs/issues/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`
+- `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`
   — found in the same probe run; masks this one if a root is reused
