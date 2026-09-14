@@ -227,6 +227,59 @@ run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
 eq   "14 inconclusive still exits with the command's rc" "$RC" "0"
 has  "14 while saying so in the verdict" "$OUT" "INCONCLUSIVE"
 
+# --- 15-18. `--strict` REMAPS THE NO-VERDICT CASE AND NOTHING ELSE ----------
+# The flag exists because the verdict line does not always ARRIVE. Measured
+# 2026-09-14: through codescout's `run_command`, a `cargo test` wrapped by this
+# script classifies `type: "test"`, and that envelope carried no stderr field —
+# so `{"exit_code": 0, "passed": 0}` was the whole result, byte-identical to a
+# SURVIVED mutant. The exit code is the only channel that survives every renderer.
+#
+# Cases 16-18 are the NON-VACUITY PAIR for 15: a flag that returned 3 for
+# everything would satisfy 15 alone, and would be strictly worse than no flag —
+# it would convert two real verdicts into "proved nothing". Each asserts that a
+# verdict the caller ACTS ON keeps its own status under the same flag.
+#
+# Mutation that must kill these, both run 2026-09-14 against an isolated copy of the
+# script and the suite (never the shared tree — the fixture resolves PROBE to the repo's
+# own script, so mutating it in place ships a broken probe to every concurrent session):
+#   drop the `[ "$inconclusive" = "1" ]` conjunct -> 17, 18 red.
+#   drop the `[ "$STRICT" = "1" ]`      conjunct -> 4, 5, 6, 14 red.
+# The second is worth reading rather than counting: cases 4-6 run `-- true`, which emits
+# no count line and is therefore INCONCLUSIVE, so the default path's protection turns out
+# to be guarded at four sites rather than the one this comment first claimed. That is the
+# measurement that makes "opt-in" a property of the code and not of the flag's name.
+
+# 15. INCONCLUSIVE + --strict -> 3. Case 14 is this case's control: same runner
+#     output, no flag, and it must still exit with the command's own status.
+R=$(newrepo)
+run "$R" "$SID" --shared --strict --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "running 0 tests"; exit 0'
+eq   "15 strict remaps inconclusive to 3" "$RC" "3"
+has  "15 while still naming the verdict" "$OUT" "INCONCLUSIVE"
+has  "15 and saying what it remapped from" "$OUT" "exiting 3 rather than 0"
+
+# 16. No count line + --strict -> 3 as well. The OTHER inconclusive branch; one
+#     conjunct guards both, and a fix touching only one would pass 15.
+R=$(newrepo)
+run "$R" "$SID" --shared --strict --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "error: expected one of \`)\`, found \`;\`"; exit 101'
+eq   "16 strict remaps the no-count-line branch too" "$RC" "3"
+has  "16 and still calls it inconclusive" "$OUT" "INCONCLUSIVE"
+
+# 17. SURVIVED + --strict -> still 0. A real finding, not an absence.
+R=$(newrepo)
+run "$R" "$SID" --shared --strict --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "running 2 tests"; echo "test result: ok. 2 passed"; exit 0'
+eq   "17 strict leaves SURVIVED at the command's rc" "$RC" "0"
+has  "17 and it is still a verdict" "$OUT" "SURVIVED"
+
+# 18. KILLED + --strict -> still the command's rc, not 3.
+R=$(newrepo)
+run "$R" "$SID" --shared --strict --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "running 2 tests"; echo "test result: FAILED. 1 passed; 1 failed"; exit 101'
+eq   "18 strict leaves KILLED at the command's rc" "$RC" "101"
+has  "18 and it is still a verdict" "$OUT" "KILLED"
+
 echo
 echo "mutation-probe: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

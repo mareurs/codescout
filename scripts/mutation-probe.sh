@@ -69,6 +69,26 @@ mutation-probe.sh — run one mutation in an isolated tree and report kill/survi
   --replace <literal>  text to put in its place ("" deletes it)
   --shared             mutate the real checkout instead of a worktree.
                        Only for mutations whose subject IS the shared tree.
+  --strict             exit 3 when the run proved nothing (INCONCLUSIVE), instead
+                       of passing the test command's status through. Off by
+                       default: SURVIVED and KILLED keep their exit codes either
+                       way, and only the no-verdict case is remapped.
+                       WHY OPT-IN, since the reason is otherwise only inferable
+                       from the exit block at the foot of this file: cases 4, 5
+                       and 6 in tests/mutation-probe.sh run `-- true`, which emits
+                       no count line and is therefore INCONCLUSIVE — so a --strict
+                       that defaulted on would red three fixtures that are testing
+                       RESTORATION and ISOLATION rather than verdicts.
+                       AND THE COST OF THAT, stated because it is real and was
+                       raised by sessionId aa272bed-7d33-4e5e-bcbf-2ccf3b4c4c66:
+                       an opt-in flag is a policy someone has to remember, and the
+                       caller who most needs it is the one who does not yet know
+                       their test is uncommitted — precisely the reader CLAUDE.md
+                       § Observer Blindness position 3 says a flag cannot reach.
+                       It is accepted rather than unnoticed: the default path's
+                       own protection is what those three fixtures assert, and
+                       trading their coverage for a reminder is the worse deal.
+                       Pass --strict in any wrapper that branches on `$?`.
   --                   everything after this is the test command
 
   mutation-probe.sh --file src/a.rs --find 'st.defer();' --replace '' \
@@ -77,13 +97,14 @@ USAGE
     exit 2
 }
 
-FILE=""; FIND=""; REPL=""; SHARED=0
+FILE=""; FIND=""; REPL=""; SHARED=0; STRICT=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --file) FILE="${2:-}"; shift 2 ;;
         --find) FIND="${2:-}"; shift 2 ;;
         --replace) REPL="${2:-}"; shift 2 ;;
         --shared) SHARED=1; shift ;;
+        --strict) STRICT=1; shift ;;
         --) shift; break ;;
         *) usage ;;
     esac
@@ -261,13 +282,16 @@ restored=$(count_lit "$TARGET" "$FIND")
 ran_lines=$(grep -cE '^running [0-9]+ tests?$' "$RUNLOG" || true)
 executed=$(grep -oE '^running [0-9]+ tests?$' "$RUNLOG" | awk '{s+=$2} END {print s+0}')
 
+inconclusive=0
 if [ "$ran_lines" -eq 0 ]; then
+    inconclusive=1
     echo "mutation-probe: INCONCLUSIVE — no test-count line in the output, so whether any" >&2
     echo "  test ran is unknown and no verdict is available. Three causes, and they differ:" >&2
     echo "  the mutation did not COMPILE; the command was not a test runner; or the runner's" >&2
     echo "  '^running N tests' line has changed shape and this parse needs updating." >&2
     echo "  Read the output above — it says which." >&2
 elif [ "$executed" -eq 0 ]; then
+    inconclusive=1
     echo "mutation-probe: INCONCLUSIVE — the runner started and selected 0 tests, so nothing" >&2
     echo "  could have caught this mutation. Most often the filter matches no test NAME, or" >&2
     echo "  the test is in a file this worktree built at HEAD because it is uncommitted —" >&2
@@ -282,19 +306,41 @@ else
     echo "  never applied, and the count above rules out a compile failure wearing this verdict." >&2
 fi
 
-# The exit status stays the TEST COMMAND'S, unchanged, and that is a weighed trade
-# rather than an inheritance. Three things hold it there: `docs/PROBES.md` pins it, a
+# The exit status stays the TEST COMMAND'S by default, unchanged, and that is a weighed
+# trade rather than an inheritance. Three things hold it there: `docs/PROBES.md` pins it, a
 # verdict has never been encoded in it — SURVIVED is a real finding and also exits 0 —
 # and cases 5, 6 and 14 assert `rc == 0` while running `-- true`, so a distinct exit
-# code would red fixtures that are testing RESTORATION and ISOLATION rather than
-# verdicts.
+# code by default would red fixtures that are testing RESTORATION and ISOLATION rather
+# than verdicts.
 #
-# THE RESIDUAL HAZARD, named because it is this same week's shape one layer down: a
-# caller chaining `mutation-probe ... && <next step>` reads INCONCLUSIVE as success,
-# which is absence rendered as a value again, at the exit-code layer. It is accepted
-# rather than unnoticed — the equivalent hazard already exists for SURVIVED, which
-# exits 0 and is a verdict people act on, so `$?` was never the channel to read.
-# READ THE VERDICT LINE. If a caller ever needs to branch on this, the honest change
-# is a `--strict` flag that maps INCONCLUSIVE to a distinct code, not a redefinition
-# of what `$?` has always meant here.
+# THE RESIDUAL HAZARD IS NOW LARGER THAN THIS COMMENT ONCE CLAIMED, and `--strict` is
+# the answer it named in advance. The version above called the hazard "a caller chaining
+# `mutation-probe ... && <next step>`" — a caller who could always have read the verdict
+# line instead. Measured 2026-09-14, that was too narrow: through codescout's own
+# `run_command`, a `cargo test` wrapped by this script classifies as `type: "test"`, and
+# that envelope carried NO stderr field at all. The verdict was not merely easy to skip,
+# it did not arrive — and `{"exit_code": 0, "passed": 0}` is the byte-identical rendering
+# of a SURVIVED mutant, so the reader got a plausible WRONG verdict rather than a gap.
+# Filed as docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+# and fixed there; `--strict` is the half that does not depend on which renderer, which
+# codescout build, or which harness is on the other end of the pipe. The exit code is the
+# only channel that survives every one of them.
+#
+# So READ THE VERDICT LINE remains the instruction, and `--strict` exists for the caller
+# who cannot see it. Credit where it is due: `--strict`'s exit-3 shape was drafted by
+# sessionId d52899fd-7490-4408-8deb-1395c3a7f8f6 on 2026-09-14 and talked out of it by
+# this author, on the grounds above — which were right about the fixtures and wrong about
+# the channel.
+#
+# SCOPE, deliberately narrow: `--strict` remaps ONLY the two INCONCLUSIVE branches.
+# SURVIVED still exits 0 and KILLED still exits the command's status, because those are
+# verdicts a caller acts on rather than absences — redefining them would be the
+# "redefinition of what `$?` has always meant here" this comment has always refused.
+# A test command that itself exits 3 is shadowed under `--strict`; that is the cost of
+# the flag and the reason it is opt-in.
+if [ "$STRICT" = "1" ] && [ "$inconclusive" = "1" ]; then
+    echo "mutation-probe: --strict — exiting 3 rather than $rc, because this run proved" >&2
+    echo "  nothing and $rc is indistinguishable from a run that did." >&2
+    exit 3
+fi
 exit "$rc"
