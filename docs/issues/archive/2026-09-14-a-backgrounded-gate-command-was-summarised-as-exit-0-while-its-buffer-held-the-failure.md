@@ -302,8 +302,37 @@ does not carry *other* dirty files, so the then-uncommitted test was absent: `ru
 `SURVIVED` with two readings (*untested* / *unreachable*), neither of which is *"your test was
 not in the tree"*. That is this corpus's own
 `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` arriving inside
-the instrument built to check for it. **Commit the test before mutating it, and read the test
-count in the probe output, not only the verdict.**
+the instrument built to check for it.
+
+**REFINED 2026-09-14 by `9403d62d` — and the correction is to the PRESCRIPTION, not to the
+mechanism above.** `scripts/mutation-probe.sh:172` is `cp "$ROOT/$FILE" "$TARGET"`: **the file
+under test IS carried across, uncommitted and all.** Only *other* dirty files are built at HEAD,
+which the paragraph above states correctly and the script's own comment at `:175` confirms.
+Verified here at the bytes. What did not follow was the rule drawn from it:
+
+| mutation and test live in | verdict |
+|---|---|
+| the **same** file (Rust inline `#[cfg(test)] mod tests`) | **sound, even uncommitted** |
+| **different** files (`tests/*.rs`, or a script tested from Rust) | the test file is HEAD's — an uncommitted test is simply ABSENT |
+
+This case was the second kind: mutation in `output.rs`, test in `tests.rs`. *"Commit the test
+first"* is correct and bills a commit on **every** run; **"commit first when the test does not
+live in the mutated file"** is the same protection billed only to the case that needs it.
+`9403d62d` measured the base rate against their own three runs that day — two inline and sound,
+one cross-file and vacuous. One in three here, not universal.
+
+**The sharper reading is theirs and is the one to keep.** The script's `others > 0` NOTE *did*
+fire on the vacuous run; it named `tests.rs` as dirty and not carried. The information was
+present and simply **not joined to the verdict** — `SURVIVED` is computed without reference to a
+note printed twenty lines earlier, and its two documented readings (*untested* / *unreachable*)
+do not include the third. That is not a missing check but a check whose output does not reach
+the conclusion it bears on: `CLAUDE.md` § *Observer Blindness* position 3 in miniature. So the
+cheap remedy is **not another warning** — it is that **`SURVIVED` should refuse to render as a
+finding when the run executed zero tests**, because a zero-test run cannot survive anything.
+Not implemented; recorded here so whoever picks it up does not re-derive it.
+
+The standing advice, in its narrow form: **commit the test first when it does not live in the
+mutated file, and read the test count in the probe output, not only the verdict.**
 
 ---
 
