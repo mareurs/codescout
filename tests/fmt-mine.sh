@@ -187,12 +187,13 @@ run "$P" "$PEER_STUB"
 eq "PEER exits 1" "$RC" "1"
 eq "PEER left the file unwritten" "$(grep -c 'pub fn f(  )' "$P/src/lib.rs")" "1"
 has "PEER says REFUSED" "$OUT" "REFUSED"
-# The four below are the remedy half. Each reds on a message regression that every
+# The five below are the remedy half. Each reds on a message regression that every
 # assertion above stays green through -- which is the defect this suite was born from.
 has "PEER names the owning sid" "$OUT" "5399543d-22d6-4ed9-9ebb-876be459989f"
 has "PEER names the socket to reach them" "$OUT" "uds:/run/user/1000/cc-socks/1849060.sock"
 has "PEER names the LIVE marker" "$OUT" "[LIVE]"
 has "PEER says why there is no --force" "$OUT" "no --force"
+has "PEER remedy does not overclaim the peer can perform it" "$OUT" "does not guarantee they hold anything to format"
 
 echo "== 5. UNKNOWN is 'cannot tell', never 'nobody owns it' =="
 P=$(newproj); deformed "$P"

@@ -175,9 +175,10 @@ refuse_not_mine() {
 
   What to do, and which applies depends on what the scan said above:
 
-    [LIVE] peer      ask them to format their own file — the scan printed the
-                     `uds:` socket to reach them. They can perform it; you cannot
-                     perform it for them without writing their bytes.
+    [LIVE] peer      the scan printed the `uds:` socket to reach them — but a
+                     row here does not guarantee they hold anything to format:
+                     `git diff -- <path>` says whose bytes are dirty right now,
+                     before you ask them to act on it.
     not live         nobody can be asked, and their uncommitted work is abandoned.
                      `cargo fmt` is then a judgement call a human should make, not
                      one this script should make for them.
