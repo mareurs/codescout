@@ -16,6 +16,22 @@ Why each part, one line each. Every measurement, date and superseded form →
   librarian-less binary that reds the CLI tests for the *next* session, reading exactly like a
   feature-gating regression in whatever they just committed. Ending on the default lane rebuilds it,
   so **following the gate cannot arm the trap for anyone else — provided both lanes actually run.**
+  **THAT GUARANTEE IS SEQUENTIAL, AND ITS STATED CONDITION IS EXACTLY THE ONE THAT CANNOT CATCH
+  THE FAILURE.** *"Provided both lanes actually run"* is satisfied by **every** party while the
+  guarantee still fails: your lean lane arms the trap the moment it finishes and disarms it when
+  your default lane completes, and any session whose `cli_doc` tests execute inside that window
+  gets the librarian-less binary. Nobody deviated, so no amount of compliance closes it — which
+  is why this is stated here rather than left as a thing to be careful about. Measured 2026-09-14
+  with **six** sessions sharing this checkout, so the union of those windows is not small. The
+  tell is `error: unrecognized subcommand 'doc'`, `code=2`, redding 13 of 15 `cli_doc` tests, and
+  it reads as a feature-gating regression **in whatever you just committed** —
+  `cluster/transient-shared-state-lies-to-readers`, where the standard diagnostic reports someone
+  else's outage as your bug. **So when `cli_doc` reds on a diff that cannot have touched feature
+  gating, re-run it before reading your own diff:** the window is minutes, a second run is the
+  cheapest discriminator available, and it is also the repair. Full account and the two remedies
+  that would *close* this rather than document it (per-session `CARGO_TARGET_DIR`; `cli_doc`
+  asserting the binary advertises `doc`) →
+  [`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`](docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md).
   The superseded *"reds 10 of 11"* figure is deliberately **not** restated with a fresh number:
   re-deriving it means arming the shared trap on purpose while other sessions are building against
   the same `target/`. Verified 2026-09-05 — the target is `cli_doc`, it holds **15** tests, and all

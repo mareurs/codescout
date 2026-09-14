@@ -2813,6 +2813,87 @@ mod tests {
         );
     }
 
+    /// The gate section must keep stating that its own guarantee is SEQUENTIAL, and must keep
+    /// naming the error a reader will actually have on screen.
+    ///
+    /// The guarantee reads *"following the gate cannot arm the trap for anyone else — provided
+    /// both lanes actually run."* That holds for one session alone and fails under concurrency
+    /// **while every party complies**: a lean lane arms the trap when it finishes and disarms it
+    /// when that session's default lane completes, so any session whose `cli_doc` tests execute
+    /// inside the window gets the librarian-less binary. The stated condition is satisfied by
+    /// everyone involved, which is precisely why it cannot catch this — measured 2026-09-14 with
+    /// six sessions on this checkout
+    /// (`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`).
+    ///
+    /// **The error string is the load-bearing needle, not the argument.** A reader meets this as
+    /// 13 of 15 `cli_doc` failures reading `error: unrecognized subcommand 'doc'`, and concludes
+    /// their own diff broke feature gating — `cluster/transient-shared-state-lies-to-readers`,
+    /// where the standard diagnostic reports someone else's outage as your bug. The caveat is
+    /// only worth anything if the person holding that red can FIND it, so what is pinned here is
+    /// the text they would grep, not the sentence explaining it. That is
+    /// `CLAUDE.md` § *Observer Blindness* position 3 — move the scope to the read surface.
+    ///
+    /// **Both directions, for the reason the sibling test above documents.** CLAUDE.md must cite
+    /// the bug file, and the bug file must still exist: a citation nobody resolves is
+    /// indistinguishable from a live one.
+    ///
+    /// **What this canNOT do**, stated because the assertion looks stronger than it is: it pins
+    /// that the caveat is PRESENT and findable, never that it is true or that anyone acts on it.
+    /// The remedies that would actually close the class are a per-session `CARGO_TARGET_DIR` or
+    /// `cli_doc` asserting the binary advertises `doc`; both are open, and this test must not be
+    /// read as covering them.
+    #[test]
+    fn claude_md_gate_section_states_its_guarantee_is_sequential() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
+            .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
+
+        // Same scoping anchors as the two sibling tests — there are now THREE tests
+        // anchored on this sentence, not two.
+        const START: &str = "**Run `./scripts/fmt-mine.sh`";
+        const END: &str = "The gate sentence above is pinned byte-for-byte by";
+
+        let start = claude_md.find(START).unwrap_or_else(|| {
+            panic!("CLAUDE.md has no gate directive beginning {START:?} — move this test with it")
+        });
+        let rest = &claude_md[start..];
+        let end = rest.find(END).unwrap_or_else(|| {
+            panic!("CLAUDE.md's gate section begins with {START:?} but never reaches {END:?}")
+        });
+        let section = &rest[..end];
+
+        const BUG: &str =
+            "docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md";
+        for needle in ["unrecognized subcommand", "cli_doc", BUG] {
+            assert!(
+                section.contains(needle),
+                "CLAUDE.md § Development Commands no longer names {needle:?}.\n\n\
+                 The gate's trap guarantee is SEQUENTIAL: it fails under concurrency while every \
+                 party runs both lanes in the documented order, so compliance cannot close it and \
+                 there is nothing for a careful reader to do differently. What the caveat buys is \
+                 that someone holding `error: unrecognized subcommand 'doc'` across 13 of 15 \
+                 `cli_doc` tests can find out it is not their diff — which requires the ERROR TEXT \
+                 to be here, not just the explanation. If you are moving this, move it somewhere a \
+                 session running the gate will see it, and update this test. Do not simply delete \
+                 it."
+            );
+        }
+
+        // The other direction: a citation nobody resolves is indistinguishable from a live one.
+        assert!(
+            std::path::Path::new(&format!("{root}/{BUG}")).exists()
+                || std::path::Path::new(&format!(
+                    "{root}/docs/issues/archive/{}",
+                    BUG.trim_start_matches("docs/issues/")
+                ))
+                .exists(),
+            "CLAUDE.md § Development Commands cites {BUG} for the concurrency premise, and it is \
+             at neither its live path nor docs/issues/archive/. Either it was archived under a \
+             different slug (re-point CLAUDE.md) or deleted (then the caveat's evidence is gone \
+             and the claim needs re-deriving, not re-citing)."
+        );
+    }
+
     /// The `get_guide` bodies are the fourth prose surface the model reads, and
     /// until now the only one with no drift gate at all:
     /// `prompt_surfaces_reference_only_real_tools` builds its `surfaces` list from
