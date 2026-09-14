@@ -1,13 +1,13 @@
 ---
-id: '33efc480b2da9ac3'
+id: b2b4078e23e0516d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a test doc comment records a mutation result the corpus has since falsified, and the same commit ships its contradiction 671 lines away'
 tags:
 - cluster/doc-contradicted-by-code
 - testing
 - trackers
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
@@ -195,17 +195,32 @@ The constraint any fix has to meet, stated so the next session does not re-deriv
 - Anything stronger is a mechanism question (what could red when a doc comment's corpus premise
   goes false) and should go through the architecture skill rather than be improvised here.
 
-**One proposal on the table, recorded as its author's and NOT evaluated here.** From sessionId
-`6be73414-…`: the decayed claim **names its own population** — *"zero bug files carry a `cluster/`
-tag in flow style"* — so a test can assert that population is still zero, and it reds **the day the
-corpus moves** (2026-09-03 here) rather than thirteen days later via a reader. `:1476` then becomes
-a second gate for free, since the two comments would disagree out loud. The attraction is that it
-needs no stale-prose detection: it gates the **premise**, which is machine-checkable, instead of
-the **prose**, which is not. Not adopted here — whether to build it is an architecture question and
-this file does not answer it.
+**FIXED by `a2f6dda8` — and the architecture pass rejected every mechanism, including the one
+proposed above.** Run by sessionId `6be73414-…` on their own operator's go-ahead. ADR:
+`docs/adrs/2026-09-14-state-the-property-not-the-snapshot.md`; ledger `docs/trackers/claim-decay.md`
+DC-6.
 
-Fix SHA: *(not yet fixed)*
-Patch-id: *(not yet fixed)*
+| candidate | verdict |
+|---|---|
+| gate the claim's named population (*"zero files carry a flow-style tag"*) | **rejected** — it reds on 2026-09-03 **and forbids a legitimate, deliberately supported form**: `cluster_tags` reads both arms on purpose and the fixture test exists to prove it. A wall across a road the project paved. |
+| `re-derive: <command>` annotation plus a runner | **rejected on uptake** — at `9045c56a`, **77** dated `measured YYYY-MM-DD` claims across **43** Rust files and the reader-facing re-derive form in **zero** of them, though `CLAUDE.md` already mandates that form. Re-derived independently by this session: 77 / 43 / 0, same tree. |
+| mutation-annotation parity | **rejected — it would not have fired.** The contradiction was *prose* at `:805` against an *annotation* at `:1476`, not annotation against annotation. Recorded anyway because the population is real (23 across 10 files), so it reads like a good idea until checked against the case that motivated it. |
+
+**The fix needed no mechanism, and that is the generalisable part.** The decaying sentence was
+never load-bearing for the split it justified: corpus coverage of either arm is **incidental**, so
+the fixture test covers the inline arm **unconditionally** — true on every possible corpus, and the
+only form of coverage that survives a corpus which moves. **A measurement was standing in for a
+property.** One line, not a subsystem.
+
+**No regression test, and none is possible — stated rather than glossed, because the archive rule
+asks for one.** The defect was a false sentence, and no assertion reads prose. What stands in its
+place is structural: the replacement text makes **no claim about the corpus at all**, so it cannot
+decay in this way rather than being watched for decay. That is `CLAUDE.md` § *Observer Blindness*
+position 3 — the correct path ending in a safe state — and it is why the archive is honest without
+the test the rule nominally requires.
+
+Fix SHA: `a2f6dda8`
+Patch-id: `e3c23461135bf01e488d1b097ddb93742ae00fc1`
 
 ## Tests added
 

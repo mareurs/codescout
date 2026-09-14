@@ -235,10 +235,14 @@ was absent from the hook for months while redding the shared gate
 carried a flow-style `cluster/` tag. Three ordinary filings later the corpus reaches the branch
 and the comment is false — so **a mutation result over a live corpus decays exactly like a count,
 and needs the same instant and tree**, which `CLAUDE.md` § *Testing Discipline* demands of counts
-and of nothing else. Filed as
-`docs/issues/2026-09-14-a-test-doc-comment-records-a-mutation-result-the-corpus-has-since-falsified.md`
-(`33efc480b2da9ac3`). Both sessions reached it from opposite ends: this one stated it as a doubt
-before either had the number, `6be73414-…` measured it and named the class.
+and of nothing else. Filed, fixed by `a2f6dda8` and archived:
+`docs/issues/archive/2026-09-14-a-test-doc-comment-records-a-mutation-result-the-corpus-has-since-falsified.md`
+(`b2b4078e23e0516d`, re-keyed from `33efc480b2da9ac3` by the archive move). Both sessions reached
+it from opposite ends: this one stated it as a doubt
+before either had the number, `6be73414-…` measured it and named the class. **The architecture pass
+rejected every proposed mechanism, including the gate this section once floated** — the fix was to
+state the fixture's property instead of a corpus snapshot, one line rather than a subsystem
+(`docs/adrs/2026-09-14-state-the-property-not-the-snapshot.md`).
 
 A check requiring every append to pass `index_row` would also be wrong — 28 of 49 guarded
 ledgers keep no row table. The assertion belongs on the *documentation*, in the coupling form
