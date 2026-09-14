@@ -1,7 +1,7 @@
 ---
 id: '1efc6488cb2b8946'
 kind: bug
-status: open
+status: investigating
 opened: 2026-09-01
 closed:
 severity: high
@@ -61,6 +61,52 @@ where the shared working tree was red, one refused commit, and roughly two hours
 sessions' wall time** to land five files that no single session could commit.
 
 ## Reproduction
+
+> **RE-DERIVED 2026-09-14 — THE REPRODUCTION BELOW NO LONGER HOLDS AS WRITTEN, and the
+> general case is fixed.** Read this box before the steps; they describe a substrate that
+> changed under them twice.
+>
+> **What fixed it: `015c13e5` (2026-09-13) split the monolithic ledger into per-class files
+> under `docs/trackers/issue-clusters/`** — twelve days after this was filed, under a commit
+> message naming no tracker entry, which is why nothing here moved. Textbook zombie-open.
+>
+> A pathspec commit's temp index is HEAD plus the NAMED paths only (verified 2026-09-14:
+> with two paths staged, `git commit -- Q.txt` yields a temp index whose
+> `git diff --cached --name-only` is `Q.txt` alone). With one monolithic ledger every
+> session's count edit landed in that one file, so any two sessions entangled. With
+> per-class files, a session filing in IC-2 names `IC-2-*.md` and leaves every other class
+> at HEAD — so a peer's concurrent edit to IC-11 never enters the consistency check.
+>
+> **Measured 2026-09-14 against the real hook, temp index over HEAD, working tree untouched:**
+>
+> ```
+> bug file alone, no ledger                       REFUSE  exit=1
+> bug file + ITS OWN per-class ledger             PASS    exit=0   <- the third form
+> HEAD only (control)                             PASS    exit=0
+> ```
+>
+> *"There is no third form"* was true of the monolith and is false now.
+>
+> **WHAT REMAINS, and it is much narrower: a SAME-CLASS collision.** Two sessions filing
+> into one cluster still need the same `IC-N-*.md`, and there the intersection is still
+> empty — each leg verified separately 2026-09-14, the composition inferred rather than
+> driven end-to-end:
+> - bare → `foreign-index` refuses (peer paths in the shared index);
+> - pathspec naming the contested ledger, peer's blob untouched → `foreign-index` refuses;
+> - pathspec naming it after editing ON TOP of the peer's content → `unreviewed-content`
+>   refuses (its INTRA-path axis; measured, with a working control);
+> - pathspec naming the bug file alone → `ledger-counts` refuses (measured, above).
+>
+> **And `93b30111` (today) removed this bug's last unsafe escape.** Until then a pathspec
+> commit naming a contested path was ALLOWED by `foreign-index`, so the same-class case had
+> a route that worked — by silently committing the peer's blob under your message. Removing
+> a capture is right, but it is a trade and should be recorded as one: the intersection is
+> now genuinely empty where it was previously non-empty-and-wrong.
+>
+> **Owed before any fix is designed:** re-adjudicate whether a same-class collision is
+> frequent enough to mechanise. The cost figures in § *Symptom* — nine cross-session
+> messages, two hours of two sessions — were paid under the monolith, where EVERY pair
+> collided. They do not transfer to the narrowed case and must not be cited for it.
 
 Two sessions on one checkout, both with a coupled pair staged — a `cluster/<slug>` count in
 `docs/trackers/issue-clusters.md` and the bug file it counts.
