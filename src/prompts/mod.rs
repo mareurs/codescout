@@ -2361,6 +2361,15 @@ mod tests {
     /// into the wrong table, a non-existent one writes nothing and allocates no id — which
     /// live in prose and were themselves found by reproduction, not by a gate
     /// (`context-injection-session-log:F-9`).
+    ///
+    /// **The absence half was decoration when first written, and `mutation-probe.sh` is what
+    /// said so** — reverting the template to the two-call form left this test green. The
+    /// needles are plain phrases; the retired protocol is not, carrying `**` emphasis and a
+    /// line wrap mid-phrase. Hence the normalization below, without which the guard matched
+    /// 1 of the 4 stale rows and neither surface that produced the incident. The general
+    /// claim, and this repo's third instance of it in one day: a phrase-shaped needle over
+    /// prose is a line-oriented instrument aimed at something that is not lines
+    /// (`context-injection-session-log:F-8`).
     #[test]
     fn prescriptive_recipes_teach_append_entrys_one_call_form() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -2412,9 +2421,28 @@ mod tests {
                  silence."
             );
 
-            let lower = text.to_lowercase();
+            // NORMALIZE BEFORE MATCHING. A raw `contains` over these files is decoration,
+            // and the probe said so: mutating the template back to the two-call form left
+            // this test GREEN. The retired protocol is written as `**Then**\n> add the
+            // Index …` — bold markers and a line wrap sit inside the phrase — and TAXONOMY's
+            // F-N row wrote `*after*`. Against the ORIGINAL text a raw needle matched 1 of
+            // the 4 stale rows and NEITHER of the two surfaces that produced the incident.
+            // Collapsing emphasis, backticks, blockquote markers and all whitespace runs is
+            // what makes the phrase expressible at all — the same line-oriented blind spot
+            // `mutation-probe.sh` documents at :95-103 for `grep -c`.
+            let norm = text
+                .chars()
+                .map(|c| match c {
+                    '*' | '`' | '_' | '>' | '#' => ' ',
+                    c => c,
+                })
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
             for &needle in RETIRED_PROTOCOL {
-                if lower.contains(needle) {
+                if norm.contains(needle) {
                     bad.push(format!("  {rel}  teaches the two-call form: \"{needle}\""));
                 }
             }
