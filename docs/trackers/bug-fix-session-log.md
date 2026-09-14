@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 152
+entry_high_water_F: 153
 entry_high_water_W: 135
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 135
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-153 | 2026-09-14 | med | cross-session | open | **Ran the bytes check `F-147` prescribes, pointed at the wrong PAIR — and its output is smallest exactly when the capture is worst.** `2aec3cd4` carried peer `codescout-e7`'s whole `## F-152` section plus their `entry_high_water_F` bump. I ran `git diff -- <file>` after committing, read `1 insertion`, and reported the peer's work safe. `git diff` is worktree↔index; the question was index↔HEAD. Their section was already absorbed into my index, so the calm number was the *signature* of the capture, not evidence against it. Second instance in one day by the author of `F-147`, three commits after committing `F-147`'s own text into the captured file. Nothing lost (`432e379f` holds the index row). Tell: *"what am I about to commit?"* is answered only by `git diff --cached`; `git diff` answers *"what am I leaving behind?"*, and that answer shrinks as the capture grows. |
 | F-152 | 2026-09-14 | med | record-vs-code drift | fixed-verified | **Repaired a per-SITE defect per-FEATURE, then recorded it as done.** `7e9619698bebe094` read *"Direction 2 IMPLEMENTED (`b21ad3b4`)"*; scouting that record's own § *Resume* precondition showed the direction had shipped at **one of four** sites. `project_security_config` copies the whole `SecuritySection`, so every refusal prescribing a `.codescout/project.toml` edit is defeated by the same per-process cache — `indexing_enabled`, `shell_command_mode` and `max_index_bytes` were all still sending readers to an edit the cache cannot see, the shell gate among them. The overclaim, not the defect, is what would have hidden them: a record that reads as settled sends the next session to Direction 1 and is never revisited. This is `CLAUDE.md`'s **mutate once per guarded SITE, not once per feature** arriving as a defect in a *fix* rather than as a law about *tests* — knowing the class prevented nothing; the record's own standing precondition caught it. Fixed `10a3c10d`; both guard assertions mutation-killed independently. |
 | F-151 | 2026-09-14 | high | reasoning/search-scope | open | **Searched for CONSUMERS of a field, never for how the handle is RESOLVED — and the resolver was four lines from the struct.** `BufferEntry.stderr` is reachable via an `.err` suffix (`output_buffer.rs:289` `strip_suffix`, `:674` stream select), verified live: `grep -c TOKEN @cmd_x.err` → `1`. Distinct from `F-150`: that is about the region of input space an observation was taken in, this is about the shape of the search. *"Who reads this field?"* presumes the answer is a reader; an escape hatch that transforms the KEY is invisible to every grep phrased around the VALUE. Tell: when N call sites agree, read the thing they all call. Cost: a § Workarounds that sent readers to native `Bash` for a stream a four-character suffix already served. Peer `40130` owns the larger half — `.err` is on **no** agent-facing surface, and three sessions concluded the stream unrecoverable that evening, wrong in the same direction, which reads exactly like corroboration. |
 | F-150 | 2026-09-14 | med | reasoning/bug-triage | fixed-verified | **Concluded "no such code path exists" from a reproduction run at one point on a thresholded axis.** Filed `4c433eb615bedf68` claiming nothing reads `BufferEntry.stderr`, from two of three call sites. The third read exactly that field, gated on `needs_summary` (>~10 KB). The reproduction was `grep -c` — two bytes — so every observation sat on the one side of the gate where the mechanism is absent, and *absent* and *gated out* are byte-identical there. Three fix shapes drafted on the false premise, all redesigning two tools' read contracts to duplicate a shipping mechanism. Tell: before concluding a mechanism does not exist, re-run the reproduction on the far side of every threshold the code consults — "widen the sample" does not reach this, because one more sample at the same size is the same observation. |
@@ -15287,6 +15288,26 @@ when writes are the thing disabled. Both assertions mutation-killed independentl
 **Rests on:** `project_security_config` continuing to derive the gate config from the resident
 project's cached `SecuritySection`. If Direction 1 lands a per-call re-read, the four-site
 population dissolves and this entry becomes history rather than guidance.
+
+## F-153 — The bytes check F-147 prescribes has a near-neighbour that reassures loudest when it is wrongest
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Status:** open · **Category:** cross-session
+
+**Observed.** `2aec3cd4` — my archive/repoint commit — carried peer session `codescout-e7`'s entire `## F-152` section **and** their `entry_high_water_F: 152` frontmatter bump. Verified at the bytes on their report rather than accepted: `git log -S'## F-152' -- docs/trackers/bug-fix-session-log.md` returns `2aec3cd4` and nothing earlier. Nothing was lost — they committed the matching index row as `432e379f` and said so in its message, so the two halves reconcile from the log.
+
+This is a known instance of `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`, not a new bug, and no bug file was opened for it.
+
+**The refinement, which is why this is not a duplicate of `F-147`.** `F-147` is mine, from earlier the same day, and states the remedy: *"`git status --short` answers which paths; only `git diff --cached` answers which bytes."* I did not skip the bytes check. **I ran a bytes check pointed at the wrong pair.** After committing I ran `git diff -- docs/trackers/bug-fix-session-log.md`, read `1 file changed, 1 insertion(+)`, and reported to my user that the peer's work was safely unstaged.
+
+`git diff` compares **worktree ↔ index**. The question was **index ↔ HEAD**. One word shorter, a different question, and — this is the part worth carrying — **its output is smallest exactly when the capture is worst.** Their section had already been absorbed into my index, so `git diff` could not see it; all that remained in the worktree was the one index row they added afterwards. A calm `1 insertion` was the *signature* of the failure, and I read it as the all-clear.
+
+**So the tell is not "remember `--cached`", which `F-147` already said and did not prevent.** It is that the reassuring reading and the failing reading of `git diff` are the same output, and the discriminator costs one word. When the question is *"what am I about to commit?"*, the only instrument that answers it is `git diff --cached` (equivalently `git show` after the fact). `git diff` answers *"what am I about to leave behind?"* — a question nobody asked, whose answer shrinks as the capture grows.
+
+**Second instance in one day, by the author of the first, three commits after committing `F-147`'s own text into the file that was captured.** `CLAUDE.md` § *Observer Blindness*: knowing the class prevented nothing; what caught it was the peer reading their own `git log`. The structurally-available check is the **pre-commit guard**, which already refuses *"an index commit carrying another session's staged paths"* — it passed here because their write was never `git add`-ed by them; my own pathspec `add` is what staged it. A guard keyed on authorship of the staged *hunks* rather than on who ran `git add` would fire; that is `H-N`/`I-N` shaped, not a policy.
+
+**Rests on:** `scripts/file-provenance.py` being able to attribute hunk-level authorship within a shared file. It reported `UNKNOWN` for this file at the time — 541 writes, all predating its window — so the mechanism above is not free today.
 
 ## Template for new entries
 
