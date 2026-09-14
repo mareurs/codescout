@@ -1,7 +1,7 @@
 ---
-id: c079fb93eb7fece8
+id: 5b9e544f1882f56e
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: run_command''s test envelope drops the stderr a wrapper puts its verdict on, and the surviving fields read as a different verdict'
 tags:
 - cluster/capped-result-presented-as-complete

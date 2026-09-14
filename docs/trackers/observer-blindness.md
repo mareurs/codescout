@@ -2884,7 +2884,7 @@ absorbing it as one makes the population look self-correcting.
 
 | bug | § Reproduction asserted | actual mechanism | refuted by |
 |---|---|---|---|
-| `c079fb93eb7fece8` — `run_command`'s test envelope drops stderr | the discriminator is the **classification**: *"`type: "generic"` → stderr in full"* vs *"`type: "test"` → no stderr key"* | the gate is **volume**: `needs_summary` is `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS` (`command_summary.rs:218`). Classification only chooses *which* summarizer runs once that gate is crossed, and two of the three then dropped the field | sessionId `9403d62d`, writing the fix |
+| `5b9e544f1882f56e` — `run_command`'s test envelope drops stderr | the discriminator is the **classification**: *"`type: "generic"` → stderr in full"* vs *"`type: "test"` → no stderr key"* | the gate is **volume**: `needs_summary` is `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS` (`command_summary.rs:218`). Classification only chooses *which* summarizer runs once that gate is crossed, and two of the three then dropped the field | sessionId `9403d62d`, writing the fix |
 
 **What makes this a confirmation rather than an anecdote: § *Who can see it* named the observer
 before the fact.** It reads *"the party who tries to FIX from the stated mechanism. Not a more

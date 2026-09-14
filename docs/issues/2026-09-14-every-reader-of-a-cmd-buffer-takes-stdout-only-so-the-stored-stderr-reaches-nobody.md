@@ -55,7 +55,7 @@ The stdout control returns `1` in both, proving the buffer is populated and the 
 stream demonstrably reached the server — and the buffer holding that same run still answers
 `0`. The loss is at the read surface, not at capture, and it is not specific to the `test`
 classification that
-`docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`
+`docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`
 reports.
 
 ## Environment

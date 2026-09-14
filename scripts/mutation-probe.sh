@@ -321,7 +321,7 @@ fi
 # that envelope carried NO stderr field at all. The verdict was not merely easy to skip,
 # it did not arrive — and `{"exit_code": 0, "passed": 0}` is the byte-identical rendering
 # of a SURVIVED mutant, so the reader got a plausible WRONG verdict rather than a gap.
-# Filed as docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+# Filed as docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
 # and fixed there; `--strict` is the half that does not depend on which renderer, which
 # codescout build, or which harness is on the other end of the pipe. The exit code is the
 # only channel that survives every one of them.

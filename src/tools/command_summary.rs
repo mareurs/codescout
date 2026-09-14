@@ -344,7 +344,7 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
     // A test harness writes its RESULTS to stdout, so a test run's stderr is the
     // compiler's diagnostics and any wrapper script's commentary — exactly what a
     // reader wants when the news is bad, and until 2026-09-14 the only shape that
-    // never carried it. BUG docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+    // never carried it. BUG docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
     if let Some(err) = summarize_stderr(stderr) {
         result["stderr"] = Value::String(err);
     }
@@ -829,7 +829,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 
     // -- summarized stderr on the test / build shapes --
     //
-    // BUG docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
+    // BUG docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
     //
     // What these guard is a DIRECTION, not a presence. A wrapper's verdict is the
     // LAST thing on stderr, so a fix that carried the head would satisfy every

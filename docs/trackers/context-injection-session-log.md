@@ -1259,7 +1259,7 @@ arms by `index_row_description_names_every_way_to_anchor_a_row`, observed KILLED
 
 **Valid:** dated 2026-09-14
 
-**Observed:** `docs/issues/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`
+**Observed:** `docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`
 § Hypotheses tried rejects *"stderr is never captured for test-type runs"* with: *"cargo's own
 `Compiling …` lines are stderr and are present [in the buffer]."* The verdict is right and **the
 reason is void**. Corrected by sessionId `9403d62d`, verified here at the bytes before accepting.
@@ -1313,7 +1313,7 @@ session is actively fixing is the capture this corpus keeps paying for.
 **Observed:** third instance today of one shape, and this entry exists for the **consolidation**
 rather than the instance — `F-8` and `F-11` are already here and were filed as unrelated.
 
-My own bug file (`c079fb93eb7fece8`) framed the discrimination as classification: § Reproduction
+My own bug file (`5b9e544f1882f56e`) framed the discrimination as classification: § Reproduction
 contrasts *"`type: "generic"` → stderr in full"* with *"`type: "test"` → no stderr key"*. That is
 true only **conditional on the summarizer being entered at all**, and the gate is
 `needs_summary` — `(stdout.len() + stderr.len()) / 4 > MAX_INLINE_TOKENS`
