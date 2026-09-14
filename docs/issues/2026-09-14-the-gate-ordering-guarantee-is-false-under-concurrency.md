@@ -1,14 +1,14 @@
 ---
 kind: bug
-status: taken
+status: mitigated
 tags:
 - cluster/transient-shared-state-lies-to-readers
-claimed_by: f0b1a4c7-e991-4478-bf22-b088483b6821
-closed: null
+closed: 2026-09-14
 opened: 2026-09-14
 owner: marius
 related: []
 severity: medium
+unverified: 'The race itself is NOT closed — only its legibility. A peer''s lean-lane build can still replace target/debug/codescout inside any default lane''s run phase; cli_doc now names that cause instead of reading as the reader''s own feature-gating regression. The closure is direction 1, a per-session CARGO_TARGET_DIR, which changes every session''s environment and is an operator decision. Cost measured both ways: 3.7 G + 48 s cold for an isolated debug target, against a prior measurement of 87 s + 2.8 G once then 11 s per run, faster than the contended shared tree.'
 ---
 
 # BUG: the gate-ordering guarantee is true sequentially and false under concurrency — a peer's lean lane re-arms the trap inside your default lane
@@ -224,10 +224,18 @@ form at 87 s + 2.8 G once, then **11 s per run — faster than the shared tree**
 on disk and **falsified on time**. Not actioned here: it changes every session's environment and
 belongs to the operator.
 
-**3. Retired as insufficient.** Stating the premise in `CLAUDE.md` cannot help when no behaviour
-change by any party closes the window — which is now measured, not argued. It has been written
-anyway (the `CLAUDE.md` gate-order bullet now carries it), and it is worth having for the reader
-who hits this; it is simply not a fix.
+Direction 3 is retired as insufficient: stating the premise in `CLAUDE.md` cannot help when no
+behaviour change by any party closes the window — which is now measured, not argued. It has been
+written anyway (the `CLAUDE.md` gate-order bullet now carries it), and it is worth having for the
+reader who hits this; it is simply not a fix.
+
+Fix SHA: `412415bd`
+Patch-id: `213ec5cc5d2f4ddd77a56e1022a7407d79ba2b08`
+
+**Deliberately NOT archived.** The mitigation is verified and the gate is green, but the defect
+this record names is still live and its only closure is an operator decision. Archiving would
+remove the one queryable surface where that decision is visible — a `mitigated` record in
+`docs/issues/` is the honest place for a fix that made an outage legible without preventing it.
 
 ## Attribution
 
