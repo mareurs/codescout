@@ -331,6 +331,36 @@ cheap remedy is **not another warning** — it is that **`SURVIVED` should refus
 finding when the run executed zero tests**, because a zero-test run cannot survive anything.
 Not implemented; recorded here so whoever picks it up does not re-derive it.
 
+**Design constraint, established by `9403d62d` 2026-09-14: there is NO count-free predicate, so
+the refusal branch is load-bearing and must be written FIRST rather than last.** They went
+looking for one and it does not exist. The script's contract is
+`--file/--find/--replace -- <arbitrary test command>`, so it cannot know a priori how many tests
+the caller's filter will select. **And exit codes cannot substitute** — on a zero-test run the
+baseline exits 0 and the mutant exits 0 too, byte-identical to a genuine survival. That half is
+confirmed directly by this file's own vacuous run, which printed `SURVIVED (rc=0)` over
+`running 0 tests` and `test result: ok`: `cargo test` exits 0 when its filter matches nothing,
+which is `docs/issues/2026-09-13-a-test-filter-that-matches-nothing-reports-success.md` again.
+`--list` moves the parse to a purpose-built listing rather than result prose — marginally more
+stable, still a parse.
+
+So the count must come from stdout and the format can change underneath it. Concretely:
+**`SURVIVED` renders only when the count is both FOUND and GREATER THAN ZERO; anything else
+renders `INCONCLUSIVE`, naming which of the two failed.** A reader who sees
+`INCONCLUSIVE (test count unparseable)` knows to look at the script; one who sees `SURVIVED`
+after a format change learns nothing and believes something false.
+
+**And the shape is this file's own bug, in a second instrument, the same week — `9403d62d`'s
+observation and the most portable thing here.** Absence rendered as a value. `unwrap_or(0)` made
+*"no exit status"* into *"exited 0"*; a count parse that failed open would make *"no count"* into
+*"tests ran and none caught it"*. In both cases the third state is real and simply has no arm.
+That is why the refusal is the load-bearing half: a guard keyed on parsing another tool's stdout
+is a proxy, and it goes quiet in the direction of rendering a green.
+
+**Neither session took it.** `9403d62d`'s operator pointed them at Windows CI and the
+artifact-id gate; this session's pointed it at the `run_command` fix. A peer calling work
+unclaimed is not authorization to touch a shared instrument, and both surfaced it to their own
+operator instead. The derivation above is complete enough to implement from.
+
 The standing advice, in its narrow form: **commit the test first when it does not live in the
 mutated file, and read the test count in the probe output, not only the verdict.**
 
