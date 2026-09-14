@@ -39,7 +39,7 @@ either `compile` or `check` mode. No MCP tool, no server changes, no dependency 
 - **Test env isolation is option A, mandatory:** `docs/conventions/test-env-isolation.md`.
   Resolve env at the edge into a plain struct, pass it inward. **Never** `EnvGuard`,
   **never** `#[serial_test::serial]` — option B is documented as NOT VIABLE and was removed
-  project-wide in `a656f8cec220d347` (119 → 0 `set_var` occurrences). A test that read
+  project-wide in `d4ab34c71d668020` (119 → 0 `set_var` occurrences). A test that read
   `$HOME` here would also overwrite the operator's real `~/.claude/CLAUDE.md`, so this rule
   is simultaneously the correctness rule and the safety rule.
 - **Error style:** this is a CLI, not an MCP tool surface. Use `anyhow::bail!` /

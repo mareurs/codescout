@@ -1477,6 +1477,8 @@ be asked of it.
 **Kin:** none yet in this ledger — first instance of this shape observed here.
 
 ## Sweep 2026-08-25
+<!-- audit-doc-refs:ignore-refs `4232733980fe92e9` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 Unscheduled sweep (explicit user request; next-sweep-due was 2026-09-22, not yet due).
 
@@ -2215,7 +2217,7 @@ approved, C-judge deferred as a named task (`HY-28`).
 | item | what | verification |
 |---|---|---|
 | A1 | `28f197a703b6f903` `taken` → `investigating` — `status: taken` with no readable `claimed_by:`, so the claim named nobody and nothing could ever check it | `doctor`'s own prescribed remedy |
-| A2 | `cd808780d9ea2db9` `taken` → `investigating` — claimed by session `26cb9b5b-…`, absent from all 18 live sessions on this machine. Operator-gated, because `doctor` is explicit that a claim made on another host is unresolvable here **by construction** and absence is not evidence of death | peer `codescout-75` confirmed it holds no claim on it |
+| A2 | `9c7c5bc9168404be` `taken` → `investigating` — claimed by session `26cb9b5b-…`, absent from all 18 live sessions on this machine. Operator-gated, because `doctor` is explicit that a claim made on another host is unresolvable here **by construction** and absence is not evidence of death | peer `codescout-75` confirmed it holds no claim on it |
 | B | `librarian(action="link_scan", write=true)` — **305 edges added, 3 pruned** | **fixpoint proven**: a second read-only scan returned `edges_missing[0]`, `edges_stale[0]`. The write reporting success is not the proof. |
 
 The B figure is 305 where the pre-sweep read said 302: a peer's two commits landed in between

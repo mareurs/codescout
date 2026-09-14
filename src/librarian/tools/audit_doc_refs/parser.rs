@@ -224,8 +224,29 @@ fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKin
 /// that one, which is the false negative this class invites: a mention about patch-ids
 /// swallowing a real citation.
 fn labelled_as_patch_id(text: &str, span_start: usize) -> bool {
-    let line_start = text[..span_start].rfind('\n').map_or(0, |i| i + 1);
-    let before = &text[line_start..span_start];
+    // The window deliberately CROSSES line breaks, and that is not a loosening.
+    //
+    // A same-line scan misses the wrapped form, which this corpus writes freely:
+    //
+    //     **DONE 2026-08-30** — `c2039a16`, patch-id
+    //        `63a943ba8e2a1a9b`. 9 sidecars under ...
+    //
+    // and `docs/issues/archive/2026-09-02-declared-patch-ids-per-line-scan-misses-a-wrapped-value.md`
+    // already recorded that exact blind spot in a NEIGHBOURING detector. The first cut of
+    // this function reproduced it anyway.
+    //
+    // Crossing the break is safe because the discriminator is the no-letters gap, not the
+    // line: a newline and its indentation are whitespace, so the rule still refuses to
+    // reach back through any prose. 240 bytes bounds the walk; the widest real gap in the
+    // corpus is under 30.
+    const WINDOW: usize = 240;
+    let lo = text[..span_start]
+        .char_indices()
+        .rev()
+        .take_while(|(i, _)| span_start - i <= WINDOW)
+        .last()
+        .map_or(0, |(i, _)| i);
+    let before = &text[lo..span_start];
     let Some(at) = before.to_ascii_lowercase().rfind("patch-id") else {
         return false;
     };
@@ -1852,6 +1873,14 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         assert!(!labelled_as_patch_id(u, u.find('`').unwrap()));
 
         // No label at all, and a label on a PREVIOUS line must not reach across.
+        // WRAPPED — label ends a line, value starts the next. A same-line scan misses
+        // this, which is the archived defect this rule was written against.
+        let wrapped = "**DONE** — `c2039a16`, patch-id\n   `aaaaaaaaaaaaaaaa`. 9 sidecars";
+        assert!(labelled_as_patch_id(
+            wrapped,
+            wrapped.rfind("`aaaa").unwrap()
+        ));
+
         let v = "plain `aaaaaaaaaaaaaaaa`";
         assert!(!labelled_as_patch_id(v, v.find('`').unwrap()));
         let w = "patch-id `bbbbbbbbbbbbbbbb`\nand then `aaaaaaaaaaaaaaaa`";

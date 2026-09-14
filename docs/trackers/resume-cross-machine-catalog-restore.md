@@ -155,6 +155,8 @@ Also 2026-08-31: this entry's **Status** line above is no longer current in one 
 Note this closes a citation break, not a cosmetic gap: those four ids were cited
 from outside and resolved to **nothing**.
 ## CM-4 — body_keeps_snapshot: one predicate, both errors
+<!-- audit-doc-refs:ignore-refs `ec40b63996d15b62` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 **Status:** fixed 2026-08-28 — `experiments` `16b5b243`, patch-id
 `2293ef75e6a6525efc99c14d3c80b1eec0e25081`.
@@ -241,6 +243,8 @@ out to be **three** private copies, not the two the bug file named, and
 `get` response — rebuild it from the file or from git, which is exactly what
 CM-8 did and why CM-8 was safe.
 ## CM-6 — `memory(write)` has no shrink guard
+<!-- audit-doc-refs:ignore-refs `d8a7d136a92ee5a2` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 **Status:** fixed 2026-08-28 — `experiments` `5b7b82cc`, patch-id
 `4477be7feb16fad3ff16b9dfabaa1e884a3ca53e`. Half of it; see *Next*.
@@ -357,6 +361,8 @@ whose SINGLE LINE exceeds the budget — many small lines never reach the valve 
 would pass with the fix reverted. Options and blast radius are written up in the
 bug file's § Fix.
 ## CM-8 — duplicate frontmatter in the hamsa log
+<!-- audit-doc-refs:ignore-refs `a843bfdefaf6347b` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 **Status:** fixed 2026-08-28 — body edit only, no code. Verified: `git diff` is
 exactly 14 deletions plus a trailing newline; 44 `A-N` headings and 30 index rows

@@ -12,6 +12,8 @@ topic: issue clusters and rule promotion
 ---
 
 ## IC-15 — a parameter is accepted at the boundary and silently dropped downstream
+<!-- audit-doc-refs:ignore-refs `114306f5be948990` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 **Slug:** `cluster/accepted-parameter-silently-dropped`
 **Claim:** A parameter is accepted at the boundary — it validates, the call succeeds — and some path downstream discards it. The caller has positive evidence the value was set, because nothing rejected it, and no later observation distinguishes "applied" from "accepted and dropped".

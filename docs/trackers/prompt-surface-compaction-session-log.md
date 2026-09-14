@@ -55,6 +55,8 @@ entry_prefix:
 > `archive/mcp-prompt-redesign-session-log.md`.
 > **Update, later on 2026-08-19:** of the three open bugs named above, the heredoc
 > pipe-rewrite is **fixed and archived** — new id `0de2778e6adac220`, fix `4ea33d15`,
+<!-- audit-doc-refs:ignore-refs `d5cb0c41335b2610` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 > patch-id `50691255eccd`. The `d5cb0c41335b2610` above was re-keyed by that move and no
 > longer resolves. Still open: the rendezvous latch bug and `grep`'s silent zero on an
 > absolute glob (`a23bdded8539b234`).

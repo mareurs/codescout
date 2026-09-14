@@ -812,6 +812,8 @@ shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
 
 **Source:** `src/tools/output_buffer.rs:42`, `src/tools/core/types.rs:485`; this session's peer-delegation brainstorm.
 ## R-15 — Scout external-tool on-disk state against bug-doc claims before a fix depends on addressing it
+<!-- audit-doc-refs:ignore-refs `26a9e85d58931839` `7e868829c00fa9b2` `c85ec91bdbfd1aee` — not artifact ids at all. codescout's own `ws_hash` is `{:016x}` (`src/socket_discovery.rs:10`), so it is 16 lowercase hex BY CONSTRUCTION and collides with the artifact-id namespace — the line's whole point is comparing hash widths. Suppressed rather than repointed for a reason stronger than shape: that function is documented "Stable-within-a-build" and built on `DefaultHasher`, which carries no cross-version guarantee. An artifact id is stable until its file moves and a patch-id is stable forever, so this namespace holds three token kinds of identical shape and three different durabilities. A resolver that mis-reads an artifact id is wrong in a way that STAYS wrong and is eventually noticed; mis-read a `ws_hash` and the answer changes under you after a toolchain bump, which reads as corpus churn rather than a category error. -->
+
 
 **Verdict:** hit (caught doc-vs-filesystem gap pre-implementation)
 

@@ -34,6 +34,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 `## Resume`, which carries the real next action along with the caveats.
 
 ## Queue — rendered snapshot (2026-08-18)
+<!-- audit-doc-refs:ignore-refs `403e3fad0356f171` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 
 > **`params` is the source of truth; this table is a snapshot of it.** Params live in the librarian
 > catalog (`~/.local/share/librarian/catalog.db`), which is **not** in the repo — so without this
@@ -1314,6 +1316,8 @@ Worst single row is BL-44 at 2,038 → 7 characters (`dropped`); BL-29's own row
 **done** — fixed by teaching it the `entry_prefix` ledger declaration. Its "26 of 66 unprotected" framing was later retracted, and the `id:`-stamping remedy it suggested was reverted in `bb9a94d7`.
 
 ### BL-39 — the two sanctioned entry formats are not equivalent
+<!-- audit-doc-refs:ignore-refs `d34dfcd2cc718bd8` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 **done, archived** — a params-rendered index defines no citable token. All steps shipped, `doctor` verified (`ledger_defines_nothing` 10→2, `entry_without_definition` 3→1). The blocking peer file committed and was archived; the bug itself moved to `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (id re-keyed `d34dfcd2cc718bd8` → `9dc28c0860b214d9`), all live citations re-pointed in the same commit.
 
 
@@ -1321,12 +1325,16 @@ Shipping commits, which lived only in the queue table: `de4df2cd`, `f19d5296`, `
 
 *(Moved out of the queue table 2026-09-13; the rest of that cell duplicated this section and was not carried over.)*
 ### BL-40 — every drift check asks whether the body kept up with params, never the reverse
+<!-- audit-doc-refs:ignore-refs `bde782f4cc52ac22` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 **done** `87f3b936` — `params_behind_body` in `doctor`, same two sets subtracted the other way. Ids only; the message names `append_entry` and says explicitly not to re-render from params, because that is `snapshot_drift`'s remedy and here it would delete the newer record. Deliberately **not** gated on `body_keeps_snapshot` — that gate is right for the row question and would silence a body id the catalog has never seen, which is the whole finding. Also extracted `params_backed_ledgers`, since this would have been the third hand-rolled copy of a 45-line preamble shared by three checks that must agree on what a ledger is.
 
 Found by nearly publishing from the stale side: `windows-platform-support.md` had 29 params rows against 35 in the body, with two statuses stale, and `append_entry`'s `warning` was the only surface that could see this direction — only during an append, which that ledger had not had since the divergence. On its first live run the check fired **twice**: the WIN case, and `mirela/…/solver-invariants.md` at 10 of 68, a different repo no surface had ever reported. Data repair for both → **BL-42**.
 
 Bug file archived; its id was re-keyed `bde782f4cc52ac22` → `0808a5251625e6db` by the move. *(Moved out of the queue table 2026-09-13; the rest of that cell — the two first-run firings and the second repo — is already stated above, so only the archive fact was carried over.)*
 ### BL-41 — link_scan's dangling count is prefix-gated, so a whole namespace can read as healthy
+<!-- audit-doc-refs:ignore-refs `52269554ea4f51a4` — these ids are the SUBJECT of the prose below, not citations: the sentence records that the id DIED. Repointing one rewrites its own claim into something true and meaningless, and there is no inline escape — `backticks` are scanned by design (extract.rs), so a named suppression is the only way to say "mentioned, not cited". -->
+
 **done** `ff088630` — 129 dead `WIN-N` citations moved the project total by zero. The gate is right in intent (it suppresses `CI-2`-shaped prose) and wrong in discriminator: it cannot tell "not a namespace" from "a namespace that is wholly broken". Fixed by gating on the `entry_prefix` **declaration** as well as on observed definitions.
 
 The wiring is the load-bearing choice and it is not the one the bug file proposed: the declaration rides on `DocExtract.declared_prefixes`, populated inside `extract()`, which already holds the whole file text including frontmatter — so **there is no wire for a caller to forget**. Threading it through `DefinitionIndex::build` would have made an omission a silent no-op and touched 11 test call sites. Pinned by an end-to-end test that runs a real row-only body through the real extractor into the real index, the only one of five that fails if either half drops its end.
@@ -2468,7 +2476,7 @@ Three regression tests added (`src/tools/core/tests.rs`), reusing the
 `seed_linked_worktree` / `rooted_ctx` fixtures the read-side notice fix had
 already built — including one pinning the case that matters most for a
 re-armed refusal: no worktrees, never activated, still allowed. Bug archived
-(`1523556488a95de2` → `a742a50ea6723daf`); citations of the old path in
+(`a742a50ea6723daf` → `a742a50ea6723daf`); citations of the old path in
 `src/tools/core/types.rs`, `guards.rs`, `tests.rs` re-pointed in the same pass.
 ### 2026-08-17 — BL-14, BL-15, BL-37(partial); and `experiments` was red at a clean tree
 
