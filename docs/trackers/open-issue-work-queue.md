@@ -12,6 +12,7 @@ tags:
 - work-queue
 topic: work-queue
 expects_augmentation: docs/augmentations/docs-trackers-open-issue-work-queue.yaml
+snapshot_anchor: '| ID | Ph | Task | Status | Bug |'
 ---
 
 > **Prefix:** `BL-N` — a row in this queue. Work-stream-scoped, defined here, not a project-wide
@@ -65,7 +66,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | done-archived | `3d733b00b134634c` |
 | BL-20 | 1 | params merge-patch wipes entry arrays wholesale — no guard, no report, no git backup; gave entries an update path (`update_entry`) + always-on counts | done-archived | `36eda0c2634dbea9` |
 | BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | done-archived | `e52abced30ff1dbc` |
-| BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | done-archived | `18a637f59289192c` |
+| BL-22 | 1 | reindex re-keys moved artifacts and cascade-deletes their events — `move` breaks the `id == hash(abs_path)` invariant, so the next reindex destroyed 11 events of history while reporting removed: 0 | done-archived | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | done-archived | `61e2360408cb206b` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | done-archived | `0cd1fe818951b232` |
 | BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | done | `cfcbee6f7d047a55` |
