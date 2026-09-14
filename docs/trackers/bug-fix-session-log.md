@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 142
+entry_high_water_F: 143
 entry_high_water_W: 133
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 133
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-143 | 2026-09-14 | med | reasoning/shared-checkout | fixed-verified | **A red that goes away tells you nothing about why.** Classified three peer reds as stale reports; all three were correct measurements of trees that were really broken and really repaired. The instance I argued hardest for was the weakest. |
 | F-142 | 2026-09-14 | med | cross-session | fixed-verified | **Read a doc comment's motivation clause as a live limitation and warned a peer about a defect that was fixed six lines below it.** `archive/` in the cited bug path was a second signal I walked past. |
 | F-141 | 2026-09-14 | high | measurement | fixed-verified | **A gate's precondition was checked by an instrument that could not express failure — and a 3-file scan agreed with it.** `--fail-on high` is vacuous while the verdict sits at `med`; the real population was 13, not 0. |
 | F-140 | 2026-09-14 | med | reasoning/shared-checkout | open | **A 69-second still-frame was read as a negative result, and shipped in a commit message.** Killed this session's wedged `cargo test --workspace` to release a peer's, checked the peer's log 69s later, saw no movement, and concluded the two were not deadlocking each other. The peer's gate finished `DEFAULT_EXIT=0` four minutes after the kill. A kill releases a lock instantly; the blocked binary then runs the next test before writing anything a log watcher can see — so silence is consistent with *blocked* and *unblocked-and-busy* alike, making the check no evidence rather than weak evidence. Cost two errors, not one: the false negative, and the false positive it licensed — a SIGSTOPped peer process promoted to "the lever" and recommended for a signal, falsified by the same run. Confirm on the blocked process's STATE (`ps -o stat=`, `/proc/locks`), never on its output |
@@ -14647,6 +14648,56 @@ distinction** — nothing about `target/release/codescout` says which tree produ
 
 **Rests on:** `src/librarian/tools/mv.rs:287-293`; peer sessionId
 `f3c594ce-c424-40d3-a603-9693cfef3f63`.
+
+## F-143 — Repair and staleness emit the same sequence, so a red that clears cannot name its own cause
+
+**Valid:** dated 2026-09-14
+
+**Severity:** med · **Category:** reasoning/shared-checkout · **Status:** fixed-verified
+
+**Observed.** Three gate runs of mine went red on failures I had not caused, and each went
+green minutes later with no action from me. I classified all three as *stale reports* —
+"a photograph of a half-written file presented as a regression" — and offered them to a peer
+as datapoints for a bug about an advisory reporting a cached failure as current state.
+
+**All three were the wrong class, and the peer's refutation of one generalised to the
+other two.**
+
+| # | what I saw | what it actually was |
+|---|---|---|
+| 1 | `the_hook_enforces_every_rule_it_declares`, 7-vs-6 rule sets | the script really declared 6 at that instant; the +98-line edit was half-landed |
+| 2 | lean lane, `could not compile … due to 15 previous errors` | `a13b31c6` took `check_tool_access` from 2 params to 3; **every** caller broke, and the owner fixed ~16 call sites |
+| 3 | one invocation: lean RED, default GREEN | the port's second half landed between the two lanes |
+
+Every one was **correct at its own instant**, on a tree that was genuinely inconsistent then
+and genuinely repaired later. None was a report outliving its subject.
+
+**The distinction that makes them different classes.** A stale report is wrong at the moment
+you read it and **stays** wrong with no further input — the repairing write was discarded and
+a pre-repair outcome was written down afterwards. A moved corpus produces two correct
+readings that disagree because the tree changed between them. No re-run can make the first
+right; nothing is *wrong* about the second.
+
+**Lesson.** **A red that goes away tells you nothing about why.** Repair and staleness emit an
+identical sequence — red, then green, no action by me — and the fact that separates them
+(*"I broke that and I fixed it"*) is held by exactly one party: the owner. Inferring a cause
+from that sequence is closing an attribution by inference, which § *Observer Blindness*
+already forbids for authorship; this is the same law applied to **causation**.
+
+**The trap inside the caveat.** I flagged at the time that #1 and #2 needed a re-run to
+establish the claim, and singled out #3 as self-proving because one command's output held
+both the red and the green. It proves nothing of the sort — it proves the tree changed
+between two lanes, which is exactly what a two-phase edit looks like. **The instance I argued
+hardest for was the one I had least reason to trust**, because its apparent self-sufficiency
+replaced the question rather than answering it.
+
+**Cost.** Nearly widened another session's defect population by 3 with instances of a
+different mechanism — the failure mode that file exists to warn about. Caught because the
+owner of #2 was asked directly, by a third party who thought to ask.
+
+**Rests on:** `a13b31c6`; peer sessionIds `f3c594ce-c424-40d3-a603-9693cfef3f63` and
+`6be73414-6293-4a4e-95a4-4bada8327f08`. Sibling of [[F-141]] — that one is a check that
+cannot express failure, this one is a sequence that cannot express cause.
 
 ## Template for new entries
 
