@@ -13,7 +13,7 @@ entry_prefix:
   - F
   - W
 entry_high_water_F: 6
-entry_high_water_W: 2
+entry_high_water_W: 3
 ---
 
 # Session Log — Context Injection & Principal Identity
@@ -47,6 +47,7 @@ author to make.
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-09-14 | high | scout the SINK a proposed value must be accepted at, not only the subsystem under design | an ADR would have shipped on a mechanism the `deny_unknown_fields` librarian tools reject, and the one option buildable today would have been wrongly recorded as unavailable | validated |
 | W-2 | 2026-09-14 | high | probe a would-be KEY in a universe containing two of whatever it keys | a single-field `agent_id` key would have passed every test and conflated two sessions' parents the first time two sessions shared a server | validated |
+| W-3 | 2026-09-14 | high | when the obvious benefit is already provided, measure the property the incumbent cannot have by construction | the ADR's justification would have stayed an argument after F-6 demoted it, with the real benefit unmeasured and unclaimable | validated |
 
 ---
 
@@ -719,8 +720,13 @@ unchanged, and no committed behaviour depends on Arm A.
 motivation stated more strongly than the evidence supports, and I would have shipped the
 hook citing Arm A as proof.
 
-**Status:** open — the ADR's Context still reads as though those bugs are live, and the
-precision benefit is unmeasured.
+**Status:** mitigated — the replacement experiment this entry called for has been run, at
+`context-injection-session-log:W-3`. Measured: one subagent dispatch costs the parent **2**
+re-deliveries without the stamp (a full `tracker-conventions` body, then `librarian § Filter
+Syntax`) and **0** with it, stable over two dispatches, while the subagent continues to
+receive its own guides. So the precision benefit this entry called unquantified is now
+quantified. What remains open is the concurrency half — two subagents in flight without
+cross-suppression — which is predicted by the same mechanism and still unmeasured.
 
 **Valid:** dated 2026-09-14
 
@@ -736,6 +742,68 @@ subagents can be served without cross-suppression. `guide_rearm` can do neither 
 construction, so that is where a difference must show if one exists. Until it is run, the
 ADR should say the class is archived-but-recurring and the benefit is precision, rather
 than implying subagents are starved today.
+
+## W-3 — Measuring the property the incumbent cannot have: parent over-delivery 2 to 0, subagent delivery intact
+
+**Observed:** 2026-09-14, the replacement experiment `context-injection-session-log:F-6`
+called for. F-6 established that subagent *delivery* is already handled by the shipped
+`guide_rearm` path and that this feature's remaining value was **precision**, unmeasured.
+This measures it.
+
+**Pattern:** When a mechanism's obvious benefit turns out to be already provided by
+something else, do not defend the mechanism — find the property the incumbent **cannot
+have by construction**, and measure that instead. `guide_rearm` is a broadcast *reset*
+carrying no identity, so *restoring a principal to its own prior state* is the one thing
+it can never do. That is where the difference had to be if one existed.
+
+**Design that made it discriminate.** The observable had to be a topic the PARENT holds
+that the SUBAGENT will not re-trigger — otherwise the subagent re-consumes it, re-marks
+it, and both arms look identical. Subagents were therefore restricted to a single `grep`
+and explicitly forbidden from touching `doc`, while the parent's observable was a
+librarian guide section keyed to one exact `doc(find)` call shape.
+
+**Result.** Identical parent call, before and after one subagent dispatch, from a
+verified-silent baseline:
+
+| arm | stamp hook | parent re-deliveries |
+|---|---|---|
+| 1 | off | **2** — the entire `tracker-conventions` body, then `librarian § Filter Syntax` |
+| 2 | on | **0**, and again **0** after a second dispatch |
+
+And the other half, which is what stops this being a trade: under the stamp the subagent
+**still received** `project-activation-bootstrap`. Parent over-delivery removed, subagent
+delivery preserved.
+
+**Counterfactual:** without the park/restore map, every subagent dispatch wipes the
+parent's delivered-set and the parent re-pays it one guide section per call — a full
+guide body was ~50 KB in the arm measured, and it took two calls to drain a single
+dispatch. On a session that fans out to several subagents, that is the parent's context
+window being re-filled with text it already holds, repeatedly, invisibly. `guide_rearm`
+cannot avoid it: it has no identity to scope the reset to.
+
+**Confirming data points:**
+1. This session — 2 → 0 re-deliveries, stable across two dispatches, subagent delivery
+   intact.
+2. Pending: the concurrency half — two subagents in flight, neither suppressing the
+   other's guides. Predicted by the same mechanism and **not** measured here.
+
+**Impact:** high — it converts the ADR's justification from an argument into a
+measurement, after F-6 had correctly demoted the previous one.
+
+**Promote-when:** the concurrency half is measured too. At that point the ADR's
+Consequences can state the benefit in observed terms rather than predicted ones.
+
+**Status:** validated — single work-stream datapoint, both directions checked.
+
+**Valid:** dated 2026-09-14
+
+**Rests on:** a disposable prototype hook scoped to one session id, whose own behaviour
+was controlled separately (stamps for an agent in this session; emits nothing for the
+parent or another session). One honest gap in arm 1: my own `sleep` ran concurrently with
+the subagent, so I cannot say whether the subagent's call or mine drained the re-arm
+request. It does not affect the outcome — either drain clears the shared ledger, which is
+what arm 1 observed — but the attribution is unestablished and the run should not be
+cited as showing *which* call drains.
 
 ## Template for new entries
 
