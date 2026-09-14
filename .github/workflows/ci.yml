@@ -138,7 +138,7 @@ jobs:
   #
   # Why it is wired at all: `scripts/mutation-probe.sh` exists so that arming a
   # mutation cannot publish a red to peers who cannot attribute it
-  # (docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md).
+  # (docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md).
   # Two of its properties failed while it was being written and both were found by
   # RUNNING it rather than reading it: the occurrence count used `grep -F -c`, which
   # counts matching LINES and reported 11 for a two-line pattern occurring once; and

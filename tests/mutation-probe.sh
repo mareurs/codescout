@@ -5,7 +5,7 @@
 #
 # `mutation-probe.sh` exists so that arming a mutation cannot publish a red to
 # peers who cannot attribute it
-# (`docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`).
+# (`docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`).
 # Two of its properties are load-bearing and both failed at least once while it
 # was being written — found by RUNNING it, not by reading it:
 #

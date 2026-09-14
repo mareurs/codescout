@@ -145,7 +145,7 @@ detector for four tools.
 **Acceptance was NOT taken via this file's § Reproduction step 2.** That step prescribes
 deleting `doc`'s `"gather" =>` dispatch arm and observing a red — an armed mutation in a
 shared checkout, which is itself an open defect here
-(`docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`):
+(`docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`):
 a peer running the gate cannot tell a deliberate red from a real one. The same
 discrimination is available without arming anything, from a synthetic two-action schema:
 

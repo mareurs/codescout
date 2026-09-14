@@ -1,13 +1,12 @@
 ---
-id: df0c18734b20fddd
+id: ed033db8b681f538
 kind: bug
 status: fixed
 title: An armed mutation is a deliberate red, and no observer can distinguish it from a broken test
 tags:
 - cluster/transient-shared-state-lies-to-readers
 topic: shared-checkout mutation testing
-claimed_at: 2026-09-14
-claimed_by: f3c594ce-c424-40d3-a603-9693cfef3f63
+closed: 2026-09-14
 ---
 
 # BUG: an armed mutation is a deliberate red, and no observer can tell it from a broken test
@@ -64,6 +63,13 @@ this project relies on — so the practice generating the hazard is the practice
 discipline requires.
 
 ## Fix
+
+- **SHA** — `9433feb3` (branch `experiments`; positional, dies on the next rebase)
+- **patch-id** — `90d4b2215b3ee26745e5d50de24a8ee3c1f86056`
+  (`git show 9433feb3 > f && git patch-id --stable < f`; content hash of the diff, survives
+  rebase **and** cherry-pick). Single parent, 39474 bytes — neither merge-commit trap applies.
+- **Gate** — fmt-mine 0 / clippy 0 / lean 0 / default 0 at tree `331d2c0f`;
+  `tests/mutation-probe.sh` 21 passed, 0 failed.
 
 **BUILT 2026-09-14 as `scripts/mutation-probe.sh`, and it is not the marker this section spent
 two weeks designing.** What changed was a measurement, not an argument: isolating the mutation

@@ -224,6 +224,6 @@ N/A — fixed, gate green, acceptance red observed.
 - `docs/issues/archive/2026-04-22-resilient-stdin-spin-flood.md` — the original
   BUG-047 spin, which is what this backoff exists to prevent.
 - `docs/trackers/issue-clusters/IC-14-guard-narrower-than-its-name.md` — the class.
-- `docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
+- `docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
   — why the confirming mutation was not run here.
 - `CLAUDE.md` § *Testing Discipline* — the law, stated before this instance.

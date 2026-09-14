@@ -235,7 +235,7 @@ Removing `st.defer();` from `decide_start`: **32 passed, 1 failed.** Only
 Without the extraction this would have landed a guard incapable of detecting its own removal.
 
 Applied and reverted inside one shell invocation with a restoring `trap`, so the shared tree was
-never left holding an armed red (`df0c18734b20fddd`).
+never left holding an armed red (`ed033db8b681f538`).
 
 **PROXIMITY IS NOT REACH, and the three blind tests are the evidence.** This is
 § *Testing Discipline*'s *loudness is a property of a PATH* — an alarm nothing reaches is

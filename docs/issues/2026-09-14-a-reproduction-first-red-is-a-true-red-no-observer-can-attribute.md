@@ -15,7 +15,7 @@ plan — the plan is a hypothesis about the reproduction."* Following it produce
 is **red by design** from the moment it is written until the fix lands: minutes to hours.
 
 On a shared checkout every other session sees that red in their own gate run and cannot
-tell it from a regression they caused. `df0c18734b20fddd` records the same observer
+tell it from a regression they caused. `ed033db8b681f538` records the same observer
 confusion for an **armed mutation**, but the two are not one defect, and the difference
 decides the remedy:
 
@@ -23,7 +23,7 @@ decides the remedy:
 |---|---|---|
 | is there a real defect behind the red? | **no**, it is synthetic | **yes**, and it is live |
 | window | seconds to minutes | minutes to **hours** |
-| announcement convention | *"say so before it fires"* (`df0c18734b20fddd`) | **none** |
+| announcement convention | *"say so before it fires"* (`ed033db8b681f538`) | **none** |
 | mandated by CLAUDE.md? | no | **yes** |
 | safe to suppress? | yes, costs no information | **no** — hides a live defect |
 
@@ -65,7 +65,7 @@ failing test emits exactly one thing — its panic message — and by convention
 describes the defect, never the test's lifecycle stage. So the one channel guaranteed to
 reach every observer carries none of what they need.
 
-`df0c18734b20fddd`'s remedy is to announce before arming. That is a **policy** someone must
+`ed033db8b681f538`'s remedy is to announce before arming. That is a **policy** someone must
 remember, and it is workable for a mutation because the window is short and the author is
 watching it. It does not transfer here: the window is long, the author is mid-fix rather
 than mid-run, and nothing triggers the recollection.
@@ -117,7 +117,7 @@ indistinguishability IS the defect.
 
 ## Workarounds
 
-Announce before writing the test, as `df0c18734b20fddd` prescribes for its own case. Works,
+Announce before writing the test, as `ed033db8b681f538` prescribes for its own case. Works,
 and is a policy rather than a mechanism — the author of this record had read that file, cited
 it to a peer the same evening, and still did not announce.
 
@@ -129,8 +129,8 @@ not evidence a convention holds.
 
 ## References
 
-- `docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
-  (`df0c18734b20fddd`) — the synthetic-red sibling. Filed separately rather than appended
+- `docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
+  (`ed033db8b681f538`) — the synthetic-red sibling. Filed separately rather than appended
   there because the remedies diverge: announce-then-revert for a red with nothing behind it,
   mark-the-message for a red with a live defect behind it. A shared title would make every
   reader work out which half applies before using either.

@@ -7,7 +7,7 @@
 # running the suite, and reading the failure as evidence. On a shared checkout
 # that failure is published to every other session's `cargo test`, where it is
 # byte-identical to a real regression. Measured instances and the full account:
-# `docs/issues/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`.
+# `docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`.
 #
 # WHY ISOLATION RATHER THAN A WARNING
 #
