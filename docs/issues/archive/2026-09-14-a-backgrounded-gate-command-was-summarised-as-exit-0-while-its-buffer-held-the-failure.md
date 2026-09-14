@@ -526,6 +526,34 @@ exists to re-read.
   ceiling, the sibling half of this trigger.
 - `get_guide("progressive-disclosure")` — the summary/buffer contract this violates.
 
+**2026-09-14, later — the verdict text this record tells you to read can VANISH.**
+`scripts/mutation-probe.sh` writes every verdict to **stderr**, and a `cargo test` wrapped by it
+classifies `type: test` through `run_command` — an envelope carrying **no stderr field**. Found
+by `9403d62d` on the fix they had shipped hours earlier, on its most common path. Verified
+independently here, one step worse than first reported: `echo MARKER >&2; cargo test --lib
+run_command::` returned `{type: test, exit_code: 0, output_id: …, passed: 187}` and the marker
+was absent from the envelope **and from the buffer** — dropped, not merely unrendered. The
+control is the same command one call earlier with a narrower filter: unclassified, inlined, and
+its `stderr` field carried the marker intact. The discriminator is the classification, not the
+command.
+
+**Consequence:** an `exit_code: 0, passed: 0` envelope is the byte-identical rendering of a real
+SURVIVED, so an INCONCLUSIVE verdict does not merely get skipped by a caller chaining `&&` — it
+**never arrives**, and the reader gets a plausible wrong answer rather than a visible gap. The
+exit code is the only channel surviving the envelope, which is why `--strict` shipped (opt-in,
+remapping only the two INCONCLUSIVE branches to exit 3) and why the INCONCLUSIVE-exits-0 trade
+recorded above is safe only for a human reading a terminal.
+
+**Nothing above is retracted.** § *Tests added*'s claim that exit codes cannot substitute is
+about **detecting** a zero-test run and still holds; this is about **reporting** the verdict once
+detected. Different claims, both standing. Envelope bug filed separately by `9403d62d`.
+
+**For anyone re-running this file's probes:** every mutation run recorded here appended `2>&1`,
+which merges stderr into stdout **in the shell, before the tool classifies anything** — which is
+why those verdicts were visible at all. Habit, not design. The conclusions do not rest on it:
+each KILLED was read from `exit_code: 101` plus the named failing test in `failures`, both of
+which survive the classified envelope.
+
 ## Fix provenance
 
 - **SHA:** `cc57cd28` (experiments) — positional; does not survive a rebase of `experiments`.
