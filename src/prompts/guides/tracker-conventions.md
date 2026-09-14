@@ -138,6 +138,44 @@ git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
 grep <first-12-of-patch-id> /tmp/patch-ids.txt
 ```
 
+**Write the pair as a `## Fix provenance` section — the SHAPE is what `doctor` reads, and
+prose does not discharge it.** `librarian(action="doctor")`'s
+`terminal_status_without_fix_anchor` refuses a `fixed` or `mitigated` record that declares
+no pointer, and its sharpest measurement is that a loose hash in prose is **worse than
+none**: a record carrying one does not merely lack an anchor, it *reads as* anchored, so a
+reader scanning for provenance finds the commit the bug was OBSERVED at and stops looking.
+
+````markdown
+## Fix provenance
+
+- **SHA:** `5a72304c` (`experiments`)
+- **patch-id:** `e9f8df63b911`
+````
+
+**Plural, because a fix is not always one commit.** Repeat the pair; each `- **patch-id:**`
+binds to the `- **SHA:**` above it, not to the first in the file. The singular shape this
+replaced pushed one author into a table — which read well and was invisible to every check,
+so both anchors it recorded were verified by nothing.
+
+**A fix that landed in another repository takes the `<repo>:<sha>` prefix** —
+`- **SHA:** `codescout-companion:b8ffa8b`` — which the dead-pointer check skips rather than
+reporting unresolvable, since it cannot see that repo's object DB.
+
+**A fenced example is a quotation, not a declaration** — including the one just above, which
+is why quoting the shape here costs nothing. The corollary is the trap: a block you fence
+inside your own bug file declares *nothing*, and the record still reads as anchored to a
+human.
+
+**If the record genuinely closed with no commit** — a mitigation that was a doc note, a
+defect that turned out to be environmental — say so in frontmatter rather than leaving the
+section absent, which is indistinguishable from forgetting:
+
+```yaml
+no_fix_commit: "mitigation was a doc note; nothing was committed"
+```
+
+An empty value does not discharge it. The check wants the reason, not the field.
+
 **A merge commit's patch-id is never citable — but it is not always EMPTY, and the
 difference decides whether you notice.** For a **clean** merge `git show <merge>` emits
 the message with no diff (the tree is derivable from the parents, so there is nothing to
