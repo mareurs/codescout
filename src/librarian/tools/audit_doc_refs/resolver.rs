@@ -1386,8 +1386,14 @@ mod tests {
     fn default_severity_gates_only_on_deterministic_filesystem_verdicts() {
         use crate::librarian::tools::audit_doc_refs::severity::default_severity;
 
-        // Filesystem facts: same answer on every run.
-        for v in [Verdict::Missing, Verdict::FileMissing] {
+        // Deterministic facts about a store we can interrogate: same answer on every
+        // run. `ArtifactMissing` is the catalog's half of that — see the note on
+        // `default_severity` for why a catalog fact is as stable as a filesystem one.
+        for v in [
+            Verdict::Missing,
+            Verdict::FileMissing,
+            Verdict::ArtifactMissing,
+        ] {
             assert_eq!(default_severity(v), Severity::High, "{v:?} should gate");
         }
 
@@ -2657,10 +2663,13 @@ mod tests {
             &id_ctx(tmp.path(), &[], ids(&[LIVE])),
         );
         assert_eq!(r.verdict, Verdict::ArtifactMissing);
-        // Med, not High: the verdict reports before it gates. When the live corpus is
-        // reconciled and `default_severity` moves this to the `High` arm, THIS assertion
-        // is the one that must be updated — deliberately, and in the same commit.
-        assert_eq!(r.severity, Severity::Med);
+        // High: the gate bites here as of 2026-09-14. It landed at `med` first and was
+        // tightened only once the live corpus measured 0 gating instances against a
+        // locally-tightened binary — the reconciliation is the precondition, not a
+        // follow-up. The `--fail-on high` run that is supposed to prove it was VACUOUS
+        // while this sat at `med`, because no `ArtifactMissing` could reach `high` to
+        // be counted; that is why the measurement had to be taken with the arm moved.
+        assert_eq!(r.severity, Severity::High);
         assert_eq!(r.severity_reason, SeverityReason::PolicyDefault);
     }
 
@@ -2737,12 +2746,13 @@ mod tests {
         );
         assert_eq!(fenced.verdict, Verdict::ArtifactMissing);
         assert_eq!(inline.verdict, Verdict::ArtifactMissing);
-        // At the CURRENT Med band `cap_code_block` is inert by construction — it only
-        // fires on `High`. So this test pins the wiring, and the assertion that the cap
-        // actually BITES cannot be written until the tightening step. Recorded here
-        // rather than left as a silent gap: see `cap_code_block_bites_artifact_missing`.
+        // Now that `ArtifactMissing` defaults to `High`, `cap_code_block` is no longer
+        // inert and this pair asserts the escape itself rather than only its wiring.
+        // The inline half is the discriminator: a cap written to fire on every position
+        // would satisfy the fenced assertion alone.
         assert_eq!(fenced.severity, Severity::Med);
-        assert_eq!(inline.severity, Severity::Med);
+        assert_eq!(fenced.severity_reason, SeverityReason::CodeBlock);
+        assert_eq!(inline.severity, Severity::High);
     }
 
     /// The tightening step's regression guard, written now while the reasoning is live.

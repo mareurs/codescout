@@ -3,10 +3,16 @@ use std::path::Path;
 
 /// Base severity per verdict, before any path-based drop or cap.
 ///
-/// `high` gates CI, so it is reserved for verdicts that are **deterministic
-/// filesystem facts**: the path is not there, or the path a `file_symbol` ref
-/// names is not there. Those answers do not change between two runs on the same
-/// tree.
+/// `high` gates CI, so it is reserved for verdicts that are **deterministic facts
+/// about a store we can interrogate**: the path is not on disk, or the id is not in
+/// the catalog. Those answers do not change between two runs on the same tree.
+///
+/// `ArtifactMissing` joined that arm on 2026-09-14, once the live corpus was
+/// reconciled to zero gating instances. It is a catalog fact rather than a
+/// filesystem one and deterministic for the same reason: `resolve_artifact_id`
+/// never touches the filesystem, and a `None` id set disables the check outright
+/// rather than marking every id dead — so a catalog that could not be read fails
+/// OPEN, and cannot turn an unreadable store into a corpus-wide red.
 ///
 /// `SymbolMissing` is deliberately **not** among them, despite being a real drift
 /// signal. It is computed from an LSP `document_symbols` response, and
@@ -22,11 +28,8 @@ pub fn default_severity(verdict: Verdict) -> Severity {
     use Severity::*;
     use Verdict::*;
     match verdict {
-        Missing | FileMissing => High,
+        Missing | FileMissing | ArtifactMissing => High,
         SymbolMissing | AnchorMissing | LineOob | AmbiguousBasename => Med,
-        // Report-before-gate. Move this to the `High` arm above once the live corpus is
-        // reconciled — that one edit is the whole tightening step.
-        ArtifactMissing => Med,
         Unknown | ResolvedBasename => Low,
         Resolved | External => Low,
     }
