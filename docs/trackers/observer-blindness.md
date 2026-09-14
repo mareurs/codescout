@@ -2896,11 +2896,36 @@ and supplied exactly the confidence this entry describes.
 **It also sharpens the blindness by one notch, in the filer's favour and against them.** § *Root
 cause* was **correctly hedged** — it said *"not established, and the file deliberately stops short
 of naming one,"* listed three candidate readings and declined to choose. So the hedge did its job
-and the file still misled, because § *Reproduction* had already framed the contrast in terms of
-the classification and § *Hypotheses tried* rejected a rival on that framing. **The asserting
-section need not be § Summary.** Any section that *demonstrates* rather than *claims* carries the
-same force, and is less likely to be re-read against the hedge precisely because it looks like
-evidence rather than argument.
+and the file still misled.
+
+**The sharper mechanism, from `9403d62d` and verified at the bytes here — nothing in the misleading
+section is FALSE.** § *Reproduction* opens *"Two runs, same session, differing only in
+classification"*, and that sentence is **true**: the two runs did differ only in classification,
+and the envelope difference genuinely is caused by it. What the demonstration does is fix a
+variable **for the layer it varied** — and every later observation under the same heading inherits
+that attribution for free. Three paragraphs down sits
+`grep -c mutation-probe @cmd_a03ab2f5 → 0`, which is a **buffer** fact
+(`read_from_buffer` resolves `.stdout` alone, universally, `read_file.rs:276`) and has nothing to
+do with classification. **The carrier is one word: *too*.** *"The wrapper's lines are absent from
+the `@cmd_*` buffer **too**"* presents a second-layer finding as a continuation of the first.
+
+**So the hedge is structurally unable to reach it, and that is why this is not a vigilance
+problem.** § *Root cause*'s hedge is scoped to the **mechanism**; § *Reproduction* never claimed a
+mechanism, so there is nothing there for a hedge to qualify. A filer can hedge every claim they
+make and still hand the reader a framing they never stated. **Do not read this entry as *§ Summary
+asserts* alone** — a correct demonstration is the more dangerous carrier, because it looks like
+evidence rather than argument and invites no scrutiny.
+
+**The predicted cost, observed: three sessions independently landed on classification as the
+discriminator** — each having read a section that correctly established it one layer up. The
+control that separates the layers is a `generic` run whose envelope **has** stderr and whose
+buffer still answers `0`, and the section's framing gave nobody a reason to construct it.
+
+**One paragraph, two entries of this ledger.** That same closing paragraph ends *"Cargo's own
+stderr (`Compiling …`) **is** in that buffer, so the loss is not 'stderr is never captured'"* —
+which is false for a different reason: `mutation-probe.sh:233` pipes `2>&1 | tee`, so those bytes
+were **stdout** by the time they reached the buffer. Inherited attribution and a relabelled
+control, in adjacent sentences, in a file whose § *Root cause* was properly hedged throughout.
 
 **And the falsifier was inside the same file, authored by the filer.** § E1 reads *"With `-- true`
 **(no buffering)** the identical script returned its verdict inline."* The parenthetical is
